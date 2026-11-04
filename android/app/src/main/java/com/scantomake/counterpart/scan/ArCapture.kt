@@ -17,12 +17,17 @@ import com.google.ar.core.Pose
 import com.google.ar.core.Session
 import com.google.ar.core.TrackingState
 import com.google.ar.core.exceptions.NotYetAvailableException
+import com.scantomake.counterpart.core.Hex
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.Collections
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicInteger
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
@@ -51,6 +56,8 @@ class ArCapture(private val session: Session, private val folder: File, private 
     @Volatile var recording = false
     private val count = AtomicInteger(0)
     private val encoder = Executors.newSingleThreadExecutor()
+    /** One future per submitted frame, in capture order; finishing awaits these off the UI thread. */
+    private val saves: MutableList<Future<CaptureCameraFrame>> = Collections.synchronizedList(mutableListOf())
     private var lastPose: Pose? = null
     private var lastAt = 0L
     private var anchor: FloatArray? = null
@@ -92,7 +99,35 @@ class ArCapture(private val session: Session, private val folder: File, private 
 
     fun frames() = count.get()
 
-    fun reset() { count.set(0); lastPose = null; anchor = null; sectors.fill(false) }
+    @Synchronized
+    fun reset() {
+        check(saves.all { it.isDone }) { "The previous scan is still saving." }
+        folder.listFiles()?.filter {
+            Regex("[0-9]{4}\\.jpg(?:\\.part)?").matches(it.name) ||
+                it.name in setOf("capture-camera.json", "capture-kind", "finished")
+        }?.forEach { check(it.delete()) { "The previous scan could not be cleared." } }
+        count.set(0); lastPose = null; anchor = null; sectors.fill(false); saves.clear()
+    }
+
+    /** What finishing a capture learned from the encoder: the frames actually saved, and how many failed. */
+    data class SavedFrames(val frames: List<CaptureCameraFrame>, val failed: Int)
+
+    /**
+     * Waits (off the UI thread) until every submitted frame is written, then returns the successful frames
+     * with their capture-camera metadata. Callers must not write the finished marker or navigate before
+     * this returns, and must look at `failed` rather than assuming the submitted count was saved.
+     */
+    suspend fun awaitSaved(): SavedFrames = withContext(Dispatchers.IO) {
+        // The same lock guards camera-frame submission. Stop cannot miss a frame whose
+        // capture was already in progress when Done was tapped.
+        val pending = synchronized(this@ArCapture) { recording = false; saves.toList() }
+        val saved = mutableListOf<CaptureCameraFrame>()
+        var failed = 0
+        for (future in pending) {
+            try { saved += future.get() } catch (_: Exception) { failed += 1 }
+        }
+        SavedFrames(saved.sortedBy { it.image }, failed)
+    }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         val t = IntArray(1); GLES20.glGenTextures(1, t, 0); texture = t[0]
@@ -154,6 +189,7 @@ class ArCapture(private val session: Session, private val folder: File, private 
         } catch (_: NotYetAvailableException) { null } catch (_: Exception) { null }
     }
 
+    @Synchronized
     private fun track(frame: Frame) {
         val camera = frame.camera
         val tracking = camera.trackingState == TrackingState.TRACKING
@@ -172,11 +208,24 @@ class ArCapture(private val session: Session, private val folder: File, private 
             val moved = last == null || dist(last, pose) > 0.04f || angle(last, pose) > 10f
             if (moved && now - lastAt > 350 && count.get() < MAX_FRAMES) {
                 try {
+                    // Snapshot this frame's CPU-image intrinsics, pose and timestamp now: they belong to
+                    // this frame, and ARCore may report different values for the next one.
+                    val intrinsics = camera.imageIntrinsics
+                    val focal = intrinsics.focalLength; val principal = intrinsics.principalPoint; val intrDims = intrinsics.imageDimensions
+                    val snapshot = Snapshot(
+                        fx = focal[0].toDouble(), fy = focal[1].toDouble(),
+                        cx = principal[0].toDouble(), cy = principal[1].toDouble(),
+                        intrinsicsWidth = intrDims[0], intrinsicsHeight = intrDims[1],
+                        timestampMs = frame.timestamp / 1_000_000,
+                        tracking = CaptureCamera.trackingWord(camera.trackingState.name),
+                        center = listOf(pose.tx().toDouble(), pose.ty().toDouble(), pose.tz().toDouble()),
+                    )
                     frame.acquireCameraImage().use { image ->
                         val bytes = nv21(image); val w = image.width; val h = image.height
                         val index = count.incrementAndGet()
                         val rotation = sensorRotation()
-                        encoder.execute { save(bytes, w, h, rotation, File(folder, "%04d.jpg".format(index))) }
+                        val name = "%04d.jpg".format(index)
+                        saves += encoder.submit<CaptureCameraFrame> { save(bytes, w, h, rotation, File(folder, name), name, snapshot) }
                     }
                     lastPose = pose; lastAt = now
                     anchor?.let { a -> sectors[(((Math.toDegrees(atan2((pose.tx() - a[0]).toDouble(), (pose.tz() - a[2]).toDouble())) + 360) % 360) / 15).toInt() % 24] = true }
@@ -197,18 +246,48 @@ class ArCapture(private val session: Session, private val folder: File, private 
         return Math.toDegrees(2.0 * kotlin.math.acos(dot.toDouble())).toFloat()
     }
 
-    private fun save(nv21: ByteArray, w: Int, h: Int, rotation: Int, target: File) {
+    /** One frame's camera snapshot, taken on the GL thread at acquire time. */
+    private data class Snapshot(
+        val fx: Double, val fy: Double, val cx: Double, val cy: Double,
+        val intrinsicsWidth: Int, val intrinsicsHeight: Int,
+        val timestampMs: Long, val tracking: String, val center: List<Double>,
+    )
+
+    /**
+     * Encodes one frame and returns its capture-camera record, bound to the exact bytes written: the hash
+     * and size are read from the final JPEG, and the intrinsics are carried through the same rotation.
+     * Throws when the frame could not be saved, so finishing can say so instead of counting it.
+     */
+    private fun save(nv21: ByteArray, w: Int, h: Int, rotation: Int, target: File, name: String, snapshot: Snapshot): CaptureCameraFrame {
         val out = ByteArrayOutputStream()
         YuvImage(nv21, ImageFormat.NV21, w, h, null).compressToJpeg(Rect(0, 0, w, h), 92, out)
         var bytes = out.toByteArray()
+        if (bytes.isEmpty()) throw IllegalStateException("empty frame")
         if (rotation % 360 != 0) {
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw IllegalStateException("undecodable frame")
             val turned = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
             val o2 = ByteArrayOutputStream(); turned.compress(Bitmap.CompressFormat.JPEG, 92, o2); bytes = o2.toByteArray()
             bitmap.recycle(); turned.recycle()
+            if (bytes.isEmpty()) throw IllegalStateException("empty rotated frame")
         }
-        val temp = File(target.path + ".part"); temp.writeBytes(bytes); temp.renameTo(target)
+        val saved = CaptureCamera.savedIntrinsics(
+            snapshot.fx, snapshot.fy, snapshot.cx, snapshot.cy,
+            snapshot.intrinsicsWidth, snapshot.intrinsicsHeight, w, h, rotation)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth != saved.width || bounds.outHeight != saved.height)
+            throw IllegalStateException("saved size ${bounds.outWidth}x${bounds.outHeight} != expected ${saved.width}x${saved.height}")
+        if (saved.width < 16 || saved.height < 16 || !(saved.fx > 0) || !(saved.fy > 0) || snapshot.center.any { !it.isFinite() })
+            throw IllegalStateException("implausible camera metadata")
+        val temp = File(target.path + ".part")
+        temp.writeBytes(bytes)
+        if (!temp.renameTo(target)) { temp.delete(); throw IllegalStateException("could not save frame") }
+        return CaptureCameraFrame(
+            image = name, sha256 = Hex.sha256(bytes), width = saved.width, height = saved.height,
+            fx = saved.fx, fy = saved.fy, cx = saved.cx, cy = saved.cy,
+            timestampMs = maxOf(0, snapshot.timestampMs), tracking = snapshot.tracking, center = snapshot.center)
     }
 
-    fun close() { encoder.shutdown(); encoder.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS) }
+    /** Never blocks: finishing awaits [awaitSaved]; disposal lets queued writes drain. */
+    fun close() { encoder.shutdown() }
 }

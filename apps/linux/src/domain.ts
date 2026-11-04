@@ -1,4 +1,14 @@
-import type { Field, Project, Question, RawQuestion } from "./types";
+import type {
+  Field,
+  Project,
+  Question,
+  RawQuestion,
+  ReconstructionAnswer,
+  ReconstructionComponent,
+  ReconstructionReview,
+  ReconstructionSelection,
+  Vec3,
+} from "./types";
 /** Issue tickets before reads AND mutations. Late reads cannot roll the UI back. */
 export class ReadOrder {
   private issued = 0;
@@ -186,6 +196,94 @@ export const duration = (seconds?: number) =>
     : seconds < 3600
       ? `${Math.ceil(seconds / 60)} min`
       : `${Math.floor(seconds / 3600)} h ${Math.ceil((seconds % 3600) / 60)} min`;
+const AXES = ["x", "y", "z"] as const;
+export type Axis = (typeof AXES)[number];
+const finite3 = (v: Vec3) => v.every(Number.isFinite);
+/** Preview coordinates are arbitrary unless scaleMPerUnit proves a metric size. */
+export function formatPreviewExtent(review: ReconstructionReview, value: number) {
+  if (!Number.isFinite(value)) return "unknown size";
+  if (review.scaleKnown && review.scaleMPerUnit && review.scaleMPerUnit > 0)
+    return `${(value * review.scaleMPerUnit * 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} mm`;
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 3 })} preview units`;
+}
+export function formatExtents(
+  review: ReconstructionReview,
+  extents: ReconstructionReview["extents"],
+) {
+  return AXES.map((a) => formatPreviewExtent(review, extents[a])).join(" × ");
+}
+export function componentWords(c: ReconstructionComponent) {
+  const share = Math.round(c.share * 100);
+  return `Piece ${c.index + 1} — ${share}% of the model · ${c.faces.toLocaleString()} triangles · ${c.vertices.toLocaleString()} points`;
+}
+/** The component the suggestion describes, matched by its published extents. */
+export function suggestedComponent(review: ReconstructionReview) {
+  if (review.suggestion?.type !== "component" || !review.components?.length)
+    return undefined;
+  const wanted = review.suggestion.extents;
+  const distance = (c: ReconstructionComponent) =>
+    AXES.reduce((sum, a) => {
+      const scale = Math.max(Math.abs(wanted[a]), Math.abs(c.extents[a]), 1e-9);
+      return sum + Math.abs(wanted[a] - c.extents[a]) / scale;
+    }, 0);
+  const best = [...review.components].sort((a, b) => distance(a) - distance(b))[0];
+  return best && distance(best) < 0.01 ? best : undefined;
+}
+/** Box to highlight for a selection; undefined when the contract gives no location. */
+export function selectionBox(
+  review: ReconstructionReview,
+  selection: ReconstructionSelection,
+): { min: Vec3; max: Vec3 } | undefined {
+  if (selection.type === "crop") return { min: selection.min, max: selection.max };
+  if (selection.type === "component") {
+    const c = review.components?.find((x) => x.index === selection.index);
+    return c ? { min: c.boundsMin, max: c.boundsMax } : undefined;
+  }
+  const c = suggestedComponent(review);
+  return c ? { min: c.boundsMin, max: c.boundsMax } : undefined;
+}
+export function validateCrop(review: ReconstructionReview, min: Vec3, max: Vec3) {
+  if (!finite3(min) || !finite3(max) || min.some((v, i) => !(v < max[i]!)))
+    throw new Error("Each crop minimum must be below its maximum.");
+  if (min.some((v, i) => max[i]! < review.boundsMin[i]! || v > review.boundsMax[i]!))
+    throw new Error("That crop does not cover any of the model. Adjust the bounds.");
+}
+export function buildRegionAnswer(
+  review: ReconstructionReview,
+  selection: ReconstructionSelection,
+): ReconstructionAnswer {
+  if (review.kind !== "region" || !review.previewMeshSha256)
+    throw new Error("This review changed. Look at the current question and answer again.");
+  if (
+    selection.type === "component" &&
+    review.components &&
+    !review.components.some((c) => c.index === selection.index)
+  )
+    throw new Error("That piece is not in the current preview. Choose again.");
+  if (selection.type === "crop") validateCrop(review, selection.min, selection.max);
+  if (selection.type === "suggested" && !review.suggestion)
+    throw new Error("There is no suggestion in the current preview. Choose a piece or crop.");
+  return { type: "region", previewMeshSha256: review.previewMeshSha256, selection };
+}
+export function parseExtentMm(text: string) {
+  const value = Number(text);
+  if (!text.trim() || !Number.isFinite(value) || value < 1 || value > 10000)
+    throw new Error("Enter a measured size between 1 and 10,000 mm.");
+  return value;
+}
+export function buildScaleAnswer(
+  review: ReconstructionReview,
+  axis: Axis,
+  extentMm: number,
+): ReconstructionAnswer {
+  if (review.kind !== "scale" || !review.meshSha256)
+    throw new Error("This review changed. Look at the current question and answer again.");
+  if (!Number.isFinite(extentMm) || extentMm < 1 || extentMm > 10000)
+    throw new Error("Enter a measured size between 1 and 10,000 mm.");
+  if (!(review.extents[axis] > 0))
+    throw new Error("That side has no size in the current model. Choose another side.");
+  return { type: "scale", meshSha256: review.meshSha256, axis, extentMm };
+}
 export function newerProject(existing: Project | undefined, incoming: Project) {
   return existing && existing.updatedAtMs > incoming.updatedAtMs
     ? existing

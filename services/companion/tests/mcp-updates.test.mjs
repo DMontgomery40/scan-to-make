@@ -87,10 +87,15 @@ test('shell command lines: quotes, escapes, cd and variables', () => {
 });
 
 /** A scripted updater: commands are recorded, sessions are fakes, versions come from a fake registry. */
-async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest = '1.1.50', fail, gate, failRename, installed = {}, connectFail} = {}) {
+async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = ''} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'mcp-updates-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const env = mac({'/opt/homebrew/bin/npm': '', '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js': '', ...files}, {'/opt/homebrew/bin/npm': '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js', ...links});
+  const readFile = env.readFile;
+  env.readFile = path => {
+    const staged = path.match(/\.counterpart-update-[0-9a-f-]+\/lib\/node_modules\/([^/]+)\/package\.json$/);
+    return staged ? JSON.stringify({name: staged[1], version: latest, ...(postinstall ? {scripts: {postinstall}} : {})}) : readFile(path);
+  };
   const commands = [], events = [], restarts = [], moves = [];
   let version = '1.1.46';
   const session = id => ({
@@ -110,7 +115,7 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
       if (args.includes('rev-parse')) return {code: 0, output: 'abc123\n'};
       if (fail && (typeof fail === 'function' ? fail(args) : args.join(' ').includes(fail))) return {code: 1, output: 'npm ERR! network'};
       if (args.includes('install') || args.includes('pull')) version = latest;
-      return {code: 0, output: ''};
+      return {code: 0, output: args.includes('install') ? installOutput : ''};
     },
   });
   const done = () => until(() => events.some(event => event.type === 'mcp.update.done' || event.type === 'mcp.update.failed'));
@@ -130,7 +135,7 @@ test('Update runs the matching update in that installation, restarts every sessi
   assert.equal(f.commands[0], '/opt/homebrew/bin/npm view bambu-printer-mcp version');
   // Installed beside the live copy, then swapped in: a failed install never touches what runs.
   const staging = f.commands[1].match(/--prefix (.+\/\.counterpart-update-[0-9a-f-]+) /)[1];
-  assert.equal(f.commands[1], `${node} /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js install --global --prefix ${staging} bambu-printer-mcp@1.1.50`);
+  assert.equal(f.commands[1], `${node} /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js install --global --prefix ${staging} --allow-scripts=bambu-printer-mcp --ignore-scripts=false --foreground-scripts bambu-printer-mcp@1.1.50`);
   assert.ok(staging.startsWith(`${prefix}/`));
   const live = `${prefix}/lib/node_modules/bambu-printer-mcp`;
   assert.deepEqual(f.moves, [['rename', live, `${staging}/previous`], ['rename', `${staging}/lib/node_modules/bambu-printer-mcp`, live], ['rm', staging]]);
@@ -743,4 +748,29 @@ test('review fix (#295): a printer listed after start (Add, a Printer MCP choice
   assert.deepEqual(f.restarts.map(entry => [entry.id, entry.process.args]), [['later', [fresh]]]);
   await f.updates.applyOverride('unknown');
   assert.equal(f.restarts.length, 1, 'an unknown or override-free destination is left alone');
+});
+
+
+test('npm script policy: Update and Download authorize only the selected MCP and refuse a skipped postinstall', async t => {
+  for (const pkg of ['bambu-printer-mcp', 'mcp-3d-printer-server']) {
+    for (const download of [false, true]) {
+      const prefix = `${APP}/printers/${pkg}`;
+      const profile = {backend: pkg, process: {command: '/usr/bin/node', args: [`${prefix}/lib/node_modules/${pkg}/dist/index.js`]}};
+      const files = {[`${prefix}/lib/node_modules/${pkg}/package.json`]: pkgJson('1.1.46', pkg)};
+      for (const ran of [false, true]) {
+        const f = await updater(t, {profile, files, postinstall: 'node setup.mjs',
+          installOutput: ran ? `> ${pkg}@1.1.50 postinstall\n> node setup.mjs\n` : 'install-scripts: setup was skipped'});
+        if (download) await f.updates.download(pkg); else await f.updates.update(f.mcpId);
+        await f.done();
+        const install = f.commands.find(command => command.includes(' install '));
+        assert.ok(install.includes(`--allow-scripts=${pkg} --ignore-scripts=false --foreground-scripts`));
+        assert.ok(!install.includes('dangerously-allow-all'));
+        assert.equal(f.events.at(-1).type, ran ? 'mcp.update.done' : 'mcp.update.failed');
+        if (!ran) {
+          assert.equal(f.moves.filter(move => move[0] === 'rename').length, 0, 'skipped setup never swaps the working copy');
+          assert.match(f.events.at(-1).data.log, /required setup/);
+        }
+      }
+    }
+  }
 });

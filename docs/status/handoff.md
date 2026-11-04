@@ -219,6 +219,12 @@ remote native probes and the SSH tunnel were removed after verification.
        ownership and its regression in objects-printers.
      - #299 final head `6d95d38`: retain PrintSheet `maxPauses` 16, unique/sorted `pauseBeforeLayers`, exclude
        pauses from saved defaults (`48f22a5`), and final control refusals/deadlines (`c4c904f`, `3c0a192`).
+     - Queue receipt: main `f610034` includes #292 (`0c6125b`, head `7fbd3f2`, gate 7/7) and #297
+       (`f610034`, head `f9466b4`). Preserve main's optional Claude Code/Blender/Fusion setup items alongside
+       the MCP documentation links. Remaining order: #302 → #293 → #303 orientation → #300 → #301.
+     - #302 removes `selection.connectionMode` from the handoff schema (legacy configs load with that key
+       dropped) and removes HMS 0007 auto-clear. Keep both removals when reconciling release code; its current
+       print.ts still has the auto-clear workaround. Do not restore it from this branch during conflict resolution.
      - Known conflicts: PrintSheet, local-control protocol/services, objects/printers, and add/add printing/discovery.
        Also reconcile profiles/setup/server-cli, print/slice-cache, updater/printer checks and help/index.html.
      - Preserve release-only reconstruction handlers/review state and contracts, Linux Avahi/bootstrap-printer
@@ -231,8 +237,15 @@ remote native probes and the SSH tunnel were removed after verification.
      jobs, parent restarted only `com.scantomake.mac.companion` via launchctl. Settings then offered Update Add-on;
      clicked it, closed Blender's untouched startup scene normally, and Check Again reported Blender set up.
      AirPods 25 mm + FDM request and Stove FDM request were resent through the actual Send buttons at
-     1793790273706 / 1793790324011; both showed Working, AirPods had real Blender tool activity. Keep app/MCP
-     restarts and updates held until those passes settle. No app replacement, config-file edit or printer start.
+     1793790273706 / 1793790324011; both showed Working, AirPods had real Blender tool activity.
+     **Current handoff:** both passes are now done/Ready; a fresh saved-object scan showed no touching-up or
+     printing projects. AirPods monitor records ended/cancelled at 2026-11-04T11:34:23.486Z. Parent sent literal
+     "settled" directly to MCP owner and merge owner. MCP owner checked the actual app idle at 12:14Z
+     (P1S Ready; no Working/Printing), clicked nothing, and returned Mac UI to this release owner because
+     the updater is blocked by npm's install-script policy. Revised order agreed directly with both owners:
+     release owner packages/installs the combined Mac build with the updater fix first; then explicitly
+     hands UI to MCP owner for Update. Other agents' UI/restarts remain held. No autonomous print/reprint.
+     The recovery itself made no app replacement, config-file edit or printer start.
      Installed app still predates #298; sending the FDM request does not prove new MCP prompt consumption.
      Their incoming "releases held" note predates the authorized publications below; the publication receipts and
      revoked hold were sent back directly. The orchestrator must coordinate installed MCP Update with the FDM/MCP
@@ -252,10 +265,16 @@ remote native probes and the SSH tunnel were removed after verification.
      in Mac build 202611040120. MCP-only releases need no new iPhone build.
      Its status-doc edits were removed by the MCP owner and reconciled here. Do not replace the installed app
      during that thread's MCP update/acceptance; coordinate the later Mac upgrade explicitly.
-   - **Installed updater obstacle:** the hand-copied Bambu build already reports 1.1.52, so the
-     version-only comparison hides Update for genuine npm 1.1.52. MCP owner presented metadata
-     relabel / new npm version / updater change options. The owners now plan annotation releases
-     Bambu 1.1.53 / generic 1.2.27, then the visible Update action; no duplicate release from this thread.
+   - **Installed updater obstacle:** the hand-copied Bambu build reports 1.1.52. Newer releases exposed Update,
+     but the earlier update failed at 11:34:59Z: Homebrew npm 11.20.0 skipped Bambu's required postinstall
+     under allowScripts, and Counterpart retained the old copy. Latest published versions reported by MCP
+     owner are Bambu **1.1.54** (`e1fbc69`) and generic **1.2.28** (`381ff87`), including support arguments.
+     Parent's companion fix authorizes only the selected package with `--allow-scripts=<pkg>` on global
+     Download/Update, enables foreground scripts and verifies any declared postinstall banner before swap.
+     Checkout `npm ci` is unchanged. Focused Linux companion build and updater checks pass (30/30);
+     the installed app still lacks this fix, so UI Update acceptance remains blocked until packaging.
+     Earlier integrated source `07241c503` passed official agents-136 CI: contracts 58, printer-handoff
+     108 (5 skipped), companion 811 (1 skipped), and all six Python suites; this is engineering evidence.
      MCP owner checked Settings: Developer Mode was already selected; saved credentials returned a fresh
      status at 10:37:36Z on Nov 4. No route change was needed; actual released control acceptance remains open.
      No metadata or project state was changed by this release thread. The 05:49 project has an
@@ -343,7 +362,23 @@ remote native probes and the SSH tunnel were removed after verification.
      geometry. Public review schemas stay unchanged. Parent made Apple raw-cache publication atomic and
      removed a project-read fallback that could silently clear the qualification flag.
      `reconstructionReviewV1` is currently tool-presence-based; runtime packaging/smoke verification is still
-     required. The Android owner wires metadata/manifest/review UI; the Linux UI owner wires its review surface.
+     required. Android `029b00fb` and Linux review UI `19af6236` are now integrated. Android binds saved JPEG
+     metadata to its bytes, uploads camera metadata before its qualification-required manifest, retains originals,
+     and renders region/crop/measurement review. Linux renders the same review and reads only its current preview
+     through the native bounded file bridge. Both hide generic Ask while review is pending.
+     Parent review fixed Android's last-frame submission/Done race and clears prior frames on Start Again;
+     it also prevents restarting plain-photo capture while saves are pending. Linux measurement axes no longer
+     claim world directions for an arbitrarily oriented reconstruction, and crop helpers dispose their GPU
+     geometry/materials when replaced. Parent's merged-source Android build/lint and 47 tests passed on
+     agents-173; Linux frontend build and 12 tests passed on agents-136. Android APK and receipts retained at
+     agents-173 `~/scan-to-make-work/review-integration/artifacts/`; APK SHA-256
+     `5279470750fb944ff390f1fbf3f43cddb0f9e3666586bf52ab668a34454edf3b`. No app/device installation by parent.
+     Android delegate reported build/lint and 47 checks passing; Linux reported frontend 12, Rust 13 and packaging
+     10 passing. Linux's installed `g0d2eb8b2d82f-node24.22.2-x64` passed native Repair and retained-project/3D
+     checks; it predates the final runtime packaging. No reconstruction-review UI acceptance was demonstrated:
+     the desktop imports models/photos/scan files, while handheld captures enter via authenticated phone upload.
+     Android device remains unavailable after the recorded T3 emulator failure; no bypass attempted. Real phone
+     capture, region/scale interaction, pairing and resulting geometry remain unaccepted on both hosts.
      Reconstruction owner proceeds with actual runtime packaging, not only the design manifest. Mac's existing
      CPython/Pillow/usd-core closure can serve qualification; Linux needs the executable reconstruction closure.
      Correct the draft dependency manifest against actual binary/source archives and existing licence inventory

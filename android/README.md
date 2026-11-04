@@ -77,16 +77,32 @@ on every request, a 30-day credential the app renews when under 20 days are left
 ## Scanning (first version) and what the Mac receives
 
 Android phones have no LiDAR and no Object Capture, so the phone can't make the `scan.usdz` the iPhone makes. Instead
-it records a **walk-around set of photos** and sends them the way the iPhone sends its in-hand scan: as capture frames
-(`POST /v1/objects/<id>/capture?name=0001.jpg`), then `POST …/start` with no capture manifest. The Mac then rebuilds
-the model from the photos itself (`tools/mac-reconstruct`, Apple's photogrammetry, which accepts JPEG) and touches it
-up as usual. No Mac change was needed.
+it records a **walk-around set of photos** and sends them as capture frames
+(`POST /v1/objects/<id>/capture?name=0001.jpg`). An ARCore capture also sends **capture-camera v1**
+(`POST …/capture-camera`): for every saved frame, the SHA-256 of the exact saved bytes, the saved size, the CPU-image
+intrinsics carried into saved pixels (snapshotted per frame, through the saver's rotation), the frame timestamp, the
+tracking state and the physical camera centre in metres. It then starts with a capture manifest
+(`cameraMetadataRequired` for AR; `scaleQualificationRequired` for every Android capture), but only after the host's
+`/healthz` reports `reconstructionReviewV1` — an older host gets an update instruction, never a silent downgrade.
+Finishing a scan waits (off the UI thread) until every frame and its metadata are actually saved. The recorded
+frames stay on the phone after sending, so any step can be sent again; capture frames are always re-sent rather
+than skipped by name. The computer rebuilds the model from the photos (Apple photogrammetry on a Mac,
+`tools/linux-reconstruct` on Linux) and touches it up as usual.
+
+When a rebuild can't prove which part is the object or how big it is, the project opens a **reconstruction review**
+instead of a generic question: the app loads the actual preview mesh (`GET …/reconstruction-preview.stl?reviewId=…`,
+stride-decimated for rendering only), lets you turn and zoom it, draws the suggested/chosen part or an adjustable
+crop box on it (or the side to measure), and sends the explicit answer bound to the review's hashes
+(`POST …/reconstruction`). Best Guess, words and photos are hidden while a review is open — the companion refuses
+them for it.
 
 - With **ARCore** (Google Play Services for AR) the camera's motion tracking decides when you've moved far enough for
   the next frame (every 4 cm or 10°), a ring shows which sides you've covered, and where the phone supports the
   **Depth API** (depth from motion) it tells you whether you're too near or too far. Frames are the sharpest CPU image
-  the camera offers.
-- Without ARCore the camera takes a photo every 1.5 s while you walk around.
+  the camera offers. The coverage ring's anchor is on-screen guidance only; it is never sent as evidence
+  (`objectAnchor: null`).
+- Without ARCore the camera takes a photo every 1.5 s while you walk around. Plain photos carry no camera metadata
+  or scale: the host qualifies scale explicitly, so expect to measure one side in reconstruction review.
 - Depth is **not** sent to the Mac: the Mac only takes depth as lossless `NNNN.depth.plist` files paired with
   `NNNN.heic` frames (an AVFoundation format, from the iPhone's LiDAR). Sending ARCore depth would need a Mac change.
 - Needs at least 20 frames; 40–80 all the way around (and a second, higher lap) is better. Rebuilding from photos
@@ -129,7 +145,8 @@ Not verified (needs a real phone and the Mac):
 
 ## Not done yet (compared with the iPhone app)
 
-- No 3D model viewer: the project shows the Mac's renders (PNG), not a turnable model.
+- No general 3D model viewer: the project shows the Mac's renders (PNG). The one turnable model is the
+  reconstruction review preview, which exists so the person can check the actual rebuilt mesh before answering.
 - No live camera stream: Printing shows a camera snapshot every 3 s (the snapshot route every companion has).
 - Blender/Fusion setup, AI model settings and the device list still need Android settings UI.
 - No widgets or Live-Activity equivalent beyond the ongoing "Following your Mac" notification.

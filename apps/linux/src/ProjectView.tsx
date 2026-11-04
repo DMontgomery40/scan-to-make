@@ -4,6 +4,7 @@ import { activePrint, duration, words } from "./domain";
 import { Picture, Stage } from "./Stage";
 import { Question } from "./Question";
 import { PrintSheet } from "./PrintSheet";
+import { ReconstructionReviewCard } from "./ReconstructionReview";
 import { Action, Modal } from "./ui";
 import type { useChangeQueue } from "./useChangeQueue";
 import type { Project, Printer, Ask } from "./types";
@@ -265,6 +266,15 @@ export function ProjectView({
       <div className="project-layout">
         <div className="project-main">
           <Stage project={p} />
+          {p.reconstructionReview && (
+            <ReconstructionReviewCard
+              key={p.reconstructionReview.id}
+              project={p}
+              review={p.reconstructionReview}
+              mutate={mutate}
+              apply={apply}
+            />
+          )}
           {p.current?.summary && (
             <p className="result-summary">{p.current.summary}</p>
           )}
@@ -362,6 +372,7 @@ export function ProjectView({
                 !p.current ||
                 active ||
                 !!p.print?.uncertain ||
+                !!p.reconstructionReview ||
                 p.ask?.status === "open"
               }
               onClick={() => setPrint(true)}
@@ -391,7 +402,7 @@ export function ProjectView({
             </p>
           )}
           {p.failure && <p className="error">{p.failure}</p>}
-          {p.ask?.status === "open" && (
+          {!p.reconstructionReview && p.ask?.status === "open" && (
             <AskCard
               key={p.ask.id}
               project={p}

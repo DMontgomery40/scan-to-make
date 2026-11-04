@@ -38,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,12 +61,18 @@ import com.google.ar.core.CameraConfigFilter
 import com.google.ar.core.Config
 import com.google.ar.core.Session
 import com.scantomake.counterpart.app.Media
+import com.scantomake.counterpart.core.WireJson
 import com.scantomake.counterpart.ui.CIcons
 import com.scantomake.counterpart.ui.Palette
 import com.scantomake.counterpart.ui.PrimaryButton
 import com.scantomake.counterpart.ui.SecondaryButton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Scan it (first version). With ARCore (and its Depth API where the phone has it) frames are taken as you walk
@@ -96,8 +103,12 @@ fun ScanScreen(projectId: String, done: () -> Unit) {
         onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
     }
 
-    fun finish(frames: Int) {
-        if (frames >= MIN_FRAMES) File(folder, "finished").writeText(frames.toString())
+    // Only called after every frame (and, for AR, its camera metadata) is actually saved on disk.
+    fun finish(frames: Int, kind: String) {
+        if (frames >= MIN_FRAMES) {
+            File(folder, "capture-kind").writeText(kind)
+            File(folder, "finished").writeText(frames.toString())
+        }
         done()
     }
 
@@ -133,11 +144,14 @@ private fun sensorOrientation(context: Context, cameraId: String?): Int = try {
 } catch (_: Exception) { 90 }
 
 @Composable
-private fun ArScan(folder: File, finish: (Int) -> Unit) {
+private fun ArScan(folder: File, finish: (Int, String) -> Unit) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
     var progress by remember { mutableStateOf(ScanProgress()) }
     var recording by remember { mutableStateOf(false) }
+    var finishing by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
     val holder = remember {
         try {
@@ -181,28 +195,61 @@ private fun ArScan(folder: File, finish: (Int) -> Unit) {
             view = this
         }
     }, Modifier.fillMaxSize())
-    Overlay(progress, recording, if (capture.depthSupported) "ARCore · Depth API on" else "ARCore · motion tracking (this phone has no Depth API)",
-        start = { capture.reset(); capture.recording = true; recording = true },
-        stop = { capture.recording = false; recording = false; finish(capture.frames()) })
+    Overlay(progress, recording, finishing, problem, if (capture.depthSupported) "ARCore · Depth API on" else "ARCore · motion tracking (this phone has no Depth API)",
+        start = {
+            try { capture.reset(); problem = null; capture.recording = true; recording = true }
+            catch (_: Exception) { problem = "The previous scan could not be cleared. Wait for it to finish saving, then try again." }
+        },
+        stop = {
+            capture.recording = false; recording = false; finishing = true; problem = null
+            scope.launch {
+                // Wait for the encoder off the UI thread; only saved frames (with their camera metadata)
+                // may become the finished capture.
+                val saved = try { capture.awaitSaved() } catch (_: Exception) { null }
+                if (saved == null || saved.frames.size < MIN_FRAMES) {
+                    problem = "Only ${saved?.frames?.size ?: 0} frames could be saved; at least $MIN_FRAMES are needed. Start again and keep walking slowly."
+                } else {
+                    val written = withContext(Dispatchers.IO) {
+                        try {
+                            val json = WireJson.encodeToString(JsonObject.serializer(), CaptureCamera.document(saved.frames))
+                            File(folder, "capture-camera.json").writeText(json); true
+                        } catch (_: Exception) { false }
+                    }
+                    if (written) finish(saved.frames.size, "ar")
+                    else problem = "The scan's camera information couldn't be saved on this phone. Free some space and scan again."
+                }
+                finishing = false
+            }
+        })
 }
 
 @Composable
-private fun PhotoScan(folder: File, finish: (Int) -> Unit) {
+private fun PhotoScan(folder: File, finish: (Int, String) -> Unit) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
     val capture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build() }
     var recording by remember { mutableStateOf(false) }
+    var finishing by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
     var frames by remember { mutableStateOf(0) }
+    // A frame counts only when the camera has actually written it (saved via a .part file, then renamed).
+    val submitted = remember { AtomicInteger(0) }
+    val pending = remember { AtomicInteger(0) }
     LaunchedEffect(recording) {
-        while (recording && frames < ArCapture.MAX_FRAMES) {
-            val index = frames + 1
+        while (recording && submitted.get() < ArCapture.MAX_FRAMES) {
+            val index = submitted.incrementAndGet()
             val target = File(folder, "%04d.jpg".format(index))
-            capture.takePicture(ImageCapture.OutputFileOptions.Builder(target).build(), ContextCompat.getMainExecutor(context),
+            val temp = File(folder, "%04d.jpg.part".format(index))
+            pending.incrementAndGet()
+            capture.takePicture(ImageCapture.OutputFileOptions.Builder(temp).build(), ContextCompat.getMainExecutor(context),
                 object : ImageCapture.OnImageSavedCallback {
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {}
-                    override fun onError(exception: ImageCaptureException) { target.delete() }
+                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                        if (temp.length() > 0 && temp.renameTo(target)) frames += 1 else temp.delete()
+                        pending.decrementAndGet()
+                    }
+                    override fun onError(exception: ImageCaptureException) { temp.delete(); pending.decrementAndGet() }
                 })
-            frames = index
             delay(1_500)
         }
     }
@@ -216,16 +263,36 @@ private fun PhotoScan(folder: File, finish: (Int) -> Unit) {
         }, ContextCompat.getMainExecutor(ctx))
         view
     }, Modifier.fillMaxSize())
-    Overlay(ScanProgress(frames = frames, tracking = true), recording, "Photos every 1.5 s (no ARCore on this phone)",
-        start = { folder.listFiles()?.forEach { it.delete() }; frames = 0; recording = true },
-        stop = { recording = false; finish(frames) })
+    Overlay(ScanProgress(frames = frames, tracking = true), recording, finishing, problem, "Photos every 1.5 s (no ARCore on this phone)",
+        start = {
+            if (pending.get() > 0) problem = "The camera is still saving photos. Wait a moment before starting again."
+            else { folder.listFiles()?.forEach { it.delete() }; submitted.set(0); frames = 0; problem = null; recording = true }
+        },
+        stop = {
+            recording = false; finishing = true; problem = null
+            scope.launch {
+                // Plain photos have no camera metadata: the host qualifies scale explicitly (the person
+                // measures in reconstruction review). Still, only written files may finish the capture.
+                var waited = 0
+                while (pending.get() > 0 && waited < 300) { delay(100); waited += 1 }
+                val saved = withContext(Dispatchers.IO) {
+                    folder.listFiles { f -> Regex("[0-9]{4}\\.jpg").matches(f.name) && f.length() > 0 }?.size ?: 0
+                }
+                finishing = false
+                if (pending.get() > 0) problem = "The camera is still saving photos. Wait a moment, then tap Done again."
+                else if (saved < MIN_FRAMES) problem = "Only $saved photos were saved; at least $MIN_FRAMES are needed. Start again and keep walking slowly."
+                else finish(saved, "photos")
+            }
+        })
 }
 
 @Composable
-private fun Overlay(progress: ScanProgress, recording: Boolean, mode: String, start: () -> Unit, stop: () -> Unit) {
+private fun Overlay(progress: ScanProgress, recording: Boolean, finishing: Boolean, problem: String?, mode: String, start: () -> Unit, stop: () -> Unit) {
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
         Column(Modifier.fillMaxWidth().padding(top = 48.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.55f)).padding(14.dp)) {
             Text(when {
+                finishing -> "Saving the last frames…"
+                problem != null -> problem
                 !recording -> "Put the object somewhere you can walk around. Fill most of the view with it, then tap Start."
                 !progress.tracking -> "Move the phone slowly so it can find its place."
                 progress.distanceM != null && progress.distanceM > 1.0f -> "Come closer: about 30–60 cm from it."
@@ -245,9 +312,16 @@ private fun Overlay(progress: ScanProgress, recording: Boolean, mode: String, st
             }
             Text("${progress.frames} frames" + if (progress.frames < MIN_FRAMES && recording) " · at least $MIN_FRAMES" else "",
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(8.dp))
-            Row(Modifier.fillMaxWidth()) {
-                if (!recording) PrimaryButton("Start", Modifier.fillMaxWidth(), onClick = start)
-                else PrimaryButton(if (progress.frames >= MIN_FRAMES) "Done" else "Keep going…", Modifier.fillMaxWidth(), enabled = progress.frames >= MIN_FRAMES, onClick = stop)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                when {
+                    finishing -> PrimaryButton("Saving…", Modifier.fillMaxWidth(), enabled = false, onClick = {})
+                    recording -> PrimaryButton(if (progress.frames >= MIN_FRAMES) "Done" else "Keep going…", Modifier.fillMaxWidth(), enabled = progress.frames >= MIN_FRAMES, onClick = stop)
+                    progress.frames >= MIN_FRAMES -> {
+                        SecondaryButton("Start Again", Modifier.weight(1f), onClick = start)
+                        PrimaryButton("Done", Modifier.weight(1f), onClick = stop)
+                    }
+                    else -> PrimaryButton("Start", Modifier.fillMaxWidth(), onClick = start)
+                }
             }
         }
     }

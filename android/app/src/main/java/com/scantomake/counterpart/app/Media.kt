@@ -11,7 +11,14 @@ import com.scantomake.counterpart.api.CompanionClient
 import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectUploader
+import com.scantomake.counterpart.api.ReconstructionAnswers
 import com.scantomake.counterpart.api.UploadFile
+import com.scantomake.counterpart.core.Hex
+import com.scantomake.counterpart.core.WireJson
+import com.scantomake.counterpart.scan.CaptureCamera
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
@@ -75,21 +82,63 @@ object Media {
     fun captureFinished(context: Context, projectId: String) = File(captureFolder(context, projectId), "finished").exists()
     fun captureFrames(context: Context, projectId: String): List<File> =
         captureFolder(context, projectId).listFiles { f -> Regex("[0-9]{4}\\.jpg").matches(f.name) }?.sortedBy { it.name } ?: emptyList()
+    /** "ar" (ARCore, with capture-camera.json) or "photos" (timed plain photos); older scans guess from files. */
+    fun captureKind(context: Context, projectId: String): String =
+        File(captureFolder(context, projectId), "capture-kind").takeIf { it.exists() }?.readText()?.trim()?.takeIf { it == "ar" || it == "photos" }
+            ?: if (File(captureFolder(context, projectId), "capture-camera.json").exists()) "ar" else "photos"
 
     /**
-     * Sends a finished scan's frames as a handheld capture (`POST …/capture?name=0001.jpg`) and its chosen photos,
-     * then starts the project without a capture manifest: the Mac rebuilds the model from the frames
-     * (mac-reconstruct, Apple's photogrammetry) and then touches it up, as it does for the iPhone's in-hand scan.
+     * The stored capture-camera document, re-verified against the frame files on disk right now: same
+     * frame set, same SHA-256, same saved size for every frame. Anything else is an actionable error —
+     * never a silently re-bound document. Returns the exact wire bytes to send.
+     */
+    private suspend fun verifiedCaptureCamera(context: Context, id: String, frames: List<File>): ByteArray = withContext(Dispatchers.IO) {
+        val changed = CompanionException("capture-changed", "This scan's files changed on this phone. Scan it again.")
+        val file = File(captureFolder(context, id), "capture-camera.json")
+        val bytes = try { file.readBytes() } catch (_: Exception) {
+            throw CompanionException("capture-camera-missing", "This scan is missing its camera information. Scan it again.")
+        }
+        if (bytes.isEmpty() || bytes.size > 4 * 1024 * 1024) throw changed
+        val records = CaptureCamera.parse(bytes) ?: throw changed
+        if (records.map { it.image }.sorted() != frames.map { it.name }.sorted()) throw changed
+        val byName = frames.associateBy { it.name }
+        for (record in records) {
+            val frame = byName[record.image] ?: throw changed
+            val data = try { frame.readBytes() } catch (_: Exception) { throw changed }
+            if (data.isEmpty() || Hex.sha256(data) != record.sha256) throw changed
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+            if (bounds.outWidth != record.width || bounds.outHeight != record.height) throw changed
+        }
+        WireJson.encodeToString(JsonObject.serializer(), CaptureCamera.document(records)).toByteArray()
+    }
+
+    /**
+     * Sends a finished scan and starts the project. The host must first prove it can qualify a photo
+     * reconstruction (`/healthz` `reconstructionReviewV1`); an older host gets an update instruction, never
+     * a silent downgrade. Frames go up exactly as recorded (re-sent on retry, never skipped by name),
+     * then capture-camera v1 for AR captures, then `start` with the capture manifest
+     * (`cameraMetadataRequired` for AR, `scaleQualificationRequired` for every Android capture).
+     * The recorded frames stay on this phone afterwards, so any step can simply be sent again.
      */
     suspend fun sendProject(context: Context, uploader: ProjectUploader, client: CompanionClient, id: String, photos: List<File>): Project {
         val frames = if (captureFinished(context, id)) captureFrames(context, id) else emptyList()
-        if (frames.isNotEmpty()) {
-            uploader.send(frames.map { UploadFile(UploadFile.Kind.Capture, it.name, file = it, type = "image/jpeg") }, id)
+        if (frames.isEmpty()) {
+            sendPhotos(uploader, id, photos)
+            return client.start(id)
+        }
+        if (ReconstructionAnswers.CAPABILITY !in client.health().capabilities) throw ReconstructionAnswers.updateHost
+        val ar = captureKind(context, id) == "ar"
+        val cameraJson = if (ar) verifiedCaptureCamera(context, id, frames) else null
+        val project = client.get(id)
+        // Capture files can only be (re)written before the touch-up starts; afterwards `start` with the
+        // same manifest is the companion's own idempotent answer.
+        if (project.state == Project.State.New) {
+            uploader.send(frames.map { UploadFile(UploadFile.Kind.Capture, it.name, file = it, type = "image/jpeg") }, id, resendCapture = true)
+            if (cameraJson != null) client.addCaptureCamera(id, cameraJson)
         }
         sendPhotos(uploader, id, photos)
-        val started = client.start(id)
-        if (frames.isNotEmpty()) captureFolder(context, id).deleteRecursively()
-        return started
+        return client.start(id, ReconstructionAnswers.captureManifest(frames.map { it.name }, cameraMetadataRequired = ar))
     }
 
     suspend fun sendPhotos(uploader: ProjectUploader, id: String, photos: List<File>, forMessage: Boolean = false): List<String> {

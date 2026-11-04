@@ -28,6 +28,7 @@ pub fn allowed(method: &str) -> bool {
             | "objects.selectPlate"
             | "objects.answerAsk"
             | "objects.answerCloseup"
+            | "objects.answerReconstruction"
             | "objects.print"
             | "objects.estimate"
             | "objects.pausePrint"
@@ -191,6 +192,8 @@ mod tests {
             assert!(!allowed(method));
         }
         assert!(validate("objects.correct", &json!({"photos":["/etc/passwd"]})).is_err());
+        assert!(allowed("objects.answerReconstruction"));
+        assert!(!allowed("objects.reconstructionPreview"));
     }
     #[test]
     fn validates_request_identity() {
