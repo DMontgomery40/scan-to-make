@@ -433,6 +433,9 @@ test('Linux printer discovery browses each Bonjour type with avahi-browse and ke
   assert.deepEqual(parseAvahiLine('=;wlp2s0;IPv4;OctoPrint\\032instance\\032on\\032octopi;_octoprint._tcp;local;octopi.local;192.168.1.20;80;"path=/" "version=1.10.2"', '_octoprint._tcp'),
     {type: '_octoprint._tcp', name: 'OctoPrint instance on octopi', host: 'octopi.local', port: '80'});
   assert.equal(parseAvahiLine('+;wlp2s0;IPv4;OctoPrint;_octoprint._tcp;local', '_octoprint._tcp'), undefined, 'unresolved');
+  // Captured from avahi-browse on agents-136 for a name containing a literal backslash.
+  assert.equal(parseAvahiLine('=;eth0;IPv4;STM\\032host\\032test\\\\032name;_stmhosttest._tcp;local;agents-136.local;192.168.68.215;19999;"k=ab" "v=1"', '_stmhosttest._tcp')?.name,
+    'STM host test\\032name', 'an escaped backslash is not a second escape');
   assert.equal(parseAvahiLine('=;wlp2s0;IPv6;OctoPrint;_octoprint._tcp;local;octopi.local;fe80::1;80;', '_octoprint._tcp'), undefined, 'IPv4 rows only');
   assert.equal(parseAvahiLine('=;wlp2s0;IPv4;Voron;_moonraker._tcp;local;voron.local;192.168.1.30;7125;', '_octoprint._tcp'), undefined, 'another type');
   assert.equal(parseAvahiLine('=;wlp2s0;IPv4;Bad;_octoprint._tcp;local;bad host;192.168.1.31;80;', '_octoprint._tcp'), undefined, 'invalid host');

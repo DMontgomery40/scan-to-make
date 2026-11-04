@@ -126,7 +126,8 @@ export function parseAvahiLine(line: string, type: string): BonjourService | und
   const fields = line.split(';');
   if (fields.length < 9 || fields[0] !== '=' || fields[2] !== 'IPv4' || fields[4] !== type) return undefined;
   const [, , , instance, , , target, , port] = fields as [string, string, string, string, string, string, string, string, string];
-  const name = instance.replace(/\\(\d{3})/g, (_, code: string) => String.fromCharCode(Number(code))).replace(/\\(.)/g, '$1').slice(0, 128);
+  // One pass: `\\032` is an escaped backslash followed by "032", not a space.
+  const name = instance.replace(/\\(\d{3}|.)/g, (_, code: string) => code.length === 3 ? String.fromCharCode(Number(code)) : code).slice(0, 128);
   const host = target.replace(/\.$/, '');
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(host) || !/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) return undefined;
   return {type, name, host, port};
