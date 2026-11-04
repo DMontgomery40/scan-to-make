@@ -28,7 +28,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes} = {}) {
+async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -57,6 +57,7 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
     const content = {};
     if ('confirmed' in properties) content.confirmed = true;
     if ('bambu_model' in properties) content.bambu_model = 'p1s';
+    if ('choice' in properties) content.choice = choice ?? properties.choice.oneOf?.[0]?.const;
     setImmediate(() => relay.respond(pending.id, {action: 'accept', content}));
   });
   const steps = [];
@@ -927,4 +928,35 @@ test('the printer MCP\'s design guidance is read as an MCP prompt, and an MCP wi
   t.after(() => older.close());
   await older.connect();
   assert.equal(await older.prompt('fdm_design'), undefined);
+});
+
+
+const LEGACY_ASK = {message: 'This design was made in several colours before Counterpart kept each colour as its own part.', title: 'Colours',
+  choices: [{value: 'one-colour', title: 'Print it in one colour'}, {value: 'remake', title: 'Make it again in colour'}], proceed: 'one-colour'};
+
+test("Counterpart's own question comes before slicing: only the proceed choice slices and prints", async t => {
+  const go = await setup(t, {choice: 'one-colour'});
+  const result = await go.runner.run({stlPath: go.stlPath, ask: LEGACY_ASK});
+  assert.equal(go.seen[0].message, LEGACY_ASK.message);
+  assert.deepEqual(go.seen[0].requestedSchema, {type: 'object', required: ['choice'], properties: {choice: {type: 'string', title: 'Colours',
+    oneOf: [{const: 'one-colour', title: 'Print it in one colour'}, {const: 'remake', title: 'Make it again in colour'}]}}});
+  assert.equal(result.print.dispatch, 'started');
+  assert.deepEqual((await go.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['slice_stl', 'inspect_print_file', 'print_3mf']);
+});
+
+test("another choice, a decline or a timeout on Counterpart's question stops before anything is sliced; an estimate never asks", async t => {
+  const remake = await setup(t, {choice: 'remake'});
+  await assert.rejects(remake.runner.run({stlPath: remake.stlPath, ask: LEGACY_ASK}), {code: 'print-choice', detail: 'remake'});
+  const declined = await setup(t, {answer: 'decline'});
+  await assert.rejects(declined.runner.run({stlPath: declined.stlPath, ask: LEGACY_ASK}), {code: 'print-choice', detail: 'declined'});
+  const timedOut = await setup(t, {answer: 'none', relayTimeoutMs: 50});
+  await assert.rejects(timedOut.runner.run({stlPath: timedOut.stlPath, ask: LEGACY_ASK}), {code: 'print-choice', detail: 'declined'});
+  for (const f of [remake, declined, timedOut]) {
+    assert.equal(f.seen.length, 1, 'only Counterpart\'s question was asked');
+    assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), [], 'nothing sliced or sent');
+    assert.equal(f.relay.pending().length, 0);
+  }
+  const estimate = await setup(t, {choice: 'remake'});
+  await estimate.runner.run({stlPath: estimate.stlPath, print: false, ask: LEGACY_ASK});
+  assert.equal(estimate.seen.length, 0, 'an estimate slices without asking');
 });
