@@ -27,6 +27,7 @@ import ControlKit
     private var pausedUntil: Date?
     /// Sends in a row that couldn't reach the relay, per token.
     private var failures: [String: Int] = [:]
+    private var recovery = LiveActivityRecovery(defaults: .standard)
     private let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20
@@ -36,14 +37,25 @@ import ControlKit
     /// Tokens come from the companion (the phone on the LAN) and from iCloud (`CounterpartDevice`, the phone away).
     func deliver(_ event: CounterpartEvent, title: String, client: ControlClient, cloudTokens: LiveActivityTokens) async {
         guard enabled, endpoint != nil, event.type.hasPrefix("print.") else { return }
+        recovery.record(event, title: title, now: Date())
         let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
-        let candidates: [String] = event.type == "print.started"
-            ? (local.pushToStart + cloudTokens.pushToStart).map(\.token)
-            : (local.activities + cloudTokens.activities).filter { $0.printId == event.printId }.map(\.token)
+        let candidates = event.type == "print.started" ? (local.pushToStart + cloudTokens.pushToStart).map(\.token) : []
         for token in Set(candidates.map { $0.lowercased() }) where !dead.contains(token) {
             guard let push = LiveActivityPush.make(for: event, token: token, title: title, now: Date()) else { continue }
             enqueue(push)
         }
+        recover(local: local, cloud: cloudTokens)
+    }
+
+    /// Called each long-poll cycle even with no new events: the phone may only now have registered its token.
+    func recover(client: ControlClient, cloudTokens: LiveActivityTokens) async {
+        guard enabled, endpoint != nil else { return }
+        let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
+        recover(local: local, cloud: cloudTokens)
+    }
+
+    private func recover(local: LiveActivityTokens, cloud: LiveActivityTokens) {
+        for push in recovery.pushes(tokens: local.activities + cloud.activities, now: Date()) where !dead.contains(push.token) { enqueue(push) }
     }
 
     private var tokenPausedUntil: [String: Date] = [:]

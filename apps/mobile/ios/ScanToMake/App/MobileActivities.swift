@@ -56,6 +56,14 @@ import CounterpartKit
     func reconcile(_ snapshots: [PrintActivitySnapshot], mayStart: Bool) async {
         guard let app, !app.needsMac, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         for snapshot in snapshots {
+            // Only a current companion snapshot may retire another print. An older CloudKit mirror
+            // can otherwise race a freshly started activity before its mirror upsert arrives.
+            let currentPrint = app.projects.projects.first { $0.id == snapshot.attributes.projectId }?.print?.printId
+            for activity in Activity<PrintAttributes>.activities where currentPrint == snapshot.attributes.printId && snapshot.supersedes(activity.attributes) {
+                await activity.end(nil, dismissalPolicy: .immediate)
+                let old = activity.attributes.printId
+                tokens[old] = nil; removed.insert(old)
+            }
             let content = ActivityContent(state: snapshot.content, staleDate: snapshot.observedAt.addingTimeInterval(5 * 60))
             if let activity = Activity<PrintAttributes>.activities.first(where: { $0.attributes.printId == snapshot.attributes.printId }) {
                 if snapshot.content.terminal {

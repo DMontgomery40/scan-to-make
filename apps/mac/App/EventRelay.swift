@@ -48,6 +48,7 @@ import ControlKit
         guard let status = try? await client.status() else { return 10 }
         await refreshProjects(client, force: false)
         await cloud.tick(projects: projects)
+        await relay.recover(client: client, cloudTokens: cloud.deviceTokens)
         await CompanionSettingsModel.shared.refresh()
         await cloud.publishMacIfDue(client)
         guard status.capabilities.events else { return 15 }

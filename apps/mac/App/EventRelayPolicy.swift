@@ -205,7 +205,7 @@ struct LiveActivityPush: Encodable, Equatable {
         case "print.started": kind = .start; priority = 10
         case "print.status", "print.resumed": kind = .update
         case "print.paused": kind = .update; priority = 10
-        case "print.done", "print.failed", "print.cancelled": kind = .end; priority = 10
+        case "print.done", "print.failed", "print.not-started", "print.cancelled": kind = .end; priority = 10
         default: return nil
         }
         // Push-to-start requires an alert. Muted projects can still update an activity started on the phone.
@@ -214,13 +214,14 @@ struct LiveActivityPush: Encodable, Equatable {
         let fallbackState: String
         switch event.type {
         case "print.done": fallbackState = "finished"
-        case "print.failed": fallbackState = "failed"
+        case "print.failed", "print.not-started": fallbackState = "failed"
         case "print.cancelled": fallbackState = "cancelled"
         case "print.paused": fallbackState = "paused"
         case "print.started": fallbackState = "preparing"
         default: fallbackState = "printing"
         }
-        let state = data?.state.flatMap { states.contains($0) ? $0 : nil } ?? fallbackState
+        // The terminal event belongs to this print; its last printer report may still say preparing/printing.
+        let state = kind == .end ? fallbackState : data?.state.flatMap { states.contains($0) ? $0 : nil } ?? fallbackState
         let ends = data?.endsAt.flatMap(CounterpartEvent.parse)
             ?? data?.remainingSec.map { now.addingTimeInterval($0) } ?? now
         let content = ContentState(state: state, progress: min(100, max(0, kind == .end && state == "finished" ? 100 : data?.progress ?? 0)),
@@ -236,9 +237,9 @@ struct LiveActivityPush: Encodable, Equatable {
             push.alert = alert(title: "\(shortTitle) is printing", body: "On \(name)")
         } else if kind == .start {
             return nil
-        } else if event.notify != "none" && (event.type == "print.paused" || kind == .end) {
-            push.alert = alert(title: event.title, body: event.body, sound: kind == .end ? "default" : nil)
         }
+        // CloudKit owns discrete event alerts with their camera frames. An optional ActivityKit
+        // update/end alert would produce another banner for the same pause or completion.
         return push
     }
 
@@ -256,9 +257,62 @@ struct LiveActivityPush: Encodable, Equatable {
     }
 }
 
-/// How long to wait before sending a push again when the relay couldn't be reached, or nil to stop trying. An end has
-/// no later update to repair the phone's Live Activity, so it keeps trying for about an hour; a start or an update is
-/// soon replaced by the next one.
+/// A start can reach a locked phone before its update token reaches the Mac. Retain the latest state
+/// so late tokens still receive progress or an end, including after a companion restart. No tokens are stored here.
+struct LiveActivityRecovery {
+    private struct Entry: Codable { var event: CounterpartEvent; var title: String }
+    private static let key = "relay.latestPrintEvents"
+    private let defaults: UserDefaults
+    private var entries: [String: Entry]
+    private var queued: Set<String> = []
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        entries = defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode([String: Entry].self, from: $0) } ?? [:]
+    }
+
+    mutating func record(_ event: CounterpartEvent, title: String, now: Date) {
+        guard let id = event.printId,
+              event.type == "print.started" || LiveActivityPush.make(for: event, token: "aa", title: title, now: now) != nil else { return }
+        // A retry replaces this project's previous print. Keep its end until its token arrives too.
+        if event.type == "print.started", let project = event.projectId {
+            for (oldID, entry) in entries where oldID != id && entry.event.projectId == project {
+                guard LiveActivityPush.make(for: entry.event, token: "aa", title: entry.title, now: now)?.kind != .end else { continue }
+                entries[oldID]?.event = CounterpartEvent(seq: event.seq, id: "superseded:\(event.id):\(oldID)", at: event.at,
+                    type: "print.cancelled", projectId: project, printId: oldID, printerName: entry.event.printerName,
+                    title: entry.event.title, body: "A newer print replaced this one.", notify: "none")
+            }
+        }
+        // A late status must not turn a terminal print back into an active surface.
+        if let previous = entries[id], LiveActivityPush.make(for: previous.event, token: "aa", title: previous.title, now: now)?.kind == .end { return }
+        entries[id] = Entry(event: event, title: title)
+        entries = entries.filter { now.timeIntervalSince($0.value.event.date ?? .distantPast) < 24 * 60 * 60 }
+        entries = Dictionary(uniqueKeysWithValues: entries.sorted { ($0.value.event.date ?? .distantPast) > ($1.value.event.date ?? .distantPast) }.prefix(256).map { ($0.key, $0.value) })
+        defaults.set(try? JSONEncoder().encode(entries), forKey: Self.key)
+        // One event/token pair is queued once per process. LiveActivityRelay owns network retries.
+        queued = queued.filter { key in entries.values.contains { key.hasSuffix("|" + $0.event.id) } }
+    }
+
+    mutating func pushes(tokens: [LiveActivityTokens.Activity], now: Date) -> [LiveActivityPush] {
+        var pushes: [LiveActivityPush] = []
+        for token in tokens {
+            guard let entry = entries[token.printId], now.timeIntervalSince(entry.event.date ?? .distantPast) < 24 * 60 * 60 else { continue }
+            let key = token.token.lowercased() + "|" + entry.event.id
+            guard !queued.contains(key) else { continue }
+            guard var push = LiveActivityPush.make(for: entry.event, token: token.token, title: entry.title, now: now) else { continue }
+            if push.kind == .start {
+                // This is an existing activity's update token, never the push-to-start token.
+                push.kind = .update; push.attributes = nil; push.alert = nil; push.priority = 5
+            }
+            queued.insert(key)
+            pushes.append(push)
+        }
+        return pushes
+    }
+}
+
+/// How long to wait before resending when the relay cannot be reached. An end keeps trying for about an hour;
+/// starts and updates are soon replaced by newer state.
 enum RelayRetry {
     static func delay(failures: Int, kind: LiveActivityPush.Kind) -> TimeInterval? {
         guard failures >= 1, failures <= (kind == .end ? 10 : 3) else { return nil }

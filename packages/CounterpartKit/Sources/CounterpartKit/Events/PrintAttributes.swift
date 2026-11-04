@@ -87,4 +87,9 @@ public struct PrintActivitySnapshot: Equatable, Sendable {
     public func shouldStart(foreground: Bool, dismissed: Set<String>) -> Bool {
         foreground && content.canStart && !dismissed.contains(attributes.printId)
     }
+
+    /// The current project snapshot replaces its old print identity on retry. Other projects keep their activities.
+    public func supersedes(_ earlier: PrintAttributes) -> Bool {
+        attributes.projectId == earlier.projectId && attributes.printId != earlier.printId
+    }
 }

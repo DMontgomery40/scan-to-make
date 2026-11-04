@@ -182,6 +182,69 @@ final class EventRelayTests: XCTestCase {
 
     // MARK: The relay's request
 
+    func testCloudKitOwnsPausedAndTerminalAlertsWhileTheActivityStillChanges() throws {
+        for type in ["print.paused", "print.done", "print.failed", "print.cancelled"] {
+            let push = try XCTUnwrap(LiveActivityPush.make(for: event(type, printId: "print-1"), token: "aa", title: "Mic mount", now: now))
+            XCTAssertNil(push.alert, "\(type) already has a CloudKit alert; updating the activity must not alert again")
+            XCTAssertEqual(push.kind, type == "print.paused" ? .update : .end)
+        }
+    }
+
+    func testNotStartedEndsTheActivityDespiteTheLastPreparingReport() throws {
+        let push = try XCTUnwrap(LiveActivityPush.make(for: event("print.not-started", data: .init(state: "preparing"), printId: "print-1"),
+                                                      token: "aa", title: "Mic mount", now: now))
+        XCTAssertEqual(push.kind, .end)
+        XCTAssertEqual(push.contentState.state, "failed")
+        XCTAssertNil(push.alert)
+        XCTAssertNil(push.staleDate)
+    }
+
+    func testTerminalRecoveryWaitsForALateTokenAndSurvivesRestart() throws {
+        let name = "activity-recovery-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        var recovery = LiveActivityRecovery(defaults: defaults)
+        recovery.record(event("print.not-started", printId: "old"), title: "Mic mount", now: now)
+        XCTAssertTrue(recovery.pushes(tokens: [], now: now).isEmpty)
+        var restarted = LiveActivityRecovery(defaults: defaults)
+        let token = LiveActivityTokens.Activity(printId: "old", deviceId: "phone", token: "aa", updatedAt: "")
+        let pushes = restarted.pushes(tokens: [token, token], now: now)
+        XCTAssertEqual(pushes.count, 1, "LAN and iCloud may carry the same token")
+        XCTAssertEqual(pushes.first?.kind, .end)
+        XCTAssertEqual(pushes.first?.contentState.state, "failed")
+        XCTAssertTrue(restarted.pushes(tokens: [token], now: now).isEmpty, "do not requeue an unchanged event/token each poll")
+    }
+
+    func testRetryEndsTheEarlierPrintWithoutEndingAnotherProjectOrRestartingTheActivity() throws {
+        let name = "activity-retry-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        var recovery = LiveActivityRecovery(defaults: defaults)
+        recovery.record(event("print.started", printId: "old"), title: "Mic mount", now: now)
+        recovery.record(event("print.started", project: "p2", printId: "other"), title: "Hook", now: now)
+        recovery.record(event("print.started", printId: "new"), title: "Mic mount", now: now)
+        recovery.record(event("print.status", notify: "none", data: .init(state: "printing"), printId: "old"), title: "Mic mount", now: now)
+        let tokens = ["old", "new", "other"].map { LiveActivityTokens.Activity(printId: $0, deviceId: "phone", token: $0, updatedAt: "") }
+        let pushes = recovery.pushes(tokens: tokens, now: now)
+        XCTAssertEqual(pushes.first { $0.token == "old" }?.kind, .end)
+        XCTAssertEqual(pushes.first { $0.token == "old" }?.contentState.state, "cancelled")
+        XCTAssertEqual(pushes.first { $0.token == "new" }?.kind, .update, "a late token receives current state, never another start")
+        XCTAssertEqual(pushes.first { $0.token == "other" }?.kind, .update)
+        XCTAssertTrue(pushes.allSatisfy { $0.alert == nil })
+    }
+
+    func testAMutedRetryStillRetiresTheEarlierActivityWithoutStartingAnother() throws {
+        let name = "activity-muted-retry-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        var recovery = LiveActivityRecovery(defaults: defaults)
+        recovery.record(event("print.started", printId: "old"), title: "Mic mount", now: now)
+        recovery.record(event("print.started", notify: "none", printId: "new"), title: "Mic mount", now: now)
+        let pushes = recovery.pushes(tokens: [.init(printId: "old", deviceId: "phone", token: "aa", updatedAt: "")], now: now)
+        XCTAssertEqual(pushes.first?.kind, .end)
+        XCTAssertTrue(pushes.allSatisfy { $0.alert == nil })
+    }
+
     func testRelayRequestsFollowTheClientContract() throws {
         let start = LiveActivityPush.make(for: event("print.started", printId: "print-1"), token: "ABCDEF0123456789ABCDEF0123456789",
                                           title: "Mic mount", now: now)

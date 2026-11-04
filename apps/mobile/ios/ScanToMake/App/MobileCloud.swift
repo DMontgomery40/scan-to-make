@@ -74,7 +74,7 @@ import Observation
         guard let database else { return }
         let availability = CloudNotificationSubscriptions.availability(settings: settings, localChoices: localChoices)
         switch availability {
-        case .allowed: alertsMessage = "iCloud alerts include every event type."
+        case .allowed: alertsMessage = "iCloud sends project and print alerts. Print starts appear as a Live Activity when available."
         case .unknown: alertsMessage = "Connect to an updated Mac to check your saved notification choices. Existing iCloud alerts keep their last configuration."
         case .savedOptOut: alertsMessage = "A saved iPhone alert choice is off. Separate device and event choices aren't supported yet, so Counterpart won't enable shared iCloud alerts. Existing shared alerts keep their last configuration."
         }

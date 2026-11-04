@@ -3,6 +3,18 @@ import CloudKit
 @testable import CounterpartKit
 
 final class CloudNotificationTests: XCTestCase {
+    func testPrintStartedSubscriptionIsSilentBecauseTheActivityStartAlreadyAlerts() throws {
+        // Keep the stable ID so an existing account's visible subscription is replaced in place.
+        let subscriptions = CloudNotificationSubscriptions.changes(settings: .init(notifications: .init()), localChoices: [true]).saving
+        let started = try XCTUnwrap(subscriptions.first { $0.subscriptionID == "ev-started" })
+        let info = try XCTUnwrap(started.notificationInfo)
+        XCTAssertTrue(info.shouldSendContentAvailable)
+        XCTAssertNil(info.titleLocalizationKey)
+        XCTAssertNil(info.alertLocalizationKey)
+        XCTAssertNil(info.soundName)
+        let ready = try XCTUnwrap(subscriptions.first { $0.subscriptionID == "ev-ready" }?.notificationInfo)
+        XCTAssertNotNil(ready.alertLocalizationKey, "discrete event alerts remain enabled")
+    }
     func testExistingOptOutsPauseSharedAlertsAndUnknownPreferencesDoNotEnableThem() {
         XCTAssertFalse(CloudNotificationSubscriptions.alertsAllowed(settings: nil, localChoices: []))
         XCTAssertFalse(CloudNotificationSubscriptions.alertsAllowed(settings: .init(), localChoices: []))
@@ -63,16 +75,18 @@ final class CloudNotificationTests: XCTestCase {
             XCTAssertTrue(event.querySubscriptionOptions.contains(.firesOnRecordCreation))
             XCTAssertEqual(event.zoneID?.zoneName, CounterpartIdentifiers.cloudKitZone)
             let info = try XCTUnwrap(event.notificationInfo)
-            XCTAssertTrue(info.shouldSendMutableContent)
             XCTAssertTrue(info.shouldSendContentAvailable)
             XCTAssertTrue(info.desiredKeys?.contains("eventId") == true)
             XCTAssertTrue(info.desiredKeys?.contains("projectId") == true)
             XCTAssertTrue(info.desiredKeys?.contains("type") == true)
             XCTAssertLessThanOrEqual(info.desiredKeys?.count ?? 0, 3, "CloudKit rejects notification payloads requesting more than three fields")
-            XCTAssertEqual(info.titleLocalizationKey, "%1$@")
-            XCTAssertEqual(info.titleLocalizationArgs, ["title"])
-            XCTAssertEqual(info.alertLocalizationKey, "%1$@")
-            XCTAssertEqual(info.alertLocalizationArgs, ["body"])
+            if event.subscriptionID != "ev-started" {
+                XCTAssertTrue(info.shouldSendMutableContent)
+                XCTAssertEqual(info.titleLocalizationKey, "%1$@")
+                XCTAssertEqual(info.titleLocalizationArgs, ["title"])
+                XCTAssertEqual(info.alertLocalizationKey, "%1$@")
+                XCTAssertEqual(info.alertLocalizationArgs, ["body"])
+            }
             XCTAssertNil(info.collapseIDKey, "separate prints must not share one constant collapse ID")
             XCTAssertNotNil(info.category)
         }

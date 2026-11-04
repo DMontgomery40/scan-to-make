@@ -3,6 +3,13 @@ import CloudKit
 @testable import CounterpartKit
 
 final class PrintActivityTests: XCTestCase {
+    func testRetrySupersedesOnlyTheEarlierActivityForTheSameProject() {
+        let snapshot = PrintActivitySnapshot(attributes: .init(projectId: "p", printId: "new", title: "Clip", printerName: "Printer"),
+            content: .init(state: "printing", progress: 0, endsAt: Date()))
+        XCTAssertTrue(snapshot.supersedes(.init(projectId: "p", printId: "old", title: "Clip", printerName: "Printer")))
+        XCTAssertFalse(snapshot.supersedes(snapshot.attributes))
+        XCTAssertFalse(snapshot.supersedes(.init(projectId: "other", printId: "old", title: "Hook", printerName: "Printer")))
+    }
     func testProjectProgressAndTerminalStateOverrideAnOldPrinterReport() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         var project = Project(id: "p", createdAtMs: 0, updatedAtMs: now.timeIntervalSince1970 * 1000, state: .printing)

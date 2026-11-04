@@ -21,7 +21,7 @@ public enum CloudNotificationSubscriptions {
     public static func changes(settings: CompanionSettings?, localChoices: [Bool]) -> (saving: [CKSubscription], deleting: [String]) {
         let subscriptions = make()
         let enabled = alertsAllowed(settings: settings, localChoices: localChoices)
-        return (enabled ? subscriptions : subscriptions.filter { $0.subscriptionID == "proj-silent" }, [])
+        return (enabled ? subscriptions : subscriptions.filter { ["proj-silent", "ev-started"].contains($0.subscriptionID) }, [])
     }
 
     public static func make() -> [CKSubscription] {
@@ -39,6 +39,13 @@ public enum CloudNotificationSubscriptions {
             info.alertLocalizationKey = "%1$@"; info.alertLocalizationArgs = ["body"]
             info.category = group.category; info.soundName = "default"
             info.shouldSendMutableContent = true; info.shouldSendContentAvailable = true
+            if group.id == "ev-started" {
+                // Push-to-start requires its own ActivityKit alert. Replace the old visible subscription
+                // under the same account-wide ID so a print start cannot also produce a CloudKit banner.
+                info.titleLocalizationKey = nil; info.titleLocalizationArgs = nil
+                info.alertLocalizationKey = nil; info.alertLocalizationArgs = nil
+                info.soundName = nil; info.shouldSendMutableContent = false
+            }
             // CloudKit allows at most three extra fields. The service extension fetches the full
             // event for its frame and presentation; these preserve routing if that fetch fails.
             info.desiredKeys = ["eventId", "projectId", "type"]

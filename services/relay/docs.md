@@ -116,10 +116,22 @@ Which token to use, from PRD §8.8:
 | `print.started` | `start` | 10 | required, e.g. "*Title* is printing" |
 | `print.status` | `update` | 5 | none |
 | `print.resumed` | `update` | 5 | none |
-| `print.paused` | `update` | 10 | optional, with the problem |
-| `print.done` | `end` | 10 | optional |
-| `print.failed` | `end` | 10 | optional |
-| `print.cancelled` | `end` | 10 (§8.8 doesn't name it; 10 matches the other ends) | optional |
+| `print.paused` | `update` | 10 | none; CloudKit owns the alert |
+| `print.done` | `end` | 10 | none; CloudKit owns the alert |
+| `print.failed` / `print.not-started` | `end` | 10 | none; CloudKit owns the alert |
+| `print.cancelled` | `end` | 10 (§8.8 doesn't name it; 10 matches the other ends) | none; CloudKit owns the alert |
+
+The Mac leaves optional update/end alerts out: the phone's CloudKit subscription delivers the event
+with its camera frame. `ev-started` is silent because ActivityKit requires the start alert. The server
+still accepts optional update/end alerts as part of its wire contract. If an activity token arrives
+after an event, the Mac recovers the latest saved state on its next poll; a retry ends the earlier
+activity for the same project, including when that earlier token arrives late.
+
+PRD §9.1 specifies a Live Activity for `print.started`, without a separate notification banner. When
+the relay is off, the foreground phone can start its activity locally. If activities are disabled or
+unavailable, there is no standalone start alert; first-layer, milestone, completion and problem alerts
+still use CloudKit. A remote start must contain Apple's required `alert` with a title and body, and may
+itself alert the person; the “no banner” rule excludes an additional CloudKit start banner.
 
 What the relay adds to each push:
 - `timestamp` (now);
@@ -215,8 +227,7 @@ End, sent on `print.done`. The relay adds `"dismissal-date"`, 4 hours after its 
   "token": "5c0d…91aa",
   "kind": "end",
   "contentState": { "state": "finished", "progress": 100, "layer": 300, "totalLayers": 300, "endsAt": 815230800, "stage": "" },
-  "priority": 10,
-  "alert": { "title": "Desk hook is done", "body": "Take it off the plate.", "sound": "default" }
+  "priority": 10
 }
 ```
 

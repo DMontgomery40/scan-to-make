@@ -96,7 +96,7 @@ struct MacNotificationSettings: View {
             if let settings = model.settings, settings.notifications != nil, let deviceId = model.deviceId {
                 Section {
                     ForEach(SettingsSchema.notificationTypes) { type in
-                        toggle(type.label, settings.phoneNotifies(type.id, deviceId: deviceId)) { on in
+                        toggle(type.id == "print.started" ? "Print started (Live Activity)" : type.label, settings.phoneNotifies(type.id, deviceId: deviceId)) { on in
                             SettingsPatch.phoneNotification(type.id, on, deviceId: deviceId)
                         }.disabled(true)
                     }
