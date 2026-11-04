@@ -75,6 +75,9 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     val projects by state.projects.collectAsState()
     val catalog by state.catalog.collectAsState()
     val project = projects.firstOrNull { it.id == id } ?: return
+    // Keep the exact plate the person opened; the server also checks this at dispatch.
+    val expectedPlate = remember(id) { project.selectedPlate?.id }
+    val plateChanged = project.selectedPlate?.id != expectedPlate
     var destinationId by remember { mutableStateOf(project.printerDestinationId ?: catalog?.defaultDestinationId) }
     var quality by remember { mutableStateOf(PrintQuality.Standard) }
     var strength by remember { mutableStateOf(PrintStrength.Standard) }
@@ -110,6 +113,8 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SectionTitle("Printer")
+            project.selectedPlate?.let { Text(it.name, fontWeight = FontWeight.SemiBold) }
+            if (plateChanged) Text("The selected plate changed. Close this sheet and open Print again.", color = Palette.needsYou)
             catalog?.destinations?.forEach { d ->
                 val selected = d.id == (destinationId ?: catalog?.defaultDestinationId)
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Palette.card)
@@ -163,11 +168,11 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
             }
             problem?.let { Text(it, color = Palette.failed) }
         }
-        PrimaryButton(if (working) "Sending to the printer…" else "Print", Modifier.fillMaxWidth().padding(16.dp), enabled = !working && (!uncertain || checked), icon = CIcons.Printer) {
+        PrimaryButton(if (working) "Sending to the printer…" else "Print", Modifier.fillMaxWidth().padding(16.dp), enabled = !working && !plateChanged && (!uncertain || checked), icon = CIcons.Printer) {
             working = true; problem = null
             scope.launch {
                 try {
-                    state.show(app.companion.print(id, PrintChoice(colour, quality, strength, checked)))
+                    state.show(app.companion.print(id, PrintChoice(colour, quality, strength, checked), expectedPlate))
                     printing()
                 } catch (e: CompanionException) { problem = e.message } catch (e: Exception) { problem = CompanionException.unreachable.message } finally { working = false }
             }

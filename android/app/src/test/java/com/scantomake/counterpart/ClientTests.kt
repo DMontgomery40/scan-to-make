@@ -295,7 +295,8 @@ class ContractTests {
         val live: PrintLive = WireJson.decodeFromJsonElement(samples["printLive"]!!)
         assertTrue(live.state.isNotEmpty())
         val destinations = samples["destinations"].arr!!.map { WireJson.decodeFromJsonElement<PrinterDestination>(it) }
-        assertEquals(2, destinations.size)
+        assertTrue(destinations.isNotEmpty())
+        assertEquals(samples["destinations"].arr!!.map { it.obj!!["id"].str }, destinations.map { it.id })
         samples["statuses"].arr!!.forEach { s ->
             val phase = s.obj!!["phase"].str
             assertTrue("every status phase is known: $phase", ProjectPhase.of(phase) != null)

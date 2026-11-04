@@ -65,6 +65,8 @@ import com.scantomake.counterpart.app.Counterpart
 import com.scantomake.counterpart.app.Media
 import com.scantomake.counterpart.core.str
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -115,11 +117,12 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
         if (ok && f != null && f.length() > 0) gotPhotos(listOf(f)) else f?.delete()
     }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(12)) { uris -> gotPhotos(uris.mapNotNull { Media.keep(context, it) }) }
-    val pickModel = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) run("model") {
-            val name = context.contentResolver.query(uri, null, null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(c.getColumnIndexOrThrow("_display_name")) else null } ?: "model.stl"
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw CompanionException("invalid-model", "That file couldn't be read.")
-            state.show(app.companion.addModelFile(id, name, bytes))
+    val pickModel = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) run("model") {
+            for (uri in uris) {
+                val (name, bytes) = withContext(Dispatchers.IO) { Media.readModel(context, uri) }
+                state.show(app.companion.addModelFile(id, name, bytes))
+            }
         }
     }
 
@@ -165,6 +168,15 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 words.size?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
             }
             Text(words.status, fontSize = 17.sp)
+            ProjectPlates(project, working != null,
+                select = { plate -> run("plate") { state.show(app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex)) } },
+                print = { plate -> run("plate") {
+                    if (!plate.selected) state.show(app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex))
+                    print()
+                } })
+            if (project.kind == "published" && project.canSelectPlate) SecondaryButton("Import More Model Files", Modifier.fillMaxWidth(), enabled = working == null) {
+                pickModel.launch(arrayOf("*/*"))
+            }
             if (words.phase == ProjectPhase.Working) {
                 val pass = project.runningPass
                 val stages = pass?.stages ?: emptyList()

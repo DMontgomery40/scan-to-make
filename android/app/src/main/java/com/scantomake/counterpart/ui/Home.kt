@@ -105,6 +105,7 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
                     OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), placeholder = { Text("Projects, printers, notes") }, singleLine = true)
                 }
                 error?.let { e -> item { ConnectionBanner(e.message, e.needsPairing) } }
+                if (query.isBlank()) item { StarterProjects { open(it, false) } }
                 if (loaded && projects.isEmpty() && error == null) {
                     item { EmptyHome(newProject) }
                 }

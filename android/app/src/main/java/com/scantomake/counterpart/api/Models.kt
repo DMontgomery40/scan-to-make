@@ -57,6 +57,7 @@ data class Project(
     val pendingFollowup: String? = null,
     val messages: List<Message>? = null,
     val pendingPhotos: List<String>? = null,
+    val plates: List<ProjectPlate>? = null,
     val raw: JsonObject = JsonObject(emptyMap()),
 ) {
     enum class State(val wire: String) {
@@ -72,6 +73,9 @@ data class Project(
     val projectStatus: ProjectStatus? get() = ProjectStatus.of(settings?.status) ?: ProjectStatus.of(outcome)
     val isArchived: Boolean get() = settings?.archived ?: (archived == true || projectStatus == ProjectStatus.Archived)
     val openAsk: Ask? get() = ask?.takeIf { it.status != "answered" }
+    val selectedPlate: ProjectPlate? get() = plates?.firstOrNull { it.selected }
+    val completedPlateCount: Int get() = plates?.count { it.completedAtMs != null } ?: 0
+    val canSelectPlate: Boolean get() = !plates.isNullOrEmpty() && state != State.Printing && state != State.TouchingUp && print?.uncertain != true
 
     companion object {
         fun decode(o: JsonObject): Project? {
@@ -88,7 +92,7 @@ data class Project(
                 printerDestinationId = o.opt("printerDestinationId"), printConfirmation = o.opt("printConfirmation"),
                 status = o.opt("status"), title = o.opt("title"), kind = o.opt("kind"), ask = o.opt("ask"), settings = o.opt("settings"),
                 outcome = o.opt("outcome"), archived = o.opt("archived"), credit = o["credit"].obj, files = o["files"].obj,
-                pendingFollowup = o.opt("pendingFollowup"), messages = o.opt("messages"), pendingPhotos = o.opt("pendingPhotos"), raw = o,
+                pendingFollowup = o.opt("pendingFollowup"), messages = o.opt("messages"), pendingPhotos = o.opt("pendingPhotos"), plates = o.opt("plates"), raw = o,
             )
         }
     }

@@ -5,8 +5,18 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Use the same curated catalog and pictures as the Apple clients. Geometry stays on the companion.
+val starterAssets = tasks.register<Sync>("prepareStarterAssets") {
+    from("../../packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters") {
+        include("catalog.json", "**/*.png")
+        into("Starters")
+    }
+    into(layout.buildDirectory.dir("generated/starter-assets"))
+}
+
 android {
     namespace = "com.scantomake.counterpart"
+    sourceSets["main"].assets.srcDir(starterAssets.map { it.destinationDir })
     compileSdk = 35
     buildToolsVersion = "35.0.0"
 
@@ -40,6 +50,8 @@ android {
     }
     packaging { resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/versions/9/OSGI-INF/MANIFEST.MF") }
 }
+
+tasks.named("preBuild") { dependsOn(starterAssets) }
 
 dependencies {
     implementation(libs.androidx.core.ktx)

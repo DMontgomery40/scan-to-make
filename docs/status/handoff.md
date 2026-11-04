@@ -224,6 +224,17 @@ remote native probes and the SSH tunnel were removed after verification.
      HTTPS/Tailscale and events are portable; Android photo reconstruction currently calls Apple's
      `tools/mac-reconstruct`, so a Linux reconstruction path and desktop shell still need implementation/acceptance.
      Renaming Mac labels alone does not deliver Linux support. Follow actual app UI acceptance for both hosts.
+     Android's four downloaded commits are integrated and pushed at `0e43a2e`. The next Android change adds
+     the shared starter catalog/images, multiple original-file import, plate selection/completion/reprint UI
+     and `expectedPlate` dispatch protection. Linux build, 28 existing contract/client tests and lint pass on
+     `agents-173`; one imported test assumed exactly two destination fixtures and now verifies decoded IDs.
+     This is engineering evidence only: no Android UI or Linux desktop acceptance yet.
+     Android SDK 22.0 (platform/build-tools 35) and JDK17 are on agents-173, not the space-constrained Mac.
+     Build source/logs: `/home/david/scan-to-make-work/android-linux-build`; SDK: `/home/david/Android/Sdk`.
+     User requested Theo's TStack workflow. `/council` is installed under `~/.codex/skills/council`;
+     Opus 5.5, GPT-6.1 Sol and Muse Wonder Full are reviewing the Android/Linux approach. Muse recommends
+     Tauri/TypeScript over GTK, with a private Unix-socket bridge, Secret Service worker and systemd user service.
+     Final architecture awaits the other two reviews; do not confuse their design feedback with app acceptance.
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
    route selection through authorized routes and per-physical-printer reservations; phone print
    sheet has layer pauses and Resume-specific confirmation. Finished print removes live controls,

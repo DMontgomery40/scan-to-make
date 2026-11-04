@@ -96,7 +96,7 @@ class CompanionClient(
                 "PUT" -> if (m("$one/scan")) return "captures:import"
                 "POST" -> {
                     if (m("/v1/blender/(check|update)")) return "projects:write"
-                    if (m("/v1/objects") || m("$one/(start|duplicate|corrections|closeup|model|ask|photos|capture|capture-depth)")) return "captures:import"
+                    if (m("/v1/objects") || m("$one/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth)")) return "captures:import"
                     if (m("$one/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)")) return "printer-handoff:use"
                     if (m("/v1/devices/live-activity-tokens")) return "projects:write"
                     if (m("/v1/settings/(ai/test|fusion/setup)")) return "projects:write"
@@ -204,6 +204,11 @@ class CompanionClient(
     suspend fun list(): List<Project> = request("GET", "/v1/objects")["objects"].arr?.mapNotNull { it.obj?.let(Project::decode) } ?: throw invalid()
     suspend fun get(id: String): Project = one(request("GET", "/v1/objects/$id"))
 
+    suspend fun addStarter(starterId: String): Project = one(request("POST", "/v1/objects", jsonOf("starterId" to starterId)))
+
+    suspend fun selectPlate(id: String, fileIndex: Int, plateIndex: Int): Project =
+        one(request("POST", "/v1/objects/$id/plate-selection", jsonOf("fileIndex" to fileIndex, "plateIndex" to plateIndex)))
+
     /** Creates a project. `kind` is `fit`, `copy` or `published` (with a model page `url`). */
     suspend fun create(instructions: String, kind: String? = null, url: String? = null): Project {
         val text = instructions.trim()
@@ -280,7 +285,10 @@ class CompanionClient(
     }
 
     /** Starts preparing the print. The printer MCP still asks its own confirmation. */
-    suspend fun print(id: String, choice: PrintChoice): Project = one(request("POST", "/v1/objects/$id/print", choice.body))
+    suspend fun print(id: String, choice: PrintChoice, expectedPlate: String? = null): Project {
+        val body = if (expectedPlate == null) choice.body else JsonObject(choice.body + ("expectedPlate" to JsonPrimitive(expectedPlate)))
+        return one(request("POST", "/v1/objects/$id/print", body))
+    }
     suspend fun answerPrintConfirmation(id: String, response: JsonObject): Project = one(request("POST", "/v1/objects/$id/print-confirmation", response))
 
     enum class PrintControl(val wire: String) { Pause("pause"), Resume("resume"), Cancel("cancel") }

@@ -18,6 +18,27 @@ import java.util.UUID
 
 /** Photos chosen or taken for a project stay in the cache (ObjectsChosen) until the Mac has them. */
 object Media {
+    /** Bound allocation before reading a document; import original 3MFs without modifying them. */
+    fun readModel(context: Context, uri: Uri): Pair<String, ByteArray> {
+        val name = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(cursor.getColumnIndexOrThrow("_display_name")) else null
+        } ?: throw CompanionException("invalid-model", "That file's name couldn't be read.")
+        if (name.substringAfterLast('.').lowercase() !in setOf("3mf", "stl"))
+            throw CompanionException("invalid-model", "Choose an original 3MF or STL file.")
+        val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (output.size().toLong() + count > 64L * 1024 * 1024)
+                    throw CompanionException("invalid-model", "Choose a 3MF or STL file at most 64 MB.")
+                output.write(buffer, 0, count)
+            }
+            output.toByteArray()
+        } ?: throw CompanionException("invalid-model", "That file couldn't be read.")
+        return name to bytes
+    }
     fun chosenRoot(context: Context) = File(context.cacheDir, "ObjectsChosen").apply { mkdirs() }
 
     /** A file the camera app writes a photo into, and its content URI. */
