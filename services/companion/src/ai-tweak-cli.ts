@@ -11,6 +11,7 @@ import {checkModelAccess,modelAccessFromEnv,runAiTweak,type AiTweakOptions} from
 import {pickAiTweak,type PickResult} from './ai-tweak-pick.js';
 import {exportPicked} from './ai-tweak-export.js';
 import {lookupMakerSize} from './maker-size-lookup.js';
+import {installedModelWorkerTools} from './model-worker-tools.js';
 
 /** The user's own CLI: an explicit operator path, else the usual install locations. */
 export function findExecutable(name:'claude'|'codex',env:NodeJS.ProcessEnv=process.env):string|undefined{
@@ -86,6 +87,8 @@ export function optionsFromEnv(env:NodeJS.ProcessEnv=process.env):AiTweakOptions
 
 async function main(argv:string[]){
  const [command,...rest]=argv;
+ if ((command === 'run' || command === 'pick') && process.env.SCAN_TO_MAKE_MODEL_STATE)
+  Object.assign(process.env, installedModelWorkerTools(process.env.SCAN_TO_MAKE_MODEL_STATE));
  if(command==='project'){
   const {runProjectRequest}=await import('./project-worker.js');
   const controller=new AbortController();

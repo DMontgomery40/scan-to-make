@@ -18,7 +18,7 @@ async function fixture(t){
  await writeFile(join(cli,'ai-tweak-cli.js'),`
    const {execFileSync}=require('node:child_process');
    process.on('SIGTERM',()=>{});
-   process.stdout.write(JSON.stringify({judgeTool:process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL,pid:process.pid,pgid:Number(execFileSync('/bin/ps',['-o','pgid=','-p',String(process.pid)],{encoding:'utf8'}))})+'\\n');
+   process.stdout.write(JSON.stringify({state:process.env.SCAN_TO_MAKE_MODEL_STATE,judgeTool:process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL,pid:process.pid,pgid:Number(execFileSync('/bin/ps',['-o','pgid=','-p',String(process.pid)],{encoding:'utf8'}))})+'\\n');
    setInterval(()=>{},1000);
  `);
  return join(app,'Contents/MacOS/Counterpart');
@@ -33,7 +33,7 @@ test('compiled signed-entry helper execs Node in its own PID/group; forced shutd
  const ready=await Promise.race([once(child.stdout,'data'),closed.then(()=>{throw Error('helper exited before worker readiness')}),new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('helper readiness deadline')),5000);timer.unref();})]);
  const row=JSON.parse(ready[0].toString());workerPid=row.pid;
  assert.equal(row.pid,child.pid);assert.equal(row.pgid,child.pid);
- assert.match(row.judgeTool??'',/Payload\/source\/tools\/ai-tweak-judge$/);
+ assert.ok(row.state?.startsWith('/'));assert.equal(row.judgeTool,undefined);
  process.kill(-child.pid,'SIGTERM'); // Deliberately ignored by the fixture worker.
  process.kill(-child.pid,'SIGKILL');
  const result=await Promise.race([closed,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('stdout remained open after SIGKILL')),2000);timer.unref();})]);
@@ -43,7 +43,7 @@ test('compiled signed-entry helper execs Node in its own PID/group; forced shutd
 
 test('compiled helper refuses keyed caller environment before starting any worker',async t=>{
  const executable=await fixture(t);
- for(const variable of ['SCAN_TO_MAKE_CODEX_PATH','SCAN_TO_MAKE_AI_ENDPOINT','HOME']){
+ for(const variable of ['SCAN_TO_MAKE_CODEX_PATH','SCAN_TO_MAKE_AI_ENDPOINT','SCAN_TO_MAKE_MODEL_STATE','HOME']){
   const child=spawn(executable,['--model-worker','check'],{env:{[variable]:'/tmp/attacker'},stdio:['pipe','pipe','pipe']});
   const closed=once(child,'close');let output='';child.stdout.on('data',chunk=>output+=chunk);
   child.stdin.end(JSON.stringify({kind:'api',provider:'openai',model:'gpt-6-astra',keychainRef:'6f3de8c4-83b6-4ad7-9c6f-9b73c7077c73'}));

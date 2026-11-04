@@ -351,6 +351,22 @@ COCOAPODS: 1.15.2
 
 
 class LicenceAuditTests(unittest.TestCase):
+    def test_local_python_package_is_not_an_undeclared_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            repo, site = base / "repo", base / "site-packages"
+            site.mkdir()
+            policy = _create_allowed_repo_fixture(repo, site)
+            tool = repo / "tools" / "mesh-helper"
+            package = tool / "local_geometry"
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("")
+            (tool / "preview.py").write_text("from local_geometry import mesh\nimport unknown_external_package\n")
+            report = audit.run_audit(repo, policy, python_paths=[site])
+            names = {v["name"] for v in report["violations"]}
+            self.assertNotIn("local_geometry", names)
+            self.assertIn("unknown_external_package", names)
+
     def test_allowed_set_passes_and_report_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

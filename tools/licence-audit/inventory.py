@@ -1628,6 +1628,8 @@ def _collect_local_tool_module_names(tools_root: Path) -> set[str]:
         if "__pycache__" in py_file.parts:
             continue
         names.add(py_file.stem)
+        if py_file.name == "__init__.py":
+            names.add(py_file.parent.name)
     return names
 
 

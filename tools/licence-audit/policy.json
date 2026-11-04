@@ -275,6 +275,14 @@
       "reason": "Dev-only local Workers runtime tooling (miniflare via wrangler/@cloudflare/vitest-plugin) for services/relay; never deployed: the relay bundle has no dependencies.",
       "scope": "server",
       "version": "*"
+    },
+    {
+      "ecosystem": "python",
+      "licence": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+      "name": "numpy",
+      "reason": "Used only by the isolated caliper source generator to produce model assets. NumPy and generator code are not bundled in either app; its wheel retains upstream notices including the CC0 components.",
+      "scope": "server",
+      "version": "2.5.4"
     }
   ],
   "isolatedGplTools": {
@@ -284,6 +292,7 @@
     ],
     "folders": [
       "tools/ai-tweak-judge",
+      "tools/caliper",
       "tools/scan-correct",
       "tools/scan-repair"
     ]
