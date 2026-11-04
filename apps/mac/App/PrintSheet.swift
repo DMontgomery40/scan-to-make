@@ -283,7 +283,7 @@ struct PrintSheet: View {
         printer != nil && !model.working.contains(object.id) && (!uncertain || checked) && !refused
             && (words.actions.contains(.print) || words.actions.contains(.printChecked))
             && (settingsServed || chosen != nil || (filamentState == .done && filaments.isEmpty))
-            && !(layerCount.map { count in pauses.contains { $0 > count } } ?? false)
+            && !(offersPauses && (layerCount.map { count in pauses.contains { $0 > count } } ?? false))
     }
 
     private var colour: PrintSettings.Colour? {
