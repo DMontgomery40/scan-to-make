@@ -1,0 +1,252 @@
+export type Json =
+  null | boolean | number | string | Json[] | { [key: string]: Json };
+export interface Plate {
+  id: string;
+  fileIndex: number;
+  plateIndex: number;
+  name: string;
+  fileName: string;
+  thumbnail?: string;
+  selected: boolean;
+  sliced: boolean;
+  status: string;
+}
+export interface Field {
+  name: string;
+  title: string;
+  description?: string;
+  required: boolean;
+  type?: string;
+  enum?: string[];
+  enumNames?: string[];
+  default?: string | number | boolean;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  format?: string;
+  items?: { type: string; enum?: string[] };
+}
+export interface Question {
+  id: string;
+  message: string;
+  expiresAtMs: number;
+  fields: Field[];
+  supported: boolean;
+  url?: string;
+  mode?: string;
+}
+export interface RawQuestion {
+  id: string;
+  message: string;
+  expiresAtMs: number;
+  fields?: Field[];
+  supported?: boolean;
+  mode?: string;
+  url?: string;
+  requestedSchema?: unknown;
+}
+export interface Ask {
+  id: string;
+  question: string;
+  photo?: string;
+  region?: { x: number; y: number; width: number; height: number };
+  answers: string[];
+  type?: string;
+  url?: string;
+  options?: {
+    id: string;
+    label: string;
+    detail?: string;
+    thumbnail?: string;
+  }[];
+  multiple?: boolean;
+  status: string;
+}
+export interface Pass {
+  startedAtMs: number;
+  endedAtMs?: number;
+  note?: string;
+  photos?: string[];
+  summary?: string;
+  status?: string;
+  activityCount?: number;
+  stages?: { id: string; words: string; endedAtMs?: number }[];
+}
+export interface PrintOptions {
+  quality?: string;
+  strength?: string;
+  copies?: number;
+  pauseBeforeLayers?: number[];
+  colour?: {
+    auto?: boolean;
+    amsSlot?: number;
+    external?: boolean;
+    material?: string;
+  };
+}
+export interface Project {
+  id: string;
+  title: string;
+  instructions?: string;
+  directory?: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  state: string;
+  kind?: string;
+  archived?: boolean;
+  progress?: string;
+  failure?: string;
+  pendingFollowup?: string;
+  photos: string[];
+  requestPhotos?: string[];
+  messages?: { id: string; text: string; atMs: number; photos: string[] }[];
+  passes: Pass[];
+  completion?: { note: string; atMs: number; undone?: boolean };
+  current?: {
+    model: string;
+    renders: string[];
+    sizeMm?: number[];
+    summary?: string;
+    changes?: { tag: string; text: string }[];
+  };
+  files?: { original: string[] };
+  plates?: Plate[];
+  ask?: Ask;
+  question?: { closeup: string };
+  status?: { text: string; phase: string; tint: string };
+  printerDestinationId?: string;
+  settings?: {
+    status: string;
+    archived: boolean;
+    designEngine?: string;
+    notifications?: string;
+    printDefaults?: PrintOptions;
+  };
+  preferences?: { printDefaults?: PrintOptions };
+  credit?: {
+    url: string;
+    designer?: string;
+    site?: string;
+    title?: string;
+    licence?: string;
+    thumbnail?: string;
+  };
+  printConfirmation?: RawQuestion;
+  print?: {
+    uncertain?: boolean;
+    destinationId?: string;
+    destination?: { id: string; name: string };
+    settings?: PrintOptions;
+    monitor?: { phase: string; endState?: string; unreachableSince?: string };
+    live?: {
+      observedAt: string;
+      state: string;
+      job?: {
+        progress?: number;
+        layer?: number;
+        totalLayers?: number;
+        remainingSec?: number;
+        stage?: string;
+      };
+      problems: { code: string; message: string }[];
+    };
+    events?: { atMs: number; message: string }[];
+  };
+}
+export interface Printer {
+  id: string;
+  name: string;
+  backend: string;
+  model?: string;
+  address?: string;
+  state?: string;
+  origin?: string;
+  folder?: string;
+  mcpId?: string;
+  capabilities?: Record<string, unknown>;
+  mcps?: { backend: string; destinationId: string }[];
+  incomplete?: { missing: string[]; fill: Record<string, string> };
+}
+export interface Filament {
+  slot: number;
+  colour: string;
+  material: string;
+  name: string;
+  filamentId: string;
+  destinationId: string;
+  suggested?: boolean;
+}
+export interface Estimate {
+  destinationId: string;
+  quality: string;
+  strength: string;
+  seconds?: number;
+  grams?: number;
+  layers?: number;
+  warnings?: string[];
+  copies?: number;
+}
+export interface HostStatus {
+  configured: boolean;
+  running: boolean;
+  stateDir: string;
+  controlSocket: string;
+}
+export type ModelChoice =
+  | { kind: "none" | "claude-code" | "codex-cli" }
+  | {
+      kind: "api";
+      provider: "anthropic" | "openai";
+      model: string;
+      keychainRef: string;
+    }
+  | { kind: "endpoint"; url: string; model: string; keychainRef?: string };
+export interface ModelRecord {
+  revision: string;
+  choice: ModelChoice;
+  check?: { revision: string; state: string; outcome?: string };
+}
+export interface CompanionSettings {
+  milestones: string;
+  general?: Record<string, boolean>;
+  notifications?: { mac?: Record<string, boolean> };
+}
+export interface SetupOptions {
+  types: {
+    printerType: string;
+    label: string;
+    backends: string[];
+    serial: boolean;
+    secret?: { label: string; hint: string; required: boolean };
+  }[];
+  models: Record<string, { value: string; label: string }[]>;
+  serialModels?: Record<string, string>;
+}
+export interface McpPackage {
+  package: string;
+  label: string;
+  description: string;
+  installed: boolean;
+  version?: string;
+  latestVersion?: string;
+  appMcpId: string;
+  installs: {
+    mcpId: string;
+    version?: string;
+    source?: string;
+    path?: string;
+  }[];
+}
+export interface Route {
+  route: string;
+  choices: string[];
+  options?: {
+    id?: string;
+    value?: string;
+    label?: string;
+    route?: string;
+    available?: boolean;
+    reason?: string;
+  }[];
+}

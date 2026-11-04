@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "bundle-resources/host/": "host/",
+      "bundle-resources/Payload/": "Payload/",
+      "bundle-resources/BUILD-ID": "BUILD-ID"
+    }
+  }
+}
