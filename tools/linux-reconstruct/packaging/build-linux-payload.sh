@@ -40,7 +40,7 @@ PIL_WHEEL_URL=https://files.pythonhosted.org/packages/e6/99/fdf65cc539e266ab9354
 PIL_WHEEL_SHA=42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca
 # distro packages providing COLMAP and every shared library its binary needs
 # (ldd closure, minus glibc/ld-linux which the supported target provides).
-COLMAP_PACKAGES="colmap libamd3 libatomic1 libboost-program-options1.90.0 libbrotli1 libbz2-1.0 libcamd3 libccolamd3 libceres4t64 libcholmod5 libcolamd3 libdeflate0 libdouble-conversion3 libfreeimage3 libfreetype6 libgcc-s1 libgflags2.2 libgfortran5 libgl1 libglew2.2 libglib2.0-0t64 libglvnd0 libglx0 libgomp1 libgoogle-glog0v6t64 libgraphite2-3 libharfbuzz0b libicu78 libimath-3-1-29t64 libjbig0 libjpeg-turbo8 libjxr0t64 liblcms2-2 liblerc4 liblzma5 libmd4c0 libmetis5 libopenexr-3-1-30 libopengl0 libopenjp2-7 libpcre2-16-0 libpcre2-8-0 libpng16-16t64 libqt5core5t64 libqt5gui5t64 libqt5widgets5t64 libraw23t64 libsharpyuv0 libspqr4 libsqlite3-0 libstdc++6 libsuitesparseconfig7 libtiff6 libunwind8 libwebp7 libwebpmux3 libx11-6 libxau6 libxcb1 libxdmcp6 libzstd1 zlib1g"
+COLMAP_PACKAGES="colmap libamd3 libatomic1 libboost-program-options1.90.0 libbrotli1 libbz2-1.0 libcamd3 libccolamd3 libceres4t64 libcholmod5 libcolamd3 libdeflate0 libdouble-conversion3 libfreeimage3 libfreetype6 libgcc-s1 libgflags2.2 libgfortran5 libgl1 libglew2.2 libglib2.0-0t64 libglvnd0 libglx0 libgomp1 libgoogle-glog0v6t64 libgraphite2-3 libharfbuzz0b libicu78 libimath-3-1-29t64 libjbig0 libjpeg-turbo8 libjxr0t64 liblcms2-2 liblerc4 liblzma5 libmd4c0 libmetis5 libopenexr-3-1-30 libopengl0 libopenjp2-7 libpcre2-16-0 libpcre2-8-0 libpng16-16t64 libposelib libqt5core5t64 libqt5gui5t64 libqt5widgets5t64 libraw23t64 libsharpyuv0 libspqr4 libsqlite3-0 libstdc++6 libsuitesparseconfig7 libtiff6 libunwind8 libwebp7 libwebpmux3 libx11-6 libxau6 libxcb1 libxdmcp6 libzstd1 zlib1g"
 
 mkdir -p "$(dirname "$out")"
 work=$(mktemp -d "$(dirname "$out")/.reconstruction-payload.XXXXXX")
@@ -89,6 +89,10 @@ cp "$work/openmvs-src/LICENSE" "$stage/licenses/openmvs-LICENSE" 2>/dev/null || 
 mkdir -p "$work/debs" "$stage/colmap-root"
 (cd "$work/debs" && apt-get download $COLMAP_PACKAGES >/dev/null)
 for deb in "$work/debs"/*.deb; do dpkg -x "$deb" "$stage/colmap-root"; done
+# Closure proof: every library the extracted COLMAP binary needs must
+# resolve inside the payload (the distro package under-declares libposelib).
+missing=$(LD_LIBRARY_PATH="$stage/colmap-root/usr/lib/x86_64-linux-gnu:$stage/lib" ldd "$stage/colmap-root/usr/bin/colmap" | grep 'not found' || true)
+if [ -n "$missing" ]; then echo "COLMAP closure is incomplete:" >&2; echo "$missing" >&2; exit 1; fi
 # GCC runtime libraries for the OpenMVS binaries, from the same extracted debs.
 for lib in libgomp.so.1 libstdc++.so.6 libgcc_s.so.1; do
   cp -L "$stage/colmap-root/usr/lib/x86_64-linux-gnu/$lib" "$stage/lib/" 2>/dev/null || \
