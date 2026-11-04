@@ -6,7 +6,7 @@ import {createInterface} from 'node:readline';
 
 /**
  * Printers on the local network, for Add printer… (MAC-6). Both scans are bounded and never fail the sheet: a
- * blocked port or a missing dns-sd only means nothing was found that way. Neither fetches a URL or contacts a printer.
+ * blocked port or a missing dns-sd/avahi-browse only means nothing was found that way. Neither fetches a URL or contacts a printer.
  * The SSDP part is KAN-163's (branch KAN-163-printer-setup), unchanged in its checks.
  */
 
@@ -117,22 +117,50 @@ export function parseZoneLine(line: string, type: string): BonjourService | unde
   return {type, name, host, port};
 }
 
+/**
+ * `avahi-browse --parsable --resolve` lines for one type:
+ * `=;<interface>;<IPv4|IPv6>;<instance>;<type>;<domain>;<host>;<address>;<port>;<txt>`.
+ * Only resolved IPv4 rows count, so one service on several interfaces or families is listed once by host and port.
+ */
+export function parseAvahiLine(line: string, type: string): BonjourService | undefined {
+  const fields = line.split(';');
+  if (fields.length < 9 || fields[0] !== '=' || fields[2] !== 'IPv4' || fields[4] !== type) return undefined;
+  const [, , , instance, , , target, , port] = fields as [string, string, string, string, string, string, string, string, string];
+  // One pass: `\\032` is an escaped backslash followed by "032", not a space.
+  const name = instance.replace(/\\(\d{3}|.)/g, (_, code: string) => code.length === 3 ? String.fromCharCode(Number(code)) : code).slice(0, 128);
+  const host = target.replace(/\.$/, '');
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(host) || !/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) return undefined;
+  return {type, name, host, port};
+}
+
 export type Spawn = (command: string, args: string[], options: {stdio: ['ignore', 'pipe', 'ignore']}) => ChildProcess;
 
-/** Browses each type with mDNSResponder's own `dns-sd -Z` for `durationMs`, on macOS. */
+/**
+ * Browses each type for `durationMs`: with mDNSResponder's own `dns-sd -Z` on macOS, and with the Avahi
+ * daemon's `avahi-browse` on Linux (`-t` ends once its cache is listed and resolved; the timer bounds both).
+ */
 export function discoverBonjour(durationMs = 3000, options: {spawn?: Spawn; platform?: NodeJS.Platform} = {}): Promise<BonjourService[]> {
-  if ((options.platform ?? process.platform) !== 'darwin') return Promise.resolve([]);
+  const platform = options.platform ?? process.platform;
+  if (platform !== 'darwin' && platform !== 'linux') return Promise.resolve([]);
   const spawn = options.spawn ?? (nodeSpawn as Spawn);
+  const linux = platform === 'linux';
   return Promise.all(Object.keys(BONJOUR_TYPES).map(type => new Promise<BonjourService[]>(resolve => {
     const found = new Map<string, BonjourService>();
     let child: ChildProcess;
-    try { child = spawn('/usr/bin/dns-sd', ['-Z', type, 'local'], {stdio: ['ignore', 'pipe', 'ignore']}); }
+    try {
+      child = linux
+        ? spawn('/usr/bin/avahi-browse', ['--parsable', '--resolve', '--terminate', '--no-db-lookup', type], {stdio: ['ignore', 'pipe', 'ignore']})
+        : spawn('/usr/bin/dns-sd', ['-Z', type, 'local'], {stdio: ['ignore', 'pipe', 'ignore']});
+    }
     catch { resolve([]); return; }
-    const done = () => { clearTimeout(timer); try { child.kill(); } catch { /* gone */ } resolve([...found.values()]); };
+    let settled = false;
+    const done = () => { if (settled) return; settled = true; clearTimeout(timer); try { child.kill(); } catch { /* gone */ } resolve([...found.values()]); };
     const timer = setTimeout(done, durationMs);
     child.on('error', done);
+    // avahi-browse -t exits once it has listed everything; dns-sd never exits on its own.
+    if (linux) child.on('exit', () => setImmediate(done));
     if (child.stdout) createInterface({input: child.stdout}).on('line', line => {
-      const service = parseZoneLine(line, type);
+      const service = linux ? parseAvahiLine(line, type) : parseZoneLine(line, type);
       if (service && found.size < 32) found.set(`${service.host}:${service.port}`, service);
     });
   }))).then(lists => lists.flat());

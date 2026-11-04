@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { hostname, networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { PAIRING_LINK_MAX_ADDRESSES } from '@scan-to-make/contracts/pairing-link';
@@ -39,31 +40,53 @@ export function discoverAddresses(interfaces: Interfaces = networkInterfaces()):
   return { lan: [...new Set(lan)], tailscale: [...new Set(tailscale)] };
 }
 
-/** `<LocalHostName>.local` on macOS (scutil), the name Bonjour answers for; otherwise none. */
-export function localHostName(): string | undefined {
-  if (process.platform !== 'darwin') return undefined;
-  try {
-    const name = execFileSync('/usr/sbin/scutil', ['--get', 'LocalHostName'], { encoding: 'utf8', timeout: 2000 }).trim();
-    return /^[A-Za-z0-9-]{1,63}$/.test(name) ? `${name}.local` : undefined;
-  } catch {
-    return undefined;
+/** Reads a command's stdout, or undefined. Injectable for tests. */
+export type HostQuery = (command: string, args: string[]) => string | undefined;
+const query: HostQuery = (command, args) => {
+  try { return execFileSync(command, args, { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return undefined; }
+};
+export type ReadText = (path: string) => string | undefined;
+const readText: ReadText = (path) => { try { return readFileSync(path, 'utf8'); } catch { return undefined; } };
+
+/**
+ * `<LocalHostName>.local` on macOS (scutil), the name Bonjour answers for. On Linux, the name the
+ * Avahi daemon itself announces (its D-Bus GetHostNameFqdn), which already carries any collision
+ * suffix it chose. Otherwise, or without a running Avahi, none.
+ */
+export function localHostName(platform: NodeJS.Platform = process.platform, run: HostQuery = query): string | undefined {
+  if (platform === 'linux') {
+    const reply = run('/usr/bin/busctl', ['--system', 'call', 'org.freedesktop.Avahi', '/', 'org.freedesktop.Avahi.Server', 'GetHostNameFqdn']);
+    const name = /^s "([^"]*)"\s*$/.exec(reply?.trim() ?? '')?.[1];
+    return name && /^[A-Za-z0-9-]{1,63}\.local$/.test(name) ? name : undefined;
   }
+  if (platform !== 'darwin') return undefined;
+  const name = run('/usr/sbin/scutil', ['--get', 'LocalHostName'])?.trim();
+  return name && /^[A-Za-z0-9-]{1,63}$/.test(name) ? `${name}.local` : undefined;
 }
 
-/** The Mac's name as the user set it (System Settings › General › About), on macOS; otherwise none. */
-export function computerName(): string | undefined {
-  if (process.platform !== 'darwin') return undefined;
-  try {
-    const name = execFileSync('/usr/sbin/scutil', ['--get', 'ComputerName'], { encoding: 'utf8', timeout: 2000 }).trim();
-    return name || undefined;
-  } catch {
+/**
+ * The computer's name as the user set it: the Mac's Computer Name (System Settings › General › About),
+ * or on Linux the "pretty" hostname (Settings › About, hostnamectl --pretty) from /etc/machine-info.
+ */
+export function computerName(platform: NodeJS.Platform = process.platform, run: HostQuery = query, read: ReadText = readText): string | undefined {
+  if (platform === 'linux') {
+    for (const line of (read('/etc/machine-info') ?? '').split('\n')) {
+      const match = /^PRETTY_HOSTNAME=(.*)$/.exec(line.trim());
+      if (!match) continue;
+      let value = match[1]!.trim();
+      if (/^(["']).*\1$/.test(value)) value = value.slice(1, -1).replace(/\\(.)/g, '$1');
+      value = value.replace(/[\x00-\x1f\x7f]/g, '').trim();
+      return value || undefined;
+    }
     return undefined;
   }
+  if (platform !== 'darwin') return undefined;
+  return run('/usr/sbin/scutil', ['--get', 'ComputerName'])?.trim() || undefined;
 }
 
-/** The Mac's name as people know it ("Mac mini"): the Computer Name, else the host name without `.local`. */
-export function macDisplayName(): string | undefined {
-  const name = (computerName() ?? hostname().replace(/\.local\.?$/i, '')).trim();
+/** The computer's name as people know it ("Mac mini", "Workshop PC"): the name the user set, else the host name without `.local`. */
+export function macDisplayName(platform: NodeJS.Platform = process.platform, run: HostQuery = query, read: ReadText = readText, host: string = hostname()): string | undefined {
+  const name = (computerName(platform, run, read) ?? host.replace(/\.local\.?$/i, '')).trim();
   return name ? name.slice(0, 64) : undefined;
 }
 

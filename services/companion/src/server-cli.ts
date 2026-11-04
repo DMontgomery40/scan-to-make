@@ -224,11 +224,13 @@ if (allAddresses !== undefined && allAddresses !== '1') throw new Error('SCAN_TO
 const nearbyPairing = process.env.SCAN_TO_MAKE_NEARBY_PAIRING;
 if (nearbyPairing !== undefined && (nearbyPairing !== '1' || allAddresses !== '1'))
   throw new Error('SCAN_TO_MAKE_NEARBY_PAIRING must be 1 when set, with SCAN_TO_MAKE_LAN_ALL_ADDRESSES=1');
-const macName = allAddresses === '1' ? computerName() : undefined;
+// Linux has no Computer Name unless the user set a pretty hostname: the host name names the advert there.
+const macName = allAddresses === '1' ? computerName() ?? (process.platform === 'linux' ? macDisplayName() : undefined) : undefined;
 // The Mac's name for people ("Mac mini"): /healthz and status.get.
 const displayName = macDisplayName();
 // PRD §5.10: a phone on the owner's Apple Account enrols with a token the Mac app publishes to their private CloudKit.
-const icloud = remoteAuth?.transport === 'lan' ? new IcloudEnrolment(join(remoteAuth.directory, 'mac-id')) : undefined;
+// CloudKit enrolment needs the signed Mac app to publish the token; no other host offers it.
+const icloud = remoteAuth?.transport === 'lan' && process.platform === 'darwin' ? new IcloudEnrolment(join(remoteAuth.directory, 'mac-id')) : undefined;
 const server = await startCompanionServer({
   lanTls,
   ...(displayName ? { name: displayName } : {}),

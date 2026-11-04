@@ -1,7 +1,7 @@
 import {ModelAccessEnvironment as accessEnv} from '@scan-to-make/contracts/model-access';
 import {execFile,spawn} from 'node:child_process';
 import {createHash,randomBytes} from 'node:crypto';
-import {createReadStream,createWriteStream,type WriteStream} from 'node:fs';
+import {createReadStream,createWriteStream,existsSync,type WriteStream} from 'node:fs';
 import {chmod,copyFile,lstat,mkdir,mkdtemp,open,readdir,readFile,realpath,rename,rm,rmdir,stat,writeFile} from 'node:fs/promises';
 import {homedir,tmpdir,userInfo} from 'node:os';
 import {dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
@@ -138,7 +138,7 @@ function plan(access:Exclude<ModelAccess,{kind:'none'}>,options:AiTweakOptions,b
  const path=[binDir,dirname(executable),...(options.python&&isAbsolute(options.python)?[dirname(options.python)]:[]),'/opt/homebrew/bin','/usr/local/bin','/usr/bin','/bin','/usr/sbin','/sbin',
   ...(options.searchPath??'').split(':').filter(dir=>isAbsolute(dir))];
  // Built from scratch: an inherited ANTHROPIC_API_KEY would silently move a subscription run onto API billing.
- const env:Record<string,string>={HOME:home,PATH:[...new Set(path)].join(':'),TMPDIR:tmp+sep,LANG:source.LANG||'en_US.UTF-8',SHELL:source.SHELL||'/bin/zsh'};
+ const env:Record<string,string>={HOME:home,PATH:[...new Set(path)].join(':'),TMPDIR:tmp+sep,LANG:source.LANG||'en_US.UTF-8',SHELL:source.SHELL||defaultShell()};
  // The user's own sign-in location; a custom Claude config dir also names its keychain entry.
  for(const name of ['USER','LOGNAME','CLAUDE_CONFIG_DIR'] as const)if(source[name])env[name]=source[name]!;
  // Claude Code finds its keychain login by account name. A launchd agent's environment has no USER
@@ -177,6 +177,14 @@ function plan(access:Exclude<ModelAccess,{kind:'none'}>,options:AiTweakOptions,b
 class AccessFailure extends Error {}
 
 function accountName(){try{return userInfo().username||undefined;}catch{return undefined;}}
+/** The agent's shell when the worker environment names none (a keyed worker starts empty): zsh on
+ * macOS as before; elsewhere the account's own login shell, else bash. Linux often has no /bin/zsh. */
+export function defaultShell(platform:NodeJS.Platform=process.platform,account:()=>string|null|undefined=()=>{try{return userInfo().shell;}catch{return undefined;}},exists:(path:string)=>boolean=existsSync):string{
+ if(platform==='darwin')return '/bin/zsh';
+ const own=account();
+ if(own&&isAbsolute(own)&&exists(own))return own;
+ return ['/bin/bash','/usr/bin/bash'].find(exists)??'/bin/sh';
+}
 
 /**
  * T3 Code's rule for Claude's init capabilities, applied to `claude auth status`: signed in through
