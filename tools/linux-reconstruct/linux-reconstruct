@@ -1,8 +1,14 @@
 #!/bin/sh
-# Launcher: prefer this tool's own venv (usd-core), fall back to python3.
+# Launcher: this tool's own venv (dev/Linux payload), else the app payload's
+# bundled Python (Mac: Payload/python beside Payload/source), else python3
+# for ad-hoc development use. A packaged closure never falls through to the
+# system interpreter silently: the first two locations are version-pinned.
 set -eu
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if [ -x "$DIR/.venv/bin/python" ]; then
   exec "$DIR/.venv/bin/python" "$DIR/reconstruct.py" "$@"
+fi
+if [ -x "$DIR/../../../python/bin/python3" ]; then
+  exec "$DIR/../../../python/bin/python3" "$DIR/reconstruct.py" "$@"
 fi
 exec python3 "$DIR/reconstruct.py" "$@"

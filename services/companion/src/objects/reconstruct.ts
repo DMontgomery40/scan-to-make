@@ -1,5 +1,5 @@
 import {spawn} from 'node:child_process';
-import {existsSync} from 'node:fs';
+import {existsSync, statSync} from 'node:fs';
 import {lstat, mkdir, rename, rm, writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {dirname, join} from 'node:path';
@@ -332,14 +332,68 @@ export function macQualifiedReconstructRunner(
 }
 
 /**
- * Whether this host can actually run the qualified capture/review path
- * (capabilities.reconstructionReviewV1). Presence of the tools only; a
- * missing Python USD runtime still fails the run plainly, never silently.
+ * Whether the tools for the qualified capture/review path are present.
+ * Presence alone is not the capability: see reconstructionReadiness.
  */
 export function reconstructionReviewSupported(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): boolean {
   if (platform === 'linux') return !!findLinuxReconstruct(env);
   if (platform === 'darwin') return !!findMacReconstruct(env) && !!findLinuxReconstruct(env);
   return false;
+}
+
+export interface ReconstructionReadiness { ok: boolean; error?: string; versions?: Record<string, string> }
+
+let readinessCache: {key: string; at: number; promise: Promise<ReconstructionReadiness>} | undefined;
+
+/** Test seam: drop cached readiness evidence. */
+export function resetReconstructionReadiness(): void { readinessCache = undefined; }
+
+async function probeReadiness(platform: string, env: NodeJS.ProcessEnv): Promise<ReconstructionReadiness> {
+  const binary = findLinuxReconstruct(env);
+  if (!binary || (platform === 'darwin' && !findMacReconstruct(env)))
+    return {ok: false, error: QUALIFY_NOT_INSTALLED};
+  const mode = platform === 'linux' ? 'samples' : 'qualify';
+  return new Promise(resolve => {
+    const child = spawn(binary, ['check', '--mode', mode], {stdio: ['ignore', 'pipe', 'pipe']});
+    let out = '';
+    const timer = setTimeout(() => child.kill('SIGKILL'), 30000);
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { out = (out + chunk).slice(-16384); });
+    child.on('error', () => { clearTimeout(timer); resolve({ok: false, error: QUALIFY_NOT_INSTALLED}); });
+    child.on('close', code => {
+      clearTimeout(timer);
+      try {
+        const line = out.trim().split('\n').at(-1);
+        const report = JSON.parse(line ?? '') as {ok?: unknown; error?: unknown; versions?: Record<string, string>};
+        resolve(code === 0 && report.ok === true
+          ? {ok: true, versions: report.versions}
+          : {ok: false, error: typeof report.error === 'string' ? report.error : QUALIFY_NOT_INSTALLED});
+      } catch { resolve({ok: false, error: QUALIFY_NOT_INSTALLED}); }
+    });
+  });
+}
+
+/**
+ * Verified-runnable evidence for capabilities.reconstructionReviewV1: the
+ * tool's own bounded `check`, cached per binary (path + mtime) so health
+ * requests never spawn probes repeatedly. A changed/replaced binary
+ * invalidates; a failure is retried after 30 s, never cached as success.
+ */
+export function reconstructionReadiness(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<ReconstructionReadiness> {
+  if (platform !== 'linux' && platform !== 'darwin') return Promise.resolve({ok: false, error: QUALIFY_NOT_INSTALLED});
+  const binary = findLinuxReconstruct(env);
+  let stamp = '';
+  try { stamp = binary ? String(statSync(binary).mtimeMs) : ''; } catch { stamp = ''; }
+  const key = `${platform}|${binary ?? ''}|${stamp}|${platform === 'darwin' ? findMacReconstruct(env) ?? '' : ''}`;
+  const now = Date.now();
+  if (readinessCache?.key === key && now - readinessCache.at < 30000) return readinessCache.promise;
+  if (readinessCache?.key === key) {
+    // Reuse a prior success indefinitely for the same binary; re-probe failures.
+    const cached = readinessCache;
+    return cached.promise.then(result => result.ok ? result : (readinessCache = {key, at: now, promise: probeReadiness(platform, env)}).promise);
+  }
+  readinessCache = {key, at: now, promise: probeReadiness(platform, env)};
+  return readinessCache.promise;
 }
 
 /** The platform's own builder: Linux tool on Linux, Apple's (with qualification) on a Mac. */

@@ -251,8 +251,10 @@ receipt. `extentMm` ∈ [1, 10000]. A receipt for a different mesh is refused.
 
 Concrete versions, licences, layout and install/verify steps live in
 [`packaging-manifest.json`](packaging-manifest.json), with rationale in
-[`PACKAGING.md`](PACKAGING.md). Nothing is bundled yet; do not claim
-otherwise.
+[`PACKAGING.md`](PACKAGING.md). The builder is
+[`packaging/build-linux-payload.sh`](packaging/build-linux-payload.sh);
+`linux-reconstruct check --mode samples|qualify` is the bounded readiness
+probe behind the companion's `reconstructionReviewV1` capability.
 
 ## Dependencies and licences
 

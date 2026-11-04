@@ -75,6 +75,17 @@ for required in "$payload/source/services/companion/dist/server-cli.js" "$payloa
 done
 "$node" -e 'import(process.argv[1]).then(m=>{if(typeof m.discoverAddresses!=="function")process.exit(1)})' "$payload/source/services/companion/dist/lan-addresses.js"
 
+# The reconstruction runtime closure (tools/linux-reconstruct/packaging/build-linux-payload.sh),
+# when the packager provides it: copied whole, with its BUILD-ID preserved for the receipt.
+if [ -n "${RECONSTRUCTION_PAYLOAD:-}" ]; then
+  [ -x "$RECONSTRUCTION_PAYLOAD/bin/linux-reconstruct" ] && [ -f "$RECONSTRUCTION_PAYLOAD/BUILD-ID" ] \
+    || { echo "RECONSTRUCTION_PAYLOAD is not a built reconstruction payload: $RECONSTRUCTION_PAYLOAD" >&2; exit 1; }
+  cp -a "$RECONSTRUCTION_PAYLOAD" "$payload/reconstruction"
+  env -i HOME="$work" "$payload/reconstruction/bin/linux-reconstruct" check --mode samples >/dev/null \
+    || { echo 'Packaged reconstruction runtime does not run relocated' >&2; exit 1; }
+  echo "Reconstruction: $(cat "$payload/reconstruction/BUILD-ID")"
+fi
+
 printf 'g%s-node%s-%s\n' "${commit:0:12}" "$node_version" "$node_arch" > "$stage/BUILD-ID"
 chmod -R go-w "$stage"
 # These links must survive packaging: the workspace packages and npm (Settings → Printers → Download/Update).

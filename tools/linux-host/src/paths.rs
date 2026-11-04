@@ -61,6 +61,11 @@ impl Installation {
         let path = self.payload().join("python/bin/python3");
         executable(&path).then_some(path)
     }
+    /// The packaged reconstruction runtime (Payload/reconstruction), when present.
+    pub fn reconstruction(&self) -> Option<PathBuf> {
+        let path = self.payload().join("reconstruction/bin/linux-reconstruct");
+        executable(&path).then_some(self.payload().join("reconstruction"))
+    }
     /// The files the companion cannot start without, including the workspace package links
     /// and npm (Download/Update). A packager that drops symlinks breaks exactly these.
     pub fn require_payload(&self) -> io::Result<()> {

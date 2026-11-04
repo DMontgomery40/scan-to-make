@@ -188,6 +188,7 @@
     "tools/capture-mesh-convert",
     "tools/capture-pipeline",
     "tools/capture-fit-eval",
+    "tools/linux-reconstruct",
     "tools/mac-reconstruct",
     "deploy/companion/generate-lan-tls.py",
     "deploy/companion/healthcheck.mjs"

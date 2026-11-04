@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
-import {linuxReconstructRunner, macQualifiedReconstructRunner, parseRegionOutcome, parseScaleOutcome, reconstructionReviewSupported, QUALIFY_NOT_INSTALLED} from '../dist/objects/reconstruct.js';
+import {linuxReconstructRunner, macQualifiedReconstructRunner, parseRegionOutcome, parseScaleOutcome, reconstructionReviewSupported, reconstructionReadiness, resetReconstructionReadiness, QUALIFY_NOT_INSTALLED} from '../dist/objects/reconstruct.js';
 import {validateCaptureCamera, InvalidCaptureCameraError} from '../dist/objects/capture-camera.js';
 
 const STL = 'solid m\nendsolid m\n';
@@ -295,4 +295,23 @@ test('reconstructionReviewSupported reflects the tools actually present', async 
   assert.equal(reconstructionReviewSupported('linux', {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool}), true);
   assert.equal(reconstructionReviewSupported('darwin', {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool, SCAN_TO_MAKE_MAC_RECONSTRUCT: tool}), true);
   assert.equal(reconstructionReviewSupported('win32', {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool}), false);
+});
+
+test('readiness runs the tool check once, caches it, and never caches failure as success', async () => {
+  resetReconstructionReadiness();
+  const root = await mkdtemp(join(tmpdir(), 'readiness-'));
+  const tool = join(root, 'tool');
+  const counter = join(root, 'count');
+  await writeFile(tool, `#!/bin/sh\necho x >> ${counter}\nif [ -f ${root}/fail ]; then echo '{"ok":false,"error":"USD runtime unavailable: test"}'; exit 2; fi\necho '{"ok":true,"toolVersion":"9.9","versions":{"python":"3.12"}}'\n`);
+  await chmod(tool, 0o755);
+  const env = {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool};
+  assert.equal((await reconstructionReadiness('linux', env)).ok, true);
+  assert.equal((await reconstructionReadiness('linux', env)).ok, true);
+  assert.equal((await readFile(counter, 'utf8')).trim().split('\n').length, 1, 'second call is cached');
+  resetReconstructionReadiness();
+  await writeFile(join(root, 'fail'), '');
+  const failed = await reconstructionReadiness('linux', env);
+  assert.equal(failed.ok, false);
+  assert.match(failed.error, /USD runtime unavailable/);
+  resetReconstructionReadiness();
 });

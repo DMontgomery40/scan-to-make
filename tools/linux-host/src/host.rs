@@ -621,6 +621,13 @@ pub fn serve_environment(context: &Context, inherited: BTreeMap<String, String>,
         ("SCAN_TO_MAKE_CONTROL_SOCKET", context.socket().display().to_string()),
     ];
     for (key, value) in fixed { env.insert(key.into(), value); }
+    // The packaged reconstruction closure, when this payload carries one:
+    // its relocatable launcher pins the bundled Python/COLMAP/OpenMVS.
+    if let Some(reconstruction) = installation.reconstruction() {
+        env.insert("SCAN_TO_MAKE_LINUX_RECONSTRUCT".into(), reconstruction.join("bin/linux-reconstruct").display().to_string());
+        env.insert("SCAN_TO_MAKE_OPENMVS_DIR".into(), reconstruction.join("openmvs").display().to_string());
+        env.insert("SCAN_TO_MAKE_COLMAP".into(), reconstruction.join("bin/colmap").display().to_string());
+    }
     if state.join("tls/cert.pem").is_file() {
         env.insert("SCAN_TO_MAKE_LAN_TLS_CERT".into(), state.join("tls/cert.pem").display().to_string());
         env.insert("SCAN_TO_MAKE_LAN_TLS_KEY".into(), state.join("tls/key.pem").display().to_string());

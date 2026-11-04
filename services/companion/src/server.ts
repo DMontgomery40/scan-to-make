@@ -8,7 +8,7 @@ import {McpUpdateError, type McpUpdater} from './printing/mcp-updates.js';
 import type {IcloudEnrolment} from './icloud-enrolment.js';
 import {LiveActivityTokenUploadSchema} from '@scan-to-make/contracts/counterpart';
 import type {ObjectService} from './objects/service.js';
-import {reconstructionReviewSupported} from './objects/reconstruct.js';
+import {reconstructionReadiness} from './objects/reconstruct.js';
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
 import {createPrintHandoffRoutes,type PrintHandoffServices} from './print-handoff-http.js';
 import {acquireInstanceLock} from './instance-lock.js';
@@ -261,7 +261,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerSettings: !!options.objects && !!options.printerSetup, reconstructionReviewV1: !!options.objects && reconstructionReviewSupported() } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerSettings: !!options.objects && !!options.printerSetup, reconstructionReviewV1: !!options.objects && (await reconstructionReadiness()).ok } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){

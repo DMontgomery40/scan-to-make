@@ -1,84 +1,76 @@
 {
-  "version": 1,
+  "version": 2,
   "tool": "linux-reconstruct",
   "toolVersion": "1.2.0",
-  "status": "design-only: nothing in this manifest is bundled yet; the Linux host/app packaging tasks consume it",
+  "status": "built and verified on Ubuntu 26.04 x86_64 (packaging/build-linux-payload.sh); not yet shipped inside a Counterpart .deb/AppImage - apps/linux owns that wiring via RECONSTRUCTION_PAYLOAD",
+  "buildIdFormat": "reconstruction-<toolVersion>-g<commit12>-linux-x64 (file BUILD-ID at payload root)",
+  "target": "Ubuntu 26.04 LTS x86_64; the host provides glibc/ld-linux only (the .deb closure carries its exact baseline). Linux x64 only - no arm64 claim.",
   "layout": {
-    "prefix": "<app-payload>/reconstruction/",
-    "bin": "bin/linux-reconstruct (launcher from this directory, unchanged)",
-    "pythonEnv": ".venv/ created at install time inside the tool directory (never system Python)",
-    "colmap": "bin/colmap (or distro COLMAP via SCAN_TO_MAKE_COLMAP)",
-    "openmvs": "openmvs/ directory containing InterfaceCOLMAP, DensifyPointCloud, ReconstructMesh (SCAN_TO_MAKE_OPENMVS_DIR)",
-    "env": {
-      "SCAN_TO_MAKE_LINUX_RECONSTRUCT": "<prefix>/bin/linux-reconstruct",
-      "SCAN_TO_MAKE_OPENMVS_DIR": "<prefix>/openmvs",
-      "SCAN_TO_MAKE_COLMAP": "<prefix>/bin/colmap (only when not using the distro package)"
-    }
+    "payloadRoot": "Payload/reconstruction/ inside the app payload",
+    "bin/linux-reconstruct": "relocatable launcher: bundled python/bin/python3 + tool/reconstruct.py, defaults SCAN_TO_MAKE_OPENMVS_DIR and SCAN_TO_MAKE_COLMAP to the payload",
+    "bin/colmap": "wrapper: LD_LIBRARY_PATH over colmap-root, QT_QPA_PLATFORM=offscreen",
+    "tool/": "tools/linux-reconstruct source at the build commit (git archive)",
+    "python/": "standalone CPython with usd-core + Pillow installed from pinned wheels",
+    "colmap-root/": "Ubuntu .deb closure extracted with dpkg -x (downloaded, never installed)",
+    "openmvs/": "InterfaceCOLMAP, DensifyPointCloud, ReconstructMesh from the official binary zip",
+    "lib/": "GCC runtime libraries (libgomp, libstdc++, libgcc_s) from the same .deb closure",
+    "licenses/": "notices extracted from the exact shipped artifacts, Debian copyright files, OpenMVS license + corresponding source tarball, build-check.json"
   },
   "components": [
     {
-      "name": "COLMAP",
-      "version": "3.12.6",
-      "role": "CPU sparse reconstruction (feature_extractor, matchers, mapper, image_undistorter, model_converter)",
-      "licence": "BSD 3-Clause (COLMAP) — ship COPYING; bundled libraries keep their own notices (see COLMAP's license file)",
-      "source": "https://github.com/colmap/colmap/releases (3.12.6) or the distro package",
-      "acquire": "Prefer the distro/apt package where available. A bundled build must be the CPU build (the tool always passes --SiftExtraction.use_gpu 0); CUDA is never required.",
-      "verify": "colmap help | head -1  ->  COLMAP 3.12.6"
+      "name": "COLMAP (Ubuntu package colmap 3.12.6-4) + shared-library closure",
+      "version": "3.12.6-4 (Ubuntu 26.04 archive at build time; exact .deb versions recorded in the payload's licenses/debian/)",
+      "role": "CPU sparse reconstruction",
+      "licence": "COLMAP BSD-3-Clause; each closure library under its Debian copyright file shipped in licenses/debian/",
+      "acquire": "apt-get download of the package list pinned in build-linux-payload.sh, dpkg -x into colmap-root (no system install)",
+      "verify": "bin/colmap help | head -1 -> COLMAP 3.12.6"
     },
     {
-      "name": "OpenMVS",
+      "name": "OpenMVS official Ubuntu binaries",
       "version": "2.4.0",
-      "role": "Dense point cloud + mesh (InterfaceCOLMAP, DensifyPointCloud, ReconstructMesh), invoked as separate processes",
-      "licence": "AGPL-3.0 — distributing these binaries obliges a written source offer for OpenMVS 2.4.0 exactly as built; ship the AGPL text and the offer. Process separation does not remove the binary-distribution duties.",
-      "source": "https://github.com/cdcseacave/openMVS archive v2.4.0",
-      "sourceArchiveSha256": "7104ae1ddd6ca38fbca9e0e4a70b20af59e21e0b497eb7181c864fbf38ca8d00",
-      "acquire": "Build from the pinned archive on the target distro (CMake, -DCMAKE_BUILD_TYPE=Release); record the compiler and full flag set in the build receipt so the source offer is exact. Dependencies (Boost, Eigen, OpenCV, CGAL, etc.) come from the distro; list their package versions in the receipt.",
-      "verify": "InterfaceCOLMAP --help | head -1  ->  OpenMVS x64 v2.4.0"
+      "role": "Dense point cloud + mesh, invoked as separate processes",
+      "licence": "AGPL-3.0 (licenses/openmvs-LICENSE from the source tree)",
+      "binaryArchive": {"file": "OpenMVS_Ubuntu_x64.zip", "url": "https://github.com/cdcseacave/openMVS/releases/download/v2.4.0/OpenMVS_Ubuntu_x64.zip", "sha256": "7104ae1ddd6ca38fbca9e0e4a70b20af59e21e0b497eb7181c864fbf38ca8d00", "note": "This hash is the official prebuilt BINARY zip (an earlier draft wrongly called it a source archive)."},
+      "correspondingSource": {"file": "openmvs-v2.4.0-corresponding-source.tar.gz", "url": "https://github.com/cdcseacave/openMVS/archive/refs/tags/v2.4.0.tar.gz", "sha256": "1668a991fa1fdd3540ee47fdba282a7579ed876af713e8fa907625be1cf8dfc8", "shippedAt": "licenses/openmvs-v2.4.0-corresponding-source.tar.gz"},
+      "runtimeLibraries": "libgomp/libstdc++/libgcc_s from the .deb closure (lib/), glibc from the supported host",
+      "verify": "openmvs/InterfaceCOLMAP --help -> OpenMVS x64 v2.4.0"
     },
     {
-      "name": "Python",
-      "version": ">=3.11 (developed against 3.12/3.14)",
-      "role": "Runs the tool (stdlib plus usd-core only)",
-      "licence": "PSF License",
-      "acquire": "System interpreter to create .venv; the tool runs from .venv/bin/python via the launcher. Never install into the system interpreter (PEP 668).",
-      "verify": ".venv/bin/python --version"
+      "name": "CPython standalone (astral-sh/python-build-standalone)",
+      "version": "3.12.16+20261026 x86_64-unknown-linux-gnu install_only",
+      "sha256": "6a79e922e50006b601f29e688407659da1c2b86ebcd4e9c7254cf234be8b89de (matches the GitHub release asset digest)",
+      "licence": "PSF + bundled-library notices (licenses/python-LICENSE.txt from the shipped tree)",
+      "verify": "python/bin/python3 --version -> 3.12.16"
     },
     {
-      "name": "usd-core (PyPI)",
-      "version": "26.8 (pinned in requirements.txt)",
-      "role": "USDZ write/validate (export) and USDZ read (qualify of Apple output)",
-      "licence": "Apache-2.0 (OpenUSD) — ship license in the venv as installed",
-      "acquire": "pip install -r requirements.txt into .venv at install time (wheel; no compiler needed)",
-      "verify": ".venv/bin/python -c \"import pxr; print('pxr ok')\""
+      "name": "usd-core wheel",
+      "version": "26.8 cp312 manylinux_2_27/2_28 x86_64",
+      "sha256": "204fb1ef1fc977b827c491f4e9fa39b57518504ed0cacfe12e026e95123cacf1",
+      "licence": "As shipped in the exact wheel: METADATA LicenseRef-TOST-1.0 with LICENSE.txt (OpenUSD's TOST terms cover Apache-2.0-based terms plus third-party notices; the composite expression in the Mac audit - TOST/MIT/BSD/Apache/BSL/Apple sample code - describes the same wheel family). Full texts in licenses/usd_core/.",
+      "verify": "python/bin/python3 -c 'import pxr'"
     },
     {
-      "name": "Pillow",
-      "version": "per services/companion (currently unpinned there)",
-      "role": "NOT used by linux-reconstruct. Required by companion photo helpers (photo_overview.py, ai_tweak_stills.py) which run under the companion's Python, so it belongs in the companion payload manifest, not this tool's venv. Listed here so the combined installer does not double-count or omit it.",
-      "licence": "HPND (Pillow license)",
-      "acquire": "Owned by the companion/host packaging scope, not this manifest's installer steps."
+      "name": "Pillow wheel",
+      "version": "13.0.0 cp312 manylinux_2_27/2_28 x86_64",
+      "sha256": "42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca",
+      "licence": "As shipped in the exact wheel: METADATA License-Expression MIT-CMU, LICENSE file in licenses/pillow/.",
+      "role": "Image handling for companion helpers that share this Python on Linux; the reconstruction tool itself parses headers with the standard library.",
+      "verify": "python/bin/python3 -c 'import PIL'"
     }
   ],
-  "installerSteps": [
-    "Copy tools/linux-reconstruct (source only, no .venv/caches) into <prefix>.",
-    "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt (usd-core==26.8).",
-    "Place COLMAP: distro package, or the pinned CPU build at bin/colmap.",
-    "Build OpenMVS 2.4.0 from the pinned archive; copy InterfaceCOLMAP, DensifyPointCloud, ReconstructMesh (+ RefineMesh/TextureMesh if later needed) into openmvs/; keep the source tree or a written offer per AGPL-3.0.",
-    "Write the launcher env (SCAN_TO_MAKE_LINUX_RECONSTRUCT / SCAN_TO_MAKE_OPENMVS_DIR / SCAN_TO_MAKE_COLMAP) into the host's service environment.",
-    "Run the smoke checks in verification; record a receipt (component versions, build flags, distro, uname) beside the payload.",
-    "Confirm capabilities.reconstructionReviewV1 reports true only after the smoke checks pass; do not advertise the capability from file presence alone in release packaging."
-  ],
+  "readiness": {
+    "check": "bin/linux-reconstruct check --mode samples|qualify prints one JSON line {ok, toolVersion, versions} and exits 0 only when the closure runs (30s bound in the companion)",
+    "capability": "companion capabilities.reconstructionReviewV1 requires this check to pass; results are cached per binary (path+mtime), failures re-probed after 30s and never cached as success",
+    "mac": "No separate Mac closure: qualify reuses the audited Mac payload Python (CPython 3.12 + usd-core 26.8 + Pillow 13 in apps/mac/distribution.json) via the relocatable in-repo launcher; check --mode qualify is the Mac readiness probe"
+  },
   "verification": [
-    "colmap help | head -1",
-    "InterfaceCOLMAP --help | head -1",
-    ".venv/bin/python -c \"import pxr\"",
-    ".venv/bin/python -m unittest discover -s tests (in tools/linux-reconstruct)",
-    "linux-reconstruct samples <fixture photos> /tmp/smoke.usdz full --save-masks /tmp/smoke-masks --work-dir /tmp/smoke-work  (expect exit 5 needs-object-region with a preview STL)"
+    "packaging/build-linux-payload.sh OUT (ends with env -i relocated check)",
+    "env -i HOME=/tmp OUT/bin/linux-reconstruct samples <fixture> /tmp/o.usdz full --save-masks /tmp/m --work-dir /tmp/w -> exit 5 with preview STL",
+    "tool unit tests: python -m unittest discover -s tool/tests inside the payload's python"
   ],
-  "updatePolicy": "Versions above are pinned. Bump one component at a time, rerun verification, and record the change in this manifest in the same commit.",
-  "notBundledYet": [
-    "No COLMAP or OpenMVS binaries in this repository",
-    "No .deb/AppImage wiring (apps/linux scope)",
-    "No on-device installer (tools/linux-host scope)"
+  "notYetShipped": [
+    ".deb/AppImage integration (apps/linux scope; consumes this payload via RECONSTRUCTION_PAYLOAD in tools/linux-host/prepare-payload.sh)",
+    "arm64 Linux",
+    "distros other than Ubuntu 26.04 x86_64"
   ]
 }

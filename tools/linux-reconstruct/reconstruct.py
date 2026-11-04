@@ -665,6 +665,53 @@ def finish_from_mesh(raw_mesh, fit, anchor, options, work, output, receipt, timi
     return 0
 
 
+def _tool_version(argv):
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+        text = (proc.stdout + proc.stderr).strip().splitlines()
+        return text[0][:200] if text else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def check_main(args):
+    """Bounded readiness evidence: one JSON line, exit 0 only when the
+    closure actually runs. `samples` also launches COLMAP/OpenMVS --help;
+    `qualify` needs only the USD runtime (Apple did the reconstruction)."""
+    report = {"ok": False, "tool": "linux-reconstruct", "toolVersion": TOOL_VERSION,
+              "mode": args.mode, "versions": {}}
+    try:
+        import pxr  # noqa: F401
+        report["versions"]["python"] = ".".join(str(v) for v in sys.version_info[:3])
+        report["versions"]["usd"] = "importable"
+    except ImportError as e:
+        report["error"] = f"USD runtime unavailable: {e}"
+        emit(report)
+        return 2
+    if args.mode == "samples":
+        colmap = find_colmap()
+        version = _tool_version([colmap, "help"]) if colmap else None
+        if not version or "COLMAP" not in version:
+            report["error"] = "COLMAP is not runnable"
+            emit(report)
+            return 2
+        report["versions"]["colmap"] = version
+        for tool in ("InterfaceCOLMAP", "DensifyPointCloud", "ReconstructMesh"):
+            try:
+                binary = find_openmvs(tool)
+            except RunError:
+                binary = None
+            version = _tool_version([binary, "--help"]) if binary else None
+            if not version or "OpenMVS" not in version:
+                report["error"] = f"{tool} is not runnable"
+                emit(report)
+                return 2
+            report["versions"][tool] = version
+    report["ok"] = True
+    emit(report)
+    return 0
+
+
 def qualify_main(args):
     """Qualify an externally rebuilt USDZ (e.g. Apple PhotogrammetrySession
     output for an Android capture on a Mac host).
@@ -737,6 +784,8 @@ def qualify_main(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="linux-reconstruct")
     sub = parser.add_subparsers(dest="command", required=True)
+    check = sub.add_parser("check")
+    check.add_argument("--mode", choices=("samples", "qualify"), default="samples")
     qualify = sub.add_parser("qualify")
     qualify.add_argument("input")
     qualify.add_argument("output")
@@ -753,6 +802,8 @@ def main(argv=None):
     samples.add_argument("--measurement")
     samples.add_argument("--work-dir")
     args = parser.parse_args(argv)
+    if args.command == "check":
+        return check_main(args)
     if args.command == "qualify":
         return qualify_main(args)
 
