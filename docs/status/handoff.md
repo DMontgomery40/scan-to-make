@@ -3,7 +3,7 @@
 The one handoff. Update this file in place when you stop; never add a numbered or dated copy, a prompt file,
 or a "continuation" section on top. Git history has every older version.
 
-Last verified: **2026-11-03, 16:00 Mountain**, against GitHub, the Mac, the installed apps and the printer.
+Last verified: **2026-11-03, 17:05 Mountain**, against GitHub, the Mac, the installed apps and the printer.
 Status of each of David's asks: [`asks.md`](asks.md). Hands-on review list: [`app-review-2026-11-02.md`](app-review-2026-11-02.md).
 What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey in [`../design/journey.md`](../design/journey.md).
 
@@ -29,10 +29,10 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 
 | What | Version | From |
 |---|---|---|
-| Mac app `/Applications/Counterpart.app` | **202611031529** | `feat/pause-at-layer` @ `539ef23` (contains all of #295) |
+| Mac app `/Applications/Counterpart.app` | **202611031655** | `feat/pause-at-layer` @ `604fe55` (contains all of #295) |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **202611022325** | old: has none of #294/#295 or pause-at-layer |
-| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `fdca5a1` (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
-| mcp-3D-printer-server | `~/mcp-3D-printer-server` on `feat/bambu-complete` @ `45551f1`, built in place | runs from its own folder and `.env` |
+| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `300e88e` (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
+| mcp-3D-printer-server | `~/mcp-3D-printer-server` on `feat/bambu-complete` @ `5987381`, built in place | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
 | FULU runtime | Colima profile `bambu-fulu`, image `bpm-fulu-e2e:runtime`, plug-in **02.05.02.58** | launcher `~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh` (in neither repo) |
 | P1S | `01P00C4B2500106`, 192.168.68.148, firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode | AMS A1 black PLA, A2 yellow PLA, A3 PETG |
@@ -57,18 +57,23 @@ Every deployment, companion restart and rollback is logged in
 
 ## Open, in order
 
-0. **Right now (16:00):** Claude's test Triangle pick is **paused before layer 2 on the P1S** and can only be resumed
-   or stopped on the printer's screen (see 2a). **The iPhone app loads nothing**: since 14:38 no request from the
-   phone has reached the Mac (60 s watch on :9077 while David refreshed: zero connections; agents-136 reaches
-   `192.168.68.123:9077` in 37 ms; Mac firewall off; pairing and pinned certificate unchanged; `devicectl` and Xcode
-   list Davica3 as unavailable). David is on his LAN and says it isn't his connection. Asked him to toggle Airplane
-   Mode, rejoin Wi-Fi and reopen: if it still can't reach, reproduce with the installed phone commit (`d981948`,
-   202611022325) in the Simulator against this Mac's companion. The "two app instances" he sees are one process at two
-   moments: `SettingsView.swift:34` shows **"Connected now" while `reachable` is still unknown** (fresh launch from the
-   Live Activity), and "Can't reach it" after a failed request (`MobileCloud.swift:17` vs `:78` explain the two
-   Notifications texts). Fix the label: unknown is not connected, and a request with no answer must end in "Can't
-   reach it" instead of a spinner.
-1. **Remote Pause/Resume/Stop are refused by the printer.** Nov 3 afternoon: tried lead (a) through the existing
+0. **Phone:** the "nothing loads" of 15:40 was the phone on Tailscale instead of David's WireGuard; fixed on his side.
+   Still to fix in the phone app: `SettingsView.swift:34` shows **"Connected now" while `reachable` is unknown**; a
+   request with no answer must end in "Can't reach it", not a spinner.
+1. **Remote Pause/Resume/Stop are refused by the printer: what can be done is shipped; Developer Mode acceptance open.**
+   Bambu's authorization control lets a cloud-bound P1S (01.10) take these only from Bambu Studio and Bambu Handy.
+   FULU's 02.05 plug-in gets 0x0502400A (malformed signature header); Studio's 02.08 plug-in in our helper, even with
+   a signed-in cloud session, the printer selected and subscribed (`exp/native-plugin-controls`, local stash on the
+   Mac worktree), never installs the printer certificate for a non-Bambu app. Making it believe it is Studio, or
+   signing with keys extracted from Bambu Connect, bypasses Bambu's authorization: not built, by decision.
+   **Shipped (installed 17:00):** both MCPs' `counterpart_print_route` offer `lan` (FULU), `cloud` (FULU) and
+   `developer` (direct LAN, unsigned controls, for LAN Only + Developer Mode) with `options` (label, available,
+   reason, controls); a refusal 0x05024007-0x0502400B says Studio/Handy or Developer Mode; the Mac picker shows the
+   MCP's options for either MCP (checked in the real app). bambu-printer-mcp `300e88e` (1019/0), mcp-3D `5987381`
+   (649/0), Counterpart `604fe55` (stm-ci ALL PASS). **Open:** a real Stop on the Developer Mode connection (needs
+   David to turn on LAN Only + Developer Mode), and a real refused Stop in the app showing the new words. The direct
+   route doesn't read the printer's reply to a control, so an unsigned control to a printer *not* in Developer Mode
+   still reports "sent"; add the reply check (both MCPs). Earlier detail: Nov 3 afternoon: tried lead (a) through the existing
    native helper with Bambu Studio's 02.08.02.61 plug-in (`exp/native-plugin-controls`, `be88434`, pushed, rolled back
    from the live MCP). The helper reaches the printer and gets replies (`ledctrl` answered `success`, unsigned), but the
    plug-in never reports `device_cert_installed` (private or Studio config folder, `lan_only` 0 or 1), so every
