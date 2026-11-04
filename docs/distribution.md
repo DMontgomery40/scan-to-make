@@ -10,18 +10,20 @@ The iPhone identifiers remain `com.scantomake`, `com.scantomake.notifications`, 
 App Store Connect now contains **Counterpart 3D**, Apple ID **6830483457**, bundle
 `com.scantomake`, with **Full Access** saved and rechecked. David chose external
 testers through a public link. Xcode's signed-in account successfully cloud-signed,
-exported and uploaded **2.0 (1)** on 2026-11-03 at 22:19 Mountain. The app and both
+exported and uploaded **2.0 (2)** on 2026-11-03 at 23:19 Mountain. The app and both
 extensions passed signature, version and Production entitlement checks. Source:
-`b734344`; artifact: `~/scan-to-make-work/testflight-2.0-1/`. Apple accepted the
-upload, finished processing, and now shows **Waiting for Review** for the external
+`c438efa`; artifact: `~/scan-to-make-work/testflight-2.0-2/`. Apple accepted the
+upload and finished processing. Build 1 was removed from review; build 2 was submitted
+at 23:32 and now shows **Waiting for Review** for the external
 `Counterpart Public Beta` group. Automatic tester notifications are off. The public link is **https://testflight.apple.com/join/S4tExVzp**, open to anyone.
 Apple displays: “Testers cannot join public link until this group has an approved build.”
 No tester email invitations or public announcement were sent.
 The internal prerequisite group `Counterpart Team` exists. Beta description and
 David's supplied review/feedback contacts are saved in App Store Connect.
 
-The local certificate inventory still shows only Apple Development, but this is
-not a blocker to iPhone export: Xcode used cloud-managed Apple Distribution signing.
+Xcode used cloud-managed Apple Distribution signing for the iPhone. A Developer ID
+Application certificate was issued and imported at 23:32; the matching Mac profile,
+notarization credentials and downloadable Mac release remain in progress.
 `ab455a6` fixes the release helper to use Apple's matching rsync peer and requests
 sufficient codesign verbosity to inspect the signing certificate.
 
@@ -49,7 +51,12 @@ notifications and Watch delivery still need the acceptance recorded in
 
 ## Production services
 
-Deploy and inspect the complete CloudKit schema in
+The complete CloudKit schema was deployed and verified in Production on Nov 3 at
+23:23. The development export was missing `CounterpartCommand` and
+`CounterpartProject.openAsk`; both were added before deployment. The exact schema
+is retained in [cloudkit-schema.ckdb](protocols/cloudkit-schema.ckdb). All five
+record types are present and `CounterpartEvent.type` is Queryable. No records
+were changed. Container:
 `iCloud.com.scantomake.counterpart`: `CounterpartEvent`, `CounterpartProject`,
 `CounterpartCommand`, `CounterpartMac`, and `CounterpartDevice`, with every field in
 [the CloudKit contract](protocols/cloudkit.md). `CounterpartEvent.type` must be
@@ -140,10 +147,10 @@ Suggested Beta App Description:
 
 David's release direction is Linux desktop support soon and provider choice,
 not a permanent Mac/Claude Code requirement. Do not claim Linux is shipped or
-promise a public 24-hour deadline before acceptance. Existing Codex/API adapters
-must be wired into the main project worker; its current Claude-specific dependency
-is an implementation gap to close. OpenCode integration and supported model
-capabilities also need qualification. Linux must account for the Apple-only
+promise a public 24-hour deadline before acceptance. Saved provider routing is integrated for project jobs, cleanup and helper text;
+Off is enforced. Claude/Codex fixture MCP and image checks passed. Real app-level
+modeling acceptance, OpenCode integration and API cleanup capability coverage remain.
+API cleanup retains harness requirements; custom cleanup endpoints need Responses support. Linux must account for the Apple-only
 reconstruction and CloudKit pieces, alongside its UI, companion and Tailscale path.
 
 

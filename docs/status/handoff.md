@@ -71,15 +71,16 @@ remote native probes and the SSH tunnel were removed after verification.
 
 0. **External TestFlight, in progress.** App Store listing is **Counterpart 3D** (icon remains
    Counterpart), ID **6830483457**, bundle `com.scantomake`, **Full Access** verified. User chose
-   a public link for external testers. Source `b734344` was cloud-signed, exported, validated and
-   uploaded as **2.0 (1)** at 22:19 Mountain; processing finished and it is **Waiting for Review**. Internal group
+   a public link for external testers. Source `c438efa` was cloud-signed, exported, validated and
+   uploaded as **2.0 (2)** at 23:19 Mountain. Build 1 was removed from review and build 2
+   submitted at 23:32; it is **Waiting for Review**. Build 2 includes starters and multi-plate UI. Internal group
    `Counterpart Team` exists; description and user-supplied review/feedback contacts are saved.
-   External group **Counterpart Public Beta** has build 2.0 (1), submitted for Beta App Review.
+   External group **Counterpart Public Beta** has build 2.0 (2), submitted for Beta App Review (build 1 remains unsubmitted).
    Automatic tester notifications are off; zero testers, no email invitations. Public link created
    **https://testflight.apple.com/join/S4tExVzp**, Open to Anyone. Apple says testers cannot join
    until an approved build is in the group. No public announcement sent. App record currently
    lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
-   Release branch `feat/testflight-readiness` is pushed through `ab455a6` (no PR yet).
+   Release branch `feat/testflight-readiness` is pushed through `db8e87b` (no PR yet).
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.
    - **Starter projects and multi-plate printing implemented on the release branch:** welcome/Home and
      the empty Mac workspace offer the scan platform, Counterpart caliper card and long vernier
@@ -95,21 +96,33 @@ remote native probes and the SSH tunnel were removed after verification.
    - **Latest direction:** Linux computer support coming soon, including Tailscale; bring-your-own-AI
      includes Claude Code, Codex, OpenCode and OpenAI-compatible APIs (OpenRouter/local models).
      The saved beta copy identifies Codex/API/endpoint settings as existing options; project routing
-     remains an integration bug, and OpenCode is planned. User explicitly requested a subagent
+     is integrated at `c438efa`; OpenCode is planned. User explicitly requested a subagent
      to fix provider routing while parent finishes TestFlight; describe supported choices directly
      in the listing and complete wiring before sharing the link. No public
-     24-hour promise. Main project worker routing is still Claude-specific despite existing
-     Codex/API adapters; close that gap rather than require Claude Code permanently.
+     24-hour promise. Saved provider routing now drives model jobs and Off is enforced. `db8e87b` corrects
+     the helper to use independently installed cleanup tools, not a nonexistent bundled judge.
+     Live delegated Claude/Codex fixture MCP/image checks passed; real app modeling acceptance
+     and OpenCode remain. API cleanup retains CLI/Responses requirements; see provider report.
    - **Phone connectivity fix is implemented:** unknown shows Checking, failed requests mark
      unreachable, successful poll recovery reloads; bounded JSON metadata requests preserve long
      downloads. David explicitly says his phone is connected. A developer-tool tunnel being
      unavailable is not evidence of app failure. No fresh phone build installed this session.
-   - **Production services remain:** CloudKit Console is signed in, at its What's New dialog;
-     schema deployment not performed. CLI cktool has no management token. The production relay
+   - **Production services remain:** CloudKit Console is signed in; the complete schema was deployed and verified in Production at 23:23. Added missing
+     `CounterpartCommand` and `CounterpartProject.openAsk`; `CounterpartEvent.type` is Queryable.
+     Source schema: `docs/protocols/cloudkit-schema.ckdb`. No user records were changed. The production relay
      probe returned HTTP 405, not a valid relay/APNs receipt. Do not point the installed development
-     phone/Mac at production yet. No notarized Mac companion/download exists yet; independent
+     phone/Mac at production yet. Developer ID Application certificate is now issued/imported; matching profile and notarization
+     remain in progress. No notarized Mac companion/download exists yet; independent
      worker installer is implemented and qualified but fresh-install activation remains unaccepted.
-   - **Evidence:** `~/scan-to-make-work/testflight-2.0-1/` holds archive/IPA; official Linux CI at
+   - **Latest implementation evidence:** `testflight-ci-c438efa` passed Node 22/24,
+     each 790 companion and 55 contract tests. Final cleanup-path changes pass two
+     compiled-helper tests, two tool-resolution tests and the full licence workflow.
+     `testflight-ci-db8e87b` passed Node 22 (792); Node 24 exposed a printer-test race:
+     its second pause matched the first pause's old message. `78e6750` waits for a
+     new event; all 29 printing tests then pass. Full final rerun remains in progress.
+     Mac 147 + one skip, shared 168 and two new simulator UI tests pass. The packaged
+     companion was rebuilt and audited; Docker starter/context smoke passes.
+   - **Earlier evidence:** `~/scan-to-make-work/testflight-2.0-1/` holds archive/IPA; official Linux CI at
      `~/scan-to-make-work/testflight-ci-b734344/` passes Node 22/24 (each 55 contracts + 767 companion,
      one macOS-only skip). Shared 164; iOS app 16; print UI 15 across corrected reruns; Mac 147 +
      one skip before final format/#292 integration. Independent review found no substantive issues.
@@ -196,7 +209,7 @@ remote native probes and the SSH tunnel were removed after verification.
     content filter) is active on the Mac.
 13. **Long-standing asks** (details per row in `asks.md`): scan quality (walk-around models have an incomplete rear;
     in-hand is off), camera/Face ID after scanning, real-print notifications and Watch delivery, same-account
-    enrollment, AI provider routing (saved choice is not used by model jobs), Mac memory (348 MB open vs the 150 MB
+    enrollment, AI provider app-level acceptance (saved choice is now routed), Mac memory (348 MB open vs the 150 MB
     menu-bar target), "Vivi" multi-colour (ask 41).
 14. **Caliper card** (`KAN-209-caliper`, unmerged; evidence `~/scan-to-make-work/caliper/`): rename to Counterpart,
     docs QR → `https://counterpart.dtmont.com/`, put each vernier digit under its own line, then print the two-colour

@@ -41,7 +41,7 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 | 25 | Claude unconstrained on the user's Mac (web, images, browser downloads) | 1 | merged in #219 path; not verified | Link flow downloads via his browser |
 | 26 | Fusion as a design engine | 2 | **installed #272; private real-worker pass verified**: actual app worker produced a 10 mm parametric cube, exported STL/F3D, reopened the archive and closed only its two owned documents. Four original document identities/flags and the active stove geometry remained unchanged. Local Bambu `ed9aba3` and durable CLI/add-in `86a3016` are installed; configured SSH verifies binding and visible tool results. New Set Up flow is build/test-verified, not clicked in this acceptance pass | Set up works; one real pass uses Fusion |
 | 27 | Update both MCPs from either app | 2 | **installed #259; acceptance partial**: parked updater backend integrated with both clients; print/design/cleanup reservations prevent replacing an MCP in use. Actual app-driven update pending | Update button updates the MCP from the phone and the Mac |
-| 28 | Every Mac setting on the phone | 1 | **on device, partial acceptance (#282/#283/#285)**: phone General values now come from the real Mac. Turning keep-awake off on the phone changed the Mac Settings switch; restored on and verified both sides. Current phone is excluded from removable older pairings. AI connection tests and passive Fusion status are visible. Fusion setup and MCP update actions are not clicked in this acceptance; AI provider routing remains unimplemented | Changes a Mac setting from the phone |
+| 28 | Every Mac setting on the phone | 1 | **on device, partial acceptance (#282/#283/#285)**: phone General values now come from the real Mac. Turning keep-awake off on the phone changed the Mac Settings switch; restored on and verified both sides. Current phone is excluded from removable older pairings. AI connection tests and passive Fusion status are visible. Fusion setup and MCP update actions are not clicked in this acceptance; AI provider routing is now integrated on the release branch; device acceptance remains | Changes a Mac setting from the phone |
 | 29 | Phone connects automatically on the same Apple Account | 1 | **installed #259; acceptance partial**: missing phone consumer and pinned enrollment implemented. Signed builds pass; real same-account enrollment pending | Fresh install connects with no code |
 | 30 | Help / docs / website | 2 | **on device, both**: installed Mac Help and phone Settings → Guide render the live Counterpart Help page | counterpart.dtmont.com/help.html loads; Settings → Help opens it |
 | 31 | No bed/plate checks anywhere | 3 | done (app + both MCPs) | — |
@@ -58,7 +58,7 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 | 42 | Pause at a chosen layer to drop in magnets, as Bambu Studio and OrcaSlicer do | 1 | **on Mac, observed**: print sheet → Pause → "Before layer N of T"; bambu-printer-mcp `pause_at_layers` has the slicer write the printer's own pause. On Nov 3 at 14:18 the P1S paused itself before layer 3. Resume from the Mac app accepted at 20:25; see row 2. Phone implementation is on `feat/testflight-readiness`; generic MCP parity is pushed at `afcf378` (663 tests pass, package/site checks pass), not deployed or hardware-accepted; PR not opened | He sets a pause layer in the app and the printer stops there |
 
 | 43 | Linux computer companion, with Tailscale connectivity | Nov 3 | **requested, not shipped**: David wants Linux soon; the beta description says coming soon. Reuse the MCP backend and qualify UI, enrollment, workers and Apple-dependent reconstruction/CloudKit alternatives | Fresh Linux install pairs with the phone and completes the supported workflow |
-| 44 | Bring your own AI: Claude Code, Codex, OpenCode and OpenAI-compatible APIs, including OpenRouter/local models | Nov 3 | **partially implemented**: Codex/API adapters and connection tests exist; main project jobs still use the Claude-specific worker dependency. Complete routing and verify supported tool/image capabilities; do not market Claude Code as a permanent requirement | The selected provider performs a real design/cleanup pass |
+| 44 | Bring your own AI: Claude Code, Codex, OpenCode and OpenAI-compatible APIs, including OpenRouter/local models | Nov 3 | **implemented on release branch**: saved Claude/Codex/API choice now drives project jobs and cleanup; Off is enforced. Delegated live Claude/Codex fixture MCP/image checks passed. Parent fixed independent cleanup worker paths. OpenCode and real app-level modeling acceptance remain | The selected provider performs a real design/cleanup pass |
 
 ## Current evidence and outstanding device checks
 
@@ -109,11 +109,12 @@ Defects Codex found in the code:
 - `ObjectMasker` subtracts the hands before choosing the object.
 - `reconstruct.ts` throws away the reconstruction's stderr, which hides the real error.
 
-### AI provider routing acceptance — 2026-11-02
+### AI provider routing acceptance — updated 2026-11-03
 
-The new phone/Mac AI connection controls save and test ModelAccessService credentials.
-They do not select the current ObjectService worker: cleanup, design and corrections still
-use configured Claude Code. The UI now labels this diagnostic scope explicitly, and the
-project footer reports the actual Claude worker rather than the unused saved choice.
-Provider switching and globally disabling model AI remain unimplemented; no live provider
-change or alternate-provider model job is claimed by this settings bridge.
+Saved phone/Mac provider settings now select subsequent design, correction, cleanup,
+published-model and title/completion jobs; each job snapshots the selection and Off
+is enforced. Integrated from `05110ca` at `c438efa`. Live Claude/Codex logins used a
+fixture MCP and inspected its image. API checks used mocked HTTP with real fixture
+MCP processes. `db8e87b` corrects the helper to resolve independently installed cleanup
+tools from app-owned configuration. Real app-level modeling acceptance and OpenCode
+remain; API cleanup retains the existing CLI/Responses requirements.
