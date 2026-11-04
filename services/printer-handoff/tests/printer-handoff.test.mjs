@@ -289,6 +289,18 @@ test('generic gcode sequence confirms temperatures then uploads with print set',
   assert.equal(calls.at(-1).arguments.type, 'klipper');
 });
 
+// PrusaSlicer and Cura have no auto-orient through the MCP and refuse support arguments: the model goes to them as it is.
+test('a non-Bambu slicer gets the model as it is, and a supports choice is refused before slicing', async t => {
+  const f = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server', supports: true});
+  await f.runner.run({stlPath: f.stlPath, selection: {printerType: 'klipper', material: 'PLA'}});
+  const slice = (await f.calls()).find(entry => entry.tool === 'slice_stl');
+  assert.equal('orient' in slice.arguments, false, 'orient is Bambu-compatible slicing only');
+  assert.equal(slice.arguments.stl_path, f.stlPath);
+  const refused = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server', supports: true});
+  await assert.rejects(refused.runner.run({stlPath: refused.stlPath, selection: {printerType: 'klipper', material: 'PLA'}, slicer: {enableSupport: false}}), {code: 'print-settings-unsupported'});
+  assert.deepEqual((await refused.calls()).filter(entry => entry.tool).map(entry => entry.tool), []);
+});
+
 test('generic Bambu sequence prints the sliced 3MF with print_3mf', async t => {
   const f = await setup(t, {mode: 'generic', backend: 'mcp-3d-printer-server'});
   await f.runner.run({stlPath: f.stlPath, selection: {...selection, printerType: 'bambu'}});

@@ -330,6 +330,8 @@ export class PrinterHandoffRunner {
           || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
           || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))
           || (slicer.pauseAtLayers?.length && !Object.hasOwn(sliceProperties, 'pause_at_layers'))
+          // Only Bambu-compatible slicing takes the designer's supports; PrusaSlicer and Cura refuse them.
+          || ((slicer.enableSupport !== undefined || slicer.supportType !== undefined) && !isBambuSlicing(this.#config, selection, slicer))
           || (slicer.enableSupport !== undefined && !Object.hasOwn(sliceProperties, 'enable_support'))
           || (slicer.supportType !== undefined && !Object.hasOwn(sliceProperties, 'support_type'))
           // mcp-3D-printer-server forwards repetitions only on its Bambu-compatible route; elsewhere it would slice one.
@@ -360,8 +362,9 @@ export class PrinterHandoffRunner {
       use_printer_filaments: false,
       arrange: !threeMf || (slicer.repetitions ?? 1) > 1,
       ensure_on_bed: !threeMf,
-      // The slicer orients an STL itself (Bambu Studio's auto-orient); a 3MF keeps its placement.
-      orient: !threeMf,
+      // The slicer orients an STL itself (Bambu Studio's auto-orient); a 3MF keeps its placement. Other slicers
+      // (PrusaSlicer, Cura) have no auto-orient through the MCP: the model goes to them as it is.
+      orient: threeMf ? false : isBambuSlicing(this.#config, selection, slicer) ? true : undefined,
     };
     // The same model sliced the same way before (Print Again, or Print after Estimate): print that file. Only
     // slice_stl is skipped; inspection, the printer checks, Studio's warning and the print call all run as always.
