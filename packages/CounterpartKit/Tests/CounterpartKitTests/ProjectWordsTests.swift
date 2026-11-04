@@ -9,13 +9,12 @@ private func ready(_ more: [String: Any] = [:]) -> Project {
 /// The words every surface uses. Ported unchanged from the iPhone app's ObjectWordsTests, plus the PRD §4
 /// phases and the companion's own status line.
 final class ProjectWordsTests: XCTestCase {
-    func testExplicitFitKeepsEngineChoiceEvenWhenItUsesScanOrCaptureReference() {
+    func testTheAppsFollowTheCompanionsDecidedKind() {
+        // The companion sends passKind as kind; scans or captures no longer make the app guess "copy".
         XCTAssertFalse(project(["kind": "fit", "scan": "reference.usdz", "capture": ["reference.heic"]]).usesCopyWorkflow)
-        XCTAssertTrue(project(["kind": "copy"]).usesCopyWorkflow)
-        XCTAssertTrue(project(["scan": "legacy.usdz"]).usesCopyWorkflow)
-        XCTAssertTrue(project(["capture": ["legacy.heic"]]).usesCopyWorkflow)
-        XCTAssertFalse(project(["instructions": "A mount for the pole"]).usesCopyWorkflow)
-        XCTAssertTrue(project([:]).usesCopyWorkflow)
+        XCTAssertTrue(project(["kind": "copy", "scan": "scan.usdz"]).usesCopyWorkflow)
+        XCTAssertFalse(project(["kind": "published"]).usesCopyWorkflow)
+        XCTAssertFalse(project(["kind": "fit", "instructions": "A guitar pick that says Vivi"]).usesCopyWorkflow)
     }
 
     private var confirmation: [String: Any] { [

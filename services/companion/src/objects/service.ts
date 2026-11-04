@@ -171,7 +171,9 @@ export function spreadPick<T>(items: T[], count: number): T[] {
  * with a scan (LiDAR or a handheld capture) is a copy, even with a request ("Copy this. Close up the bottom."),
  * since the phone sends only the request; a request with photos alone is a new design.
  */
-export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions'>): PassKind {
+export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions' | 'current'>): PassKind {
+  // A copy needs something to copy: one that never received a scan or capture is its request, a new design.
+  if (object.kind === 'copy' && !object.scan && !object.capture?.length && !object.current && object.instructions?.trim()) return 'fit';
   if (object.kind) return object.kind;
   // PRD §8.11: a link to a published model's page prints the designer's file; it is never designed.
   if (publishedLink(object.instructions)) return 'published';
@@ -1430,6 +1432,8 @@ export class ObjectService {
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
     const kind: PassKind = passKind(object);
+    // Keep the decision: once this pass makes a model, a copy with nothing scanned would otherwise read as a copy again.
+    if (object.kind !== kind) object = await store.update(object.id, o => ({...o, kind}));
     // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.
     const build = kind !== 'published' && !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
