@@ -8,6 +8,8 @@ The app covers capture (LiDAR Object Capture plus close-up stills) and cleanup (
 
 ## Start here
 
+Android app: see [`android/AGENTS.md`](android/AGENTS.md) and [`android/README.md`](android/README.md).
+
 New session? Read [`docs/status/handoff.md`](docs/status/handoff.md) for how to pick up the work, and [`docs/status/asks.md`](docs/status/asks.md) for what's open. Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
 
 ## Read bambu-printer-mcp before you build
