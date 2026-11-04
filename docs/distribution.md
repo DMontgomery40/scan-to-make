@@ -23,28 +23,22 @@ The internal prerequisite group `Counterpart Team` exists. Beta description and
 David's supplied review/feedback contacts are saved in App Store Connect.
 
 Xcode used cloud-managed Apple Distribution signing for the iPhone. A Developer ID
-Application certificate and matching Production profile are installed. Build
-**0.1.0 (202611032345)** passes distribution signature/entitlement checks and embedded
-Node/Python execution. Apple notarization submission
-`8569fc14-6619-42b0-aefb-ae0469545a65` was **Accepted** on Nov 4 at 00:00 Mountain.
-The ticket is stapled and Gatekeeper accepts the app. The published download was
-retrieved independently, matched SHA-256 and passed Gatekeeper/stapler verification. Artifacts are in
-`~/scan-to-make-work/mac-beta-export-202611032345/`; log is
-`~/scan-to-make-work/mac-beta-export-202611032345/release.log`. The initial direct-build submission
-was rejected because Sparkle’s four nested helpers lacked distribution signatures.
-The release script now archives and exports through Xcode; all four exported helpers
-have verified Developer ID signatures and secure timestamps. The licence check now
-handles archive-directory depth as well as ordinary builds. The Keychain notary profile is
-`Counterpart-Production`; the private Sparkle update key is also in Keychain.
-`121e8e3` disables Xcode debug-entitlement injection for distribution builds.
-`ab455a6` fixes the release helper to use Apple's matching rsync peer and requests
-sufficient codesign verbosity to inspect the signing certificate.
+Application certificate and matching Production profile are installed for the Mac.
+The current [Mac beta release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.3)
+is **0.1.0 (202611040120)**, source `e7d5f6d` (#298), published Nov 4.
+It retrieves FDM guidance from the selected MCP and forwards structured slicer feedback
+to API design workers. Both published MCPs supply the required prompts.
 
-The [Mac beta release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.2)
-and [setup page](https://counterpart.dtmont.com/beta.html) are published. The signed
-Sparkle feed at `/appcast.xml` matches the verified local feed. The Mac artifact is
-0.1.0 (202611032345), source `9993978` (release-script URL/feed-signing fixes followed).
-Downloaded ZIP SHA-256: `b7a8a67e6c8d86357be74247f04e34a913d4b7f0e363c661572b8a2ea879e7ab`.
+The archive/export passed distribution signature and Production entitlement checks;
+embedded Node/Python start and all five changed runtime modules match the prepared payload.
+Notarization submission `6fa11899-18fc-4671-91c1-388f50ccb7dd` was **Accepted**;
+the ticket is stapled and Gatekeeper accepts the app. Artifacts and compact receipts:
+`~/scan-to-make-work/mac-beta-export-202611040120/`. The Keychain notary profile is
+`Counterpart-Production`; the private Sparkle update key is also in Keychain.
+
+ZIP SHA-256: `88557aa0bd97bc696c3bc3beceef2c21f78c2338b3fe4c3a3eca11334a95288e`.
+The setup page and signed Sparkle feed point to this release. The prior Mac beta remains
+available as v2.0-beta.2; no app was installed over David's working development app.
 A downloaded-file check is not fresh-install acceptance. Verify installation
 independently of David's existing setup:
 
@@ -62,10 +56,12 @@ independently of David's existing setup:
   Registry latest was independently verified for both on Nov 4; visible app acceptance remains open.
   Do not hand-copy local feature-branch builds. Accept print controls using the
   visible Counterpart UI with exactly the published packages users receive.
-- Counterpart #298 consumes the MCP's FDM guidance and changes the bundled companion.
-  This release thread owns its integration and a new Mac release; both MCPs now
-  serve the required prompts. The current Mac download does not yet contain #298; these companion-only
-  changes do not require a new TestFlight phone build.
+- Counterpart #298 is merged and included in Mac build 202611040120. These companion-only
+  changes require no new TestFlight phone build. Real New project / Ask for changes
+  acceptance with the published MCPs remains open.
+- David's existing hand-copied MCP reports 1.1.52, so the version-only updater offers no
+  Update despite differing from npm's 1.1.52. The MCP owner reported this obstacle and
+  is awaiting David's choice of remedy; no metadata or project state was changed here.
 - The legacy macOS installer and Docker image pin older MCP versions. They do not
   reproduce the currently accepted feature-branch installation.
 

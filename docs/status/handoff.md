@@ -87,7 +87,7 @@ remote native probes and the SSH tunnel were removed after verification.
    until an approved build is in the group. Review notes now include the live Mac download/setup link and starter details.
    No tester email invitations sent. App record currently
    lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
-   Release branch is `feat/testflight-readiness` (no PR yet); release source is `9993978`.
+   Release branch is `feat/testflight-readiness` (no PR yet); release source is `e7d5f6d`.
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.
    - **Starter projects and multi-plate printing implemented on the release branch:** welcome/Home and
      the empty Mac workspace offer the scan platform, Counterpart caliper card and long vernier
@@ -119,23 +119,26 @@ remote native probes and the SSH tunnel were removed after verification.
      No records changed. Production `counterpart-relay` now serves `/relay/*`; its APNs probe returned
      `410 token_inactive / BadDeviceToken`, proving authentication, not phone delivery. Production key
      is topic-scoped to `com.scantomake`. Sandbox and installed development relay settings are unchanged.
-   - **Mac beta published:** Developer ID certificate and matching Production CloudKit/APNs
-     profile are installed. Sparkle update key is in Keychain; notarization credential profile is
-     `Counterpart-Production`. Build **0.1.0 (202611032345)** passed deep signature/entitlement checks
-     and embedded Node/Python execution. `121e8e3` fixes Xcode's injected debug entitlement in distribution
-     builds. The first notarization rejected Sparkle’s nested helper signatures. The release script now
-     uses Xcode archive/export; all four helpers have Developer ID signatures and timestamps.
-     Retry **8569fc14-6619-42b0-aefb-ae0469545a65** was **Accepted**, then stapled and
-     accepted by Gatekeeper. [Release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.2)
-     and [beta setup](https://counterpart.dtmont.com/beta.html) are live. The downloaded ZIP
-     matched SHA-256 and passed Gatekeeper/stapler checks; signed `/appcast.xml` matches
-     local verified bytes. Artifacts/receipts: `~/scan-to-make-work/mac-beta-export-202611032345/`.
-     Native caches, intermediate payload, downloaded verification copy and Linux scratch are removed;
-     final archive, notarized ZIP, test results and compact receipts remain. Free disk is 5.2 GiB.
-     Independent worker installer is qualified; fresh installation remains unaccepted.
+   - **Mac beta published:** build **0.1.0 (202611040120)**, source `e7d5f6d` (#298), contains
+     MCP FDM guidance and the structured-result fix for API workers. Developer ID + Production
+     CloudKit/APNs export verified; Node/Python start; all five changed runtime modules match.
+     Notarization **6fa11899-18fc-4671-91c1-388f50ccb7dd** was **Accepted**, stapled and
+     accepted by Gatekeeper. [Release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.3)
+     and [setup](https://counterpart.dtmont.com/beta.html) identify this build. ZIP SHA-256:
+     `88557aa0bd97bc696c3bc3beceef2c21f78c2338b3fe4c3a3eca11334a95288e`.
+     Artifacts/receipts: `~/scan-to-make-work/mac-beta-export-202611040120/`.
+     Notary profile `Counterpart-Production` and private Sparkle key stay in Keychain.
+     The previous v2.0-beta.2 download remains available. Temporary payload and Xcode caches
+     removed; retain the final archive/ZIP and compact receipts. Independent worker installer
+     is qualified; fresh-install and real design/print acceptance remain open.
      No production app was installed over David's working development app. Production relay
      settings must change only when both installed clients move to Production. The actual
      Kass six-plate original was not downloaded by the browser attempt; its import remains open.
+   - **FDM integration checks:** #298 merged after clean Codex review on `3971ada` and SAFE
+     merge gate. Node 22/24 companion workflows pass (793 + one skip; 55 contracts each).
+     Handoff workflows pass on unchanged handoff source. The API regression first reproduced
+     missing structured slicer warnings on endpoint/OpenAI/Anthropic and passes after the fix.
+     These are engineering receipts, not actual app acceptance. `~/scan-to-make-work/fdm-release-checks/`.
    - **Final implementation evidence:** official Linux workflow `testflight-ci-6124fb3` passes
      Node 22 and 24, each **792 companion + 55 contracts**, zero failures and one Mac-only skip.
      `78e6750` fixes the test race where a second pause matched the first pause's old event.
@@ -201,10 +204,16 @@ remote native probes and the SSH tunnel were removed after verification.
    - Both published packages advertise all four FDM prompts. That startup check is engineering evidence only;
      installed app Update/visible-control acceptance remains with the MCP owner.
    - This TestFlight thread owns handoff/distribution/site/appcast, app packaging and Counterpart
-     [#298](https://github.com/DMontgomery40/scan-to-make/pull/298) integration (updated onto this release branch at `1aa04ba`; code unchanged).
-     #298 changes the companion payload, requiring a new Mac release; MCP-only releases need no new iPhone build.
+     [#298](https://github.com/DMontgomery40/scan-to-make/pull/298), merged as `e7d5f6d` and shipped
+     in Mac build 202611040120. MCP-only releases need no new iPhone build.
      Its status-doc edits were removed by the MCP owner and reconciled here. Do not replace the installed app
      during that thread's MCP update/acceptance; coordinate the later Mac upgrade explicitly.
+   - **Installed updater obstacle:** the hand-copied Bambu build already reports 1.1.52, so the
+     version-only comparison hides Update for genuine npm 1.1.52. MCP owner presented metadata
+     relabel / new npm version / updater change options to David; his choice is pending.
+     No metadata or project state was changed by this release thread. The 05:49 project has an
+     uncertain print record; the updater checks app `state === printing`, print gate and live
+     printer state. Resolve through the app, never manufacture an idle state in object.json.
    - **Android and Linux ownership agreed directly with the MCP thread (Nov 4): this TestFlight thread owns both.**
      David downloaded `~/Downloads/counterpart-android-debug.apk`, `counterpart-android-source.zip` and
      `counterpart-android-app.bundle`. They are three artifacts of the Android app, not starter models.
@@ -277,7 +286,7 @@ remote native probes and the SSH tunnel were removed after verification.
 - FDM design guidance lives in both MCPs as `fdm_design`, `fdm_multicolor`, `fdm_assembly`, `fdm_after_slice`
   prompts and a resource. Counterpart fetches `fdm_design` for design and copy passes; the guidance is maintained
   in the MCPs, not duplicated in the app. Developer notes: `docs/design/fdm-prompt-pack/` in #298.
-  The combined MCPs are published; integrate reviewed #298 and release its Mac companion payload next.
+  The combined MCPs and #298 Mac payload are published; actual app acceptance remains next.
   Acceptance means New project / Ask for changes through Counterpart, with the published MCP providing guidance.
 - Printing picks is authorized; the Sandbox APNs key and relay are provisioned (`counterpart-relay-sandbox`).
 

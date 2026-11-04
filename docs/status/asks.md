@@ -60,7 +60,7 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 | 43 | Linux computer companion, with Tailscale connectivity | Nov 3 | **requested, not shipped**: David wants Linux soon; the beta description says coming soon. Reuse the MCP backend and qualify UI, enrollment, workers and Apple-dependent reconstruction/CloudKit alternatives | Fresh Linux install pairs with the phone and completes the supported workflow |
 | 44 | Bring your own AI: Claude Code, Codex, OpenCode and OpenAI-compatible APIs, including OpenRouter/local models | Nov 3 | **implemented on release branch**: saved Claude/Codex/API choice now drives project jobs and cleanup; Off is enforced. Delegated live Claude/Codex fixture MCP/image checks passed. Parent fixed independent cleanup worker paths. OpenCode and real app-level modeling acceptance remain | The selected provider performs a real design/cleanup pass |
 
-| 45 | Design passes plan how the object prints (FDM prompt pack) | Nov 4 | **branch**: combined MCP release PRs [bambu #99](https://github.com/DMontgomery40/bambu-printer-mcp/pull/99) and [generic #52](https://github.com/DMontgomery40/mcp-3D-printer-server/pull/52) published 1.1.52 and 1.2.26 with the prompts. Counterpart [#298](https://github.com/DMontgomery40/scan-to-make/pull/298) fetches `fdm_design` per pass and permits Fusion filament/slicing tools. New Mac packaging and actual UI acceptance remain. Multi-part 3MF/orientation (row 41) and post-slice review are follow-ups | A design pass started in the actual app states its print plan, and the print keeps it |
+| 45 | Design passes plan how the object prints (FDM prompt pack) | Nov 4 | **published, not installed/accepted**: combined MCP release PRs [bambu #99](https://github.com/DMontgomery40/bambu-printer-mcp/pull/99) and [generic #52](https://github.com/DMontgomery40/mcp-3D-printer-server/pull/52) published 1.1.52 and 1.2.26 with the prompts. Counterpart [#298](https://github.com/DMontgomery40/scan-to-make/pull/298) is merged and published in Mac build 202611040120; it fetches `fdm_design` per pass, permits Fusion filament/slicing tools and forwards structured results to API workers. Actual UI acceptance remains. Multi-part 3MF/orientation (row 41) and post-slice review are follow-ups | A design pass started in the actual app states its print plan, and the print keeps it |
 
 | 46 | Integrate downloaded Android app and support Mac and Linux desktop companions | Nov 4 | **assigned to TestFlight thread by agreement with MCP thread**: APK, source ZIP and Git bundle in Downloads inspected; bundle `android-app` @ `549873a` verifies. No device/host acceptance. Shared HTTPS/Tailscale protocol is portable; the supplied scan reconstruction depends on Apple's mac-reconstruct and needs a Linux implementation | Android pairs with each desktop app and completes the supported project, scan and print flows through its visible UI |
 
@@ -71,7 +71,7 @@ published packages users receive. Engineering test counts below do not establish
 ## Current evidence and outstanding device checks
 
 External beta update, Nov 4: iPhone **2.0 (2)** is Waiting for Review in the public
-TestFlight group. Mac **0.1.0 (202611032345)** is notarized, stapled and
+TestFlight group. Mac **0.1.0 (202611040120)** is notarized, stapled and
 [published with setup instructions](https://counterpart.dtmont.com/beta.html).
 A fresh download matched its SHA-256 and passed Gatekeeper/stapler checks.
 Production CloudKit and the APNs relay are provisioned; real production phone
