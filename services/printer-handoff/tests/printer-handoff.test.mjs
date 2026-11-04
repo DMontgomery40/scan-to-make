@@ -501,6 +501,14 @@ test('a known pre-dispatch printer refusal preserves its reason without claiming
   });
 });
 
+test('the refusal is read from the code, never the words: an MCP without the code is not trusted as a refusal', async t => {
+  const f = await setup(t, {dispatch:'preflight-error-wording'});
+  await assert.rejects(f.runner.run({stlPath:f.stlPath}), error => {
+    assert.notEqual(error.code, 'printer-not-ready', 'matching the message is the MCP\'s job (PRD §8.0)');
+    return true;
+  });
+});
+
 test('progress reaches the caller before each operation, including the last printer request', async t => {
   const f = await setup(t);
   const progress = [];

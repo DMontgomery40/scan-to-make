@@ -300,14 +300,11 @@ export class PrinterMcpClient {
       if (Buffer.byteLength(JSON.stringify(result)) > MAX_FORWARDED_BYTES) fail('result-limit');
       return structuredClone(result);
     }
-    // This exact Bambu rejection is emitted by the idle-state preflight before
-    // upload/dispatch. Preserve the actionable refusal instead of inventing uncertainty.
-    if (result.isError && this.#config.backend === 'bambu-printer-mcp' && name === 'print_3mf') {
-      const detail = failureDetail(result, this.#config);
-      if (/^(?:Error: )?The printer rejected the print command \(HMS 0500-0500-0001-0007,/.test(detail ?? '') && detail?.includes('nothing is printing'))
-        fail('printer-command-rejected', undefined, detail);
-      if (/^(?:Error: )?Printer state (?:FAILED|RUNNING|PAUSE|PREPARE|SLICING|UNKNOWN) is not safely idle\.$/.test(detail ?? ''))
-        fail('printer-not-ready', undefined, detail);
+    // A printer refusal names itself with a stable code in the MCP's structured error (both MCPs, src/refusal.ts):
+    // keep the actionable refusal instead of inventing uncertainty. The app never reads the words (PRD §8.0).
+    if (result.isError && name === 'print_3mf') {
+      const code = (result.structuredContent as {code?: unknown} | undefined)?.code;
+      if (code === 'printer-command-rejected' || code === 'printer-not-ready') fail(code, undefined, failureDetail(result, this.#config));
     }
     // Unstructured tool errors can include a lost post-dispatch acknowledgement.
     // A declined confirmation is known not to dispatch; other ambiguous results

@@ -157,7 +157,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   if (name === 'clear_hms_errors') {await confirmPrint();return text({status:'success'});}
   if (name === 'camera_snapshot') return text({format: 'jpeg', base64: 'ZmFrZQ==', savedTo: join(directory, 'snapshot.jpg')});
   if (name === 'print_3mf' || name === 'upload_gcode' || name === 'process_and_print_stl') {
-    if (process.env.HANDOFF_FIXTURE_DISPATCH === 'preflight-error') return {isError:true, content:[{type:'text',text:'Printer state FAILED is not safely idle.'}]};
+    // As bambu-printer-mcp 1.1.57 / mcp-3d-printer-server 1.2.31 return a refusal: the words plus a stable code.
+    if (process.env.HANDOFF_FIXTURE_DISPATCH === 'preflight-error') return {isError:true, content:[{type:'text',text:'Error: Printer state FAILED is not safely idle.'}],
+      structuredContent:{status:'error', retryable:false, suggestion:'Fix the printer state first.', message:'Printer state FAILED is not safely idle.', tool:name, code:'printer-not-ready'}};
+    if (process.env.HANDOFF_FIXTURE_DISPATCH === 'preflight-error-wording') return {isError:true, content:[{type:'text',text:'Printer state FAILED is not safely idle.'}]};
     await confirmPrint();
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'crash') process.exit(9);
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'timeout') await new Promise(() => {});
