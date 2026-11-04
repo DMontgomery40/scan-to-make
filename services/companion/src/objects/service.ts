@@ -207,6 +207,7 @@ function resumedHere(events: readonly {message: string}[]): boolean {
 export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
+  readonly #controlling = new Set<string>();
   readonly #controllers = new Map<string, AbortController>();
   readonly #confirmations = new Map<string, {pending: PendingElicitation; printing: NonNullable<ObjectServiceDeps['print']>; timer: ReturnType<typeof setTimeout>}>();
   readonly #cancelledPrints = new Set<string>();
@@ -1205,11 +1206,17 @@ export class ObjectService {
   /** Pause, resume or stop this project's print, through the destination's mutex (PRD §8.6). */
   /**
    * Not under the object's gate: the printer MCP may ask its own confirmation
-   * during the call, and answering it goes through that gate. Two taps are still
-   * one at a time, behind the destination's mutex.
+   * during the call, and answering it goes through that gate. A second control while
+   * one still waits is refused, never queued behind its question (the app's request
+   * would end long before a queued control could run).
    */
   async control(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<StmObject> {
     if (this.#closed) throw new InvalidStateError('Counterpart is shutting down on this Mac.');
+    if (this.#controlling.has(id)) throw new InvalidStateError('The printer is still answering the last Pause, Resume or Stop. Answer its question or wait, then try again.');
+    this.#controlling.add(id);
+    try { return await this.#control(id, action); } finally { this.#controlling.delete(id); }
+  }
+  async #control(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<StmObject> {
     const object = await this.get(id);
     const print = object.print;
     if (object.state !== 'printing' || !print?.dispatchedAt || !print.monitor || print.monitor.phase === 'ended')
