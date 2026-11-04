@@ -1,1 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.cs.allow-jit</key><true/></dict></plist>
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <!-- Downloaded MCPs load npm native addons signed by their own publishers. -->
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict></plist>
