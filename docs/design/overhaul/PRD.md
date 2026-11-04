@@ -33,7 +33,7 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | Project page, rename, Project Settings, Done/Works (§5.4) | Built; Done/Works checked on both Nov 2–3 | rename and settings acceptance partial; Compare versions not built (§18) |
 | Conversation bubbles; "DONE" marks Done without a pass (§5.4.1) | Built | Not accepted |
 | Change request reliability | Built | **open bug**: `objects/completion-intent.ts` turns errors and timeouts into `unknown` with nothing logged, so a change request can stall silently |
-| Print sheet: printer, estimate, quality, strength (§5.5) | Built; prints from the Mac app's Print button Nov 3 | — · quality/strength numbers, slice estimate parsing: *In the app today; moves to the MCPs (§8.0).* |
+| Print sheet: printer, estimate, quality, strength (§5.5) | Built; prints from the Mac app's Print button Nov 3 | — · slice estimate parsing: *In the app today; moves to the MCPs (§8.0).* |
 | Per-part AMS colours for a multi-colour 3MF (§5.5, §8.5) | Built on Mac (#293) and iPhone (`5864c56`) | **Accepted on device Nov 4** (iPhone + P1S, David: "Yes, both colours are correct") · nearest-spool matching: *In the app today; moves to the MCPs (§8.0).* |
 | A colour design from before colour parts asks before printing in one colour (§5.5) | Built (#306) | Not accepted |
 | Copies, pause before a layer (§5.5) | Built; P1S paused itself before layer 3 on Nov 3 (Mac, pre-release MCP build) | Not accepted on the published MCPs; mcp-3D-printer-server parity not on npm · per-slicer rules for copies and supports: *In the app today; moves to the MCPs (§8.0).* |
@@ -45,7 +45,7 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | Notifications (§9.1) | Built; OS permission on | Not accepted: delivery of each event type |
 | Live Activity (§9.4) | Built; Sandbox relay test start/update/end seen on the Lock Screen | Not accepted: real print, Watch, production push |
 | Printer camera (§8.6.1) | Built; 12 reads in 23 s, ≤ 8.4 KB, 0 errors | sustained acceptance |
-| Settings on both, the same (§5.9) | Built; keep-awake toggled from the phone changed the Mac. The phone says "Checking…" until it knows whether the Mac answers (`b845a545`, in the installed iPhone build) | Not accepted: David to confirm on the phone |
+| Settings on both, the same (§5.9) | Built; keep-awake toggled from the phone changed the Mac. **Seen on device Nov 4** (David, iPhone build 202611041132): Settings shows Connected while the Mac is reachable. The brief "Checking…" state before the first answer (`b845a545`) is covered by the engineering test, not a device check | — |
 | Update both MCPs from either app (§8.10) | Built; bambu-printer-mcp 1.1.54 installed through Settings → Update Nov 4 | from the phone; mcp-3D-printer-server is still a hand-built dist |
 | AI provider routing (§7.5) | Built: Claude Code, Codex CLI, Anthropic/OpenAI API, OpenAI-compatible endpoint, Off | real Claude cleanup observed Nov 4; OpenCode not supported yet |
 | Design passes plan how the object prints (FDM prompt pack, `docs/design/fdm-prompt-pack`) | Published in bambu-printer-mcp 1.1.52 / mcp-3D-printer-server 1.2.26 (#99, #52) | Not accepted |
@@ -399,7 +399,7 @@ Screenshots, printer detail: `screens/phone-printer.jpg` and `screens/phone-prin
 
 ### 5.9 Settings and About
 
-**Status:** Built. General values come from the real Mac; keep-awake changed from the phone changed the Mac (Nov 3). Help opens the live help page on both. The phone's Mac row says "Checking…" until reachability is known, never "Connected now" (`b845a545`, in installed build 202611041132); not accepted.
+**Status:** Built. General values come from the real Mac; keep-awake changed from the phone changed the Mac (Nov 3). Help opens the live help page on both. The phone's Mac row says "Checking…" until reachability is known and never "Connected now" before then (`b845a545`, covered by the engineering test). **Seen on device Nov 4:** David saw Settings show Connected while the Mac was reachable (build 202611041132).
 
 Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications.jpg` and `screens/phone-about.jpg`.
 
@@ -605,8 +605,8 @@ Deleting app code before the published MCP has the replacement would regress ins
 
 | # | In the app today (checked on main `d1f68252`) | Moves to |
 |---|---|---|
-| 1 | `services/companion/src/printing/print-settings.ts`: quality → layer height, strength → walls/infill, nozzle scaling | `slice_stl` takes `quality` and `strength`; the MCP owns the numbers |
-| 2 | `services/printer-handoff/src/mcp-client.ts` (~307): the `HMS 0500-0500-0001-0007` and "not safely idle" text matches on `print_3mf` errors | the MCP returns a structured refusal (`printer-command-rejected`, `printer-not-ready`) |
+| 1 | ~~quality → layer height, strength → walls/infill, nozzle scaling~~ **Moved** 2026-11-04: bambu-printer-mcp 1.1.56 / mcp-3d-printer-server 1.2.30 take `quality`/`strength`; 1.1.56 installed through the app's Update; app copies deleted in #313 | the MCPs' `slice_stl` |
+| 2 | ~~the `HMS 0500-0500-0001-0007` and "not safely idle" text matches on `print_3mf` errors~~ **Moved** 2026-11-04: bambu-printer-mcp 1.1.57 / mcp-3d-printer-server 1.2.31 return `printer-command-rejected`/`printer-not-ready` as `structuredContent.code`; 1.1.57 installed through the app's Update; the app reads the code (#314) | the MCPs' structured refusal |
 | 3 | `services/printer-handoff/src/print.ts`: `isBambuSlicing` (124–128); which slicers accept supports and repetitions (365–374); `bambu_model` only for Bambu slicing | the MCP reports its slice capabilities and ignores what it can't apply |
 | 4 | `services/printer-handoff/src/counterpart.ts`: the `get_printer_status` fallback for MCPs without `counterpart/1`. `services/companion/src/objects/service.ts`: `backend === 'bambu-printer-mcp'` at 632, 722, 1332, 1337, 1378 and 1605 | deleted; the capability is required |
 | 5 | `services/printer-handoff/src/remote-mcp.ts`: the hard-coded per-tool scope table | scopes derived from the MCPs' tool annotations |
