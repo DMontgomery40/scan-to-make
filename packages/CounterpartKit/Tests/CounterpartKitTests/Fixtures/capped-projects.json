@@ -64,7 +64,8 @@
       "settings": {
         "status": "not-printed",
         "archived": false
-      }
+      },
+      "kind": "copy"
     }
   },
   {
@@ -138,7 +139,8 @@
       "settings": {
         "status": "not-printed",
         "archived": false
-      }
+      },
+      "kind": "copy"
     }
   },
   {
@@ -214,7 +216,8 @@
       "settings": {
         "status": "not-printed",
         "archived": false
-      }
+      },
+      "kind": "copy"
     }
   },
   {
@@ -275,7 +278,8 @@
       "settings": {
         "status": "not-printed",
         "archived": false
-      }
+      },
+      "kind": "copy"
     }
   },
   {
@@ -334,7 +338,8 @@
       "settings": {
         "status": "not-printed",
         "archived": false
-      }
+      },
+      "kind": "copy"
     }
   }
 ]
