@@ -1,0 +1,123 @@
+DEFINE SCHEMA
+
+    RECORD TYPE CounterpartCommand (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE,
+        type            STRING,
+        projectId       STRING,
+        payload         STRING,
+        photos          LIST<ASSET>,
+        status          STRING,
+        message         STRING,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE CounterpartDevice (
+        "___createTime"  TIMESTAMP,
+        "___createdBy"   REFERENCE,
+        "___etag"        STRING,
+        "___modTime"     TIMESTAMP,
+        "___modifiedBy"  REFERENCE,
+        "___recordID"    REFERENCE,
+        activityTokens   LIST<STRING> QUERYABLE SEARCHABLE,
+        deviceId         STRING QUERYABLE SEARCHABLE SORTABLE,
+        pushToStartToken STRING QUERYABLE SEARCHABLE SORTABLE,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE CounterpartEvent (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE,
+        body            STRING QUERYABLE SEARCHABLE SORTABLE,
+        confirmationId  STRING QUERYABLE SEARCHABLE SORTABLE,
+        createdAt       TIMESTAMP QUERYABLE SORTABLE,
+        eventId         STRING QUERYABLE SEARCHABLE SORTABLE,
+        expiresAt       TIMESTAMP QUERYABLE SORTABLE,
+        frame           ASSET,
+        notify          STRING QUERYABLE SEARCHABLE SORTABLE,
+        printId         STRING QUERYABLE SEARCHABLE SORTABLE,
+        progress        DOUBLE QUERYABLE SORTABLE,
+        projectId       STRING QUERYABLE SEARCHABLE SORTABLE,
+        remainingSec    DOUBLE QUERYABLE SORTABLE,
+        seq             INT64 QUERYABLE SORTABLE,
+        title           STRING QUERYABLE SEARCHABLE SORTABLE,
+        type            STRING QUERYABLE SEARCHABLE SORTABLE,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE CounterpartMac (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE,
+        addresses       STRING QUERYABLE SEARCHABLE SORTABLE,
+        enrolmentToken  STRING QUERYABLE SEARCHABLE SORTABLE,
+        macId           STRING QUERYABLE SEARCHABLE SORTABLE,
+        name            STRING QUERYABLE SEARCHABLE SORTABLE,
+        spkiSha256      STRING QUERYABLE SEARCHABLE SORTABLE,
+        tokenExpiresAt  TIMESTAMP QUERYABLE SORTABLE,
+        updatedAt       TIMESTAMP QUERYABLE SORTABLE,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE CounterpartProject (
+        "___createTime"       TIMESTAMP,
+        "___createdBy"        REFERENCE,
+        "___etag"             STRING,
+        "___modTime"          TIMESTAMP,
+        "___modifiedBy"       REFERENCE,
+        "___recordID"         REFERENCE,
+        confirmationExpiresAt TIMESTAMP QUERYABLE SORTABLE,
+        confirmationFields    STRING QUERYABLE SEARCHABLE SORTABLE,
+        confirmationId        STRING QUERYABLE SEARCHABLE SORTABLE,
+        confirmationMessage   STRING QUERYABLE SEARCHABLE SORTABLE,
+        confirmationSupported INT64 QUERYABLE SORTABLE,
+        endsAt                TIMESTAMP QUERYABLE SORTABLE,
+        openAsk               STRING,
+        printId               STRING QUERYABLE SEARCHABLE SORTABLE,
+        printOutcome          STRING QUERYABLE SEARCHABLE SORTABLE,
+        printState            STRING QUERYABLE SEARCHABLE SORTABLE,
+        printerName           STRING QUERYABLE SEARCHABLE SORTABLE,
+        progress              DOUBLE QUERYABLE SORTABLE,
+        projectId             STRING QUERYABLE SEARCHABLE SORTABLE,
+        projectState          STRING QUERYABLE SEARCHABLE SORTABLE,
+        remainingSec          DOUBLE QUERYABLE SORTABLE,
+        state                 STRING QUERYABLE SEARCHABLE SORTABLE,
+        stateText             STRING QUERYABLE SEARCHABLE SORTABLE,
+        thumbnail             ASSET,
+        title                 STRING QUERYABLE SEARCHABLE SORTABLE,
+        updatedAt             TIMESTAMP QUERYABLE SORTABLE,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud",
+        GRANT READ TO "_world"
+    );
+
+    RECORD TYPE Users (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE,
+        roles           LIST<INT64>,
+        GRANT WRITE TO "_creator",
+        GRANT READ TO "_world"
+    );
