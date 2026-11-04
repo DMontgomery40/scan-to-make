@@ -72,16 +72,19 @@ remote native probes and the SSH tunnel were removed after verification.
 0. **External TestFlight, in progress.** App Store listing is **Counterpart 3D** (icon remains
    Counterpart), ID **6830483457**, bundle `com.scantomake`, **Full Access** verified. User chose
    a public link for external testers. Source `b734344` was cloud-signed, exported, validated and
-   uploaded as **2.0 (1)** at 22:19 Mountain; Apple accepted it for processing. Internal group
+   uploaded as **2.0 (1)** at 22:19 Mountain; processing finished and it is **Waiting for Review**. Internal group
    `Counterpart Team` exists; description and user-supplied review/feedback contacts are saved.
-   No external group, review submission, or public link is yet confirmed. App record currently
+   External group **Counterpart Public Beta** has build 2.0 (1), submitted for Beta App Review.
+   Automatic tester notifications are off; zero testers, no email invitations, no public link enabled. App record currently
    lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
    Release branch `feat/testflight-readiness` is pushed through `ab455a6` (no PR yet).
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.
    - **Latest direction:** Linux computer support coming soon, including Tailscale; bring-your-own-AI
      includes Claude Code, Codex, OpenCode and OpenAI-compatible APIs (OpenRouter/local models).
      The saved beta copy identifies Codex/API/endpoint settings as existing options; project routing
-     remains an integration bug, and OpenCode is planned. No public
+     remains an integration bug, and OpenCode is planned. User explicitly requested a subagent
+     to fix provider routing while parent finishes TestFlight; describe supported choices directly
+     in the listing and complete wiring before sharing the link. No public
      24-hour promise. Main project worker routing is still Claude-specific despite existing
      Codex/API adapters; close that gap rather than require Claude Code permanently.
    - **Phone connectivity fix is implemented:** unknown shows Checking, failed requests mark
