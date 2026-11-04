@@ -1,6 +1,5 @@
 import {copyFile, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {parseEnv} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
 import type {ElicitResult, Tool} from '@modelcontextprotocol/sdk/types.js';
 import {
@@ -358,12 +357,12 @@ export class PrinterHandoffRunner {
     // SSH, shells and other wrappers can change cwd or host before starting the MCP. Their
     // actual defaults are not visible here, so only cache direct local Node/npm launches.
     const localLaunch = /^(node|nodejs|npx)(\.exe|\.cmd)?$/i.test(basename(this.#config.process.command));
-    const mcpCwd = this.#config.process.cwd ?? process.cwd();
-    const dotEnv = input.sliceCache && !alreadySliced && localLaunch ? await readFile(join(mcpCwd, '.env'), 'utf8').catch(() => undefined) : undefined;
-    const presets = input.sliceCache && !alreadySliced && localLaunch
-      ? await presetDigests(sliceArgs, mcpCwd, {...(dotEnv ? parseEnv(dotEnv) : {}), ...this.#config.process.env}) : undefined;
+    // The `.env` the running MCP started with, not the file now: an edit reaches the MCP only when it restarts.
+    const started = catalog.startedWith;
+    const presets = input.sliceCache && !alreadySliced && localLaunch && started
+      ? await presetDigests(sliceArgs, this.#config.process.cwd ?? process.cwd(), {...started.presets, ...this.#config.process.env}) : undefined;
     const cacheKey = input.sliceCache && !alreadySliced && presets ? sliceCacheKey({model: await readFile(input.stlPath), backend: this.#config.backend, presets,
-      server: catalog.server, config: this.#config.process, env: dotEnv,
+      server: catalog.server, config: this.#config.process, env: started?.envSha256,
       args: {...sliceArgs, lay_flat: !threeMf && session.hasTool('lay_flat')}}) : undefined;
     const reused = cacheKey ? await readSlice(input.sliceCache!.directory, cacheKey) : undefined;
     let orientedStlPath = input.stlPath;

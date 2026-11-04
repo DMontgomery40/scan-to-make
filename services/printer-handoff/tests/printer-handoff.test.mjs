@@ -11,6 +11,7 @@ import {
   InMemoryElicitationRelay,
   PrinterHandoffRunner,
   PrinterMcpClient,
+  PrinterSession,
   readPrinterHandoffConfig,
 } from '../dist/index.js';
 
@@ -796,6 +797,23 @@ test('cached generic G-code still confirms temperatures and uploads G-code after
   }
   assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool),
     ['lay_flat', 'slice_stl', 'confirm_temperatures', 'confirm_temperatures', 'upload_gcode', 'confirm_temperatures', 'upload_gcode']);
+});
+
+test('a running MCP keeps the .env it started with: its slices are keyed by that one until it restarts', async t => {
+  const f = await setup(t);
+  const session = new PrinterSession('p1s', f.config, {relay: f.relay});
+  t.after(() => session.close());
+  const runner = new PrinterHandoffRunner(f.config, {relay: f.relay, session});
+  const slices = async () => (await f.calls()).filter(call => call.tool === 'slice_stl').length;
+  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}};
+  await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=hardened_steel\n');
+  await runner.run(input);
+  await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=stainless_steel\n');
+  await runner.run(input);
+  assert.equal(await slices(), 1, 'the running MCP still slices with the .env it read at start, so its slice still fits');
+  await session.restart();
+  await runner.run(input);
+  assert.equal(await slices(), 2, 'restarted, it reads the edited .env, and nothing sliced before matches it');
 });
 
 test('editing a preset the MCP reads from its .env or environment invalidates its slice', async t => {

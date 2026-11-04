@@ -31,7 +31,7 @@ export function sliceCacheKey(parts: {model: Buffer; backend: string; server?: {
 }
 
 /** Preset files both printer MCPs read from their environment when slice_stl doesn't name one. */
-const ENV_PRESETS = ['SLICER_PROFILE', 'BAMBU_SLICER_PROFILE', 'FILAMENT_PROFILE', 'SLICER_FILAMENT_PROFILE'];
+export const ENV_PRESETS = ['SLICER_PROFILE', 'BAMBU_SLICER_PROFILE', 'FILAMENT_PROFILE', 'SLICER_FILAMENT_PROFILE'];
 
 /** Explicit preset files can be edited without changing their path. If the MCP alone can read/resolve
  * an input (a remote path or named template), let it slice rather than reuse an unverified input. */
