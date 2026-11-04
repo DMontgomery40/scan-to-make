@@ -618,7 +618,12 @@ remote native probes and the SSH tunnel were removed after verification.
     and 23 photos. Actual Mac UI shows Your scan → Fixing the scan. First Codex pass at 18:05Z failed
     with “Codex did not return a valid project result”; this is an open provider acceptance failure,
     not a capture/upload failure. The subsequent Claude pass started 18:07:07Z and reached Blender,
-    identifying the object as a Leatherman Wave+. Cleanup result/geometry acceptance remains pending.
+    identifying the object as a Leatherman Wave+. **Claude cleanup completed 18:18:06Z** (about 11 min).
+    Actual installed Mac UI opened the result, now titled **Leatherman Wave+ replica**, Ready to print,
+    and rendered `current/model.stl` at 102.6 × 36.0 × 20.6 mm. This confirms the user-operated
+    capture → transfer → cleanup → displayed model flow. Geometry/scale acceptance remains open:
+    the pass assumed a flat unphotographed underside and straight lower sidewalls, retaining scan scale.
+    No print was initiated. Codex's initial invalid-result failure remains unresolved.
     No printer action, companion restart or provider-setting change was performed by the release owner.
     **iPhone AMS parity gap (Nov 4):** installed build is current, but #293 added the per-colour controls
     only to Mac. Mobile PrintSheet explicitly directs users to Mac for changing a colour's spool. Muse
@@ -628,7 +633,12 @@ remote native probes and the SSH tunnel were removed after verification.
     David reports a physical print completed with WRONG AMS colours and the plate is now clear.
     Merge owner `5bc59bdb` has been asked to coordinate the existing AMS/MCP owners on that print's
     backend receipts (last observed project Guitar pick `a2bfa85a-9700-495d-a86c-d4c6d521502e`).
-    Do not mark colour acceptance passed or reprint. David also reports another Device Hub use;
+    Root cause established by that owner: pre-#293 design retained only the merged STL; its two colour
+    3MFs stayed in old pass output under noncanonical names, with no current filaments/model.3mf.
+    The actual slice/dispatch was one black body/tray 0, so no MCP mapping bug is established. Owner
+    is implementing a producing-pass-bound legacy colour-loss explanation and explicit remake/one-colour
+    choice on main; no automatic adoption of ambiguous old outputs. Parent did not start the new pick
+    pass now running. Do not mark colour acceptance passed or reprint. David also reports another Device Hub use;
     read-only check at 11:15 MST found no Xcode DeviceHub process or events in its previous 8 minutes.
     David clarified this was an iOS lock-screen/Settings notice saying the device was viewed through
     Device Hub, not an observed agent tool call or reopened Mac window. USB read-only display info
