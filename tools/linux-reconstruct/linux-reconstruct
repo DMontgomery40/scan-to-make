@@ -1,0 +1,8 @@
+#!/bin/sh
+# Launcher: prefer this tool's own venv (usd-core), fall back to python3.
+set -eu
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -x "$DIR/.venv/bin/python" ]; then
+  exec "$DIR/.venv/bin/python" "$DIR/reconstruct.py" "$@"
+fi
+exec python3 "$DIR/reconstruct.py" "$@"
