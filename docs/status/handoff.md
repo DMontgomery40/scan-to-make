@@ -611,7 +611,26 @@ remote native probes and the SSH tunnel were removed after verification.
     Close, then checked Apple Camera front and rear. His result: “Preview stays live; both cameras work
     afterward.” USB-only `viewer-off-live.log` / `viewer-off-camera-excerpt.log` recorded camera processing
     with zero continuity-display blackening events. Owned logger is stopped. This accepts preview/cancel
-    and camera recovery with the viewer off; a complete real-object capture/reconstruction remains open.
+    and camera recovery with the viewer off. Theo/T3 workflow warning filed per its Ideas policy:
+    https://github.com/pingdotgg/t3code/discussions/31054 (Xcode-origin evidence, no claim T3 opened it).
+    **Real scan received Nov 4:** David completed capture and sent it from the phone. Object
+    `ba9346cd-e650-4e78-8cce-5ba7207b8122` contains the 2,106,941-byte original `scan/scan.usdz`
+    and 23 photos. Actual Mac UI shows Your scan → Fixing the scan. First Codex pass at 18:05Z failed
+    with “Codex did not return a valid project result”; this is an open provider acceptance failure,
+    not a capture/upload failure. The subsequent Claude pass started 18:07:07Z and reached Blender,
+    identifying the object as a Leatherman Wave+. Cleanup result/geometry acceptance remains pending.
+    No printer action, companion restart or provider-setting change was performed by the release owner.
+    **iPhone AMS parity gap (Nov 4):** installed build is current, but #293 added the per-colour controls
+    only to Mac. Mobile PrintSheet explicitly directs users to Mac for changing a colour's spool. Muse
+    implementation child `428fc779-7752-4874-8a67-8dedf20b7615` owns mobile/shared-client parity in
+    an isolated worktree; existing mapping API/model-version/estimate guards must be reused. Parent
+    retains integration/install ownership; child has no physical-phone/viewer/deploy/print permission.
+    David reports a physical print completed with WRONG AMS colours and the plate is now clear.
+    Merge owner `5bc59bdb` has been asked to coordinate the existing AMS/MCP owners on that print's
+    backend receipts (last observed project Guitar pick `a2bfa85a-9700-495d-a86c-d4c6d521502e`).
+    Do not mark colour acceptance passed or reprint. David also reports another Device Hub use;
+    read-only check at 11:15 MST found no Xcode DeviceHub process or events in its previous 8 minutes.
+    Other owners are auditing activity; no claim about the unverified actor. All physical viewers stay off.
     Keep physical-phone viewers/screen sharing/recording off during capture acceptance; use USB syslog
     only. Other agents remain off Davica3. Private logs and retained archives (not committed):
     `~/scan-to-make-work/camera-recurrence-20261104/`, especially `mac-coredevice-trigger.log`,
