@@ -21,6 +21,9 @@ struct PrintSheet: View {
     @State private var copies: Int?
     /// "Before layer N" pauses (the slicer's Add pause, for magnets or nuts), where `offersPauses`. Empty: none.
     @State private var pauses: [Int] = []
+    /// The pause whose layer is being typed, and what's typed.
+    @State private var editingPause: Int?
+    @State private var typedLayer = ""
     @State private var slice = EstimateState()
     @State private var shownPrinter: String?
     @Environment(\.horizontalSizeClass) private var widthClass
@@ -261,48 +264,82 @@ struct PrintSheet: View {
     private var layerCount: Int? { estimate?.layers.flatMap { $0 > 1 ? $0 : nil } }
     private var pauseTooLate: Bool { layerCount.map { count in pauses.contains { $0 > count } } ?? false }
 
+    /// The layers a row may take: above the pause before it and below the one after, so the list stays in order.
+    private func pauseRange(_ index: Int) -> ClosedRange<Int> {
+        let low = index > 0 ? pauses[index - 1] + 1 : 2
+        let high = index + 1 < pauses.count ? pauses[index + 1] - 1 : (layerCount ?? 100_000)
+        return low...max(low, high)
+    }
+    /// Room for another pause after the last one.
+    private var canAddPause: Bool { pauses.count < PrintChoice.maxPauses && (pauses.max() ?? 1) < (layerCount ?? 100_000) }
+
     private var pauseSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Pause").font(.headline)
-                Spacer()
-                if !pauses.isEmpty { Text(pauses.count == 1 ? "1 pause" : "\(pauses.count) pauses").font(.caption).foregroundStyle(.secondary) }
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Pause").font(.headline)
             ForEach(pauses.indices, id: \.self) { index in
-                HStack(spacing: 10) {
+                HStack(spacing: 4) {
                     Button { withAnimation { _ = pauses.remove(at: index) } } label: {
-                        Image(systemName: "minus.circle.fill").font(.title3).symbolRenderingMode(.palette).foregroundStyle(.white, .red)
+                        Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44).contentShape(.rect)
                     }
                     .buttonStyle(.plain)
+                    .padding(.leading, -10)
                     .accessibilityLabel("Remove the pause before layer \(pauses[index])")
-                    Stepper(value: Binding(get: { pauses[index] }, set: { pauses[index] = $0 }), in: 2...max(2, layerCount ?? 100_000)) {
-                        Text(layerCount.map { "Before layer \(pauses[index]) of \($0)" } ?? "Before layer \(pauses[index])")
-                            .monospacedDigit().foregroundStyle(layerCount.map { pauses[index] > $0 } == true ? .red : .primary)
+                    Button { typedLayer = String(pauses[index]); editingPause = index } label: {
+                        HStack(spacing: 0) {
+                            Text("Before layer ")
+                            Text("\(pauses[index])").fontWeight(.semibold).foregroundStyle(Color.filament)
+                            if let count = layerCount { Text(" of \(count)").foregroundStyle(.secondary) }
+                        }
+                        .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
                     }
-                    .accessibilityIdentifier("pause-\(index)")
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Type the layer")
+                    Spacer(minLength: 8)
+                    Stepper("Before layer \(pauses[index])", value: Binding(get: { pauses[index] }, set: { pauses[index] = $0 }), in: pauseRange(index))
+                        .labelsHidden()
+                        .accessibilityIdentifier("pause-\(index)")
                 }
+                .foregroundStyle(layerCount.map { pauses[index] > $0 } == true ? .red : .primary)
             }
-            if pauses.count < PrintChoice.maxPauses {
+            if canAddPause {
                 Button {
                     let next = (pauses.max() ?? 1) + 1
                     withAnimation { pauses.append(min(next, layerCount ?? next)) }
                 } label: {
                     Label(pauses.isEmpty ? "Add a Pause" : "Add Another Pause", systemImage: "plus.circle.fill")
                 }
+                .frame(minHeight: 44)
                 .accessibilityIdentifier("add-pause")
             }
             Text(pauses.isEmpty
                  ? "Stop before a layer to drop in magnets or nuts."
-                 : "The printer stops before each of these layers and waits, so you can drop in magnets or nuts. Press Resume on the printer when they’re in. Layers count as in Bambu Studio’s and OrcaSlicer’s preview.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                 : "The printer stops before each layer and waits for magnets or nuts. Press Resume on the printer when they’re in. Layers count as in Bambu Studio’s and OrcaSlicer’s preview.")
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if pauseTooLate, let count = layerCount {
-                Label("This print has \(count) layers.", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
+                Label("This print has \(count) layers.", systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
         .disabled(busy == "print")
+        .alert("Pause before layer", isPresented: Binding(get: { editingPause != nil }, set: { if !$0 { editingPause = nil } })) {
+            TextField("Layer", text: $typedLayer).keyboardType(.numberPad)
+            Button("Cancel", role: .cancel) { editingPause = nil }
+            Button("Done") { setTypedLayer() }
+        } message: {
+            Text(layerCount.map { "A layer from 2 to \($0)." } ?? "A layer from 2 up.")
+        }
+    }
+
+    /// A typed layer: kept within the print, and the list sorted with no layer twice.
+    private func setTypedLayer() {
+        defer { editingPause = nil }
+        guard let index = editingPause, pauses.indices.contains(index), let typed = Int(typedLayer.trimmingCharacters(in: .whitespaces)) else { return }
+        var next = pauses
+        next[index] = min(max(2, typed), layerCount ?? 100_000)
+        withAnimation { pauses = Array(Set(next)).sorted() }
     }
 
     /// Why Draft, Fine and Strength aren't offered: the update that unlocks them, in the Mac's words when it gives them.
@@ -377,7 +414,9 @@ struct PrintSheet: View {
         // Fresh capabilities: a Mac that just started reads its printers in the background (Copies depends on them).
         await store.loadPrinters()
         await store.loadCapabilities()
-        destinationId = project?.printerDestinationId ?? store.catalog?.defaultDestinationId ?? ""
+        let saved = project?.printerDestinationId ?? store.catalog?.defaultDestinationId ?? ""
+        // A printer whose MCP was changed since has another id; the project's choice follows it.
+        destinationId = store.catalog?.listed(saved) ?? saved
         // Print another: the last print's quality and strength again (its printer is the project's).
         if let last = project?.resolvedPrintDefaults(destinationId: destinationId) {
             quality = last.quality.flatMap(PrintQuality.init(rawValue:)) ?? quality

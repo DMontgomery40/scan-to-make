@@ -146,6 +146,12 @@ public struct PrinterCatalog: Codable, Equatable, Sendable {
     public func destination(_ id: String?) -> PrinterDestination? {
         destinations.first { $0.id == (id ?? defaultDestinationId) }
     }
+    /// The listed printer an id stands for now: itself, or the printer it became after a Printer MCP change
+    /// (its id through the other MCP, in `mcps`).
+    public func listed(_ id: String) -> String? {
+        if destinations.contains(where: { $0.id == id }) { return id }
+        return destinations.first { $0.mcps?.contains { $0.destinationId == id } == true }?.id
+    }
 }
 
 /// A spool the printer reports (`GET /v1/objects/<id>/filaments`): an AMS slot or the external spool.

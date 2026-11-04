@@ -521,6 +521,11 @@ final class CompanionClientTests: XCTestCase {
         let older = try JSONDecoder().decode(PrinterDestination.self, from: Data(#"{"id":"current","name":"P1S","backend":"bambu-printer-mcp","source":"current"}"#.utf8))
         XCTAssertFalse(older.offersMcpChoice)
         XCTAssertFalse(older.offersLayerPauses)
+        // A project saved on the printer's id through the other MCP finds the printer it became.
+        let catalog = PrinterCatalog(destinations: [printer], defaultDestinationId: "current")
+        XCTAssertEqual(catalog.listed("current"), "current")
+        XCTAssertEqual(catalog.listed("mcp-1a2b"), "current")
+        XCTAssertNil(catalog.listed("gone"))
     }
 
     func testPrinterConnectionReadsTheMCPsOwnWordsAndChangesGoThroughTheMac() async throws {
