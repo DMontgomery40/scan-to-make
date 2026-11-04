@@ -362,7 +362,8 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
     if (candidate.origin !== 'counterpart' || !candidate.folder) continue;
     const env = await environment(join(candidate.folder, '.env'));
     let route: RouteSource | undefined;
-    if (candidate.backend === 'mcp-3d-printer-server' && env.PRINTER_TYPE?.trim().toLowerCase() === 'bambu' && !env.BAMBU_DEFAULT_CONNECTION_MODE?.trim()
+    if (candidate.backend === 'mcp-3d-printer-server' && env.PRINTER_TYPE?.trim().toLowerCase() === 'bambu'
+      && (!env.BAMBU_DEFAULT_CONNECTION_MODE?.trim() || (env.BAMBU_DEFAULT_CONNECTION_MODE?.trim() === 'bambu_network' && !env.BAMBU_NETWORK_CONFIG_DIR?.trim()))
       && await readsRouteSettings(candidate.config.process.args?.find(arg => isAbsolute(arg) && arg.endsWith('.js')))) {
       const own = join(candidate.folder, '.env');
       route = await findBambuRoute(env.BAMBU_SERIAL ?? env.BAMBU_PRINTER_SERIAL,

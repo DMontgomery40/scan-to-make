@@ -21,6 +21,8 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 
 **What this companion supports.** `GET /healthz` (READ) replies `{status: "ok", protocolVersion: "0.1.0", capabilities: {genericConfirmations: true, materialChoice: true}}` from PR 5. `capabilities` is absent on older companions, so treat a missing flag as false. `name` (when present) is the Mac's name as people know it, its Computer Name ("Mac mini"), else its host name without `.local`: say "Mac mini connected" rather than "Your Mac". `genericConfirmations` means the printer questions below may carry text, number and choice fields, and `…/print-confirmation` takes those answers. Without it, show only yes/no questions and send booleans. `materialChoice` means `colour: {material}` is accepted ("What's loaded?", below).
 
+`printerSettings` enables the phone's per-printer Printer MCP and Connection pickers below, backed by the same services as Mac Settings. `printLayerPauses` means Print and Estimate accept `pauseBeforeLayers`; also require the destination's `capabilities.layerPauses` before offering the control. Missing flags mean the older companion does not support these controls.
+
 ## Headers the phone sends
 
 | Header | Value | Status |
@@ -57,6 +59,9 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | Method and path | Scope | Body | Reply |
 |---|---|---|---|
 | `GET /v1/objects/printers` | READ | | `{defaultDestinationId, destinations: PrinterDestination[]}`. From PR 1 each destination may carry `origin`, `state`, `stateCheckedAt` and `capabilities` (below). |
+| `GET /v1/objects/printers/<destinationId>/route` | PRINT | | `{route: PrintRoute \| null}`. Calls that destination MCP's `counterpart_print_route`, like Mac `printers.route`. Null means no route tool; do not show a Connection picker. |
+| `POST /v1/objects/printers/<destinationId>/route` | PRINT | `{route: string}` | `{route: PrintRoute \| null}`. The MCP saves its connection choice; no copy is kept by Counterpart. Refused with 409 during a project print, preparation/design reservation or printer-reported job. Reads remain available. |
+| `POST /v1/objects/printers/<destinationId>/mcp` | SETTINGS | `{backend: "bambu-printer-mcp" \| "mcp-3d-printer-server"}` | `{destinationId, defaultDestinationId, destinations: PrinterDestination[]}`. Uses Mac `printers.chooseMcp`; returns the canonical selected id and refreshed catalog. Offer only the destination's `mcps: [{backend, destinationId}]`. Existing busy checks refuse a change with 409; the current selection stays visible on refusal. |
 | `GET /v1/objects/printers/<destinationId>/camera.jpg` | PRINT | | A JPEG from that printer's camera (PR 2), shared 3 s cache. 404 when the destination has no camera; 503 when the camera is busy or unreachable. Header `X-Captured-At` (ISO), when the frame was taken. From PR 5 a frame up to 2 min old is returned at once while the next is fetched, so only a camera with no frame yet makes the request wait (below). |
 | `POST /v1/objects/<id>/printer` | PRINT | `{destinationId}` | `{object}` |
 | `GET /v1/objects/<id>/filaments` | PRINT | | `{filaments: [{slot, colour, material, name, filamentId, destinationId, suggested?}]}` for the project's printer. `suggested: true` (PR 2) marks the one preselected tray. |
@@ -66,6 +71,8 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `GET /v1/objects/<id>/camera.jpg` | PRINT | | A JPEG from the camera of the printer this project is printing on, or its chosen printer (PR 2). Same cache, codes and header as the printer camera route. |
 | `POST /v1/objects/<id>/print/pause`, `…/print/resume`, `…/print/cancel` | PRINT | `{}` | `{object}` (PR 2). 409 when nothing of this project's is printing, or the MCP lacks the tool. The MCP's own confirmation, if it asks, arrives as `printConfirmation` exactly as for Print. The app asks "Stop the print?" before posting cancel. |
 | `GET /v1/objects/<id>/prints/<printId>/frames/<eventId>.jpg` | READ | | An event's camera frame (PR 3); the event's `frame` field gives the path. |
+
+`PrintRoute` is `{route, mode, type, choices: string[], options?: [{id, label, available, reason?, controls?}], savedTo?: string | null}`. Use the MCP's option labels, availability and control description; show unknown future ids as reported. Earlier MCPs report only `choices` (`lan`, `cloud`); their fallback labels are Local network and Bambu Cloud. Destination ids are `[A-Za-z0-9_-]{1,256}` and route ids are `[a-z][a-z0-9_-]{0,31}`. Mutations reject unknown fields and never accept a replacement `destinationId` in the body. These operations use existing pairing scopes, so no new pairing is needed.
 
 ### Saved Project Settings (`projectPreferences`)
 

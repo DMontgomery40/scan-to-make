@@ -12,12 +12,14 @@ import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
 import {ControlFailure, parameters} from '../local-control-protocol.js';
+import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
 const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|settings|duplicate|photos|capture|capture-depth|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
+const PRINTER_SETTINGS = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
 const SETTINGS: RemoteScope = 'projects:write';
 
 class HttpFailure extends Error {
@@ -149,7 +151,7 @@ function send(response: ServerResponse, status: number, value: unknown): void {
 }
 
 /** Phone-facing objects: start something, send its scan and photos, follow it, correct it, print it. */
-export function createObjectRoutes(service: ObjectService) {
+export function createObjectRoutes(service: ObjectService, printerSetup?: Pick<PrinterSetup, 'chooseMcp'>) {
   return {
     async handle(request: IncomingMessage, response: ServerResponse, authorize: (scope: RemoteScope) => Promise<void>, header: (name: string) => string | undefined): Promise<void> {
       const url = new URL(request.url ?? '/', 'http://localhost');
@@ -159,6 +161,26 @@ export function createObjectRoutes(service: ObjectService) {
           if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
           return send(response, 200, service.printers());
+        }
+        const printerSettings = PRINTER_SETTINGS.exec(url.pathname);
+        if (printerSettings) {
+          const [, destinationId, action] = printerSettings;
+          const reading = action === 'route' && request.method === 'GET';
+          if (!reading && request.method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(action === 'mcp' ? SETTINGS : PRINT);
+          if (reading) return send(response, 200, {route: await service.printRoute(destinationId!) ?? null});
+          const input = await json<unknown>(request);
+          if (!input || typeof input !== 'object' || Array.isArray(input) || 'destinationId' in input) throw new HttpFailure(400, 'invalid-request');
+          if (action === 'route') {
+            const parsed = parameters['printers.route'].safeParse({...input, destinationId});
+            if (!parsed.success || !parsed.data.route) throw new HttpFailure(400, 'invalid-request');
+            return send(response, 200, {route: await service.printRoute(destinationId!, parsed.data.route) ?? null});
+          }
+          const parsed = parameters['printers.chooseMcp'].safeParse({...input, destinationId});
+          if (!parsed.success) throw new HttpFailure(400, 'invalid-request');
+          if (!printerSetup) throw new HttpFailure(404, 'not-supported', 'Update Counterpart on your Mac to change this printer’s MCP.');
+          const selected = await printerSetup.chooseMcp(destinationId!, parsed.data.backend);
+          return send(response, 200, {...selected, ...service.printers()});
         }
         const printerCamera = PRINTER_CAMERA.exec(url.pathname);
         if (printerCamera) {
@@ -438,6 +460,7 @@ export function createObjectRoutes(service: ObjectService) {
         }
         return send(response, 200, {object: publicObject(object)});
       } catch (error) {
+        if (error instanceof PrinterSetupError) return send(response, error.code === 'conflict' ? 409 : error.code === 'invalid' ? 400 : error.code === 'not-found' ? 404 : 503, {error: {code: error.code === 'invalid' ? 'invalid-request' : error.code, message: error.message}});
         if (error instanceof ControlFailure) return send(response, error.code === 'conflict' ? 409 : error.code === 'invalid-request' ? 400 : 503, {error: {code: error.code, message: error.message}});
         if (error instanceof HttpFailure) return send(response, error.status, {error: {code: error.code, message: error.message}});
         if (error instanceof ObjectNotFoundError) return send(response, 404, {error: {code: 'not-found', message: 'Object not found'}});

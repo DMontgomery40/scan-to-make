@@ -89,13 +89,18 @@ import CounterpartKit
         do {
             let latest = try await mac.get(id)
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return .cancelled }
+            reachable = true
+            if error?.isUnreachable == true { error = nil }
             if reads.accept(id, ticket: ticket) { show(latest) }
             return nil
         } catch {
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return .cancelled }
             let failure = error as? CompanionError ?? .unreachable
+            if failure.isUnreachable { reachable = false; self.error = failure }
             if failure.code == "not-found" {
                 guard reads.accept(id, ticket: ticket) else { return .cancelled }
+                reachable = true
+                if self.error?.isUnreachable == true { self.error = nil }
                 remove(id)
             }
             return failure
@@ -225,10 +230,12 @@ import CounterpartKit
             do {
                 let client = mac.client
                 for try await update in EventStream(feed: LongPollEventFeed(client: client), healthy: { await client.answers() }).updates {
-                    events = true; reachable = true
+                    events = true
                     switch update {
                     case .resync: await load(); await loadPrinters()
                     case .event(let event):
+                        reachable = true
+                        if error?.isUnreachable == true { error = nil }
                         await receive(event)
                     }
                 }

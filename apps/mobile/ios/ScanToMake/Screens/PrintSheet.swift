@@ -19,6 +19,7 @@ struct PrintSheet: View {
     @State private var strength = PrintStrength.standard
     /// How many on the plate, where `offersCopies`; nil until you choose (the printer profile's count).
     @State private var copies: Int?
+    @State private var pauses: [Int] = []
     @State private var slice = EstimateState()
     @State private var shownPrinter: String?
     @Environment(\.horizontalSizeClass) private var widthClass
@@ -234,6 +235,7 @@ struct PrintSheet: View {
                 } onIncrement: { copies = min(64, (copies ?? 1) + 1) } onDecrement: { copies = max(1, (copies ?? 2) - 1) }
                 .accessibilityIdentifier("copies")
             }
+            if offersPauses { pauseRows }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -264,6 +266,41 @@ struct PrintSheet: View {
     }
     /// Copies on a Mac that takes them, for a printer whose MCP really makes them (KAN-214 PR 8b).
     private var offersCopies: Bool { store.macCapabilities.contains("printCopies") && printer?.offersCopies == true }
+
+    private var offersPauses: Bool {
+        !slicedOriginal && store.macCapabilities.contains("printLayerPauses") && printer?.capabilities?.layerPauses == true
+    }
+    private var layerCount: Int? { estimate?.layers }
+    private var validPauses: Bool {
+        !offersPauses || pauses.isEmpty || (layerCount.map { count in pauses.allSatisfy { $0 >= 2 && $0 <= count } } ?? false)
+    }
+
+    @ViewBuilder private var pauseRows: some View {
+        Text("Pause").font(.headline)
+        ForEach(pauses.indices, id: \.self) { index in
+            HStack {
+                Stepper(value: Binding(get: { pauses[index] }, set: { pauses[index] = $0 }), in: 2...max(2, layerCount ?? 100_000)) {
+                    Text(layerCount.map { "Before layer \(pauses[index]) of \($0)" } ?? "Before layer \(pauses[index])").monospacedDigit()
+                }
+                Button { pauses.remove(at: index) } label: { Image(systemName: "minus.circle.fill") }
+                    .buttonStyle(.borderless).accessibilityLabel("Remove this pause")
+            }
+        }
+        Button(pauses.isEmpty ? "Add a Pause…" : "Add Another Pause") {
+            let next = (pauses.max() ?? 1) + 1
+            pauses.append(min(next, layerCount ?? next))
+        }
+        .disabled(layerCount.map { $0 < 2 } ?? true)
+        .accessibilityIdentifier("add-pause")
+        if !pauses.isEmpty {
+            Text("The printer waits before each chosen layer so you can insert magnets or nuts. Resume from Counterpart when you’re ready.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !validPauses {
+                Text(layerCount.map { "Choose a pause between layers 2 and \($0)." } ?? "Waiting for this print’s layer count…")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+    }
 
 
     private var uncertainCard: some View {
@@ -298,7 +335,7 @@ struct PrintSheet: View {
     }
 
     private var canPrint: Bool {
-        guard busy == nil, printer != nil, printer?.isOffline != true else { return false }
+        guard busy == nil, printer != nil, printer?.isOffline != true, validPauses else { return false }
         if uncertain && !checked { return false }
         // An AMS printer prints the spool you can see chosen here, never whatever the Mac last had set.
         if !published && filamentKind == "ams" && chosen == nil { return false }
@@ -406,7 +443,8 @@ struct PrintSheet: View {
         let choice = PrintChoice(colour: published ? nil : colour,
                                  quality: !slicedOriginal && printer?.offersQuality == true ? quality : .standard,
                                  strength: !slicedOriginal && printer?.offersStrength == true ? strength : .standard,
-                                 checked: uncertain && checked, copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil))
+                                 checked: uncertain && checked, copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil),
+                                 pauseBeforeLayers: offersPauses ? pauses : [])
         do {
             let ticket = store.startRequest()
             store.replace(try await store.mac.client.print(projectId, choice: choice, overrideDefaults: true), ticket: ticket)

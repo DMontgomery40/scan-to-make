@@ -1191,9 +1191,23 @@ export class ObjectService {
   async printRoute(destinationId: string, route?: PrintRoute['route']): Promise<PrintRoute | undefined> {
     const session = this.#deps.printers?.session(destinationId);
     if (!session) throw new ObjectNotFoundError();
-    await session.connect();
-    if (!session.hasTool('counterpart_print_route')) return undefined;
-    return route ? await setPrintRoute(session, route) : await readPrintRoute(session);
+    const canonical = this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId;
+    const destination = this.#deps.printerCatalog?.destinations.find(item => item.id === canonical);
+    const ids = [...new Set([destinationId, canonical, ...(destination?.mcps?.map(item => item.destinationId) ?? [])])];
+    const gate = this.#deps.printGate;
+    const busy = () => new InvalidStateError('This printer is printing or preparing work. Change its connection when that finishes.');
+    // Reserve before any await: a new dispatch cannot enter between the check and the MCP mutation.
+    if (route && gate && !gate.beginUpdate(ids)) throw busy();
+    try {
+      if (route && (await this.printerBusy(destinationId) || await this.#deps.printers?.printing(destinationId))) {
+        throw busy();
+      }
+      await session.connect();
+      if (!session.hasTool('counterpart_print_route')) return undefined;
+      return route ? await setPrintRoute(session, route) : await readPrintRoute(session);
+    } finally {
+      if (route) gate?.endUpdate(ids);
+    }
   }
 
   async printerCamera(destinationId: string, options: {size?: CameraSize} = {}): Promise<CameraFrame> {

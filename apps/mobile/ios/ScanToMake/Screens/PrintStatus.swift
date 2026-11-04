@@ -24,7 +24,7 @@ struct PrintStatusCard: View {
                 HStack(spacing: 10) {
                     Button(action: openConfirmation) { Label("Review", systemImage: "checkmark.shield").frame(maxWidth: .infinity).frame(height: 36) }
                         .buttonStyle(.glassProminent)
-                    Button(role: .destructive) { answer(confirmation, .cancel, [:]) } label: { Text("Don't Print").frame(maxWidth: .infinity).frame(height: 36) }
+                    Button(role: .destructive) { answer(confirmation, .cancel, [:]) } label: { Text(project.print?.live?.state == "paused" ? "Cancel Resume" : "Don't Print").frame(maxWidth: .infinity).frame(height: 36) }
                         .buttonStyle(.glass)
                 }
                 .disabled(working)

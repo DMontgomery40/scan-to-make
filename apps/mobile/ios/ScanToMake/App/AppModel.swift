@@ -135,6 +135,7 @@ import CounterpartKit
         case "ask": route = .project(ids.plush)
         case "failed": route = .project(ids.failed); debugSection = "activity"
         case "printing": route = .printing(ids.clip)
+        case "print-finished": Fixtures.finished = true; route = .printing(ids.clip)
         // The one-colour sheet: v1 prints one filament (PRD §5.5); "print" shows the same until parts arrive (M3b).
         case "print", "print-one": route = .print(ids.mic)
         case "print-noams": Fixtures.printer = "mcp-garage"; route = .print(ids.mic)

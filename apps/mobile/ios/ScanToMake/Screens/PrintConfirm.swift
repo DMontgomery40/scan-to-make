@@ -20,6 +20,7 @@ struct PrintConfirmSheet: View {
     private var printer: String { project.print?.destination?.name ?? store.catalog?.destination(project.printerDestinationId)?.name ?? "Your printer" }
     private var via: String { store.catalog?.destination(project.printerDestinationId)?.via ?? "the printer's MCP" }
     private var words: ConfirmationWords { ConfirmationWords(message: question.message, fileName: project.print?.jobName) }
+    private var resuming: Bool { project.print?.live?.state == "paused" }
 
     var body: some View {
         NavigationStack {
@@ -32,7 +33,7 @@ struct PrintConfirmSheet: View {
                             Image(systemName: "checkmark.shield.fill").font(.title2).foregroundStyle(.blue)
                                 .frame(width: 52, height: 52).glassEffect(.regular.tint(.blue.opacity(0.25)), in: .circle)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("\(printer) needs a yes before printing \(ProjectWords.title(project))").font(.title3.bold()).fixedSize(horizontal: false, vertical: true)
+                                Text("\(printer) needs a yes before \(resuming ? "resuming" : "printing") \(ProjectWords.title(project))").font(.title3.bold()).fixedSize(horizontal: false, vertical: true)
                                 Text("Asked by \(via) on \(store.macName ?? "your Mac")").font(.footnote).foregroundStyle(.secondary)
                             }
                         }
@@ -54,18 +55,18 @@ struct PrintConfirmSheet: View {
                 .safeAreaBar(edge: .bottom) {
                     VStack(spacing: 8) {
                         Button { answer(.accept) } label: {
-                            Text(working ? "Starting…" : "Start Print").fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 44)
+                            Text(working ? (resuming ? "Resuming…" : "Starting…") : (resuming ? "Resume" : "Start Print")).fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 44)
                         }
                         .buttonStyle(.glassProminent).controlSize(.large)
                         .disabled(working || !question.canAccept(values, atMs: now))
                         .accessibilityIdentifier("start-print")
-                        Text(left > 0 ? "Nothing goes to the printer until you confirm · \(Self.clock(left)) left" : "This question expired. Your Mac will ask again if you print.")
+                        Text(left > 0 ? "Nothing goes to the printer until you confirm · \(Self.clock(left)) left" : "This question expired. Try \(resuming ? "Resume" : "Print") again for a new question.")
                             .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 20)
                 }
             }
-            .navigationTitle("Confirm Print")
+            .navigationTitle(resuming ? "Confirm Resume" : "Confirm Print")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // Closing leaves the question open; the project page offers it again, and Don't Print.

@@ -167,7 +167,7 @@ final class ObjectWordsTests: XCTestCase {
 
     func testAReadyProjectPrintsOrTakesChanges() {
         XCTAssertEqual(ready().words.actions, [.print, .correct])
-        XCTAssertEqual(ready().words.size, "48 × 50 × 54 mm")
+        XCTAssertEqual(ready().words.size, "48.2 × 50.4 × 53.6 mm")
         XCTAssertEqual(ObjectWords.formatMinutes(72), Format.duration(72 * 60))
         XCTAssertEqual(ready(["title": "Mic mount"]).words.subtitle(request: "Something that holds the mic. Both are in the photos."),
                        "Ready to print · something that holds the mic")

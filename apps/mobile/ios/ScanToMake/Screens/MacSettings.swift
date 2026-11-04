@@ -158,12 +158,18 @@ struct MacSettingsSections: View {
         Section {
             ForEach(model.store.catalog?.destinations ?? []) { printer in
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(printer.name).font(.headline)
-                        Spacer()
-                        Text(PrinterWords.state(printer, store: model.store)).font(.caption).foregroundStyle(printer.isReady == true ? Color.okGreen : .secondary)
+                    NavigationLink {
+                        PrinterDetailView(store: model.store, id: printer.id)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(printer.name).font(.headline)
+                                Spacer()
+                                Text(PrinterWords.state(printer, store: model.store)).font(.caption).foregroundStyle(printer.isReady == true ? Color.okGreen : .secondary)
+                            }
+                            Text([printer.via, printer.capabilities?.server?.version].compactMap { $0 }.joined(separator: " ")).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
-                    Text([printer.via, printer.capabilities?.server?.version].compactMap { $0 }.joined(separator: " ")).font(.caption).foregroundStyle(.secondary)
                     if let missing = printer.capabilities?.update?.message { Text(missing).font(.caption).foregroundStyle(.secondary) }
                     if let progress = printer.mcpId.flatMap({ model.store.mcpUpdates[$0] }) {
                         HStack(spacing: 6) {

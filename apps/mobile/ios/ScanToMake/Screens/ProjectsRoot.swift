@@ -170,7 +170,7 @@ struct SidebarList: View {
             }
         }
         .navigationTitle("Projects")
-        .navigationSubtitle(store.reachable == false ? "\(store.macName ?? "Your Mac") isn't answering" : "\(store.macName ?? "Your Mac") connected")
+        .navigationSubtitle(store.reachable == false ? "\(store.macName ?? "Your Mac") isn't answering" : store.reachable == true ? "\(store.macName ?? "Your Mac") connected" : store.macName ?? "Your Mac")
         .searchable(text: $query, prompt: "Projects, printers, notes")
         .searchFocused($searching)
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }

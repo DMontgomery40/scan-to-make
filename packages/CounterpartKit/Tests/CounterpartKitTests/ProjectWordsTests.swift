@@ -162,8 +162,8 @@ final class ProjectWordsTests: XCTestCase {
         }
     }
 
-    func testSizeIsWholeMillimetres() {
-        XCTAssertEqual(ProjectWords(ready()).size, "62 × 75 × 49 mm")
+    func testSizeKeepsTenthsOfAMillimetre() {
+        XCTAssertEqual(ProjectWords(ready()).size, "61.6 × 75.2 × 49.4 mm")
         XCTAssertNil(ProjectWords(project([:])).size)
     }
 
@@ -311,7 +311,7 @@ final class ProjectWordsTests: XCTestCase {
     }
 
     func testCardLines() {
-        XCTAssertEqual(ProjectWords(ready()).line, "Ready to print · 62 × 75 × 49 mm")
+        XCTAssertEqual(ProjectWords(ready()).line, "Ready to print · 61.6 × 75.2 × 49.4 mm")
         XCTAssertEqual(ProjectWords(ready(["state": "printed"])).line, "Sent to your printer", "no claim it printed without the monitor's word")
         let printed = ready(["state": "printed", "print": ["bundleId": "b", "destination": ["id": "current", "name": "P1S"],
                                                          "monitor": ["phase": "ended", "endState": "done", "endedAt": "2026-10-30T09:00:00Z"]]])

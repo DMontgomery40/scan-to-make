@@ -23,7 +23,7 @@ struct PrintersView: View {
                         ProgressView()
                     }
                 } footer: {
-                    Text("These come from bambu-printer-mcp and mcp-3D-printer-server on your Mac. Add or change printers there; Counterpart picks them up.")
+                    Text(store.macCapabilities.contains("printerSettings") ? "Add printers in Counterpart on your Mac. Pick a printer here to change its MCP or connection." : "These come from bambu-printer-mcp and mcp-3D-printer-server on your Mac. Add or change printers there; Counterpart picks them up.")
                 }
             }
             .navigationTitle("Printers")
@@ -102,9 +102,15 @@ struct PrinterDetailView: View {
     @State private var feed = CameraFeed()
     @State private var copied = false
     @State private var fullScreen = false
+    @State private var selectedId: String?
+    @State private var connection: PrinterPrintRoute?
+    @State private var connectionLoaded = false
+    @State private var settingsProblem: String?
+    @State private var savingSetting = false
 
-    private var printer: PrinterDestination? { store.catalog?.destination(id) }
-    private var job: Project? { store.printing(on: id) }
+    private var destinationId: String { selectedId ?? id }
+    private var printer: PrinterDestination? { store.catalog?.destination(destinationId) }
+    private var job: Project? { store.printing(on: destinationId) }
 
     var body: some View {
         ScrollView {
@@ -123,6 +129,10 @@ struct PrinterDetailView: View {
                     }
                     .padding(.horizontal, 20)
 
+                    if store.macCapabilities.contains("printerSettings") {
+                        printerSettings(printer).padding(.horizontal, 16)
+                    }
+
                     if let update = printer.capabilities?.update { updateCard(printer, update).padding(.horizontal, 16) }
 
                     if let job {
@@ -133,7 +143,7 @@ struct PrinterDetailView: View {
                     PanelTitle("Filament")
                     filamentCard(printer).padding(.horizontal, 16)
 
-                    let history = store.projects.filter { ($0.print?.destinationId ?? $0.print?.destination?.id) == id && $0.print?.monitor?.endState != nil }
+                    let history = store.projects.filter { ($0.print?.destinationId ?? $0.print?.destination?.id) == destinationId && $0.print?.monitor?.endState != nil }
                     if !history.isEmpty {
                         PanelTitle("Printed from Counterpart")
                         VStack(spacing: 0) {
@@ -147,7 +157,7 @@ struct PrinterDetailView: View {
                         .padding(.horizontal, 16)
                     }
 
-                    Text("\(printer.name) comes from \(printer.via) on \(store.macName ?? "your Mac"). Change its settings there; Counterpart picks them up.")
+                    Text("\(printer.name) uses \(printer.via) on \(store.macName ?? "your Mac"). Its settings are kept on your Mac.")
                         .font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 20)
                 }
                 .padding(.bottom, 40)
@@ -159,9 +169,85 @@ struct PrinterDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(isPresented: $fullScreen) { CameraFullScreen(feed: feed, printer: printer?.name ?? "Printer") }
         // Keyed on whether the Mac says it has a camera, so the photos start once the printers have loaded.
-        .task(id: "\(id)#\(printer?.hasCamera == true)#\(scenePhase)#\(fullScreen)") {
+        .task(id: "\(destinationId)#\(printer?.hasCamera == true)#\(scenePhase)#\(fullScreen)") {
             guard scenePhase == .active, printer?.hasCamera == true else { return }
-            await feed.run(app.companion, printer: id, every: fullScreen ? 3 : 10)
+            await feed.run(app.companion, printer: destinationId, every: fullScreen ? 3 : 10)
+        }
+        .task(id: "\(destinationId)#\(store.macCapabilities.contains("printerSettings"))") {
+            guard store.macCapabilities.contains("printerSettings") else { return }
+            await loadConnection()
+        }
+    }
+
+    @ViewBuilder private func printerSettings(_ printer: PrinterDestination) -> some View {
+        if (printer.mcps?.count ?? 0) > 1 || connection != nil || !connectionLoaded || settingsProblem != nil {
+            VStack(alignment: .leading, spacing: 12) {
+                if let choices = printer.mcps, choices.count > 1 {
+                    Picker("Printer MCP", selection: Binding(get: { printer.backend }, set: { chooseMcp($0) })) {
+                        ForEach(choices, id: \.backend) { choice in
+                            Text(choice.backend == "bambu-printer-mcp" ? "bambu-printer-mcp" : "mcp-3D-printer-server").tag(choice.backend)
+                        }
+                    }
+                    .pickerStyle(.menu).disabled(savingSetting || job != nil)
+                }
+                if let connection, !connection.choices.isEmpty {
+                    Picker("Connection", selection: Binding(get: { connection.route }, set: { chooseConnection($0) })) {
+                        ForEach(connection.choices, id: \.self) { choice in
+                            Text(connection.label(choice)).tag(choice).disabled(!connection.available(choice))
+                        }
+                    }
+                    .pickerStyle(.menu).disabled(savingSetting || job != nil)
+                    if let option = connection.options?.first(where: { $0.id == connection.route }), let words = option.controls ?? option.reason {
+                        Text(words).font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if !connectionLoaded { ProgressView("Reading the connection…").font(.subheadline) }
+                if let settingsProblem {
+                    Text(settingsProblem).font(.caption).foregroundStyle(.orange)
+                    Button("Try again") { Task { await loadConnection() } }.disabled(savingSetting)
+                }
+                if job != nil { Text("Change these settings when the print finishes.").font(.caption).foregroundStyle(.secondary) }
+            }
+            .padding(16)
+            .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        }
+    }
+
+    private func loadConnection() async {
+        connectionLoaded = false
+        let requestedId = destinationId
+        do {
+            let latest = try await store.mac.client.printerPrintRoute(requestedId)
+            guard !Task.isCancelled, requestedId == destinationId else { return }
+            connection = latest; settingsProblem = nil
+        } catch {
+            guard !Task.isCancelled, requestedId == destinationId else { return }
+            connection = nil
+            settingsProblem = (error as? CompanionError)?.message ?? CompanionError.unreachable.message
+        }
+        connectionLoaded = true
+    }
+
+    private func chooseConnection(_ choice: String) {
+        guard !savingSetting, choice != connection?.route, connection?.available(choice) == true else { return }
+        savingSetting = true
+        Task {
+            defer { savingSetting = false }
+            do { connection = try await store.mac.client.printerPrintRoute(destinationId, route: choice); settingsProblem = nil }
+            catch { settingsProblem = (error as? CompanionError)?.message ?? CompanionError.unreachable.message }
+        }
+    }
+
+    private func chooseMcp(_ backend: String) {
+        guard !savingSetting, backend != printer?.backend else { return }
+        savingSetting = true
+        Task {
+            defer { savingSetting = false }
+            do {
+                let selected = try await store.mac.client.choosePrinterMcp(destinationId, backend: backend)
+                store.catalog = selected.catalog
+                connection = nil; connectionLoaded = false; settingsProblem = nil
+                selectedId = selected.destinationId
+            } catch { settingsProblem = (error as? CompanionError)?.message ?? CompanionError.unreachable.message }
         }
     }
 

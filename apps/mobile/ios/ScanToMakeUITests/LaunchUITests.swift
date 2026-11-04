@@ -307,6 +307,28 @@ final class PrintScreensUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Stop Print"].waitForExistence(timeout: 5), "Stop asks first")
     }
 
+    func testFinishedPrintRetiresControlsAndFutureNotificationPromise() {
+        let app = launch("print-finished")
+        XCTAssertTrue(app.staticTexts["The print finished"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["Pause"].exists)
+        XCTAssertFalse(app.buttons["Resume"].exists)
+        XCTAssertFalse(app.buttons["Stop"].exists)
+        XCTAssertFalse(app.staticTexts["You'll get a notification when it's done, or if the printer stops."].exists)
+        XCTAssertFalse(app.staticTexts["Getting a photo from P1S…"].exists)
+    }
+
+    func testPhoneOffersAPauseWithinTheSlicedLayers() {
+        let app = launch("print-one")
+        let add = app.buttons["add-pause"]
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 20))
+        for _ in 0..<3 { app.swipeUp() }
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertTrue(add.isEnabled)
+        add.tap()
+        XCTAssertTrue(app.steppers["Before layer 2 of 212"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["print-now"].isEnabled)
+    }
+
     /// Scrolls to the bottom and checks that `last` ends above the bottom bar's top (`bar`), so the bar
     /// never covers the screen's last control.
     private func assertLastControlClearsTheBar(_ app: XCUIApplication, last: XCUIElement, bar: XCUIElement, _ screen: String) {
@@ -340,8 +362,8 @@ final class PrintScreensUITests: XCTestCase {
         XCTAssertTrue(footer.waitForExistence(timeout: 20))
         // At rest, before any scrolling: the note sits above Pause and Stop, never under them.
         XCTAssertLessThanOrEqual(footer.frame.maxY, app.buttons["Pause"].frame.minY + 1, "the note is under the controls at rest")
-        let speed = app.staticTexts["Speed"]
-        assertLastControlClearsTheBar(app, last: speed, bar: footer, "printing")
+        let bed = app.staticTexts["Bed"]
+        assertLastControlClearsTheBar(app, last: bed, bar: footer, "printing")
     }
 
     func testAPrinterNamesTheUpdateItsMCPNeeds() {

@@ -26,10 +26,10 @@ struct SettingsView: View {
                     HStack(spacing: 14) {
                         Image(systemName: "macmini.fill").font(.title2).foregroundStyle(.white)
                             .frame(width: 50, height: 50)
-                            .glassEffect(.regular.tint((store.reachable == false ? Color.orange : Color.okGreen).opacity(0.28)), in: .rect(cornerRadius: 16))
+                            .glassEffect(.regular.tint(connectionTint.opacity(0.28)), in: .rect(cornerRadius: 16))
                         VStack(alignment: .leading, spacing: 3) {
                             Text(store.macName ?? "Your Mac").font(.headline)
-                            if checking {
+                            if checking || (store.reachable == nil && store.error == nil) {
                                 Label("Checking…", systemImage: "arrow.triangle.2.circlepath").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                             } else if store.reachable == false || store.error != nil {
                                 Label("Can't reach it right now", systemImage: "exclamationmark.circle.fill").font(.subheadline.weight(.medium)).foregroundStyle(.orange)
@@ -112,6 +112,11 @@ struct SettingsView: View {
 
     private var notificationSummary: String { app.cloud.alertsMessage }
 
+    private var connectionTint: Color {
+        if checking || (store.reachable == nil && store.error == nil) { return .secondary }
+        return store.reachable == false || store.error != nil ? .orange : .okGreen
+    }
+
     private func link<Label: View>(_ url: URL, _ label: Label) -> some View {
         Button { openURL(url) } label: { label }.foregroundStyle(.primary)
     }
@@ -121,7 +126,6 @@ struct SettingsView: View {
         checking = true
         Task {
             defer { checking = false }
-            _ = try? await store.pairingClient.check()
             await store.load()
         }
     }

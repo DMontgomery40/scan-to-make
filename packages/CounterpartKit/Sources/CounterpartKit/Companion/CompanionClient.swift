@@ -76,6 +76,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/events") || is_("/v1/settings") || is_("/v1/devices") { return "projects:read" }
             if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
             if is_(one + "/(filaments|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
+            if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route") { return "printer-handoff:use" }
         case "PATCH":
             if is_(one) { return "captures:import" }
             if is_(one + "/settings") { return "captures:import" }
@@ -92,6 +93,8 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
             if is_("/v1/settings/(ai/test|fusion/setup)") { return "projects:write" }
             if is_("/v1/printers/mcp/[^/]+/update") { return "printer-handoff:use" }
+            if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route") { return "printer-handoff:use" }
+            if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/mcp") { return "projects:write" }
         default: break
         }
         return nil
@@ -125,8 +128,12 @@ public final class CompanionClient: @unchecked Sendable {
             if let deviceName { request.setValue(deviceName, forHTTPHeaderField: "X-Scan-Device-Name") }
             if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
             do {
+                // Metadata deadlines bound the whole reply, including a peer trickling bytes. Commands and
+                // file transfers keep their budgets; event long polls pass their own 40-second timeout.
+                let metadata = method == "GET" && limit <= Self.jsonLimit
+                let resourceTimeout = metadata ? timeout + 5 : (body?.count ?? 0) > Self.photoLimit ? 600 : max(180, timeout + 10)
                 let reply = try await transport.send(request, trust: .record(attempt), limit: limit,
-                                                     resourceTimeout: (body?.count ?? 0) > Self.photoLimit ? 600 : max(180, timeout + 10))
+                                                     resourceTimeout: resourceTimeout)
                 let latest = try? pairing.store.read()
                 guard attempt.isSamePairing(as: latest ?? nil) else { throw CompanionError.transport("pairing-changed") }
                 return reply
@@ -200,8 +207,8 @@ public final class CompanionClient: @unchecked Sendable {
     private struct Filaments: Decodable { var filaments: [PrinterFilament] }
     private struct ActivityReply: Decodable { var activity: [Project.Activity] }
 
-    public func list() async throws -> [Project] { try await request("GET", "/v1/objects", as: Many.self).objects }
-    public func get(_ id: String) async throws -> Project { try await request("GET", "/v1/objects/\(id)", as: One.self).object }
+    public func list() async throws -> [Project] { try await request("GET", "/v1/objects", as: Many.self, timeout: 10).objects }
+    public func get(_ id: String) async throws -> Project { try await request("GET", "/v1/objects/\(id)", as: One.self, timeout: 10).object }
     /// Creates a project. `kind` is `fit` (make something that fits) or `copy` (copy what you scanned); the
     /// Mac uses Blender for a copy and may use Fusion for a fit. Without it the Mac infers it (a scan means copy).
     public func create(_ instructions: String, kind: String? = nil, url: URL? = nil) async throws -> Project {

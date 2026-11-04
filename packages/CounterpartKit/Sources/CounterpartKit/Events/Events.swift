@@ -145,8 +145,9 @@ public struct EventStream: Sendable {
                 while !Task.isCancelled {
                     do {
                         let page = try await feed.page(after: cursor ?? 0, wait: cursor == nil ? 0 : 25, limit: cursor == nil ? 0 : 100)
+                        let recovered = failures > 0
                         failures = 0
-                        if cursor != nil, page.needsResync { continuation.yield(.resync) }
+                        if recovered || (cursor != nil && page.needsResync) { continuation.yield(.resync) }
                         if cursor != nil { for event in page.events { continuation.yield(.event(event)) } }
                         cursor = page.next
                     } catch let error as CompanionError where error.isUnsupported || error.needsPairing {
@@ -157,6 +158,7 @@ public struct EventStream: Sendable {
                         // Our own task stopping ends the stream; a poll cancelled underneath us is just retried.
                         if Task.isCancelled { break }
                         if await healthy() {
+                            if failures > 0 { continuation.yield(.resync) }
                             failures = 0
                             try? await Task.sleep(for: .seconds(1))
                             continue

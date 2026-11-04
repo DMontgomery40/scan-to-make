@@ -154,6 +154,33 @@ import CounterpartKit
         XCTAssertNil(store.project(project.id), "confirmed absence must reach the unavailable UI")
     }
 
+    func testProjectReloadReportsLostConnectionAndRecoversWhenTheMacAnswers() async {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        store.reachable = true
+        mac.answers = false
+        _ = await store.reload("d79d4c15-d786-461c-b76e-ec687c8e2dad")
+        XCTAssertEqual(store.reachable, false, "a detail refresh that cannot reach the Mac must update Settings too")
+        XCTAssertEqual(store.error?.code, "unreachable")
+        mac.answers = true
+        _ = await store.reload("d79d4c15-d786-461c-b76e-ec687c8e2dad")
+        XCTAssertEqual(store.reachable, true, "even a confirmed 404 proves the Mac answered")
+        XCTAssertNil(store.error, "the connection error clears once the Mac answers again")
+    }
+
+    func testFailedEventPollDoesNotReportConnectedWhileResyncIsStillWaiting() async {
+        let mac = ResyncMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let following = Task { await store.follow() }
+        await mac.waitForRefresh()
+        XCTAssertNil(store.reachable, "a retry signal is not a successful response from the Mac")
+        following.cancel()
+        await mac.finishRefresh()
+        await following.value
+    }
+
     func testOlderMissingReplyCannotReplaceANewerProjectOrItsErrorState() async throws {
         let mac = DelayedMissingProjectMac()
         let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
@@ -212,6 +239,26 @@ import CounterpartKit
         await model.chooseAI("codex-cli")
         XCTAssertNil(model.problem)
         XCTAssertTrue(mac.requests.contains("POST /v1/settings/ai/test"), "an accepted choice is tested")
+    }
+}
+
+/// An unreachable event feed whose resulting project refresh has not answered yet.
+private actor ResyncMac: HTTPTransport {
+    private var refresh: CheckedContinuation<HTTPReply, Error>?
+    private var waiting: CheckedContinuation<Void, Never>?
+    func waitForRefresh() async {
+        if refresh != nil { return }
+        await withCheckedContinuation { waiting = $0 }
+    }
+    func finishRefresh() {
+        refresh?.resume(throwing: TransportError("cancelled")); refresh = nil
+    }
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        guard request.url?.path == "/v1/objects" else { throw TransportError("network") }
+        return try await withCheckedThrowingContinuation {
+            refresh = $0
+            waiting?.resume(); waiting = nil
+        }
     }
 }
 

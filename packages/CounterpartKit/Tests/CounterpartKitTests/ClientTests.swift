@@ -198,6 +198,28 @@ private final class SlowTransport: HTTPTransport, @unchecked Sendable {
 }
 
 final class CompanionClientTests: XCTestCase {
+    func testProjectRefreshHasAShortDeadlineWithoutCuttingOffLongPollsOrSlicing() async throws {
+        let fake = FakeTransport { request, _ in
+            switch request.url?.path {
+            case "/v1/objects": return json(200, ["objects": []])
+            case "/v1/events": return json(200, ["events": [], "next": 0, "latest": 0])
+            default: return json(200, ["destinationId": "current", "quality": "standard", "strength": "standard", "seconds": 30, "grams": 1])
+            }
+        }
+        let mac = try client(fake)
+        _ = try await mac.list()
+        XCTAssertLessThanOrEqual(fake.calls[0].request.timeoutInterval, 10, "an unanswered refresh must leave the loading screen promptly")
+        XCTAssertLessThanOrEqual(fake.calls[0].resourceTimeout, 15, "trickled bytes cannot keep the refresh alive indefinitely")
+        _ = try await LongPollEventFeed(client: mac).page(after: 1, wait: 25, limit: 100)
+        XCTAssertGreaterThan(fake.calls[1].request.timeoutInterval, 25)
+        XCTAssertLessThanOrEqual(fake.calls[1].resourceTimeout, 50, "a stalled event poll must also end")
+        _ = try await mac.request("POST", "/v1/objects/0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11/estimate", as: SliceEstimate.self, timeout: 170)
+        XCTAssertEqual(fake.calls[2].request.timeoutInterval, 170, "slicing has its own longer deadline")
+        XCTAssertGreaterThanOrEqual(fake.calls[2].resourceTimeout, 180)
+        _ = try await mac.send("GET", "/v1/objects/0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11/model.stl", limit: CompanionClient.scanLimit)
+        XCTAssertGreaterThanOrEqual(fake.calls[3].resourceTimeout, 180, "a large model download keeps its transfer budget")
+    }
+
     func testLiveActivityTokenContractAndRemoval() async throws {
         let fake = FakeTransport { _, _ in json(200, ["stored": true]) }
         let client = try client(fake)
@@ -711,7 +733,7 @@ final class DecodingTests: XCTestCase {
 
 final class FormatTests: XCTestCase {
     func testSizesTimesAndGrams() {
-        XCTAssertEqual(Format.size([48.2, 50.4, 53.9]), "48 × 50 × 54 mm")
+        XCTAssertEqual(Format.size([48.2, 50.4, 53.9]), "48.2 × 50.4 × 53.9 mm")
         XCTAssertNil(Format.size([1, 2]))
         XCTAssertEqual(Format.duration(45), "45 s")
         XCTAssertEqual(Format.duration(38 * 60), "38 min")

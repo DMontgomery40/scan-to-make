@@ -535,7 +535,7 @@ test('review fix (#295): an MCP known only through an npx profile is not "instal
   await assert.rejects(setup.check({backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local', port: '80', secret: 'k'}), /Download mcp-3D-printer-server first/);
 });
 
-test('an mcp-3D-printer-server Bambu printer with no route gets the authenticated route another MCP uses for the same serial: its three lines, verbatim, only when that MCP reads them', async t => {
+test('an mcp-3D-printer-server Bambu printer with no route gets the authenticated route another MCP uses for the same serial: its route and session directory, verbatim, only when that MCP reads them', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
   const {stat, chmod} = await import('node:fs/promises');
@@ -545,7 +545,7 @@ test('an mcp-3D-printer-server Bambu printer with no route gets the authenticate
   // The Mac's own bambu-printer-mcp, run over ssh into ~/bambu-printer-mcp (resolveMcpInstall's via.cwd), printing through FULU.
   const bambuDir = join(home, 'bambu-printer-mcp');
   const routeLines = ['BAMBU_DEFAULT_CONNECTION_MODE=bambu_network', 'BAMBU_DEFAULT_CONNECTION_TYPE="lan"',
-    "BAMBU_NETWORK_BRIDGE_COMMAND='ssh -i ~/.ssh/fulu fulu-vm /opt/bridge --printer 01P00A123456789'"];
+    "BAMBU_NETWORK_BRIDGE_COMMAND='ssh -i ~/.ssh/fulu fulu-vm /opt/bridge --printer 01P00A123456789'", "BAMBU_NETWORK_CONFIG_DIR='/sessions/source-bambu'"];
   const bambuEnv = (serial, lines = routeLines) => ['PRINTER_HOST=192.0.2.1', `BAMBU_SERIAL=${serial}`, 'BAMBU_TOKEN=55550000', 'BAMBU_MODEL=p1s',
     'BAMBU_DEV_ID=dev-secret-1', ...lines, 'CLOUD_TOKEN=cloud-secret-2', ''].join('\n');
   await put('bambu-printer-mcp/.env', bambuEnv('01P00A123456789'));
@@ -566,7 +566,7 @@ test('an mcp-3D-printer-server Bambu printer with no route gets the authenticate
     node: '/usr/local/bin/node', busy: async () => false, restart: async id => { restarted.push(id); }, bonjour: async () => [],
     ssdp: async () => ({state: 'complete', printers: []}), folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.3.0', hasEnv: true}]});
   const offered = async () => (await setup.discover()).found.find(item => item.folder === clone);
-  const values = {BAMBU_DEFAULT_CONNECTION_MODE: 'bambu_network', BAMBU_DEFAULT_CONNECTION_TYPE: 'lan',
+  const values = {BAMBU_DEFAULT_CONNECTION_MODE: 'bambu_network', BAMBU_DEFAULT_CONNECTION_TYPE: 'lan', BAMBU_NETWORK_CONFIG_DIR: '/sessions/source-bambu',
     BAMBU_NETWORK_BRIDGE_COMMAND: 'ssh -i ~/.ssh/fulu fulu-vm /opt/bridge --printer 01P00A123456789'};
 
   // Nothing is offered for another printer's route, a route without a bridge, or an MCP copy that doesn't read it.
@@ -579,7 +579,7 @@ test('an mcp-3D-printer-server Bambu printer with no route gets the authenticate
   assert.equal((await offered()).fill, undefined, 'its dist doesn\'t read BAMBU_DEFAULT_CONNECTION_MODE');
   await put('mcp-3D-printer-server/dist/index.js', reads);
 
-  // The same serial: exactly the three keys, nothing else from that file.
+  // The same serial: only the route and session-directory keys, nothing else from that file.
   const candidate = await offered();
   assert.deepEqual([candidate.missing, candidate.fill], [[], values]);
   assert.ok(!JSON.stringify(candidate).match(/dev-secret-1|cloud-secret-2|55550000/), 'no other key, and never a token');
@@ -630,4 +630,48 @@ test('the same printer through another MCP keeps its nozzle and bed: a profile t
   assert.equal(a1.bedType, undefined);
   // The Mac app's own config is unchanged, and a profile's own value is never replaced.
   assert.deepEqual(catalog.resolve('current').selection, current.selection);
+});
+
+test('Complete Settings repairs a copied FULU route with the source MCP session folder and preserves an explicit target folder', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const f = await fixture(t);
+  const source = join(f.home, 'bambu-printer-mcp');
+  const target = join(f.home, 'mcp-3D-printer-server');
+  const route = "BAMBU_DEFAULT_CONNECTION_MODE=bambu_network\nBAMBU_DEFAULT_CONNECTION_TYPE=cloud\nBAMBU_NETWORK_BRIDGE_COMMAND='/test/shared-fulu-launcher'\n";
+  const common = 'PRINTER_HOST=192.0.2.1\nBAMBU_SERIAL=PRIVATE-SERIAL-ONE\nBAMBU_MODEL=p1s\n';
+  await f.put('bambu-printer-mcp/.env', common + route);
+  await f.put('mcp-3D-printer-server/.env', 'PRINTER_TYPE=bambu\n' + common + route);
+  await f.put('mcp-3D-printer-server/package.json', {name: 'mcp-3d-printer-server', version: '1.3.0'});
+  await f.put('mcp-3D-printer-server/dist/index.js', 'const route = process.env.BAMBU_DEFAULT_CONNECTION_MODE;');
+  const id = 'counterpart-0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11';
+  const profilesPath = await f.put('printers/profiles.json', {version: 1, profiles: [{id, name: 'Generic', backend: 'mcp-3d-printer-server',
+    process: {command: process.execPath, args: [join(target, 'dist/index.js')], cwd: target}, owned: false}], choices: {'serial:PRIVATE-SERIAL-ONE': 'mcp-3d-printer-server'}});
+  const current = {backend: 'bambu-printer-mcp', process: {command: process.execPath, args: ['/test/source-mcp.js'], cwd: source}};
+  const catalog = await loadPrinterCatalog(current, {homeDirectory: f.home, sourcePaths: [], profilesPath});
+  const calls = [];
+  const setup = new PrinterSetup({env: {...hostEnvironment(join(f.home, 'app')), home: f.home}, configs: () => catalog.entries(), catalog: () => catalog,
+    profilesPath, reload: () => catalog.reload(), restart: async () => {}, client: config => {
+      assert.equal(config.process.cwd, source, 'inspect the existing source MCP, never the generic target');
+      return {connect: async () => ({tools: [{name: 'bambu_network_bridge_status'}]}),
+        callTool: async name => { calls.push(name); return {content: [{type: 'text', text: JSON.stringify({configDir: '/sessions/source default'})}]}; },
+        close: async () => {}};
+    }});
+  assert.ok(catalog.destinations.find(item => item.id === id).incomplete, 'an already copied route missing its session folder must offer completion');
+  const before = await readFile(join(target, '.env'), 'utf8');
+  await setup.completeSettings(id);
+  const repaired = await readFile(join(target, '.env'), 'utf8');
+  assert.equal(repaired, before + 'BAMBU_NETWORK_CONFIG_DIR="/sessions/source default"\n');
+  assert.deepEqual(calls, ['bambu_network_bridge_status']);
+  await writeFile(join(target, '.env'), before + "BAMBU_NETWORK_CONFIG_DIR='/sessions/explicit-target'\n");
+  await setup.completeSettings(id);
+  assert.equal(await readFile(join(target, '.env'), 'utf8'), before + "BAMBU_NETWORK_CONFIG_DIR='/sessions/explicit-target'\n");
+  assert.deepEqual(calls, ['bambu_network_bridge_status'], 'an explicit target session folder never needs probing or replacement');
+  await writeFile(join(target, '.env'), 'PRINTER_TYPE=bambu\n' + common + "BAMBU_NETWORK_CONFIG_DIR='/sessions/explicit-target'\n");
+  await setup.completeSettings(id);
+  const fresh = await readFile(join(target, '.env'), 'utf8');
+  assert.match(fresh, /BAMBU_DEFAULT_CONNECTION_MODE=bambu_network/);
+  assert.match(fresh, /BAMBU_NETWORK_CONFIG_DIR='\/sessions\/explicit-target'/);
+  assert.equal((fresh.match(/BAMBU_NETWORK_CONFIG_DIR=/g) ?? []).length, 1, 'new setup keeps the explicit target directory too');
+  assert.deepEqual(calls, ['bambu_network_bridge_status']);
 });

@@ -255,10 +255,10 @@ struct PrintSheet: View {
             if let estimate {
                 Text(Self.summary(estimate)).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
             } else if let last = object.print?.estimate, last.seconds != nil || last.grams != nil {
-                Text([last.seconds.map { ObjectWords.formatMinutes($0 / 60) }, last.grams.map { "\(Int($0.rounded())) g" }]
+                Text([last.seconds.map { ObjectWords.formatMinutes($0 / 60) }, Format.grams(last.grams)]
                     .compactMap { $0 }.joined(separator: " · ") + " last time").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
             } else if !settingsServed {
-                Text("Your printer MCP slices it with its own preset when you print.").font(.callout).foregroundStyle(.secondary)
+                Text("Uses your printer’s saved settings when you print.").font(.callout).foregroundStyle(.secondary)
             }
         }
         if settingsServed, let printer, printer.capabilities?.quality == false || printer.capabilities?.strength == false,
@@ -269,7 +269,7 @@ struct PrintSheet: View {
 
     /// "1 h 12 min · 22 g · 0.20 mm · 15% infill".
     static func summary(_ estimate: PrintEstimate) -> String {
-        [estimate.seconds.map { ObjectWords.formatMinutes($0 / 60) }, estimate.grams.map { "\(Int($0.rounded())) g" },
+        [estimate.seconds.map { ObjectWords.formatMinutes($0 / 60) }, Format.grams(estimate.grams),
          estimate.layerHeightMm.map { String(format: "%.2f mm", $0) }, estimate.infillPercent.map { "\(Int($0.rounded()))% infill" }]
             .compactMap { $0 }.joined(separator: " · ")
     }

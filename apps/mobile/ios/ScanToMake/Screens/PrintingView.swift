@@ -22,6 +22,11 @@ struct PrintingView: View {
     private var printer: PrinterDestination? { store.catalog?.destination(project?.print?.destinationId ?? project?.printerDestinationId) }
     private var printerName: String { project?.print?.destination?.name ?? printer?.name ?? "Your printer" }
     private var live: PrintLive? { project?.print?.live }
+    private var printEnded: Bool {
+        if ["finished", "failed", "cancelled"].contains(live?.state ?? "") { return true }
+        guard let project else { return false }
+        return [.printed, .confirmed, .failed].contains(store.words(project).phase)
+    }
 
     var body: some View {
         ScrollView {
@@ -52,8 +57,8 @@ struct PrintingView: View {
         .fullScreenCover(isPresented: $fullScreen) { CameraFullScreen(feed: feed, printer: printerName) }
         // Pause, Resume and Stop can bring the printer's own question; it's answered here too.
         .modifier(PrinterQuestion(store: store, project: project, confirming: $confirming))
-        .task(id: "\(id)#\(scenePhase)#\(fullScreen)") {
-            guard scenePhase == .active else { return }
+        .task(id: "\(id)#\(scenePhase)#\(fullScreen)#\(printEnded)") {
+            guard scenePhase == .active, !printEnded else { return }
             // Snapshot fallback: cards refresh slowly; full-screen retains the shared 3 s cadence.
             await feed.run(app.companion, project: id, every: fullScreen ? 3 : 10)
         }
@@ -74,7 +79,7 @@ struct PrintingView: View {
                     .overlay {
                         VStack(spacing: 10) {
                             Image(systemName: feed.unsupported ? "video.slash.fill" : "camera").font(.system(size: 34)).foregroundStyle(.secondary)
-                            Text(feed.unsupported ? (feed.problem ?? "No camera Counterpart can use") : feed.problem ?? "Getting a photo from \(printerName)…")
+                            Text(printEnded ? "No camera photo saved for this print" : feed.unsupported ? (feed.problem ?? "No camera Counterpart can use") : feed.problem ?? "Getting a photo from \(printerName)…")
                                 .font(.headline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         }
                         .padding(.top, 60).padding(.horizontal, 30)
@@ -84,7 +89,7 @@ struct PrintingView: View {
         .overlay(alignment: .topLeading) {
             if let captured = feed.capturedAt {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    HStack(spacing: 6) { Image(systemName: "camera.fill"); Text("\(printerName) · \(Format.ago(captured, now: context.date))").font(.caption.weight(.bold)) }
+                    HStack(spacing: 6) { Image(systemName: "camera.fill"); Text("\(printEnded ? "Last camera photo" : printerName) · \(Format.ago(captured, now: context.date))").font(.caption.weight(.bold)) }
                         .padding(.horizontal, 10).padding(.vertical, 6).glassEffect(.regular, in: .capsule)
                         .accessibilityLabel("Camera photo from \(printerName), \(Format.ago(captured, now: context.date))")
                 }
@@ -146,7 +151,7 @@ struct PrintingView: View {
 
     /// "38 min left · done 12:51 PM"
     private var timeLeft: String? {
-        guard let remaining = live?.job?.remainingSec, let words = Format.duration(remaining) else { return nil }
+        guard !printEnded, let remaining = live?.job?.remainingSec, let words = Format.duration(remaining) else { return nil }
         let end = live?.endsAtDate ?? Date().addingTimeInterval(remaining)
         return "\(words) left · done \(end.formatted(date: .omitted, time: .shortened))"
     }
@@ -155,9 +160,6 @@ struct PrintingView: View {
         HStack(spacing: 12) {
             InfoTile(title: "Nozzle", value: Format.temperature(live?.temps?.nozzle?.actual) ?? "–", symbol: "flame")
             InfoTile(title: "Bed", value: Format.temperature(live?.temps?.bed?.actual) ?? "–", symbol: "square.fill")
-            // PRD §5.7: nozzle, bed and speed. The Mac doesn't report the speed level yet, so it says so.
-            InfoTile(title: "Speed", value: "–", symbol: "gauge.with.dots.needle.33percent")
-                .accessibilityLabel("Speed not reported")
         }
     }
 
@@ -183,6 +185,7 @@ struct PrintingView: View {
     }
 
     private func footer(_ project: Project) -> String {
+        if printEnded { return store.words(project).line }
         if project.print?.monitor?.unreachableSince != nil { return "Lost contact with \(printerName). Still trying." }
         return "You'll get a notification when it's done, or if the printer stops."
     }
@@ -192,7 +195,7 @@ struct PrintingView: View {
     @ViewBuilder private var controls: some View {
         let paused = live?.state == "paused"
         let canPause = printer?.canPause ?? false, canResume = printer?.canResume ?? false, canStop = printer?.canCancel ?? false
-        if (paused ? canResume : canPause) || canStop {
+        if !printEnded && ((paused ? canResume : canPause) || canStop) {
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
                     if paused && canResume {
@@ -213,7 +216,7 @@ struct PrintingView: View {
     }
 
     private func act(_ action: CompanionClient.PrintControl) {
-        guard !working else { return }
+        guard !working, !printEnded else { return }
         working = true; problem = nil
         Task {
             defer { working = false }

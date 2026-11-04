@@ -77,6 +77,37 @@ final class EventStreamTests: XCTestCase {
         XCTAssertEqual(updates, [.resync, .event(event(200))])
     }
 
+    func testRecoveryResyncsEvenWhenTheMacHasNoNewEvents() async throws {
+        let feed = ScriptedFeed([
+            .success(page([], next: 10)),
+            .failure(CompanionError.unreachable),
+            .success(page([], next: 10)),
+            .success(page([event(11)], next: 11)),
+        ])
+        let updates = try await collect(feed, count: 2)
+        XCTAssertEqual(updates, [.resync, .resync], "refresh once while away and again when the Mac actually answers")
+    }
+
+    func testARecoveredHealthProbeResyncsAfterAnOutage() async throws {
+        actor Health {
+            var probes = 0
+            func answers() -> Bool { probes += 1; return probes > 1 }
+        }
+        let health = Health()
+        let feed = ScriptedFeed([
+            .success(page([], next: 10)),
+            .failure(CompanionError.unreachable),
+            .failure(CompanionError.cancelled),
+            .success(page([event(11)], next: 11)),
+        ])
+        var updates: [EventUpdate] = []
+        for try await update in EventStream(feed: feed, healthy: { await health.answers() }).updates {
+            updates.append(update)
+            if updates.count == 2 { break }
+        }
+        XCTAssertEqual(updates, [.resync, .resync], "a confirmed health reply clears the outage even when the event poll still ends early")
+    }
+
     func testAnOlderMacEndsTheStreamSoTheAppPolls() async {
         let feed = ScriptedFeed([.failure(CompanionError.unsupported)])
         do {

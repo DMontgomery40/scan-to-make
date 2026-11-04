@@ -2,10 +2,14 @@ import Foundation
 
 /// Size, time and grams, written the same way on every screen and device.
 public enum Format {
-    /// "48 × 50 × 54 mm": whole millimetres, because LiDAR isn't sub-millimetre.
+    /// Model dimensions retain tenths: a designed 0.6 mm part must not be described as 1 mm.
     public static func size(_ millimetres: [Double]?) -> String? {
         guard let millimetres, millimetres.count == 3, millimetres.allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
-        return millimetres.map { String(Int($0.rounded())) }.joined(separator: " × ") + " mm"
+        return millimetres.map {
+            if $0 > 0 && $0 < 0.05 { return "<0.1" }
+            let value = String(format: "%.1f", $0)
+            return value.hasSuffix(".0") ? String(value.dropLast(2)) : value
+        }.joined(separator: " × ") + " mm"
     }
 
     /// A print or work duration: "45 s", "38 min", "1 h 12 m", "3 h".
@@ -28,6 +32,7 @@ public enum Format {
     /// "22 g": whole grams, or one decimal under 10 g.
     public static func grams(_ grams: Double?) -> String? {
         guard let grams, grams.isFinite, grams >= 0 else { return nil }
+        if grams > 0 && grams < 0.05 { return "<0.1 g" }
         return grams < 10 ? String(format: "%.1f g", grams) : "\(Int(grams.rounded())) g"
     }
 

@@ -309,7 +309,7 @@ private struct PrintTab: View {
                 SectionHeading("Profile")
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Your printer MCP’s preset")
-                    Text([estimate.seconds.map { ObjectWords.formatMinutes($0 / 60) }, estimate.grams.map { "\(Int($0.rounded())) g" }]
+                    Text([estimate.seconds.map { ObjectWords.formatMinutes($0 / 60) }, Format.grams(estimate.grams)]
                         .compactMap { $0 }.joined(separator: " · "))
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }

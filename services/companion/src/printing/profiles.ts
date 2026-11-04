@@ -41,7 +41,7 @@ export function requiredSettings(backend: string, printerType: string | undefine
   return [['PRINTER_HOST']];
 }
 /** The Bambu route settings both MCPs read (bambu-printer-mcp; mcp-3D-printer-server from its feat/bambu-complete). */
-export const ROUTE_KEYS = ['BAMBU_DEFAULT_CONNECTION_MODE', 'BAMBU_DEFAULT_CONNECTION_TYPE', 'BAMBU_NETWORK_BRIDGE_COMMAND'] as const;
+export const ROUTE_KEYS = ['BAMBU_DEFAULT_CONNECTION_MODE', 'BAMBU_DEFAULT_CONNECTION_TYPE', 'BAMBU_NETWORK_BRIDGE_COMMAND', 'BAMBU_NETWORK_CONFIG_DIR'] as const;
 /** Another MCP's authenticated route for the same printer: its raw `.env` lines (verbatim) and their values. */
 export interface RouteSource {lines: Record<string, string>; values: Record<string, string>; from: string}
 
@@ -112,6 +112,17 @@ export function settingsGap(backend: string, env: Record<string, string | undefi
   }
   if (options.route && backend === 'mcp-3d-printer-server' && printerType === 'bambu' && !value(['BAMBU_DEFAULT_CONNECTION_MODE'])) {
     for (const key of ROUTE_KEYS) if (options.route.lines[key] && env[key] === undefined) { fill[key] = options.route.values[key]!; lines[key] = options.route.lines[key]!; }
+  }
+  // A shared launcher may mount only the source MCP's authenticated session folder. Its default
+  // must not silently become the generic MCP's different default, including for routes copied earlier.
+  if (options.route && backend === 'mcp-3d-printer-server' && printerType === 'bambu'
+      && (fill.BAMBU_DEFAULT_CONNECTION_MODE ?? value(['BAMBU_DEFAULT_CONNECTION_MODE'])) === 'bambu_network'
+      && (fill.BAMBU_NETWORK_BRIDGE_COMMAND ?? value(['BAMBU_NETWORK_BRIDGE_COMMAND'])) === options.route.values.BAMBU_NETWORK_BRIDGE_COMMAND
+      && !value(['BAMBU_NETWORK_CONFIG_DIR'])) {
+    if (options.route.lines.BAMBU_NETWORK_CONFIG_DIR) {
+      fill.BAMBU_NETWORK_CONFIG_DIR = options.route.values.BAMBU_NETWORK_CONFIG_DIR!;
+      lines.BAMBU_NETWORK_CONFIG_DIR = options.route.lines.BAMBU_NETWORK_CONFIG_DIR;
+    } else { missing.push('BAMBU_NETWORK_CONFIG_DIR'); }
   }
   return {missing, fill, lines};
 }

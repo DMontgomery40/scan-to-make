@@ -20,6 +20,12 @@ public struct PrinterDestination: Codable, Identifiable, Equatable, Hashable, Se
     public var capabilities: Capabilities?
     /// The MCP install that serves it, for `POST /v1/printers/mcp/<mcpId>/update` (PRD §8.10).
     public var mcpId: String?
+    public struct McpChoice: Codable, Equatable, Hashable, Sendable {
+        public var backend: String
+        public var destinationId: String
+        public init(backend: String, destinationId: String) { self.backend = backend; self.destinationId = destinationId }
+    }
+    public var mcps: [McpChoice]?
 
     public struct Capabilities: Codable, Equatable, Hashable, Sendable {
         public struct Server: Codable, Equatable, Hashable, Sendable { public var name: String; public var version: String }
@@ -181,8 +187,11 @@ public struct PrintChoice: Equatable, Sendable {
     /// How many on the plate (`slice_stl` `repetitions`), only when you chose a number: nil leaves the printer
     /// profile's own count (KAN-214 #230).
     public var copies: Int?
-    public init(colour: PrintColour?, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil) {
+    /// The printer pauses before these one-based layers. Layer one has nothing to insert into yet.
+    public var pauseBeforeLayers: [Int]
+    public init(colour: PrintColour?, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil, pauseBeforeLayers: [Int] = []) {
         self.colour = colour; self.quality = quality; self.strength = strength; self.checked = checked; self.copies = copies.map { max(1, $0) }
+        self.pauseBeforeLayers = pauseBeforeLayers
     }
     public init(filament: PrinterFilament, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil) {
         self.init(colour: .tray(filament), quality: quality, strength: strength, checked: checked, copies: copies)
@@ -197,6 +206,8 @@ public struct PrintChoice: Equatable, Sendable {
         if strength != .standard { json["strength"] = strength.rawValue }
         // Only a number you chose; otherwise the printer profile's count applies.
         if let copies { json["copies"] = copies }
+        let pauses = Array(Set(pauseBeforeLayers.filter { $0 >= 2 })).sorted()
+        if !pauses.isEmpty { json["pauseBeforeLayers"] = pauses }
         return json
     }
 

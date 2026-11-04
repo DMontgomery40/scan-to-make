@@ -8,6 +8,7 @@ import {appInstall, appMcpId, installedVersion, resolveMcpInstall, type InstallE
 import type {McpUpdate} from './mcp-updates.js';
 import type {PrinterCatalog} from '../objects/printers.js';
 import {discoverBambu, discoverBonjour, modelFromSerial, BAMBU_SERIAL_MODELS, BONJOUR_TYPES, type BambuAdvert, type BonjourService} from './discovery.js';
+import type {PrintGate} from './print-gate.js';
 import {changeProfiles, findBambuRoute, newProfileId, readProfiles, readsRouteSettings, settingsGap, type RouteSource, type SavedProfile} from './profiles.js';
 
 /**
@@ -195,6 +196,7 @@ export interface PrinterSetupDeps {
   /** Restarts a printer's MCP session, so its MCP reads its `.env` again. */
   restart?(destinationId: string): Promise<void>;
   busy?(destinationId: string): Promise<boolean>;
+  gate?: PrintGate;
   ssdp?(): Promise<{state: 'complete' | 'unavailable'; printers: BambuAdvert[]}>;
   bonjour?(): Promise<BonjourService[]>;
   /** Starts an MCP for Check (a fresh process, closed after; never a printer's shared session). */
@@ -473,10 +475,39 @@ export class PrinterSetup {
    * MCP config uses for the same serial (`bambu_network` with a bridge command), and only when this copy reads it.
    */
   async #route(backend: PrinterBackend, env: Record<string, string | undefined>, entry: string | undefined, dir: string): Promise<RouteSource | undefined> {
-    if (backend !== 'mcp-3d-printer-server' || env.PRINTER_TYPE?.trim().toLowerCase() !== 'bambu' || env.BAMBU_DEFAULT_CONNECTION_MODE?.trim()) return undefined;
+    if (backend !== 'mcp-3d-printer-server' || env.PRINTER_TYPE?.trim().toLowerCase() !== 'bambu'
+      || (env.BAMBU_DEFAULT_CONNECTION_MODE?.trim() && (env.BAMBU_DEFAULT_CONNECTION_MODE.trim() !== 'bambu_network' || env.BAMBU_NETWORK_CONFIG_DIR?.trim()))) return undefined;
     if (!(await readsRouteSettings(entry))) return undefined;
     const own = join(dir, '.env');
-    return findBambuRoute(env.BAMBU_SERIAL ?? env.BAMBU_PRINTER_SERIAL, (await this.#envPaths()).filter(path => path !== own));
+    const route = await findBambuRoute(env.BAMBU_SERIAL ?? env.BAMBU_PRINTER_SERIAL, (await this.#envPaths()).filter(path => path !== own));
+    if (!route || (env.BAMBU_DEFAULT_CONNECTION_MODE?.trim() && env.BAMBU_NETWORK_BRIDGE_COMMAND?.trim() !== route.values.BAMBU_NETWORK_BRIDGE_COMMAND)) return undefined;
+    if (route.values.BAMBU_NETWORK_CONFIG_DIR || env.BAMBU_NETWORK_CONFIG_DIR?.trim()) return route;
+    // Ask the source MCP for its own resolved default; do not guess which auth folder a launcher mounts.
+    const sourceDir = dirname(route.from);
+    let source: PrinterHandoffConfig | undefined;
+    for (const {id, config} of this.deps.configs()) {
+      const effective = this.deps.effective?.(id, config) ?? config;
+      if ([config, effective].some(profile => profile.process.cwd === sourceDir || resolveMcpInstall(profile, this.deps.env).via?.cwd === sourceDir)) {
+        source = effective; break;
+      }
+    }
+    if (!source) {
+      const found = await packageAt(sourceDir);
+      if (found) source = {backend: found.package, process: {command: this.#node, args: [join(sourceDir, 'dist', 'index.js')], cwd: sourceDir}};
+    }
+    if (!source) return route;
+    const client = this.deps.client?.(source) ?? new PrinterMcpClient(source);
+    try {
+      const catalog = await client.connect(AbortSignal.timeout(10_000));
+      if (!catalog.tools.some(tool => tool.name === 'bambu_network_bridge_status')) return route;
+      const result = toolResultJson(await client.callTool('bambu_network_bridge_status', {}, {timeoutMs: 10_000}));
+      const configDir = result?.configDir;
+      if (typeof configDir !== 'string' || !isAbsolute(configDir) || configDir.length > 4096 || /[\u0000-\u001f]/.test(configDir)) return route;
+      const line = `BAMBU_NETWORK_CONFIG_DIR=${JSON.stringify(configDir)}`;
+      if (parseEnv(line).BAMBU_NETWORK_CONFIG_DIR !== configDir) return route;
+      return {from: route.from, values: {...route.values, BAMBU_NETWORK_CONFIG_DIR: configDir}, lines: {...route.lines, BAMBU_NETWORK_CONFIG_DIR: line}};
+    } catch { return route; }
+    finally { await client.close().catch(() => undefined); }
   }
 
   /**
@@ -491,6 +522,9 @@ export class PrinterSetup {
     const env = parseEnv(text);
     const route = await this.#route(backend, env, entry, dir);
     const gap = settingsGap(backend, env, {...(model ? {model} : {}), modelFromSerial, ...(route ? {route} : {})});
+    if (gap.missing.includes('BAMBU_NETWORK_CONFIG_DIR')) {
+      throw new PrinterSetupError('unavailable', 'Counterpart couldn’t read the FULU session folder from the source MCP. Set BAMBU_NETWORK_CONFIG_DIR in that MCP’s .env, then try again.');
+    }
     const existing = (env.BAMBU_MODEL ?? env.BAMBU_PRINTER_MODEL)?.trim().toLowerCase();
     if (gap.missing.includes('BAMBU_MODEL')) {
       const value = gap.fill.BAMBU_MODEL;
@@ -552,9 +586,14 @@ export class PrinterSetup {
     if (!catalog || !destination || !key) throw new PrinterSetupError('not-found', 'That printer is no longer there.');
     if (!destination.mcps?.some(item => item.backend === backend)) throw new PrinterSetupError('invalid', 'That MCP doesn’t reach this printer.');
     if (destination.backend === backend) return {destinationId: destination.id};
-    if (await this.deps.busy?.(destination.id)) throw new PrinterSetupError('conflict', 'This printer is printing. Change its MCP when the print finishes.');
-    await changeProfiles(this.#profilesPath, state => { state.choices[key] = backend; });
-    await this.deps.reload?.();
-    return {destinationId: catalog.canonical(destinationId) ?? destination.id};
+    const ids = [...new Set([destinationId, destination.id, ...(destination.mcps?.map(item => item.destinationId) ?? [])])];
+    const busy = () => new PrinterSetupError('conflict', 'This printer is printing. Change its MCP when the print finishes.');
+    if (this.deps.gate && !this.deps.gate.beginUpdate(ids)) throw busy();
+    try {
+      if (await this.deps.busy?.(destination.id)) throw busy();
+      await changeProfiles(this.#profilesPath, state => { state.choices[key] = backend; });
+      await this.deps.reload?.();
+      return {destinationId: catalog.canonical(destinationId) ?? destination.id};
+    } finally { this.deps.gate?.endUpdate(ids); }
   }
 }

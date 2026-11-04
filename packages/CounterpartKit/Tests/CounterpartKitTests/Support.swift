@@ -20,7 +20,7 @@ func project(_ json: [String: Any]) -> Project {
 
 /// A transport that answers from a closure and records what it was asked.
 final class FakeTransport: HTTPTransport, @unchecked Sendable {
-    struct Call { var request: URLRequest; var trust: TrustPolicy }
+    struct Call { var request: URLRequest; var trust: TrustPolicy; var resourceTimeout: TimeInterval }
     private let lock = NSLock()
     private(set) var calls: [Call] = []
     var answer: (URLRequest, TrustPolicy) throws -> HTTPReply
@@ -28,7 +28,7 @@ final class FakeTransport: HTTPTransport, @unchecked Sendable {
     init(_ answer: @escaping (URLRequest, TrustPolicy) throws -> HTTPReply) { self.answer = answer }
 
     func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
-        lock.lock(); calls.append(Call(request: request, trust: trust)); lock.unlock()
+        lock.lock(); calls.append(Call(request: request, trust: trust, resourceTimeout: resourceTimeout)); lock.unlock()
         return try answer(request, trust)
     }
 

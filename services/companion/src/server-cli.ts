@@ -152,7 +152,7 @@ const reloadPrinters=async()=>{
   const now=new Set(catalog.entries().map(entry=>entry.id));
   for(const id of before)if(!now.has(id)&&id!=='current'){await services.get(id)?.runner.session?.close().catch(()=>undefined);services.delete(id);}
 };
-const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,configs:()=>printerCatalog?.entries()??[],
+const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,gate:printGate,configs:()=>printerCatalog?.entries()??[],
   effective:(id,config)=>mcpUpdates!.effective(id,config),download:pkg=>mcpUpdates!.download(pkg),
   latestVersion:(pkg,options)=>mcpUpdates!.latestVersion(pkg,options),folders:()=>findMcpFolders(homedir()),
   node:process.execPath,profilesPath:printerProfiles,catalog:()=>printerCatalog,reload:reloadPrinters,
@@ -165,7 +165,7 @@ const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,configs:()=>print
     await old.runner.session?.restart(mcpUpdates!.effective(id,config));
     if(id!=='current')printerDestinations!.set(id,createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:id,onConnect:onConnect(id),relay:old.relay as import('@scan-to-make/printer-handoff').InMemoryElicitationRelay}));
   },
-  busy:async id=>printerBusy?await printerBusy(id):false}):undefined;
+  busy:async id=>printGate.held(id)||printGate.held(printerCatalog?.canonical(id)??id)||(printerBusy?await printerBusy(id):false)}):undefined;
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
   objectStoreForEvents=objectStore;
@@ -235,6 +235,7 @@ const server = await startCompanionServer({
   capture,
   printHandoff,
   ...(objects ? {objects} : {}),
+  ...(printerSetup ? {printerSetup} : {}),
   ...(eventLog ? {events: eventLog} : {}),
   ...(liveActivityTokens ? {liveActivityTokens} : {}),
   ...(presence ? {presence} : {}),

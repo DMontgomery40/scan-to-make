@@ -21,6 +21,7 @@ enum Fixtures {
     nonisolated(unsafe) static var macAnswers = false
     /// `-CounterpartScreen preparing`: the cable clip is on the printer, getting ready (layer 0).
     nonisolated(unsafe) static var preparing = false
+    nonisolated(unsafe) static var finished = false
     /// Statuses set on this run (`PATCH …/settings`), by project id.
     nonisolated(unsafe) static var statuses: [String: String] = [:]
     nonisolated(unsafe) static var titles: [String: String] = [:]
@@ -122,7 +123,7 @@ enum Fixtures {
         ]
         // `-CounterpartFixtureSet grid`: only the projects Home shows as cards, so the grid is at the top.
         let shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
-        return (shown + duplicates).map(withStatus).map(withPreparing).map { original in
+        return (shown + duplicates).map(withStatus).map(withPreparing).map(withFinished).map { original in
             guard let id = original["id"] as? String else { return original }
             var object = original
             if let title = titles[id] { object["title"] = title }
@@ -135,6 +136,19 @@ enum Fixtures {
             }
             return object
         }
+    }
+
+    private static func withFinished(_ object: [String: Any]) -> [String: Any] {
+        guard finished, object["id"] as? String == ids.clip, var print = object["print"] as? [String: Any],
+              var live = print["live"] as? [String: Any] else { return object }
+        var object = object
+        live["state"] = "finished"
+        live["job"] = ["name": "clip", "progress": 100, "layer": 212, "totalLayers": 212]
+        print["live"] = live
+        print["monitor"] = ["phase": "ended", "endState": "done", "endedAt": ISO8601DateFormatter().string(from: Date())]
+        object["print"] = print; object["state"] = "printed"
+        object["status"] = ["phase": "printed", "text": "The print finished", "symbol": "shippingbox", "tint": "secondary"]
+        return object
     }
 
     /// The clip's print getting ready on the printer, as the companion words it (KAN-214 #237).
@@ -182,7 +196,7 @@ enum Fixtures {
         "destinations": [
             ["id": "current", "name": "P1S", "backend": "bambu-printer-mcp", "model": "Bambu Lab P1S", "source": "current", "state": "ready",
              "capabilities": ["progress": true, "layers": true, "camera": "bambu-tcp", "filaments": "ams", "pause": true, "resume": true, "cancel": true,
-                              "quality": true, "strength": true, "multiColour": false, "copies": true, "missing": [],
+                              "quality": true, "strength": true, "multiColour": false, "copies": true, "layerPauses": true, "missing": [],
                               "server": ["name": "bambu-printer-mcp", "version": "1.1.48"]]],
             ["id": "mcp-garage", "name": "Garage MK4", "backend": "mcp-3d-printer-server", "model": "Prusa MK4S", "source": "mcp-profile", "origin": "claude-code", "state": "ready",
              "capabilities": ["progress": true, "layers": false, "camera": "none", "filaments": "single", "pause": true, "resume": true, "cancel": true,
@@ -250,7 +264,7 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true]]) }
         if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/camera.jpg") {
             guard path.contains("/current/") else { return json(["error": ["code": "not-found", "message": "This printer has no camera"]], 404) }
