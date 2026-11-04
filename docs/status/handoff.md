@@ -390,6 +390,19 @@ remote native probes and the SSH tunnel were removed after verification.
      CPython/Pillow/usd-core closure can serve qualification; Linux needs the executable reconstruction closure.
      Correct the draft dependency manifest against actual binary/source archives and existing licence inventory
      (it labels usd-core Apache-only, while the audited Mac wheel has a composite licence).
+     **Runtime packaging recovery:** Muse exhausted its subscription at 12:39Z (reset reported 14:12:05Z).
+     Its clean branch `linux-muse-reconstruction` contains pushed `cd0af5c82e8d` (packaging `c26a1cc0`,
+     release merge `686fb05e`, COLMAP libPoseLib follow-up). It was not merged into release yet. Retained runtime:
+     agents-171 `~/scan-to-make-work/linux-reconstruct/final-payload`, BUILD-ID
+     `reconstruction-1.2.0-gcd0af5c82e8d-linux-x64`; receipts beside it. Transcript reports a relocated check
+     and host-payload preparation, not installed reconstruction acceptance.
+     Parent review found remaining release gaps: apt downloads package names without pinned versions/hashes;
+     `ldd` only rejects "not found" and can still use build-host libraries despite the closure claim;
+     readiness probes import only `pxr` rather than the USD modules used by qualification, don't pass their
+     supplied environment to spawn, and leave stderr unread. Cache identity is launcher mtime rather than
+     the packaged build identity. Do not claim dependency independence/readiness from these checks yet.
+     T3 requires an explicit provider choice before replacing rate-limited Muse; choice requested, no switch
+     or restart performed. Source and retained runtime remain intact for continuation.
      Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
      succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
 
