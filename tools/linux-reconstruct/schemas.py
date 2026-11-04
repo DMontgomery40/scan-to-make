@@ -29,6 +29,8 @@ CAMERA_FRAME_KEYS = {"image", "sha256", "width", "height", "fx", "fy", "cx", "cy
 CAMERA_TOP_KEYS = {"version", "kind", "frames", "objectAnchor"}
 ANCHOR_KEYS = {"center", "radiusM", "confidence", "source"}
 MEASUREMENT_KEYS = {"version", "kind", "meshSha256", "axis", "extentMm"}
+REGION_KEYS = {"version", "kind", "previewMeshSha256", "selection"}
+REGION_TYPES = ("suggested", "component", "crop")
 
 
 class SchemaError(ValueError):
@@ -232,3 +234,53 @@ def load_measurement(path, mesh_sha256, extents):
     if not (math.isfinite(extent_units) and extent_units > 0):
         raise SchemaError(f"the preview extent on axis {axis} is degenerate")
     return axis, extent_mm, (extent_mm / 1000.0) / extent_units
+
+
+def load_object_region(path, preview_sha256, component_count, bounds_lo, bounds_hi):
+    """Validate capture-object-region.json against the exact preview mesh.
+
+    This is the person's explicit statement of which part of the preview is
+    the intended object. It is distinct from a measurement: it carries no
+    scale claim. Coordinates are preview-mesh (reconstruction) coordinates.
+    Returns one of:
+      {"type": "suggested"}
+      {"type": "component", "index": int}
+      {"type": "crop", "min": (x,y,z), "max": (x,y,z)}
+    """
+    data = _load_strict(path, "object region")
+    if set(data) != REGION_KEYS:
+        raise SchemaError(f"object region must have exactly the keys {sorted(REGION_KEYS)}")
+    if data["version"] != 1 or data["kind"] != "capture-object-region":
+        raise SchemaError('object region must be {"version":1,"kind":"capture-object-region"}')
+    if not isinstance(data["previewMeshSha256"], str) \
+            or not SHA256_RE.match(data["previewMeshSha256"]):
+        raise SchemaError("objectRegion.previewMeshSha256 must be 64 lowercase hex characters")
+    if data["previewMeshSha256"] != preview_sha256:
+        raise SchemaError("object region was confirmed against a different preview; "
+                          "show the current preview and confirm again")
+    selection = data["selection"]
+    if not isinstance(selection, dict) or selection.get("type") not in REGION_TYPES:
+        raise SchemaError(f"objectRegion.selection.type must be one of {REGION_TYPES}")
+    kind = selection["type"]
+    if kind == "suggested":
+        if set(selection) != {"type"}:
+            raise SchemaError("a 'suggested' selection takes no other keys")
+        return {"type": "suggested"}
+    if kind == "component":
+        if set(selection) != {"type", "index"}:
+            raise SchemaError("a 'component' selection is exactly {type, index}")
+        index = selection["index"]
+        if isinstance(index, bool) or not isinstance(index, int) \
+                or not (0 <= index < component_count):
+            raise SchemaError(f"component index must be an integer in [0, {component_count})")
+        return {"type": "component", "index": index}
+    if set(selection) != {"type", "min", "max"}:
+        raise SchemaError("a 'crop' selection is exactly {type, min, max}")
+    lo = _vec3(selection["min"], "selection.min")
+    hi = _vec3(selection["max"], "selection.max")
+    for i, axis in enumerate("xyz"):
+        if not lo[i] < hi[i]:
+            raise SchemaError(f"crop min must be below max on axis {axis}")
+        if hi[i] < bounds_lo[i] or lo[i] > bounds_hi[i]:
+            raise SchemaError("crop box does not intersect the preview mesh")
+    return {"type": "crop", "min": lo, "max": hi}

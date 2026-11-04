@@ -9,13 +9,17 @@ reconstruction.
 
 CLI (parity with tools/mac-reconstruct):
   linux-reconstruct samples <photosDir> <output.usdz> full --save-masks <masksDir>
-      [--camera-metadata <capture-camera.json>] [--measurement <capture-measurement.json>]
-      [--work-dir <path>]
+      [--camera-metadata <capture-camera.json>]
+      [--object-region <capture-object-region.json>]
+      [--measurement <capture-measurement.json>] [--work-dir <path>]
 
 NDJSON on stdout, one object per line: {"stage": ..., "progress": 0..1},
-{"error": ..., "code": ...}, {"needsScale": {...}}, {"done": "<output>"}.
-Exit 0 success (only after the output is atomically in place), 4 needs-scale,
-2 actionable error. Tool logs stay private and bounded in the work dir.
+{"error": ..., "code": ...}, {"needsObjectRegion": {...}},
+{"needsScale": {...}}, {"done": "<output>"}.
+Exit 0 success (only after the output is atomically in place),
+5 needs-object-region (which part is the object is unconfirmed; independent
+of scale), 4 needs-scale, 2 actionable error. Tool logs stay private and
+bounded in the work dir. The work dir is bound to one capture key.
 """
 import argparse
 import hashlib
@@ -35,7 +39,7 @@ import scale as scale_mod
 import schemas
 import usd_export
 
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.1.0"
 RECEIPT_VERSION = 1
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png"}
 MIN_PHOTOS, MAX_PHOTOS = 8, 300
@@ -219,17 +223,26 @@ def capture_key(photos, camera_sha):
     return h.hexdigest()[:24]
 
 
-def stage_done(work, name, marker_paths):
+def stage_done(work, name, marker_paths, capture_key_value):
+    # A stage counts only if it was produced for this exact capture. An
+    # explicit --work-dir reused for different photos/metadata must never
+    # silently inherit stale geometry (the key file in main also refuses).
     marker = work / f".stage-{name}.json"
-    return marker.exists() and all(Path(p).exists() for p in marker_paths)
+    if not marker.exists() or not all(Path(p).exists() for p in marker_paths):
+        return False
+    try:
+        return json.loads(marker.read_text(encoding="utf-8")).get("captureKey") == capture_key_value
+    except (OSError, json.JSONDecodeError):
+        return False
 
 
-def mark_stage(work, name, seconds):
+def mark_stage(work, name, seconds, capture_key_value):
     (work / f".stage-{name}.json").write_text(
-        json.dumps({"seconds": seconds, "toolVersion": TOOL_VERSION}), encoding="utf-8")
+        json.dumps({"seconds": seconds, "toolVersion": TOOL_VERSION,
+                    "captureKey": capture_key_value}), encoding="utf-8")
 
 
-def run_pipeline(photos_dir, work, timings):
+def run_pipeline(photos_dir, work, timings, capture_key_value):
     photos_dir = str(Path(photos_dir).resolve())
     """COLMAP sparse -> undistort -> OpenMVS dense mesh. Cached per stage.
     Returns (mesh_ply_path, colmap_centres {basename: centre}, registered, total).
@@ -247,7 +260,7 @@ def run_pipeline(photos_dir, work, timings):
     photos = sorted(p.name for p in Path(photos_dir).iterdir()
                     if p.suffix.lower() in PHOTO_SUFFIXES and p.is_file())
 
-    if not stage_done(work, "features", [db]):
+    if not stage_done(work, "features", [db], capture_key_value):
         stage("features", 0.05)
         timings["features"] = run_tool("colmap-features", [
             colmap, "feature_extractor", "--database_path", str(db),
@@ -259,8 +272,8 @@ def run_pipeline(photos_dir, work, timings):
             "--SiftExtraction.max_image_size", "2000",
             "--SiftExtraction.max_num_features", "8192",
         ], work, "features")
-        mark_stage(work, "features", timings["features"])
-    if not stage_done(work, "matching", [db]):
+        mark_stage(work, "features", timings["features"], capture_key_value)
+    if not stage_done(work, "matching", [db], capture_key_value):
         stage("matching", 0.2)
         if len(photos) <= EXHAUSTIVE_MATCH_LIMIT:
             argv = [colmap, "exhaustive_matcher", "--database_path", str(db),
@@ -271,10 +284,10 @@ def run_pipeline(photos_dir, work, timings):
                     "--SequentialMatching.overlap", "15",
                     "--SequentialMatching.loop_detection", "0"]
         timings["matching"] = run_tool("colmap-matching", argv, work, "matching")
-        mark_stage(work, "matching", timings["matching"])
+        mark_stage(work, "matching", timings["matching"], capture_key_value)
     model = sparse / "0"
     images_txt = work / "images.txt"
-    if not stage_done(work, "mapping", [images_txt]):
+    if not stage_done(work, "mapping", [images_txt], capture_key_value):
         if sparse.exists():
             shutil.rmtree(sparse)
         sparse.mkdir(parents=True)
@@ -306,7 +319,7 @@ def run_pipeline(photos_dir, work, timings):
         model = best
         shutil.copyfile(work / f"model-{best.name}" / "images.txt", images_txt)
         (work / "model-name.txt").write_text(best.name, encoding="utf-8")
-        mark_stage(work, "mapping", timings["mapping"])
+        mark_stage(work, "mapping", timings["mapping"], capture_key_value)
     else:
         model = sparse / (work / "model-name.txt").read_text(encoding="utf-8").strip()
     centres = mesh_mod.read_colmap_cameras(images_txt)
@@ -318,7 +331,7 @@ def run_pipeline(photos_dir, work, timings):
     check_disk(work)
 
     scene = work / "scene.mvs"
-    if not stage_done(work, "interface", [scene]):
+    if not stage_done(work, "interface", [scene], capture_key_value):
         if dense.exists():
             shutil.rmtree(dense)
         stage("undistorting", 0.5)
@@ -332,20 +345,20 @@ def run_pipeline(photos_dir, work, timings):
             find_openmvs("InterfaceCOLMAP"), "-i", str(dense), "-o", str(scene),
             "-w", str(work), "--max-threads", n_threads, "-v", "2",
         ], work, "interfacing")
-        mark_stage(work, "interface", timings.get("interfacing", 0))
+        mark_stage(work, "interface", timings.get("interfacing", 0), capture_key_value)
     dense_scene = work / "scene_dense.mvs"
-    if not stage_done(work, "densify", [dense_scene]):
+    if not stage_done(work, "densify", [dense_scene], capture_key_value):
         stage("densifying", 0.7)
         timings["densifying"] = run_tool("openmvs-densify", [
             find_openmvs("DensifyPointCloud"), "-i", str(scene), "-o", str(dense_scene),
             "-w", str(work), "--max-threads", n_threads,
             "--resolution-level", "1", "--number-views", "8", "-v", "2",
         ], work, "densifying")
-        mark_stage(work, "densify", timings["densifying"])
+        mark_stage(work, "densify", timings["densifying"], capture_key_value)
         check_disk(work)
     mesh_mvs = work / "scene_mesh.mvs"
     mesh_ply = work / "scene_mesh.ply"
-    if not stage_done(work, "mesh", [mesh_ply]):
+    if not stage_done(work, "mesh", [mesh_ply], capture_key_value):
         stage("meshing", 0.85)
         timings["meshing"] = run_tool("openmvs-mesh", [
             find_openmvs("ReconstructMesh"), "-i", str(dense_scene), "-o", str(mesh_mvs),
@@ -357,51 +370,96 @@ def run_pipeline(photos_dir, work, timings):
             if not candidates:
                 raise RunError("stage-failed", "mesh reconstruction produced no PLY")
             shutil.copyfile(candidates[0], mesh_ply)
-        mark_stage(work, "mesh", timings["meshing"])
+        mark_stage(work, "mesh", timings["meshing"], capture_key_value)
     return mesh_ply, centres, registered, total
 
 
-def select_object(mesh_obj, anchor_metric, to_metric):
-    """Pick the object component. With a proven similarity and a capture-time
-    object anchor, the component overlapping the anchor sphere wins. Without
-    an anchor, the largest component is used only when the mesh is not
-    fragmented; its identity as the object (not the table) is confirmed by
-    the person in the app against the preview before any measurement binds.
+def component_stats(mesh_obj, components):
+    total = len(mesh_obj.vertices)
+    stats = []
+    for i, (verts, face_ids) in enumerate(components):
+        sub = mesh_mod.submesh(mesh_obj, face_ids)
+        lo, hi, ext = sub.extents()
+        stats.append({"index": i, "vertices": len(verts), "faces": len(face_ids),
+                      "share": round(len(verts) / total, 4),
+                      "boundsMin": [round(v, 6) for v in lo],
+                      "boundsMax": [round(v, 6) for v in hi],
+                      "extents": {a: round(ext[a], 6) for a in ("x", "y", "z")}})
+    return stats
+
+
+def suggested_selection(mesh_obj, components, anchor_metric, to_metric):
+    """The tool's best guess at the object, for the person to confirm or
+    replace. Never applied automatically: a largest component may be the
+    table, and an anchor sphere includes the support surface inside it, so
+    no confidence is claimed for either. Returns (kind, face_ids or None,
+    report) where kind is "anchor-region" or "component".
     """
-    components = mesh_mod.connected_components(mesh_obj)
     total_vertices = len(mesh_obj.vertices)
     shares = [len(v) / total_vertices for v, _ in components]
     significant = sum(1 for s in shares if s >= COMPONENT_SIGNIFICANT)
     report = {"components": len(components), "significantComponents": significant,
-              "largestShare": round(shares[0], 4) if shares else 0.0}
+              "largestShare": round(shares[0], 4) if shares else 0.0,
+              "fragmented": bool(not components or shares[0] < COMPONENT_MIN_FRACTION
+                                 or significant > COMPONENT_MAX_SIGNIFICANT)}
     if anchor_metric is not None and to_metric is not None:
-        # The anchor is a recorded object region (centre + radius at capture
-        # time), not a guess: keep faces inside it, then the largest piece.
-        # An object standing on a table is one component with the table, so
-        # component choice alone cannot separate them.
         centre_m, radius_m = anchor_metric["center"], anchor_metric["radiusM"] * 1.15
         metric = [to_metric(v) for v in mesh_obj.vertices]
         region_faces = [fi for fi, face in enumerate(mesh_obj.faces)
                         if all(math.dist(metric[vi], centre_m) <= radius_m for vi in face)]
-        if len(region_faces) < 100:
-            raise RunError("needs-object-region",
-                           "no reconstructed part matches the marked object position; "
-                           "retake the capture or mark the object region in the app")
-        region = mesh_mod.submesh(mesh_obj, region_faces)
-        region_components = mesh_mod.connected_components(region)
-        chosen = mesh_mod.submesh(region, region_components[0][1])
-        report.update({"method": "object-anchor-region",
-                       "anchorRadiusM": round(radius_m, 4),
-                       "regionFaceFraction": round(len(region_faces) / len(mesh_obj.faces), 4),
-                       "selectedShare": round(len(chosen.vertices) / total_vertices, 4)})
+        if len(region_faces) >= 100:
+            region = mesh_mod.submesh(mesh_obj, region_faces)
+            largest = mesh_mod.connected_components(region)[0]
+            report.update({"type": "anchor-region", "anchorRadiusM": round(radius_m, 4),
+                           "regionFaceFraction": round(len(region_faces) / len(mesh_obj.faces), 4),
+                           "reason": "anchor region includes any support surface inside "
+                                     "the recorded radius; confirm or crop tighter"})
+            return "anchor-region", (region, largest[1]), report
+        report["anchorRegionEmpty"] = True
+    report.update({"type": "component", "index": 0,
+                   "reason": "largest piece of the reconstruction; it may be the "
+                             "table or floor rather than the object"})
+    return "component", None, report
+
+
+def apply_selection(mesh_obj, components, selection, anchor_metric, to_metric):
+    """Apply the person's confirmed selection. Returns (submesh, report)."""
+    kind = selection["type"]
+    if kind == "suggested":
+        sugg_kind, payload, report = suggested_selection(
+            mesh_obj, components, anchor_metric, to_metric)
+        if sugg_kind == "anchor-region":
+            region, face_ids = payload
+            chosen = mesh_mod.submesh(region, face_ids)
+        else:
+            if not components:
+                raise RunError("needs-object-region", "the reconstruction has no geometry to confirm")
+            chosen = mesh_mod.submesh(mesh_obj, components[0][1])
+        report.update({"method": f"user-confirmed-suggested-{sugg_kind}",
+                       "confirmedByUser": True})
         return chosen, report
-    if not components or shares[0] < COMPONENT_MIN_FRACTION or significant > COMPONENT_MAX_SIGNIFICANT:
-        raise RunError("needs-object-region",
-                       "the reconstruction is fragmented into many pieces and no object "
-                       "position was recorded; mark the object region in the app or retake closer")
-    report.update({"method": "largest-component-unverified",
-                   "selectedShare": round(shares[0], 4)})
-    return mesh_mod.submesh(mesh_obj, components[0][1]), report
+    if kind == "component":
+        chosen = mesh_mod.submesh(mesh_obj, components[selection["index"]][1])
+        return chosen, {"method": "user-component", "index": selection["index"],
+                        "confirmedByUser": True,
+                        "components": len(components)}
+    # crop: faces fully inside the confirmed box (preview coordinates),
+    # then the largest piece of what remains.
+    lo, hi = selection["min"], selection["max"]
+    inside = [all(lo[i] <= v[i] <= hi[i] for i in range(3)) for v in mesh_obj.vertices]
+    face_ids = [fi for fi, face in enumerate(mesh_obj.faces)
+                if all(inside[vi] for vi in face)]
+    if len(face_ids) < 4:
+        raise RunError("object-region-invalid",
+                       "the confirmed crop contains almost no geometry; "
+                       "show the preview and choose the object region again")
+    cropped = mesh_mod.submesh(mesh_obj, face_ids)
+    largest = mesh_mod.connected_components(cropped)[0]
+    chosen = mesh_mod.submesh(cropped, largest[1])
+    return chosen, {"method": "user-crop", "confirmedByUser": True,
+                    "cropMin": list(lo), "cropMax": list(hi),
+                    "croppedFaceFraction": round(len(face_ids) / len(mesh_obj.faces), 4),
+                    "components": len(components)}
 
 
 def write_json_atomic(path, obj):
@@ -419,6 +477,7 @@ def main(argv=None):
     samples.add_argument("quality")   # parity with mac-reconstruct; only "full"
     samples.add_argument("--save-masks", required=True)
     samples.add_argument("--camera-metadata")
+    samples.add_argument("--object-region")
     samples.add_argument("--measurement")
     samples.add_argument("--work-dir")
     args = parser.parse_args(argv)
@@ -451,6 +510,21 @@ def main(argv=None):
             output.parent / ".linux-reconstruct-work" / key
         work.mkdir(parents=True, exist_ok=True)
         os.chmod(work, 0o700)
+        # The work directory is bound to one capture. Reusing it for
+        # different photos/metadata is refused rather than deleting or
+        # silently inheriting another capture's stages.
+        key_file = work / "capture-key.json"
+        if key_file.exists():
+            try:
+                stored = json.loads(key_file.read_text(encoding="utf-8")).get("captureKey")
+            except (OSError, json.JSONDecodeError, AttributeError):
+                stored = None
+            if stored != key:
+                raise RunError("work-dir-mismatch",
+                               "this work directory belongs to a different capture; "
+                               "use a new work directory for these photos")
+        else:
+            write_json_atomic(key_file, {"captureKey": key})
         masks_dir = Path(args.save_masks)
         masks_dir.mkdir(parents=True, exist_ok=True)
         receipt.update({"photos": len(photos), "captureKey": key,
@@ -460,7 +534,8 @@ def main(argv=None):
             receipt["cameraFrames"] = len(camera.frames)
             receipt["cameraTrackingFrames"] = len(camera.tracking_frames())
 
-        mesh_ply, centres, registered, total = run_pipeline(args.photos_dir, work, timings)
+        mesh_ply, centres, registered, total = run_pipeline(
+            args.photos_dir, work, timings, key)
         receipt["registration"] = {"registered": registered, "total": total}
 
         # Camera-centre scale fit (only tracking frames COLMAP registered).
@@ -489,7 +564,88 @@ def main(argv=None):
             s, r, t = fit["scaleMPerUnit"], fit["rotation"], tuple(fit["translation"])
             to_metric = lambda p: scale_mod.apply_similarity(s, r, t, p)
         anchor = camera.anchor if camera else None
-        selected, selection = select_object(raw_mesh, anchor, to_metric)
+
+        # Object-identity gate. Nothing the tool computes proves which part
+        # of the reconstruction is the intended object: the largest piece may
+        # be the table and an anchor sphere includes its support surface.
+        # Export therefore requires the person's explicit confirmation,
+        # bound by hash to the exact preview mesh. This gate is independent
+        # of scale: a proven camera fit does not bypass it, and a
+        # measurement alone does not satisfy it.
+        preview_path = work / "preview.ply"
+        mesh_mod.write_ply(preview_path, raw_mesh)
+        preview_sha = schemas.sha256_file(preview_path)
+        components = mesh_mod.connected_components(raw_mesh)
+        plo, phi, _pext = raw_mesh.extents()
+        region_source = args.object_region
+        applied_path = work / "object-region.json"
+        if region_source is None and applied_path.exists():
+            region_source = str(applied_path)   # confirmed in an earlier run
+        if region_source is None:
+            sugg_kind, payload, sugg = suggested_selection(
+                raw_mesh, components, anchor, to_metric)
+            if sugg_kind == "anchor-region":
+                sugg_mesh = mesh_mod.submesh(payload[0], payload[1])
+            elif components:
+                sugg_mesh = mesh_mod.submesh(raw_mesh, components[0][1])
+            else:
+                sugg_mesh = raw_mesh
+            _slo, _shi, sugg_ext = sugg_mesh.extents()
+            sugg["extents"] = {a: round(sugg_ext[a], 6) for a in ("x", "y", "z")}
+            if to_metric is not None:
+                metric_pts = [to_metric(v) for v in sugg_mesh.vertices]
+                sugg["extentsM"] = {
+                    a: round(max(p[i] for p in metric_pts) - min(p[i] for p in metric_pts), 6)
+                    for i, a in enumerate(("x", "y", "z"))}
+            region_receipt = {
+                "version": RECEIPT_VERSION, "kind": "needs-object-region",
+                "toolVersion": TOOL_VERSION, "captureKey": key,
+                "previewMesh": str(preview_path),
+                "previewMeshSha256": preview_sha,
+                "units": "reconstruction units; multiply by scaleMPerUnit when "
+                         "scaleKnown (axes are the reconstruction axes)",
+                "boundsMin": [round(v, 6) for v in plo],
+                "boundsMax": [round(v, 6) for v in phi],
+                "vertices": len(raw_mesh.vertices), "faces": len(raw_mesh.faces),
+                "components": component_stats(raw_mesh, components),
+                "suggestion": sugg,
+                "scaleKnown": bool(fit and fit["ok"]),
+                "scaleMPerUnit": fit["scaleMPerUnit"] if fit and fit["ok"] else None,
+                "cameraScaleFit": receipt.get("cameraScaleFit"),
+                "confirm": "answer with capture-object-region v1: "
+                           "{version:1, kind:'capture-object-region', previewMeshSha256, "
+                           "selection:{type:'suggested'} | {type:'component', index:<int>} "
+                           "| {type:'crop', min:[x,y,z], max:[x,y,z]}} in preview coordinates; "
+                           "then rerun with --object-region <file> (it is remembered in the "
+                           "work directory, so a later --measurement resume does not repeat it)",
+            }
+            receipt.update({"status": "needs-object-region", "scale": None,
+                            "objectSelection": {"method": "unconfirmed",
+                                                "suggestion": sugg},
+                            "timingsSeconds": timings,
+                            "elapsedSeconds": round(time.monotonic() - started, 2)})
+            needs_path = work / "needs-object-region.json"
+            write_json_atomic(needs_path, region_receipt)
+            write_json_atomic(work / "receipt.json", receipt)
+            emit({"needsObjectRegion": {"receipt": str(needs_path),
+                                        "previewMeshSha256": preview_sha,
+                                        "previewMesh": str(preview_path),
+                                        "scaleKnown": region_receipt["scaleKnown"],
+                                        "suggestion": {"type": sugg["type"],
+                                                       "extents": sugg["extents"]}}})
+            return 5
+        try:
+            region = schemas.load_object_region(
+                region_source, preview_sha, len(components), plo, phi)
+        except schemas.SchemaError as e:
+            raise RunError("object-region-invalid", str(e)) from e
+        if args.object_region:   # remember the confirmation for resumes
+            tmp_copy = applied_path.with_suffix(".json.tmp")
+            tmp_copy.write_bytes(Path(args.object_region).read_bytes())
+            os.replace(tmp_copy, applied_path)
+        selected, selection = apply_selection(
+            raw_mesh, components, region, anchor, to_metric)
+        selected.validate()
         receipt["objectSelection"] = selection
 
         # Cache the selected unscaled mesh; measurement binds to its hash.
@@ -513,11 +669,10 @@ def main(argv=None):
             except schemas.SchemaError as e:
                 raise RunError("measurement-invalid", str(e)) from e
             transform = lambda p: (s * p[0], s * p[1], s * p[2])
-            # The measurement was answered against the preview of exactly
-            # this component, so the person has confirmed it is the object.
+            # A measurement states a size only. Object identity comes from
+            # the capture-object-region confirmation above, never from here.
             scale_report = {"method": "user-measurement", "scaleMPerUnit": s,
-                            "axis": axis, "extentMm": extent_mm,
-                            "objectConfirmedByUser": True}
+                            "axis": axis, "extentMm": extent_mm}
         if transform is None:
             preview = {
                 "version": RECEIPT_VERSION, "kind": "needs-scale",

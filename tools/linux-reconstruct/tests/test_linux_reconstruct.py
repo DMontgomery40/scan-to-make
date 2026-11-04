@@ -256,14 +256,8 @@ class MeshHandling(unittest.TestCase):
 
 
 class ObjectSelection(unittest.TestCase):
-    def test_anchor_region_separates_object_from_table(self):
-        import reconstruct
-        # One component: wide thin table + box on top sharing vertices is
-        # hard to fake; two boxes, anchor on the small one.
+    def _cluster_mesh(self):
         table = box_mesh(size=(4.0, 0.1, 4.0), offset=(-2.0, 0.0, -2.0))
-        obj = box_mesh(size=(0.4, 0.3, 0.4), offset=(3.0, 0.0, 3.0))
-        # subdivide obj faces so the region has >=100 faces is not required
-        # here: use many small boxes clustered at the anchor instead.
         verts, faces = list(table.vertices), list(table.faces)
         for k in range(12):
             b = box_mesh(size=(0.1, 0.1, 0.1),
@@ -271,15 +265,59 @@ class ObjectSelection(unittest.TestCase):
             base = len(verts)
             verts += b.vertices
             faces += [tuple(i + base for i in f) for f in b.faces]
-        merged = mesh_mod.Mesh(verts, faces)
+        return mesh_mod.Mesh(verts, faces)
+
+    def test_suggestion_is_anchor_region_but_not_applied(self):
+        import reconstruct
+        merged = self._cluster_mesh()
+        comps = mesh_mod.connected_components(merged)
         anchor = {"center": (3.3, 0.3, 3.05), "radiusM": 0.6,
                   "confidence": 0.9, "source": "user-tap"}
-        chosen, report = reconstruct.select_object(merged, anchor, lambda p: p)
-        self.assertEqual(report["method"], "object-anchor-region")
+        kind, _payload, report = reconstruct.suggested_selection(
+            merged, comps, anchor, lambda p: p)
+        self.assertEqual(kind, "anchor-region")
+        self.assertIn("support surface", report["reason"])
+
+    def test_confirmed_suggested_excludes_table(self):
+        import reconstruct
+        merged = self._cluster_mesh()
+        comps = mesh_mod.connected_components(merged)
+        anchor = {"center": (3.3, 0.3, 3.05), "radiusM": 0.6,
+                  "confidence": 0.9, "source": "user-tap"}
+        chosen, report = reconstruct.apply_selection(
+            merged, comps, {"type": "suggested"}, anchor, lambda p: p)
+        self.assertEqual(report["method"], "user-confirmed-suggested-anchor-region")
+        self.assertTrue(report["confirmedByUser"])
         _lo, _hi, ext = chosen.extents()
         self.assertLess(ext["x"], 1.5)   # table (4.0 wide) excluded
 
-    def test_fragmented_without_anchor_is_needs_object_region(self):
+    def test_user_crop_and_component(self):
+        import reconstruct
+        merged = self._cluster_mesh()
+        comps = mesh_mod.connected_components(merged)
+        chosen, report = reconstruct.apply_selection(
+            merged, comps,
+            {"type": "crop", "min": (2.9, -0.1, 2.9), "max": (3.8, 0.8, 3.2)},
+            None, None)
+        self.assertEqual(report["method"], "user-crop")
+        _lo, _hi, ext = chosen.extents()
+        self.assertLessEqual(ext["x"], 0.9)
+        chosen, report = reconstruct.apply_selection(
+            merged, comps, {"type": "component", "index": 0}, None, None)
+        self.assertEqual(report["method"], "user-component")
+
+    def test_empty_crop_rejected(self):
+        import reconstruct
+        merged = self._cluster_mesh()
+        comps = mesh_mod.connected_components(merged)
+        with self.assertRaises(reconstruct.RunError) as cm:
+            reconstruct.apply_selection(
+                merged, comps,
+                {"type": "crop", "min": (100.0, 100.0, 100.0),
+                 "max": (101.0, 101.0, 101.0)}, None, None)
+        self.assertEqual(cm.exception.code, "object-region-invalid")
+
+    def test_fragmented_suggestion_flagged_not_fatal(self):
         import reconstruct
         verts, faces = [], []
         for k in range(6):
@@ -287,9 +325,11 @@ class ObjectSelection(unittest.TestCase):
             base = len(verts)
             verts += b.vertices
             faces += [tuple(i + base for i in f) for f in b.faces]
-        with self.assertRaises(reconstruct.RunError) as cm:
-            reconstruct.select_object(mesh_mod.Mesh(verts, faces), None, None)
-        self.assertEqual(cm.exception.code, "needs-object-region")
+        mesh_obj = mesh_mod.Mesh(verts, faces)
+        comps = mesh_mod.connected_components(mesh_obj)
+        _kind, _payload, report = reconstruct.suggested_selection(
+            mesh_obj, comps, None, None)
+        self.assertTrue(report["fragmented"])
 
     def test_images_txt_skips_points_lines(self):
         with tempfile.TemporaryDirectory() as d:
@@ -300,6 +340,46 @@ class ObjectSelection(unittest.TestCase):
             centres = mesh_mod.read_colmap_cameras(p)
             self.assertEqual(set(centres), {"a.jpg", "b.jpg"})
             self.assertEqual(centres["b.jpg"], (-4.0, -5.0, -6.0))
+
+
+class ObjectRegionSchema(unittest.TestCase):
+    def _write(self, tmp, obj):
+        p = tmp / "r.json"
+        p.write_text(json.dumps(obj), encoding="utf-8")
+        return p
+
+    def test_valid_variants_load(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            base = {"version": 1, "kind": "capture-object-region",
+                    "previewMeshSha256": "a" * 64}
+            for sel in ({"type": "suggested"},
+                        {"type": "component", "index": 2},
+                        {"type": "crop", "min": [0, 0, 0], "max": [1, 2, 3]}):
+                p = self._write(tmp, {**base, "selection": sel})
+                got = schemas.load_object_region(p, "a" * 64, 5,
+                                                 (-1, -1, -1), (4, 4, 4))
+                self.assertEqual(got["type"], sel["type"])
+
+    def test_wrong_preview_and_bad_shapes_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            base = {"version": 1, "kind": "capture-object-region",
+                    "previewMeshSha256": "b" * 64,
+                    "selection": {"type": "suggested"}}
+            p = self._write(tmp, base)
+            with self.assertRaises(schemas.SchemaError):
+                schemas.load_object_region(p, "a" * 64, 5, (-1, -1, -1), (4, 4, 4))
+            base["previewMeshSha256"] = "a" * 64
+            for bad in ({"type": "component", "index": 9},
+                        {"type": "component", "index": True},
+                        {"type": "crop", "min": [2, 0, 0], "max": [1, 2, 3]},
+                        {"type": "crop", "min": [10, 0, 0], "max": [11, 2, 3]},
+                        {"type": "suggested", "index": 0},
+                        {"type": "everything"}):
+                p = self._write(tmp, {**base, "selection": bad})
+                with self.assertRaises(schemas.SchemaError, msg=str(bad)):
+                    schemas.load_object_region(p, "a" * 64, 5, (-1, -1, -1), (4, 4, 4))
 
 
 class CliPaths(unittest.TestCase):
@@ -324,6 +404,22 @@ class CliPaths(unittest.TestCase):
             r = self.run_cli("samples", d, str(Path(d) / "o.usdz"), "preview",
                              "--save-masks", str(Path(d) / "masks"))
             self.assertEqual(r.returncode, 2)
+
+    def test_work_dir_bound_to_capture_key(self):
+        with tempfile.TemporaryDirectory() as d:
+            photos = Path(d) / "photos"
+            photos.mkdir()
+            make_capture(photos, n=10)
+            work = Path(d) / "work"
+            work.mkdir()
+            (work / "capture-key.json").write_text(
+                json.dumps({"captureKey": "some-other-capture"}), encoding="utf-8")
+            r = self.run_cli("samples", str(photos), str(Path(d) / "o.usdz"), "full",
+                             "--save-masks", str(Path(d) / "masks"),
+                             "--work-dir", str(work))
+            self.assertEqual(r.returncode, 2)
+            lines = [json.loads(ln) for ln in r.stdout.splitlines() if ln.strip()]
+            self.assertEqual(lines[-1]["code"], "work-dir-mismatch")
 
     def test_invalid_camera_metadata_exit2(self):
         with tempfile.TemporaryDirectory() as d:

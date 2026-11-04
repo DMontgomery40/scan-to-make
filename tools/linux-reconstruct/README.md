@@ -28,6 +28,12 @@ one of two proofs holds:
    reconstruction is not replayed (stages are cached in the work directory,
    keyed by photo hashes).
 
+Object identity is never assumed either, independently of scale: which
+part of the reconstruction is the intended object is confirmed by the
+person against the exact preview (`capture-object-region.json`, exit 5)
+before anything is exported. A measurement states a size; it does not
+confirm identity.
+
 Unscaled geometry stays in the private work directory (mode 0700) and is
 never written to the output path. Output is published atomically and `done`
 is emitted only after the USDZ is in place and re-validated.
@@ -37,32 +43,48 @@ is emitted only after the USDZ is in place and re-validated.
 ```
 linux-reconstruct samples <photosDir> <output.usdz> full --save-masks <masksDir> \
     [--camera-metadata <capture-camera.json>] \
+    [--object-region <capture-object-region.json>] \
     [--measurement <capture-measurement.json>] \
     [--work-dir <path>]
 ```
 
+Two independent questions can stop a run, in this order: **which part is
+the object** (exit 5) and **how big is it** (exit 4, only when the camera
+fit did not prove scale). A typical sequence is: run → 5, rerun with
+`--object-region` → 4 or done, rerun with `--measurement` → done. Cached
+stages make reruns cheap; a confirmed object region is remembered in the
+work directory, so the measurement rerun does not repeat it.
+
 NDJSON on stdout, one object per line: `{"stage": ..., "progress": 0..1}` for
 `inventory, features, matching, mapping, undistorting, interfacing,
 densifying, meshing, exporting`; then exactly one of `{"done": "<output>"}`,
+`{"needsObjectRegion": {"receipt": path, "previewMeshSha256": ...,
+"previewMesh": path, "scaleKnown": bool, "suggestion": {...}}}`,
 `{"needsScale": {"receipt": path, "meshSha256": ..., "extents": {...},
 "previewMesh": path}}`, or `{"error": ..., "code": ...}`. Exit codes: 0
-success, 4 needs-scale, 2 actionable error. SIGINT/SIGTERM kills only this
-tool's own process group and never reports success. Tool logs are bounded
-files under `<work-dir>/logs/`, never stdout.
+success, 5 needs-object-region, 4 needs-scale, 2 actionable error.
+SIGINT/SIGTERM kills only this tool's own process group and never reports
+success. Tool logs are bounded files under `<work-dir>/logs/`, never stdout.
+
+The work directory is bound to one capture: it stores `capture-key.json`
+(hash of photo bytes + camera-metadata hash) and every stage marker carries
+the same key. Reusing an explicit `--work-dir` for different photos or
+metadata is refused (`work-dir-mismatch`, exit 2); nothing is deleted.
 
 Receipts: `<work-dir>/receipt.json` always; on success also
-`<output>.receipt.json`; on needs-scale also `<work-dir>/needs-scale.json`.
+`<output>.receipt.json`; on needs-object-region also
+`<work-dir>/needs-object-region.json`; on needs-scale also
+`<work-dir>/needs-scale.json`.
 Receipt `version: 1` fields: `tool`, `toolVersion`, `status`
-(`done|needs-scale|failed`), `photos`, `registration {registered,total}`,
-`cameraScaleFit` (when metadata supplied), `objectSelection`, `scale`
+(`done|needs-object-region|needs-scale|failed`), `photos`,
+`registration {registered,total}`, `cameraScaleFit` (when metadata
+supplied), `objectSelection`, `scale`
 (`{method, scaleMPerUnit, extentsM, upAxisProvenance, ...}` or null),
 `outputSha256`, `timingsSeconds`, `elapsedSeconds`.
 
 Error codes include: `too-few-photos`, `too-many-photos`, `capture-too-large`,
-`camera-metadata-invalid`, `measurement-invalid`, `tool-missing`,
-`reconstruction-failed`, `needs-object-region` (fragmented mesh and no
-recorded object position — the app must collect an object region/anchor or
-the capture must be retaken; no arbitrary cropping is attempted),
+`camera-metadata-invalid`, `measurement-invalid`, `object-region-invalid`,
+`work-dir-mismatch`, `tool-missing`, `reconstruction-failed`,
 `scale-implausible`, `stage-timeout`, `stage-failed`,
 `workspace-too-large`, `cancelled`.
 
@@ -78,16 +100,24 @@ Masks: `--save-masks` is accepted for CLI parity with mac-reconstruct. The
 Linux pipeline does not segment photos, so the directory is created empty and
 the receipt says so; no masks are fabricated.
 
-Object selection: with a proven camera fit **and** an `objectAnchor`, faces
-inside the recorded anchor sphere (radius ×1.15) form the object region and
-its largest piece is the object — an object on a table reconstructs as one
-component with the table, so the recorded region, not connectivity, is what
-separates them. Without an anchor, the largest connected component is used only when
-the mesh is not fragmented (largest share ≥40%, ≤20 significant components);
-this is recorded as `largest-component-unverified` — it may be the table, so
-in the measurement flow the person confirms the previewed component is the
-object before the measurement binds. Fragmented output without an anchor is
-`needs-object-region`, not a guess.
+Object identity: nothing computed here proves which part of a
+reconstruction is the intended object. The largest component may be the
+table; an anchor sphere includes the support surface inside its radius
+(measured on our own fixture: anchor-region extents came out as the
+support disc's, not the object's). So **no selection is ever applied
+automatically** — not with an anchor, not with a proven camera fit, and a
+measurement alone never counts as confirmation. Instead the run stops
+with exit 5 and a `needs-object-region` receipt containing the full
+preview mesh (private, reconstruction units), per-component stats
+(index, share, bounds, extents), the tool's suggestion (anchor region
+when fit+anchor exist, else largest component — labelled with why it may
+be wrong, never with a confidence number), and whether scale is already
+known (`scaleKnown`, `scaleMPerUnit`, suggestion extents in metres when
+known — no measurement is demanded in that case). The person confirms or
+corrects the region in the app (`capture-object-region.json`, below),
+bound by SHA-256 to the exact preview. Fragmented reconstructions
+(largest share <40% or >20 significant components) are flagged
+`fragmented: true` in the suggestion for the same review, not guessed at.
 
 Export: vertices are transformed to metres (full similarity incl. rotation
 into the ARCore Y-up frame when the camera fit proved scale; uniform scale
@@ -148,10 +178,45 @@ Duplicate centres (paused capture) are dropped before fitting; a path that
 barely moves or is a straight line cannot establish scale and falls back to
 measurement.
 
+## capture-object-region.json (version 1)
+
+Written by the companion from the person's answer to the
+needs-object-region question. Bound by SHA-256 to the exact preview mesh
+in that receipt; coordinates are preview-mesh (reconstruction)
+coordinates, exactly as in the receipt's bounds and component stats.
+Strict: unknown keys, a stale preview hash, an out-of-range component
+index, or a crop that misses the preview are refused
+(`object-region-invalid`). It makes no scale claim.
+
+```json
+{"version": 1, "kind": "capture-object-region",
+ "previewMeshSha256": "<needs-object-region receipt previewMeshSha256>",
+ "selection": {"type": "suggested"}}
+```
+
+`selection` is exactly one of:
+
+- `{"type": "suggested"}` — accept the receipt's suggestion as shown.
+- `{"type": "component", "index": <int>}` — the component with that index
+  in the receipt's `components` list.
+- `{"type": "crop", "min": [x,y,z], "max": [x,y,z]}` — faces fully inside
+  the box; the largest resulting piece is the object. A crop containing
+  almost no geometry is refused.
+
+Rerun with `--object-region <file>`. The confirmation is copied into the
+work directory (`object-region.json`) and reused by later resumes, so a
+subsequent `--measurement` run does not repeat it; passing a new
+`--object-region` replaces it. The applied selection is recorded in the
+receipt as `objectSelection {method: user-confirmed-suggested-anchor-region
+| user-confirmed-suggested-component | user-component | user-crop,
+confirmedByUser: true, ...}`.
+
 ## capture-measurement.json (version 1)
 
-Written by the companion from the person's in-app answer. Strict numeric
-JSON; no prose is interpreted.
+Written by the companion from the person's in-app answer, after the
+object region has been confirmed (the needs-scale receipt's mesh is the
+confirmed selection). Strict numeric JSON; no prose is interpreted. A
+measurement by itself never satisfies the object-region gate.
 
 ```json
 {"version": 1, "kind": "capture-measurement",
@@ -187,6 +252,8 @@ python3 -m unittest discover -s tests
 ```
 
 Covers scale recovery against a known similarity, outlier/shuffle/line
-rejection, strict schema accept/reject, PLY round-trip, components, COLMAP
-centre parsing, CLI exit paths, and (when usd-core is present) USDZ validity.
-These are engineering checks only, never app acceptance.
+rejection, strict schema accept/reject (camera, measurement, object
+region), suggestion vs confirmed selection, crop/component application,
+PLY round-trip, components, COLMAP centre parsing, CLI exit paths
+including work-dir capture binding, and (when usd-core is present) USDZ
+validity. These are engineering checks only, never app acceptance.
