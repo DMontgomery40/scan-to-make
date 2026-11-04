@@ -4,7 +4,7 @@ import {mkdtemp, writeFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {zipSync, strToU8} from 'fflate';
-import {PrinterHandoffRunner, modelFilaments, printerHandoffConfigSchema} from '../dist/index.js';
+import {PrinterHandoffRunner, modelFilaments, modelFilamentSlotCount, printerHandoffConfigSchema} from '../dist/index.js';
 
 const published = Buffer.from(zipSync({
   '[Content_Types].xml': strToU8('<Types/>'),
@@ -38,6 +38,26 @@ test('a designed multi-part 3MF (no project settings) still names its parts and 
     {index: 1, name: 'body'},
     {index: 2, name: 'letters'},
   ]);
+});
+
+test('the declared slot count counts unused filaments too, and a sliced plate names painted filaments', () => {
+  const {zipSync: zip, strToU8: text} = {zipSync, strToU8};
+  const sliced = Buffer.from(zip({
+    '[Content_Types].xml': text('<Types/>'),
+    '3D/3dmodel.model': text('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/project_settings.config': text(JSON.stringify({
+      filament_colour: ['#000000', '#FEC600', '#FFFFFF', '#0000FF'],
+      filament_type: ['PLA', 'PLA', 'PLA', 'PLA'],
+    })),
+    'Metadata/model_settings.config': text('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
+      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
+    // Plate 1 paints with filament 3 as well: positions are 0-based.
+    'Metadata/plate_1.json': text(JSON.stringify({filament_ids: [0, 2]})),
+  }));
+  assert.equal(modelFilamentSlotCount(sliced), 4);
+  assert.equal(modelFilamentSlotCount(designed), 0);
+  assert.deepEqual(modelFilaments(sliced).map(f => f.index), [1, 3]);
+  assert.equal(modelFilaments(sliced)[1].colour, '#FFFFFF');
 });
 
 test('unreadable bytes give no filaments rather than throwing', () => {

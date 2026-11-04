@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {readdir, readFile, stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createInterface} from 'node:readline';
+import {inspectModelFile} from '@scan-to-make/printer-handoff';
 import type {TouchupPass} from './inputs.js';
 import type {TouchupInvocation} from './invocation.js';
 
@@ -232,7 +233,11 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   else model = validCheckpoints.at(-1);
 
   const partsPath = join(pass.outDir, 'touched.3mf');
-  const parts = await readFile(partsPath).then(bytes => bytes.length > 4 && bytes[0] === 0x50 && bytes[1] === 0x4b ? partsPath : undefined, () => undefined);
+  // The 3MF becomes the model that prints, so it is validated like one: a truncated
+  // archive or a stray zip falls back to the merged mesh instead of becoming the model.
+  const parts = await readFile(partsPath).then(bytes => {
+    try { inspectModelFile(bytes, '3mf'); return partsPath; } catch { return undefined; }
+  }, () => undefined);
   const base = {renders, checkpoints, ...(parts ? {parts} : {}), ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;

@@ -54,7 +54,11 @@ public struct ModelColourFilament: Codable, Sendable, Identifiable, Equatable {
 public struct ColourMapping: Codable, Sendable, Equatable {
     public let filaments: [ModelColourFilament]
     public let trays: [PrinterFilament]
-    public init(filaments: [ModelColourFilament], trays: [PrinterFilament]) { self.filaments = filaments; self.trays = trays }
+    /// The model version these rows describe; sent back with Print so a redesign can't inherit old choices.
+    public let modelVersion: String?
+    public init(filaments: [ModelColourFilament], trays: [PrinterFilament], modelVersion: String? = nil) {
+        self.filaments = filaments; self.trays = trays; self.modelVersion = modelVersion
+    }
 }
 
 /// What the print sheet asks for (PRD §5.5, §8.5). Standard quality and strength send nothing, so the MCP's preset decides.
@@ -246,11 +250,12 @@ public extension ControlClient {
         return result.object
     }
     /// Prints a multi-part model with the spool chosen for each of its filaments, in filament order.
-    func printObject(_ id: String, checked: Bool, settings: PrintSettings, filaments: [PrinterFilament]) async throws -> Project {
+    func printObject(_ id: String, checked: Bool, settings: PrintSettings, filaments: [PrinterFilament], modelVersion: String? = nil) async throws -> Project {
         var params = settings.params
         params["id"] = .string(id)
         if checked { params["checked"] = .bool(true) }
         params["filaments"] = .array(filaments.map(Self.value))
+        if let modelVersion { params["filamentsModelVersion"] = .string(modelVersion) }
         let result: ObjectReply = try await call("objects.print", params)
         return result.object
     }
@@ -268,10 +273,13 @@ public extension ControlClient {
         return result.object
     }
     /// Slices the current model as a Print with these settings would, without printing. Up to 180 s.
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int? = nil) async throws -> PrintEstimate {
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int? = nil,
+                  filaments: [PrinterFilament] = [], modelVersion: String? = nil) async throws -> PrintEstimate {
         var params: [String: JSONValue] = ["id": .string(id), "quality": .string(quality.rawValue), "strength": .string(strength.rawValue)]
         if let destinationId { params["destinationId"] = .string(destinationId) }
         if let copies { params["copies"] = .number(Double(copies)) }
+        if !filaments.isEmpty { params["filaments"] = .array(filaments.map(Self.value)) }
+        if let modelVersion { params["filamentsModelVersion"] = .string(modelVersion) }
         return try await call("objects.estimate", params)
     }
     /// Pause, resume or cancel this project's print (`capabilities.printControl`).

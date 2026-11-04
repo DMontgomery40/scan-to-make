@@ -9,6 +9,31 @@ const say = text => emit({type: 'assistant', message: {content: [{type: 'text', 
 const result = (structured, extra = {}) => emit({type: 'result', subtype: 'success', is_error: false, num_turns: 4, total_cost_usd: 1.23, structured_output: structured, ...extra});
 const stl = 'solid touched\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid touched\n';
 const hang = () => setInterval(() => {}, 1000);
+// A real (stored, uncompressed) minimal 3MF: the runner validates touched.3mf as one.
+const crcTable = Array.from({length: 256}, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+const crc32 = bytes => (bytes.reduce((crc, b) => (crcTable[(crc ^ b) & 255] ^ (crc >>> 8)) >>> 0, 0xFFFFFFFF) ^ 0xFFFFFFFF) >>> 0;
+const zip = entries => {
+  const chunks = [], central = []; let offset = 0;
+  for (const [name, text] of Object.entries(entries)) {
+    const data = Buffer.from(text), nameBytes = Buffer.from(name), crc = crc32(data);
+    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nameBytes.length, 26);
+    const entry = Buffer.alloc(46); entry.writeUInt32LE(0x02014b50, 0); entry.writeUInt16LE(20, 4); entry.writeUInt16LE(20, 6);
+    entry.writeUInt32LE(crc, 16); entry.writeUInt32LE(data.length, 20); entry.writeUInt32LE(data.length, 24);
+    entry.writeUInt16LE(nameBytes.length, 28); entry.writeUInt32LE(offset, 42);
+    chunks.push(local, nameBytes, data); central.push(entry, nameBytes); offset += 30 + nameBytes.length + data.length;
+  }
+  const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(Object.keys(entries).length, 8); end.writeUInt16LE(Object.keys(entries).length, 10);
+  end.writeUInt32LE(central.reduce((sum, b) => sum + b.length, 0), 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...chunks, ...central, end]);
+};
+const threeMf = zip({
+  '[Content_Types].xml': '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
+  '_rels/.rels': '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>',
+  '3D/3dmodel.model': '<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><resources><object id="1" type="model"><mesh><vertices><vertex x="0" y="0" z="0"/><vertex x="1" y="0" z="0"/><vertex x="0" y="1" z="0"/></vertices><triangles><triangle v1="0" v2="1" v3="2"/></triangles></mesh></object></resources><build><item objectid="1"/></build></model>',
+  'Metadata/model_settings.config': '<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/><part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part><part id="2" subtype="normal_part"><metadata key="name" value="letters"/><metadata key="extruder" value="2"/></part></object></config>',
+});
 mkdirSync('out/checkpoints', {recursive: true});
 emit({type: 'system', subtype: 'init', model: 'claude-opus-5-5', apiKeySource: 'none', tools: ['Read', 'WebSearch'], plugins: [{name: 'cc-plugin-telemetry', source: 'cc-plugin-telemetry@builtin'}], mcp_servers: [{name: 'printer', status: 'connected'}]});
 switch (scenario) {
@@ -19,14 +44,19 @@ switch (scenario) {
     break;
   case 'multicolour':
     toolUse('mcp__printer__counterpart_make_3mf'); say('Made the pick black with yellow lettering.');
-    writeFileSync('out/checkpoints/01.stl', stl); writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', Buffer.from('PK\x03\x04 two parts'));
+    writeFileSync('out/checkpoints/01.stl', stl); writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', threeMf);
     writeFileSync('out/front.png', 'png');
     result({status: 'done', summary: 'Made the pick black with yellow lettering.',
       parts: [{name: 'body', colour: '#111111', material: 'PLA'}, {name: 'letters', colour: '#FFD200'}]});
     break;
+  case 'multicolourbroken':
+    toolUse('mcp__printer__counterpart_make_3mf');
+    writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', Buffer.from('PK\x03\x04 truncated archive'));
+    result({status: 'done', summary: 'Two colours.', parts: [{name: 'body', colour: '#111111'}]});
+    break;
   case 'multicolourjunk':
     toolUse('mcp__printer__counterpart_make_3mf');
-    writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', Buffer.from('PK\x03\x04 two parts'));
+    writeFileSync('out/touched.stl', stl); writeFileSync('out/touched.3mf', threeMf);
     result({status: 'done', summary: 'Two colours.',
       parts: [{name: 'body', colour: 'black'}, {colour: '#ffd200'}, 'oops', {name: 'x'.repeat(300), colour: '#FFF', material: 7}]});
     break;

@@ -204,7 +204,7 @@ actor FixtureObjects: ObjectsCompanion {
             ModelColourFilament(index: 2, name: "letters", colour: "#FFD200", material: "PLA", slot: 1, distance: 0.03),
         ], trays: try await filaments(id))
     }
-    func print(_ id: String, checked: Bool, settings: PrintSettings, filaments: [PrinterFilament]) async throws -> Project { try change(id, ["state": "printing"]) }
+    func print(_ id: String, checked: Bool, settings: PrintSettings, filaments: [PrinterFilament], modelVersion: String?) async throws -> Project { try change(id, ["state": "printing"]) }
     func status() async throws -> ControlStatus {
         ControlStatus(companionVersion: "fixture", pairedDeviceCount: 1,
                       capabilities: .init(nearbyPairing: true, objectsCreate: true, events: true, printControl: true, printSettings: true,

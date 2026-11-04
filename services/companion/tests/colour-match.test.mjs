@@ -64,6 +64,29 @@ test('no loaded spools: no match, never a invented slot', () => {
   assert.deepEqual(matchColours([{colour: '#000000'}, {}], []), [undefined, undefined]);
 });
 
+test('for an already-sliced file the material is a hard rule, not a preference', () => {
+  // Black sliced for PLA: the black PETG spool may not win; no same-material spool at all gives no match.
+  const [black] = matchColours([{colour: '#000000', material: 'PLA'}], TRAYS, {requireMaterial: true});
+  assert.notEqual(black.slot, 0);
+  assert.equal(black.materialMismatch, undefined);
+  assert.deepEqual(matchColours([{colour: '#000000', material: 'ASA'}], TRAYS, {requireMaterial: true}), [undefined]);
+});
+
+test('two clearly different colours prefer different spools when another spool is close', () => {
+  const trays = [{slot: 0, colour: '#101010', material: 'PLA'}, {slot: 1, colour: '#202020', material: 'PLA'}];
+  const matches = matchColours([{colour: '#000000'}, {colour: '#404040'}], trays);
+  assert.deepEqual(matches.map(m => m.slot), [0, 1]);
+});
+
+test('automatic matches never mix AMS trays with the external spool in one print', () => {
+  const matches = matchColours([{colour: '#111111'}, {colour: '#FFFFFF'}], TRAYS);
+  const slots = matches.map(m => m.slot);
+  assert.ok(!(slots.includes(254) && slots.some(slot => slot < 254)), `mixed sources: ${slots}`);
+  assert.equal(slots[1], 1, 'white follows the nearest AMS spool rather than the external one');
+  // With only the external spool loaded, everything uses it.
+  assert.deepEqual(matchColours([{colour: '#111111'}], [TRAYS[2]]).map(m => m.slot), [254]);
+});
+
 test('a malformed colour is treated as unknown, not as black', () => {
   const [match] = matchColours([{colour: 'yellow'}, ], TRAYS);
   assert.equal(match.guessed, true);

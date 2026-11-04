@@ -48,35 +48,54 @@ export function colourDistance(a: string, b: string): number {
 const materialOf = (value: string | undefined) => value?.trim().toUpperCase() || undefined;
 /** A wrong-material spool must beat the right material by this much colour distance to win. */
 const MATERIAL_PENALTY = 0.15;
+/** Reusing a spool already serving a clearly different colour costs this much, so distinct colours spread out. */
+const REUSE_PENALTY = 0.1;
+const DISTINCT = 0.05;
+const external = (tray: TrayColour) => tray.slot >= 254;
 
 /**
  * One match per model filament, in order; `undefined` where no tray is loaded.
  * The same spool may serve several filaments of the same colour. A filament with
  * no known colour takes the first still-unassigned spool of its material (else
  * any unassigned spool, else the first) and is marked `guessed`.
+ * `requireMaterial` (an already-sliced file, whose temperatures are fixed)
+ * admits only spools of the asked-for material. Automatic matches never mix
+ * AMS trays with the external spool: one print feeds from one source.
  */
-export function matchColours(model: ModelColour[], trays: TrayColour[]): (ColourMatch | undefined)[] {
+export function matchColours(model: ModelColour[], trays: TrayColour[], options: {requireMaterial?: boolean} = {}): (ColourMatch | undefined)[] {
   const loaded = trays.filter(tray => oklab(tray.colour));
-  const assigned = new Set<number>();
-  return model.map(filament => {
-    if (!loaded.length) return undefined;
-    const wanted = materialOf(filament.material);
-    const mismatch = (tray: TrayColour) => wanted !== undefined && materialOf(tray.material) !== wanted;
-    const target = filament.colour ? oklab(filament.colour) : undefined;
-    if (!target) {
-      const free = loaded.filter(tray => !assigned.has(tray.slot));
-      const pool = free.length ? free : loaded;
-      const chosen = pool.find(tray => !mismatch(tray)) ?? pool[0]!;
-      assigned.add(chosen.slot);
-      return {slot: chosen.slot, guessed: true, ...(mismatch(chosen) ? {materialMismatch: true} : {})};
-    }
-    let best: {tray: TrayColour; distance: number; score: number} | undefined;
-    for (const tray of loaded) {
-      const distance = colourDistance(filament.colour!, tray.colour);
-      const score = distance + (mismatch(tray) ? MATERIAL_PENALTY : 0);
-      if (!best || score < best.score || (score === best.score && tray.slot < best.tray.slot)) best = {tray, distance, score};
-    }
-    assigned.add(best!.tray.slot);
-    return {slot: best!.tray.slot, distance: best!.distance, ...(mismatch(best!.tray) ? {materialMismatch: true} : {})};
-  });
+  const assigned = new Map<number, string[]>();
+  const matches = model.map(filament => pick(filament, loaded, assigned, options));
+  const slots = matches.flatMap(match => match ? [match.slot] : []);
+  if (slots.some(slot => slot >= 254) && slots.some(slot => slot < 254)) {
+    const amsOnly = loaded.filter(tray => !external(tray));
+    if (amsOnly.length) return model.map(filament => pick(filament, amsOnly, new Map(), options));
+  }
+  return matches;
+}
+
+function pick(filament: ModelColour, loaded: TrayColour[], assigned: Map<number, string[]>,
+    options: {requireMaterial?: boolean}): ColourMatch | undefined {
+  if (!loaded.length) return undefined;
+  const wanted = materialOf(filament.material);
+  const mismatch = (tray: TrayColour) => wanted !== undefined && materialOf(tray.material) !== wanted;
+  const eligible = options.requireMaterial && wanted ? loaded.filter(tray => !mismatch(tray)) : loaded;
+  if (!eligible.length) return undefined;
+  const target = filament.colour ? oklab(filament.colour) : undefined;
+  if (!target) {
+    const free = eligible.filter(tray => !assigned.has(tray.slot));
+    const pool = free.length ? free : eligible;
+    const chosen = pool.find(tray => !mismatch(tray)) ?? pool[0]!;
+    assigned.set(chosen.slot, [...(assigned.get(chosen.slot) ?? [])]);
+    return {slot: chosen.slot, guessed: true, ...(mismatch(chosen) ? {materialMismatch: true} : {})};
+  }
+  let best: {tray: TrayColour; distance: number; score: number} | undefined;
+  for (const tray of eligible) {
+    const distance = colourDistance(filament.colour!, tray.colour);
+    const shared = (assigned.get(tray.slot) ?? []).some(colour => colourDistance(colour, filament.colour!) > DISTINCT);
+    const score = distance + (mismatch(tray) ? MATERIAL_PENALTY : 0) + (shared ? REUSE_PENALTY : 0);
+    if (!best || score < best.score || (score === best.score && tray.slot < best.tray.slot)) best = {tray, distance, score};
+  }
+  assigned.set(best!.tray.slot, [...(assigned.get(best!.tray.slot) ?? []), filament.colour!]);
+  return {slot: best!.tray.slot, distance: best!.distance, ...(mismatch(best!.tray) ? {materialMismatch: true} : {})};
 }

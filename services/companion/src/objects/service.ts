@@ -148,18 +148,21 @@ export interface ObjectServiceDeps {
 /** What the print sheet sends with Print (PRD §8.5). */
 export interface PrintOptions extends PrintSettings {checked?: boolean; filament?: FilamentChoice;
   /** A multi-part 3MF: the spool chosen for each of the model's filaments, in filament order. */
-  filaments?: FilamentChoice[]}
+  filaments?: FilamentChoice[];
+  /** The model version those choices were made against (`colourMapping`'s), so a redesign can't inherit them. */
+  filamentsModelVersion?: string}
 /** One of a multi-part model's filaments with its suggested (or chosen) spool, for the print sheet. */
 export interface ColourMappingFilament extends ModelFilament {
   /** The suggested tray's absolute slot; absent when nothing is loaded. */
   slot?: number; distance?: number; materialMismatch?: boolean; guessed?: boolean;
 }
-export interface ColourMapping {filaments: ColourMappingFilament[]; trays: FilamentChoice[]}
+export interface ColourMapping {filaments: ColourMappingFilament[]; trays: FilamentChoice[]; modelVersion?: string}
 const BAMBU_TO_STATUS: Record<string, string> = {idle: 'IDLE', preparing: 'PREPARE', printing: 'RUNNING', paused: 'PAUSE', finished: 'FINISH', failed: 'FAILED', cancelled: 'FAILED', offline: 'OFFLINE', busy: 'UNKNOWN'};
 
 export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, ConfirmationValue>} | {action: 'decline' | 'cancel'; content?: never};
 export interface FilamentChoice {slot: number; colour: string; material: string; name: string; filamentId: string; destinationId: string; suggested?: boolean}
-type LiveFilament = FilamentChoice & {profile: string};
+/** A loaded tray; `profile` is absent when the MCP resolves no slicer profile for it (usable for a sliced file, not for slicing). */
+type LiveFilament = FilamentChoice & {profile?: string};
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 
 function toolProgress(name: string): string {
@@ -541,62 +544,81 @@ export class ObjectService {
     catch { throw new InvalidStateError('Couldn’t read the printer’s filament. Check its connection and try again.'); }
     // The counterpart/1 filament contract (mcp-3D-printer-server): {slots: [{id, material, color, name, profile}]}.
     if (record(inventory) && Array.isArray(inventory.slots)) return inventory.slots.flatMap((slot: unknown): LiveFilament[] => {
-      if (!record(slot) || typeof slot.id !== 'string' || !/^(\d{1,3}|ext)$/.test(slot.id) || typeof slot.material !== 'string' || !slot.material || slot.material.length > 128
-          || typeof slot.color !== 'string' || !/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(slot.color)
-          || typeof slot.profile !== 'string' || !slot.profile.startsWith('/')) return [];
+      if (!record(slot) || typeof slot.id !== 'string' || !/^(\d{1,4}|ext)$/.test(slot.id) || typeof slot.material !== 'string' || !slot.material || slot.material.length > 128
+          || typeof slot.color !== 'string' || !/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(slot.color)) return [];
       const number = slot.id === 'ext' ? 254 : Number(slot.id);
-      if (number > 254) return [];
+      if (number > 4095) return [];
+      const profile = typeof slot.profile === 'string' && slot.profile.startsWith('/') ? slot.profile : undefined;
       return [{slot:number, colour:slot.color.slice(0,7).toUpperCase(), material:slot.material,
         filamentId:typeof slot.filamentId === 'string' ? slot.filamentId.slice(0,128) : '', destinationId:destinationId ?? 'default',
-        name:typeof slot.name === 'string' ? slot.name.slice(0,256) : slot.material, profile:slot.profile}];
+        name:typeof slot.name === 'string' ? slot.name.slice(0,256) : slot.material, ...(profile ? {profile} : {})}];
     });
     if (!record(inventory) || !Array.isArray(inventory.trays)) throw new InvalidStateError('The printer did not return a filament inventory.');
     return inventory.trays.flatMap((tray: unknown): LiveFilament[] => {
       if (!record(tray) || tray.loaded !== true || !Number.isSafeInteger(tray.slot) || (tray.slot as number) < 0
           || typeof tray.tray_color !== 'string' || !/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(tray.tray_color)
-          || typeof tray.tray_type !== 'string' || !tray.tray_type || tray.tray_type.length > 128 || typeof tray.tray_info_idx !== 'string' || tray.tray_info_idx.length > 128
-          || typeof tray.resolved_profile_path !== 'string' || !tray.resolved_profile_path.startsWith('/')) return [];
+          || typeof tray.tray_type !== 'string' || !tray.tray_type || tray.tray_type.length > 128 || typeof tray.tray_info_idx !== 'string' || tray.tray_info_idx.length > 128) return [];
+      const profile = typeof tray.resolved_profile_path === 'string' && tray.resolved_profile_path.startsWith('/') ? tray.resolved_profile_path : undefined;
       return [{slot:tray.slot as number, colour:'#' + tray.tray_color.slice(0,6).toUpperCase(), material:tray.tray_type,
         filamentId:tray.tray_info_idx, destinationId:destinationId ?? 'default', name:typeof tray.display_name === 'string' ? tray.display_name.slice(0,256) : tray.tray_type,
-        profile:tray.resolved_profile_path}];
+        ...(profile ? {profile} : {})}];
     });
   }
 
-  /** Live filaments; `suggested` marks the preselected one: the configured material's first loaded tray, else the first tray. */
+  /** Live filaments; `suggested` marks the preselected one: the configured material's first loaded tray, else the first tray.
+   * Single-colour choices slice with the spool's profile, so profile-less trays are not offered here. */
   async filaments(id: string): Promise<FilamentChoice[]> {
-    const live = await this.liveFilaments(id), object = await this.get(id);
+    const live = (await this.liveFilaments(id)).filter(item => item.profile), object = await this.get(id);
     const destinationId = this.#destinationId(object);
     const material = (destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services)?.selection?.material?.toLowerCase();
-    const pick = live.find(item => material && item.material.toLowerCase() === material) ?? live[0];
+    const pick = live.find(item => material && item.profile && item.material.toLowerCase() === material) ?? live.find(item => item.profile) ?? live[0];
     return live.map(({profile: _profile, ...choice}) => ({...choice, ...(choice === pick || (pick && choice.slot === pick.slot) ? {suggested: true} : {})}));
   }
 
   /**
-   * The current 3MF's filaments with the colour each belongs in: the file's own
-   * assignments (published files carry colours), overlaid by position with what
+   * The current 3MF's filaments with the colour each belongs in, its declared
+   * slot count, and a version of the model bytes: the file's own assignments
+   * (published files carry colours) for the selected plate, overlaid with what
    * the design pass declared (a designed 3MF carries filaments but no colours).
+   * Declared colours match file filaments by part name first, then by position
+   * when the counts agree — several parts may share one filament.
    */
-  async #modelFilaments(object: StmObject): Promise<ModelFilament[]> {
-    if (!isMultipart(object) || !object.current) return [];
-    const fromFile = modelFilaments(await this.#modelBytes(object).catch(() => Buffer.alloc(0)));
-    const declared = object.current.filaments ?? [];
-    if (!fromFile.length) return declared.map((entry, i) => ({index: i + 1, ...entry}));
-    return fromFile.map(filament => {
-      const declaredEntry = declared[filament.index - 1];
+  async #modelData(object: StmObject): Promise<{filaments: ModelFilament[]; slots: number; version: string}> {
+    const bytes = isMultipart(object) && object.current ? await this.#modelBytes(object).catch(() => Buffer.alloc(0)) : Buffer.alloc(0);
+    const version = createHash('sha256').update(bytes).digest('hex');
+    if (!bytes.length) return {filaments: [], slots: 0, version};
+    const fromFile = modelFilaments(bytes, object.publishedSelection?.plateIndex ?? 0);
+    const declared = object.current!.filaments ?? [];
+    if (!fromFile.length) return {filaments: declared.map((entry, i) => ({index: i + 1, ...entry})), slots: declared.length, version};
+    const byName = new Map(declared.flatMap(entry => entry.name ? [[entry.name.trim().toLowerCase(), entry] as const] : []));
+    const aligned = declared.length === fromFile.length;
+    const filaments = fromFile.map((filament, position) => {
+      const declaredEntry = (filament.name ? byName.get(filament.name.trim().toLowerCase()) : undefined) ?? (aligned ? declared[position] : undefined);
       return {index: filament.index,
         ...((filament.name ?? declaredEntry?.name) ? {name: filament.name ?? declaredEntry!.name} : {}),
         ...((filament.colour ?? declaredEntry?.colour) ? {colour: filament.colour ?? declaredEntry!.colour} : {}),
         ...((filament.material ?? declaredEntry?.material) ? {material: filament.material ?? declaredEntry!.material} : {})};
     });
+    return {filaments, slots: Math.max(modelFilamentSlotCount(bytes), ...filaments.map(filament => filament.index)), version};
+  }
+
+  /** Whether this object's printer reports AMS trays at all (the gate `liveFilaments` applies). */
+  #amsAvailable(object: StmObject): boolean {
+    const destinationId = this.#destinationId(object);
+    const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
+    return !!services?.runner.filaments
+      && (services.runner.backend === 'bambu-printer-mcp' || (!!destinationId && this.#deps.printers?.capabilities(destinationId)?.filaments === 'ams'));
   }
 
   /** The print sheet's colour rows for a multi-part model: its filaments, the loaded spools, and the nearest spool for each. */
   async colourMapping(id: string): Promise<ColourMapping> {
     const object = await this.get(id);
-    const model = await this.#modelFilaments(object);
-    if (!model.length) return {filaments: [], trays: []};
+    const {filaments: model, version} = await this.#modelData(object);
+    if (!model.length || !this.#amsAvailable(object)) return {filaments: [], trays: []};
     const live = await this.liveFilaments(id);
-    const matches = matchColours(model, live);
+    const sliced = !!object.publishedSelection?.sliced;
+    const pool = sliced ? live : live.filter(tray => tray.profile);
+    const matches = matchColours(model, pool, {requireMaterial: sliced});
     return {
       filaments: model.map((filament, i) => ({...filament, ...(matches[i] ? {
         slot: matches[i]!.slot,
@@ -605,49 +627,66 @@ export class ObjectService {
         ...(matches[i]!.guessed ? {guessed: true} : {}),
       } : {})})),
       trays: live.map(({profile: _profile, ...choice}) => choice),
+      modelVersion: version,
     };
   }
 
   /**
    * A multi-part 3MF's spools as the MCP's selection and slicing options: the
    * sheet's validated choices, or the nearest spool per colour. Undefined when
-   * the model's filaments can't be read (the MCP's own defaults then apply, as
-   * before) or this backend reports no live inventory to map against.
+   * the model's filaments can't be read, or (with no explicit choices) when no
+   * inventory can be read — the MCP's own defaults then apply, as before.
    */
   async #multipartColour(object: StmObject, options: PrintOptions, selection: PrinterSelection | undefined,
-      backend: PrinterHandoffConfig['backend']): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer} | undefined> {
-    // AMS mapping is a Bambu concept: the bambu MCP, or the generic MCP driving a Bambu printer.
-    if (backend !== 'bambu-printer-mcp' && selection?.printerType !== 'bambu') return undefined;
-    const model = await this.#modelFilaments(object);
+      _backend: PrinterHandoffConfig['backend']): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]} | undefined> {
+    const {filaments: model, slots, version} = await this.#modelData(object);
     if (!model.length) return undefined;
-    const live = await this.liveFilaments(object.id);
+    if (options.filaments && options.filamentsModelVersion && options.filamentsModelVersion !== version)
+      throw new InvalidStateError('The model changed since you chose its spools. Reopen the print sheet and check the colours.');
+    let live: LiveFilament[];
+    try { live = await this.liveFilaments(object.id); }
+    catch (error) { if (options.filaments) throw error; return undefined; }
+    const sliced = !!object.publishedSelection?.sliced;
     let chosen: LiveFilament[];
     if (options.filaments) {
       if (options.filaments.length !== model.length)
         throw new InvalidStateError('Choose a spool for every colour in this model, then try again.');
-      chosen = options.filaments.map(choice => {
+      chosen = options.filaments.map((choice, i) => {
         const tray = live.find(item => item.slot === choice.slot && item.colour === choice.colour
           && item.material === choice.material && item.filamentId === choice.filamentId && item.destinationId === choice.destinationId);
         if (!tray) throw new InvalidStateError('A chosen filament changed. Choose the current spools and try again.');
+        const wanted = model[i]!;
+        if (sliced && wanted.material && tray.material.toUpperCase() !== wanted.material.toUpperCase())
+          throw new InvalidStateError(`“${wanted.name ?? `Part ${wanted.index}`}” was sliced for ${wanted.material}, so it can only print from a ${wanted.material} spool. Choose one, or share the designer’s editable 3MF to change material.`);
+        if (!sliced && !tray.profile)
+          throw new InvalidStateError(`The ${tray.material} spool in slot ${tray.slot + 1} has no slicing profile on this Mac. Choose another spool.`);
         return tray;
       });
     } else {
-      const matches = matchColours(model, live);
-      if (matches.some(match => !match)) throw new InvalidStateError('No filament is loaded. Load a spool in the AMS, then try again.');
+      const pool = sliced ? live : live.filter(tray => tray.profile);
+      if (!pool.length) return undefined;
+      const matches = matchColours(model, pool, {requireMaterial: sliced});
+      if (matches.some(match => !match)) {
+        const missing = model[matches.findIndex(match => !match)]!;
+        throw new InvalidStateError(sliced && missing.material
+          ? `No ${missing.material} spool is loaded for “${missing.name ?? `Part ${missing.index}`}”, and this file was sliced for ${missing.material}. Load one, then try again.`
+          : 'No filament is loaded. Load a spool in the AMS, then try again.');
+      }
       chosen = matches.map(match => live.find(item => item.slot === match!.slot)!);
     }
     const byIndex = new Map(model.map((filament, i) => [filament.index, chosen[i]!]));
-    const top = Math.max(...model.map(filament => filament.index));
-    // Unused project filaments stay unmapped (-1); their slice profile is the first chosen spool's.
+    // One entry per declared slot, used or not (slicing requires exactly that many
+    // profiles); a slot no part names — including a painted region — follows the
+    // first colour's spool rather than failing the print for a missing mapping.
     const at = (index: number) => byIndex.get(index) ?? chosen[0]!;
-    const amsMapping = Array.from({length: top}, (_, i) => byIndex.get(i + 1)?.slot ?? -1);
+    const amsMapping = Array.from({length: slots}, (_, i) => at(i + 1).slot);
     const mapped: PrinterSelection = {...selection,
       useAms: chosen.some(tray => tray.slot !== 254 && tray.slot !== 255),
       amsMapping, amsSlots: undefined, autoMatchAms: false};
-    if (object.publishedSelection?.sliced) return {selection: mapped};
-    return {selection: mapped, slicer: {
-      loadFilaments: Array.from({length: top}, (_, i) => at(i + 1).profile).join(';'),
-      filamentColours: Array.from({length: top}, (_, i) => at(i + 1).colour).join(';'),
+    if (sliced) return {selection: mapped, chosenTrays: chosen};
+    return {selection: mapped, chosenTrays: chosen, slicer: {
+      loadFilaments: Array.from({length: slots}, (_, i) => at(i + 1).profile!).join(';'),
+      filamentColours: Array.from({length: slots}, (_, i) => at(i + 1).colour).join(';'),
     }};
   }
 
@@ -964,7 +1003,15 @@ export class ObjectService {
     const printing = {...configured, services};
     const printDestination = destination ? {id: destination.id, name: destination.name} : undefined;
     const {store: bundles, relay, runner} = printing.services;
-    const {selection: colourSelection, slicer} = await this.#colour(id, options, services.selection, runner.backend);
+    const {selection: colourSelection, slicer, chosenTrays} = await this.#colour(id, options, services.selection, runner.backend);
+    // Slicing and confirmation can take minutes: re-read the spools at dispatch, so a spool
+    // swapped in between can't silently take the mapping (the MCPs check material, not colour).
+    const recheckTrays = chosenTrays?.length ? async () => {
+      const live = await this.liveFilaments(id);
+      for (const tray of chosenTrays) if (!live.some(item => item.slot === tray.slot && item.colour === tray.colour
+        && item.material === tray.material && item.filamentId === tray.filamentId && item.destinationId === tray.destinationId))
+        throw new InvalidStateError('A chosen spool changed while slicing. Nothing was sent — open the print sheet and check the colours.');
+    } : undefined;
     const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
     const overrides = object.publishedSelection?.sliced
       ? {repetitions: 1, ...(options.pauseBeforeLayers?.length ? {pauseAtLayers: options.pauseBeforeLayers} : {})}
@@ -1016,7 +1063,7 @@ export class ObjectService {
     };
     // Print Again prints the slice it made last time when nothing that shapes it changed (slice-cache.ts).
     const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')},
-      ...(Object.keys(sliced).length ? {slicer: sliced} : {})})
+      ...(recheckTrays ? {beforePrint: recheckTrays} : {}), ...(Object.keys(sliced).length ? {slicer: sliced} : {})})
       .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch),
         async error => {
           const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;
@@ -1055,7 +1102,7 @@ export class ObjectService {
 
   /** The print sheet's colour, as the MCP's own selection and slicing options (PRD §8.5 colour v1). */
   async #colour(id: string, options: PrintOptions, selection: PrinterSelection | undefined, backend: PrinterHandoffConfig['backend'])
-    : Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer}> {
+    : Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]}> {
     const object = await this.get(id);
     if (isMultipart(object)) {
       // A 3MF owns its per-part filaments: map each to a spool, never one spool for the whole model.
@@ -1067,6 +1114,7 @@ export class ObjectService {
       const live = (await this.liveFilaments(id)).find(item => item.slot === choice.slot && item.colour === choice.colour
         && item.material === choice.material && item.filamentId === choice.filamentId && item.destinationId === choice.destinationId);
       if (!live) throw new InvalidStateError('The chosen filament changed. Choose a current spool and try again.');
+      if (!live.profile) throw new InvalidStateError('That spool has no slicing profile on this Mac. Choose another spool.');
       return {selection: {...selection, material:live.material, useAms:live.slot !== 254 && live.slot !== 255, amsSlots:[live.slot], amsMapping:undefined, autoMatchAms:false},
         slicer: {loadFilaments:live.profile, filamentColours:live.colour}};
     }
@@ -1079,10 +1127,10 @@ export class ObjectService {
       const material = colour.material.trim();
       if (backend === 'bambu-printer-mcp') {
         const live = await this.liveFilaments(id).catch(() => [] as LiveFilament[]);
-        const match = live.find(item => item.material.toLowerCase() === material.toLowerCase());
+        const match = live.find(item => item.profile && item.material.toLowerCase() === material.toLowerCase());
         // A loaded spool of that material: print from it with its own profile.
         if (match) return {selection: {...selection, material: match.material, useAms: match.slot !== 254 && match.slot !== 255,
-          amsSlots: [match.slot], amsMapping: undefined, autoMatchAms: false}, slicer: {loadFilaments: match.profile, filamentColours: match.colour}};
+          amsSlots: [match.slot], amsMapping: undefined, autoMatchAms: false}, slicer: {loadFilaments: match.profile!, filamentColours: match.colour}};
         // No spool reports it (the external spool counts once the printer knows its type): there is no profile to
         // slice it with, and slicing with the preset's filament would print the wrong material's settings.
         throw new InvalidStateError(`The printer doesn't report a ${material} spool. Set the external spool to ${material} on the printer, or load ${material} in the AMS, then try again.`);
@@ -1099,10 +1147,11 @@ export class ObjectService {
     if ('external' in colour) {
       const tray = live.find(item => item.slot === 254 || item.slot === 255);
       return {selection: {...selection, useAms: false, amsSlots: undefined, amsMapping: undefined, autoMatchAms: false, ...(tray ? {material: tray.material} : {})},
-        ...(tray ? {slicer: {loadFilaments: tray.profile, filamentColours: tray.colour}} : {})};
+        ...(tray?.profile ? {slicer: {loadFilaments: tray.profile, filamentColours: tray.colour}} : {})};
     }
     const tray = live.find(item => item.slot === colour.amsSlot);
     if (!tray) throw new InvalidStateError('That AMS slot is empty now. Choose a loaded spool and try again.');
+    if (!tray.profile) throw new InvalidStateError('That spool has no slicing profile on this Mac. Choose another spool.');
     return {selection: {...selection, material: tray.material, useAms: true, amsSlots: [tray.slot], amsMapping: undefined, autoMatchAms: false},
       slicer: {loadFilaments: tray.profile, filamentColours: tray.colour}};
   }
@@ -1386,7 +1435,7 @@ export class ObjectService {
 
   readonly #estimates2 = new Map<string, Promise<PrintEstimate>>();
   /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
-  async estimate(id: string, request: {destinationId?: string; quality?: PrintSettings['quality']; strength?: PrintSettings['strength']; copies?: number} = {}): Promise<PrintEstimate> {
+  async estimate(id: string, request: {destinationId?: string; quality?: PrintSettings['quality']; strength?: PrintSettings['strength']; copies?: number; filaments?: FilamentChoice[]; filamentsModelVersion?: string} = {}): Promise<PrintEstimate> {
     const object = await this.get(id);
     const defaults = object.preferences?.printDefaults;
     request = {...(defaults?.quality ? {quality: defaults.quality} : {}), ...(defaults?.strength ? {strength: defaults.strength} : {}),
@@ -1410,13 +1459,17 @@ export class ObjectService {
     if (capabilities && ((overrides.layerHeightMm !== undefined && !capabilities.quality) || (overrides.wallLoops !== undefined && !capabilities.strength)
         || (copies && !capabilities.copies)))
       throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {})}));
-    // A multi-colour model slices with its mapped spools' profiles, exactly as Print would.
-    // Best effort: an unreadable inventory leaves the estimate to the MCP's own defaults.
-    const multipart = isMultipart(object)
-      ? await this.#multipartColour(object, {}, services.selection, services.runner.backend).catch(() => undefined) : undefined;
+    // A multi-colour model slices with its mapped spools' profiles, exactly as Print would:
+    // the sheet's chosen spools when it sends them (validated, errors visible), else the
+    // suggestions. Best effort for suggestions: an unreadable inventory leaves the
+    // estimate to the MCP's own defaults.
+    const multipart = !isMultipart(object) ? undefined
+      : request.filaments
+        ? await this.#multipartColour(object, {filaments: request.filaments, ...(request.filamentsModelVersion ? {filamentsModelVersion: request.filamentsModelVersion} : {})}, services.selection, services.runner.backend)
+        : await this.#multipartColour(object, {}, services.selection, services.runner.backend).catch(() => undefined);
     const slicer = {...overrides, ...(multipart?.slicer ?? {})};
     const model = await this.#modelBytes(object);
-    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0, multipart?.selection?.amsMapping ?? null]);
+    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0, multipart?.selection?.amsMapping ?? null, multipart?.slicer?.loadFilaments ?? null, multipart?.slicer?.filamentColours ?? null]);
     let running = this.#estimates2.get(key);
     if (!running) {
       const runner = services.runner;

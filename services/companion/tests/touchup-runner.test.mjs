@@ -44,6 +44,14 @@ test('a request in several colours keeps the printer MCP\'s multi-part 3MF besid
   ]);
 });
 
+test('a touched.3mf that is not a printable 3MF never becomes the model', async () => {
+  const {pass, inv} = await setup('multicolourbroken');
+  const result = await runTouchupWorker(inv, pass);
+  assert.equal(result.parts, undefined);
+  assert.equal(result.partColours, undefined);
+  assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+});
+
 test('part colours the worker garbles lose the garbled field but keep their filament’s place', async () => {
   const {pass, inv} = await setup('multicolourjunk');
   const result = await runTouchupWorker(inv, pass);

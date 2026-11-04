@@ -79,18 +79,46 @@ export function inspectModelFile(bytes: Buffer, format: 'stl' | '3mf'): ModelFil
 }
 
 /**
+ * How many filament slots this 3MF's project declares, used or not: the longest
+ * of the per-filament lists in `project_settings.config` (0 for a designed 3MF
+ * with none). Slicing needs one profile per declared slot, so callers size
+ * per-filament lists to this, not to the highest used extruder.
+ */
+export function modelFilamentSlotCount(bytes: Buffer): number {
+  const project = projectSettings(bytes);
+  if (!project) return 0;
+  return Math.min(64, Math.max(0, ...['filament_settings_id', 'filament_type', 'filament_colour', 'filament_diameter']
+    .map(key => Array.isArray(project[key]) ? (project[key] as unknown[]).length : 0)));
+}
+
+function projectSettings(bytes: Buffer): Record<string, unknown> | undefined {
+  try {
+    if (!bytes.length || bytes.length > 64 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return undefined;
+    const files = unzipSync(bytes, {filter: file => file.name === 'Metadata/project_settings.config' && file.originalSize <= 8 * 1024 * 1024});
+    const file = files['Metadata/project_settings.config'];
+    if (!file) return undefined;
+    const parsed = JSON.parse(Buffer.from(file).toString('utf8')) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+  } catch { return undefined; }
+}
+
+/**
  * The filaments this 3MF's parts print with: each part's `extruder` from
  * `Metadata/model_settings.config`, with the colour and material the project's
  * `project_settings.config` declares for that filament when the file carries one
- * (published files do; a `counterpart_make_3mf` design does not). Best effort:
- * an unreadable archive gives none, never a throw — validity is `inspectModelFile`'s job.
+ * (published files do; a `counterpart_make_3mf` design does not). When the file
+ * is sliced (or Studio-saved) the selected plate's `plate_N.json` `filament_ids`
+ * (0-based positions) are the authoritative used set — they cover painted
+ * regions no part names. Best effort: an unreadable archive gives none, never
+ * a throw — validity is `inspectModelFile`'s job.
  */
-export function modelFilaments(bytes: Buffer): ModelFilament[] {
+export function modelFilaments(bytes: Buffer, plateIndex = 0): ModelFilament[] {
   try {
     if (!bytes.length || bytes.length > 64 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return [];
     let total = 0;
+    const plateName = `Metadata/plate_${plateIndex + 1}.json`;
     const files = unzipSync(bytes, {filter: file => {
-      if (!['Metadata/model_settings.config', 'Metadata/project_settings.config'].includes(file.name)) return false;
+      if (!['Metadata/model_settings.config', 'Metadata/project_settings.config', plateName].includes(file.name)) return false;
       total += file.originalSize;
       return file.originalSize <= 8 * 1024 * 1024 && total <= 16 * 1024 * 1024;
     }});
@@ -112,6 +140,18 @@ export function modelFilaments(bytes: Buffer): ModelFilament[] {
     for (const block of settings.matchAll(/<part\b[^>]*>([\s\S]*?)<\/part>/g)) read(block[1]!, true);
     const shells = settings.replace(/<part\b[^>]*>[\s\S]*?<\/part>/g, '');
     for (const block of shells.matchAll(/<object\b[^>]*>([\s\S]*?)<\/object>/g)) read(block[1]!, false);
+    // A sliced plate's own filament list outranks part extruders: painted and
+    // support filaments appear there and nowhere a part names them.
+    const plateFile = files[plateName];
+    if (plateFile) {
+      try {
+        const plate = JSON.parse(Buffer.from(plateFile).toString('utf8')) as {filament_ids?: unknown};
+        const positions = Array.isArray(plate.filament_ids)
+          ? [...new Set(plate.filament_ids.filter((value): value is number => Number.isInteger(value)).map(value => value + 1))].filter(index => index >= 1 && index <= 64)
+          : [];
+        for (const index of positions) if (!byIndex.has(index)) byIndex.set(index, {index});
+      } catch { /* the extruder list above still stands */ }
+    }
     const projectFile = files['Metadata/project_settings.config'];
     if (projectFile) {
       const project = JSON.parse(Buffer.from(projectFile).toString('utf8')) as Record<string, unknown>;

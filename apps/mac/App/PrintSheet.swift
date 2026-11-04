@@ -132,10 +132,10 @@ struct PrintSheet: View {
         .padding(24)
         .frame(width: 720)
         .tint(.filament)
-        .task(id: printer?.id) { await loadFilaments() }
+        .task(id: "\(printer?.id ?? "")|\(object.current?.model ?? "")|\(modelVersion)") { await loadFilaments() }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
-        // must not hold Print for the new one.
-        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(modelVersion)") { await loadEstimate() }
+        // must not hold Print for the new one. The chosen spools too: they change what the estimate slices.
+        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(modelVersion)|\(mappingSignature)") { await loadEstimate() }
     }
 
     // MARK: Printers
@@ -202,7 +202,10 @@ struct PrintSheet: View {
     }
 
     static func name(_ filament: PrinterFilament) -> String {
-        let place = filament.external ? "External" : "A\(filament.slot + 1)"
+        // AMS units are lettered A–D, four trays each (slot 4 is B1); AMS-HT units report from 128.
+        let place = filament.external ? "External"
+            : filament.slot >= 128 ? "AMS-HT"
+            : "\(String(UnicodeScalar(65 + min(filament.slot / 4, 25))!))\(filament.slot % 4 + 1)"
         return "\(place) · \(filament.material) \(filament.name)"
     }
 
@@ -250,6 +253,9 @@ struct PrintSheet: View {
         mapping?.trays.first { $0.slot == mappingSlots[filament.index] }
     }
 
+    /// The mapping choices as a task key, so editing a spool re-slices the estimate with it.
+    private var mappingSignature: String { mappingSlots.keys.sorted().map { "\($0):\(mappingSlots[$0] ?? -1)" }.joined(separator: ",") }
+
     /// The chosen spools in filament order, when every colour has one: what Print sends.
     private var chosenSpoolPerColour: [PrinterFilament]? {
         guard let mapping, !mapping.filaments.isEmpty else { return nil }
@@ -268,6 +274,7 @@ struct PrintSheet: View {
             }
         default:
             if let mapping, !mapping.filaments.isEmpty {
+                ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(mapping.filaments) { filament in
                         VStack(alignment: .leading, spacing: 2) {
@@ -275,14 +282,15 @@ struct PrintSheet: View {
                                 SpoolDot(hex: filament.colour ?? "#808080", size: 18)
                                 Text(filament.name ?? "Part \(filament.index)").frame(minWidth: 60, alignment: .leading).lineLimit(1)
                                 Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                                if let tray = chosenTray(filament) { SpoolDot(hex: tray.colour, size: 18) }
                                 Menu {
                                     ForEach(mapping.trays) { tray in
-                                        Button { mappingSlots[filament.index] = tray.slot } label: { Text(Self.name(tray)) }
+                                        Button { mappingSlots[filament.index] = tray.slot } label: {
+                                            Text(mappingSlots[filament.index] == tray.slot ? "✓ \(Self.name(tray))" : Self.name(tray))
+                                        }
                                     }
                                 } label: {
-                                    HStack(spacing: 8) {
-                                        if let tray = chosenTray(filament) { SpoolDot(hex: tray.colour, size: 18); Text(Self.name(tray)) } else { Text("Choose a spool") }
-                                    }
+                                    Text(chosenTray(filament).map(Self.name) ?? "Choose a spool")
                                 }
                                 .menuStyle(.borderlessButton).fixedSize()
                                 .disabled(mapping.trays.isEmpty)
@@ -296,6 +304,8 @@ struct PrintSheet: View {
                         Text("No filament is loaded. Load a spool, then reopen this sheet.").foregroundStyle(.secondary)
                     }
                 }
+                }
+                .frame(maxHeight: 176)
             } else {
                 Text("Keeps the model’s filament assignments. The printer service confirms the loaded spools.").font(.callout)
             }
@@ -306,6 +316,10 @@ struct PrintSheet: View {
     private func mappingNote(_ filament: ModelColourFilament) -> String? {
         if filament.colour == nil { return "The model doesn’t say this part’s colour — pick its spool." }
         guard let tray = chosenTray(filament) else { return nil }
+        if let other = mapping?.filaments.first(where: { $0.index != filament.index && mappingSlots[$0.index] == tray.slot
+                && $0.colour != nil && $0.colour?.caseInsensitiveCompare(filament.colour ?? "") != .orderedSame }) {
+            return "Shares this spool with \(other.name ?? "Part \(other.index)") — both parts print this colour."
+        }
         if let material = filament.material, tray.material.caseInsensitiveCompare(material) != .orderedSame {
             return "Closest colour loaded; prints in \(tray.material), not \(material)."
         }
@@ -390,7 +404,7 @@ struct PrintSheet: View {
                                      copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),
                                      pauseBeforeLayers: offersPauses ? Array(Set(pauses)).sorted() : [])
         if published, let spools = chosenSpoolPerColour {
-            Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filaments: spools) { dismiss() } }
+            Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filaments: spools, modelVersion: mapping?.modelVersion) { dismiss() } }
             return
         }
         let filament = published ? nil : chosen
@@ -441,7 +455,8 @@ struct PrintSheet: View {
         estimateState = .loading
         do {
             let result = try await model.estimate(object.id, destinationId: printer?.id, quality: offersQuality ? quality : .standard,
-                                                  strength: offersStrength ? strength : .standard, copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil))
+                                                  strength: offersStrength ? strength : .standard, copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),
+                                                  filaments: published ? chosenSpoolPerColour ?? [] : [], modelVersion: mapping?.modelVersion)
             guard !Task.isCancelled else { return }
             estimate = result
             estimateState = .done
