@@ -259,6 +259,12 @@ remote native probes and the SSH tunnel were removed after verification.
      Log: `~/scan-to-make-work/linux-desktop/receipts/payload-build.log`; Tauri release linked, packaging and
      visible setup/starter checks continue. This is not host acceptance. Further builds use an owned `TMPDIR`
      under `/home`. Failed-build source/log: `~/scan-to-make-work/linux-host/{repo,prepare.log}` on agents-173.
+     The first .deb and AppImage built, and the UI owner installed the .deb and clicked Set up this computer.
+     Setup failed with "Counterpart could not list this computer's network addresses". Parent reproduced the
+     underlying read-only import failure: installed Node cannot find `@scan-to-make/contracts`; all three
+     companion workspace links exist in prepared resources but `node_modules/@scan-to-make` is absent from
+     the installed package. UI/packaging owner is fixing packaging within `apps/linux`, then will retry the
+     visible setup button. Do not repair installed node_modules manually or claim connected-app acceptance.
      The delegate created disposable account `stm-hosttest` (UID 1001) with lingering enabled for pending
      runtime checks; remove only after its owned checks and service cleanup. No real host acceptance yet.
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
