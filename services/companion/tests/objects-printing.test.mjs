@@ -291,6 +291,27 @@ test('the estimate for a multi-colour model slices with the mapped spools’ pro
   assert.equal(f.runs.at(-1).estimate.slicer.loadFilaments, '/p/ext.json;/p/ext.json');
 });
 
+test('an estimate for another printer reads that printer’s spools, not the saved printer’s', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
+  const base = f.deps.print.services;
+  const otherRunner = {...base.runner,
+    filaments: async () => ({trays: [{slot: 0, loaded: true, tray_color: 'FFFFFFFF', tray_type: 'PLA', tray_info_idx: 'OTHER', resolved_profile_path: '/p/other.json'}]}),
+    estimate: async input => { f.runs.push({estimate: input, other: true}); return {estimate: {seconds: 60, grams: 1}, settings: {layers: 10}}; }};
+  f.deps.print.destinations.set('other', {...base, runner: otherRunner});
+  f.deps.printerCatalog.canonical = id => ['current', 'other'].includes(id) ? id : undefined;
+  const {modelVersion} = await f.service.colourMapping(f.object.id);
+  // Automatic matching uses the requested printer's inventory.
+  await f.service.estimate(f.object.id, {destinationId: 'other'});
+  assert.equal(f.runs.at(-1).other, true);
+  assert.equal(f.runs.at(-1).estimate.slicer.loadFilaments, '/p/other.json;/p/other.json');
+  assert.equal(f.runs.at(-1).estimate.slicer.filamentColours, '#FFFFFF;#FFFFFF');
+  // Explicit choices from that printer validate against its trays, not the saved printer's.
+  const tray = {slot: 0, colour: '#FFFFFF', material: 'PLA', filamentId: 'OTHER', destinationId: 'other', name: 'PLA'};
+  await f.service.estimate(f.object.id, {destinationId: 'other', filaments: [tray, tray], filamentsModelVersion: modelVersion});
+  assert.equal(f.runs.at(-1).estimate.slicer.loadFilaments, '/p/other.json;/p/other.json');
+});
+
 test('the mapping and per-colour spools cross both transports (Mac socket and phone HTTP)', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
   await multipart(f, {bytes: twoPart3mf(), filaments: [{name: 'body', colour: '#111111'}, {name: 'letters', colour: '#FFD200'}]});

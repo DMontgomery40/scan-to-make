@@ -549,9 +549,10 @@ export class ObjectService {
     return undefined;
   }
 
-  private async liveFilaments(id: string): Promise<LiveFilament[]> {
+  private async liveFilaments(id: string, override?: {destinationId?: string}): Promise<LiveFilament[]> {
     const object = await this.get(id), configured = this.#deps.print;
-    const destinationId = this.#destinationId(object);
+    // An estimate may name a different printer from the project's saved one: its spools are that printer's.
+    const destinationId = override ? override.destinationId : this.#destinationId(object);
     const services = destinationId ? configured?.destinations?.get(destinationId) : configured?.services;
     // Trays come from any MCP that reports them (counterpart_printer_info `filaments: "ams"`), not from one package.
     const ams = services?.runner.backend === 'bambu-printer-mcp' || (!!destinationId && this.#deps.printers?.capabilities(destinationId)?.filaments === 'ams');
@@ -662,7 +663,7 @@ export class ObjectService {
    * inventory can be read — the MCP's own defaults then apply, as before.
    */
   async #multipartColour(object: StmObject, options: PrintOptions, selection: PrinterSelection | undefined,
-      _backend: PrinterHandoffConfig['backend']): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]} | undefined> {
+      _backend: PrinterHandoffConfig['backend'], destinationOverride?: {destinationId?: string}): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]} | undefined> {
     const {filaments: model, slots, version, declaredSlots} = await this.#modelData(object);
     if (!model.length) return undefined;
     if (options.filaments && options.filamentsModelVersion !== version)
@@ -670,7 +671,7 @@ export class ObjectService {
         ? 'The model changed since you chose its spools. Reopen the print sheet and check the colours.'
         : 'These spool choices carry no model version. Reopen the print sheet and choose the spools again.');
     let live: LiveFilament[];
-    try { live = await this.liveFilaments(object.id); }
+    try { live = await this.liveFilaments(object.id, destinationOverride); }
     catch (error) { if (options.filaments) throw error; return undefined; }
     const sliced = !!object.publishedSelection?.sliced;
     let chosen: LiveFilament[];
@@ -1524,8 +1525,8 @@ export class ObjectService {
       throw new InvalidStateError('The model changed since you chose its spools. Reopen the print sheet and check the colours.');
     const multipart = !isMultipart(object) ? undefined
       : request.filaments
-        ? await this.#multipartColour(object, {filaments: request.filaments, ...(request.filamentsModelVersion ? {filamentsModelVersion: request.filamentsModelVersion} : {})}, services.selection, services.runner.backend)
-        : await this.#multipartColour(object, {}, services.selection, services.runner.backend).catch(() => undefined);
+        ? await this.#multipartColour(object, {filaments: request.filaments, ...(request.filamentsModelVersion ? {filamentsModelVersion: request.filamentsModelVersion} : {})}, services.selection, services.runner.backend, {destinationId})
+        : await this.#multipartColour(object, {}, services.selection, services.runner.backend, {destinationId}).catch(() => undefined);
     const slicer = {...overrides, ...(multipart?.slicer ?? {})};
     const model = await this.#modelBytes(object);
     const supports = designedSupports(object);

@@ -257,6 +257,12 @@ struct PrintSheet: View {
     /// The mapping choices as a task key, so editing a spool re-slices the estimate with it.
     private var mappingSignature: String { mappingSlots.keys.sorted().map { "\($0):\(mappingSlots[$0] ?? -1)" }.joined(separator: ",") }
 
+    /// AMS trays and the external spool can't feed one print together (the companion refuses the mix).
+    private var mixedFeedSources: Bool {
+        let external = mappingSlots.values.map { $0 >= 254 }
+        return external.contains(true) && external.contains(false)
+    }
+
     /// The chosen spools in filament order, when every colour has one: what Print sends.
     private var chosenSpoolPerColour: [PrinterFilament]? {
         guard let mapping, !mapping.filaments.isEmpty else { return nil }
@@ -289,8 +295,9 @@ struct PrintSheet: View {
                                         Button { mappingSlots[filament.index] = tray.slot } label: {
                                             Text(mappingSlots[filament.index] == tray.slot ? "✓ \(Self.name(tray))" : Self.name(tray))
                                         }
-                                        .disabled((slicedOriginal && filament.material != nil && tray.material.caseInsensitiveCompare(filament.material!) != .orderedSame)
-                                            || mappingSlots.contains { $0.key != filament.index && ($0.value >= 254) != (tray.slot >= 254) })
+                                        // Mixed AMS/external choices stay selectable (else no row could be the
+                                        // first to switch source); the note below and Print say what's wrong.
+                                        .disabled(slicedOriginal && filament.material != nil && tray.material.caseInsensitiveCompare(filament.material!) != .orderedSame)
                                     }
                                 } label: {
                                     Text(chosenTray(filament).map(Self.name) ?? "Choose a spool")
@@ -305,6 +312,10 @@ struct PrintSheet: View {
                     }
                     if mapping.trays.isEmpty {
                         Text("No filament is loaded. Load a spool, then reopen this sheet.").foregroundStyle(.secondary)
+                    }
+                    if mixedFeedSources {
+                        Text("One print feeds from one source. Put every colour on AMS spools, or every colour on the external spool.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 }
@@ -383,7 +394,7 @@ struct PrintSheet: View {
         guard published else { return true }
         if mappingState == .loading { return false }
         guard let mapping, !mapping.filaments.isEmpty else { return true }
-        return chosenSpoolPerColour != nil
+        return chosenSpoolPerColour != nil && !mixedFeedSources
     }
 
     private var canPrint: Bool {
