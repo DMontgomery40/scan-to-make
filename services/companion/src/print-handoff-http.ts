@@ -89,6 +89,8 @@ export interface PrintHandoffServices {
   selection?: PrinterHandoffConfig['selection'];
   /** PRD §8.10: holds the printer for a print, so its MCP isn't updated under it; throws while it updates. */
   admit?: () => () => void;
+  /** The other destinations' relays: their remote (`/v1/mcp`) questions are listed and answered here too. */
+  remoteRelays?: () => ElicitationRelay[];
 }
 
 /**
@@ -155,6 +157,12 @@ function validateAnswer(requestedSchema: unknown, answer: ElicitationAnswer): vo
 }
 
 export function createPrintHandoffRoutes(services: PrintHandoffServices) {
+  // This destination's questions, plus remote questions asked on any other destination.
+  const questions = () => [
+    ...services.relay.pending().map(item => ({item, relay: services.relay})),
+    ...(services.remoteRelays?.() ?? []).filter(relay => relay !== services.relay)
+      .flatMap(relay => relay.pending().filter(item => item.remoteDeviceId).map(item => ({item, relay}))),
+  ];
   let activePrint: ActivePrint | undefined;
   let completedPrints = 0;
   let startingPrint: Promise<void> | undefined;
@@ -209,6 +217,8 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
       response: ServerResponse,
       authorize: (scope: RemoteScope) => Promise<void>,
       header: (name: string) => string | undefined,
+      /** The answering device, so a remote device can never answer its own question. */
+      deviceId: () => string | undefined = () => undefined,
     ) {
       const controller = new AbortController();
       const disconnected = () => { if (!response.writableEnded) controller.abort(); };
@@ -228,7 +238,7 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           const id = elicitation[1]?.toLowerCase();
           if (!id) {
             if (request.method !== 'GET') throw new Failure(405, 'method-not-allowed');
-            const elicitations = services.relay.pending();
+            const elicitations = questions().map(entry => entry.item);
             await authorize(HANDOFF_SCOPE);
             await send(response, JSON.stringify({elicitations}));
             return;
@@ -243,10 +253,11 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
           try { answer = answerSchema.parse(JSON.parse(bytes.toString('utf8'))); }
           catch { throw new Failure(400, 'invalid-request'); }
           await authorize(HANDOFF_SCOPE);
-          const pending = services.relay.pending().find(item => item.id === id);
-          if (!pending) throw new Failure(404, 'elicitation-not-pending');
-          validateAnswer(pending.requestedSchema, answer);
-          if (!services.relay.respond(id, answer)) throw new Failure(404, 'elicitation-not-pending');
+          const found = questions().find(entry => entry.item.id === id);
+          if (!found) throw new Failure(404, 'elicitation-not-pending');
+          if (found.item.remoteDeviceId && found.item.remoteDeviceId === deviceId()) throw new Failure(403, 'own-question');
+          validateAnswer(found.item.requestedSchema, answer);
+          if (!found.relay.respond(id, answer)) throw new Failure(404, 'elicitation-not-pending');
           await send(response, JSON.stringify({id, answered: true}));
           return;
         }

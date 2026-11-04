@@ -655,10 +655,22 @@ test('project preferences persist across both transports without starting work',
   assert.equal((await call('PATCH', `/v1/objects/${project.id}/settings`, {unexpected: true})).status, 400);
 });
 
+test('a duplicate never inherits the last print\'s layer pauses as a default', async t => {
+  const {call, service, store} = await fixture(t);
+  const project = await service.create('A magnet box', 'fit');
+  await service.start(project.id); await service.settled(project.id);
+  await store.update(project.id, o => ({...o, print: {bundleId: 'b', settings: {quality: 'fine', pauseBeforeLayers: [12]}}}));
+  const copied = (await call('POST', `/v1/objects/${project.id}/duplicate`, {})).json.object;
+  assert.equal(copied.preferences.printDefaults.quality, 'fine');
+  assert.equal(copied.preferences.printDefaults.pauseBeforeLayers, undefined, 'a hidden stop would close the cavities on a print that shows none');
+});
+
 test('duplicate copies the current model and defaults, never the source outcome or active work', async t => {
   const {call, service, store} = await fixture(t);
   const project = await service.create('A mount', 'copy');
   // A copy has something it copies (here, its scan); a request alone would be a new design.
+  await mkdir(join(store.dir(project.id), 'scan'), {recursive: true});
+  await writeFile(join(store.dir(project.id), 'scan', 'scan.usdz'), 'the scanned mount');
   await store.update(project.id, o => ({...o, scan: 'scan.usdz'}));
   await service.start(project.id); await service.settled(project.id);
   await service.setProjectSettings(project.id, {title: 'Original mount', status: 'works', archived: true,
@@ -674,6 +686,8 @@ test('duplicate copies the current model and defaults, never the source outcome 
   assert.equal(copied.title, 'Original mount copy');
   assert.equal(copied.state, 'ready');
   assert.equal(copied.kind, 'copy');
+  assert.equal(copied.scan, 'scan.usdz', 'a copy keeps the scan it copies');
+  assert.equal(await readFile(join(store.dir(copied.id), 'scan', 'scan.usdz'), 'utf8'), 'the scanned mount');
   assert.equal(copied.settings.status, 'not-printed');
   assert.equal(copied.settings.archived, false);
   assert.deepEqual(copied.preferences, source.preferences);

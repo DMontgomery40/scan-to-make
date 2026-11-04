@@ -663,12 +663,15 @@ public struct PrintSettings: Codable, Equatable, Sendable {
     /// `{auto: true}`, `{amsSlot: n}`, `{external: true}` or `{material: "PETG"}`.
     public var colour: JSONValue?
     public var copies: Int?
+    /// The last print's "Pause before layer" numbers (`print.settings`), so Print Another keeps the magnet pauses.
+    /// Read only: Print sends its own (`pauseBeforeLayers`), and saved defaults never carry them.
+    public var pauseBeforeLayers: [Int]?
 
-    public init(quality: String? = nil, strength: String? = nil, colour: JSONValue? = nil, copies: Int? = nil) {
-        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies
+    public init(quality: String? = nil, strength: String? = nil, colour: JSONValue? = nil, copies: Int? = nil, pauseBeforeLayers: [Int]? = nil) {
+        self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies; self.pauseBeforeLayers = pauseBeforeLayers
     }
 
-    private enum CodingKeys: String, CodingKey { case quality, strength, colour, copies }
+    private enum CodingKeys: String, CodingKey { case quality, strength, colour, copies, pauseBeforeLayers }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(quality, forKey: .quality)

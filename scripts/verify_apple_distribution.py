@@ -60,6 +60,15 @@ def main():
     args = parser.parse_args()
     info, entitlements = inspect_bundle(args.app, args.platform)
     issues = validate_metadata(info, entitlements, platform=args.platform, expected_build=args.build)
+    if args.platform == 'mac':
+        node = args.app / 'Contents/Resources/Payload/node/bin/node'
+        signed_node = subprocess.run(['/usr/bin/codesign', '-d', '--entitlements', ':-', str(node)],
+                                     check=True, capture_output=True)
+        node_entitlements = plistlib.loads(signed_node.stdout)
+        # Check the shipped helper: downloaded MCPs can contain native npm addons signed by other teams.
+        for key in ('com.apple.security.cs.allow-jit', 'com.apple.security.cs.disable-library-validation'):
+            if node_entitlements.get(key) is not True:
+                issues.append(f'Payload Node: {key} must be enabled')
     if args.platform == 'ios':
         for name, identifier, cloudkit in [
             ('CounterpartNotificationService', 'com.scantomake.notifications', True),

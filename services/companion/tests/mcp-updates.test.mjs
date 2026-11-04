@@ -135,7 +135,7 @@ test('Update runs the matching update in that installation, restarts every sessi
   assert.equal(f.commands[0], '/opt/homebrew/bin/npm view bambu-printer-mcp version');
   // Installed beside the live copy, then swapped in: a failed install never touches what runs.
   const staging = f.commands[1].match(/--prefix (.+\/\.counterpart-update-[0-9a-f-]+) /)[1];
-  assert.equal(f.commands[1], `${node} /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js install --global --prefix ${staging} --allow-scripts=bambu-printer-mcp --ignore-scripts=false --foreground-scripts bambu-printer-mcp@1.1.50`);
+  assert.equal(f.commands[1], `${node} /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js install --global --prefix ${staging} --allow-scripts=bambu-printer-mcp --ignore-scripts=false --foreground-scripts --loglevel=notice bambu-printer-mcp@1.1.50`);
   assert.ok(staging.startsWith(`${prefix}/`));
   const live = `${prefix}/lib/node_modules/bambu-printer-mcp`;
   assert.deepEqual(f.moves, [['rename', live, `${staging}/previous`], ['rename', `${staging}/lib/node_modules/bambu-printer-mcp`, live], ['rm', staging]]);
@@ -763,7 +763,7 @@ test('npm script policy: Update and Download authorize only the selected MCP and
         if (download) await f.updates.download(pkg); else await f.updates.update(f.mcpId);
         await f.done();
         const install = f.commands.find(command => command.includes(' install '));
-        assert.ok(install.includes(`--allow-scripts=${pkg} --ignore-scripts=false --foreground-scripts`));
+        assert.ok(install.includes(`--allow-scripts=${pkg} --ignore-scripts=false --foreground-scripts --loglevel=notice`));
         assert.ok(!install.includes('dangerously-allow-all'));
         assert.equal(f.events.at(-1).type, ran ? 'mcp.update.done' : 'mcp.update.failed');
         if (!ran) {
@@ -773,4 +773,49 @@ test('npm script policy: Update and Download authorize only the selected MCP and
       }
     }
   }
+});
+
+test('review fix (#295): removing the last printer on an install while its Update waits ends the update, not the companion', {timeout: 5000}, async t => {
+  const gate = new PrintGate();
+  const profile = bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']);
+  const profiles = [{id: 'p1s', config: profile}, {id: 'a1', config: profile}];
+  let busy = true;
+  const rejections = [];
+  const onRejection = reason => { rejections.push(reason); };
+  process.on('unhandledRejection', onRejection);
+  t.after(() => { process.off('unhandledRejection', onRejection); });
+  const f = await updater(t, {gate, profiles, busy: () => busy});
+  const mcpId = f.mcpId;
+  assert.equal((await f.updates.update(mcpId)).state, 'waiting');
+  profiles.splice(0, profiles.length);
+  busy = false;
+  await f.done();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(rejections, []);
+  assert.equal(f.events.at(-1).type, 'mcp.update.failed');
+  assert.match(f.events.at(-1).data.log, /No printer uses this MCP any more/);
+  assert.equal(f.commands.some(command => command.includes(' install ')), false);
+  assert.equal(f.restarts.length, 0);
+  assert.equal(gate.updating('p1s'), false);
+  assert.equal(gate.updating('a1'), false);
+  // A later Update of the same install is refused as having no printers, not stuck behind the first.
+  await assert.rejects(f.updates.update(mcpId), /No printer uses that MCP/);
+});
+
+test('review fix (#295): removing the printers while an admitted Update checks them releases them and ends the update', {timeout: 5000}, async t => {
+  const gate = new PrintGate(), checking = Promise.withResolvers();
+  const profile = bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']);
+  const profiles = [{id: 'p1s', config: profile}, {id: 'a1', config: profile}];
+  const f = await updater(t, {gate, profiles, busy: () => checking.promise});
+  const accepted = await f.updates.update(f.mcpId);
+  assert.equal(accepted.state, 'started');
+  assert.equal(gate.updating('p1s'), true, 'held while its printers are checked');
+  profiles.splice(0, profiles.length);
+  checking.resolve(false);
+  await f.done();
+  assert.equal(f.events.at(-1).type, 'mcp.update.failed');
+  assert.match(f.events.at(-1).data.log, /No printer uses this MCP any more/);
+  assert.equal(f.commands.some(command => command.includes(' install ')), false);
+  assert.equal(gate.updating('p1s'), false);
+  assert.equal(gate.updating('a1'), false);
 });

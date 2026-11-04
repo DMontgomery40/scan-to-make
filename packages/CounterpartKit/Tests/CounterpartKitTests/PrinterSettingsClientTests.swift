@@ -30,7 +30,7 @@ final class PrinterSettingsClientTests: XCTestCase {
         XCTAssertEqual(route.label("new-route"), "A connection from the MCP")
         XCTAssertFalse(route.available("new-route"))
         XCTAssertEqual(route.label("lan"), "Local network", "older MCP choices remain readable")
-        let selected = try await mac.choosePrinterMcp("current", backend: "mcp-3d-printer-server")
+        let selected = try await mac.choosePrinterMcpWithCatalog("current", backend: "mcp-3d-printer-server")
         XCTAssertEqual(selected.catalog.destination(selected.destinationId)?.backend, "mcp-3d-printer-server")
         XCTAssertEqual(fake.calls.map { $0.request.httpMethod }, ["POST", "POST"])
         let bodies = try fake.calls.map { try JSONSerialization.jsonObject(with: XCTUnwrap($0.request.httpBody)) as? [String: String] }

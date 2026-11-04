@@ -35,13 +35,13 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
   uses the actual installed app's visible controls. Leave the current AirPods hanger print running as he instructed.
 - **Orientation/support incident (Nov 4):** the AirPods hanger was reported printing upright with supports off
   although its design planned side-down printing. The orientation/support-plan fix is owned by thread
-  `56a66f4e-49b6-49ee-b167-550b55157819`, targeting main after #293 to preserve 3MF placement and AMS mapping.
+  `56a66f4e-49b6-49ee-b167-550b55157819`, targeting main as #303 after #302; #293's AMS work follows it.
   Release owner integrates it with #298/provider guidance. David's updated scope supersedes the earlier plan:
   drop `lay_flat`, pass every STL to the slicer with `orient: true`, preserve 3MF placement, and pass the
   designer's structured support on/off/type directly to `slice_stl`. Include support args in slice-cache
   identity; use the existing unsupported-settings refusal. No stored rotation, hash-bound plan, receipt
   checks, missing-plan Ask or walls/infill minimum Asks. Counterpart is a bridge to the slicer.
-  No fix or UI acceptance is claimed yet.
+  The source fix is installed in build 202611040628; design/print acceptance remains open.
   Mac UI, companion restarts, installs and MCP Update remain held until the release owner hands control back.
 - No user memories (AGENTS.md). Push after every feature. Clean up worktrees, branches, venvs and build bloat you made.
 - iOS/macOS 27.x, Liquid Glass; read current Apple docs. Use Apple's frameworks; don't hand-roll what Apple ships.
@@ -50,9 +50,9 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 
 | What | Version | From |
 |---|---|---|
-| Mac app `/Applications/Counterpart.app` | **202611032022** | main @ `2f7f43e` (Resume confirmation deadlock fix; source audit found #295/pause-at-layer absent from this main build, contrary to the older handoff) |
+| Mac app `/Applications/Counterpart.app` | **202611040628** | release @ `86467621`: includes #295/#299/#302/#303/#300/#301, provider routing, updater script permissions and bundled Node native-addon entitlement. Signed development CloudKit/APNs; installed idle and verified through actual UI Nov 4 13:35Z. |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611040322), DEBUG** | Phone/deploy owner verified Nov 4: `feat/phone-pause-and-printer-pickers` around `f03580e`; installed by its child around 03:24 MST. Includes #271 virtual RealityView camera and handheld teardown. Fixture screen launches are not connected-app acceptance. |
-| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `587461b` (active since 20:17) (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
+| bambu-printer-mcp (what Counterpart runs) | **Published npm 1.1.54**, installed through actual Settings → Printers → Update Nov 4 13:37Z; replaces hand-copied `587461b`. UI says Updated to 1.1.54, P1S Ready. | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
 | mcp-3D-printer-server | live dist from `56d8fb9`; source `feat/bambu-complete` now `afcf378` (new layer-pause parity not deployed) | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
 | FULU runtime | Colima profile `bambu-fulu`, image `bpm-fulu-e2e:runtime`, plug-in **02.05.02.58** | launcher `~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh` (in neither repo) |
@@ -211,9 +211,33 @@ remote native probes and the SSH tunnel were removed after verification.
      follow-ups, phone picker/pause deployment, and `/v1/mcp`. This release thread retains Android/Linux,
      TestFlight/reconstruction and its release/status/distribution files. Leave their branches and live deployments
      alone; record and coordinate any proposed Mac deployment or companion restart here first.
-     **Final-main integration checklist (merge owner, Nov 4):** wait for their final main SHA/caveats, then
-     reconcile hunks rather than choosing whole files. Earlier #295/#299 heads on this release branch do not
-     contain all fixes in main's squashes `7b112af`/`2a8155f`:
+     **Combined integration through main `a72b6d4`:** reconciled #295/#299 final changes, #292/#297,
+     #302 and #303 with provider routing, Linux discovery, reconstruction, plate selection and notification
+     deduplication. One FDM guidance block remains. `--allow-scripts` and main's no-printer safeguards both remain.
+     Combined checks: contracts 58, handoff 116 (5 skipped), companion 824 (1 skipped), site 4 pages, Swift
+     suites and unsigned Mac build passed. Removed an auto-merged duplicate PrinterSetupViews Xcode entry.
+     This is source/build evidence; installed Mac remains unchanged until the recorded deployment boundary.
+     **Remote MCP integration:** main `290d71fb` (#300, final head `ee3d008`) is also reconciled on release.
+     Catalog/session setup now serves `/v1/mcp` with or without objects, while keeping release's provider-worker
+     routing, no Claude-only requirement, Linux placeholder handling and print-gate reservations. Retained
+     `source_f3d` confinement and plain support arguments. The signed `202611040557` artifact predates #300;
+     this source integration does not change it or the installed app.
+     **Phone controls integration:** main `9acca30b` (#301) reconciled with release plates/reconstruction.
+     Uses main's final connection/MCP cards and stable pause rows (maximum 16), retaining selected-plate label,
+     estimate identity and `expectedPlate`. One route handler supports main's PUT and existing Android POST
+     aliases; both changes require PRINT+SETTINGS. POST MCP replies retain the refreshed catalog. Both
+     `printerChoices` and legacy `printerSettings` capabilities remain, as do print-gate reservations and the
+     bounded 20-second live printer check. Renamed the earlier Swift catalog-returning helper to
+     `choosePrinterMcpWithCatalog` to avoid conflicting with main's id-returning method.
+     Checks: companion build, 86 affected Node checks, 172 shared Swift checks and unsigned iOS Release build
+     pass. Logs in `~/scan-to-make-work/phone-301-integration/`. No phone installation/UI acceptance.
+     Remaining main queue: #293 (Muse after quota reset).
+     Engineering checks: companion build and 125 focused remote/auth/updater/session/printer checks pass.
+     Broader handoff/HTTP/control/provider run: 212 pass, 5 skip, one unchanged Mac worker-environment
+     assertion fails because the child receives `__CF_USER_TEXT_ENCODING` (secret-leak assertion passes).
+     The same model-access suite passes 17/17 on Linux Node 24.22.2. Logs retained under
+     `~/scan-to-make-work/main-integration-mac/remote-mcp-*.log`; no remote-client/UI acceptance is claimed.
+     Reconciliation details:
      - #295 final head `f17b72f`: preserve MCP updater `#perform` handling when all printers are removed
        (`#held`, `NO_PRINTERS`, caught fire-and-forget) and both regressions; preserve setup `#runs()` settings-folder
        ownership and its regression in objects-printers.
@@ -221,10 +245,22 @@ remote native probes and the SSH tunnel were removed after verification.
        pauses from saved defaults (`48f22a5`), and final control refusals/deadlines (`c4c904f`, `3c0a192`).
      - Queue receipt: main `f610034` includes #292 (`0c6125b`, head `7fbd3f2`, gate 7/7) and #297
        (`f610034`, head `f9466b4`). Preserve main's optional Claude Code/Blender/Fusion setup items alongside
-       the MCP documentation links. Remaining order: #302 → #293 → #303 orientation → #300 → #301.
+       the MCP documentation links. #302 is now merged: main `d9cd9eef783e607f56b3afde366741de70067197`,
+       head `697775f`, gate 11/11 and Codex clean. Remaining order: #303 orientation → #293 → #300 → #301.
+       #293 Muse stopped mid-edit on quota at 12:41Z; merge owner plans to resume after 14:12Z unless David
+       explicitly chooses another provider. No provider switch authorized by this release thread.
      - #302 removes `selection.connectionMode` from the handoff schema (legacy configs load with that key
        dropped) and removes HMS 0007 auto-clear. Keep both removals when reconciling release code; its current
        print.ts still has the auto-clear workaround. Do not restore it from this branch during conflict resolution.
+     - #303 orientation/supports initial head `bebaa791`: replace #298's invocation sentence about lay_flat
+       and discarded orientation with slicer auto-orientation/direct support forwarding (including off).
+       Its `supports` schema block follows `ask`. Preserve release's provider `worker` hook when reconciling
+       touchup/mcp-client/bound-fusion. Integrate from the merge owner's final main after #302. The
+       "multi-colour 3MF lies the way it prints" rule belongs in #293, not #303, because main does not yet
+       support that multi-colour path. This order supersedes earlier #293-before-orientation notes.
+       Known limitation reported by orientation owner: Studio `orient:true` refused the stove gap filler
+       with "empty layer" (KAN-223). Surface Studio's refusal; do not silently restore lay_flat or keep-pose.
+       David's selected auto-orient behavior remains unchanged unless he chooses otherwise.
      - Known conflicts: PrintSheet, local-control protocol/services, objects/printers, and add/add printing/discovery.
        Also reconcile profiles/setup/server-cli, print/slice-cache, updater/printer checks and help/index.html.
      - Preserve release-only reconstruction handlers/review state and contracts, Linux Avahi/bootstrap-printer
@@ -238,7 +274,58 @@ remote native probes and the SSH tunnel were removed after verification.
      clicked it, closed Blender's untouched startup scene normally, and Check Again reported Blender set up.
      AirPods 25 mm + FDM request and Stove FDM request were resent through the actual Send buttons at
      1793790273706 / 1793790324011; both showed Working, AirPods had real Blender tool activity.
-     **Current handoff:** both passes are now done/Ready; a fresh saved-object scan showed no touching-up or
+     **Deployment completed after fresh idle verification:** parent observed AirPods **Couldn't finish /
+     The printer stopped**, no pending confirmation, no Working/Printing projects, and P1S **Ready** in Settings.
+     Installed the already-signed `202611040557` (`4d6838f0`, includes #303 and updater fix, predates #300), retaining
+     a rollback at the time; superseded by the corrected deployment below.
+     Quit through the app, replaced `/Applications/Counterpart.app`, restarted only its companion (PID 83387),
+     and verified retained projects and printer state through UI. All nine project IDs, settings, printer config,
+     companion environment and credentials are retained; only the instance-lock owner receipt changed.
+     Settings shows P1S Ready, Local network / Developer Mode selected, and Update 1.1.52 → 1.1.54.
+     Explicit **SETTLED** UI handoff sent directly to MCP owner for Update; parent did not click it.
+     Phone, printer operations and public appcast stayed untouched. Deployment receipts are beside the build.
+     **Update attempt 13:18:53Z failed and rolled back:** owner used visible Update. The new npm flags worked:
+     postinstall ran and applied the compatibility patch. Fresh MCP startup then failed loading sharp because
+     bundled hardened Node has only allow-jit, and sharp's native addon has a different/no Team ID. Version
+     1.1.52 remains live; no staging leftovers or print. UI returned to parent. Packaging corrected in `86467621`;
+     retained isolated repro at `~/scan-to-make-work/sharp-library-validation-repro/`. No retry until rebuilt.
+     Node-only packaging fix adds `com.apple.security.cs.disable-library-validation` alongside allow-jit;
+     the distribution verifier now checks the signed Node's actual entitlements. Parent reproduced failure
+     under the installed Node, then re-signed an isolated copy with the new entitlements: all four sharp
+     loads passed and fresh npm 1.1.54 initialized. No printer commands. Receipts in
+     `~/scan-to-make-work/node-native-signing/`. Rebuild/runtime notarization and real UI Update passed below.
+     **Corrected build installed and UI verified:** signed development Mac `202611040628`, source `86467621` (also #300/#301),
+     finished exit 0 and passed deep/strict signature verification. Its actual embedded Node passes all four
+     sharp loads and fresh npm 1.1.54 initialize. Corrected standalone Developer ID Node notarization
+     `89b595ea-1d8f-47f5-9641-a062fa6f1f6a` was Accepted; this is not a notarization claim for the development app.
+     Parent freshly observed no active projects/pending confirmations and P1S Ready, quit through the app,
+     installed the prepared bundle and restarted the companion. Actual UI again showed all nine retained
+     projects and P1S Ready with Developer Mode selected. Auth, settings, companion environment and printer
+     config hashes are unchanged; only the instance-lock owner changed. Receipts and immediate 557 rollback:
+     `~/scan-to-make-work/native-node-mac-202611040628/`. Explicit SETTLED sent directly to MCP owner at
+     13:36Z for the visible Update retry; other agents retain UI/deploy holds. No printer operations.
+     **Published MCP Update accepted in actual app:** MCP owner freshly checked idle and pressed Update at
+     13:37:01Z. Events: `mcp.update.started` 13:37:01.935Z → `mcp.update.done` 13:37:05.843Z,
+     “Your printers use it now.” Version **1.1.54** is now live, matching npm latest (#101 / `e1fbc69`).
+     UI shows “Updated to 1.1.54” and P1S Ready. New MCP PID 30636 replaced 89891; no staging leftovers.
+     This closes both updater blockers through the installed app. Mac UI returned to release owner.
+     Unused mcp-3D checkout remains 1.2.26, not updated; latest published is 1.2.28. No prints.
+     MCP owner cleans its repro kit; parent keeps logs, new signed artifact and immediate 557 rollback,
+     and removed superseded app/rollback and owned build caches. Orientation/FDM/physical print acceptance
+     remains open for David's app-driven use; no automatic reprint.
+     **Earlier hold, Nov 4 13:05Z:** visible Mac UI showed AirPods **Getting the print ready**, with a floating-
+     cantilever warning, unchecked **Print anyway**, **Cancel Print**, and disabled **Print**. P1S shows Ready,
+     but the pending print question means deployment is not idle. Parent left the decision untouched and
+     notified both owners directly: no install, restart or MCP Update until David resolves it and idle is
+     verified again. Combined source `4d6838f0`, signed development build `202611040557`, finished with exit 0;
+     deep/strict codesign verification passed and CloudKit/APNs development entitlements match the installed
+     app. Packaged runtime includes the updater script permission/lifecycle check, no-printer safeguard, FDM
+     guidance and auto-orient/support forwarding. Build log/exit and payload-check receipts are in
+     `~/scan-to-make-work/combined-mac-202611040557/`; superseded artifact and old rollback cleaned after
+     corrected build verification. The immediate 557 rollback is retained in the newer namespace.
+     Completed Linux integration snapshot (205 MB) was removed; its log is retained as
+     `~/scan-to-make-work/main-integration-mac/linux-check.log` alongside the Mac check log.
+     **Earlier settled handoff:** both passes were done/Ready; a fresh saved-object scan showed no touching-up or
      printing projects. AirPods monitor records ended/cancelled at 2026-11-04T11:34:23.486Z. Parent sent literal
      "settled" directly to MCP owner and merge owner. MCP owner checked the actual app idle at 12:14Z
      (P1S Ready; no Working/Printing), clicked nothing, and returned Mac UI to this release owner because
@@ -246,7 +333,8 @@ remote native probes and the SSH tunnel were removed after verification.
      release owner packages/installs the combined Mac build with the updater fix first; then explicitly
      hands UI to MCP owner for Update. Other agents' UI/restarts remain held. No autonomous print/reprint.
      The recovery itself made no app replacement, config-file edit or printer start.
-     Installed app still predates #298; sending the FDM request does not prove new MCP prompt consumption.
+     At that earlier recovery the installed app predated #298; sending the FDM request did not prove new MCP
+     prompt consumption. Current 628 includes the guidance; a new app-driven design remains to be accepted.
      Their incoming "releases held" note predates the authorized publications below; the publication receipts and
      revoked hold were sent back directly. The orchestrator must coordinate installed MCP Update with the FDM/MCP
      owner above, so two threads never replace the same live backend.
@@ -259,20 +347,34 @@ remote native probes and the SSH tunnel were removed after verification.
      npm **1.2.26** published at 08:04:34Z (Publish Package run `41796478364`); registry latest independently
      verified. Release/tag v1.2.26 published; #49–#51 closed as released.
    - Both published packages advertise all four FDM prompts. That startup check is engineering evidence only;
-     installed app Update/visible-control acceptance remains with the MCP owner.
+     Bambu Update succeeded through the installed app at 13:37Z; physical-control acceptance remains open.
    - This TestFlight thread owns handoff/distribution/site/appcast, app packaging and Counterpart
      [#298](https://github.com/DMontgomery40/scan-to-make/pull/298), merged as `e7d5f6d` and shipped
      in Mac build 202611040120. MCP-only releases need no new iPhone build.
      Its status-doc edits were removed by the MCP owner and reconciled here. Do not replace the installed app
      during that thread's MCP update/acceptance; coordinate the later Mac upgrade explicitly.
-   - **Installed updater obstacle:** the hand-copied Bambu build reports 1.1.52. Newer releases exposed Update,
+   - **Resolved updater obstacles:** the previous hand-copied Bambu build reported 1.1.52. Newer releases exposed Update,
      but the earlier update failed at 11:34:59Z: Homebrew npm 11.20.0 skipped Bambu's required postinstall
      under allowScripts, and Counterpart retained the old copy. Latest published versions reported by MCP
      owner are Bambu **1.1.54** (`e1fbc69`) and generic **1.2.28** (`381ff87`), including support arguments.
      Parent's companion fix authorizes only the selected package with `--allow-scripts=<pkg>` on global
      Download/Update, enables foreground scripts and verifies any declared postinstall banner before swap.
+     **Main backport merged:** #304 squash `f9ecff62537e1f0d0cd2813b302ee4b9c31a3398`, head `b0926e2`,
+     carries the complete global install-script policy/verification and Node native-addon entitlement.
+     Owner reports package/e2e/licence/Mac build passed at `e179aef`; Node 22/24 companion passed at
+     `b0926e2`, whose only additional edits were updater source/tests. branch_check SAFE; Codex no major
+     issues. Release `31353f57` already matches the runtime behavior; final main integration waits for #293.
+     `verify_apple_distribution.py` is absent on main, so its signed-Node check remains release-only until
+     distribution tooling is integrated. No live deployment is needed for the backport.
+     Review follow-up (#304 `b0926e2`): both global installs now also force `--loglevel=notice`, so a
+     user's silent npm setting cannot suppress the lifecycle banner and falsely reject completed setup.
+     Release build and all 32 updater checks pass; real Homebrew npm with `npm_config_loglevel=silent`
+     hides the banner without the flag and shows it with the flag (setup runs in both cases). Engineering
+     receipts: `~/scan-to-make-work/main-integration-mac/npm-notice-*`. This follow-up is source-only;
+     installed 628 lacks it, but its actual Update succeeded with David's existing npm settings.
      Checkout `npm ci` is unchanged. Focused Linux companion build and updater checks pass (30/30);
-     the installed app still lacks this fix, so UI Update acceptance remains blocked until packaging.
+     build 202611040628 now includes this and the Node native-addon signing fix. Actual UI Update to
+     published Bambu 1.1.54 succeeded at 13:37Z; see the deployment receipt above.
      Earlier integrated source `07241c503` passed official agents-136 CI: contracts 58, printer-handoff
      108 (5 skipped), companion 811 (1 skipped), and all six Python suites; this is engineering evidence.
      MCP owner checked Settings: Developer Mode was already selected; saved credentials returned a fresh
@@ -383,6 +485,20 @@ remote native probes and the SSH tunnel were removed after verification.
      CPython/Pillow/usd-core closure can serve qualification; Linux needs the executable reconstruction closure.
      Correct the draft dependency manifest against actual binary/source archives and existing licence inventory
      (it labels usd-core Apache-only, while the audited Mac wheel has a composite licence).
+     **Runtime packaging recovery:** Muse exhausted its subscription at 12:39Z (reset reported 14:12:05Z).
+     Its clean branch `linux-muse-reconstruction` contains pushed `cd0af5c82e8d` (packaging `c26a1cc0`,
+     release merge `686fb05e`, COLMAP libPoseLib follow-up). It was not merged into release yet. Retained runtime:
+     agents-171 `~/scan-to-make-work/linux-reconstruct/final-payload`, BUILD-ID
+     `reconstruction-1.2.0-gcd0af5c82e8d-linux-x64`; receipts beside it. Transcript reports a relocated check
+     and host-payload preparation, not installed reconstruction acceptance.
+     Parent review found remaining release gaps: apt downloads package names without pinned versions/hashes;
+     `ldd` only rejects "not found" and can still use build-host libraries despite the closure claim;
+     readiness probes import only `pxr` rather than the USD modules used by qualification, don't pass their
+     supplied environment to spawn, and leave stderr unread. Cache identity is launcher mtime rather than
+     the packaged build identity. Do not claim dependency independence/readiness from these checks yet.
+     David chose **resume Muse after reset**. Continuation is scheduled for Nov 4 at 14:13Z (07:13 Mountain),
+     after its 14:12:05Z quota reset. No provider switch. Source and retained runtime remain intact;
+     parent continues the separate main integration/Mac build work. #293 remains with the merge owner.
      Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
      succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
 
@@ -425,6 +541,40 @@ remote native probes and the SSH tunnel were removed after verification.
     3MF. `tools/caliper/LICENSE` had an uncommitted GPL-3 → Apache-2.0 switch. The no-AMS variant can now use
     `pause_at_layers`.
 15. **Starting a file already on the printer's SD card** without reslicing: offered to David, not built.
+16. **The whole MCP toolset, remotely, through the companion: `/v1/mcp`** (from David's Claude Duet chat, Nov 3).
+    The goal is that a remote Claude session (or any MCP client) can use *everything* both MCPs do, through the
+    companion's existing front door, not a second one.
+    - **Built, not deployed (Nov 4, branch `feat/remote-mcp`):** design in
+      [`../design/remote-mcp.md`](../design/remote-mcp.md); pairing and connecting in
+      [`../tailscale-setup.md`](../tailscale-setup.md#remote-mcp-clients-v1mcp). It covers:
+      - `/v1/mcp` (`current`) and `/v1/mcp/<destinationId>` on each destination's shared session;
+      - scopes `mcp:read|design|control|print|raw`, with `pair-mcp` to grant them;
+      - path confinement to `<bundle store>/remote/<deviceId>/`;
+      - remote questions tagged with the device, cancelled at once until a screen shows them.
+
+      Loopback tests: `services/companion/tests/remote-mcp.test.mjs`.
+    - **Blocks real use:** on Nov 4 the Mac had **no Tailscale** and the companion was LAN-only (its certificate names
+      only `192.168.68.123`). A cloud session has no path in until David picks one: Serve mode, a subnet route, or a
+      certificate that names the tailnet address. Open questions are listed at the end of the design doc.
+    - **What exists, read it first:** the companion already sits behind **Tailscale Serve** with per-phone pairing
+      and revocation (`docs/tailscale-setup.md`); NET-001 (team vote, Oct 14) ruled out **Funnel**. So "Funnel in
+      front of each MCP's HTTP mode" is the wrong answer here, and so is a separate WireGuard/wstunnel path for the
+      app itself. `remote-auth-cli.ts pair-printer-handoff` mints a token scoped to printing and health.
+    - **The gap:** `/v1` reaches about a dozen MCP tools out of 54 in bambu-printer-mcp and 42 in
+      mcp-3D-printer-server. Pause, resume, stop, temperatures, fans, lights, speed, AMS and drying, files, skip
+      objects, clearing HMS errors, and the MCPs' own prompts and resources are not reachable remotely.
+    - **Design:** one Streamable HTTP endpoint, `/v1/mcp`, behind the same Serve, allowed login and pairing, passing
+      both MCPs through as they are. Reuse `PrinterSessionPool`, `remote-auth`, the MCP SDK and mcp-proxy's pattern.
+      New parts only: per-device **scopes** (read, control, print, design; raw RPC off by default), file paths confined
+      to the bundle store, and print confirmations still routed to David's phone, so a remote session can't approve
+      its own print.
+    - **Step 1, in both MCPs:** scopes key off each tool's `readOnlyHint` / `destructiveHint` annotations, and both
+      MCPs annotate only a few tools today. Annotate every tool in both.
+    - **For a cloud Claude session (Duet) to reach it:** that environment's network allowlist refused Tailscale's
+      control and relay hosts. With those hosts allowed and an **ephemeral** auth key in the environment settings
+      (never in chat), the session runs `tailscaled` in userspace, joins the tailnet like a device, pairs with a scoped
+      token, and uses `/v1/mcp`. Other users without Tailscale would need a connector route later (OAuth pairing code,
+      optional hosted relay); not started.
 
 ## Stale work to decide on or clean up
 

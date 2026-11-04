@@ -3,6 +3,7 @@ import {chmod, lstat, mkdir, unlink} from 'node:fs/promises';
 import {dirname, isAbsolute, join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
+import {DEFAULT_TIMEOUTS} from '@scan-to-make/printer-handoff';
 import {acquireInstanceLock} from './instance-lock.js';
 import {controlError, ControlFailure, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, parseRequest, type ControlMethod} from './local-control-protocol.js';
 
@@ -43,8 +44,9 @@ export function methodDeadlineMs(method: ControlMethod, params: unknown): number
   if (method === 'printers.add' || method === 'printers.remove' || method === 'printers.chooseMcp' || method === 'printers.completeSettings') return 30_000;
   // Starting the printer MCP's session can take a few seconds before its route is read.
   if (method === 'printers.route') return 25_000;
-  // The printer MCP may ask its own confirmation; the call waits up to 120 s for it.
-  if (method === 'objects.pausePrint' || method === 'objects.resumePrint' || method === 'objects.cancelPrint') return 130_000;
+  // The printer MCP may ask its own confirmation: the control waits the question's window (10 min) plus 2 min,
+  // so the app's request must outlive it, or an answer after the app gave up would still run the control.
+  if (method === 'objects.pausePrint' || method === 'objects.resumePrint' || method === 'objects.cancelPrint') return DEFAULT_TIMEOUTS.elicitationMs + 130_000;
   if (method === 'events.wait') {
     const timeout = (params as {timeoutMs?: unknown})?.timeoutMs;
     return (typeof timeout === 'number' && Number.isFinite(timeout) ? Math.min(Math.max(timeout, 0), 25_000) : 25_000) + 5_000;

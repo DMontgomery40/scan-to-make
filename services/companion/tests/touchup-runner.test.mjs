@@ -165,3 +165,21 @@ test('a cancelled pass never starts the worker', async () => {
   assert.equal(result.reason, 'cancelled');
   assert.ok(Date.now() - started < 1000);
 });
+
+// The designer's supports choice reaches the result as the slicer takes it; anything else is no choice at all.
+for (const [answer, expected] of [
+  [{enabled: true, type: 'tree(auto)'}, {enabled: true, type: 'tree(auto)'}],
+  [{enabled: true}, {enabled: true}],
+  [{enabled: false, type: 'tree(auto)'}, {enabled: false}],
+  [{enabled: true, type: 'tree(manual)'}, {enabled: true}],
+  [{enabled: 'yes'}, undefined],
+  [null, undefined],
+]) {
+  test(`the designer's supports answer ${JSON.stringify(answer)} becomes ${JSON.stringify(expected)}`, async () => {
+    const {pass, inv} = await setup('supports');
+    inv.env = {...inv.env, SUPPORTS: JSON.stringify(answer)};
+    const result = await runTouchupWorker(inv, pass);
+    assert.equal(result.status, 'done');
+    assert.deepEqual(result.supports, expected);
+  });
+}

@@ -749,3 +749,38 @@ test('Complete Settings repairs a copied FULU route with the source MCP session 
   assert.equal((fresh.match(/BAMBU_NETWORK_CONFIG_DIR=/g) ?? []).length, 1, 'new setup keeps the explicit target directory too');
   assert.deepEqual(calls, ['bambu_network_bridge_status']);
 });
+
+test('review fix (#295): a printer that only borrows a found checkout\'s code doesn\'t hide that checkout\'s own printer', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await mkdtemp(join(tmpdir(), 'setup-borrow-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  const clone = join(home, 'mcp-3D-printer-server');
+  await put('mcp-3D-printer-server/.env', 'PRINTER_TYPE=bambu\nPRINTER_HOST=192.0.2.5\nBAMBU_SERIAL=01P00A000000005\nBAMBU_TOKEN=55550000\nBAMBU_MODEL=p1s\n');
+  await put('mcp-3D-printer-server/dist/index.js', '');
+  await put('mcp-3D-printer-server/package.json', JSON.stringify({name: 'mcp-3d-printer-server', version: '1.2.27'}));
+  const data = join(home, 'Library/Application Support/Scan to Make');
+  const env = {...hostEnvironment(data), home};
+  const profilesPath = join(env.appPrinters, 'profiles.json');
+  const entry = join(clone, 'dist/index.js');
+  // An OctoPrint added through the form: it runs the clone's code, with its settings in its own profile folder.
+  const ownFolder = join(env.appPrinters, 'profiles', 'octo');
+  await put('Library/Application Support/Scan to Make/printers/profiles/octo/.env', 'PRINTER_TYPE=octoprint\nPRINTER_HOST=octopi.local\n');
+  // And one whose settings are inline, with no folder of its own.
+  const configs = [
+    {id: 'octo', config: {backend: 'mcp-3d-printer-server', process: {command: '/usr/local/bin/node', args: [entry], cwd: ownFolder}}},
+    {id: 'inline', config: {backend: 'mcp-3d-printer-server', process: {command: '/usr/local/bin/node', args: [entry], env: {PRINTER_TYPE: 'klipper', PRINTER_HOST: 'voron.local'}}}},
+  ];
+  const setup = new PrinterSetup({env, configs: () => configs, profilesPath, node: '/usr/local/bin/node',
+    folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.2.27', hasEnv: true}],
+    ssdp: async () => ({state: 'complete', printers: []}), bonjour: async () => []});
+  const found = (await setup.discover()).found.filter(item => item.source === 'folder');
+  assert.deepEqual(found.map(item => [item.folder, item.host]), [[clone, '192.0.2.5']], 'the clone\'s own P1S is still offered');
+  const added = await setup.add({folder: clone});
+  assert.ok(added.id);
+  // Once a printer reads its settings from the clone, the clone is that printer.
+  configs.push({id: 'clone', config: {backend: 'mcp-3d-printer-server', process: {command: '/usr/local/bin/node', args: [entry], cwd: clone}}});
+  assert.equal((await setup.discover()).found.filter(item => item.source === 'folder').length, 0);
+  await assert.rejects(setup.add({folder: clone}), /one of your printers already/);
+});

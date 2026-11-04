@@ -17,6 +17,12 @@ switch (scenario) {
     writeFileSync('out/checkpoints/01.stl', stl); writeFileSync('out/touched.stl', stl); writeFileSync('out/front.png', 'png');
     result({status: 'done', summary: 'Restored the texture on the underside.'});
     break;
+  // The designer's supports choice, as the worker answers it (SUPPORTS: a JSON value for the answer's supports).
+  case 'supports':
+    toolUse();
+    writeFileSync('out/checkpoints/01.stl', stl); writeFileSync('out/touched.stl', stl);
+    result({status: 'done', summary: 'Made the hanger.', supports: JSON.parse(process.env.SUPPORTS ?? 'null')});
+    break;
   case 'needs_closeup':
     toolUse('Read');
     result({status: 'needs_closeup', closeup: 'the underside', summary: 'The underside is not visible in any photo.'});

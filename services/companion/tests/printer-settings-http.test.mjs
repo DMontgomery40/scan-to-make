@@ -112,10 +112,10 @@ test('printer settings require their existing scopes and refuse malformed mutati
   assert.equal((await f.call('/v1/objects/printers/missing/route')).status, 404);
   assert.equal(f.calls.length, 0, 'unauthorized or invalid requests must not reach the printer');
   assert.equal((await f.call(path + '/route', 'GET', undefined, f.printOnly)).status, 200);
-  assert.equal((await f.call(path + '/route', 'POST', {route: 'cloud'}, f.printOnly)).status, 200);
+  assert.equal((await f.call(path + '/route', 'POST', {route: 'cloud'}, f.printOnly)).status, 403);
   assert.equal((await f.call(path + '/route', 'POST', {route: 'lan'}, f.settingsOnly)).status, 403, 'settings permission does not grant printer controls');
   assert.equal((await f.call(path + '/mcp', 'POST', {backend: 'mcp-3d-printer-server'}, f.printOnly)).status, 403, 'print permission does not grant settings mutations');
-  assert.equal((await f.call(path + '/mcp', 'POST', {backend: 'mcp-3d-printer-server'}, f.settingsOnly)).status, 200);
+  assert.equal((await f.call(path + '/mcp', 'POST', {backend: 'mcp-3d-printer-server'}, f.settingsOnly)).status, 403);
 });
 
 test('route and MCP mutations refuse active project prints, reservations and printer-reported jobs while reads remain available', async t => {

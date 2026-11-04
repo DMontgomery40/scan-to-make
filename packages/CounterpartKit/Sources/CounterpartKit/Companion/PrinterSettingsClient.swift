@@ -43,7 +43,7 @@ public extension CompanionClient {
     }
 
     /// Changes the existing preference for a printer available through both installed MCPs.
-    func choosePrinterMcp(_ destinationId: String, backend: String) async throws -> PrinterMCPSelection {
+    func choosePrinterMcpWithCatalog(_ destinationId: String, backend: String) async throws -> PrinterMCPSelection {
         guard Pattern("[A-Za-z0-9_-]{1,256}").matches(destinationId), ["bambu-printer-mcp", "mcp-3d-printer-server"].contains(backend) else {
             throw CompanionError(code: "invalid-request", message: "That printer MCP isn't valid.")
         }

@@ -38,7 +38,7 @@
       <li><a href="#scan">Scanning and sizes</a></li>
       <li><a href="#working">While your Mac works</a></li>
       <li><a href="#print">Printing</a></li>
-      <li><a href="#printers">Printers and connections</a></li>
+      <li><a href="#printers">Printers and the backend</a></li>
       <li><a href="#after">After it prints</a></li>
       <li><a href="#settings">Settings and updates</a></li>
       <li><a href="#notifications">Notifications</a></li>
@@ -61,7 +61,7 @@
         <li><strong>Optional for design and editing:</strong> choose Claude Code, Codex, or an OpenAI-compatible API in <span class="path">Settings › AI</span>. OpenRouter and local model endpoints work through the API option. Printing an existing model or a reprint does not need an AI connection.</li>
         <li><strong>Blender is optional.</strong> Install it for scan cleanup, design or model changes. Printing existing models and reprints works without it.</li>
         <li><strong>Autodesk Fusion is optional too.</strong> Use your own installation for parametric designs and changes, connected through <span class="path">Settings › AI › Design with Fusion</span>. Printing existing models and reprints needs neither Blender nor Fusion.</li>
-        <li>Have your printer's <strong>MCP server</strong>: bambu-printer-mcp for Bambu Lab printers, mcp-3D-printer-server for OctoPrint, Klipper, Duet, Repetier, PrusaLink and Creality.</li>
+        <li>Have your printer's <strong>MCP server</strong>, Counterpart's printing backend: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> for Bambu Lab printers (<a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/setup">setup guide</a>), or <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a> for OctoPrint, Klipper, Duet, Repetier, PrusaLink, Creality and Bambu Lab (<a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/setup">setup guide</a>). If you already print from Claude or Codex with one, Counterpart finds it.</li>
         <li><strong>On your iPhone,</strong> open Counterpart and pair with your Mac: click the Counterpart icon in the Mac's menu bar and scan the code it shows.</li>
       </ol>
       <div class="shots">
@@ -140,11 +140,12 @@
     </section>
 
     <section id="printers" aria-labelledby="printers-h">
-      <h2 id="printers-h">Printers and connections</h2>
-      <p>Counterpart finds your printers in the MCP servers you've already set up, and prints through them as they are. It never copies a printer's settings.</p>
+      <h2 id="printers-h">Printers and the backend</h2>
+      <p>Your printer's MCP server is Counterpart's printing backend. Counterpart has no slicer or printer code of its own: slicing, AMS colours, the print, progress, the camera, Pause and Stop are all tools in <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> or <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a>, the same servers Claude and Codex use. Counterpart finds your printers in the servers you've already set up, and prints through them as they are. It never copies a printer's settings.</p>
+      <p>Their docs cover everything the server does: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/slicing">slicing</a>, <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/ams">AMS colours</a>, <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/fulu">FULU and Bambu Cloud</a>, and the <a href="https://dmontgomery40.github.io/bambu-printer-mcp/reference/printer-tools">printer tools</a> for Bambu Lab; <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/setup">printer setup</a>, <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/slicing">slicing</a> and the <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/reference/printer-tools">printer tools</a> for everything else.</p>
       <ul>
         <li><span class="path">Settings › Printers</span> on the Mac lists each printer, the MCP server and version that reaches it, and <strong>Update</strong> when a newer version is out. Updates wait until the printer isn't printing.</li>
-        <li>For a Bambu printer on bambu-printer-mcp, <strong>Connection</strong> chooses how it reaches the printer: <strong>Local network</strong>, or <strong>Bambu Cloud</strong>. The MCP server keeps the choice.</li>
+        <li>For a Bambu printer on bambu-printer-mcp, <strong>Connection</strong> chooses how it reaches the printer: <strong>Local network</strong>, or <strong>Bambu Cloud</strong>. The MCP server keeps the choice; its <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/fulu">FULU guide</a> explains the routes.</li>
         <li>On iPhone, <strong>Printers</strong> shows each printer, what's loaded and its camera. Choosing a printer's connection is on the Mac for now.</li>
       </ul>
       <div class="shots">
@@ -191,7 +192,7 @@
       <div class="faq">
         <details><summary>My iPhone can't find my Mac</summary><p>Check that Counterpart is running on your Mac (its icon is in the menu bar). On the same Wi-Fi, check iPhone Settings › Counterpart › Local Network is on. In Counterpart on your iPhone, Settings › Your Mac › Check Connection tries again. If it still can't, quit and reopen Counterpart on the Mac, or pair again with the code from its menu bar.</p></details>
         <details><summary>Making it stopped with an error</summary><p>The project says what went wrong. Check the selected provider in Settings → AI and its connection test. Fix the reported issue, then open the project and tap Try Again.</p></details>
-        <details><summary>The print didn't start</summary><p>Open the project: it shows what the printer or its MCP server said. If the printer shows an error on its own screen, clear it there, then print again. If the message says Bambu Cloud refused it (code -3120 or 403), switch the printer's Connection to Local network in Settings › Printers on the Mac.</p></details>
+        <details><summary>The print didn't start</summary><p>Open the project: it shows what the printer or its MCP server said. If the printer shows an error on its own screen, clear it there, then print again. The MCP server's docs list what each printer supports: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/reference/limitations">bambu-printer-mcp</a>, <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/reference/limitations">mcp-3D-printer-server</a>. If the message says Bambu Cloud refused it (code -3120 or 403), switch the printer's Connection to Local network in Settings › Printers on the Mac.</p></details>
         <details><summary>The size is a little off</summary><p>Measure the size that matters with a caliper and say it in Ask for changes, like “the tube is 25.4 mm across”. It redoes that part only.</p></details>
         <details><summary>My iPhone camera went black after scanning</summary><p>An earlier test version could leave the camera unusable after Scan in hand. Restart your iPhone to fix it. Current versions don't do this.</p></details>
         <details><summary>I don't see a button this page mentions</summary><p>Your iPhone app shows a feature only when the Counterpart on your Mac supports it. Update Counterpart on the Mac, then reopen the app on your iPhone.</p></details>

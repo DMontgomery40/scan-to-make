@@ -1,8 +1,13 @@
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {ElicitRequestSchema, type CallToolResult, type Tool} from '@modelcontextprotocol/sdk/types.js';
+import {ElicitRequestSchema, ErrorCode, McpError, type CallToolResult, type GetPromptResult, type ListPromptsResult, type ListResourcesResult, type ReadResourceResult, type ServerCapabilities, type Tool} from '@modelcontextprotocol/sdk/types.js';
 import {Ajv, type ValidateFunction} from 'ajv';
+import {createHash} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {parseEnv} from 'node:util';
 import {appOwnedPrinterProcess} from './node-runtime.js';
+import {ENV_PRESETS} from './slice-cache.js';
 import {timeoutsFor, type PrinterHandoffConfig} from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {slicerReport} from './slicer-report.js';
@@ -39,11 +44,17 @@ function failureDetail(result: CallToolResult, config: PrinterHandoffConfig): st
 export interface PrinterToolCatalog {
   server: {name: string; version: string};
   tools: Tool[];
+  /** The working directory's `.env` as this process started with it (the MCP reads it once, at start):
+   * its digest and the preset paths it names, for the slice cache. Never its other values. */
+  startedWith?: {envSha256?: string; presets: Record<string, string | undefined>};
+  /** What the server declared at initialize (prompts, resources, …); absent from catalogs made before it was kept. */
+  capabilities?: ServerCapabilities;
 }
 
 const MAX_PAGES = 20;
 const MAX_TOOLS = 256;
 const MAX_RESULT_BYTES = 1024 * 1024;
+const MAX_FORWARDED_BYTES = 8 * 1024 * 1024;
 
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') {
@@ -69,6 +80,16 @@ export interface PrinterMcpClientOptions {
   onClose?: () => void;
 }
 
+/** A prompt or resource request passed through for a transparent adapter (`/v1/mcp`). */
+export interface PassthroughOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  context?: ElicitationContext;
+}
+
+/** One `notifications/progress` from the printer MCP during a tool call. */
+export interface McpProgress {progress: number; total?: number; message?: string}
+
 export interface PrinterToolCallOptions {
   /** Transparent MCP adapters preserve tool errors and media under the SDK's
    * transport frame limit, without applying printer-domain result semantics. */
@@ -83,6 +104,8 @@ export interface PrinterToolCallOptions {
    * server's elicitation requests carry no reference to the call that caused them.
    */
   elicitationContext?: ElicitationContext;
+  /** The MCP's progress notifications for this call. Given, the call asks for them, and each restarts its timeout (within its total). */
+  onProgress?: (progress: McpProgress) => void;
 }
 
 /** One stdio MCP session against the operator-configured printer server. */
@@ -119,6 +142,9 @@ export class PrinterMcpClient {
     if (signal?.aborted) fail('cancelled');
     const timeouts = timeoutsFor(this.#config);
     const processConfig = await appOwnedPrinterProcess(this.#config.process);
+    const dotEnv = await readFile(join(this.#config.process.cwd ?? process.cwd(), '.env'), 'utf8').catch(() => undefined);
+    const started = {...(dotEnv === undefined ? {} : {envSha256: createHash('sha256').update(dotEnv).digest('hex')}),
+      presets: Object.fromEntries(Object.entries(dotEnv ? parseEnv(dotEnv) : {}).filter(([name]) => ENV_PRESETS.includes(name)))};
     const transport = new StdioClientTransport({
       command: processConfig.command,
       args: [...(processConfig.args ?? [])],
@@ -173,7 +199,9 @@ export class PrinterMcpClient {
         if (!cursor) break;
         if (page === MAX_PAGES - 1) fail('catalog-limit');
       }
-      this.#catalog = freeze({server: {name: server.name, version: server.version}, tools});
+      const capabilities = client.getServerCapabilities();
+      this.#catalog = freeze({server: {name: server.name, version: server.version}, tools, startedWith: started,
+        ...(capabilities ? {capabilities: structuredClone(capabilities)} : {})});
       // A process that exits later ends this session; the owner reconnects on its next call.
       client.onclose = () => {
         if (this.#closing || this.#client !== client) return;
@@ -253,6 +281,12 @@ export class PrinterMcpClient {
     try {
       result = await this.#client.callTool({name, arguments: args}, undefined, {
         signal: options.signal, timeout, maxTotalTimeout: timeout, resetTimeoutOnProgress: true,
+        // The SDK asks the MCP for progress (and resets the timeout on it) only with a handler: given only when the
+        // caller wants it, so other calls (the Fusion worker's pass-through) send exactly what they always did.
+        ...(options.onProgress ? {onprogress: ({progress, total, message}: {progress: number; total?: number; message?: string}) => {
+          try { options.onProgress?.({progress, ...(total !== undefined ? {total} : {}), ...(message !== undefined ? {message} : {})}); }
+          catch { /* A caller's progress display never fails the call. */ }
+        }} : {}),
       }) as CallToolResult;
     } catch (error) {
       const failure = new PrinterMcpError(options.dispatchSensitive && this.#declinedElicitations === declinedBefore
@@ -261,7 +295,11 @@ export class PrinterMcpClient {
       failure.incomplete = true;
       throw failure;
     }
-    if (options.forwardResult) return structuredClone(result);
+    // A transparent adapter keeps errors and media, within a wider bound than domain results.
+    if (options.forwardResult) {
+      if (Buffer.byteLength(JSON.stringify(result)) > MAX_FORWARDED_BYTES) fail('result-limit');
+      return structuredClone(result);
+    }
     // This exact Bambu rejection is emitted by the idle-state preflight before
     // upload/dispatch. Preserve the actionable refusal instead of inventing uncertainty.
     if (result.isError && this.#config.backend === 'bambu-printer-mcp' && name === 'print_3mf') {
@@ -281,6 +319,51 @@ export class PrinterMcpClient {
     if (refused?.failed) fail('slicer-error', undefined, refused.message);
     if (result.isError) fail('tool-failed', undefined, failureDetail(result, this.#config));
     if (Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES) fail('result-limit');
+    return structuredClone(result);
+  }
+
+  /** Prompts and resources, passed through unchanged for a transparent adapter (`/v1/mcp`); the result size limit still applies. */
+  async listPrompts(cursor?: string, options: PassthroughOptions = {}): Promise<ListPromptsResult> {
+    return this.#passthrough(options, (client, request) => client.listPrompts(cursor ? {cursor} : {}, request));
+  }
+  async getPrompt(name: string, args: Record<string, string> | undefined, options: PassthroughOptions = {}): Promise<GetPromptResult> {
+    return this.#passthrough(options, (client, request) => client.getPrompt({name, ...(args ? {arguments: args} : {})}, request));
+  }
+  async listResources(cursor?: string, options: PassthroughOptions = {}): Promise<ListResourcesResult> {
+    return this.#passthrough(options, (client, request) => client.listResources(cursor ? {cursor} : {}, request));
+  }
+  async readResource(uri: string, options: PassthroughOptions = {}): Promise<ReadResourceResult> {
+    return this.#passthrough(options, (client, request) => client.readResource({uri}, request));
+  }
+  /**
+   * With a context, a question the server asks meanwhile is tagged like a tool call's (the caller holds
+   * the mutex), and any it leaves unanswered is cancelled when it ends. A JSON-RPC error the server
+   * answered is a finished request; only a timeout, abort or lost connection is `incomplete`.
+   */
+  async #passthrough<T>(options: PassthroughOptions, request: (client: Client, requestOptions: {signal?: AbortSignal; timeout: number; maxTotalTimeout: number}) => Promise<T>): Promise<T> {
+    if (!this.#client || !this.#catalog) fail('not-connected');
+    const {context, signal} = options;
+    const timeout = options.timeoutMs ?? timeoutsFor(this.#config).toolMs;
+    const previous = this.#elicitationContext, before = new Set(this.#outstandingElicitations);
+    if (context) this.#elicitationContext = context;
+    let result: T;
+    try { result = await request(this.#client, {...(signal ? {signal} : {}), timeout, maxTotalTimeout: timeout}); }
+    catch (error) {
+      const answered = error instanceof McpError && error.code !== ErrorCode.RequestTimeout && error.code !== ErrorCode.ConnectionClosed && !signal?.aborted;
+      const failure = new PrinterMcpError(answered ? 'request-failed' : 'tool-failed', error, failureDetail({content: [{type: 'text', text: error instanceof Error ? error.message : String(error)}]}, this.#config));
+      if (!answered) failure.incomplete = true;
+      throw failure;
+    } finally {
+      if (context) {
+        if (this.#elicitationContext === context) this.#elicitationContext = previous;
+        for (const id of [...this.#outstandingElicitations].filter(id => !before.has(id))) {
+          this.#outstandingElicitations.delete(id);
+          try { this.#relay?.respond(id, {action: 'cancel'}); } catch { /* Already answered. */ }
+        }
+      }
+    }
+    // Passed through as it is, like a forwarded tool result, so the same wider bound applies.
+    if (Buffer.byteLength(JSON.stringify(result)) > MAX_FORWARDED_BYTES) fail('result-limit');
     return structuredClone(result);
   }
 

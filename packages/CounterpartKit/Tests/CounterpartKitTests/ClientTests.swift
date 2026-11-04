@@ -525,6 +525,71 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(PrinterFilament(slot: 254, colour: "#FFFFFF", material: "PETG", name: "Generic PETG #FFFFFF", filamentId: "", destinationId: "x").slotLabel, "Ext")
     }
 
+    func testPausesAreSentOnlyWhenChosenSortedAndWithinTheCompanionsLimit() throws {
+        let filament = PrinterFilament(slot: 0, colour: "#141414", material: "PLA", name: "Bambu PLA Basic", filamentId: "GFA00", destinationId: "current")
+        XCTAssertNil(PrintChoice(filament: filament).body["pauseBeforeLayers"], "no pause, no key: an older Mac refuses it")
+        XCTAssertNil(PrintChoice(colour: nil, pauseBeforeLayers: []).body["pauseBeforeLayers"], "an empty list is never sent (the companion's min is 1)")
+        XCTAssertEqual(PrintChoice(colour: nil, pauseBeforeLayers: [12, 3, 12, 1]).body["pauseBeforeLayers"] as? [Int], [3, 12],
+                       "sorted, once each, never layer 1")
+        XCTAssertEqual((PrintChoice(colour: nil, pauseBeforeLayers: Array(2...40)).body["pauseBeforeLayers"] as? [Int])?.count, PrintChoice.maxPauses)
+    }
+
+    func testPrinterDestinationsDecodeBothMCPsAndLayerPausesAndOlderMacsStillDecode() throws {
+        let current = #"{"id":"current","name":"P1S","backend":"bambu-printer-mcp","source":"current","mcps":[{"backend":"bambu-printer-mcp","destinationId":"current"},{"backend":"mcp-3d-printer-server","destinationId":"mcp-1a2b"}],"capabilities":{"progress":true,"layers":true,"camera":"bambu-tcp","filaments":"ams","pause":true,"resume":true,"cancel":true,"quality":true,"strength":true,"layerPauses":true,"newerField":1}}"#
+        let printer = try JSONDecoder().decode(PrinterDestination.self, from: Data(current.utf8))
+        XCTAssertTrue(printer.offersMcpChoice)
+        XCTAssertEqual(printer.mcps?.map(\.name), ["bambu-printer-mcp", "mcp-3D-printer-server"])
+        XCTAssertTrue(printer.offersLayerPauses)
+        let older = try JSONDecoder().decode(PrinterDestination.self, from: Data(#"{"id":"current","name":"P1S","backend":"bambu-printer-mcp","source":"current"}"#.utf8))
+        XCTAssertFalse(older.offersMcpChoice)
+        XCTAssertFalse(older.offersLayerPauses)
+        // A project saved on the printer's id through the other MCP finds the printer it became.
+        let catalog = PrinterCatalog(destinations: [printer], defaultDestinationId: "current")
+        XCTAssertEqual(catalog.listed("current"), "current")
+        XCTAssertEqual(catalog.listed("mcp-1a2b"), "current")
+        XCTAssertNil(catalog.listed("gone"))
+    }
+
+    func testPrinterConnectionReadsTheMCPsOwnWordsAndChangesGoThroughTheMac() async throws {
+        let route: [String: Any] = ["route": "lan", "mode": "bambu_network", "type": "lan", "choices": ["lan", "cloud", "developer"], "savedTo": "/Users/x/.env",
+            "options": [["id": "lan", "label": "Local network", "available": true, "controls": "Pause, Resume and Stop go through FULU."],
+                        ["id": "cloud", "label": "Bambu Cloud", "available": false, "reason": "Sign in first."],
+                        ["id": "developer", "label": "Local network, Developer Mode", "available": true]]]
+        let fake = FakeTransport { request, _ in
+            if request.url?.path.hasSuffix("/mcp") == true { return json(200, ["destinationId": "mcp-1a2b"]) }
+            if request.httpMethod == "PUT" { return json(200, ["route": route.merging(["route": "developer"]) { $1 }]) }
+            return json(200, ["route": route])
+        }
+        let c = try client(fake)
+        let maybe = try await c.printerConnection("current")
+        let read = try XCTUnwrap(maybe)
+        XCTAssertEqual(read.current?.label, "Local network")
+        XCTAssertEqual(read.current?.controls, "Pause, Resume and Stop go through FULU.")
+        XCTAssertEqual(read.shown.map(\.available), [true, false, true])
+        let saved = try await c.setPrinterConnection("current", route: "developer")
+        XCTAssertEqual(saved.route, "developer")
+        let id = try await c.choosePrinterMcp("current", backend: "mcp-3d-printer-server")
+        XCTAssertEqual(id, "mcp-1a2b")
+        XCTAssertEqual(fake.calls.map { $0.request.httpMethod }, ["GET", "PUT", "PUT"])
+        XCTAssertEqual(fake.calls.map { $0.request.url?.path }, ["/v1/objects/printers/current/route", "/v1/objects/printers/current/route", "/v1/objects/printers/current/mcp"])
+        let bodies = try fake.calls.dropFirst().map { try XCTUnwrap(JSONSerialization.jsonObject(with: $0.request.httpBody!) as? [String: String]) }
+        XCTAssertEqual(bodies, [["route": "developer"], ["backend": "mcp-3d-printer-server"]])
+        do { _ = try await c.printerConnection("../x"); XCTFail("an id that isn't one is never sent") } catch {}
+        XCTAssertEqual(fake.calls.count, 3)
+    }
+
+    func testPrinterConnectionWithoutAChoiceOrOnAnOlderMacAndARefusalMidPrint() async throws {
+        let none = try await client(FakeTransport { _, _ in json(200, ["route": NSNull()]) }).printerConnection("current")
+        XCTAssertNil(none, "an MCP without the choice: nothing to show")
+        let legacy = try JSONDecoder().decode(PrinterConnection.self, from: Data(#"{"route":"cloud","mode":"bambu_network","type":"cloud","choices":["lan","cloud"],"savedTo":null}"#.utf8))
+        XCTAssertEqual(legacy.shown.map(\.label), ["Local network", "Bambu Cloud"], "an MCP from before options keeps the known names")
+        let older = try client(FakeTransport { _, _ in json(404, ["error": ["code": "not-found", "message": "Not found"]]) })
+        do { _ = try await older.printerConnection("current"); XCTFail() } catch let error as CompanionError { XCTAssertTrue(error.isUnsupported) }
+        let busy = try client(FakeTransport { _, _ in json(409, ["error": ["code": "invalid-state", "message": "This printer is printing. Change its connection when the print finishes."]]) })
+        do { _ = try await busy.setPrinterConnection("current", route: "cloud"); XCTFail() }
+        catch let error as CompanionError { XCTAssertEqual(error.message, "This printer is printing. Change its connection when the print finishes.") }
+    }
+
     func testDownloadsAreCachedPerVersion() async throws {
         let data = try fixture("objects.json")
         struct List: Decodable { var objects: [Project] }
@@ -694,6 +759,10 @@ final class DecodingTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PrintSettings.self, from: Data(#"{"quality":"draft","plateCheck":true}"#.utf8))
         XCTAssertEqual(decoded, PrintSettings(quality: "draft"))
         XCTAssertEqual(Set(try json(decoded).keys), ["quality"])
+        // A print's saved layer pauses are read back (Print Another), never sent as a setting.
+        let paused = try JSONDecoder().decode(PrintSettings.self, from: Data(#"{"quality":"fine","pauseBeforeLayers":[3,12]}"#.utf8))
+        XCTAssertEqual(paused.pauseBeforeLayers, [3, 12])
+        XCTAssertEqual(Set(try json(paused).keys), ["quality"])
     }
 
     func testConfirmationFieldsCanBeMadeInTests() {

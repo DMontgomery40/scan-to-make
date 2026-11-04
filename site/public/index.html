@@ -25,7 +25,7 @@
     <nav aria-label="Site">
       <a href="#how">How it works</a>
       <a href="#devices">iPhone, Mac, iPad</a>
-      <a href="#printers">Printers</a>
+      <a href="#printers">Printing backend</a>
       <a href="help.html">Help</a>
     </nav>
   </div>
@@ -36,7 +36,7 @@
     <div class="wrap">
       <div>
         <h1 id="hero-title">Make the part that fits.</h1>
-        <p class="lede">Describe it, photograph it, scan it, or paste a link. Counterpart makes the part on your Mac, shows it to you on your iPhone, and prints it on your own printer.</p>
+        <p class="lede">Describe it, photograph it, scan it, or paste a link. Counterpart makes the part on your Mac, shows it to you on your iPhone, and prints it on your own printer through its MCP server.</p>
         <div class="cta">
           <a class="button" href="beta.html">Get the beta</a>
           <a class="button quiet" href="help.html">Read the guide</a>
@@ -176,20 +176,70 @@
   </section>
 
   <section id="printers" aria-labelledby="printers-title">
-    <div class="wrap printers-grid">
-      <div>
-        <h2 id="printers-title">Prints on the printer you already have</h2>
-        <p>Counterpart prints through the MCP server you already use for your printer, as you've set it up. It never copies your printer's settings.</p>
-        <p>On the Mac, Settings › Printers lists each printer, the MCP server that reaches it and its version, with Update when a newer one is out. For a Bambu printer you can choose how bambu-printer-mcp reaches it: your local network, or Bambu Cloud.</p>
-        <div class="mcps">
-          <a class="mcp" href="https://dmontgomery40.github.io/bambu-printer-mcp/"><b>bambu-printer-mcp</b><span>Bambu Lab printers: slicing, AMS colours, printing and the printer's camera.</span></a>
-          <a class="mcp" href="https://dmontgomery40.github.io/mcp-3D-printer-server/"><b>mcp-3D-printer-server</b><span>OctoPrint, Klipper, Duet, Repetier, PrusaLink and Creality printers, and Bambu Lab too.</span></a>
+    <div class="wrap">
+      <h2 id="printers-title">Your printer's MCP server is the backend</h2>
+      <p class="intro">Counterpart has no slicer and no printer code of its own. Every printer action in the app is a call to a tool in an open-source MCP server on your Mac: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> for Bambu Lab printers, or <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a> for OctoPrint, Klipper, Duet, Repetier, PrusaLink, Creality and Bambu Lab. They're the same servers Claude, Codex and other agents use to print from a conversation, so when a server learns a new printer or gets a fix, Counterpart gets it too.</p>
+
+      <ol class="flow" aria-label="How a print travels">
+        <li><b>Counterpart</b><span>on your iPhone and Mac: the request, the model, the Print sheet</span></li>
+        <li><b>The MCP server</b><span>on your Mac: slicing, AMS colours, the print, the camera, Pause and Stop</span></li>
+        <li><b>Your printer</b><span>over your local network, or the route the server is set to use</span></li>
+      </ol>
+
+      <div class="backend">
+        <table class="tools">
+          <caption>What each action in Counterpart asks the server to do</caption>
+          <thead><tr><th scope="col">In Counterpart</th><th scope="col">MCP tools</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Estimate, and Print</th><td><code>lay_flat</code>, <code>slice_stl</code></td></tr>
+            <tr><th scope="row">Check the sliced file and send it</th><td><code>inspect_print_file</code>, <code>print_3mf</code>, or <code>upload_gcode</code> on a G-code printer</td></tr>
+            <tr><th scope="row">Colours from what's loaded</th><td><code>get_printer_filaments</code></td></tr>
+            <tr><th scope="row">Ready, printing, progress, layers, time left</th><td><code>get_printer_status</code>, <code>counterpart_print_progress</code></td></tr>
+            <tr><th scope="row">The printer's camera</th><td><code>camera_snapshot</code></td></tr>
+            <tr><th scope="row">Pause, Resume, Stop</th><td><code>pause_print</code>, <code>resume_print</code>, <code>cancel_print</code></td></tr>
+            <tr><th scope="row">Connection: Local network or Bambu Cloud</th><td><code>counterpart_print_route</code></td></tr>
+            <tr><th scope="row">Which buttons a printer gets</th><td><code>counterpart_printer_info</code></td></tr>
+          </tbody>
+        </table>
+        <div class="pair">
+          <figure><a class="shot" href="screens/phone-printers.jpg"><img src="screens/phone-printers.jpg" width="644" height="1400" loading="lazy" alt="Printers on iPhone"></a><figcaption>iPhone: each printer, through its server.</figcaption></figure>
+          <figure><a class="shot mac" href="screens/mac-settings-printers.jpg"><img src="screens/mac-settings-printers.jpg" width="620" height="678" loading="lazy" alt="Settings › Printers on the Mac, listing each printer's MCP server and version"></a><figcaption>Mac: Settings › Printers shows the server behind each printer, its version and Update.</figcaption></figure>
         </div>
       </div>
-      <div class="pair">
-        <figure><a class="shot" href="screens/phone-printers.jpg"><img src="screens/phone-printers.jpg" width="644" height="1400" loading="lazy" alt="Printers on iPhone"></a><figcaption>iPhone: each printer and what's loaded.</figcaption></figure>
-        <figure><a class="shot mac" href="screens/mac-settings-printers.jpg"><img src="screens/mac-settings-printers.jpg" width="620" height="678" loading="lazy" alt="Settings › Printers on the Mac"></a><figcaption>Mac: the printers and the MCP servers behind them.</figcaption></figure>
+
+      <div class="servers">
+        <article class="server">
+          <a class="card" href="https://dmontgomery40.github.io/bambu-printer-mcp/"><img src="https://dmontgomery40.github.io/bambu-printer-mcp/social-card.png" width="1200" height="630" loading="lazy" alt="bambu-printer-mcp: print from a conversation. A chat asks an agent to fit a MakerWorld phone stand to the new iPhone and print it, beside a slicer preview of the first layer."></a>
+          <h3><a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a></h3>
+          <p>For Bambu Lab printers: Bambu Studio or FULU slicing, AMS colours, LAN, Bambu Cloud and FULU routes, the camera, and print control.</p>
+          <ul class="doclinks">
+            <li><a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/setup">Set it up</a></li>
+            <li><a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/slicing">Slicing</a></li>
+            <li><a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/ams">AMS colours</a></li>
+            <li><a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/fulu">FULU</a></li>
+            <li><a href="https://dmontgomery40.github.io/bambu-printer-mcp/reference/printer-tools">Printer tools</a></li>
+            <li><a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/examples">Examples</a></li>
+            <li><a href="https://www.npmjs.com/package/bambu-printer-mcp">npm</a></li>
+            <li><a href="https://github.com/DMontgomery40/bambu-printer-mcp">GitHub</a></li>
+          </ul>
+        </article>
+        <article class="server">
+          <a class="card" href="https://dmontgomery40.github.io/mcp-3D-printer-server/"><img src="https://dmontgomery40.github.io/mcp-3D-printer-server/social-card.png" width="1200" height="630" loading="lazy" alt="mcp-3d-printer-server: print from a conversation. A chat asks an agent to fit a MakerWorld phone case to an iPhone 17 Pro Max and print it, beside a slicer preview of the first layer."></a>
+          <h3><a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a></h3>
+          <p>For OctoPrint, Klipper, Duet, Repetier, PrusaLink, Creality and Bambu Lab: slicing with your slicer, printing, status and the camera where the printer has one.</p>
+          <ul class="doclinks">
+            <li><a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/setup">Set it up</a></li>
+            <li><a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/slicing">Slicing</a></li>
+            <li><a href="https://dmontgomery40.github.io/mcp-3D-printer-server/reference/bambu-tools">Bambu tools</a></li>
+            <li><a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/fulu">FULU</a></li>
+            <li><a href="https://dmontgomery40.github.io/mcp-3D-printer-server/reference/printer-tools">Printer tools</a></li>
+            <li><a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/examples">Examples</a></li>
+            <li><a href="https://www.npmjs.com/package/mcp-3d-printer-server">npm</a></li>
+            <li><a href="https://github.com/DMontgomery40/mcp-3D-printer-server">GitHub</a></li>
+          </ul>
+        </article>
       </div>
+      <p class="intro">Already printing from Claude or Codex with one of these? Counterpart finds that setup by itself and uses it as it is. It never copies your printer's settings.</p>
     </div>
   </section>
 
