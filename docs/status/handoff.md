@@ -6,6 +6,8 @@ or a "continuation" section on top. Git history has every older version.
 Last device verification: **2026-11-03, 20:27 Mountain**. **Resume, Pause and Stop now work from the Mac
 Counterpart UI through FULU**, confirmed by the P1S's correlated replies and observed state changes.
 The printer remains cloud-bound, Developer Mode off. The test pick is stopped; the app shows the printer Ready.
+Those receipts used hand-copied, unpublished MCP code; they do not establish acceptance of the released backend.
+Repeat acceptance through the app after its Update action installs the published npm package.
 Status of each of David's asks: [`asks.md`](asks.md). Hands-on review list: [`app-review-2026-11-02.md`](app-review-2026-11-02.md).
 What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey in [`../design/journey.md`](../design/journey.md).
 
@@ -15,8 +17,12 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
   printer, judged by the printer's own reports. Unit tests, scripts, direct MCP calls, the control socket, ssh and
   Studio/Handy are engineering checks only. Never stop, pause or resume the printer outside Counterpart's UI to
   make a test pass. Never restart FULU/Colima or repair state to manufacture a result.
+  Use the same published MCP packages users receive through Download/Update; hand-copied feature builds do not
+  count as release acceptance. Design acceptance likewise starts with New project / Ask for changes in the app.
 - **The printer MCPs are the backend.** A button is one MCP tool call. A bug in bambu-printer-mcp is a bug in the
   app and is fixed once, in the MCP. No extra layers, parallel backends or copies of MCP state.
+  Download/Update follows npm latest independently of App Store/TestFlight releases. David explicitly authorized
+  merging and publishing the combined MCP fixes after checks on Nov 4; earlier release holds are superseded.
 - **Anything that applies to both MCPs goes into both** (bambu-printer-mcp and mcp-3D-printer-server).
 - **Don't invent rules or "improvements".** Change what was asked. When he has decided, don't re-ask.
   (Example: removing the FULU control's 5-second hold made him furious; it stays.)
@@ -180,18 +186,31 @@ remote native probes and the SSH tunnel were removed after verification.
      without an AMS mapping; it needs the MCP to pick the nearest loaded tray per part colour (both MCPs; mcp-3D has
      no 3MF tool). This is ask 41, the "Vivi" pick.
    - **#297** `docs/site-mcp-backend`: site says the MCPs are the backend and links their docs sites.
-4. **MCP branches, PRs not opened, releases held by David** (merging to main publishes to npm):
-   - bambu-printer-mcp `feat/one-printer-control-route` (`c0c988b`, 21 commits over 1.1.51 main; + persistent resume records): route ownership,
-     FULU cloud session, refusal reporting, prompt removal, `counterpart_print_route`, `pause_at_layers`, Resume fix,
-     client headers. Before a PR: strip the `Co-Authored-By` trailers on `c03a9bb`, `f4433b6`, `84aa077`, `7146550`
-     (that repo forbids AI attribution), CHANGELOG, code-review gate. Open PRs there: #95 camera stream, #96 Fusion
-     document binding, **#97 Studio 2.9 bare-`M` temperature marker (not in the deployed build)**.
-   - mcp-3D-printer-server `feat/bambu-complete` is pushed at **`afcf378`**: existing control fixes
-     plus layer-pause parity, preserved project pauses, exact-layer placement verification and
-     refusal of already sliced files missing requested pauses. The packed tarball now includes
-     `control-reply.js`. Linux: 663 pass / 6 optional skips; packed stdio/HTTP/SSE and site pass.
-     Logs: `~/scan-to-make-work/testflight-generic-parity/`. Local dist/live install not rebuilt.
-     No PR or npm release. Preserve unrelated untracked .env backup, private models and scratch.
+4. **Combined MCP releases authorized and in progress; no publication receipt yet (Nov 4).**
+   The [FDM/MCP thread](t3-thread://v2/11412686-e469-46d5-8f3a-5aaa68539c60/0df403d6-0993-4ddb-8d4a-4f20d2ca9186)
+   owns both integrations, merges, npm publication and Counterpart's visible MCP Update/acceptance while idle.
+   Do not start a competing release or copy `dist` into the installed app.
+   - bambu-printer-mcp [#99](https://github.com/DMontgomery40/bambu-printer-mcp/pull/99),
+     `release/1.1.52` @ `4185980`: control route `587461b` (including camera/Fusion fixes), Studio 2.9 and FDM prompts.
+     Supersedes #95–#98. Latest reported published npm version is 1.1.51; confirm registry receipts after release.
+   - mcp-3D-printer-server [#52](https://github.com/DMontgomery40/mcp-3D-printer-server/pull/52),
+     `release/1.2.26` @ `89b00d2`: `afcf378` controls/layer pauses plus camera, Studio 2.9 and FDM prompts.
+     Supersedes #49–#51. Latest reported published npm version is 1.2.25; package/site checks passed.
+   - This TestFlight thread owns handoff/distribution/site/appcast, app packaging and Counterpart
+     [#298](https://github.com/DMontgomery40/scan-to-make/pull/298) @ `faaff20` integration.
+     #298 changes the companion payload, requiring a new Mac release; MCP-only releases need no new iPhone build.
+     Its status-doc edits were removed by the MCP owner and reconciled here. Do not replace the installed app
+     during that thread's MCP update/acceptance; coordinate the later Mac upgrade explicitly.
+   - **Android and Linux ownership agreed directly with the MCP thread (Nov 4): this TestFlight thread owns both.**
+     David downloaded `~/Downloads/counterpart-android-debug.apk`, `counterpart-android-source.zip` and
+     `counterpart-android-app.bundle`. They are three artifacts of the Android app, not starter models.
+     The bundle verifies against this repository: `android-app` @ `549873a`, prerequisite `4ce8dac`.
+     Preserve the originals. Integrate Android source, retain pairing/TLS pinning, and support the same companion
+     protocol on Mac and Linux desktop. No other Linux desktop/server API owner is known to the MCP thread.
+     The downloaded README says compiled/unit-tested only, never accepted on a device or real companion.
+     HTTPS/Tailscale and events are portable; Android photo reconstruction currently calls Apple's
+     `tools/mac-reconstruct`, so a Linux reconstruction path and desktop shell still need implementation/acceptance.
+     Renaming Mac labels alone does not deliver Linux support. Follow actual app UI acceptance for both hosts.
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
    route selection through authorized routes and per-physical-printer reservations; phone print
    sheet has layer pauses and Resume-specific confirmation. Finished print removes live controls,
@@ -251,6 +270,11 @@ remote native probes and the SSH tunnel were removed after verification.
 - mcp-3D-printer-server slices Bambu printers with Bambu Studio by default (FULU's OrcaSlicer CLI v1.0.0 segfaults).
 - Printer settings live in each MCP's `.env`; Counterpart edits them, it never keeps its own copy.
 - The 5-second hold on FULU controls stays.
+- FDM design guidance lives in both MCPs as `fdm_design`, `fdm_multicolor`, `fdm_assembly`, `fdm_after_slice`
+  prompts and a resource. Counterpart fetches `fdm_design` for design and copy passes; the guidance is maintained
+  in the MCPs, not duplicated in the app. Developer notes: `docs/design/fdm-prompt-pack/` in #298.
+  Publish the combined MCP releases first; then integrate #298 and release its Mac companion payload.
+  Acceptance means New project / Ask for changes through Counterpart, with the published MCP providing guidance.
 - Printing picks is authorized; the Sandbox APNs key and relay are provisioned (`counterpart-relay-sandbox`).
 
 ## Done or superseded (verified; don't redo)
@@ -275,8 +299,9 @@ remote native probes and the SSH tunnel were removed after verification.
   LaunchAgent in `gui/$(id -u)` (`launchctl bootstrap`). Grep the built payload for your change. Install: close open
   sheets, quit, back up, `ditto` to `/Applications`, `launchctl kickstart -k gui/$(id -u)/com.scantomake.mac.companion`,
   open, log it in `deployment-boundary.txt`. Restart the companion only while the printer is idle or not dispatching.
-- **MCP deploy:** copy the built `dist` files into the live install path in the table above (back up first), then
-  restart the companion. The Mac has no GitHub credentials: push from a Linux box (`git fetch <mac worktree>` then push).
+- **MCP deploy:** publish the reviewed package, then use Counterpart's own Download/Update controls while idle.
+  Verify the app runs that published version and accept through its visible controls. Do not hand-copy `dist`.
+  The Mac has no GitHub credentials: push from a Linux box (`git fetch <mac worktree>` then push).
 - **Drive the Mac app over ssh:** System Events accessibility works (`osascript`); screenshots and synthetic clicks don't.
   Target the project window by name (a Settings window may be window 1), press buttons with `AXPress`, move in the
   sidebar with arrow keys. Many SwiftUI buttons have no accessible name: find them by size, and confirm each press by a

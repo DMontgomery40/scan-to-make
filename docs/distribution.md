@@ -53,11 +53,17 @@ independently of David's existing setup:
   now qualifies and attaches them without another service or global installs.
   It requires an existing Python 3.12 and Blender 5.0.1; include these prerequisites
   and the exact release source commit in beta setup instructions.
-- The app's Download MCP action installs npm's latest version. Local feature-branch
-  fixes are not delivered by that action. The two MCP npm releases remain held;
-  do not merge/publish them to solve this implicitly. Identify and test the exact
-  beta-compatible backend installation before claiming print controls work for
-  new testers.
+- The app's Download/Update MCP actions install npm's latest version independently
+  of the iPhone or Mac release. David authorized both combined MCP releases after
+  checks on Nov 4; the previous release hold is superseded. The FDM/MCP thread owns
+  bambu-printer-mcp #99 (1.1.52) and mcp-3D-printer-server #52 (1.2.26), publication
+  and the actual app's MCP Update/acceptance. Publication receipts are still pending.
+  Do not hand-copy local feature-branch builds. Accept print controls using the
+  visible Counterpart UI with exactly the published packages users receive.
+- Counterpart #298 consumes the MCP's FDM guidance and changes the bundled companion.
+  This release thread owns its integration and a new Mac release after the MCPs
+  publish. The current Mac download does not yet contain #298; these companion-only
+  changes do not require a new TestFlight phone build.
 - The legacy macOS installer and Docker image pin older MCP versions. They do not
   reproduce the currently accepted feature-branch installation.
 
