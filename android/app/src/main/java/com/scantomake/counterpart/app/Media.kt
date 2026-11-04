@@ -37,7 +37,7 @@ object Media {
         if ((jpeg || png) && bytes.size <= CompanionClient.PHOTO_LIMIT) {
             File(chosenRoot(context), "${UUID.randomUUID()}.${if (png) "png" else "jpg"}").apply { writeBytes(bytes) }
         } else {
-            val bitmap = if (Build.VERSION.SDK_INT >= 28) ImageDecoder.decodeBitmap(ImageDecoder.createSource(bytes)) { d, info, _ ->
+            val bitmap = if (Build.VERSION.SDK_INT >= 28) ImageDecoder.decodeBitmap(ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes))) { d, info, _ ->
                 val side = maxOf(info.size.width, info.size.height)
                 if (side > 4032) d.setTargetSampleSize(side / 4032 + 1)
             } else BitmapFactory.decodeByteArray(bytes, 0, bytes.size)

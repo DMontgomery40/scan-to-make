@@ -30,7 +30,6 @@ object Notifications {
     private const val SEEN = "eventsSeen"
 
     fun createChannels(context: Context) {
-        if (Build.VERSION.SDK_INT < 26) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannels(listOf(
             NotificationChannel(READY, "Ready to print", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "Your Mac finished a design or a scan" },

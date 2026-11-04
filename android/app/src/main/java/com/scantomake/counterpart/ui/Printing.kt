@@ -128,7 +128,7 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                 SectionTitle("Strength")
                 Segmented(PrintStrength.entries.map { it.title }, PrintStrength.entries.indexOf(strength)) { strength = PrintStrength.entries[it] }
             }
-            Text(String.format("%.2f mm layers · %d walls · %d%% infill", quality.layerHeightMm, strength.walls, strength.infill), color = Palette.secondary, fontSize = 12.sp)
+            Text(String.format(java.util.Locale.US, "%.2f mm layers · %d walls · %d%% infill", quality.layerHeightMm, strength.walls, strength.infill), color = Palette.secondary, fontSize = 12.sp)
 
             SectionTitle("Filament")
             val list = filaments
@@ -198,6 +198,7 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
     val state = AppState.of(LocalContext.current)
     val scope = rememberCoroutineScope()
     val projects by state.projects.collectAsState()
+    val catalog by state.catalog.collectAsState()
     val p = projects.firstOrNull { it.id == id }
     var frame by remember { mutableStateOf<CompanionClient.CameraFrame?>(null) }
     var image by remember { mutableStateOf<ImageBitmap?>(null) }
@@ -214,7 +215,10 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
                 val next = app.companion.camera(projectId = id, fullScreen = true, previous = frame)
                 if (next !== frame) { frame = next; image = ImageCache.decode(next.jpeg) }
                 cameraProblem = null
-            } catch (e: CompanionException) { cameraProblem = e.message } catch (_: Exception) {}
+            } catch (e: CompanionException) {
+                cameraProblem = e.message
+                if (e.code == "no-camera" || e.isUnsupported) break
+            } catch (_: Exception) {}
             now = System.currentTimeMillis()
             delay(3_000)
         }
@@ -240,7 +244,7 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
         val live = p.print?.live
         val job = live?.job
         val printer = state.printerName(p) ?: "your printer"
-        val destination = state.catalog.value?.destination(p.print?.destinationId ?: p.printerDestinationId)
+        val destination = catalog?.destination(p.print?.destinationId ?: p.printerDestinationId)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 10f).clip(RoundedCornerShape(24.dp)).stage(), contentAlignment = Alignment.Center) {
                 image?.let { Image(it, "Camera photo from $printer", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }

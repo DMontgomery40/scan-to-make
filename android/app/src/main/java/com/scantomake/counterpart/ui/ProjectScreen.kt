@@ -79,7 +79,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
     val scope = rememberCoroutineScope()
     val projects by state.projects.collectAsState()
     val failures by state.sendFailures.collectAsState()
-    state.sending.collectAsState().value
+    val sending by state.sending.collectAsState()
     val project = projects.firstOrNull { it.id == id }
     var working by remember { mutableStateOf<String?>(null) }
     var problem by remember { mutableStateOf<String?>(null) }
@@ -232,7 +232,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             } }
 
             if (ProjectAction.Print in words.actions || ProjectAction.PrintChecked in words.actions) PrimaryButton("Print", Modifier.fillMaxWidth(), icon = CIcons.Printer, enabled = working == null, onClick = print)
-            if (ProjectAction.FinishSending in words.actions && id !in state.sending.value) PrimaryButton("Finish Sending", Modifier.fillMaxWidth(), enabled = working == null) {
+            if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Finish Sending", Modifier.fillMaxWidth(), enabled = working == null) {
                 state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) }
             }
             if (ProjectAction.Scan in words.actions) SecondaryButton(if (Media.captureFinished(context, id)) "Scan Again" else "Scan It", Modifier.fillMaxWidth(), icon = CIcons.Cube, onClick = scan)

@@ -87,7 +87,12 @@ class PinnedTransport : HttpTransport {
         factory.trustManagers.filterIsInstance<X509TrustManager>().first()
     }
 
-    /** A trust manager that accepts exactly one leaf: `check` decides from its DER bytes. */
+    /**
+     * A trust manager that accepts exactly one leaf: `check` decides from its DER bytes. This is certificate
+     * pinning (the companion's certificate is self-signed, so system trust can't vouch for it), never "trust all":
+     * every other certificate is refused. Unpinned (Tailscale) companions use the system's own trust.
+     */
+    @android.annotation.SuppressLint("CustomX509TrustManager")
     private class LeafTrust(private val check: (ByteArray) -> Unit) : X509TrustManager {
         override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = throw CertificateException("client")
         override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {

@@ -122,7 +122,7 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit) {
             SectionTitle("This phone")
             OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name your Mac shows") }, singleLine = true)
             SecondaryButton("Save Name", Modifier.fillMaxWidth(), enabled = isPlainText(name, 80)) { app.prefs.edit().putString(Counterpart.DEVICE_NAME_KEY, name.trim()).apply() }
-            Text("The new name shows on your Mac the next time you pair.", color = Palette.secondary, fontSize = 12.sp)
+            Text("Your Mac shows the new name after you reopen Counterpart here.", color = Palette.secondary, fontSize = 12.sp)
 
             SectionTitle("Notifications")
             if (!notifications) SecondaryButton("Turn On Notifications", Modifier.fillMaxWidth()) {
