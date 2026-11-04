@@ -20,6 +20,7 @@ RUN npm install --global --prefix /opt/printers/bambu bambu-printer-mcp@1.1.42 \
     && npm cache clean --force
 WORKDIR /app
 COPY packages/contracts packages/contracts
+COPY packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters
 COPY services/project services/project
 COPY services/printer-handoff services/printer-handoff
 COPY services/companion services/companion

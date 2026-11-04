@@ -44,6 +44,7 @@ mkdir -p "$state/releases"
 app=$(mktemp -d "$state/releases/install-XXXXXXXX")
 # Install the committed snapshot only, never local credentials, captures or node_modules.
 git -C "$source_root" archive HEAD packages/contracts services/project services/printer-handoff services/companion \
+  packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters \
   tools/capture-mesh-convert tools/capture-pipeline tools/capture-fit-eval \
   tools/scan-repair tools/scan-correct tools/ai-tweak-judge deploy/companion | tar -xf - -C "$app"
 git -C "$source_root" rev-parse HEAD > "$app/REVISION"

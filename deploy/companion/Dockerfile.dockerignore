@@ -2,6 +2,12 @@
 !packages/
 !packages/contracts/
 !packages/contracts/**
+!packages/CounterpartKit/
+!packages/CounterpartKit/Sources/
+!packages/CounterpartKit/Sources/CounterpartKit/
+!packages/CounterpartKit/Sources/CounterpartKit/Resources/
+!packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/
+!packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/**
 !services/
 !services/project/
 !services/project/**
