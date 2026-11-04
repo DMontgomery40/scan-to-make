@@ -221,7 +221,17 @@ remote native probes and the SSH tunnel were removed after verification.
      Catalog/session setup now serves `/v1/mcp` with or without objects, while keeping release's provider-worker
      routing, no Claude-only requirement, Linux placeholder handling and print-gate reservations. Retained
      `source_f3d` confinement and plain support arguments. The signed `202611040557` artifact predates #300;
-     this source integration does not change it or the installed app. Remaining main queue: #293 and #301.
+     this source integration does not change it or the installed app.
+     **Phone controls integration:** main `9acca30b` (#301) reconciled with release plates/reconstruction.
+     Uses main's final connection/MCP cards and stable pause rows (maximum 16), retaining selected-plate label,
+     estimate identity and `expectedPlate`. One route handler supports main's PUT and existing Android POST
+     aliases; both changes require PRINT+SETTINGS. POST MCP replies retain the refreshed catalog. Both
+     `printerChoices` and legacy `printerSettings` capabilities remain, as do print-gate reservations and the
+     bounded 20-second live printer check. Renamed the earlier Swift catalog-returning helper to
+     `choosePrinterMcpWithCatalog` to avoid conflicting with main's id-returning method.
+     Checks: companion build, 86 affected Node checks, 172 shared Swift checks and unsigned iOS Release build
+     pass. Logs in `~/scan-to-make-work/phone-301-integration/`. No phone installation/UI acceptance.
+     Remaining main queue: #293 (Muse after quota reset).
      Engineering checks: companion build and 125 focused remote/auth/updater/session/printer checks pass.
      Broader handoff/HTTP/control/provider run: 212 pass, 5 skip, one unchanged Mac worker-environment
      assertion fails because the child receives `__CF_USER_TEXT_ENCODING` (secret-leak assertion passes).
@@ -274,6 +284,11 @@ remote native probes and the SSH tunnel were removed after verification.
      Settings shows P1S Ready, Local network / Developer Mode selected, and Update 1.1.52 → 1.1.54.
      Explicit **SETTLED** UI handoff sent directly to MCP owner for Update; parent did not click it.
      Phone, printer operations and public appcast stayed untouched. Deployment receipts are beside the build.
+     **Update attempt 13:18:53Z failed and rolled back:** owner used visible Update. The new npm flags worked:
+     postinstall ran and applied the compatibility patch. Fresh MCP startup then failed loading sharp because
+     bundled hardened Node has only allow-jit, and sharp's native addon has a different/no Team ID. Version
+     1.1.52 remains live; no staging leftovers or print. UI returned to parent. Packaging correction in progress;
+     retained isolated repro at `~/scan-to-make-work/sharp-library-validation-repro/`. No retry until rebuilt.
      **Earlier hold, Nov 4 13:05Z:** visible Mac UI showed AirPods **Getting the print ready**, with a floating-
      cantilever warning, unchecked **Print anyway**, **Cancel Print**, and disabled **Print**. P1S shows Ready,
      but the pending print question means deployment is not idle. Parent left the decision untouched and

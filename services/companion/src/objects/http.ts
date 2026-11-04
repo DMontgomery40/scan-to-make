@@ -20,7 +20,8 @@ const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 *
 const MAX_DEPTH = 8 * 1024 * 1024;
 const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|photos|capture|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
-const PRINTER_SETTINGS = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
+/** Settings -> Printers: the printer MCP's connection (`route`) and which MCP a printer uses (`mcp`). */
+const PRINTER_CHOICE = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
 const SETTINGS: RemoteScope = 'projects:write';
 
 class HttpFailure extends Error {
@@ -153,7 +154,7 @@ function send(response: ServerResponse, status: number, value: unknown): void {
 }
 
 /** Phone-facing objects: start something, send its scan and photos, follow it, correct it, print it. */
-export function createObjectRoutes(service: ObjectService, printerSetup?: Pick<PrinterSetup, 'chooseMcp'>) {
+export function createObjectRoutes(service: ObjectService, options: {printerSetup?: Pick<PrinterSetup, 'chooseMcp'>} = {}) {
   return {
     async handle(request: IncomingMessage, response: ServerResponse, authorize: (scope: RemoteScope) => Promise<void>, header: (name: string) => string | undefined): Promise<void> {
       const url = new URL(request.url ?? '/', 'http://localhost');
@@ -164,32 +165,45 @@ export function createObjectRoutes(service: ObjectService, printerSetup?: Pick<P
           await authorize(READ);
           return send(response, 200, service.printers());
         }
-        const printerSettings = PRINTER_SETTINGS.exec(url.pathname);
-        if (printerSettings) {
-          const [, destinationId, action] = printerSettings;
-          const reading = action === 'route' && request.method === 'GET';
-          if (!reading && request.method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
-          await authorize(action === 'mcp' ? SETTINGS : PRINT);
-          if (reading) return send(response, 200, {route: await service.printRoute(destinationId!) ?? null});
-          const input = await json<unknown>(request);
-          if (!input || typeof input !== 'object' || Array.isArray(input) || 'destinationId' in input) throw new HttpFailure(400, 'invalid-request');
-          if (action === 'route') {
-            const parsed = parameters['printers.route'].safeParse({...input, destinationId});
-            if (!parsed.success || !parsed.data.route) throw new HttpFailure(400, 'invalid-request');
-            return send(response, 200, {route: await service.printRoute(destinationId!, parsed.data.route) ?? null});
-          }
-          const parsed = parameters['printers.chooseMcp'].safeParse({...input, destinationId});
-          if (!parsed.success) throw new HttpFailure(400, 'invalid-request');
-          if (!printerSetup) throw new HttpFailure(404, 'not-supported', 'Update Counterpart on your Mac to change this printer’s MCP.');
-          const selected = await printerSetup.chooseMcp(destinationId!, parsed.data.backend);
-          return send(response, 200, {...selected, ...service.printers()});
-        }
         const printerCamera = PRINTER_CAMERA.exec(url.pathname);
         if (printerCamera) {
           if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(PRINT);
           if (url.searchParams.get('stream') === '1') return await sendCameraStream(response, () => authorize(PRINT), signal => service.printerCameraStream(printerCamera[1]!, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card', signal}));
           return sendFrame(response, await service.printerCamera(printerCamera[1]!, {size: url.searchParams.get('size') === 'full' ? 'full' : 'card'}), header('if-none-match'));
+        }
+        const printerChoice = PRINTER_CHOICE.exec(url.pathname);
+        if (printerChoice) {
+          // The same companion methods as the Mac's Settings -> Printers (`printers.route`, `printers.chooseMcp`).
+          // Reading needs printing; changing also needs settings, so a print-only token can't rewrite an MCP's .env.
+          const [, destinationId, kind] = printerChoice as unknown as [string, string, 'route' | 'mcp'];
+          if (kind === 'route' && request.method === 'GET') {
+            await authorize(PRINT);
+            return send(response, 200, {route: await service.printRoute(destinationId) ?? null});
+          }
+          if (request.method !== 'PUT' && request.method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(PRINT); await authorize(SETTINGS);
+          const input = await json<unknown>(request);
+          if (!input || typeof input !== 'object' || Array.isArray(input) || Object.hasOwn(input, 'destinationId')) throw new HttpFailure(400, 'invalid-request');
+          if (kind === 'route') {
+            const parsed = parameters['printers.route'].safeParse({...input, destinationId});
+            if (!parsed.success || !parsed.data.route) throw new HttpFailure(400, 'invalid-request');
+            const route = await service.printRoute(destinationId, parsed.data.route);
+            if (!route) throw new HttpFailure(409, 'not-supported', 'This printer’s MCP has no connection choice.');
+            return send(response, 200, {route});
+          }
+          const parsed = parameters['printers.chooseMcp'].safeParse({...input, destinationId});
+          if (!parsed.success) throw new HttpFailure(400, 'invalid-request');
+          if (!options.printerSetup) throw new HttpFailure(503, 'unavailable', 'Counterpart on this Mac can’t change a printer’s MCP.');
+          try {
+            const selected = await options.printerSetup.chooseMcp(destinationId, parsed.data.backend);
+            return send(response, 200, request.method === 'POST' ? {...selected, ...service.printers()} : selected);
+          }
+          catch (error) {
+            if (!(error instanceof PrinterSetupError)) throw error;
+            const status = error.code === 'not-found' ? 404 : error.code === 'invalid' ? 400 : error.code === 'conflict' ? 409 : 503;
+            throw new HttpFailure(status, error.code === 'invalid' ? 'invalid-request' : error.code, error.message);
+          }
         }
         if (url.pathname === '/v1/settings/ai/test' || url.pathname === '/v1/settings/fusion/setup') {
           if (request.method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');

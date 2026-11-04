@@ -138,7 +138,9 @@ enum Fixtures {
                                     ["id": "working", "words": "Matching your photos", "startedAtMs": ago(6), "typicalSec": 300]]]]],
         ]
         // `-CounterpartFixtureSet grid`: only the projects Home shows as cards, so the grid is at the top.
-        let shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
+        var shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
+        // `-CounterpartScreen printer-connection`: the P1S idle, so its Settings → Printers choices can be changed.
+        if idlePrinter { shown = shown.filter { $0["state"] as? String != "printing" } }
         return (shown + duplicates).map(withStatus).map(withPreparing).map(withFinished).map { original in
             guard let id = original["id"] as? String else { return original }
             var object = original
@@ -207,10 +209,25 @@ enum Fixtures {
         return object
     }
 
-    static let catalog: [String: Any] = [
+    /// The P1S's Printer MCP and connection, as Settings → Printers sets them on this run.
+    nonisolated(unsafe) static var idlePrinter = false
+    /// `-CounterpartScreen print-pauses`: the print sheet opens with these pauses, scrolled to them.
+    nonisolated(unsafe) static var pauses: [Int] = []
+    nonisolated(unsafe) static var p1sBackend = "bambu-printer-mcp"
+    nonisolated(unsafe) static var p1sRoute = "lan"
+    static var route: [String: Any] {
+        ["route": p1sRoute, "mode": p1sRoute == "developer" ? "lan_mqtt_ftps" : "bambu_network", "type": p1sRoute == "cloud" ? "cloud" : "lan",
+         "choices": ["lan", "cloud", "developer"], "savedTo": "/Users/david/bambu-printer-mcp/.env",
+         "options": [["id": "lan", "label": "Local network", "available": true, "controls": "Prints, Pause, Resume and Stop go to the printer on your network through the Bambu plug-in."],
+                     ["id": "cloud", "label": "Bambu Cloud", "available": true, "controls": "Prints, Pause, Resume and Stop go through your Bambu account."],
+                     ["id": "developer", "label": "Local network, Developer Mode", "available": false, "reason": "Turn on LAN Only and Developer Mode on the printer first."]]]
+    }
+
+    static var catalog: [String: Any] { [
         "defaultDestinationId": "current",
         "destinations": [
-            ["id": "current", "name": "P1S", "backend": "bambu-printer-mcp", "model": "Bambu Lab P1S", "source": "current", "state": "ready",
+            ["id": "current", "name": "P1S", "backend": p1sBackend, "model": "Bambu Lab P1S", "source": "current", "state": "ready",
+             "mcps": [["backend": p1sBackend, "destinationId": "current"], ["backend": p1sBackend == "bambu-printer-mcp" ? "mcp-3d-printer-server" : "bambu-printer-mcp", "destinationId": "current"]],
              "capabilities": ["progress": true, "layers": true, "camera": "bambu-tcp", "filaments": "ams", "pause": true, "resume": true, "cancel": true,
                               "quality": true, "strength": true, "multiColour": false, "copies": true, "layerPauses": true, "missing": [],
                               "server": ["name": "bambu-printer-mcp", "version": "1.1.48"]]],
@@ -225,7 +242,7 @@ enum Fixtures {
                                          "command": ["npm", "install", "-g", "mcp-3d-printer-server@latest"], "latestVersion": "1.2.22"],
                               "server": ["name": "mcp-3d-printer-server", "version": "1.2.9"]]],
         ],
-    ]
+    ] }
 
     /// Every Mac setting, as KAN-214's settings.md shows them.
     static let settings: [String: Any] = [
@@ -280,8 +297,19 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true]]) }
         if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
+        if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/route") {
+            guard path.contains("/current/") else { return json(["route": NSNull()]) }
+            if method == "PUT", let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let route = body["route"] as? String {
+                Fixtures.p1sRoute = route
+            }
+            return json(["route": Fixtures.route])
+        }
+        if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/mcp"), method == "PUT" {
+            if let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let backend = body["backend"] as? String { Fixtures.p1sBackend = backend }
+            return json(["destinationId": "current"])
+        }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/camera.jpg") {
             guard path.contains("/current/") else { return json(["error": ["code": "not-found", "message": "This printer has no camera"]], 404) }
             var reply = HTTPReply(status: 200, body: try Data(contentsOf: folder.appending(path: "bed.jpg")))

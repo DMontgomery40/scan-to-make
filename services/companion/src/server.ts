@@ -141,8 +141,6 @@ export async function startCompanionServer(
     /** PRD §8.10: Update for the printer MCPs. */
     blenderAddon?: import('./touchup/addon-repair.js').BlenderAddonRepair;
     mcpUpdates?: McpUpdater;
-    /** The same per-printer MCP preference used by Mac Settings. */
-    printerSetup?: import('./printing/setup.js').PrinterSetup;
     /** PRD §5.10: enrolment through the owner's iCloud (LAN mode only). */
     icloud?: IcloudEnrolment;
     /** Extra addresses to bind beside the configured one; looked up again every `rediscoverMs`. */
@@ -157,6 +155,8 @@ export async function startCompanionServer(
     nearby?: {name: string; advertise?: typeof advertise};
     /** The Mac's name as people know it ("Mac mini"), in /healthz so the phone can say which Mac it reached. */
     name?: string;
+    /** Settings -> Printers on the phone: which MCP a printer uses (`PUT /v1/objects/printers/<id>/mcp`). */
+    printerSetup?: Pick<import('./printing/setup.js').PrinterSetup, 'chooseMcp'>;
   } = {}
 ): Promise<{
   url: string;
@@ -210,7 +210,7 @@ export async function startCompanionServer(
   const instanceLock=options.capture?.scanProcessing?await acquireInstanceLock(options.capture.scanProcessing.directory):undefined;
   const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
   const printHandoffRoutes=options.printHandoff?createPrintHandoffRoutes(options.printHandoff):undefined;
-  const objectRoutes=options.objects?createObjectRoutes(options.objects,options.printerSetup):undefined;
+  const objectRoutes=options.objects?createObjectRoutes(options.objects,options.printerSetup?{printerSetup:options.printerSetup}:{}):undefined;
   const eventRoutes=options.events?createEventRoutes(options.events):undefined;
   let authority = '';
   const handler: RequestListener = async (request, response) => {
@@ -265,7 +265,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerSettings: !!options.objects && !!options.printerSetup, reconstructionReviewV1: !!options.objects && reconstructionReviewSupported() } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerChoices: !!options.objects && !!options.printerSetup, printerSettings: !!options.objects && !!options.printerSetup, reconstructionReviewV1: !!options.objects && reconstructionReviewSupported() } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
