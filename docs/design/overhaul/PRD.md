@@ -39,13 +39,13 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | Copies, pause before a layer (§5.5) | Built; P1S paused itself before layer 3 on Nov 3 (Mac, pre-release MCP build) | Not accepted on the published MCPs; mcp-3D-printer-server parity not on npm |
 | Plates of an imported 3MF; per-plate print and completion (§5.5) | Built | Not accepted |
 | Pause, Resume, Stop (§5.7) | Built; worked from the Mac UI over local FULU Nov 3 (hand-copied MCP code) | Not accepted on the published MCP; phone Stop |
-| Bambu Cloud print route (§8.2) | Bambu refused cloud printing (-3120, HTTP 403) Nov 3 | MCP fixes bambu-printer-mcp #102 and mcp-3D-printer-server #56 open |
+| Bambu Cloud print route (§8.2) | Bambu refused cloud printing (-3120, HTTP 403) Nov 3. Fixed the way Bambu Studio sends it (`start_local_print_with_record` first), published in bambu-printer-mcp 1.1.55 and mcp-3d-printer-server 1.2.29 (#102, #56) | Not accepted: install through the app's Update, then a print with Connection = Bambu Cloud |
 | FULU through mcp-3D-printer-server | — | **open bug**: crashes on its config-dir mount |
 | Print a published model (§8.11) | Built; MakerWorld caliper import + real P1S estimate observed | Not accepted: print, browser download path |
 | Notifications (§9.1) | Built; OS permission on | Not accepted: delivery of each event type |
 | Live Activity (§9.4) | Built; Sandbox relay test start/update/end seen on the Lock Screen | Not accepted: real print, Watch, production push |
 | Printer camera (§8.6.1) | Built; 12 reads in 23 s, ≤ 8.4 KB, 0 errors | sustained acceptance |
-| Settings on both, the same (§5.9) | Built; keep-awake toggled from the phone changed the Mac | **open bug**: phone shows "Connected now" while reachability is unknown (`SettingsView.swift`) |
+| Settings on both, the same (§5.9) | Built; keep-awake toggled from the phone changed the Mac. The phone says "Checking…" until it knows whether the Mac answers (`b845a545`, in the installed iPhone build) | Not accepted: David to confirm on the phone |
 | Update both MCPs from either app (§8.10) | Built; bambu-printer-mcp 1.1.54 installed through Settings → Update Nov 4 | from the phone; mcp-3D-printer-server is still a hand-built dist |
 | AI provider routing (§7.5) | Built: Claude Code, Codex CLI, Anthropic/OpenAI API, OpenAI-compatible endpoint, Off | real Claude cleanup observed Nov 4; OpenCode not supported yet |
 | Design passes plan how the object prints (FDM prompt pack, `docs/design/fdm-prompt-pack`) | Published in bambu-printer-mcp 1.1.52 / mcp-3D-printer-server 1.2.26 (#99, #52) | Not accepted |
@@ -397,7 +397,7 @@ Screenshots, printer detail: `screens/phone-printer.jpg` and `screens/phone-prin
 
 ### 5.9 Settings and About
 
-**Status:** Built. General values come from the real Mac; keep-awake changed from the phone changed the Mac (Nov 3). Help opens the live help page on both. **Open bug:** the phone shows "Connected now" while reachability is unknown (`SettingsView.swift`).
+**Status:** Built. General values come from the real Mac; keep-awake changed from the phone changed the Mac (Nov 3). Help opens the live help page on both. The phone's Mac row says "Checking…" until reachability is known, never "Connected now" (`b845a545`, in installed build 202611041132); not accepted.
 
 Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications.jpg` and `screens/phone-about.jpg`.
 
@@ -589,7 +589,7 @@ Who runs what:
 
 ### 8.2 Finding printers and choosing the MCP
 
-**Status:** Built, including the Codex `config.toml` source and one destination per printer. Bambu Cloud printing was refused by Bambu (-3120, HTTP 403) on Nov 3; the fix is in bambu-printer-mcp #102 and mcp-3D-printer-server #56, both open.
+**Status:** Built, including the Codex `config.toml` source and one destination per printer. Bambu Cloud printing was refused by Bambu (-3120, HTTP 403) on Nov 3. bambu-printer-mcp 1.1.55 and mcp-3d-printer-server 1.2.29 now send a cloud print the way Bambu Studio does; not accepted on the printer yet.
 
 - **Existing.** `services/companion/src/objects/printers.ts` (`loadPrinterCatalog`) builds the list of printers from the MCP configs the user already has:
   - Claude Code (`~/.claude.json`, user and project scopes);
