@@ -260,7 +260,8 @@ remote native probes and the SSH tunnel were removed after verification.
      No Linux reconstruction source integration or geometry/scale acceptance yet.
      Linux host delegate hit Claude's rate limit, with a clean `linux-host-runtime` branch at `d640c07`
      (`5d38205` helper, `76e17b2` companion portability, `d640c07` payload script), worktree
-     `~/.t3/worktrees/scan-to-make/t3-6dc7974b`. Provider-switch choice is pending; do not silently replace Opus.
+     `~/.t3/worktrees/scan-to-make/t3-6dc7974b`. David used his banked Claude reset; the same Opus delegate
+     resumed implementation. Muse Wonder Full 1.0 is separately researching reconstruction and metric-scale design.
      Its agents-173 payload build compiled the Rust release helper but failed npm extraction with errno -122
      in `/tmp` (tmpfs/quota). The UI delegate's independent agents-136 build succeeded: 210 MB, BUILD-ID
      `gd640c07bd9a3-node24.22.2-x64`, at `~/scan-to-make-work/linux-desktop/app/src-tauri/resources`.
@@ -271,8 +272,12 @@ remote native probes and the SSH tunnel were removed after verification.
      Setup failed with "Counterpart could not list this computer's network addresses". Parent reproduced the
      underlying read-only import failure: installed Node cannot find `@scan-to-make/contracts`; all three
      companion workspace links exist in prepared resources but `node_modules/@scan-to-make` is absent from
-     the installed package. UI/packaging owner is fixing packaging within `apps/linux`, then will retry the
-     visible setup button. Do not repair installed node_modules manually or claim connected-app acceptance.
+     the installed package. UI owner reports this fixed in BOTH rebuilt .deb and AppImage by materializing npm
+     directory links and providing relocatable npm/npx launchers; extracted packages pass 60 export imports and
+     five internal dependency checks. After reinstall, the actual setup button passed address discovery and created
+     the service. The next blocker is host-generated `printer-handoff.json` with relative `process.command='node'`,
+     rejected by the absolute-path schema (`config.js:80`, retained `companion-error.log`). Sent to the host owner
+     to fix source and coordinate a rebuilt helper/UI retry. No hand-edited installed configuration or connected-app acceptance.
      The delegate created disposable account `stm-hosttest` (UID 1001) with lingering enabled for pending
      runtime checks; remove only after its owned checks and service cleanup. No real host acceptance yet.
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
