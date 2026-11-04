@@ -337,12 +337,17 @@ remote native probes and the SSH tunnel were removed after verification.
      upload verifies photo hashes/dimensions; a private cached reconstruction stops for region confirmation and,
      when needed, a measurement. HTTP/local-control answers bind the current review/hash; generic Ask/Best Guess
      cannot approve it. Preview routes expose only the current review. No real capture/UI acceptance yet.
-     Follow-up ownership: Muse reconstruction owner extends Mac-hosted Android/photo capture qualification
-     (the current Mac runner ignores ARCore metadata); a new Android owner wires capture-camera v1, uploads,
-     manifest and native review UI; a Linux UI owner adds the native review surface/preview bridge. Shared
-     `scaleQualificationRequired` manifest flag and `/healthz` capability `reconstructionReviewV1` are the agreed
-     next transport additions, not implemented yet. Old clients/hosts must not silently bypass qualification.
-     Packaging still needs Python/Pillow/usd-core and COLMAP/OpenMVS with licence/source information.
+     **Mac qualification integrated:** `90ac9164` is merged. `scaleQualificationRequired` in the capture
+     manifest/completion forces Apple reconstruction followed by the shared region/measurement qualifier;
+     iPhone captures without the flag use their existing path. ARCore metadata alone cannot qualify Apple
+     geometry. Public review schemas stay unchanged. Parent made Apple raw-cache publication atomic and
+     removed a project-read fallback that could silently clear the qualification flag.
+     `reconstructionReviewV1` is currently tool-presence-based; runtime packaging/smoke verification is still
+     required. The Android owner wires metadata/manifest/review UI; the Linux UI owner wires its review surface.
+     Reconstruction owner proceeds with actual runtime packaging, not only the design manifest. Mac's existing
+     CPython/Pillow/usd-core closure can serve qualification; Linux needs the executable reconstruction closure.
+     Correct the draft dependency manifest against actual binary/source archives and existing licence inventory
+     (it labels usd-core Apache-only, while the audited Mac wheel has a composite licence).
      Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
      succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
 

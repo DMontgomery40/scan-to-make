@@ -1839,7 +1839,7 @@ export class ObjectService {
     await mkdir(join(dir, 'scan'), {recursive: true});
     // Qualification is keyed on the capture's own declaration, never on
     // whether camera metadata happens to be present.
-    const scaleQualificationRequired = !!(await store.get(id).catch(() => undefined))?.captureCompletion?.scaleQualificationRequired;
+    const scaleQualificationRequired = !!(await store.get(id)).captureCompletion?.scaleQualificationRequired;
     const outcome = await reconstruct({photosDir: join(dir, 'capture'), output: join(dir, 'scan', 'scan.usdz'),
       masksDir: join(dir, 'capture-masks'), ...await reconstructionInputs(dir),
       ...(scaleQualificationRequired ? {scaleQualificationRequired: true} : {}), signal, onProgress: show});

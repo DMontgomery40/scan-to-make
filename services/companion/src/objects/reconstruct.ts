@@ -313,7 +313,16 @@ export function macQualifiedReconstructRunner(
     await mkdir(input.workDir, {recursive: true});
     // Capture photos cannot change after start, so an existing Apple rebuild
     // is this capture's; answer resumes reuse it instead of rebuilding.
-    if (!existsSync(raw)) await mac({...input, output: raw});
+    if (!existsSync(raw)) {
+      // Only a completed Apple rebuild is reusable. A cancelled process may
+      // leave a partial file; never cache that file under the completed name.
+      const building = join(input.workDir, `apple-raw-building-${randomUUID()}.usdz`);
+      try {
+        await mac({...input, output: building});
+        input.signal?.throwIfAborted();
+        await rename(building, raw);
+      } finally { await rm(building, {force: true}).catch(() => undefined); }
+    }
     input.signal?.throwIfAborted();
     return runLinuxTool(qualifyBinary, ['qualify', raw, input.output,
       ...(input.objectRegion ? ['--object-region', input.objectRegion] : []),
