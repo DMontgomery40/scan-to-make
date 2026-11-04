@@ -83,6 +83,7 @@ export const runCommand: CommandRunner = (command, args, options) => new Promise
 });
 
 const RESTORE_FAILED = "The previous version couldn't be put back, so these printers may not start their MCP. Install a fresh copy from Update.";
+const NO_PRINTERS = (pkg: string) => `No printer uses this MCP any more (it was removed), so Counterpart stopped updating ${pkg}.`;
 const BUSY_UNKNOWN = (pkg: string) => `Counterpart couldn't check whether a print is running, so it didn't update ${pkg}. Try Update again.`;
 const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.length <= LOG_TAIL_BYTES ? text : bytes.subarray(bytes.length - LOG_TAIL_BYTES).toString('utf8').replace(/^�+/, ''); };
 const newer = newerVersion;
@@ -138,6 +139,8 @@ export class McpUpdater {
   readonly #starting = new Map<string, Promise<McpUpdate>>();
   /** Installs (by what they run) an update is changing now: a second update of the same files waits. */
   readonly #changing = new Map<string, string>();
+  /** The printers #claim marked as updating, released by #perform even if they were removed meanwhile. */
+  readonly #held = new Map<string, string[]>();
   #timer?: ReturnType<typeof setInterval>;
   constructor(deps: McpUpdaterDeps) {
     this.#deps = deps; this.#run = deps.run ?? runCommand; this.#now = deps.now ?? Date.now; this.#fs = deps.fs ?? realFs;
@@ -283,10 +286,10 @@ export class McpUpdater {
   }
 
   async #finishAdmission(mcpId: string, options: {fresh?: boolean}, latest: string, pkg: string, update: McpUpdate, claimed: boolean): Promise<void> {
-    if (claimed) { void this.#perform(mcpId, options, latest); return; }
+    if (claimed) { void this.#perform(mcpId, options, latest, pkg).catch(() => undefined); return; }
     update.state = 'waiting';
     await this.#emit('mcp.update.waiting', pkg, update);
-    void this.#waitThenRun(mcpId, options, latest, pkg);
+    void this.#waitThenRun(mcpId, options, latest, pkg).catch(() => undefined);
   }
 
   /** Marks the install's printers as updating (no print can start), then makes sure none is printing. */
@@ -304,6 +307,7 @@ export class McpUpdater {
     catch (error) { gate?.endUpdate(ids); throw error; }
     if (busy || keys.some(key => this.#changing.has(key) && this.#changing.get(key) !== mcpId)) { gate?.endUpdate(ids); return false; }
     for (const key of keys) this.#changing.set(key, mcpId);
+    this.#held.set(mcpId, ids);
     return true;
   }
 
@@ -320,12 +324,24 @@ export class McpUpdater {
     }
     const update = this.#active.get(mcpId);
     if (update) update.state = 'started';
-    await this.#perform(mcpId, options, latest);
+    await this.#perform(mcpId, options, latest, pkg);
   }
 
-  async #perform(mcpId: string, options: {fresh?: boolean}, latest: string): Promise<void> {
+  async #perform(mcpId: string, options: {fresh?: boolean}, latest: string, pkg: string): Promise<void> {
     const update = this.#active.get(mcpId)!;
-    const members = this.#members(mcpId, options), first = members[0]!, pkg = first.config.backend;
+    const members = this.#members(mcpId, options), first = members[0];
+    const release = () => {
+      this.#deps.gate?.endUpdate([...new Set([...members.map(member => member.id), ...(this.#held.get(mcpId) ?? [])])]);
+      this.#held.delete(mcpId);
+      for (const [key, owner] of [...this.#changing]) if (owner === mcpId) this.#changing.delete(key);
+    };
+    // Every printer on this install was removed while the update waited or was being admitted: nothing to update.
+    if (!first) {
+      this.#active.delete(mcpId);
+      release();
+      if (update) await this.#emit('mcp.update.failed', pkg, update, NO_PRINTERS(pkg)).catch(() => undefined);
+      return;
+    }
     const previous = new Map(members.map(member => [member.id, this.#deps.overrides.peek(member.id, member.config)]));
     const own = members.filter(member => member.mcpId === mcpId);
     let log = '';
@@ -421,10 +437,7 @@ export class McpUpdater {
       this.#active.delete(mcpId);
       await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)),
         restoreFailed ? RESTORE_FAILED : undefined);
-    } finally {
-      this.#deps.gate?.endUpdate(members.map(member => member.id));
-      for (const [key, owner] of [...this.#changing]) if (owner === mcpId) this.#changing.delete(key);
-    }
+    } finally { release(); }
   }
 
   #freshInstall(config: PrinterHandoffConfig): McpInstall & {type: 'app'} {

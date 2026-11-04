@@ -744,3 +744,48 @@ test('review fix (#295): a printer listed after start (Add, a Printer MCP choice
   await f.updates.applyOverride('unknown');
   assert.equal(f.restarts.length, 1, 'an unknown or override-free destination is left alone');
 });
+
+test('review fix (#295): removing the last printer on an install while its Update waits ends the update, not the companion', {timeout: 5000}, async t => {
+  const gate = new PrintGate();
+  const profile = bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']);
+  const profiles = [{id: 'p1s', config: profile}, {id: 'a1', config: profile}];
+  let busy = true;
+  const rejections = [];
+  const onRejection = reason => { rejections.push(reason); };
+  process.on('unhandledRejection', onRejection);
+  t.after(() => { process.off('unhandledRejection', onRejection); });
+  const f = await updater(t, {gate, profiles, busy: () => busy});
+  const mcpId = f.mcpId;
+  assert.equal((await f.updates.update(mcpId)).state, 'waiting');
+  profiles.splice(0, profiles.length);
+  busy = false;
+  await f.done();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(rejections, []);
+  assert.equal(f.events.at(-1).type, 'mcp.update.failed');
+  assert.match(f.events.at(-1).data.log, /No printer uses this MCP any more/);
+  assert.equal(f.commands.some(command => command.includes(' install ')), false);
+  assert.equal(f.restarts.length, 0);
+  assert.equal(gate.updating('p1s'), false);
+  assert.equal(gate.updating('a1'), false);
+  // A later Update of the same install is refused as having no printers, not stuck behind the first.
+  await assert.rejects(f.updates.update(mcpId), /No printer uses that MCP/);
+});
+
+test('review fix (#295): removing the printers while an admitted Update checks them releases them and ends the update', {timeout: 5000}, async t => {
+  const gate = new PrintGate(), checking = Promise.withResolvers();
+  const profile = bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']);
+  const profiles = [{id: 'p1s', config: profile}, {id: 'a1', config: profile}];
+  const f = await updater(t, {gate, profiles, busy: () => checking.promise});
+  const accepted = await f.updates.update(f.mcpId);
+  assert.equal(accepted.state, 'started');
+  assert.equal(gate.updating('p1s'), true, 'held while its printers are checked');
+  profiles.splice(0, profiles.length);
+  checking.resolve(false);
+  await f.done();
+  assert.equal(f.events.at(-1).type, 'mcp.update.failed');
+  assert.match(f.events.at(-1).data.log, /No printer uses this MCP any more/);
+  assert.equal(f.commands.some(command => command.includes(' install ')), false);
+  assert.equal(gate.updating('p1s'), false);
+  assert.equal(gate.updating('a1'), false);
+});
