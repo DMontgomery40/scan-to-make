@@ -4,7 +4,7 @@
   "toolVersion": "1.2.0",
   "status": "built and verified on Ubuntu 26.04 x86_64 (packaging/build-linux-payload.sh); not yet shipped inside a Counterpart .deb/AppImage - apps/linux owns that wiring via RECONSTRUCTION_PAYLOAD",
   "buildIdFormat": "reconstruction-<toolVersion>-g<commit12>-linux-x64 (file BUILD-ID at payload root)",
-  "target": "Ubuntu 26.04 LTS x86_64. Explicit system baseline the payload may resolve from the host: ld-linux-x86-64.so.2, libc.so.6, libm.so.6, libdl.so.2, libpthread.so.0, librt.so.1, libutil.so.1, libresolv.so.2 (glibc 2.43 core). Every other library of every shipped binary must resolve inside the payload; the build fails otherwise (a build-host /usr/lib resolution is a failure, not a pass).",
+  "target": "Ubuntu 26.04 LTS x86_64. Explicit system baseline the payload may resolve from the host: ld-linux-x86-64.so.2, libc.so.6, libm.so.6, libdl.so.2, libpthread.so.0, librt.so.1, libutil.so.1, libmvec.so.1, libresolv.so.2 (glibc 2.43 core). Every other library of every shipped binary must resolve inside the payload; the build fails otherwise (a build-host /usr/lib resolution is a failure, not a pass).",
   "layout": {
     "payloadRoot": "Payload/reconstruction/ inside the app payload",
     "bin/linux-reconstruct": "relocatable launcher: bundled python/bin/python3 + tool/reconstruct.py, defaults SCAN_TO_MAKE_OPENMVS_DIR and SCAN_TO_MAKE_COLMAP to the payload",

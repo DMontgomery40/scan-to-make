@@ -43,7 +43,7 @@ PIL_WHEEL_SHA=42d63be3af4f9b951b199b0a9d23365d37ab14687e6d77b74940432c8515c4ca
 # outside the payload at verify time must be on the documented baseline:
 # Ubuntu 26.04 glibc core (ld-linux, libc/libm/libdl/libpthread/librt).
 PACKAGES_FILE="$tool_dir/packaging/colmap-packages.txt"
-BASELINE_LIBS="ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0 librt.so.1 libutil.so.1 libresolv.so.2"
+BASELINE_LIBS="ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libmvec.so.1 libdl.so.2 libpthread.so.0 librt.so.1 libutil.so.1 libresolv.so.2"
 
 mkdir -p "$(dirname "$out")"
 work=$(mktemp -d "$(dirname "$out")/.reconstruction-payload.XXXXXX")
@@ -120,6 +120,15 @@ if bad:
 print(f"verified {len(by_name)} pinned .debs")
 PYEOF
 for deb in "$work/debs"/*.deb; do dpkg -x "$deb" "$stage/colmap-root"; done
+# Debian alternatives (blas/lapack) are postinst symlinks dpkg -x does not
+# create; link the shipped reference implementations into the library dir.
+libdir="$stage/colmap-root/usr/lib/x86_64-linux-gnu"
+for soname in libblas.so.3 liblapack.so.3; do
+  if [ ! -e "$libdir/$soname" ]; then
+    target=$(find "$libdir" -name "$soname" -type f | head -1)
+    [ -n "$target" ] && ln -s "$(realpath --relative-to="$libdir" "$target")" "$libdir/$soname"
+  fi
+done
 # GCC runtime libraries for the OpenMVS binaries, from the same extracted debs.
 for lib in libgomp.so.1 libstdc++.so.6 libgcc_s.so.1; do
   cp -L "$stage/colmap-root/usr/lib/x86_64-linux-gnu/$lib" "$stage/lib/" 2>/dev/null || \
