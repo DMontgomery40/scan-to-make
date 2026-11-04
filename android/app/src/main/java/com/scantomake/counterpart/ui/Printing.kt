@@ -29,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,6 +57,7 @@ import com.scantomake.counterpart.api.Iso
 import com.scantomake.counterpart.api.PrintChoice
 import com.scantomake.counterpart.api.PrintColour
 import com.scantomake.counterpart.api.PrintQuality
+import com.scantomake.counterpart.api.PrintPauses
 import com.scantomake.counterpart.api.PrintStrength
 import com.scantomake.counterpart.api.PrinterFilament
 import com.scantomake.counterpart.api.ProjectAction
@@ -74,6 +76,7 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     val scope = rememberCoroutineScope()
     val projects by state.projects.collectAsState()
     val catalog by state.catalog.collectAsState()
+    val capabilities by state.capabilities.collectAsState()
     val project = projects.firstOrNull { it.id == id } ?: return
     // Keep the exact plate the person opened; the server also checks this at dispatch.
     val expectedPlate = remember(id) { project.selectedPlate?.id }
@@ -81,6 +84,9 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     var destinationId by remember { mutableStateOf(project.printerDestinationId ?: catalog?.defaultDestinationId) }
     var quality by remember { mutableStateOf(PrintQuality.Standard) }
     var strength by remember { mutableStateOf(PrintStrength.Standard) }
+    var copies by remember { mutableStateOf(1) }
+    var copiesPicked by remember { mutableStateOf(false) }
+    var pauseText by remember { mutableStateOf("") }
     var filaments by remember { mutableStateOf<List<PrinterFilament>?>(null) }
     var colour by remember { mutableStateOf<PrintColour?>(null) }
     var estimate by remember { mutableStateOf<SliceEstimate?>(null) }
@@ -88,22 +94,44 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     var working by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
     var checked by remember { mutableStateOf(false) }
+    var selectingPrinter by remember { mutableStateOf(false) }
+    var printerProblem by remember { mutableStateOf<String?>(null) }
+    var sliceRefusal by remember { mutableStateOf<String?>(null) }
     val uncertain = ProjectWords(project).actions.contains(ProjectAction.PrintChecked)
     val destination = catalog?.destination(destinationId)
+    val offersQuality = !project.slicedOriginal && destination?.capabilities?.quality == true
+    val offersStrength = !project.slicedOriginal && destination?.capabilities?.strength == true
+    val offersCopies = !project.slicedOriginal && "printCopies" in capabilities && destination?.capabilities?.copies == true
+    val offersPauses = !project.slicedOriginal && destination?.capabilities?.layerPauses == true
+    val selectedQuality = if (offersQuality) quality else PrintQuality.Standard
+    val selectedStrength = if (offersStrength) strength else PrintStrength.Standard
+    val selectedCopies = if (project.slicedOriginal) 1 else if (offersCopies && copiesPicked) copies else null
+    val pauseLayers = if (offersPauses) PrintPauses.parse(pauseText, estimate?.layers) else emptyList()
 
     LaunchedEffect(Unit) { if (catalog == null) state.loadPrinters() }
     LaunchedEffect(destinationId) {
-        filaments = null; colour = null
+        filaments = null; colour = null; selectingPrinter = true; printerProblem = null
         try {
             if (destinationId != null && destinationId != project.printerDestinationId) state.show(app.companion.selectPrinter(id, destinationId!!))
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { printerProblem = e.message ?: "The printer couldn't be selected." }
+        finally { selectingPrinter = false }
+        if (printerProblem != null) return@LaunchedEffect
+        try {
             val list = app.companion.filaments(id)
             filaments = list
             colour = list.firstOrNull { it.suggested == true }?.let { PrintColour.Auto }
-        } catch (_: Exception) { filaments = emptyList() }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { filaments = emptyList() }
     }
-    LaunchedEffect(destinationId, quality, strength) {
-        estimate = null; estimating = true
-        try { estimate = app.companion.estimate(id, destinationId, quality, strength) } catch (_: Exception) {} finally { estimating = false }
+    LaunchedEffect(destinationId, selectedQuality, selectedStrength, selectedCopies, project.mediaVersion, project.selectedPlate?.id) {
+        estimate = null; estimating = true; sliceRefusal = null
+        try { estimate = app.companion.estimate(id, destinationId, selectedQuality, selectedStrength, selectedCopies) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        // HTTPS exposes slicer refusals as invalid-state; retain the companion's own words.
+        catch (e: CompanionException) { if (e.code in setOf("invalid-state", "slicer-refused", "slicer-error")) sliceRefusal = e.message }
+        catch (_: Exception) { /* A missing estimate alone does not prevent printing. */ }
+        finally { estimating = false }
     }
 
     Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding()) {
@@ -118,22 +146,41 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
             catalog?.destinations?.forEach { d ->
                 val selected = d.id == (destinationId ?: catalog?.defaultDestinationId)
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Palette.card)
-                    .border(2.dp, if (selected) Palette.filament else Color.Transparent, RoundedCornerShape(16.dp)).clickable { destinationId = d.id }.padding(14.dp),
+                    .border(2.dp, if (selected) Palette.filament else Color.Transparent, RoundedCornerShape(16.dp)).clickable(enabled = !working) { destinationId = d.id }.padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Icon(CIcons.Printer, null, tint = if (selected) Palette.filament else Palette.secondary); Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) { Text(d.name, fontWeight = FontWeight.Medium); Text("${d.modelName} · ${d.stateWords}", color = Palette.secondary, fontSize = 12.sp) }
                 }
-            } ?: Text("Reading the printers on your Mac…", color = Palette.secondary)
+            } ?: Text("Reading your printers…", color = Palette.secondary)
 
-            if (destination?.capabilities?.quality != false) {
+            if (project.slicedOriginal) Text("Uses the quality, strength, copies and pauses saved in this sliced file. Import an editable 3MF to change them.", color = Palette.secondary)
+            if (offersQuality) {
                 SectionTitle("Quality")
-                Segmented(PrintQuality.entries.map { it.title }, PrintQuality.entries.indexOf(quality)) { quality = PrintQuality.entries[it] }
+                Segmented(PrintQuality.entries.map { it.title }, PrintQuality.entries.indexOf(quality), enabled = !working) { quality = PrintQuality.entries[it] }
             }
-            if (destination?.capabilities?.strength != false) {
+            if (offersStrength) {
                 SectionTitle("Strength")
-                Segmented(PrintStrength.entries.map { it.title }, PrintStrength.entries.indexOf(strength)) { strength = PrintStrength.entries[it] }
+                Segmented(PrintStrength.entries.map { it.title }, PrintStrength.entries.indexOf(strength), enabled = !working) { strength = PrintStrength.entries[it] }
             }
-            Text(String.format(java.util.Locale.US, "%.2f mm layers · %d walls · %d%% infill", quality.layerHeightMm, strength.walls, strength.infill), color = Palette.secondary, fontSize = 12.sp)
+            if (offersQuality || offersStrength) Text(String.format(java.util.Locale.US, "%.2f mm layers · %d walls · %d%% infill", selectedQuality.layerHeightMm, selectedStrength.walls, selectedStrength.infill), color = Palette.secondary, fontSize = 12.sp)
+            if (offersCopies) {
+                SectionTitle("Copies")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { copies--; copiesPicked = true }, enabled = copies > 1 && !working) { Text("−", fontSize = 22.sp) }
+                    Text(if (copiesPicked) "$copies" else "Printer setting", modifier = Modifier.weight(1f))
+                    TextButton(onClick = { copies++; copiesPicked = true }, enabled = copies < 64 && !working) { Text("+", fontSize = 22.sp) }
+                }
+                if (!copiesPicked) TextButton(onClick = { copies = 1; copiesPicked = true }, enabled = !working) { Text("Use one copy") }
+            }
+            if (offersPauses) {
+                SectionTitle("Pause")
+                OutlinedTextField(value = pauseText, onValueChange = { if (it.length <= 160) pauseText = it },
+                    modifier = Modifier.fillMaxWidth(), label = { Text("Before layers") }, placeholder = { Text("2, 15, 30") },
+                    singleLine = true, enabled = !working, isError = pauseLayers == null)
+                Text("The printer pauses before each layer so you can insert magnets or nuts, then Resume. Leave empty for no added pauses.", color = Palette.secondary, fontSize = 12.sp)
+                if (pauseLayers == null) Text(estimate?.layers?.let { "Enter up to 16 layers, from 2 to $it, separated by commas." }
+                    ?: "Enter up to 16 whole layer numbers from 2 to 100000, separated by commas.", color = Palette.failed, fontSize = 12.sp)
+            }
 
             SectionTitle("Filament")
             val list = filaments
@@ -143,7 +190,7 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                 else -> Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     list.forEach { f ->
                         val selected = (colour as? PrintColour.Tray)?.filament?.slot == f.slot || (colour == PrintColour.Auto && f.suggested == true)
-                        Column(Modifier.clickable { colour = PrintColour.Tray(f) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(Modifier.clickable(enabled = !working) { colour = PrintColour.Tray(f) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(Modifier.size(36.dp).clip(CircleShape).background(hexColor(f.colour)).border(3.dp, if (selected) Palette.filament else Color.White.copy(alpha = 0.25f), CircleShape))
                             Text(f.slotLabel, fontSize = 11.sp); Text(f.material, fontSize = 11.sp, color = Palette.secondary)
                         }
@@ -167,12 +214,17 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                 Text("The last print may have reached the printer. I checked: it isn't printing this.", fontSize = 14.sp)
             }
             problem?.let { Text(it, color = Palette.failed) }
+            printerProblem?.let { Text(it, color = Palette.failed) }
+            sliceRefusal?.let { Text(it, color = Palette.failed) }
         }
-        PrimaryButton(if (working) "Sending to the printer…" else "Print", Modifier.fillMaxWidth().padding(16.dp), enabled = !working && !plateChanged && (!uncertain || checked), icon = CIcons.Printer) {
+        PrimaryButton(if (working) "Sending to the printer…" else "Print", Modifier.fillMaxWidth().padding(16.dp),
+            enabled = !working && !selectingPrinter && printerProblem == null && destination != null && !plateChanged &&
+                pauseLayers != null && sliceRefusal == null && (!uncertain || checked), icon = CIcons.Printer) {
             working = true; problem = null
             scope.launch {
                 try {
-                    state.show(app.companion.print(id, PrintChoice(colour, quality, strength, checked), expectedPlate))
+                    state.show(app.companion.print(id, PrintChoice(colour, selectedQuality, selectedStrength, checked, selectedCopies,
+                        pauseBeforeLayers = pauseLayers ?: emptyList()), expectedPlate))
                     printing()
                 } catch (e: CompanionException) { problem = e.message } catch (e: Exception) { problem = CompanionException.unreachable.message } finally { working = false }
             }
@@ -181,10 +233,10 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
 }
 
 @Composable
-fun Segmented(options: List<String>, selected: Int, choose: (Int) -> Unit) {
+fun Segmented(options: List<String>, selected: Int, enabled: Boolean = true, choose: (Int) -> Unit) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).padding(3.dp)) {
         options.forEachIndexed { i, o ->
-            Box(Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (i == selected) Palette.filament else Color.Transparent).clickable { choose(i) }.padding(vertical = 10.dp),
+            Box(Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (i == selected) Palette.filament else Color.Transparent).clickable(enabled = enabled) { choose(i) }.padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center) { Text(o, color = if (i == selected) Color.Black else Color.White, fontWeight = FontWeight.Medium) }
         }
     }

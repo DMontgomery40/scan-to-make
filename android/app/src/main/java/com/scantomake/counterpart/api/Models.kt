@@ -74,6 +74,7 @@ data class Project(
     val isArchived: Boolean get() = settings?.archived ?: (archived == true || projectStatus == ProjectStatus.Archived)
     val openAsk: Ask? get() = ask?.takeIf { it.status != "answered" }
     val selectedPlate: ProjectPlate? get() = plates?.firstOrNull { it.selected }
+    val slicedOriginal: Boolean get() = selectedPlate?.sliced ?: (raw["publishedSelection"].obj?.get("sliced").bool == true)
     val completedPlateCount: Int get() = plates?.count { it.completedAtMs != null } ?: 0
     val canSelectPlate: Boolean get() = !plates.isNullOrEmpty() && state != State.Printing && state != State.TouchingUp && print?.uncertain != true
 
@@ -261,6 +262,7 @@ data class PrinterDestination(
         val progress: Boolean = false, val layers: Boolean = false, val camera: String = "none", val filaments: String = "none",
         val pause: Boolean = false, val resume: Boolean = false, val cancel: Boolean = false, val quality: Boolean = false,
         val strength: Boolean = false, val copies: Boolean? = null, val materialChoice: Boolean? = null, val update: Update? = null,
+        val layerPauses: Boolean? = null,
     ) { @Serializable data class Update(val message: String = "", val latestVersion: String? = null) }
 
     val isBambu: Boolean get() = backend == "bambu-printer-mcp"
@@ -319,7 +321,8 @@ sealed class PrintColour {
 
 /** What the print sheet sends with Print (CounterpartKit `PrintChoice.body`). */
 data class PrintChoice(val colour: PrintColour? = null, val quality: PrintQuality = PrintQuality.Standard,
-                       val strength: PrintStrength = PrintStrength.Standard, val checked: Boolean = false, val copies: Int? = null) {
+                       val strength: PrintStrength = PrintStrength.Standard, val checked: Boolean = false, val copies: Int? = null,
+                       val pauseBeforeLayers: List<Int> = emptyList()) {
     val body: JsonObject get() {
         val json = LinkedHashMap<String, JsonElement>()
         json["checked"] = JsonPrimitive(checked)
@@ -333,6 +336,11 @@ data class PrintChoice(val colour: PrintColour? = null, val quality: PrintQualit
         if (quality != PrintQuality.Standard) json["quality"] = JsonPrimitive(quality.wire)
         if (strength != PrintStrength.Standard) json["strength"] = JsonPrimitive(strength.wire)
         copies?.let { json["copies"] = JsonPrimitive(maxOf(1, it)) }
+        if (pauseBeforeLayers.isNotEmpty()) {
+            val pauses = pauseBeforeLayers.distinct().sorted()
+            require(pauses.size <= 16 && pauses.all { it in 2..100_000 }) { "Choose up to 16 pause layers, starting at layer 2." }
+            json["pauseBeforeLayers"] = kotlinx.serialization.json.JsonArray(pauses.map { JsonPrimitive(it) })
+        }
         return JsonObject(json)
     }
 }

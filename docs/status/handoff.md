@@ -224,7 +224,7 @@ remote native probes and the SSH tunnel were removed after verification.
      HTTPS/Tailscale and events are portable; Android photo reconstruction currently calls Apple's
      `tools/mac-reconstruct`, so a Linux reconstruction path and desktop shell still need implementation/acceptance.
      Renaming Mac labels alone does not deliver Linux support. Follow actual app UI acceptance for both hosts.
-     Android's four downloaded commits are integrated and pushed at `0e43a2e`. The next Android change adds
+     Android's four downloaded commits are integrated and pushed at `0e43a2e`. `40cc1d9` adds
      the shared starter catalog/images, multiple original-file import, plate selection/completion/reprint UI
      and `expectedPlate` dispatch protection. Linux build, 28 existing contract/client tests and lint pass on
      `agents-173`; one imported test assumed exactly two destination fixtures and now verifies decoded IDs.
@@ -232,9 +232,20 @@ remote native probes and the SSH tunnel were removed after verification.
      Android SDK 22.0 (platform/build-tools 35) and JDK17 are on agents-173, not the space-constrained Mac.
      Build source/logs: `/home/david/scan-to-make-work/android-linux-build`; SDK: `/home/david/Android/Sdk`.
      User requested Theo's TStack workflow. `/council` is installed under `~/.codex/skills/council`;
-     Opus 5.5, GPT-6.1 Sol and Muse Wonder Full are reviewing the Android/Linux approach. Muse recommends
-     Tauri/TypeScript over GTK, with a private Unix-socket bridge, Secret Service worker and systemd user service.
-     Final architecture awaits the other two reviews; do not confuse their design feedback with app acceptance.
+     Council reviews are complete: Opus recommended GTK/Rust, Muse Tauri/TypeScript, Sol Electron/TypeScript.
+     Parent chose Tauri 2/React/Three.js with a narrow native socket bridge, Secret Service model worker and
+     systemd user service. This was not a unanimous council decision. Implementation and ownership are in
+     `docs/superpowers/plans/2026-11-04-android-linux.md`; separate delegates own `apps/linux` and `tools/linux-host`.
+     Android now also implements copies and layer pauses, gates choices by printer capabilities, preserves sliced
+     originals, and retains slice/selection refusals in the print sheet. Visible UI acceptance remains pending.
+     T3 on agents-173 discovers `Counterpart_API35_Test`, but `device_open` exits code 1 before it comes online.
+     Read-only diagnosis found that running T3 and Device Hub processes lack the newly granted `kvm` group (991).
+     Do not bypass the Device panel or restart this environment while the Linux host delegate is using it.
+     Reconstruction dependencies are installed separately on agents-171 in
+     `/home/david/scan-to-make-work/linux-reconstruct`: COLMAP 3.12.6 (requires explicit `libposelib` package)
+     and official OpenMVS 2.4.0 Ubuntu binaries, verified against release SHA-256
+     `7104ae1ddd6ca38fbca9e0e4a70b20af59e21e0b497eb7181c864fbf38ca8d00`.
+     No Linux reconstruction source integration or geometry/scale acceptance yet.
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
    route selection through authorized routes and per-physical-printer reservations; phone print
    sheet has layer pauses and Resume-specific confirmation. Finished print removes live controls,
