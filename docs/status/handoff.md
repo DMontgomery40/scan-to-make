@@ -289,6 +289,11 @@ remote native probes and the SSH tunnel were removed after verification.
      bundled hardened Node has only allow-jit, and sharp's native addon has a different/no Team ID. Version
      1.1.52 remains live; no staging leftovers or print. UI returned to parent. Packaging correction in progress;
      retained isolated repro at `~/scan-to-make-work/sharp-library-validation-repro/`. No retry until rebuilt.
+     Node-only packaging fix adds `com.apple.security.cs.disable-library-validation` alongside allow-jit;
+     the distribution verifier now checks the signed Node's actual entitlements. Parent reproduced failure
+     under the installed Node, then re-signed an isolated copy with the new entitlements: all four sharp
+     loads passed and fresh npm 1.1.54 initialized. No printer commands. Receipts in
+     `~/scan-to-make-work/node-native-signing/`. Rebuild/notarization verification and real UI Update remain.
      **Earlier hold, Nov 4 13:05Z:** visible Mac UI showed AirPods **Getting the print ready**, with a floating-
      cantilever warning, unchecked **Print anyway**, **Cancel Print**, and disabled **Print**. P1S shows Ready,
      but the pending print question means deployment is not idle. Parent left the decision untouched and
