@@ -36,7 +36,16 @@ export interface PrintRunInput {
   bundleId?: string;
   /** Keep each slice here and print a kept one again when nothing that shapes it changed (slice-cache.ts). */
   sliceCache?: {directory: string};
+  /**
+   * A question Counterpart asks before slicing, through the relay that carries the printer's own questions.
+   * The print goes on only when the person picks `proceed`; any other choice, a decline or a timeout stops
+   * before anything is sliced or sent (PrinterMcpError `print-choice`, detail = the choice or `declined`).
+   * Asked only when printing: an estimate never asks.
+   */
+  ask?: PrintAsk;
 }
+/** A choice put to the person before a print (`PrintRunInput.ask`). */
+export interface PrintAsk {message: string; title: string; choices: {value: string; title: string}[]; proceed: string}
 /** How the printer will report this print, so its job can be recognised (PRD §8.6). */
 export interface DispatchIdentity {
   /** The printer's task id, when the print tool returned a real one. */
@@ -269,6 +278,31 @@ export class PrinterHandoffRunner {
     } finally { signal?.removeEventListener('abort', abort); }
   }
 
+  /** Puts `ask` to the person; returns only when they pick `ask.proceed`. */
+  async #choose(ask: PrintAsk, context: ElicitationContext, signal?: AbortSignal): Promise<void> {
+    const stopped = (choice: string) => new PrinterMcpError('print-choice', undefined, choice);
+    const relay = this.#relay;
+    if (!relay) throw stopped('declined');
+    if (signal?.aborted) fail('cancelled');
+    let id: string | undefined;
+    const stop = relay.subscribe(pending => { id ??= pending.id; });
+    let answer: Promise<ElicitResult>;
+    try {
+      answer = relay.request({method: 'elicitation/create', params: {mode: 'form', message: ask.message, requestedSchema: {
+        type: 'object', required: ['choice'],
+        properties: {choice: {type: 'string', title: ask.title, oneOf: ask.choices.map(choice => ({const: choice.value, title: choice.title}))}},
+      }}}, context);
+    } finally { stop(); }
+    const abort = () => { if (id) relay.respond(id, {action: 'cancel'}); };
+    signal?.addEventListener('abort', abort, {once: true});
+    try {
+      const result = await answer;
+      if (signal?.aborted) fail('cancelled');
+      const choice = result.action === 'accept' && typeof result.content?.choice === 'string' ? result.content.choice : 'declined';
+      if (choice !== ask.proceed) throw stopped(choice);
+    } finally { signal?.removeEventListener('abort', abort); }
+  }
+
   /**
    * Runs one handoff: slice -> inspect -> print, using the tool
    * sequence of the configured backend. Print confirmations are elicited by
@@ -307,6 +341,8 @@ export class PrinterHandoffRunner {
     // run's. On a shared session only a mutex holder may tag questions: slicing
     // without a known model may ask for it, so it holds the mutex then.
     const signal = input.signal;
+    // Counterpart's own question comes first: nothing is sliced or sent until the person picks the print.
+    if (input.ask && input.print !== false) await this.#choose(input.ask, tag, signal);
     const local: CallOptions = {signal, ...(shared ? (selection.model ? {} : {elicitationContext: tag}) : {elicitationContext: tag})};
     const progress = async (phase: PrintPhase, estimate?: SliceEstimate) => { await input.onProgress?.({phase, ...(estimate ? {estimate} : {})}); };
     const mcpProgress = (phase: PrintPhase) => (mcp: McpProgress) => { void input.onProgress?.({phase, mcp})?.catch(() => undefined); };
@@ -474,7 +510,7 @@ export class PrinterHandoffRunner {
    * Runs a stored handoff bundle and records the sliced output back into it.
    * The bundle backend must match this runner's configured backend.
    */
-  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']; sliceCache?: PrintRunInput['sliceCache']; beforePrint?: PrintRunInput['beforePrint']} = {}) {
+  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']; sliceCache?: PrintRunInput['sliceCache']; beforePrint?: PrintRunInput['beforePrint']; ask?: PrintAsk} = {}) {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
     if (manifest.status === 'uncertain') fail('dispatch-uncertain');
@@ -488,7 +524,7 @@ export class PrinterHandoffRunner {
       const inputStl = join(workDirectory, basename(store.stlPath(manifest)));
       await copyFile(store.stlPath(manifest), inputStl);
       const result = await this.run({stlPath: inputStl, selection: manifest.selection, slicer: options.slicer, print: options.print, signal: options.signal, bundleId: id, onProgress: options.onProgress,
-        ...(options.sliceCache ? {sliceCache: options.sliceCache} : {}),
+        ...(options.sliceCache ? {sliceCache: options.sliceCache} : {}), ...(options.ask ? {ask: options.ask} : {}),
         persistOutput: async output => {
           // MCP backends may delete scratch files on close. Save both artifacts
           // before dispatch, and give the printer the durable bundle path.

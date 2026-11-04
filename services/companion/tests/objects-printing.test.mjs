@@ -1062,3 +1062,64 @@ test('Print and Estimate keep their slices in the project\'s own folder, so Prin
   await f.service.settled(f.object.id);
   assert.deepEqual(f.runs.find(run => run.options)?.options.sliceCache, {directory: slices});
 });
+
+// A design pass from before Counterpart kept colour parts (#293): its out/ holds the merged touched.stl and a 3MF.
+async function legacyPass(f, {model = STL, threeMf} = {}) {
+  const dir = join(f.root, `pass-${Math.random().toString(16).slice(2)}`);
+  await mkdir(join(dir, 'out'), {recursive: true});
+  await writeFile(join(dir, 'out', 'touched.stl'), model);
+  if (threeMf) await writeFile(join(dir, 'out', 'pick_2color.3mf'), threeMf);
+  await f.store.update(f.object.id, o => ({...o, kind: 'fit', passes: [...o.passes, {startedAtMs: Date.now(), endedAtMs: Date.now(), status: 'improved', dir}]}));
+}
+const oneFilamentAssembly = () => {
+  const {zipSync, strToU8} = fflate();
+  return Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="extruder" value="1"/>'
+      + '<part id="1" subtype="normal_part"><metadata key="extruder" value="1"/></part><part id="2" subtype="normal_part"><metadata key="extruder" value="1"/></part></object></config>')}));
+};
+
+test('a colour design from before colour parts asks before printing; making it again sends nothing and starts that pass', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await legacyPass(f, {threeMf: twoPart3mf()});
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  const ask = f.runs[0].options.ask;
+  assert.equal(ask?.proceed, 'one-colour', 'Print asks first, and only "one colour" prints the merged model');
+  assert.deepEqual(ask.choices.map(choice => choice.value), ['one-colour', 'remake']);
+  assert.match(ask.message, /several colours.*one colour/);
+  assert.equal((await f.deps.print.services.store.read(f.runs[0].id)).cleanStl?.file, 'clean.stl', 'the merged STL is what prints when the person chooses it');
+
+  // "Make it again in colour": nothing is sliced or sent, the phone hears why, and the person's message starts the pass.
+  const g = await setup(t);
+  await legacyPass(g, {threeMf: twoPart3mf()});
+  const touchups = [];
+  g.deps.runTouchup = async input => { touchups.push(input); throw new Error('test: stop the pass here'); };
+  g.deps.print.services.runner.runBundle = async (_store, _id, options) => { g.runs.push({options}); throw new PrinterMcpError('print-choice', undefined, 'remake'); };
+  await g.service.print(g.object.id);
+  await g.service.settled(g.object.id);
+  const stopped = g.events.find(event => event.type === 'print.not-started');
+  assert.equal(stopped?.detail?.reason, 'Not printed. Making it again in colour.');
+  const remade = await until(async () => (await g.service.get(g.object.id)).messages?.find(message => /again in the colours it was designed with/.test(message.text)));
+  assert.ok(remade, 'the choice is sent as the person\'s own change request');
+  await until(() => touchups.length > 0);
+  assert.equal(touchups.length, 1, 'one design pass, started by the choice');
+});
+
+test('no colour question for a one-colour assembly, or once a later redesign made the model', async t => {
+  const assembly = await setup(t, {reports: [status('RUNNING', 10)]});
+  await legacyPass(assembly, {threeMf: oneFilamentAssembly()});
+  await assembly.service.print(assembly.object.id);
+  await assembly.approve();
+  await assembly.service.settled(assembly.object.id);
+  assert.equal(assembly.runs[0].options.ask, undefined, 'parts on one filament are an ordinary one-colour model');
+
+  const redesigned = await setup(t, {reports: [status('RUNNING', 10)]});
+  await legacyPass(redesigned, {model: Buffer.concat([STL, Buffer.from(' ')]), threeMf: twoPart3mf()});
+  await legacyPass(redesigned, {});
+  await redesigned.service.print(redesigned.object.id);
+  await redesigned.approve();
+  await redesigned.service.settled(redesigned.object.id);
+  assert.equal(redesigned.runs[0].options.ask, undefined, 'only the pass that made the current model counts');
+});
