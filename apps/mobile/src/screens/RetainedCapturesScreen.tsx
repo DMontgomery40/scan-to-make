@@ -12,7 +12,7 @@ import {
   objectCaptureNative,
   type NativeCaptureDraft,
 } from '../capture/nativeObjectCapture';
-import { Button, Card, Notice, Screen } from '../ui/components';
+import { Button, Card, Screen } from '../ui/components';
 import { type } from '../ui/theme';
 
 // Whether this device can scan. Scanning is only offered once the native
@@ -165,32 +165,32 @@ export function RetainedCapturesScreen({
               }
             />
           ) : support === 'unknown' ? (
-            <Notice
-              title="Couldn’t check for LiDAR"
-              action={
-                <Button
-                  label="Check again"
-                  variant="secondary"
-                  disabled={busy}
-                  onPress={() => run(refresh, 'Checked this device again.')}
-                />
-              }
-            >
-              Scanning stays off until this device confirms it has a LiDAR
-              scanner.
-            </Notice>
+            <Card>
+              <Text style={type.heading}>Couldn’t check for LiDAR</Text>
+              <Text accessibilityLiveRegion="polite" style={type.body}>
+                Scanning stays off until this device confirms it has a LiDAR
+                scanner.
+              </Text>
+              <Button
+                label="Check again"
+                variant="secondary"
+                disabled={busy}
+                onPress={() => run(refresh, 'Checked this device again.')}
+              />
+            </Card>
           ) : (
-            <Notice
-              title={
-                support === 'no-lidar'
+            <Card>
+              <Text style={type.heading}>
+                {support === 'no-lidar'
                   ? 'Scanning needs LiDAR'
-                  : 'Scanning isn’t available here'
-              }
-            >
-              {support === 'no-lidar'
-                ? 'This device has no LiDAR scanner, so it can’t make a true-to-size scan. Scan the object on an iPhone or iPad with LiDAR. You can still add a USDZ scan file to this project here.'
-                : 'This device doesn’t support Object Capture, so it can’t make a scan. Scan the object on an iPhone or iPad with LiDAR. You can still add a USDZ scan file to this project here.'}
-            </Notice>
+                  : 'Scanning isn’t available here'}
+              </Text>
+              <Text accessibilityLiveRegion="polite" style={type.body}>
+                {support === 'no-lidar'
+                  ? 'This device has no LiDAR scanner, so it can’t make a true-to-size scan. Scan the object on an iPhone or iPad with LiDAR. You can still add a USDZ scan file to this project here.'
+                  : 'This device doesn’t support Object Capture, so it can’t make a scan. Scan the object on an iPhone or iPad with LiDAR. You can still add a USDZ scan file to this project here.'}
+              </Text>
+            </Card>
           )}
           {activeRunID ? (
             <Text accessibilityLiveRegion="polite" style={type.body}>
