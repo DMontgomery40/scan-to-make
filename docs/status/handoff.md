@@ -193,6 +193,14 @@ remote native probes and the SSH tunnel were removed after verification.
    The [FDM/MCP thread](t3-thread://v2/11412686-e469-46d5-8f3a-5aaa68539c60/0df403d6-0993-4ddb-8d4a-4f20d2ca9186)
    owns both integrations, merges, npm publication and Counterpart's visible MCP Update/acceptance while idle.
    Do not start a competing release or copy `dist` into the installed app.
+   - **Coordination with the Linux orchestrator:** [Continue Previous Scan App Work](t3-thread://v2/9ac19334-ae37-45a2-b26d-c20726031d9e/5bc59bdb-bd02-43c6-8736-a7cff96259d3)
+     owns main integration of #295/pause-at-layer/#292/#297 and remaining relay/progress fixes, MCP annotation
+     follow-ups, phone picker/pause deployment, and `/v1/mcp`. This release thread retains Android/Linux,
+     TestFlight/reconstruction and its release/status/distribution files. Leave their branches and live deployments
+     alone; record and coordinate any proposed Mac deployment or companion restart here first.
+     Their incoming "releases held" note predates the authorized publications below; the publication receipts and
+     revoked hold were sent back directly. The orchestrator must coordinate installed MCP Update with the FDM/MCP
+     owner above, so two threads never replace the same live backend.
    - bambu-printer-mcp [#99](https://github.com/DMontgomery40/bambu-printer-mcp/pull/99),
      merged as `ff32e5e`: control route (including camera/Fusion fixes), Studio 2.9, FDM prompts and X2D route selection.
      npm **1.1.52** published at 08:06:24Z (Publish Package run `41796513132`); registry latest independently
