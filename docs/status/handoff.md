@@ -3,9 +3,9 @@
 The one handoff. Update this file in place when you stop; never add a numbered or dated copy, a prompt file,
 or a "continuation" section on top. Git history has every older version.
 
-Last device verification: **2026-11-03, 17:05 Mountain**; deployment updated at 18:24.
-Handoff corrected **2026-11-03 evening** after David rejected the prior agent's FULU stopping premise;
-repository and public-source review only, no new device acceptance.
+Last device verification: **2026-11-03, 20:27 Mountain**. **Resume, Pause and Stop now work from the Mac
+Counterpart UI through FULU**, confirmed by the P1S's correlated replies and observed state changes.
+The printer remains cloud-bound, Developer Mode off. The test pick is stopped; the app shows the printer Ready.
 Status of each of David's asks: [`asks.md`](asks.md). Hands-on review list: [`app-review-2026-11-02.md`](app-review-2026-11-02.md).
 What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey in [`../design/journey.md`](../design/journey.md).
 
@@ -31,25 +31,35 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 
 | What | Version | From |
 |---|---|---|
-| Mac app `/Applications/Counterpart.app` | **202611031655** | `feat/pause-at-layer` @ `604fe55` (contains all of #295) |
+| Mac app `/Applications/Counterpart.app` | **202611032022** | main @ `2f7f43e` (includes #295, pause-at-layer, and the Resume confirmation deadlock fix) |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **202611022325** | old: has none of #294/#295 or pause-at-layer |
-| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `997d77d` (active since 18:24) (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
-| mcp-3D-printer-server | `~/mcp-3D-printer-server` on `feat/bambu-complete` @ `d51c2c4`, built in place | runs from its own folder and `.env` |
+| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `587461b` (active since 20:17) (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
+| mcp-3D-printer-server | `~/mcp-3D-printer-server` on `feat/bambu-complete` @ `56d8fb9`, built in place | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
 | FULU runtime | Colima profile `bambu-fulu`, image `bpm-fulu-e2e:runtime`, plug-in **02.05.02.58** | launcher `~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh` (in neither repo) |
 | P1S | `01P00C4B2500106`, 192.168.68.148, firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode | AMS A1 black PLA, A2 yellow PLA, A3 PETG |
 
-Every deployment, companion restart and rollback is logged in
-`~/scan-to-make-work/claude-route-20261102/deployment-boundary.txt`; app and MCP rollbacks are in the same folder.
+Earlier deployments are logged in `~/scan-to-make-work/claude-route-20261102/deployment-boundary.txt`.
+This evening's deployment and redacted acceptance receipts are in
+`~/scan-to-make-work/codex-fulu-controls-20261103/`. The experimental 02.08 runtime was rolled back;
+the active launcher again uses the original 02.05.02.58 image. Temporary plug-ins, credential copies,
+remote native probes and the SSH tunnel were removed after verification.
 
 ## Works on the real devices (verified)
 
+- **Resume → Pause → Stop from the Mac UI (20:25–20:27):** Triangle pick was paused before layer 2.
+  After a companion restart to deploy the fix, Resume's confirmation was answered in Counterpart.
+  P1S replied `resume/20001: success` at 20:25:19, and the app showed Printing. Pause replied
+  `pause/20003: success` at 20:26:05, then the app showed Paused at 88%. Stop → Stop Printing replied
+  `stop/20005: success` at 20:26:50; the app showed “The printer stopped” and the printer Ready.
+  No Studio/Handy control, direct script control, Developer Mode change or printer restart was used.
+  This verifies bambu-printer-mcp over local FULU; phone, cloud transport and mcp-3D hardware acceptance remain open.
 - **Print from the Mac app over the local network (FULU):** Triangle picks printed start to finish from the Print
   button at 13:24, 13:50 and 14:11 today (bambu-printer-mcp, Connection: Local network).
 - **Pause before a layer** (magnets, nuts): print sheet → Pause → "Before layer N of T" → Print. The MCP's
   `pause_at_layers` has the slicer CLI write the printer's own pause (`M400 U1`) via `--load-custom-gcodes`; at 14:18
   the P1S paused itself before layer 3. Pauses saved in a Studio/Orca project 3MF are kept (the CLI drops them on its
-  own). Resume on the **printer's screen** works; see the open item for Resume from the app.
+  own). Resume now also works from the Mac app, as verified above.
 - **A refused control is shown and kept:** the app shows the printer's refusal ("refused Pause over the local network
   (error 0502400A)"); since `acce6e1` it is also written to the project's activity and `companion.log`.
 - Settings → Printers: Connection picker (Local network / Bambu Cloud, written to the MCP's `.env`, #294 merged),
@@ -62,55 +72,34 @@ Every deployment, companion restart and rollback is logged in
 0. **Phone:** the "nothing loads" of 15:40 was the phone on Tailscale instead of David's WireGuard; fixed on his side.
    Still to fix in the phone app: `SettingsView.swift:34` shows **"Connected now" while `reachable` is unknown**; a
    request with no answer must end in "Can't reach it", not a spinner.
-1. **Remote Pause/Resume/Stop through FULU: unresolved; continue investigating.** David rejected the previous
-   agent's decision to stop at Bambu's authorization restrictions. His task is control of his own printer through
-   the open-source MCP/FULU stack. Developer Mode is an available alternative, not an agreed prerequisite or a
-   demonstrated exclusive solution. Preserve the current cloud-bound configuration while investigating.
-   **Context checked Nov 3:** [SFC's May 18 statement](https://sfconservancy.org/news/2026/may/18/bambu-studio-3d-printer-agpl-violation-response/)
-   reports two confirmed AGPL violations and launches networking-library reverse engineering and maintenance of
-   the Orca fork. [FULU's fork](https://github.com/FULU-Foundation/OrcaSlicer-bambulab) and
-   [SFC's baltobu work](https://f.sfconservancy.org/baltobu) are relevant engineering sources. Attribute SFC's
-   conclusions to SFC; the prior agent's refusal to investigate further was not a technical finding.
-   **Observed in the previous session:** the cloud-bound P1S (01.10) accepted Studio Pause/Resume. FULU's
-   02.05.02.58 plug-in returned `84033546` (`0x0502400A`) for Pause/Stop over LAN and cloud. The native helper
-   using Studio's 02.08.02.61 plug-in returned -4 without sending protected controls and never reported
-   `device_cert_installed`, including the later signed-in/selected/subscribed experiment. Neither result proves
-   other third-party paths cannot work. Unsigned `ledctrl` succeeded and cannot validate control signing.
-   **Already tried:** flag 1, 32-bit sequence IDs, cloud transport and `X-BBL-Client-*` headers did not resolve
-   the FULU refusal. Private/Studio config folders and `lan_only` 0/1 did not resolve the native helper's
-   certificate exchange. Preserve these results rather than repeating them without a new discriminating probe.
-   **Next investigation:** compare upstream FULU's initialization/certificate sequence with the MCP
-   bridge; inspect public baltobu networking work and newer compatible Linux plug-ins. The Mac-native 02.08
-   helper experiment does not test a newer Linux plug-in in FULU. Upstream `LinuxPluginHost.cpp` exposes
-   `net.install_device_cert` as a void call followed by `{ok:true,value:0}`: that response proves invocation,
-   not certificate installation. Capture the asynchronous certificate event and printer reply separately.
-   First recover a reproducible failure through Counterpart and a redacted trace; change one variable per
-   experiment. Acceptance remains Pause, Resume and Stop in the real app, confirmed by the printer.
-   **Shipped, not acceptance:** both MCPs offer `lan` (FULU), `cloud` (FULU) and `developer` (direct LAN) with
-   route options consumed by the Mac picker. Installed refusal guidance currently recommends Studio/Handy or
-   Developer Mode; revisit its exclusive wording as part of the fix. Counterpart `604fe55` passed stm-ci;
-   bambu-printer-mcp `997d77d` passed 1023 tests, mcp-3D `d51c2c4` passed 653 (previous-session results).
-   Direct controls now wait for the printer's correlated answer instead of reporting a publish as success.
-   These builds became active after the 18:24 companion restart. No new printer test, deployment or runtime
-   change was made while correcting this handoff. `exp/native-plugin-controls` remains a rolled-back experiment.
-2a. **Resume is lost when the MCP restarts during a pause: fix active, not yet accepted.** Both MCPs
-   kept "the job this server inspected and started" in memory, so any restart during a pause refused Resume for
-   the rest of the print (today's pick: three Resume presses from the phone at 16:14-16:15 refused). Now each
-   printer's record is a private file (`BAMBU_RESUME_STATE_DIR`, else `~/.config/bambu-printer-mcp/resume` and
-   `~/.config/mcp-3d-printer-server/resume`), reloaded on start; every resume check still runs. bambu-printer-mcp
-   `c0c988b` (full suite 1017/0) is included in the active `997d77d` build; mcp-3D-printer-server
-   `45551f1` (648/0) is included in `d51c2c4`. Both became active at the 18:24 companion restart.
-   Acceptance: a pick with a pause, restart the companion during the pause, Resume from the app.
-2. **Resume from the app after a pause: fixed in code, not yet re-tested.** Nov 3 15:18: the pick paused itself before
-   layer 2 (`pause_at_layers` works); Resume in the app reached the MCP, which asked its unverifiable-resume question.
-   The companion gave the control call 2 min while the question lives 10, so it timed out and the dead question hid
-   Pause/Resume/Stop until the print ended. Fixed and installed in `539ef23` (control waits `elicitationMs` + 2 min; a
-   failed control, a stale answer and a companion restart all clear the question). The Mac card's yes button reads
-   "Print" for a Resume question: wording bug. Until `fdca5a1`, bambu-printer-mcp's
-   pre-resume check refused any non-zero `print_error`, and a paused P1S reports `0x03008013` ("paused by the user"),
-   so Resume never reached the printer (David pressed it on both apps at 14:19). Now excused only while the printer
-   reports `PAUSE`. Next: a pick with a pause, Resume in the app. It may then hit item 1's refusal; the reason will show
-   in the activity. For tonight's magnet print, resume on the printer.
+1. **Remote Pause/Resume/Stop: accepted on Mac through local FULU.** Root cause was the MCP's
+   `String(20_000 + Date.now() % 1_000_000)` IDs. On this P1S 01.10, signed controls must use string IDs
+   in Studio's **20000–29999** window. Read-only probes accepted signature verification at 20000, 20001,
+   25001 and 29999; 19999, 30000, 30001 and 324005 returned 84033546. Numeric IDs also failed.
+   All 23 historical rejected controls verified cryptographically against the plug-in's public certificate:
+   “bad signature” was misleading. Certificate presence, cloud login, CPU emulation and plug-in version
+   were not the differentiator. Original Linux 02.05.02.58 and updated 02.08.02.54 both showed the same boundary.
+   **Fix:** a shared, wrapping string counter across LAN/cloud sends and retries in both MCPs. The 5-second
+   delivery hold, correlated replies and safety/resume checks remain. Refusal text and connection descriptions
+   no longer claim that only Studio/Handy or Developer Mode can work.
+   **Pushed:** bambu-printer-mcp `587461b` (1024 pass, 0 fail, 4 skipped); mcp-3D-printer-server `56d8fb9`
+   (654 pass, 0 fail, 1 skipped). Both site builds pass. Local Standards/Spec reviews completed; changelog and
+   test-assertion findings corrected. No npm release or merge of these MCP feature branches was made.
+   **Still to accept:** phone controls, Bambu Cloud controls and mcp-3D-printer-server on hardware.
+   Developer Mode is an alternative, not a prerequisite. David's objection to the prior stopping premise was right.
+2a. **Resume after a companion restart: accepted on the Mac.** The existing persisted inspected-job record
+   survived the 20:17 deployment restart while the pick was paused. Resume later passed the existing checks,
+   asked its unverifiable-file question and succeeded through Counterpart. No state record was fabricated.
+2. **Mac Resume confirmation deadlock: fixed, installed and accepted.** The original Resume request holds
+   `ObjectsModel.working` while the MCP asks a question. The form and its submit method previously used that
+   same busy flag and could never answer. `2f7f43e` separates ordinary operations from confirmation submissions;
+   other operations still see their union, and duplicate answers are blocked independently. Required fields,
+   question identity and expiration checks remain. Buttons say Resume/Cancel Resume for a paused print.
+   The regression failed before the fix; all 31 ObjectsModel tests pass after it. Signed Release build and
+   codesign verification pass; build 202611032022 is installed. A fresh Resume request's checkbox remained
+   enabled while the control waited, and its answer led to the successful printer command above.
+   The printer still returns FTPS 550 for this plug-in-uploaded file, so the existing confirmation is expected.
+   Phone parity for the waiting/confirmation flow is not yet checked.
 3. **Merge the open Counterpart PRs**, in this order, each through the merge flow below:
    - **#295** `feat/add-printer` (head `fef3ef1`): installed and in use. Includes print failures as events
      (review item 23), Print Again reuses its slice, the review fixes (cached G-code format, preset contents and
