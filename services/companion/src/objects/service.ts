@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelFilamentSlotCount, modelFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
+import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -228,6 +228,8 @@ export class ObjectService {
   readonly #controllers = new Map<string, AbortController>();
   readonly #confirmations = new Map<string, {pending: PendingElicitation; printing: NonNullable<ObjectServiceDeps['print']>; timer: ReturnType<typeof setTimeout>}>();
   readonly #cancelledPrints = new Set<string>();
+  /** Per-print spool rechecks, run again when the printer's confirmation is accepted (it can wait minutes). */
+  readonly #dispatchRechecks = new Map<string, () => Promise<void>>();
   readonly #monitors = new Map<string, {runner: PrintMonitorRunner; controller: AbortController; done: Promise<void>}>();
   readonly #expiredConfirmations = new Set<string>();
   /** One action at a time per object, so a double tap can't start the same work twice. */
@@ -583,14 +585,20 @@ export class ObjectService {
    * Declared colours match file filaments by part name first, then by position
    * when the counts agree — several parts may share one filament.
    */
-  async #modelData(object: StmObject): Promise<{filaments: ModelFilament[]; slots: number; version: string}> {
+  async #modelData(object: StmObject): Promise<{filaments: ModelFilament[]; slots: number; version: string; declaredSlots: ModelFilament[]}> {
     const bytes = isMultipart(object) && object.current ? await this.#modelBytes(object).catch(() => Buffer.alloc(0)) : Buffer.alloc(0);
-    const version = createHash('sha256').update(bytes).digest('hex');
-    if (!bytes.length) return {filaments: [], slots: 0, version};
+    // The plate is part of the version: choices made for one plate must not validate on another.
+    const version = createHash('sha256').update(bytes).update(`|plate:${object.publishedSelection?.plateIndex ?? 0}`).digest('hex');
+    if (!bytes.length) return {filaments: [], slots: 0, version, declaredSlots: []};
+    const declaredSlots = modelDeclaredFilaments(bytes);
     const fromFile = modelFilaments(bytes, object.publishedSelection?.plateIndex ?? 0);
     const declared = object.current!.filaments ?? [];
-    if (!fromFile.length) return {filaments: declared.map((entry, i) => ({index: i + 1, ...entry})), slots: declared.length, version};
-    const byName = new Map(declared.flatMap(entry => entry.name ? [[entry.name.trim().toLowerCase(), entry] as const] : []));
+    if (!fromFile.length) return {filaments: declared.map((entry, i) => ({index: i + 1, ...entry})), slots: declared.length, version, declaredSlots};
+    // Name matching only where the name is unique on both sides; duplicates fall back to position.
+    const count = (values: (string | undefined)[]) => values.reduce((map, name) => name ? map.set(name.trim().toLowerCase(), (map.get(name.trim().toLowerCase()) ?? 0) + 1) : map, new Map<string, number>());
+    const declaredCounts = count(declared.map(entry => entry.name)), fileCounts = count(fromFile.map(filament => filament.name));
+    const byName = new Map(declared.flatMap(entry => entry.name && declaredCounts.get(entry.name.trim().toLowerCase()) === 1 && fileCounts.get(entry.name.trim().toLowerCase()) === 1
+      ? [[entry.name.trim().toLowerCase(), entry] as const] : []));
     const aligned = declared.length === fromFile.length;
     const filaments = fromFile.map((filament, position) => {
       const declaredEntry = (filament.name ? byName.get(filament.name.trim().toLowerCase()) : undefined) ?? (aligned ? declared[position] : undefined);
@@ -599,7 +607,7 @@ export class ObjectService {
         ...((filament.colour ?? declaredEntry?.colour) ? {colour: filament.colour ?? declaredEntry!.colour} : {}),
         ...((filament.material ?? declaredEntry?.material) ? {material: filament.material ?? declaredEntry!.material} : {})};
     });
-    return {filaments, slots: Math.max(modelFilamentSlotCount(bytes), ...filaments.map(filament => filament.index)), version};
+    return {filaments, slots: Math.max(modelFilamentSlotCount(bytes), ...filaments.map(filament => filament.index)), version, declaredSlots};
   }
 
   /** Whether this object's printer reports AMS trays at all (the gate `liveFilaments` applies). */
@@ -626,7 +634,8 @@ export class ObjectService {
         ...(matches[i]!.materialMismatch ? {materialMismatch: true} : {}),
         ...(matches[i]!.guessed ? {guessed: true} : {}),
       } : {})})),
-      trays: live.map(({profile: _profile, ...choice}) => choice),
+      // For an unsliced model the menu only offers spools that can actually slice it.
+      trays: (sliced ? live : live.filter(tray => tray.profile)).map(({profile: _profile, ...choice}) => choice),
       modelVersion: version,
     };
   }
@@ -639,9 +648,9 @@ export class ObjectService {
    */
   async #multipartColour(object: StmObject, options: PrintOptions, selection: PrinterSelection | undefined,
       _backend: PrinterHandoffConfig['backend']): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]} | undefined> {
-    const {filaments: model, slots, version} = await this.#modelData(object);
+    const {filaments: model, slots, version, declaredSlots} = await this.#modelData(object);
     if (!model.length) return undefined;
-    if (options.filaments && options.filamentsModelVersion && options.filamentsModelVersion !== version)
+    if (options.filaments && options.filamentsModelVersion !== version)
       throw new InvalidStateError('The model changed since you chose its spools. Reopen the print sheet and check the colours.');
     let live: LiveFilament[];
     try { live = await this.liveFilaments(object.id); }
@@ -662,6 +671,8 @@ export class ObjectService {
           throw new InvalidStateError(`The ${tray.material} spool in slot ${tray.slot + 1} has no slicing profile on this Mac. Choose another spool.`);
         return tray;
       });
+      if (chosen.some(tray => tray.slot >= 254) && chosen.some(tray => tray.slot < 254))
+        throw new InvalidStateError('One print feeds from one source: put every colour on AMS spools, or every colour on the external spool.');
     } else {
       const pool = sliced ? live : live.filter(tray => tray.profile);
       if (!pool.length) return undefined;
@@ -676,8 +687,18 @@ export class ObjectService {
     }
     const byIndex = new Map(model.map((filament, i) => [filament.index, chosen[i]!]));
     // One entry per declared slot, used or not (slicing requires exactly that many
-    // profiles); a slot no part names — including a painted region — follows the
-    // first colour's spool rather than failing the print for a missing mapping.
+    // profiles). A slot no part names — a painted region in an unsliced file — is
+    // matched by its own declared colour from the same feed source as the chosen
+    // spools; with no declared colour it follows the first colour's spool rather
+    // than failing the print for a missing mapping.
+    const externalChosen = chosen.every(tray => tray.slot >= 254);
+    const fillerPool = (sliced ? live : live.filter(tray => tray.profile)).filter(tray => externalChosen ? tray.slot >= 254 : tray.slot < 254);
+    for (const declared of declaredSlots) {
+      if (byIndex.has(declared.index) || declared.index > slots) continue;
+      const [match] = matchColours([declared], fillerPool, {requireMaterial: sliced});
+      const tray = match ? live.find(item => item.slot === match.slot) : undefined;
+      if (tray && (sliced || tray.profile)) byIndex.set(declared.index, tray);
+    }
     const at = (index: number) => byIndex.get(index) ?? chosen[0]!;
     const amsMapping = Array.from({length: slots}, (_, i) => at(i + 1).slot);
     const mapped: PrinterSelection = {...selection,
@@ -1061,6 +1082,7 @@ export class ObjectService {
       })));
       if (update.phase !== 'accepted') await this.#emit({id: randomUUID(), type: 'print.preparing', ...eventBase, data: {stage: message.replace(/…$/, '')}});
     };
+    if (recheckTrays) this.#dispatchRechecks.set(id, recheckTrays);
     // Print Again prints the slice it made last time when nothing that shapes it changed (slice-cache.ts).
     const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')},
       ...(recheckTrays ? {beforePrint: recheckTrays} : {}), ...(Object.keys(sliced).length ? {slicer: sliced} : {})})
@@ -1093,6 +1115,7 @@ export class ObjectService {
         release();
         unsubscribe(); this.#running.delete(id); this.#controllers.delete(id);
         clearTimeout(this.#confirmations.get(id)?.timer); this.#confirmations.delete(id);
+        this.#dispatchRechecks.delete(id);
         this.#cancelledPrints.delete(id);
         this.#expiredConfirmations.delete(id);
       });
@@ -1522,6 +1545,21 @@ export class ObjectService {
       } else if (answer.action === 'accept' && question.supported) {
         // Checked field by field against the MCP's own schema before it ever reaches the MCP.
         checked = {action: 'accept', content: validateAnswer(question, answer.content)};
+        // The question can wait minutes: re-read the chosen spools before this acceptance
+        // is forwarded, and decline instead when one changed underneath it.
+        const recheck = this.#dispatchRechecks.get(id);
+        if (recheck) {
+          try { await recheck(); }
+          catch (error) {
+            if (confirmation.printing.services.relay.respond(confirmationId, {action: 'decline'})) {
+              this.#cancelledPrints.add(id);
+              clearTimeout(confirmation.timer);
+              this.#confirmations.delete(id);
+              await this.#deps.store.update(id, o => o.printConfirmation?.id === confirmationId ? {...o, printConfirmation: undefined} : o);
+            }
+            throw error;
+          }
+        }
       } else throw new InvalidStateError('This printer question cannot be approved here. Cancel it and use a supported confirmation form.');
       // Declining Print's own question cancels that print; declining a pause or stop question changes nothing else.
       if (checked.action !== 'accept' && this.#running.has(id)) this.#cancelledPrints.add(id);

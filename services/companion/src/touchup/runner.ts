@@ -235,9 +235,10 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const partsPath = join(pass.outDir, 'touched.3mf');
   // The 3MF becomes the model that prints, so it is validated like one: a truncated
   // archive or a stray zip falls back to the merged mesh instead of becoming the model.
-  const parts = await readFile(partsPath).then(bytes => {
+  // It also only counts beside the final mesh it was exported with — never a checkpoint's.
+  const parts = model === touched ? await readFile(partsPath).then(bytes => {
     try { inspectModelFile(bytes, '3mf'); return partsPath; } catch { return undefined; }
-  }, () => undefined);
+  }, () => undefined) : undefined;
   const base = {renders, checkpoints, ...(parts ? {parts} : {}), ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;

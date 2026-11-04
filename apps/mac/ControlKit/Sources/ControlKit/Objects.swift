@@ -252,6 +252,8 @@ public extension ControlClient {
     /// Prints a multi-part model with the spool chosen for each of its filaments, in filament order.
     func printObject(_ id: String, checked: Bool, settings: PrintSettings, filaments: [PrinterFilament], modelVersion: String? = nil) async throws -> Project {
         var params = settings.params
+        // As the settings send does: Standard is a choice too, never the saved default in disguise.
+        params["quality"] = .string(settings.quality.rawValue); params["strength"] = .string(settings.strength.rawValue)
         params["id"] = .string(id)
         if checked { params["checked"] = .bool(true) }
         params["filaments"] = .array(filaments.map(Self.value))

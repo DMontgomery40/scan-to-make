@@ -132,6 +132,7 @@ test('a broken final STL falls back to the last valid checkpoint', async () => {
   const {pass, inv} = await setup('brokenstl');
   const result = await runTouchupWorker(inv, pass);
   assert.equal(result.model, join(pass.checkpointsDir, '01.stl'));
+  assert.equal(result.parts, undefined, 'the final export’s 3MF never pairs with a checkpoint mesh');
 });
 
 test('junk is never a model', async () => {

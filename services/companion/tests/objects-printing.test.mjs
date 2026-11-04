@@ -183,15 +183,17 @@ test('a multi-colour design prints each part from the nearest loaded spool', asy
 test('the sheet’s spools override the suggestion, and a spool that changed since is refused', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
   await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
+  const {modelVersion} = await f.service.colourMapping(f.object.id);
   const choices = await f.service.filaments(f.object.id);
   const bySlot = slot => choices.find(choice => choice.slot === slot);
-  await assert.rejects(f.service.print(f.object.id, {filaments: [{...bySlot(1), colour: '#123456'}, bySlot(254)]}), /changed/);
-  await assert.rejects(f.service.print(f.object.id, {filaments: [bySlot(1)]}), /every colour/);
-  await f.service.print(f.object.id, {filaments: [bySlot(1), bySlot(254)]});
+  await assert.rejects(f.service.print(f.object.id, {filaments: [{...bySlot(1), colour: '#123456'}, bySlot(0)], filamentsModelVersion: modelVersion}), /changed/);
+  await assert.rejects(f.service.print(f.object.id, {filaments: [bySlot(1)], filamentsModelVersion: modelVersion}), /every colour/);
+  await assert.rejects(f.service.print(f.object.id, {filaments: [bySlot(1), bySlot(254)], filamentsModelVersion: modelVersion}), /One print feeds from one source/);
+  await f.service.print(f.object.id, {filaments: [bySlot(1), bySlot(0)], filamentsModelVersion: modelVersion});
   await f.approve();
   await f.service.settled(f.object.id);
-  assert.deepEqual(f.runs.at(-1).selection.amsMapping, [1, 254]);
-  assert.equal(f.runs.at(-1).options.slicer.loadFilaments, '/p/pla.json;/p/ext.json');
+  assert.deepEqual(f.runs.at(-1).selection.amsMapping, [1, 0]);
+  assert.equal(f.runs.at(-1).options.slicer.loadFilaments, '/p/pla.json;/p/petg.json');
 });
 
 test('a published multi-colour 3MF maps its designer colours to loaded spools; a sliced one keeps its slicing and its material', async t => {
@@ -257,6 +259,23 @@ test('a spool swapped while slicing stops the dispatch before anything is sent',
   assert.match(failed.failure ?? '', /changed while slicing/);
 });
 
+test('a spool swapped while the printer’s question waits is caught before the acceptance is forwarded', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
+  const real = f.deps.print.services.runner.filaments;
+  let swapped = false;
+  f.deps.print.services.runner.filaments = async () => {
+    const inventory = await real();
+    return swapped ? {trays: inventory.trays.map(tray => tray.slot === 1 ? {...tray, tray_color: 'FF0000FF'} : tray)} : inventory;
+  };
+  await f.service.print(f.object.id);
+  const question = await until(async () => (await f.service.get(f.object.id)).printConfirmation);
+  swapped = true;
+  await assert.rejects(f.service.answerPrintConfirmation(f.object.id, question.id, {action: 'accept', content: {confirmed: true}}), /changed while slicing/);
+  const settled = await f.service.settled(f.object.id);
+  assert.equal(settled.state, 'ready', 'the declined print leaves the project ready, nothing sent');
+});
+
 test('the estimate for a multi-colour model slices with the mapped spools’ profiles', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
   await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
@@ -265,10 +284,11 @@ test('the estimate for a multi-colour model slices with the mapped spools’ pro
   assert.equal(f.runs[0].estimate.slicer.loadFilaments, '/p/petg.json;/p/pla.json');
   assert.equal(f.runs[0].estimate.slicer.filamentColours, '#000000;#FEC600');
   // The sheet's edited spools slice the estimate too, not the suggestions.
+  const {modelVersion} = await f.service.colourMapping(f.object.id);
   const choices = await f.service.filaments(f.object.id);
   const bySlot = slot => choices.find(choice => choice.slot === slot);
-  await f.service.estimate(f.object.id, {filaments: [bySlot(1), bySlot(254)]});
-  assert.equal(f.runs.at(-1).estimate.slicer.loadFilaments, '/p/pla.json;/p/ext.json');
+  await f.service.estimate(f.object.id, {filaments: [bySlot(254), bySlot(254)], filamentsModelVersion: modelVersion});
+  assert.equal(f.runs.at(-1).estimate.slicer.loadFilaments, '/p/ext.json;/p/ext.json');
 });
 
 test('the mapping and per-colour spools cross both transports (Mac socket and phone HTTP)', async t => {
@@ -285,11 +305,11 @@ test('the mapping and per-colour spools cross both transports (Mac socket and ph
   const viaHttp = await (await fetch(`${base}/objects/${f.object.id}/colour-mapping`)).json();
   assert.deepEqual(viaHttp, viaSocket);
   const printed = await (await fetch(`${base}/objects/${f.object.id}/print`, {method: 'POST', headers: {'content-type': 'application/json'},
-    body: JSON.stringify({filaments: [viaSocket.trays.find(x => x.slot === 1), viaSocket.trays.find(x => x.slot === 254)]})})).json();
+    body: JSON.stringify({filaments: [viaSocket.trays.find(x => x.slot === 1), viaSocket.trays.find(x => x.slot === 0)], filamentsModelVersion: viaSocket.modelVersion})})).json();
   assert.equal(printed.object.state, 'printing');
   await f.approve();
   await f.service.settled(f.object.id);
-  assert.deepEqual(f.runs.at(-1).selection.amsMapping, [1, 254]);
+  assert.deepEqual(f.runs.at(-1).selection.amsMapping, [1, 0]);
 });
 
 test('"printed" means printed: Print leaves the project printing until the printer reports this job done', async t => {

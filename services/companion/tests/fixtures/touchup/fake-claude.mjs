@@ -90,6 +90,7 @@ switch (scenario) {
     toolUse();
     writeFileSync('out/checkpoints/01.stl', stl);
     { const header = Buffer.alloc(84); writeFileSync('out/touched.stl', header); }
+    writeFileSync('out/touched.3mf', threeMf);
     result({status: 'done', summary: 'Saved.'});
     break;
   case 'junkstl':

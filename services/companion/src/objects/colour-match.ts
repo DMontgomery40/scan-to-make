@@ -68,8 +68,14 @@ export function matchColours(model: ModelColour[], trays: TrayColour[], options:
   const matches = model.map(filament => pick(filament, loaded, assigned, options));
   const slots = matches.flatMap(match => match ? [match.slot] : []);
   if (slots.some(slot => slot >= 254) && slots.some(slot => slot < 254)) {
-    const amsOnly = loaded.filter(tray => !external(tray));
-    if (amsOnly.length) return model.map(filament => pick(filament, amsOnly, new Map(), options));
+    // One source only: prefer the AMS; an external-only print is the fallback
+    // when the AMS can't serve every colour (a missing material, say).
+    const retry = (pool: TrayColour[]) => { const shared = new Map<number, string[]>(); return model.map(filament => pick(filament, pool, shared, options)); };
+    const amsOnly = retry(loaded.filter(tray => !external(tray)));
+    if (amsOnly.every(match => match)) return amsOnly;
+    const externalOnly = retry(loaded.filter(external));
+    if (externalOnly.every(match => match)) return externalOnly;
+    return amsOnly;
   }
   return matches;
 }

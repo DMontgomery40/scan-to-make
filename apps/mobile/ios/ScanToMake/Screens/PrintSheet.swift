@@ -54,7 +54,7 @@ struct PrintSheet: View {
                             Label(message, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if published { Text("Keeps the model’s filament assignments. Your printer service confirms the loaded spools before printing.").font(.footnote).foregroundStyle(.secondary) } else { colourSection
+                        if published { Text("Each colour prints from the closest matching spool loaded in the printer. Open Counterpart on your Mac to choose a different spool for a colour.").font(.footnote).foregroundStyle(.secondary) } else { colourSection
                             .padding(16)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .glassEffect(.regular, in: .rect(cornerRadius: 24))

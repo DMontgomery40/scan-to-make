@@ -50,8 +50,9 @@ test('the declared slot count counts unused filaments too, and a sliced plate na
       filament_type: ['PLA', 'PLA', 'PLA', 'PLA'],
     })),
     'Metadata/model_settings.config': text('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
-      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
-    // Plate 1 paints with filament 3 as well: positions are 0-based.
+      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part>'
+      + '<part id="2" subtype="normal_part"><metadata key="name" value="other plate"/><metadata key="extruder" value="2"/></part></object></config>'),
+    // Plate 1 paints with filament 3 and never uses filament 2: positions are 0-based, and authoritative.
     'Metadata/plate_1.json': text(JSON.stringify({filament_ids: [0, 2]})),
   }));
   assert.equal(modelFilamentSlotCount(sliced), 4);

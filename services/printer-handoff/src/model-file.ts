@@ -91,6 +91,19 @@ export function modelFilamentSlotCount(bytes: Buffer): number {
     .map(key => Array.isArray(project[key]) ? (project[key] as unknown[]).length : 0)));
 }
 
+/** Every declared project filament slot with its declared colour and material, used or not. */
+export function modelDeclaredFilaments(bytes: Buffer): ModelFilament[] {
+  const project = projectSettings(bytes);
+  if (!project) return [];
+  const list = (key: string): string[] => Array.isArray(project[key]) ? (project[key] as unknown[]).map(String) : [];
+  const colours = list('filament_colour'), types = list('filament_type');
+  return Array.from({length: modelFilamentSlotCount(bytes)}, (_, i) => {
+    const colour = /^#?([0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?$/.exec(colours[i]?.trim() ?? '');
+    const material = types[i]?.trim().replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 64);
+    return {index: i + 1, ...(colour ? {colour: `#${colour[1]!.toUpperCase()}`} : {}), ...(material ? {material} : {})};
+  });
+}
+
 function projectSettings(bytes: Buffer): Record<string, unknown> | undefined {
   try {
     if (!bytes.length || bytes.length > 64 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return undefined;
@@ -140,8 +153,9 @@ export function modelFilaments(bytes: Buffer, plateIndex = 0): ModelFilament[] {
     for (const block of settings.matchAll(/<part\b[^>]*>([\s\S]*?)<\/part>/g)) read(block[1]!, true);
     const shells = settings.replace(/<part\b[^>]*>[\s\S]*?<\/part>/g, '');
     for (const block of shells.matchAll(/<object\b[^>]*>([\s\S]*?)<\/object>/g)) read(block[1]!, false);
-    // A sliced plate's own filament list outranks part extruders: painted and
-    // support filaments appear there and nowhere a part names them.
+    // A sliced plate's own filament list is the used set, replacing part
+    // extruders: painted and support filaments appear there and nowhere a part
+    // names them, and parts on other plates must not leak into this plate.
     const plateFile = files[plateName];
     if (plateFile) {
       try {
@@ -149,7 +163,10 @@ export function modelFilaments(bytes: Buffer, plateIndex = 0): ModelFilament[] {
         const positions = Array.isArray(plate.filament_ids)
           ? [...new Set(plate.filament_ids.filter((value): value is number => Number.isInteger(value)).map(value => value + 1))].filter(index => index >= 1 && index <= 64)
           : [];
-        for (const index of positions) if (!byIndex.has(index)) byIndex.set(index, {index});
+        if (positions.length) {
+          for (const index of [...byIndex.keys()]) if (!positions.includes(index)) byIndex.delete(index);
+          for (const index of positions) if (!byIndex.has(index)) byIndex.set(index, {index});
+        }
       } catch { /* the extruder list above still stands */ }
     }
     const projectFile = files['Metadata/project_settings.config'];
