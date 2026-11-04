@@ -463,6 +463,59 @@ class UsdzExport(unittest.TestCase):
             info = usd_export.validate_usdz(usdz)
             self.assertEqual(info, {"vertices": 8, "faces": 12})
 
+    def test_read_usdz_mesh_roundtrip(self):
+        import usd_export
+        with tempfile.TemporaryDirectory() as d:
+            usdc, usdz = Path(d) / "m.usdc", Path(d) / "m.usdz"
+            usd_export.export_usdz(box_mesh(size=(2.0, 1.0, 3.0)), usdc, usdz)
+            vertices, faces = usd_export.read_usdz_mesh(usdz)
+            self.assertEqual((len(vertices), len(faces)), (8, 12))
+
+    def test_qualify_gates_then_scales_by_measurement(self):
+        import usd_export
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            source = tmp / "apple.usdz"
+            # Untrusted units: a 2x1x3 box that is really 200x100x300 mm.
+            usd_export.export_usdz(box_mesh(size=(2.0, 1.0, 3.0)), tmp / "s.usdc", source)
+            out, work = tmp / "out.usdz", tmp / "work"
+
+            def run(*extra):
+                return subprocess.run(
+                    [sys.executable, str(HERE / "reconstruct.py"), "qualify",
+                     str(source), str(out), "--work-dir", str(work), *extra],
+                    capture_output=True, text=True, timeout=120)
+            r = run()
+            self.assertEqual(r.returncode, 5, r.stdout)
+            self.assertFalse(out.exists())
+            region_receipt = json.loads((work / "needs-object-region.json").read_text())
+            self.assertFalse(region_receipt["scaleKnown"])
+            (tmp / "region.json").write_text(json.dumps({
+                "version": 1, "kind": "capture-object-region",
+                "previewMeshSha256": region_receipt["previewMeshSha256"],
+                "selection": {"type": "suggested"}}))
+            r = run("--object-region", str(tmp / "region.json"))
+            self.assertEqual(r.returncode, 4, r.stdout)
+            scale_receipt = json.loads((work / "needs-scale.json").read_text())
+            (tmp / "measurement.json").write_text(json.dumps({
+                "version": 1, "kind": "capture-measurement",
+                "meshSha256": scale_receipt["meshSha256"], "axis": "x", "extentMm": 200.0}))
+            r = run("--measurement", str(tmp / "measurement.json"))
+            self.assertEqual(r.returncode, 0, r.stdout)
+            receipt = json.loads((tmp / "out.receipt.json").read_text())
+            self.assertEqual(receipt["mode"], "qualify")
+            self.assertAlmostEqual(receipt["scale"]["extentsM"]["x"], 0.2, places=6)
+            self.assertAlmostEqual(receipt["scale"]["extentsM"]["z"], 0.3, places=6)
+
+    def test_qualify_rejects_missing_input(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = subprocess.run(
+                [sys.executable, str(HERE / "reconstruct.py"), "qualify",
+                 str(Path(d) / "none.usdz"), str(Path(d) / "o.usdz"),
+                 "--work-dir", str(Path(d) / "w")],
+                capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -58,7 +58,7 @@ export class InvalidCaptureManifestError extends Error {
   constructor() { super('Invalid capture manifest'); this.name = 'InvalidCaptureManifestError'; }
 }
 
-export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean; cameraMetadataRequired?: boolean}
+export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean; cameraMetadataRequired?: boolean; scaleQualificationRequired?: boolean}
 
 export {InvalidCaptureCameraError} from './capture-camera.js';
 
@@ -105,19 +105,22 @@ function parseCaptureManifest(value: unknown): CaptureManifest {
   const manifest = value as Record<string, unknown>;
   if (manifest.version !== 1 || typeof manifest.depthRequired !== 'boolean' || !Array.isArray(manifest.images)
       || (manifest.cameraMetadataRequired !== undefined && typeof manifest.cameraMetadataRequired !== 'boolean')
+      || (manifest.scaleQualificationRequired !== undefined && typeof manifest.scaleQualificationRequired !== 'boolean')
       || manifest.images.length < 1 || manifest.images.length > 10000
       || manifest.images.some(name => typeof name !== 'string' || !/^[0-9]{4}\.(heic|jpe?g|png)$/.test(name))
       // Depth companions belong to the iPhone HEIC protocol only.
       || (manifest.depthRequired && manifest.images.some(name => typeof name !== 'string' || !name.endsWith('.heic')))
       || new Set(manifest.images).size !== manifest.images.length) throw new InvalidCaptureManifestError();
   return {version: 1, images: [...manifest.images].sort(), depthRequired: manifest.depthRequired,
-    ...(manifest.cameraMetadataRequired !== undefined ? {cameraMetadataRequired: manifest.cameraMetadataRequired} : {})};
+    ...(manifest.cameraMetadataRequired !== undefined ? {cameraMetadataRequired: manifest.cameraMetadataRequired} : {}),
+    ...(manifest.scaleQualificationRequired !== undefined ? {scaleQualificationRequired: manifest.scaleQualificationRequired} : {})};
 }
 
-function captureDigest(object: StmObject, depthRequired: boolean, cameraMetadataRequired = false): string {
+function captureDigest(object: StmObject, depthRequired: boolean, cameraMetadataRequired = false, scaleQualificationRequired = false): string {
   return createHash('sha256').update(JSON.stringify({version: 1, depthRequired,
     // Only present fields bind, so digests of older image-only captures are unchanged.
     ...(cameraMetadataRequired ? {cameraMetadataRequired: true} : {}),
+    ...(scaleQualificationRequired ? {scaleQualificationRequired: true} : {}),
     ...(object.captureCamera ? {camera: object.captureCamera.sha256} : {}),
     images: [...(object.capture ?? [])].sort(), depth: [...(object.captureDepth ?? [])].sort()})).digest('hex');
 }
@@ -776,15 +779,17 @@ export class ObjectService {
       if (manifest.cameraMetadataRequired && !object.captureCamera)
         throw new InvalidStateError(CAPTURE_CAMERA_PENDING);
       await this.#captureFilesPresent(object);
-      const sha256 = captureDigest(object, manifest.depthRequired, manifest.cameraMetadataRequired);
+      const sha256 = captureDigest(object, manifest.depthRequired, manifest.cameraMetadataRequired, manifest.scaleQualificationRequired);
       const same = object.captureCompletion?.sha256 === sha256 && object.captureCompletion.depthRequired === manifest.depthRequired
-        && !!object.captureCompletion.cameraMetadataRequired === !!manifest.cameraMetadataRequired;
+        && !!object.captureCompletion.cameraMetadataRequired === !!manifest.cameraMetadataRequired
+        && !!object.captureCompletion.scaleQualificationRequired === !!manifest.scaleQualificationRequired;
       if (same && ['touching-up', 'needs-closeup', 'ready', 'printing', 'printed'].includes(object.state)) return object;
       if (!same) {
         if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('Wait until the current step finishes.');
         object = await this.#deps.store.update(id, o => ({...o, captureCompletion: {
           version: 1, depthRequired: manifest.depthRequired,
           ...(manifest.cameraMetadataRequired ? {cameraMetadataRequired: true} : {}),
+          ...(manifest.scaleQualificationRequired ? {scaleQualificationRequired: true} : {}),
           frameCount: manifest.images.length, sha256, completedAtMs: Date.now(),
         }}));
       }
@@ -821,7 +826,7 @@ export class ObjectService {
     if (!complete || complete.version !== 1 || complete.frameCount !== object.capture?.length
         || (object.captureDepth?.length && !complete.depthRequired)
         || (complete.cameraMetadataRequired && !object.captureCamera)
-        || complete.sha256 !== captureDigest(object, complete.depthRequired, complete.cameraMetadataRequired)) throw new InvalidStateError(CAPTURE_PENDING);
+        || complete.sha256 !== captureDigest(object, complete.depthRequired, complete.cameraMetadataRequired, complete.scaleQualificationRequired)) throw new InvalidStateError(CAPTURE_PENDING);
     await this.#captureFilesPresent(object);
   }
 
@@ -1832,8 +1837,12 @@ export class ObjectService {
       writing = writing.then(async () => { this.#changed(await store.update(id, o => ({...o, progress: pending}))); }).catch(() => undefined);
     };
     await mkdir(join(dir, 'scan'), {recursive: true});
+    // Qualification is keyed on the capture's own declaration, never on
+    // whether camera metadata happens to be present.
+    const scaleQualificationRequired = !!(await store.get(id)).captureCompletion?.scaleQualificationRequired;
     const outcome = await reconstruct({photosDir: join(dir, 'capture'), output: join(dir, 'scan', 'scan.usdz'),
-      masksDir: join(dir, 'capture-masks'), ...await reconstructionInputs(dir), signal, onProgress: show});
+      masksDir: join(dir, 'capture-masks'), ...await reconstructionInputs(dir),
+      ...(scaleQualificationRequired ? {scaleQualificationRequired: true} : {}), signal, onProgress: show});
     await writing;
     if (outcome?.status === 'needs-review') {
       // Not a failure and not a scan: the pass ends as an Ask (see #finishReconstructionReview).

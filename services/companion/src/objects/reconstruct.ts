@@ -23,6 +23,13 @@ export interface ReconstructInput {
   measurement?: string;
   /** Private, capture-bound tool work directory (stage cache; resumes answers without rebuilding). */
   workDir?: string;
+  /**
+   * The capture declared its rebuild unqualified by itself (Android): the
+   * output may only be accepted after region/scale qualification, even when
+   * camera metadata is present. On a Mac this runs Apple's rebuild first,
+   * then qualifies it; an iPhone capture never sets this.
+   */
+  scaleQualificationRequired?: boolean;
   signal?: AbortSignal;
   onProgress?: ReconstructProgress;
 }
@@ -226,19 +233,9 @@ export function parseScaleOutcome(raw: unknown): ReconstructReviewOutcome | unde
   return {kind: 'scale', previewStl: r.previewStl, meshSha256, boundsMin, boundsMax, extents, scaleKnown: false};
 }
 
-/**
- * Runs `linux-reconstruct samples … full`. Exit 5/4 resolve as needs-review
- * (never a failure, never a success); cancellation and bounded diagnostics
- * behave exactly like the Mac runner.
- */
-export function linuxReconstructRunner(binary: string | null = findLinuxReconstruct() ?? null): Reconstruct {
-  return input => new Promise<ReconstructOutcome>((resolve, reject) => {
-    if (!binary) { reject(new Error(LINUX_NOT_INSTALLED)); return; }
-    const args = ['samples', input.photosDir, input.output, 'full', '--save-masks', input.masksDir,
-      ...(input.cameraMetadata ? ['--camera-metadata', input.cameraMetadata] : []),
-      ...(input.objectRegion ? ['--object-region', input.objectRegion] : []),
-      ...(input.measurement ? ['--measurement', input.measurement] : []),
-      ...(input.workDir ? ['--work-dir', input.workDir] : [])];
+/** One linux-reconstruct invocation; exit 5/4 resolve as needs-review, never success. */
+function runLinuxTool(binary: string, args: string[], input: ReconstructInput): Promise<ReconstructOutcome> {
+  return new Promise<ReconstructOutcome>((resolve, reject) => {
     const child = spawn(binary, args, {stdio: ['ignore', 'pipe', 'pipe'], ...(input.signal ? {signal: input.signal} : {})});
     let buffered = '', error: string | undefined, done = false, lastWords = '', spawnFailed = false;
     let region: ReconstructReviewOutcome | undefined, scale: ReconstructReviewOutcome | undefined;
@@ -281,7 +278,71 @@ export function linuxReconstructRunner(binary: string | null = findLinuxReconstr
   });
 }
 
-/** The platform's own builder: Linux tool on Linux, the Mac tool elsewhere (unchanged). */
+/** Runs `linux-reconstruct samples … full` (COLMAP/OpenMVS on a Linux host). */
+export function linuxReconstructRunner(binary: string | null = findLinuxReconstruct() ?? null): Reconstruct {
+  return input => {
+    if (!binary) return Promise.reject(new Error(LINUX_NOT_INSTALLED));
+    return runLinuxTool(binary, ['samples', input.photosDir, input.output, 'full', '--save-masks', input.masksDir,
+      ...(input.cameraMetadata ? ['--camera-metadata', input.cameraMetadata] : []),
+      ...(input.objectRegion ? ['--object-region', input.objectRegion] : []),
+      ...(input.measurement ? ['--measurement', input.measurement] : []),
+      ...(input.workDir ? ['--work-dir', input.workDir] : [])], input);
+  };
+}
+
+export const QUALIFY_NOT_INSTALLED = "This Mac can't check the size of an Android scan yet. Update Counterpart on this Mac, or use a computer that can.";
+
+/**
+ * A Mac building an Android capture: Apple's own reconstruction first
+ * (unchanged), then qualification of its output. Apple's result for plain
+ * photos carries no trustworthy metric scale and this host gets no Apple
+ * camera centres to fit ARCore poses against, so metadata presence alone
+ * never qualifies it: the qualify step applies the same region gate and
+ * requires an explicit measurement. An iPhone capture
+ * (scaleQualificationRequired unset) takes the plain Mac path exactly.
+ */
+export function macQualifiedReconstructRunner(
+  macBinary: string | null = findMacReconstruct() ?? null,
+  qualifyBinary: string | null = findLinuxReconstruct() ?? null,
+): Reconstruct {
+  const mac = macReconstructRunner(macBinary);
+  return async input => {
+    if (!input.scaleQualificationRequired) return mac(input);
+    if (!qualifyBinary || !input.workDir) throw new Error(QUALIFY_NOT_INSTALLED);
+    const raw = join(input.workDir, 'apple-raw.usdz');
+    await mkdir(input.workDir, {recursive: true});
+    // Capture photos cannot change after start, so an existing Apple rebuild
+    // is this capture's; answer resumes reuse it instead of rebuilding.
+    if (!existsSync(raw)) {
+      // Only a completed Apple rebuild is reusable. A cancelled process may
+      // leave a partial file; never cache that file under the completed name.
+      const building = join(input.workDir, `apple-raw-building-${randomUUID()}.usdz`);
+      try {
+        await mac({...input, output: building});
+        input.signal?.throwIfAborted();
+        await rename(building, raw);
+      } finally { await rm(building, {force: true}).catch(() => undefined); }
+    }
+    input.signal?.throwIfAborted();
+    return runLinuxTool(qualifyBinary, ['qualify', raw, input.output,
+      ...(input.objectRegion ? ['--object-region', input.objectRegion] : []),
+      ...(input.measurement ? ['--measurement', input.measurement] : []),
+      '--work-dir', input.workDir], input);
+  };
+}
+
+/**
+ * Whether this host can actually run the qualified capture/review path
+ * (capabilities.reconstructionReviewV1). Presence of the tools only; a
+ * missing Python USD runtime still fails the run plainly, never silently.
+ */
+export function reconstructionReviewSupported(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (platform === 'linux') return !!findLinuxReconstruct(env);
+  if (platform === 'darwin') return !!findMacReconstruct(env) && !!findLinuxReconstruct(env);
+  return false;
+}
+
+/** The platform's own builder: Linux tool on Linux, Apple's (with qualification) on a Mac. */
 export function defaultReconstructRunner(platform: string = process.platform): Reconstruct {
-  return platform === 'linux' ? linuxReconstructRunner() : macReconstructRunner();
+  return platform === 'linux' ? linuxReconstructRunner() : macQualifiedReconstructRunner();
 }

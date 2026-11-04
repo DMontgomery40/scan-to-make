@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
-import {linuxReconstructRunner, parseRegionOutcome, parseScaleOutcome} from '../dist/objects/reconstruct.js';
+import {linuxReconstructRunner, macQualifiedReconstructRunner, parseRegionOutcome, parseScaleOutcome, reconstructionReviewSupported, QUALIFY_NOT_INSTALLED} from '../dist/objects/reconstruct.js';
 import {validateCaptureCamera, InvalidCaptureCameraError} from '../dist/objects/capture-camera.js';
 
 const STL = 'solid m\nendsolid m\n';
@@ -241,4 +241,58 @@ test('HTTP: capture-camera, preview and reconstruction answer routes with scopes
   assert.equal(answered.status, 200, JSON.stringify(answered.json));
   assert.equal((await service.settled(object.id)).state, 'ready');
   assert.ok(scopes.includes('captures:import') && scopes.includes('projects:read'));
+});
+
+test('scaleQualificationRequired is recorded, digest-bound, and reaches the runner even with metadata', async () => {
+  const {service, object, builds} = await setup();
+  const one = jpeg(640, 480, 9);
+  await service.addCapturePhoto(object.id, '0001.jpg', one);
+  await service.addCaptureCamera(object.id, {version: 1, kind: 'capture-camera', objectAnchor: null,
+    frames: [{image: '0001.jpg', sha256: sha(one), width: 640, height: 480, fx: 500, fy: 500, cx: 320, cy: 240,
+      timestampMs: 1, tracking: 'tracking', center: [0, 1, 0]}]});
+  await service.start(object.id, {version: 1, images: ['0001.jpg'], depthRequired: false,
+    cameraMetadataRequired: true, scaleQualificationRequired: true});
+  const done = await service.settled(object.id);
+  assert.equal(done.captureCompletion.scaleQualificationRequired, true);
+  assert.equal(builds[0].scaleQualificationRequired, true, 'metadata presence does not bypass qualification');
+  assert.ok(builds[0].cameraMetadata, 'metadata is still carried for hosts that can use it');
+});
+
+test('Mac qualified runner: Apple first, then qualify; plain iPhone path untouched', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mac-qualified-'));
+  const calls = join(root, 'calls.log');
+  const mac = join(root, 'fake-mac');
+  // mac-reconstruct argv: samples <dir> <output> full --save-masks <dir>
+  await writeFile(mac, `#!/bin/sh\necho "mac $3" >> ${calls}\nmkdir -p "$(dirname "$3")"\necho raw > "$3"\necho '{"done":"x"}'\n`);
+  await chmod(mac, 0o755);
+  const qualify = join(root, 'fake-qualify');
+  await writeFile(qualify, `#!/bin/sh\necho "qualify $1 $2 $3" >> ${calls}\nmkdir -p "$(dirname "$3")"\necho qualified > "$3"\necho '{"done":"x"}'\n`);
+  await chmod(qualify, 0o755);
+  const run = macQualifiedReconstructRunner(mac, qualify);
+  const base = {photosDir: root, masksDir: root, workDir: join(root, 'work')};
+
+  await run({...base, output: join(root, 'iphone.usdz')});
+  assert.equal(await readFile(join(root, 'iphone.usdz'), 'utf8'), 'raw\n');
+
+  await run({...base, output: join(root, 'android.usdz'), scaleQualificationRequired: true});
+  assert.equal(await readFile(join(root, 'android.usdz'), 'utf8'), 'qualified\n');
+  const log = await readFile(calls, 'utf8');
+  assert.match(log, /qualify qualify .*apple-raw\.usdz .*android\.usdz/);
+  // A resume reuses the cached Apple rebuild.
+  await run({...base, output: join(root, 'android2.usdz'), scaleQualificationRequired: true});
+  assert.equal((await readFile(calls, 'utf8')).match(/mac .*apple-raw/g)?.length, 1);
+
+  const incapable = macQualifiedReconstructRunner(mac, null);
+  await assert.rejects(incapable({...base, output: join(root, 'x.usdz'), scaleQualificationRequired: true}),
+    error => error.message === QUALIFY_NOT_INSTALLED);
+});
+
+test('reconstructionReviewSupported reflects the tools actually present', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'capability-'));
+  const tool = join(root, 'tool');
+  await writeFile(tool, '#!/bin/sh\n');
+  await chmod(tool, 0o755);
+  assert.equal(reconstructionReviewSupported('linux', {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool}), true);
+  assert.equal(reconstructionReviewSupported('darwin', {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool, SCAN_TO_MAKE_MAC_RECONSTRUCT: tool}), true);
+  assert.equal(reconstructionReviewSupported('win32', {SCAN_TO_MAKE_LINUX_RECONSTRUCT: tool}), false);
 });

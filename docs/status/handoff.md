@@ -211,6 +211,19 @@ remote native probes and the SSH tunnel were removed after verification.
      follow-ups, phone picker/pause deployment, and `/v1/mcp`. This release thread retains Android/Linux,
      TestFlight/reconstruction and its release/status/distribution files. Leave their branches and live deployments
      alone; record and coordinate any proposed Mac deployment or companion restart here first.
+     **Final-main integration checklist (merge owner, Nov 4):** wait for their final main SHA/caveats, then
+     reconcile hunks rather than choosing whole files. Earlier #295/#299 heads on this release branch do not
+     contain all fixes in main's squashes `7b112af`/`2a8155f`:
+     - #295 final head `f17b72f`: preserve MCP updater `#perform` handling when all printers are removed
+       (`#held`, `NO_PRINTERS`, caught fire-and-forget) and both regressions; preserve setup `#runs()` settings-folder
+       ownership and its regression in objects-printers.
+     - #299 final head `6d95d38`: retain PrintSheet `maxPauses` 16, unique/sorted `pauseBeforeLayers`, exclude
+       pauses from saved defaults (`48f22a5`), and final control refusals/deadlines (`c4c904f`, `3c0a192`).
+     - Known conflicts: PrintSheet, local-control protocol/services, objects/printers, and add/add printing/discovery.
+       Also reconcile profiles/setup/server-cli, print/slice-cache, updater/printer checks and help/index.html.
+     - Preserve release-only reconstruction handlers/review state and contracts, Linux Avahi/bootstrap-printer
+       behavior, provider routing and starter/multi-plate work. #293 overlaps service/http/store/local-control;
+       #292/#302/#301 overlap service, #292/#301 http, and #301 local-control-services. Inspect each final diff.
      Nov 4: David explicitly requested fixing live connection settings and sending the failed AirPods/Stove
      prompts. Owner yielded Mac UI and held deployments/Update. Parent found Developer Mode already selected,
      fresh saved-config MCP handshake works but live Blender Check Again fails; restarting Counterpart through
@@ -324,12 +337,17 @@ remote native probes and the SSH tunnel were removed after verification.
      upload verifies photo hashes/dimensions; a private cached reconstruction stops for region confirmation and,
      when needed, a measurement. HTTP/local-control answers bind the current review/hash; generic Ask/Best Guess
      cannot approve it. Preview routes expose only the current review. No real capture/UI acceptance yet.
-     Follow-up ownership: Muse reconstruction owner extends Mac-hosted Android/photo capture qualification
-     (the current Mac runner ignores ARCore metadata); a new Android owner wires capture-camera v1, uploads,
-     manifest and native review UI; a Linux UI owner adds the native review surface/preview bridge. Shared
-     `scaleQualificationRequired` manifest flag and `/healthz` capability `reconstructionReviewV1` are the agreed
-     next transport additions, not implemented yet. Old clients/hosts must not silently bypass qualification.
-     Packaging still needs Python/Pillow/usd-core and COLMAP/OpenMVS with licence/source information.
+     **Mac qualification integrated:** `90ac9164` is merged. `scaleQualificationRequired` in the capture
+     manifest/completion forces Apple reconstruction followed by the shared region/measurement qualifier;
+     iPhone captures without the flag use their existing path. ARCore metadata alone cannot qualify Apple
+     geometry. Public review schemas stay unchanged. Parent made Apple raw-cache publication atomic and
+     removed a project-read fallback that could silently clear the qualification flag.
+     `reconstructionReviewV1` is currently tool-presence-based; runtime packaging/smoke verification is still
+     required. The Android owner wires metadata/manifest/review UI; the Linux UI owner wires its review surface.
+     Reconstruction owner proceeds with actual runtime packaging, not only the design manifest. Mac's existing
+     CPython/Pillow/usd-core closure can serve qualification; Linux needs the executable reconstruction closure.
+     Correct the draft dependency manifest against actual binary/source archives and existing licence inventory
+     (it labels usd-core Apache-only, while the audited Mac wheel has a composite licence).
      Synthetic geometry retained a support disc until explicit region choice; one OpenMVS run crashed then
      succeeded on retry. Neither result establishes real capture quality or automatic print readiness.
 
