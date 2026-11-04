@@ -40,6 +40,8 @@ struct PrintersView: View {
             #if DEBUG
             if let printer = app.debugPrinter { path = [.printer(printer)]; app.debugPrinter = nil }
             #endif
+            // Which pickers this Mac offers (`printerChoices`).
+            await store.loadCapabilities()
             // The Mac reads each printer's state in the background; asking again shows it as it fills in.
             for _ in 0..<6 where !Task.isCancelled {
                 await store.loadPrinters()
@@ -98,7 +100,11 @@ struct PrinterDetailView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.scenePhase) private var scenePhase
     let store: ProjectsStore
-    let id: String
+    /// The printer's id when the page opened; a Printer MCP change can give it another (`moved`).
+    let openedAs: String
+    @State private var moved: String?
+    private var id: String { moved ?? openedAs }
+    init(store: ProjectsStore, id: String) { self.store = store; self.openedAs = id }
     @State private var feed = CameraFeed()
     @State private var copied = false
     @State private var fullScreen = false
@@ -107,6 +113,7 @@ struct PrinterDetailView: View {
     private var job: Project? { store.printing(on: id) }
 
     var body: some View {
+        ScrollViewReader { scroll in
         ScrollView {
             if let printer {
                 VStack(alignment: .leading, spacing: 22) {
@@ -133,6 +140,13 @@ struct PrinterDetailView: View {
                     PanelTitle("Filament")
                     filamentCard(printer).padding(.horizontal, 16)
 
+                    // Settings → Printers on the Mac, here: which MCP and which connection. Hidden on a Mac without them.
+                    if store.macCapabilities.contains("printerChoices") {
+                        PanelTitle("Connection").id("connection")
+                        PrinterConnectionCard(store: store, printer: printer, printing: job != nil || printer.state == "busy") { moved = $0 }
+                            .padding(.horizontal, 16)
+                    }
+
                     let history = store.projects.filter { ($0.print?.destinationId ?? $0.print?.destination?.id) == id && $0.print?.monitor?.endState != nil }
                     if !history.isEmpty {
                         PanelTitle("Printed from Counterpart")
@@ -147,13 +161,22 @@ struct PrinterDetailView: View {
                         .padding(.horizontal, 16)
                     }
 
-                    Text("\(printer.name) comes from \(printer.via) on \(store.macName ?? "your Mac"). Change its settings there; Counterpart picks them up.")
+                    Text(store.macCapabilities.contains("printerChoices")
+                         ? "\(printer.name) comes from \(printer.via) on \(store.macName ?? "your Mac"). Its other settings stay in that MCP’s own files."
+                         : "\(printer.name) comes from \(printer.via) on \(store.macName ?? "your Mac"). Change its settings there; Counterpart picks them up.")
                         .font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 20)
                 }
                 .padding(.bottom, 40)
             } else {
                 ContentUnavailableView("This printer is no longer on your Mac", systemImage: "printer")
             }
+        }
+        #if DEBUG
+        .task(id: store.macCapabilities.contains("printerChoices")) {
+            guard app.debugSection == "connection", store.macCapabilities.contains("printerChoices") else { return }
+            try? await Task.sleep(for: .seconds(2)); withAnimation { scroll.scrollTo("connection", anchor: .top) }
+        }
+        #endif
         }
         .background(Color.black)
         .navigationBarTitleDisplayMode(.inline)
@@ -327,5 +350,124 @@ struct HistoryRow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Which printer MCP a printer uses (when both reach it) and how that MCP reaches the printer, as in the Mac's
+/// Settings → Printers. The MCP keeps the connection in its own settings and words each choice; Counterpart only
+/// shows and changes it. The Mac refuses either change while the printer prints.
+struct PrinterConnectionCard: View {
+    let store: ProjectsStore
+    let printer: PrinterDestination
+    /// A project is printing on it, or the Mac last read it as busy.
+    let printing: Bool
+    /// The printer's id after a Printer MCP change.
+    let moved: (String) -> Void
+    @State private var connection: PrinterConnection?
+    @State private var loaded = false
+    @State private var saving: String?
+    @State private var problem: String?
+
+    var body: some View {
+        // Something is always on screen before the first answer, so `.task` runs (Mac fix 0cdb625).
+        VStack(alignment: .leading, spacing: 0) {
+            if printer.offersMcpChoice, let mcps = printer.mcps {
+                group("Printer MCP") {
+                    ForEach(mcps, id: \.backend) { mcp in
+                        choiceRow(title: mcp.name, detail: nil, chosen: mcp.backend == printer.backend, available: true, key: "mcp:" + mcp.backend) {
+                            await chooseMcp(mcp.backend)
+                        }
+                    }
+                }
+                footnote("This printer is set up in both MCPs. Prints go through this one.")
+                if connection != nil || !loaded { Divider().padding(.vertical, 6) }
+            }
+            if let connection {
+                group("Connection") {
+                    ForEach(connection.shown, id: \.id) { option in
+                        choiceRow(title: option.label, detail: option.available ? nil : option.reason, chosen: option.id == connection.route,
+                                  available: option.available, key: "route:" + option.id) { await choose(option.id) }
+                    }
+                }
+                footnote(connection.current?.controls ?? "Prints, Stop, Pause and Resume go this way.")
+            } else if !loaded {
+                HStack(spacing: 10) { ProgressView(); Text("Reading \(printer.via)’s connection…").font(.subheadline).foregroundStyle(.secondary) }
+                    .padding(16)
+            } else if !printer.offersMcpChoice {
+                footnote("\(printer.via) has no connection to choose for \(printer.name).")
+            }
+            if let problem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 16).padding(.bottom, 14)
+            } else if printing {
+                footnote("Change these when the print finishes.")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .disabled(saving != nil || printing)
+        .task(id: printer.id) { await load() }
+    }
+
+    @ViewBuilder private func group(_ title: String, @ViewBuilder rows: () -> some View) -> some View {
+        Text(title.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 4)
+            .accessibilityAddTraits(.isHeader)
+        rows()
+    }
+
+    private func footnote(_ text: String) -> some View {
+        Text(text).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 14)
+    }
+
+    private func choiceRow(title: String, detail: String?, chosen: Bool, available: Bool, key: String, choose: @escaping () async -> Void) -> some View {
+        Button { Task { await choose() } } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.body).foregroundStyle(available ? .primary : .secondary)
+                    if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                }
+                Spacer(minLength: 8)
+                if saving == key { ProgressView() }
+                else if chosen { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Color.filament) }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 11)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(!available)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+
+    private func load() async {
+        do { connection = try await store.mac.client.printerConnection(printer.id); problem = nil }
+        catch let failure as CompanionError { connection = nil; if !failure.isUnsupported { problem = failure.message } }
+        catch { connection = nil }
+        loaded = true
+    }
+
+    private func choose(_ route: String) async {
+        guard saving == nil, route != connection?.route else { return }
+        saving = "route:" + route; problem = nil
+        defer { saving = nil }
+        do { connection = try await store.mac.client.setPrinterConnection(printer.id, route: route) }
+        catch let failure as CompanionError { problem = failure.message }
+        catch { problem = CompanionError.unreachable.message }
+    }
+
+    private func chooseMcp(_ backend: String) async {
+        guard saving == nil, backend != printer.backend else { return }
+        saving = "mcp:" + backend; problem = nil
+        defer { saving = nil }
+        do {
+            let id = try await store.mac.client.choosePrinterMcp(printer.id, backend: backend)
+            await store.loadPrinters()
+            moved(id)
+            // Another MCP has its own connections.
+            loaded = false; connection = nil
+            await load()
+        } catch let failure as CompanionError { problem = failure.message }
+        catch { problem = CompanionError.unreachable.message }
     }
 }
