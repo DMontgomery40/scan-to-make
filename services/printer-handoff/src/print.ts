@@ -177,7 +177,7 @@ export class PrinterHandoffRunner {
   }
 
   /**
-   * Lays the model flat and slices it exactly as a print would, then reads the
+   * Slices the model exactly as a print would, then reads the
    * time, grams and settings from the sliced file. Never prints.
    */
   async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal; sliceCache?: PrintRunInput['sliceCache']}): Promise<{estimate?: SliceEstimate; settings: SliceSettings; slicerWarning?: string}> {
@@ -270,7 +270,7 @@ export class PrinterHandoffRunner {
   }
 
   /**
-   * Runs one handoff: lay flat -> slice -> inspect -> print, using the tool
+   * Runs one handoff: slice -> inspect -> print, using the tool
    * sequence of the configured backend. Print confirmations are elicited by
    * the server during the print call and answered through the relay.
    */
