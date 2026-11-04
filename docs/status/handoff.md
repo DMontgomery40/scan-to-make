@@ -48,11 +48,11 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 
 ## Installed right now
 
-Build **202611040900** (source `3b24efcf`) is installed and checked through the actual Mac UI. Nine projects, printer configuration, settings and authentication files are retained unchanged. P1S Ready, Developer Mode, npm Bambu 1.1.54; Codex selected; retained model rendered. No phone or printer operation. Immediate rollback is build 628 at `~/scan-to-make-work/combined-mac-202611040900/Counterpart.previous`.
+Build **202611041137** (source `c5762972`) is installed and checked through the actual Mac UI after David’s colour pick finished. All ten project files, printer configuration, settings and authentication hashes are unchanged. Guitar pick Printed; P1S Ready; Claude selected. This adds #306’s legacy-colour print choice and shared iPhone AMS types. Immediate rollback is build 900 at `~/scan-to-make-work/mac-legacy-colour-202611041137/Counterpart.previous`; signed app and before/after receipts are beside it.
 
 | What | Version | From |
 |---|---|---|
-| Mac app `/Applications/Counterpart.app` | **202611040900** | release @ `3b24efcf`: final main queue including #293, provider routing, reconstruction qualification, multi-plate/starter support and both updater fixes. Signed entitlements match the previous development app exactly; installed idle and checked through actual UI Nov 4 16:08Z. |
+| Mac app `/Applications/Counterpart.app` | **202611041137** | release @ `c5762972`: #306 legacy colour-choice integration, iPhone shared AMS models and all prior release work. Signed entitlements match previous development app exactly; installed idle after the pick finished and checked through actual UI Nov 4 18:48Z. Node native-module and packaged reconstruction checks pass. |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **2.0 (202611041132), Release configuration / development signing** | Source `38003639`, includes iPhone per-part AMS controls from `5864c561`. Installed Nov 4 through USB without uninstall or fixture launch arguments; exact build verified on device. Signed entitlements equal previous 1045; Sandbox APNs/CloudKit preserved. Signed app and receipts: `~/scan-to-make-work/phone-ams-202611041132/`. |
 | bambu-printer-mcp (what Counterpart runs) | **Published npm 1.1.54**, installed through actual Settings → Printers → Update Nov 4 13:37Z; replaces hand-copied `587461b`. UI says Updated to 1.1.54, P1S Ready. | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
 | mcp-3D-printer-server | live dist from `56d8fb9`; source `feat/bambu-complete` now `afcf378` (new layer-pause parity not deployed) | runs from its own folder and `.env` |
@@ -666,12 +666,14 @@ remote native probes and the SSH tunnel were removed after verification.
     **202611041137** succeeded with matching installed app entitlements, both Node entitlements and
     packaged reconstruction qualification checked. Official `stm-ci c5762972` passed all suites
     (58 contracts, 125 printer-handoff plus 5 skips, 886 companion plus 1 skip, and Python tools).
-    These are engineering checks; deployment waits for idle. Receipt/build:
+    These are engineering checks. **Installed after the pick completed**, at 18:48Z; actual Mac UI
+    shows Guitar pick Printed and P1S Ready, with all ten project files/settings/auth unchanged. Receipt/build:
     `~/scan-to-make-work/mac-legacy-colour-202611041137/`.
     **User-started colour print active:** bundle `e592f12e-e5a0-4821-9f56-2cdacb8d6f5e`, dispatched
     18:34:41Z, uses current/model.3mf and AMS mapping `[0, 1]`; actual Mac UI at 18:40Z shows
-    Printing and P1S Busy. Parent initiated neither the design nor print. Keep installs/restarts held
-    until it settles. iPhone menu/selection acceptance is confirmed by David; physical colour result remains open. No reprint. David also reports another Device Hub use;
+    Printing and P1S Busy. It finished before the 18:48Z deployment: actual UI Printed/P1S Ready.
+    Parent initiated neither design nor print. iPhone menu/selection acceptance is confirmed by David;
+    physical colour result remains open. No reprint. David also reports another Device Hub use;
     read-only check at 11:15 MST found no Xcode DeviceHub process or events in its previous 8 minutes.
     David clarified this was an iOS lock-screen/Settings notice saying the device was viewed through
     Device Hub, not an observed agent tool call or reopened Mac window. USB read-only display info
