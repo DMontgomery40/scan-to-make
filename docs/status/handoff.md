@@ -5,7 +5,8 @@ or a "continuation" section on top. Git history has every older version.
 
 Last device verification: **2026-11-03, 20:27 Mountain**. **Resume, Pause and Stop now work from the Mac
 Counterpart UI through FULU**, confirmed by the P1S's correlated replies and observed state changes.
-The printer remains cloud-bound, Developer Mode off. The test pick is stopped; the app shows the printer Ready.
+At that verification the printer was cloud-bound with Developer Mode off. David enabled LAN Only and Developer
+Mode on Nov 4; see the current route receipt below. The test pick was stopped and the app showed Ready.
 Those receipts used hand-copied, unpublished MCP code; they do not establish acceptance of the released backend.
 Repeat acceptance through the app after its Update action installs the published npm package.
 Status of each of David's asks: [`asks.md`](asks.md). Hands-on review list: [`app-review-2026-11-02.md`](app-review-2026-11-02.md).
@@ -198,6 +199,16 @@ remote native probes and the SSH tunnel were removed after verification.
      follow-ups, phone picker/pause deployment, and `/v1/mcp`. This release thread retains Android/Linux,
      TestFlight/reconstruction and its release/status/distribution files. Leave their branches and live deployments
      alone; record and coordinate any proposed Mac deployment or companion restart here first.
+     Nov 4: David explicitly requested fixing live connection settings and sending the failed AirPods/Stove
+     prompts. Owner yielded Mac UI and held deployments/Update. Parent found Developer Mode already selected,
+     fresh saved-config MCP handshake works but live Blender Check Again fails; restarting Counterpart through
+     its own Quit menu before retrying via UI. Quit did not restart the companion; after confirming no active
+     jobs, parent restarted only `com.scantomake.mac.companion` via launchctl. Settings then offered Update Add-on;
+     clicked it, closed Blender's untouched startup scene normally, and Check Again reported Blender set up.
+     AirPods 25 mm + FDM request and Stove FDM request were resent through the actual Send buttons at
+     1793790273706 / 1793790324011; both showed Working, AirPods had real Blender tool activity. Keep app/MCP
+     restarts and updates held until those passes settle. No app replacement, config-file edit or printer start.
+     Installed app still predates #298; sending the FDM request does not prove new MCP prompt consumption.
      Their incoming "releases held" note predates the authorized publications below; the publication receipts and
      revoked hold were sent back directly. The orchestrator must coordinate installed MCP Update with the FDM/MCP
      owner above, so two threads never replace the same live backend.
@@ -218,7 +229,10 @@ remote native probes and the SSH tunnel were removed after verification.
      during that thread's MCP update/acceptance; coordinate the later Mac upgrade explicitly.
    - **Installed updater obstacle:** the hand-copied Bambu build already reports 1.1.52, so the
      version-only comparison hides Update for genuine npm 1.1.52. MCP owner presented metadata
-     relabel / new npm version / updater change options to David; his choice is pending.
+     relabel / new npm version / updater change options. The owners now plan annotation releases
+     Bambu 1.1.53 / generic 1.2.27, then the visible Update action; no duplicate release from this thread.
+     MCP owner checked Settings: Developer Mode was already selected; saved credentials returned a fresh
+     status at 10:37:36Z on Nov 4. No route change was needed; actual released control acceptance remains open.
      No metadata or project state was changed by this release thread. The 05:49 project has an
      uncertain print record; the updater checks app `state === printing`, print gate and live
      printer state. Resolve through the app, never manufacture an idle state in object.json.
@@ -273,11 +287,15 @@ remote native probes and the SSH tunnel were removed after verification.
      agents-136 at `~/scan-to-make-work/linux-desktop/artifacts/`. Software-rendered XFCE :93 is not physical
      desktop/GPU acceptance. Packaging materializes all npm directory links and supplies relocatable npm/npx.
      The initial missing-module and relative-Node setup errors are fixed in that installed build.
-     Parent is fixing the remaining first-run phantom Bambu destination: retain the generated config for
+     Parent implemented the first-run phantom Bambu destination fix at `40bdf46`: retain the generated config for
      Download/Update, hide it from printer choices only while unchanged and empty. No custom SSH route is hidden.
      Rebuild from the integrated head, including the final Avahi decoding fix, before the next UI acceptance.
+     Parent also found stable-path .deb upgrades do not signal a changed runtime to setup; Repair can leave the
+     old companion alive. This needs a BUILD-ID-aware upgrade fix and visible installed-app verification.
      Host engineering evidence: 33 real-process checks; official CI passed at `2f6b7df` (not the final integrated
-     head), focused Avahi checks passed at `b304ec1`. Desktop checks: 8 frontend, 12 Rust, 2 packaging checks;
+     head), focused Avahi checks passed at `b304ec1`. Integrated official CI at `40bdf46` passed contracts
+     55/55, printer-handoff 108/113 (5 skipped), companion 801/802 (1 skipped), and all six Python tool suites.
+     Log: agents-136 `/var/tmp/stm-ci-40bdf460e-3106419.log`. This does not verify the next rebuilt app. Desktop checks: 8 frontend, 12 Rust, 2 packaging checks;
      both extracted formats passed 60 export imports and five dependency checks. These are not app acceptance.
      Host-owned disposable account `stm-hosttest`, test packages and build cache were removed. Remaining owned
      scratch on agents-173 was retained when the cleanup guard rejected recursive deletion; do not bypass it.

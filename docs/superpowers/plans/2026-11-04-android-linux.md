@@ -68,22 +68,22 @@ State uses XDG data directories; socket uses a private `counterpart` directory u
 
 ## Task 2: Linux host and portable companion
 
-- [ ] Implement the host CLI and resource layout above in `tools/linux-host/` with exact saved provider binding and cancellation parity to `apps/mac/App/Runtime.swift` and `AgentKit/ModelAccess.swift`.
-- [ ] Add Linux Bonjour advertising/discovery (Avahi) in `services/companion/src/bonjour.ts` and `printing/discovery.ts`, preserving macOS paths and SSDP.
+- [x] Implement the host CLI and resource layout above in `tools/linux-host/` with exact saved provider binding and cancellation parity to `apps/mac/App/Runtime.swift` and `AgentKit/ModelAccess.swift`.
+- [x] Add Linux Bonjour advertising/discovery (Avahi) in `services/companion/src/bonjour.ts` and `printing/discovery.ts`, preserving macOS paths and SSDP.
 - [ ] Qualify CLI lookup/Blender paths, host name and unavailable Apple capabilities. Preserve existing response fields; add platform metadata only compatibly.
-- [ ] Package bundled Node/compiled companion/shared starters and user service; update Linux MCP defaults to npm latest without vendoring MCP dist.
-- [ ] Run focused real-process engineering checks for setup idempotency, missing/locked credentials, endpoint binding and child cancellation. Do not claim UI acceptance from these.
-- [ ] Commit and push; return exact helper contract, artifacts and limitations for parent integration.
+- [x] Package bundled Node/compiled companion/shared starters and user service; update Linux MCP defaults to npm latest without vendoring MCP dist.
+- [x] Run focused real-process engineering checks for setup idempotency, missing/locked credentials, endpoint binding and child cancellation. Do not claim UI acceptance from these.
+- [x] Commit and push; return exact helper contract, artifacts and limitations for parent integration.
 
 ## Task 3: Linux desktop UI
 
-- [ ] Build Tauri native socket bridge with method allowlist, request IDs, size/deadline limits, no mutation replay and independent confirmation requests.
+- [x] Build Tauri native socket bridge with method allowlist, request IDs, size/deadline limits, no mutation replay and independent confirmation requests.
 - [ ] Build a first runnable slice: setup → workspace → real artifact preview/orbit → project conversation/Ask for changes. Qualify WebKitGTK early and record rendering/device details.
 - [ ] Complete Home/search, three starters, project/plate views, questions, multiple originals, camera, estimates, filaments, layer pauses, Pause/Resume/Stop and refusal/recovery UI.
 - [ ] Complete settings: model choices, native credential storage, printers/MCP Download/Update/routes, QR/nearby pairing, devices and supported general preferences.
 - [ ] Native dialogs/opening tools, safe scoped artifact reads, accessibility, keyboard operation, resizing, close-window behavior and resource cleanup. Preserve jobs outside the window.
-- [ ] Produce `.deb` and AppImage packaging configuration and build on Linux with Task 2 payload. Verify actual package installation/UI separately from fixture checks.
-- [ ] Commit/push; return actual screenshots and resource measurements, clearly identifying any unqualified surfaces.
+- [x] Produce `.deb` and AppImage packaging configuration and build on Linux with Task 2 payload. Verify actual package installation/UI separately from fixture checks.
+- [x] Commit/push; return actual screenshots and resource measurements, clearly identifying any unqualified surfaces.
 
 ## Task 4: Portable reconstruction and scale
 
