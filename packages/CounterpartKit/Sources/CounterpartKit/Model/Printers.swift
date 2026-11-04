@@ -185,11 +185,62 @@ public struct PrinterFilament: Codable, Identifiable, Equatable, Hashable, Senda
         return text.isEmpty ? material : text
     }
 
+    /// This tray as the companion takes it in `filament`/`filaments` (the same identity it reported).
+    var jsonObject: [String: Any] {
+        ["slot": slot, "colour": colour, "material": material, "name": name,
+         "filamentId": filamentId, "destinationId": destinationId]
+    }
+
     /// Red, green, blue in 0…1, from `colour`.
     public var rgb: (red: Double, green: Double, blue: Double) {
         let hex = colour.hasPrefix("#") ? String(colour.dropFirst()) : colour
         let value = Int(hex.prefix(6), radix: 16) ?? 0
         return (Double((value >> 16) & 255) / 255, Double((value >> 8) & 255) / 255, Double(value & 255) / 255)
+    }
+}
+
+/// One filament of a multi-part model, with the spool the Mac suggests for it
+/// (`GET /v1/objects/<id>/colour-mapping`; the same shape the Mac app reads over its control socket).
+public struct ModelColourFilament: Codable, Identifiable, Equatable, Hashable, Sendable {
+    /// 1-based project filament, as the 3MF numbers them.
+    public var index: Int
+    public var name: String?
+    /// The colour this part belongs in, `#RRGGBB`, when the model or its design pass says one.
+    public var colour: String?
+    public var material: String?
+    /// The suggested spool's absolute slot; nil when nothing is loaded.
+    public var slot: Int?
+    /// How far the suggested spool's colour is from `colour` (0 exact); nil when the colour is unknown.
+    public var distance: Double?
+    public var materialMismatch: Bool?
+    /// No colour was known: the suggestion is only a starting point.
+    public var guessed: Bool?
+    public var id: Int { index }
+    public init(index: Int, name: String? = nil, colour: String? = nil, material: String? = nil, slot: Int? = nil,
+                distance: Double? = nil, materialMismatch: Bool? = nil, guessed: Bool? = nil) {
+        self.index = index; self.name = name; self.colour = colour; self.material = material
+        self.slot = slot; self.distance = distance; self.materialMismatch = materialMismatch; self.guessed = guessed
+    }
+}
+
+/// A multi-part model's filaments and the printer's loaded spools: which spool each colour prints from.
+public struct ColourMapping: Codable, Equatable, Sendable {
+    public var filaments: [ModelColourFilament]
+    public var trays: [PrinterFilament]
+    /// The model version these rows describe; sent back with Print so a redesign can't inherit old choices.
+    public var modelVersion: String?
+    public init(filaments: [ModelColourFilament], trays: [PrinterFilament], modelVersion: String? = nil) {
+        self.filaments = filaments; self.trays = trays; self.modelVersion = modelVersion
+    }
+    /// The suggested spool for each filament (filament index → slot): the sheet's starting choices.
+    public var suggestedSlots: [Int: Int] {
+        Dictionary(uniqueKeysWithValues: filaments.compactMap { filament in filament.slot.map { (filament.index, $0) } })
+    }
+    /// The chosen spools in filament order, when every colour has one: what Print and Estimate send.
+    public func spools(slots: [Int: Int]) -> [PrinterFilament]? {
+        guard !filaments.isEmpty else { return nil }
+        let choices = filaments.compactMap { filament in trays.first { $0.slot == slots[filament.index] } }
+        return choices.count == filaments.count ? choices : nil
     }
 }
 
@@ -220,8 +271,7 @@ public enum PrintColour: Equatable, Sendable {
 
     var json: (key: String, value: Any) {
         switch self {
-        case .tray(let f): ("filament", ["slot": f.slot, "colour": f.colour, "material": f.material, "name": f.name,
-                                         "filamentId": f.filamentId, "destinationId": f.destinationId] as [String: Any])
+        case .tray(let f): ("filament", f.jsonObject)
         case .auto: ("colour", ["auto": true])
         case .external: ("colour", ["external": true])
         case .material(let m): ("colour", ["material": m])
@@ -243,10 +293,15 @@ public struct PrintChoice: Equatable, Sendable {
     /// The layers the printer stops before (the slicer's "Add pause", for magnets or nuts). Empty: no pause, and
     /// no key, so the body stays one every companion accepts.
     public var pauseBeforeLayers: [Int]
+    /// A multi-part 3MF: the spool chosen for each of the model's filaments, in filament order. Sent instead
+    /// of `colour` (never both), with the model version those choices were made against.
+    public var filaments: [PrinterFilament]
+    public var filamentsModelVersion: String?
     public init(colour: PrintColour?, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil,
-                pauseBeforeLayers: [Int] = []) {
+                pauseBeforeLayers: [Int] = [], filaments: [PrinterFilament] = [], filamentsModelVersion: String? = nil) {
         self.colour = colour; self.quality = quality; self.strength = strength; self.checked = checked; self.copies = copies.map { max(1, $0) }
         self.pauseBeforeLayers = Array(Array(Set(pauseBeforeLayers.filter { $0 >= 2 })).sorted().prefix(Self.maxPauses))
+        self.filaments = filaments; self.filamentsModelVersion = filamentsModelVersion
     }
     public init(filament: PrinterFilament, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil) {
         self.init(colour: .tray(filament), quality: quality, strength: strength, checked: checked, copies: copies)
@@ -258,7 +313,10 @@ public struct PrintChoice: Equatable, Sendable {
     /// chosen tray goes as `filament`, so a plain print is the body every companion accepts.
     public var body: [String: Any] {
         var json: [String: Any] = ["checked": checked]
-        if let colour { json[colour.json.key] = colour.json.value }
+        if !filaments.isEmpty {
+            json["filaments"] = filaments.map(\.jsonObject)
+            if let filamentsModelVersion { json["filamentsModelVersion"] = filamentsModelVersion }
+        } else if let colour { json[colour.json.key] = colour.json.value }
         if quality != .standard { json["quality"] = quality.rawValue }
         if strength != .standard { json["strength"] = strength.rawValue }
         // Only a number you chose; otherwise the printer profile's count applies.

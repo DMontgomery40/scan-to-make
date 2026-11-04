@@ -24,6 +24,7 @@ typealias MacError = CompanionError
 
     func printers() async throws -> PrinterCatalog { try await client.printers() }
     func filaments(_ id: String) async throws -> [PrinterFilament] { try await client.filaments(id) }
+    func colourMapping(_ id: String) async throws -> ColourMapping { try await client.colourMapping(id) }
     func passActivity(_ id: String, index: Int) async throws -> [StmObject.Activity] { try await client.passActivity(id, index: index) }
     func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { try await client.selectPrinter(id, destinationId: destinationId) }
     func list() async throws -> [StmObject] { try await client.list() }

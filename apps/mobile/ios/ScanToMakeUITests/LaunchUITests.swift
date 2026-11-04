@@ -74,6 +74,18 @@ final class ProjectScreensUITests: XCTestCase {
         app.buttons["print"].tap()
         XCTAssertTrue(app.staticTexts["Plate 2"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["print-now"].exists)
+        // A multi-colour model picks a loaded spool per part colour on the phone, nearest colour preselected.
+        XCTAssertTrue(app.staticTexts["Colors"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["body"].exists)
+        XCTAssertTrue(app.staticTexts["letters"].exists)
+        XCTAssertTrue(app.staticTexts["Closest colour loaded."].exists, "the loose yellow match is said out loud")
+        let lettersSpool = app.buttons["Spool for letters"]
+        XCTAssertTrue(lettersSpool.exists)
+        XCTAssertEqual(lettersSpool.value as? String, "A2 · PLA Yellow")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Open Counterpart on your Mac")).firstMatch.exists,
+                       "no trip to the Mac to choose a spool for a colour")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["print-now"])], timeout: 10), .completed,
+                       "every colour starts on its nearest loaded spool")
     }
 
     func testAReadyProjectOffersPrintAndChanges() {
