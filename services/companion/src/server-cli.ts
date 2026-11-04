@@ -212,7 +212,9 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
     }});
   await objects.resume();
 }
-if(mcpUpdates){if(!printerCatalog)await mcpUpdates.applyOverrides();mcpUpdates.start();}
+// The objects setup applies saved MCP overrides itself; otherwise apply them here, so every session (the phone's and
+// `/v1/mcp`'s) starts the version an Update chose.
+if(mcpUpdates){if(!objects)await mcpUpdates.applyOverrides();mcpUpdates.start();}
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
  createModelSizeRunner(async()=>{const running=runningHandoff();return running?.backend==='bambu-printer-mcp'?running.process:installedBambuProcess();}));
 // The port variable keeps its original name so existing operator setups still start.
@@ -246,8 +248,17 @@ const server = await startCompanionServer({
   ...(printHandoff ? {remoteMcp: {
     bundleRoot: handoffDirectory!,
     admit: (id: string) => printGate.hold(id),
-    destinations: () => new Map([...(printerDestinations ?? new Map([['current', printHandoff]]))].flatMap(([id, services]) => services.runner.session
-      ? [[id, {session: services.runner.session, relay: services.relay}] as const] : [])),
+    destinations: () => {
+      const services = new Map(printerDestinations ?? []);
+      // `/v1/mcp` is the Mac's own printer even when a saved Printer MCP choice made another profile its winner
+      // (the catalog then leaves `current` out): the winner's services, else the phone handoff's own.
+      if (!services.has('current')) {
+        const winner = printerCatalog?.canonical('current');
+        services.set('current', (winner ? services.get(winner) : undefined) ?? printHandoff);
+      }
+      return new Map([...services].flatMap(([id, entry]) => entry.runner.session
+        ? [[id, {session: entry.runner.session, relay: entry.relay}] as const] : []));
+    },
   }} : {}),
   ...(objects ? {objects} : {}),
   ...(eventLog ? {events: eventLog} : {}),
