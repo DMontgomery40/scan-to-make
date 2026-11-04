@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {X509Certificate} from 'node:crypto';
 import {createServer} from 'node:net';
 import {request} from 'node:https';
-import {authority,bindable,discoverAddresses,localHostName,pairingOrigins} from '../dist/lan-addresses.js';
+import {authority,bindable,computerName,discoverAddresses,localHostName,macDisplayName,pairingOrigins} from '../dist/lan-addresses.js';
 import {certificatePublicKeySha256} from '../dist/lan-transport.js';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
@@ -32,7 +32,28 @@ test('addresses are chosen by interface type: wired and Wi-Fi LANs, and Tailscal
  assert.deepEqual(found,{lan:['192.168.68.123','192.168.68.205','10.0.0.5','192.168.1.9'],tailscale:['100.90.1.1','100.101.102.103']});
  for(const a of ['0.0.0.0','::','fd7a:115c:a1e0::1','mac.local',''])assert.equal(bindable(a),false,a);
  for(const a of ['192.168.68.123','10.0.0.5','100.101.102.103'])assert.equal(bindable(a),true,a);
- if(process.platform!=='darwin')assert.equal(localHostName(),undefined);
+ assert.equal(localHostName('win32'),undefined);
+});
+
+test('host names on Linux: Avahi\'s own .local name over D-Bus and the pretty hostname, with no guess when either is absent', () => {
+ const calls=[];
+ const avahi=reply=>(command,args)=>{calls.push([command,...args]);return reply;};
+ assert.equal(localHostName('linux',avahi('s "workshop-pc.local"\n')),'workshop-pc.local');
+ assert.deepEqual(calls[0],['/usr/bin/busctl','--system','call','org.freedesktop.Avahi','/','org.freedesktop.Avahi.Server','GetHostNameFqdn']);
+ assert.equal(localHostName('linux',avahi(undefined)),undefined,'no Avahi daemon: no .local name');
+ assert.equal(localHostName('linux',avahi('s "bad name.local"')),undefined);
+ assert.equal(localHostName('linux',avahi('s "host.example.com"')),undefined,'only an mDNS name');
+ assert.equal(localHostName('win32',avahi('s "x.local"')),undefined);
+ const machineInfo=text=>path=>path==='/etc/machine-info'?text:undefined;
+ const none=()=>assert.fail('no command on Linux');
+ assert.equal(computerName('linux',none,machineInfo('ICON_NAME=computer\nPRETTY_HOSTNAME="David\'s Workshop PC"\n')),"David's Workshop PC");
+ assert.equal(computerName('linux',none,machineInfo('PRETTY_HOSTNAME=Bench\n')),'Bench');
+ assert.equal(computerName('linux',none,machineInfo(undefined)),undefined);
+ assert.equal(macDisplayName('linux',none,machineInfo(undefined),'workshop-pc'),'workshop-pc','the host name when no pretty name is set');
+ assert.equal(macDisplayName('linux',none,machineInfo('PRETTY_HOSTNAME="Bench"'),'workshop-pc'),'Bench');
+ // macOS keeps scutil.
+ assert.equal(computerName('darwin',(command,args)=>command==='/usr/sbin/scutil'&&args[1]==='ComputerName'?'Mac mini\n':undefined),'Mac mini');
+ assert.equal(localHostName('darwin',(command,args)=>args[1]==='LocalHostName'?'Davids-Mac-mini\n':undefined),'Davids-Mac-mini.local');
 });
 
 test('v2 origins: the configured address first, then other LANs, the .local name and Tailscale, at most eight', () => {

@@ -250,3 +250,10 @@ test('status.get names the Mac as people know it ("Mac mini"), as /healthz does'
   const f=await fixture(t,{name:'Mac mini'});
   assert.equal((await f.call('status.get')).result.name,'Mac mini');
 });
+
+test('status.get names the host platform for desktop clients, as an added field', async () => {
+  const {hostPlatform} = await import('../dist/local-control-services.js');
+  assert.equal(hostPlatform('darwin'), 'macos');
+  assert.equal(hostPlatform('linux'), 'linux');
+  assert.equal(hostPlatform('win32'), 'other');
+});

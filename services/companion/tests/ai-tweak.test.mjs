@@ -5,7 +5,7 @@ import {chmod,mkdir,mkdtemp,readFile,readdir,rm,stat,writeFile} from 'node:fs/pr
 import {tmpdir,userInfo} from 'node:os';
 import {join} from 'node:path';
 import {promisify} from 'node:util';
-import {AI_TWEAK_PROMPT,aiTweakInternals,checkModelAccess,claudeSignedIn,modelAccessFromEnv,runAiTweak} from '../dist/ai-tweak.js';
+import {AI_TWEAK_PROMPT,aiTweakInternals,checkModelAccess,claudeSignedIn,defaultShell,modelAccessFromEnv,runAiTweak} from '../dist/ai-tweak.js';
 import {findExecutable,loginShellPath,resolveOptions} from '../dist/ai-tweak-cli.js';
 
 const run=promisify(execFile);
@@ -417,4 +417,11 @@ test('ai-tweak-cli run --pick --export is the whole AI step of a cleanup job (KA
  assert.deepEqual((await readFile(join(exported,'corrected.obj'),'utf8')).split('\n').filter(l=>l.startsWith('v ')),['v 0 0 0','v 1000 0 0','v 0 1000 0','v 0 0 1000']);
  assert.deepEqual(Object.keys(report.outputs).sort(),['corrected.obj','corrected.stl','mesh.mtl','mesh_basecolor_0.png']);
  assert.equal(report.status,'complete');
+});
+
+test('an agent with no SHELL in its environment gets one that exists: zsh on macOS, the account shell or bash on Linux', () => {
+  assert.equal(defaultShell('darwin', () => '/usr/local/bin/fish', () => false), '/bin/zsh');
+  assert.equal(defaultShell('linux', () => '/usr/bin/fish', path => path === '/usr/bin/fish'), '/usr/bin/fish');
+  assert.equal(defaultShell('linux', () => '/bin/zsh', path => path === '/bin/bash'), '/bin/bash', 'an account shell that is not installed is skipped');
+  assert.equal(defaultShell('linux', () => undefined, () => false), '/bin/sh');
 });

@@ -257,8 +257,8 @@ function fakeDnsSd() {
 }
 const tick = (ms = 20) => new Promise(r => setTimeout(r, ms));
 
-test('the advert: dns-sd -R on macOS only, re-registered after a refusal or exit, and withdrawn on close', async () => {
-  assert.equal(advertise({name: 'Mac', port: 9077, txt: {}, platform: 'linux', spawn: () => assert.fail('spawned')}), undefined);
+test('the advert: dns-sd -R on macOS, re-registered after a refusal or exit, and withdrawn on close', async () => {
+  assert.equal(advertise({name: 'Mac', port: 9077, txt: {}, platform: 'win32', spawn: () => assert.fail('spawned')}), undefined);
   const dns = fakeDnsSd();
   const advert = advertise({name: "David's Mac mini", port: 9077, txt: {v: '1', k: 'ab'.repeat(32)}, platform: 'darwin', spawn: dns.spawn, retryMs: 10});
   assert.equal(dns.children.length, 1);
@@ -283,6 +283,35 @@ test('the advert: dns-sd -R on macOS only, re-registered after a refusal or exit
   assert.deepEqual(dns.children[3].signals, ['SIGTERM']);
   await tick(60);
   assert.equal(dns.children.length, 4, 'nothing restarts after close');
+});
+
+test('the advert on Linux: avahi-publish -s through the Avahi daemon, its stderr read, re-published after it exits, withdrawn on close', async () => {
+  const children = [];
+  const spawn = (command, args, options) => {
+    const child = new EventEmitter();
+    Object.assign(child, {command, args, options, stderr: new PassThrough(), exitCode: null, signalCode: null, signals: []});
+    child.kill = signal => { child.signals.push(signal); if (child.exitCode === null && child.signalCode === null) setImmediate(() => { child.signalCode = signal; child.emit('exit', null, signal); }); return true; };
+    children.push(child);
+    return child;
+  };
+  const advert = advertise({name: 'Workshop PC', port: 9077, txt: {v: '1', k: 'cd'.repeat(32)}, platform: 'linux', spawn, retryMs: 10});
+  assert.deepEqual([children[0].command, children[0].args, children[0].options.stdio],
+    ['/usr/bin/avahi-publish', ['-s', 'Workshop PC', '_scantomake._tcp', '9077', 'v=1', `k=${'cd'.repeat(32)}`], ['ignore', 'ignore', 'pipe']]);
+  children[0].stderr.write("Established under name 'Workshop PC'\n");
+  await tick();
+  assert.deepEqual(children[0].signals, [], 'a live registration is left alone');
+  // No daemon yet, or Avahi dropped it: avahi-publish exits by itself and is started again.
+  children[0].stderr.write('Failed to create client object: Daemon not running\n');
+  children[0].exitCode = 1; children[0].emit('exit', 1, null);
+  await tick(60);
+  assert.equal(children.length, 2);
+  children[1].emit('error', new Error('ENOENT'));
+  await tick(60);
+  assert.equal(children.length, 3, 'avahi-utils missing is retried, never fatal');
+  await advert.close();
+  assert.deepEqual(children[2].signals, ['SIGTERM']);
+  await tick(60);
+  assert.equal(children.length, 3, 'nothing restarts after close');
 });
 
 test('instance names fit one DNS label without splitting a character', () => {

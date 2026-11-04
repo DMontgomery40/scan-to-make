@@ -422,7 +422,38 @@ test('discovery: a Bambu SSDP announcement from the printer itself, and dns-sd S
   };
   assert.deepEqual(await discoverBonjour(40, {spawn, platform: 'darwin'}), [{type: '_moonraker._tcp', name: 'Voron', host: 'voron.local', port: '7125'}]);
   assert.deepEqual(spawned.map(args => args[2]), ['_octoprint._tcp', '_moonraker._tcp', '_prusalink._tcp']);
-  assert.deepEqual(await discoverBonjour(40, {spawn, platform: 'linux'}), []);
+  assert.deepEqual(await discoverBonjour(40, {spawn, platform: 'win32'}), []);
+});
+
+test('Linux printer discovery browses each Bonjour type with avahi-browse and keeps resolved IPv4 rows once', async () => {
+  const {parseAvahiLine, discoverBonjour} = await import('../dist/printing/discovery.js');
+  const {EventEmitter} = await import('node:events');
+  const {PassThrough} = await import('node:stream');
+  // Real avahi-browse --parsable --resolve rows: browse (+), resolved (=) per interface and family.
+  assert.deepEqual(parseAvahiLine('=;wlp2s0;IPv4;OctoPrint\\032instance\\032on\\032octopi;_octoprint._tcp;local;octopi.local;192.168.1.20;80;"path=/" "version=1.10.2"', '_octoprint._tcp'),
+    {type: '_octoprint._tcp', name: 'OctoPrint instance on octopi', host: 'octopi.local', port: '80'});
+  assert.equal(parseAvahiLine('+;wlp2s0;IPv4;OctoPrint;_octoprint._tcp;local', '_octoprint._tcp'), undefined, 'unresolved');
+  assert.equal(parseAvahiLine('=;wlp2s0;IPv6;OctoPrint;_octoprint._tcp;local;octopi.local;fe80::1;80;', '_octoprint._tcp'), undefined, 'IPv4 rows only');
+  assert.equal(parseAvahiLine('=;wlp2s0;IPv4;Voron;_moonraker._tcp;local;voron.local;192.168.1.30;7125;', '_octoprint._tcp'), undefined, 'another type');
+  assert.equal(parseAvahiLine('=;wlp2s0;IPv4;Bad;_octoprint._tcp;local;bad host;192.168.1.31;80;', '_octoprint._tcp'), undefined, 'invalid host');
+  assert.equal(parseAvahiLine('=;wlp2s0;IPv4;Bad;_octoprint._tcp;local;bad.local;192.168.1.31;70000;', '_octoprint._tcp'), undefined, 'invalid port');
+  const spawned = [];
+  const spawn = (command, args, options) => {
+    const child = Object.assign(new EventEmitter(), {stdout: new PassThrough(), kill: () => {}});
+    spawned.push([command, args, options.stdio]);
+    setTimeout(() => {
+      if (args.at(-1) === '_moonraker._tcp') {
+        child.stdout.write('+;eth0;IPv4;Voron;_moonraker._tcp;local\n=;eth0;IPv4;Voron;_moonraker._tcp;local;voron.local;192.168.1.30;7125;\n=;wlan0;IPv4;Voron;_moonraker._tcp;local;voron.local;192.168.1.30;7125;\n');
+      }
+      child.stdout.end(); child.emit('exit', 0);
+    }, 5);
+    return child;
+  };
+  const started = Date.now();
+  assert.deepEqual(await discoverBonjour(5000, {spawn, platform: 'linux'}), [{type: '_moonraker._tcp', name: 'Voron', host: 'voron.local', port: '7125'}]);
+  assert.ok(Date.now() - started < 2000, 'avahi-browse --terminate ends the scan before the deadline');
+  assert.deepEqual(spawned.map(([command, args]) => [command, ...args]), ['_octoprint._tcp', '_moonraker._tcp', '_prusalink._tcp'].map(type =>
+    ['/usr/bin/avahi-browse', '--parsable', '--resolve', '--terminate', '--no-db-lookup', type]));
 });
 
 test('a found install missing the model its MCP needs: Counterpart fills only BAMBU_MODEL (SSDP, else the serial), appends it, records it, and Complete Settings fixes one already added', async t => {
