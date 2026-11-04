@@ -352,7 +352,8 @@ private struct DeviceRow: View {
 struct PrintersSettings: View {
     @ObservedObject var objects: ObjectsModel
     @ObservedObject private var updates = PrinterUpdates.shared
-    /// Only for a companion without `printers.updateMcp`: the package manager's own command, run here.
+    @ObservedObject private var setup = PrinterSetupModel.shared
+    @State private var adding = false
 
     private var printers: [PrinterDestination] { objects.printerCatalog?.destinations ?? [] }
 
@@ -377,25 +378,56 @@ struct PrintersSettings: View {
                         }
                         // Only bambu-printer-mcp has a choice of connection (mcp-3D-printer-server has no Bambu Cloud route).
                         if printer.mcpName == "bambu-printer-mcp" { PrintRoutePicker(destinationId:printer.id).padding(.leading, 38) }
+                        PrinterMcpPicker(printer:printer) { Task { await objects.refresh() } }.padding(.leading, 38)
+                        if printer.origin == "counterpart" {
+                            AddedPrinterActions(printer:printer, models:setup.models(printer.backend)) { Task { await objects.refresh() } }.padding(.leading, 38)
+                        }
                     }
                 }
+                if setup.available {
+                    Button("Add Printer…") { adding = true }
+                }
             } header: { Text("Printers") } footer: {
-                Text("Counterpart reads these from your MCP configs. Add or edit printers there. The connection is the printer MCP’s own setting: changing it here changes it in that MCP.")
+                Text("Counterpart finds printers in your MCP configs, and the ones you add here. The connection is the printer MCP’s own setting: changing it here changes it in that MCP.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Printer MCPs") {
+            Section {
                 ForEach(PrinterMCP.list(printers)) { mcp in
                     MCPRow(mcp:mcp, companionUpdates:objects.capabilities?.mcpUpdates == true,
                            status:mcp.mcpId.flatMap { updates.status[$0] },
                            update:{ update(mcp, fresh:false) }, installFresh:{ update(mcp, fresh:true) })
                 }
-                if PrinterMCP.list(printers).isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
+                // Both MCPs, always: one no printer uses yet shows where it is, or Download.
+                ForEach(unusedPackages) { package in
+                    McpPackageRow(package:package, status:updates.status[package.appMcpId], download:{ setup.download(package) })
+                }
+                if PrinterMCP.list(printers).isEmpty && unusedPackages.isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
+            } header: { Text("Printer MCPs") } footer: {
+                if setup.available {
+                    Text("Download installs that MCP for Counterpart only. You need just the one your printer uses.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
         .focusEffectDisabled()
         .frame(height:590)
-        .task { await objects.refresh() }
+        .task { await objects.refresh(); await setup.refresh() }
+        .sheet(isPresented:$adding) {
+            AddPrinterSheet(setup:setup) { Task { await objects.refresh(); await setup.refresh() } }
+        }
+        .onChange(of:updates.status) { _, status in
+            // A download that finished: read the packages (and printers) again.
+            if setup.packages.contains(where: { if case .updated = status[$0.appMcpId] { return true }; return false }) {
+                Task { await setup.refresh(); await objects.refresh() }
+            }
+        }
+    }
+
+    /// The packages with no printer row above: neither MCP is ever missing from the list.
+    private var unusedPackages: [PrinterMcpPackage] {
+        let used = Set(PrinterMCP.list(printers).map { $0.name.lowercased() })
+        return setup.packages.filter { !used.contains($0.package) }
     }
 
     static func readiness(_ state: String?) -> String {
@@ -596,7 +628,7 @@ struct AISettings: View {
                     Image(systemName:"cube.transparent.fill").font(.title2).foregroundStyle(fusion == .notInstalled ? .secondary : Color.filament)
                         .frame(width:40, height:40).glassEffect(.regular, in:.rect(cornerRadius:10))
                     VStack(alignment:.leading, spacing:2) {
-                        Text("Design with Fusion").font(.body.weight(.semibold))
+                        Text("Design with Fusion · Optional").font(.body.weight(.semibold))
                         switch fusion {
                         case .checking: Text("Looking for Fusion…").font(.caption).foregroundStyle(.secondary)
                         case .notInstalled:
@@ -617,8 +649,8 @@ struct AISettings: View {
                         .buttonStyle(.glassProminent).disabled(fusion != .found && fusion != .setUp)
                 }
                 Text(fusion == .notInstalled
-                     ? "New designs use Blender. Install Autodesk Fusion (its personal-use licence is free) and Set Up turns on."
-                     : "Set Up adds the Fusion360MCP add-in to Fusion, and five FUSION_MCP settings next to Blender's in your printer MCP's env file. New designs then use Fusion when it's running.")
+                     ? "Install Autodesk Fusion if you want to use it for new designs. You can also design with Blender."
+                     : "Set Up connects Fusion to Counterpart for new designs and later changes to them.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let fusionProblem { Text(fusionProblem).font(.caption).foregroundStyle(.red) }
                 if let fusionStatus, fusion == .setUp {
@@ -628,9 +660,9 @@ struct AISettings: View {
                 LabeledContent("Make something that fits") {
                     Text(fusion == .notInstalled ? "Blender" : "Fusion, or Blender if Fusion can't start").foregroundStyle(.secondary)
                 }
-                LabeledContent("Copy something") { Text("Blender, always").foregroundStyle(.secondary) }
+                LabeledContent("Clean up a scan") { Text("Blender").foregroundStyle(.secondary) }
             } header: { Text("Design engine") } footer: {
-                Text("Fusion and its licence are yours. Counterpart never ships or requires it. The bridge is fusion360-mcp-server by Faust Machines (MIT).")
+                Text("Blender and Fusion are optional. Printing existing models and reprinting needs neither. Fusion and its licence are yours; its bridge is fusion360-mcp-server by Faust Machines (MIT).")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

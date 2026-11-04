@@ -617,7 +617,8 @@
    "origin": "codex",
    "state": "unknown",
    "mcpId": "mcp-10cc07925221a48f"
-  }
+  },
+  {"id": "counterpart-0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11", "name": "Bambu Lab P1S via mcp-3D-printer-server", "backend": "mcp-3d-printer-server", "model": "p1s", "address": "192.168.1.40", "source": "mcp-profile", "origin": "counterpart", "state": "unknown", "folder": "/Users/someone/mcp-3D-printer-server", "mcps": [{"backend": "mcp-3d-printer-server", "destinationId": "counterpart-0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"}, {"backend": "bambu-printer-mcp", "destinationId": "current"}]}
  ],
  "ask": {
   "id": "5d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6",

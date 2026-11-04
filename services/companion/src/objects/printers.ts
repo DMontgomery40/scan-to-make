@@ -6,6 +6,9 @@ import {basename, delimiter, dirname, isAbsolute, join, resolve} from 'node:path
 import {parseEnv} from 'node:util';
 import {printerHandoffConfigSchema, printerSelectionSchema, type PrinterBackend, type PrinterHandoffConfig, type PrinterMcpProcess} from '@scan-to-make/printer-handoff';
 import {parseToml} from './toml.js';
+import {findBambuRoute, readProfiles, readsRouteSettings, settingsGap, type RouteSource} from '../printing/profiles.js';
+import {hostEnvironment, resolveMcpInstall} from '../printing/mcp-install.js';
+import {modelFromSerial} from '../printing/discovery.js';
 
 /** Configured destinations, not claims about live printer connectivity. */
 export interface PrinterDestination {
@@ -17,9 +20,15 @@ export interface PrinterDestination {
   source: 'current' | 'mcp-profile';
   /** The client config it came from. */
   origin?: PrinterOrigin;
+  /** The same printer reached through both MCPs: the profile for each (the listed one first). Settings' Printer MCP picker. */
+  mcps?: {backend: PrinterBackend; destinationId: string}[];
+  /** A printer added in Counterpart: the folder its MCP runs in, whose `.env` holds its settings. */
+  folder?: string;
+  /** A printer added in Counterpart whose `.env` lacks settings its MCP needs (names only), and what Complete Settings would add. */
+  incomplete?: {missing: string[]; fill: Record<string, string>};
 }
 
-export type PrinterOrigin = 'printer-handoff' | 'claude-code' | 'claude-desktop' | 'cursor' | 'codemode' | 'codex';
+export type PrinterOrigin = 'printer-handoff' | 'counterpart' | 'claude-code' | 'claude-desktop' | 'cursor' | 'codemode' | 'codex';
 
 export interface PrinterCatalog {
   defaultDestinationId: string;
@@ -31,6 +40,12 @@ export interface PrinterCatalog {
    * destination that won over it for the same printer. Undefined for an unknown id.
    */
   canonical(id: string): string | undefined;
+  /** Every profile found, listed or merged into another for the same printer (installs, Settings). */
+  entries(): {id: string; backend: PrinterBackend; config: PrinterHandoffConfig}[];
+  /** The key a per-printer MCP choice is stored under (`serial:…`, else a host key). */
+  choiceKey(id: string): string | undefined;
+  /** Reads every source again, in place: everything holding this catalog sees the new list. */
+  reload(): Promise<void>;
 }
 
 export interface PrinterCatalogOptions {
@@ -39,6 +54,8 @@ export interface PrinterCatalogOptions {
   sourcePaths?: string[];
   /** Metadata source only. Does not add or override the MCP process environment. */
   currentEnvPath?: string;
+  /** Counterpart's own list (`<appPrinters>/profiles.json`): printers added in the app, and per-printer MCP choices. */
+  profilesPath?: string;
 }
 
 type RecordValue = Record<string, unknown>;
@@ -185,6 +202,10 @@ interface Candidate {
   bambuKind: boolean;
   serial?: string;
   config: PrinterHandoffConfig;
+  folder?: string;
+  incomplete?: {missing: string[]; fill: Record<string, string>};
+  /** A Counterpart profile's recorded model. */
+  profileModel?: string;
 }
 
 async function readDocument(path: string): Promise<RecordValue | undefined> {
@@ -200,7 +221,10 @@ async function readDocument(path: string): Promise<RecordValue | undefined> {
  * mcp-3D-printer-server. Within one MCP, the Mac app's own config wins, then
  * the first source found.
  */
-function winners(candidates: Candidate[]): Map<Candidate, Candidate> {
+/** The printer's own hardware in the Mac app's selection, the same whichever MCP reaches it. */
+const HARDWARE = ['nozzleType', 'nozzleDiameterMm', 'bedType'] as const;
+
+function winners(candidates: Candidate[], choices: Record<string, PrinterBackend> = {}): {chosen: Map<Candidate, Candidate>; groups: Candidate[][]} {
   const parent = candidates.map((_, index) => index);
   const find = (index: number): number => parent[index] === index ? index : (parent[index] = find(parent[index]!));
   // A known serial identifies the printer: a shared address never merges two different serials
@@ -222,16 +246,34 @@ function winners(candidates: Candidate[]): Map<Candidate, Candidate> {
   const result = new Map<Candidate, Candidate>();
   for (const group of groups.values()) {
     const bambu = group.some(candidate => candidate.bambuKind) && group.some(candidate => candidate.backend === 'bambu-printer-mcp');
-    const eligible = group.filter(candidate => candidate.backend === (bambu ? 'bambu-printer-mcp' : 'mcp-3d-printer-server'));
+    // The person's own choice for this printer (Settings → Printers → Printer MCP) outranks the rule.
+    const keys = new Set(group.flatMap(candidate => candidate.keys));
+    const choice = [...keys].map(key => choices[key]).find(backend => backend && group.some(candidate => candidate.backend === backend));
+    const eligible = group.filter(candidate => candidate.backend === (choice ?? (bambu ? 'bambu-printer-mcp' : 'mcp-3d-printer-server')));
     const pool = eligible.length ? eligible : group;
     const winner = pool.find(candidate => candidate.source === 'current') ?? pool[0]!;
     for (const candidate of group) result.set(candidate, winner);
   }
-  return result;
+  return {chosen: result, groups: [...groups.values()]};
 }
 
 /** Reads configured profiles only. Does not start MCP processes or contact printers. */
 export async function loadPrinterCatalog(current: PrinterHandoffConfig, options: PrinterCatalogOptions = {}): Promise<PrinterCatalog> {
+  let state = await buildCatalog(current, options);
+  const catalog: PrinterCatalog = {defaultDestinationId: state.defaultDestinationId, destinations: state.destinations,
+    resolve(id) { const config = state.configs.get(id); return config ? structuredClone(config) : undefined; },
+    canonical(id) { return state.canonical.get(id); },
+    entries() { return state.candidates.map(candidate => ({id: candidate.id, backend: candidate.backend, config: structuredClone(candidate.config)})); },
+    choiceKey(id) { return state.choiceKeys.get(id); },
+    async reload() {
+      state = await buildCatalog(current, options);
+      catalog.defaultDestinationId = state.defaultDestinationId;
+      catalog.destinations = state.destinations;
+    }};
+  return catalog;
+}
+
+async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatalogOptions) {
   const home = options.homeDirectory ?? homedir();
   const currentConfig = printerHandoffConfigSchema.parse(structuredClone(current));
   const currentMetadata = await metadata(currentConfig, options.currentEnvPath);
@@ -239,9 +281,25 @@ export async function loadPrinterCatalog(current: PrinterHandoffConfig, options:
     ...(currentMetadata.model ? {model: currentMetadata.model} : {}), ...(currentMetadata.address ? {address: currentMetadata.address} : {}),
     source: 'current', origin: 'printer-handoff', keys: currentMetadata.keys, bambuKind: currentMetadata.bambuKind,
     ...(currentMetadata.serial ? {serial: currentMetadata.serial} : {}), config: currentConfig}];
+  const saved = options.profilesPath ? await readProfiles(options.profilesPath) : undefined;
+  const seenProfiles = new Set<string>();
+  // Printers added in Counterpart come right after the Mac app's own config: within one MCP they win over client configs.
+  for (const profile of saved?.profiles ?? []) {
+    const parsed = printerHandoffConfigSchema.safeParse({backend: profile.backend, process: profile.process});
+    if (!parsed.success) continue;
+    const config = parsed.data;
+    const meta = await metadata(config);
+    if (!meta.address) continue;
+    // The model Counterpart recorded, else the MCP's own: tool calls need it (bambu_model) before the MCP's defaults apply.
+    const model = profile.model ?? meta.model;
+    if (model || meta.printerType) config.selection = {...(model ? {model} : {}), ...(meta.printerType ? {printerType: meta.printerType} : {})};
+    seenProfiles.add(JSON.stringify([profile.backend, profile.process]));
+    candidates.push({id: profile.id, name: profile.name, backend: profile.backend, address: meta.address, ...(model ? {model} : {}),
+      source: 'mcp-profile', origin: 'counterpart', keys: meta.keys, bambuKind: meta.bambuKind, ...(meta.serial ? {serial: meta.serial} : {}),
+      config, folder: profile.process.cwd, ...(profile.model ? {profileModel: profile.model} : {})});
+  }
   const queue = (options.sourcePaths ?? defaultSources(home)).map(path => ({path: expand(path, home, home), origin: undefined as PrinterOrigin | undefined}));
   const visited = new Set<string>();
-  const seenProfiles = new Set<string>();
   while (queue.length && visited.size < 128) {
     const {path, origin: inherited} = queue.shift()!;
     if (visited.has(path)) continue;
@@ -294,14 +352,54 @@ export async function loadPrinterCatalog(current: PrinterHandoffConfig, options:
         ...(meta.serial ? {serial: meta.serial} : {}), config});
     }
   }
-  const chosen = winners(candidates);
+  // What a Counterpart printer's .env lacks, with the authenticated route another config here uses for the same serial.
+  const installEnv = {...hostEnvironment(''), home};
+  const envPaths = (config: PrinterHandoffConfig) => {
+    const via = resolveMcpInstall(config, installEnv).via?.cwd;
+    return [...(config.process.cwd ? [join(config.process.cwd, '.env')] : []), ...(via && isAbsolute(via) ? [join(via, '.env')] : [])];
+  };
+  for (const candidate of candidates) {
+    if (candidate.origin !== 'counterpart' || !candidate.folder) continue;
+    const env = await environment(join(candidate.folder, '.env'));
+    let route: RouteSource | undefined;
+    if (candidate.backend === 'mcp-3d-printer-server' && env.PRINTER_TYPE?.trim().toLowerCase() === 'bambu' && !env.BAMBU_DEFAULT_CONNECTION_MODE?.trim()
+      && await readsRouteSettings(candidate.config.process.args?.find(arg => isAbsolute(arg) && arg.endsWith('.js')))) {
+      const own = join(candidate.folder, '.env');
+      route = await findBambuRoute(env.BAMBU_SERIAL ?? env.BAMBU_PRINTER_SERIAL,
+        candidates.flatMap(other => other === candidate ? [] : envPaths(other.config)).filter(path => path !== own));
+    }
+    const gap = settingsGap(candidate.backend, env, {...(candidate.profileModel ? {model: candidate.profileModel} : {}), modelFromSerial, ...(route ? {route} : {})});
+    if (gap.missing.length || Object.keys(gap.fill).length) candidate.incomplete = {missing: gap.missing, fill: gap.fill};
+  }
+  const {chosen, groups} = winners(candidates, saved?.choices);
   const configs = new Map(candidates.map(candidate => [candidate.id, candidate.config] as const));
   const canonical = new Map(candidates.map(candidate => [candidate.id, chosen.get(candidate)!.id] as const));
+  const choiceKeys = new Map<string, string>();
+  const alternatives = new Map<string, {backend: PrinterBackend; destinationId: string}[]>();
+  for (const group of groups) {
+    // The nozzle and bed belong to the printer, not to an MCP: the same printer through another MCP slices for the
+    // nozzle the Mac app's config names, or that MCP's preset default fails its own nozzle check. A profile's own value stays.
+    const own = group.find(candidate => candidate.source === 'current')?.config.selection;
+    if (own) for (const candidate of group) {
+      if (candidate.source === 'current') continue;
+      const hardware = Object.fromEntries(HARDWARE.flatMap(key => own[key] !== undefined && candidate.config.selection?.[key] === undefined ? [[key, own[key]]] : []));
+      if (Object.keys(hardware).length) candidate.config.selection = {...candidate.config.selection, ...hardware};
+    }
+    const keys = group.flatMap(candidate => candidate.keys);
+    const key = keys.find(item => item.startsWith('serial:')) ?? keys[0];
+    if (key) for (const candidate of group) choiceKeys.set(candidate.id, key);
+    const winner = chosen.get(group[0]!)!;
+    const backends = [...new Set(group.map(candidate => candidate.backend))];
+    if (backends.length < 2) continue;
+    // Each MCP's own pick for this printer, as the rule would make it within that MCP; the listed one first.
+    const pick = (backend: PrinterBackend) => { const pool = group.filter(candidate => candidate.backend === backend); return (pool.find(candidate => candidate.source === 'current') ?? pool[0]!).id; };
+    alternatives.set(winner.id, [winner.backend, ...backends.filter(backend => backend !== winner.backend)]
+      .map(backend => ({backend, destinationId: backend === winner.backend ? winner.id : pick(backend)})));
+  }
   const listed = candidates.filter(candidate => chosen.get(candidate) === candidate);
   const defaultDestinationId = canonical.get('current')!;
   const destinations: PrinterDestination[] = [...listed.filter(item => item.id === defaultDestinationId), ...listed.filter(item => item.id !== defaultDestinationId)]
-    .map(({id, name, backend, model, address, source, origin}) => ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin}));
-  return {defaultDestinationId, destinations,
-    resolve(id) { const config = configs.get(id); return config ? structuredClone(config) : undefined; },
-    canonical(id) { return canonical.get(id); }};
+    .map(({id, name, backend, model, address, source, origin, folder, incomplete}) => ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin,
+      ...(alternatives.has(id) ? {mcps: alternatives.get(id)!} : {}), ...(origin === 'counterpart' && folder ? {folder} : {}), ...(incomplete ? {incomplete} : {})}));
+  return {defaultDestinationId, destinations, configs, canonical, candidates, choiceKeys};
 }

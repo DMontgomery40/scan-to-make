@@ -107,6 +107,10 @@ test('every event type has words within the limits, and the state line matches t
   assert.equal(eventWords('print.milestone', {progress: 25, remainingSec: 3900}, context).body, '1 h 5 min left · Bambu Lab P1S');
   assert.equal(eventWords('print.paused', {problems: [{code: 'x', message: 'AMS slot 1 ran out of filament'}]}, context).body, 'AMS slot 1 ran out of filament');
   assert.equal(eventWords('print.not-started', undefined, context).title, "Bambu Lab P1S didn't start Mic mount");
+  assert.equal(eventWords('print.not-started', undefined, {...context, reason: undefined}).body, 'Nothing was sent twice. Check the printer, then press Print again.');
+  // Refused by the printer service before anything reached the printer (review item 23): its reason, clipped to the schema.
+  assert.equal(eventWords('print.not-started', undefined, {...context, reason: 'Printer nozzle 0 type is unknown or does not match the job.'}).body, 'Printer nozzle 0 type is unknown or does not match the job.');
+  assert.equal(eventWords('print.not-started', undefined, {...context, reason: 'x'.repeat(900)}).body.length, 500);
   assert.deepEqual(objectStatus({state: 'new', photos: []}), {phase: 'draft', text: 'Add photos or a scan', symbol: 'square.and.pencil', tint: 'secondary'});
   assert.equal(objectStatus({state: 'new', capture: ['0001.heic']}).text, 'Draft saved · finish sending to begin');
   assert.equal(objectStatus({state: 'ready', current: {sizeMm: [60.2, 45.1, 21.7]}}).text, 'Ready to print · 60 × 45 × 22 mm');
@@ -365,4 +369,16 @@ test('a project notification preference suppresses the alert without losing its 
   assert.equal(event.type, 'print.done');
   assert.equal(event.notify, 'none');
   assert.equal(log.page(0).events.length, 1);
+});
+
+test('a print refused before it reached the printer is written to the log the phone reads (review item 23): its reason clipped, and the unclear case as a project update', async t => {
+  const {log, path} = await openLog(t);
+  const reason = 'Printer service: Error: Printer nozzle 0 type is unknown or does not match the job. ' + 'x'.repeat(900);
+  const refused = await log.append(draft('print.not-started', {detail: {reason}}));
+  assert.equal(refused.title, "Bambu Lab P1S didn't start Mic mount");
+  assert.equal(refused.body, reason.slice(0, 500));
+  const unclear = await log.append({id: randomUUID(), type: 'project.updated', projectId: PROJECT, data: {keys: ['print']}});
+  assert.deepEqual(unclear.data, {keys: ['print']});
+  const lines = (await readFile(path, 'utf8')).trim().split('\n').map(line => CounterpartEventSchema.parse(JSON.parse(line)));
+  assert.deepEqual(lines.map(event => event.type), ['print.not-started', 'project.updated']);
 });

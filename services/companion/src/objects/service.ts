@@ -463,8 +463,8 @@ export class ObjectService {
     // Metadata reads also come from status/event refreshes with no camera on screen.
     if (this.#deps.printers) return this.#deps.printers.list();
     const catalog = this.#deps.printerCatalog;
-    return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source, origin}) =>
-      ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, ...(origin ? {origin} : {})})) ?? []};
+    return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source, origin, mcps, folder}) =>
+      ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, ...(origin ? {origin} : {}), ...(mcps ? {mcps} : {}), ...(folder ? {folder} : {})})) ?? []};
   }
 
   /** The listed destination an object's choice stands for now (a duplicate resolves to its winner). */
@@ -506,10 +506,23 @@ export class ObjectService {
     const object = await this.get(id), configured = this.#deps.print;
     const destinationId = this.#destinationId(object);
     const services = destinationId ? configured?.destinations?.get(destinationId) : configured?.services;
-    if (!services || services.runner.backend !== 'bambu-printer-mcp' || !services.runner.filaments) throw new InvalidStateError('Filament choices are unavailable for this printer. Open the model in your slicer to choose a material.');
+    // Trays come from any MCP that reports them (counterpart_printer_info `filaments: "ams"`), not from one package.
+    const ams = services?.runner.backend === 'bambu-printer-mcp' || (!!destinationId && this.#deps.printers?.capabilities(destinationId)?.filaments === 'ams');
+    if (!services || !ams || !services.runner.filaments) throw new InvalidStateError('Filament choices are unavailable for this printer. Open the model in your slicer to choose a material.');
     let inventory: unknown;
     try { inventory = await services.runner.filaments(); }
     catch { throw new InvalidStateError('Couldn’t read the printer’s filament. Check its connection and try again.'); }
+    // The counterpart/1 filament contract (mcp-3D-printer-server): {slots: [{id, material, color, name, profile}]}.
+    if (record(inventory) && Array.isArray(inventory.slots)) return inventory.slots.flatMap((slot: unknown): LiveFilament[] => {
+      if (!record(slot) || typeof slot.id !== 'string' || !/^(\d{1,3}|ext)$/.test(slot.id) || typeof slot.material !== 'string' || !slot.material || slot.material.length > 128
+          || typeof slot.color !== 'string' || !/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(slot.color)
+          || typeof slot.profile !== 'string' || !slot.profile.startsWith('/')) return [];
+      const number = slot.id === 'ext' ? 254 : Number(slot.id);
+      if (number > 254) return [];
+      return [{slot:number, colour:slot.color.slice(0,7).toUpperCase(), material:slot.material,
+        filamentId:typeof slot.filamentId === 'string' ? slot.filamentId.slice(0,128) : '', destinationId:destinationId ?? 'default',
+        name:typeof slot.name === 'string' ? slot.name.slice(0,256) : slot.material, profile:slot.profile}];
+    });
     if (!record(inventory) || !Array.isArray(inventory.trays)) throw new InvalidStateError('The printer did not return a filament inventory.');
     return inventory.trays.flatMap((tray: unknown): LiveFilament[] => {
       if (!record(tray) || tray.loaded !== true || !Number.isSafeInteger(tray.slot) || (tray.slot as number) < 0
@@ -889,21 +902,32 @@ export class ObjectService {
       })));
       if (update.phase !== 'accepted') await this.#emit({id: randomUUID(), type: 'print.preparing', ...eventBase, data: {stage: message.replace(/…$/, '')}});
     };
-    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress,
+    // Print Again prints the slice it made last time when nothing that shapes it changed (slice-cache.ts).
+    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')},
       ...(Object.keys(sliced).length ? {slicer: sliced} : {})})
       .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch),
         async error => {
           const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;
           // Once the printer has the job it is printing, whatever went wrong afterwards (as the phone's print route does).
           if (error instanceof DispatchedPrintError || status === 'printed') return this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, undefined);
-          // It may have reached the printer: never send it again by itself.
-          if (status === 'uncertain') return this.#deps.store.update(id, o => ({...o, state: 'failed', printConfirmation: undefined, progress: undefined, failure: error instanceof PrinterMcpError && error.detail ? `Printer service: ${error.detail} Counterpart could not confirm a print start. Check the printer before trying again.` : UNCERTAIN, print: {...o.print!, uncertain: true}}));
+          // It may have reached the printer: never send it again by itself. The phone is told the project changed
+          // (it reads the failure), never that the printer didn't start it.
+          if (status === 'uncertain') {
+            const unclear = await this.#deps.store.update(id, o => ({...o, state: 'failed', printConfirmation: undefined, progress: undefined, failure: error instanceof PrinterMcpError && error.detail ? `Printer service: ${error.detail} Counterpart could not confirm a print start. Check the printer before trying again.` : UNCERTAIN, print: {...o.print!, uncertain: true}}));
+            await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['print']}});
+            return unclear;
+          }
           if (this.#cancelledPrints.has(id)) return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: undefined}));
+          // Refused before anything reached the printer (review item 23): the phone hears it, with the reason.
+          const refused = async (state: 'failed' | 'ready', failure: string) => {
+            const updated = await this.#deps.store.update(id, o => ({...o, state, progress: undefined, printConfirmation: undefined, failure}));
+            await this.#emit({id: randomUUID(), type: 'print.not-started', ...eventBase, detail: {reason: failure}});
+            return updated;
+          };
           if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
-            return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, printConfirmation: undefined, failure: 'Printer confirmation timed out; no print was sent. Press Print to try again.'}));
-          if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported')
-            return this.#deps.store.update(id, o => ({...o, state: 'ready', progress: undefined, printConfirmation: undefined, failure: settingsUnsupported(runner.backend, options)}));
-          return this.#deps.store.update(id, o => ({...o, state: 'failed', progress: undefined, printConfirmation: undefined, failure: error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error)}));
+            return refused('failed', 'Printer confirmation timed out; no print was sent. Press Print to try again.');
+          if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') return refused('ready', settingsUnsupported(runner.backend, options));
+          return refused('failed', error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error));
         })
       .then(o => this.#changed(o))
       .finally(() => {
@@ -1257,7 +1281,7 @@ export class ObjectService {
           const stlPath = join(work, object.current!.model.toLowerCase().endsWith('.3mf') ? 'model.3mf' : 'model.stl');
           await writeFile(stlPath, model);
           const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys(overrides).length ? {slicer: overrides} : {}),
-            signal: AbortSignal.timeout(150_000)});
+            signal: AbortSignal.timeout(150_000), sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')}});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
             ...(settings.layers !== undefined ? {layers: settings.layers} : {}), ...(settings.layerHeightMm !== undefined ? {layerHeightMm: settings.layerHeightMm} : {}),

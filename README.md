@@ -27,6 +27,8 @@ Make`) keep the old name.
 | **Live Activity relay** | A Cloudflare Worker that signs the print Live Activity's pushes with the app's APNs key. | [`services/relay/`](services/relay/) |
 | **Docs site** | counterpart.dtmont.com: the landing page and the Help guide the app links to. | [`site/`](site/) |
 
+**Blender and Autodesk Fusion are optional.** Print an existing model that needs no changes, or reprint a project, without either app. Blender supports scan cleanup and model editing; Fusion supports parametric design and changes. Only workflows that use one of those tools need it installed and set up.
+
 ## Docs
 
 - **Product:** the PRD, [`docs/design/overhaul/PRD.md`](docs/design/overhaul/PRD.md), with a mockup of every screen in
