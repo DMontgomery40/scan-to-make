@@ -13,6 +13,7 @@
 #
 # Usage: tools/linux-host/prepare-payload.sh OUT_DIR   (run on Linux; needs git, curl, tar, xz, cargo)
 set -euo pipefail
+"$(dirname "$0")/../../scripts/trunk_guard.sh" 'the Linux host payload' >/dev/null
 [ "$(uname -s)" = Linux ] || { echo 'Prepare the Linux payload on Linux.' >&2; exit 1; }
 [ $# -eq 1 ] || { echo 'Usage: prepare-payload.sh OUT_DIR' >&2; exit 1; }
 out=$1

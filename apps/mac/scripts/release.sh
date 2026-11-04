@@ -1,6 +1,7 @@
 #!/bin/bash
 # Run only after Developer ID membership/certificates are available.
 set -euo pipefail
+"$(dirname "$0")/../../../scripts/trunk_guard.sh" 'the Mac Developer ID release' >/dev/null
 : "${DEVELOPER_ID_APPLICATION:?Set Developer ID Application identity}"
 : "${NOTARY_PROFILE:?Set the notarytool Keychain profile name}"
 : "${SPARKLE_PUBLIC_KEY:?Set the Ed25519 public key (private key stays in Keychain)}"

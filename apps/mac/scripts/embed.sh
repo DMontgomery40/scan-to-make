@@ -1,5 +1,12 @@
 #!/bin/bash
 set -euo pipefail
+if [ "${CONFIGURATION:-}" = Release ]; then
+  head=$("$SRCROOT/../../scripts/trunk_guard.sh" 'a Release Counterpart.app')
+  if [ -d "$SRCROOT/Payload" ] && [ -z "${STM_TRUNK_OVERRIDE:-}" ]; then
+    prepared=$(cat "$SRCROOT/build/payload-source" 2>/dev/null || echo unknown)
+    [ "$prepared" = "$head" ] || { echo "The companion payload was prepared from $prepared, not HEAD $head: run apps/mac/scripts/prepare-payload.sh." >&2; exit 1; }
+  fi
+fi
 contents="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
 mkdir -p "$contents/Library/LaunchAgents" "$contents/Resources"
 # Payload preparation is explicit, so normal CI builds need no runtime downloads.

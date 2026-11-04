@@ -19,6 +19,7 @@
 #
 # Usage: build-linux-payload.sh OUT_DIR   (run on Ubuntu 26.04 x86_64; needs git, curl, apt-get, dpkg, unzip)
 set -euo pipefail
+"$(dirname "$0")/../../../scripts/trunk_guard.sh" 'the Linux reconstruction payload' >/dev/null
 [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] || { echo 'Build the Linux payload on Linux x86_64.' >&2; exit 1; }
 [ $# -eq 1 ] || { echo 'Usage: build-linux-payload.sh OUT_DIR' >&2; exit 1; }
 out=$1; case "$out" in /*) ;; *) out="$PWD/$out" ;; esac

@@ -2,10 +2,14 @@ name: Local workflow runner checks
 on:
   pull_request:
     branches: [main]
-    paths: ['scripts/**', '.github/workflows/**']
+    # The trunk guard's tests also run every build/install script it guards.
+    paths: ['scripts/**', '.github/workflows/**', 'apps/mac/scripts/**', 'apps/mobile/scripts/**', 'apps/linux/scripts/**',
+            'tools/linux-host/prepare-payload.sh', 'tools/linux-reconstruct/packaging/**', 'android/scripts/**']
   push:
     branches: [main]
-    paths: ['scripts/**', '.github/workflows/**']
+    # The trunk guard's tests also run every build/install script it guards.
+    paths: ['scripts/**', '.github/workflows/**', 'apps/mac/scripts/**', 'apps/mobile/scripts/**', 'apps/linux/scripts/**',
+            'tools/linux-host/prepare-payload.sh', 'tools/linux-reconstruct/packaging/**', 'android/scripts/**']
 permissions:
   contents: read
 jobs:

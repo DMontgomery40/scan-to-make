@@ -74,7 +74,15 @@ final class ProjectScreensUITests: XCTestCase {
         app.buttons["print"].tap()
         XCTAssertTrue(app.staticTexts["Plate 2"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["print-now"].exists)
-        // A multi-colour model picks a loaded spool per part colour on the phone, nearest colour preselected.
+    }
+
+    /// Regression (Nov 4 one-trunk audit): the phone once said "Open Counterpart on your Mac" for a multi-colour
+    /// 3MF. The print sheet keeps one spool row per part, nearest loaded colour preselected, on the phone.
+    func testMultiColour3MFKeepsAPerPartSpoolRowOnThePhone() {
+        let app = launch("ready", set: "plates")
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 20))
+        app.buttons["print"].tap()
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Colors"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["body"].exists)
         XCTAssertTrue(app.staticTexts["letters"].exists)

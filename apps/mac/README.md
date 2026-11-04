@@ -113,8 +113,12 @@ all optimization levels used by isolated Python workers. Node receives the
 Hardened Runtime `allow-jit` entitlement; native Python libraries are signed too.
 This shell does not install printer tools or reimplement cleanup/slicing/printing.
 
+Payload preparation and every Release build refuse unless the checkout is clean and HEAD is on
+`origin/main` (`scripts/trunk_guard.sh`; see `scripts/README.md`). A Release build also refuses a Payload
+prepared from another commit.
+
 `SOURCE_ARCHIVE` may supply a committed archive on a machine without GitHub
-credentials. Include `packages/contracts`, `services/project`,
+credentials, only with `STM_TRUNK_OVERRIDE` (it cannot be shown to be on main). Include `packages/contracts`, `services/project`,
 `services/printer-handoff`, `services/companion`, `tools/capture-mesh-convert`,
 `tools/capture-pipeline`, `tools/capture-fit-eval`,
 `tools/mac-reconstruct`,

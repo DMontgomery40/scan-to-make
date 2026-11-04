@@ -42,6 +42,24 @@ python3 scripts/ci_local.py --ios-lock xcodebuild test ...
 /usr/bin/lockf -k ~/.stm-ios.lock xcodebuild test ...   # same lock
 ```
 
+## One trunk: `trunk_guard.sh`
+
+David, 2026-11-04: "we need to make sure regressions and overwrites dont happen again".
+
+Nothing installs from a non-main SHA. Every build or install script calls `scripts/trunk_guard.sh` first and
+refuses when the tree is dirty (untracked files included) or HEAD is not on `origin/main`:
+
+- Mac: `apps/mac/scripts/prepare-payload.sh`, `release.sh`, and the app's `embed.sh` build phase for every
+  Release build (which also refuses a Payload prepared from another commit);
+- iPhone: `apps/mobile/scripts/install-iphone.sh` (USB install) and `prepare-testflight.sh`;
+- Linux: `apps/linux/scripts/bundle.sh`, `tools/linux-host/prepare-payload.sh`,
+  `tools/linux-reconstruct/packaging/build-linux-payload.sh`;
+- Android: Gradle's `assemble*`, `bundle*` and `install*` tasks (unit tests and lint are not guarded).
+
+Debug builds, tests and the CI workflows are not guarded. For local debugging only,
+`STM_TRUNK_OVERRIDE="<why>"` lets a build through, warns, and logs the head, branch and reason to
+`~/.local/state/counterpart/trunk-overrides.log`. Never install an override build for David or publish one.
+
 ## Before every merge: `branch_check.py`
 
 David, 2026-11-01: "make sure ... no one is writing on top of each other and in worktrees that have already been changed by a sibling session next door and all of sudden nothing agrees."

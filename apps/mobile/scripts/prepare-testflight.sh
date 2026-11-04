@@ -1,6 +1,7 @@
 #!/bin/bash
 # Archive, export and inspect a production IPA locally. Does not upload or install it.
 set -euo pipefail
+"$(dirname "$0")/../../../scripts/trunk_guard.sh" 'the TestFlight IPA' >/dev/null
 : "${BUILD_NUMBER:?Set an unused App Store Connect build number}"
 : "${RELEASE_DIR:?Set an absolute output directory outside the source checkout}"
 case "$RELEASE_DIR" in /*) ;; *) echo 'RELEASE_DIR must be absolute.' >&2; exit 1 ;; esac

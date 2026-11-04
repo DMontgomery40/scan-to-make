@@ -122,6 +122,25 @@ final class ObjectsClientTests: XCTestCase {
         _ = try await ControlClient(socketPath:print.path).printObject(id, checked:false, settings:PrintSettings(), filaments:[mapping.trays[1], mapping.trays[0]], expectedPlate:"0:2")
         withExtendedLifetime((server, print)) {}
     }
+
+    /// Regression (Nov 4 one-trunk audit): a multi-colour 3MF keeps one spool row per part on the Mac print sheet,
+    /// each starting on its nearest loaded spool, and Print stays off until every part has one.
+    func testMultiColourModelKeepsOneSpoolRowPerPartOnTheMacPrintSheet() throws {
+        let tray = { (slot: Int, colour: String) in try JSONDecoder().decode(PrinterFilament.self, from: JSONSerialization.data(withJSONObject:
+            ["slot":slot, "colour":colour, "material":"PLA", "name":"PLA \(colour)", "filamentId":"GFA00", "destinationId":"p1s"])) }
+        let trays = [try tray(0, "#000000"), try tray(1, "#FEC600"), try tray(254, "#FFFFFF")]
+        let mapping = ColourMapping(filaments: [ModelColourFilament(index: 1, name: "body", colour: "#111111", slot: 0, distance: 0.04),
+                                                ModelColourFilament(index: 2, name: "letters", colour: "#FFD200", slot: 1, distance: 0.12)],
+                                    trays: trays, modelVersion: "pick-3mf-v7")
+        XCTAssertEqual(mapping.filaments.map(\.name), ["body", "letters"], "one row per part, in the model's order")
+        XCTAssertEqual(mapping.suggestedSlots, [1: 0, 2: 1], "each part starts on its nearest loaded spool")
+        XCTAssertEqual(mapping.spools(slots: mapping.suggestedSlots)?.map(\.slot), [0, 1])
+        XCTAssertNil(mapping.spools(slots: [1: 0]), "a part without a spool keeps Print off")
+        XCTAssertEqual(mapping.spools(slots: [1: 1, 2: 0])?.map(\.slot), [1, 0], "the person's swap, not the suggestion")
+        XCTAssertTrue(ColourMapping.mixesFeedSources(slots: [1: 0, 2: 254]), "AMS and the external spool can't feed one print")
+        XCTAssertFalse(ColourMapping.mixesFeedSources(slots: [1: 0, 2: 1]))
+        XCTAssertNil(ColourMapping(filaments: [], trays: trays).spools(slots: [:]), "a one-colour model has no per-part rows")
+    }
     private func confirmation(_ overrides: [String: Any] = [:]) throws -> Project.PrintConfirmation {
         let fields: [String: Any] = ["id":"q1", "message":"Check the actual printer.\nKeep all checks.", "expiresAtMs":2000,
             "supported":true, "fields":[["name":"spool_loaded", "title":"The spool is loaded", "description":"Check the AMS slot.", "required":true],

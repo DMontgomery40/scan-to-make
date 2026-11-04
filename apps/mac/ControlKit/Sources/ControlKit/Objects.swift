@@ -59,6 +59,21 @@ public struct ColourMapping: Codable, Sendable, Equatable {
     public init(filaments: [ModelColourFilament], trays: [PrinterFilament], modelVersion: String? = nil) {
         self.filaments = filaments; self.trays = trays; self.modelVersion = modelVersion
     }
+    /// The companion's nearest-colour suggestion per filament index: what the sheet starts with.
+    public var suggestedSlots: [Int: Int] {
+        Dictionary(uniqueKeysWithValues: filaments.compactMap { filament in filament.slot.map { (filament.index, $0) } })
+    }
+    /// The chosen spools in filament order, when every colour has one: what Print and Estimate send.
+    public func spools(slots: [Int: Int]) -> [PrinterFilament]? {
+        guard !filaments.isEmpty else { return nil }
+        let choices = filaments.compactMap { filament in trays.first { $0.slot == slots[filament.index] } }
+        return choices.count == filaments.count ? choices : nil
+    }
+    /// AMS trays and the external spool (slot 254+) can't feed one print together; the companion refuses the mix.
+    public static func mixesFeedSources(slots: [Int: Int]) -> Bool {
+        let external = slots.values.map { $0 >= 254 }
+        return external.contains(true) && external.contains(false)
+    }
 }
 
 /// What the print sheet asks for (PRD §5.5, §8.5). Standard quality and strength send nothing, so the MCP's preset decides.

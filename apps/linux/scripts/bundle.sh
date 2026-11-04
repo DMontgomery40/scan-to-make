@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+"$(dirname "$0")/../../../scripts/trunk_guard.sh" 'the Linux .deb and AppImage' >/dev/null
 [[ $(uname -s) == Linux ]] || { echo 'Build Linux packages on Linux.' >&2; exit 1; }
 app=$(cd "$(dirname "$0")/.." && pwd)
 root=$(cd "$app/../.." && pwd)

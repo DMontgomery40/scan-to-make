@@ -261,17 +261,10 @@ struct PrintSheet: View {
     private var mappingSignature: String { mappingSlots.keys.sorted().map { "\($0):\(mappingSlots[$0] ?? -1)" }.joined(separator: ",") }
 
     /// AMS trays and the external spool can't feed one print together (the companion refuses the mix).
-    private var mixedFeedSources: Bool {
-        let external = mappingSlots.values.map { $0 >= 254 }
-        return external.contains(true) && external.contains(false)
-    }
+    private var mixedFeedSources: Bool { ColourMapping.mixesFeedSources(slots: mappingSlots) }
 
     /// The chosen spools in filament order, when every colour has one: what Print sends.
-    private var chosenSpoolPerColour: [PrinterFilament]? {
-        guard let mapping, !mapping.filaments.isEmpty else { return nil }
-        let choices = mapping.filaments.compactMap { filament in mapping.trays.first { $0.slot == mappingSlots[filament.index] } }
-        return choices.count == mapping.filaments.count ? choices : nil
-    }
+    private var chosenSpoolPerColour: [PrinterFilament]? { mapping?.spools(slots: mappingSlots) }
 
     @ViewBuilder private var multiColours: some View {
         switch mappingState {
@@ -458,7 +451,7 @@ struct PrintSheet: View {
             guard !Task.isCancelled else { return }
             mapping = loaded
             if !loaded.trays.isEmpty { filaments = loaded.trays }
-            mappingSlots = Dictionary(uniqueKeysWithValues: loaded.filaments.compactMap { filament in filament.slot.map { (filament.index, $0) } })
+            mappingSlots = loaded.suggestedSlots
             mappingState = .done
         } catch {
             guard !Task.isCancelled else { return }

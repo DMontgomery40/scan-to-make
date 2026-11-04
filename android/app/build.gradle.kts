@@ -53,6 +53,13 @@ android {
 
 tasks.named("preBuild") { dependsOn(starterAssets) }
 
+// One trunk: anything that can be installed or shipped (assemble/bundle/install, any variant) is built
+// only from a clean commit on origin/main. Local debugging: STM_TRUNK_OVERRIDE="<why>" (logged).
+val trunkGuard = tasks.register<Exec>("trunkGuard") {
+    commandLine("bash", rootProject.file("scripts/trunk-guard.sh").absolutePath, "the Android app")
+}
+tasks.matching { Regex("^(assemble|bundle|install)(Debug|Release)?$").matches(it.name) }.configureEach { dependsOn(trunkGuard) }
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

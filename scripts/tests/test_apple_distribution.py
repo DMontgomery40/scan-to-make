@@ -73,6 +73,12 @@ class AppleDistributionTests(unittest.TestCase):
 class TestFlightPreparationTests(unittest.TestCase):
     SCRIPT = pathlib.Path(__file__).resolve().parents[2] / 'apps/mobile/scripts/prepare-testflight.sh'
 
+    @staticmethod
+    def past_trunk_guard(root):
+        # These tests run on PR branches; the guard itself is covered by test_trunk_guard.py.
+        return {'STM_TRUNK_OVERRIDE': 'test_apple_distribution', 'STM_TRUNK_OVERRIDE_LOG': str(root / 'trunk-overrides.log'),
+                'STM_TRUNK_NO_FETCH': '1'}
+
     def test_export_options_allow_external_testing_and_pin_production(self):
         # Xcode is the external, signing/account-changing boundary. Stop there, then
         # inspect the actual generated export options rather than shell source text.
@@ -84,7 +90,7 @@ class TestFlightPreparationTests(unittest.TestCase):
             output = root / 'release'
             result = subprocess.run(['bash', str(self.SCRIPT)], capture_output=True, text=True,
                 env={**os.environ, 'BUILD_NUMBER': '42', 'RELEASE_DIR': str(output),
-                     'PATH': str(root) + os.pathsep + os.environ['PATH']})
+                     'PATH': str(root) + os.pathsep + os.environ['PATH'], **self.past_trunk_guard(root)})
             self.assertEqual(result.returncode, 77, result.stderr)
             options = plistlib.loads((output / 'ExportOptions.plist').read_bytes())
             self.assertEqual(options['destination'], 'export')
@@ -98,7 +104,8 @@ class TestFlightPreparationTests(unittest.TestCase):
             archive = pathlib.Path(directory) / 'Counterpart.xcarchive'
             archive.write_text('preserved')
             result = subprocess.run(['bash', str(self.SCRIPT)], capture_output=True, text=True,
-                env={**os.environ, 'BUILD_NUMBER': '42', 'RELEASE_DIR': directory})
+                env={**os.environ, 'BUILD_NUMBER': '42', 'RELEASE_DIR': directory,
+                     **self.past_trunk_guard(pathlib.Path(directory))})
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(archive.read_text(), 'preserved')
             self.assertFalse((pathlib.Path(directory) / 'ExportOptions.plist').exists())

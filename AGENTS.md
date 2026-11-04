@@ -12,6 +12,16 @@ Android app: see [`android/AGENTS.md`](android/AGENTS.md) and [`android/README.m
 
 New session? Read [`docs/status/handoff.md`](docs/status/handoff.md) for how to pick up the work, and [`docs/status/asks.md`](docs/status/asks.md) for what's open. Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
 
+## One trunk
+
+David, 2026-11-04: "we need to make sure regressions and overwrites dont happen again".
+
+- `main` is the only trunk. Feature branches merge to main by PR (gate: `scripts/ci_local.py` and
+  `scripts/branch_check.py --merge` printing SAFE). There is no long-lived release branch.
+- Nothing installs from a non-main SHA: Mac, iPhone, TestFlight, Linux and Android builds refuse a dirty tree
+  or a HEAD that isn't on `origin/main` (`scripts/trunk_guard.sh`, listed in `scripts/README.md`). The
+  `STM_TRUNK_OVERRIDE` escape is logged and only for local debugging; never install that build for David.
+
 ## Read bambu-printer-mcp before you build
 
 
