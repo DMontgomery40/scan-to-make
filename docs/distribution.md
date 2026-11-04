@@ -17,7 +17,8 @@ upload and finished processing. Build 1 was removed from review; build 2 was sub
 at 23:32 and now shows **Waiting for Review** for the external
 `Counterpart Public Beta` group. Automatic tester notifications are off. The public link is **https://testflight.apple.com/join/S4tExVzp**, open to anyone.
 Apple displays: “Testers cannot join public link until this group has an approved build.”
-No tester email invitations or public announcement were sent.
+No tester email invitations were sent. The Mac release and beta setup page are published;
+Apple review notes now include the live download/setup link and starter details.
 The internal prerequisite group `Counterpart Team` exists. Beta description and
 David's supplied review/feedback contacts are saved in App Store Connect.
 
@@ -25,9 +26,11 @@ Xcode used cloud-managed Apple Distribution signing for the iPhone. A Developer 
 Application certificate and matching Production profile are installed. Build
 **0.1.0 (202611032345)** passes distribution signature/entitlement checks and embedded
 Node/Python execution. Apple notarization submission
-`8569fc14-6619-42b0-aefb-ae0469545a65` is processing. Artifacts are in
+`8569fc14-6619-42b0-aefb-ae0469545a65` was **Accepted** on Nov 4 at 00:00 Mountain.
+The ticket is stapled and Gatekeeper accepts the app. The published download was
+retrieved independently, matched SHA-256 and passed Gatekeeper/stapler verification. Artifacts are in
 `~/scan-to-make-work/mac-beta-export-202611032345/`; log is
-`/tmp/counterpart-mac-archive-release-fixed.log`. The initial direct-build submission
+`~/scan-to-make-work/mac-beta-export-202611032345/release.log`. The initial direct-build submission
 was rejected because Sparkle’s four nested helpers lacked distribution signatures.
 The release script now archives and exports through Xcode; all four exported helpers
 have verified Developer ID signatures and secure timestamps. The licence check now
@@ -37,21 +40,30 @@ handles archive-directory depth as well as ordinary builds. The Keychain notary 
 `ab455a6` fixes the release helper to use Apple's matching rsync peer and requests
 sufficient codesign verbosity to inspect the signing certificate.
 
-There is no published GitHub release for this app and the public site still says
-it is unavailable to download. Before inviting testers, publish a notarized Mac
-artifact and exact setup instructions that a fresh Mac can follow. Verify that
-installation independently of David's existing setup:
+The [Mac beta release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.2)
+and [setup page](https://counterpart.dtmont.com/beta.html) are published. The signed
+Sparkle feed at `/appcast.xml` matches the verified local feed. The Mac artifact is
+0.1.0 (202611032345), source `9993978` (release-script URL/feed-signing fixes followed).
+Downloaded ZIP SHA-256: `b7a8a67e6c8d86357be74247f04e34a913d4b7f0e363c661572b8a2ea879e7ab`.
+A downloaded-file check is not fresh-install acceptance. Verify installation
+independently of David's existing setup:
 
 - [Mac distribution inventory](../apps/mac/DISTRIBUTION.md) excludes cleanup workers
   from the app payload. The [independent source installer](../deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app)
   now qualifies and attaches them without another service or global installs.
   It requires an existing Python 3.12 and Blender 5.0.1; include these prerequisites
   and the exact release source commit in beta setup instructions.
-- The app's Download MCP action installs npm's latest version. Local feature-branch
-  fixes are not delivered by that action. The two MCP npm releases remain held;
-  do not merge/publish them to solve this implicitly. Identify and test the exact
-  beta-compatible backend installation before claiming print controls work for
-  new testers.
+- The app's Download/Update MCP actions install npm's latest version independently
+  of the iPhone or Mac release. David authorized both combined MCP releases after
+  checks on Nov 4; the previous release hold is superseded. The FDM/MCP thread owns
+  bambu-printer-mcp #99 (1.1.52) and mcp-3D-printer-server #52 (1.2.26), publication
+  and the actual app's MCP Update/acceptance. Publication receipts are still pending.
+  Do not hand-copy local feature-branch builds. Accept print controls using the
+  visible Counterpart UI with exactly the published packages users receive.
+- Counterpart #298 consumes the MCP's FDM guidance and changes the bundled companion.
+  This release thread owns its integration and a new Mac release after the MCPs
+  publish. The current Mac download does not yet contain #298; these companion-only
+  changes do not require a new TestFlight phone build.
 - The legacy macOS installer and Docker image pin older MCP versions. They do not
   reproduce the currently accepted feature-branch installation.
 
@@ -215,7 +227,7 @@ node site/check.mjs
 - [Review access and app completeness](https://developer.apple.com/app-store/review/guidelines/#app-completeness)
 
 Release update configuration: public key `Q4iK0moZS/pqxA5lrVvBbESdU218oW49rKlNGTd0z8A=`,
-feed `https://counterpart.dtmont.com/appcast.xml`. No feed has been published yet.
+feed `https://counterpart.dtmont.com/appcast.xml`. The signed feed is published and its live bytes were verified.
 
 Apple’s [common notarization issues](https://developer.apple.com/documentation/security/resolving-common-notarization-issues)
 documents `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` for a custom distribution build.
