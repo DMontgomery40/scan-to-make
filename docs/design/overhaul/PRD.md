@@ -624,7 +624,7 @@ To review, not on the move list: the Mac's "Open in Blender" (`BlenderBridge.swi
 
 **Enforcement:**
 - `services/companion/tests/mcp-contract.test.mjs` fails when app code starts reading an MCP tool that `docs/protocols/mcp-contract.md` doesn't list.
-- `scripts/branch_check.py --merge` asks the Jev checker whether the diff adds printer, slicer, firmware, Blender or Fusion knowledge to app code. If the checker can't answer, the gate fails closed. On 2026-11-04 the TypeSafe organization had no API credits (HTTP 402), so the check isn't calibrated yet.
+- `scripts/branch_check.py --merge` asks the Jev checker whether the diff adds printer, slicer, firmware, Blender or Fusion knowledge to app code. If the checker can't answer, the gate fails closed. TypeSafe direct has no credits (HTTP 402, 2026-11-04), so it answers through Jev on OpenRouter, as David's other Jev runners do. It was calibrated on 14 real hunks (threshold 0.3).
 
 ### 8.1 Topology
 

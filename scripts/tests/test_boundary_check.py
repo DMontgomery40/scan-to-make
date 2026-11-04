@@ -76,6 +76,21 @@ class BoundaryCheckTests(unittest.TestCase):
         self.assertEqual(len(asked), 1, 'a billing refusal is the same for every chunk: ask once')
         self.assertIn('NOT CHECKED', lines[0]); self.assertIn('HTTP 402', lines[0]); self.assertIn('no available TypeSafe API credits', lines[0])
 
+    def test_typesafe_without_credits_falls_back_to_jev_on_openrouter(self):
+        calls = []
+        class Answer(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        def urlopen(request, timeout):
+            calls.append(request.full_url)
+            if 'typesafe' in request.full_url:
+                raise urllib.error.HTTPError(request.full_url, 402, 'Payment Required', {}, io.BytesIO(b'{}'))
+            assert json.loads(request.data)['model'] == 'typesafe/jev-1.13'
+            return Answer(json.dumps({'answers': {'backend_knowledge': {'noul': 0.9}}}).encode())
+        with mock.patch.dict(os.environ, {'TYPESAFE_API_KEY': 'a', 'OPENROUTER_API_KEY': 'b'}), mock.patch.object(b.urllib.request, 'urlopen', urlopen):
+            self.assertEqual(b.ask('services/x.ts', 'x'), 0.9)
+        self.assertEqual([url.split('/')[2] for url in calls], ['api.typesafe.ai', 'openrouter.ai'])
+
     def test_large_additions_are_split_into_bounded_chunks(self):
         self.git('checkout', '-q', '-b', 'feature')
         self.write('services/companion/src/big.ts', ''.join(f'export const v{i} = "{"x" * 80}";\n' for i in range(200))); self.commit('f')
