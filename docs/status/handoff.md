@@ -254,8 +254,11 @@ remote native probes and the SSH tunnel were removed after verification.
      (`5d38205` helper, `76e17b2` companion portability, `d640c07` payload script), worktree
      `~/.t3/worktrees/scan-to-make/t3-6dc7974b`. Provider-switch choice is pending; do not silently replace Opus.
      Its agents-173 payload build compiled the Rust release helper but failed npm extraction with errno -122
-     in `/tmp` (tmpfs/quota). No completed payload exists. Rerun with an owned `TMPDIR` under `/home` when
-     finishing integration. Scratch source/log: `~/scan-to-make-work/linux-host/{repo,prepare.log}` on agents-173.
+     in `/tmp` (tmpfs/quota). The UI delegate's independent agents-136 build succeeded: 210 MB, BUILD-ID
+     `gd640c07bd9a3-node24.22.2-x64`, at `~/scan-to-make-work/linux-desktop/app/src-tauri/resources`.
+     Log: `~/scan-to-make-work/linux-desktop/receipts/payload-build.log`; Tauri release linked, packaging and
+     visible setup/starter checks continue. This is not host acceptance. Further builds use an owned `TMPDIR`
+     under `/home`. Failed-build source/log: `~/scan-to-make-work/linux-host/{repo,prepare.log}` on agents-173.
      The delegate created disposable account `stm-hosttest` (UID 1001) with lingering enabled for pending
      runtime checks; remove only after its owned checks and service cleanup. No real host acceptance yet.
 5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
