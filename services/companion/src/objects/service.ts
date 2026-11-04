@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
+import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -632,6 +632,15 @@ export class ObjectService {
         ...((filament.colour ?? declaredEntry?.colour) ? {colour: filament.colour ?? declaredEntry!.colour} : {}),
         ...((filament.material ?? declaredEntry?.material) ? {material: filament.material ?? declaredEntry!.material} : {})};
     });
+    // Painted regions print with filaments no part names. When the file carries
+    // painting (and no authoritative plate list already named them), every other
+    // declared slot is a colour of the model too — visible and editable in the
+    // sheet, not silently auto-assigned. Without painting they are unused presets.
+    if (!plateUsed && modelHasPainting(bytes)) {
+      const known = new Set(filaments.map(filament => filament.index));
+      for (const slot of declaredSlots) if (!known.has(slot.index)) filaments.push({...slot});
+      filaments.sort((a, b) => a.index - b.index);
+    }
     return {filaments, slots: Math.max(modelFilamentSlotCount(bytes), ...filaments.map(filament => filament.index)), version, declaredSlots, plateUsed};
   }
 

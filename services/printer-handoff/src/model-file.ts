@@ -189,6 +189,21 @@ export function modelFilaments(bytes: Buffer, plateIndex = 0): ModelFilament[] {
 }
 
 /**
+ * Whether the model carries painted regions (per-triangle `paint_color` in the
+ * model XML, the Bambu/Prusa painting record). Painting is the evidence that a
+ * declared filament no part names may still print; without it such a slot is
+ * just an unused project preset.
+ */
+export function modelHasPainting(bytes: Buffer): boolean {
+  try {
+    if (!bytes.length || bytes.length > 64 * 1024 * 1024 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return false;
+    const files = unzipSync(bytes, {filter: file => file.name === '3D/3dmodel.model' && file.originalSize <= 32 * 1024 * 1024});
+    const model = files['3D/3dmodel.model'];
+    return !!model && Buffer.from(model).includes('paint_color="');
+  } catch { return false; }
+}
+
+/**
  * The filament indices (1-based) the selected plate's `plate_N.json` says it
  * uses, or undefined when the file carries no usable plate list. When this is
  * defined it is authoritative: a declared slot outside it does not print on

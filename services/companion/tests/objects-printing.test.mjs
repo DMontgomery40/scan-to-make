@@ -255,6 +255,26 @@ test('a sliced plate is not blocked by a declared material it never uses, but a 
   await assert.rejects(g.service.print(g.object.id), /painted part of this file was sliced for ABS/);
 });
 
+test('a painted unsliced model shows its painted filament as a colour row; without painting it stays an unused preset', async t => {
+  const {zipSync, strToU8} = fflate();
+  const build = painted => Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8(`<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2"${painted ? ' paint_color="8"' : ''}/></triangles></mesh></object></resources><build><item objectid="1"/></build></model>`),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
+      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
+    'Metadata/project_settings.config': strToU8(JSON.stringify({filament_colour: ['#FEC600', '#000000'], filament_type: ['PLA', 'PLA']}))}));
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: build(true), kind: 'published'});
+  const mapping = await f.service.colourMapping(f.object.id);
+  assert.deepEqual(mapping.filaments.map(x => x.index), [1, 2], 'the painted filament is a row the person can change');
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.deepEqual(f.runs[0].selection.amsMapping, [1, 0], 'body on the yellow PLA spool, painted black on the black spool');
+  const g = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(g, {bytes: build(false), kind: 'published'});
+  assert.deepEqual((await g.service.colourMapping(g.object.id)).filaments.map(x => x.index), [1], 'no painting: the second declared slot is just an unused preset');
+});
+
 test('spool choices for a 3MF whose filaments cannot be read are refused, never dropped', async t => {
   const {zipSync, strToU8} = fflate();
   const bare = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),

@@ -4,7 +4,7 @@ import {mkdtemp, writeFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {zipSync, strToU8} from 'fflate';
-import {PrinterHandoffRunner, modelFilaments, modelFilamentSlotCount, modelPlateFilaments, printerHandoffConfigSchema} from '../dist/index.js';
+import {PrinterHandoffRunner, modelFilaments, modelFilamentSlotCount, modelHasPainting, modelPlateFilaments, printerHandoffConfigSchema} from '../dist/index.js';
 
 const published = Buffer.from(zipSync({
   '[Content_Types].xml': strToU8('<Types/>'),
@@ -63,6 +63,16 @@ test('the declared slot count counts unused filaments too, and a sliced plate na
   assert.deepEqual(modelPlateFilaments(sliced), [1, 3]);
   assert.equal(modelPlateFilaments(designed), undefined);
   assert.equal(modelPlateFilaments(Buffer.from('not a zip')), undefined);
+});
+
+test('painting is detected from the model XML', () => {
+  const painted = Buffer.from(zipSync({
+    '[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources><build><item objectid="1"/></build></model>'),
+  }));
+  assert.equal(modelHasPainting(painted), true);
+  assert.equal(modelHasPainting(designed), false);
+  assert.equal(modelHasPainting(Buffer.from('not a zip')), false);
 });
 
 test('unreadable bytes give no filaments rather than throwing', () => {
