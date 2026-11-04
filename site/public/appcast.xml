@@ -1,0 +1,18 @@
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Counterpart</title>
+        <item>
+            <title>0.1.0</title>
+            <pubDate>Wed, 04 Nov 2026 00:00:35 -0700</pubDate>
+            <sparkle:version>202611032345</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>27.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.2/ScanToMake-202611032345.zip" length="165646819" type="application/octet-stream" sparkle:edSignature="XKT2qwN6GbsYrWTC5IS3+G5ns7UH2PJWdutb10B4oG+knM0pCtglcPH46SG45JpRT//I23nSm4YPSIvJk1/SDA=="></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: TckluZtVLTUG8W+BkXaxXEjtvLyshTCZpTgTH8iKeEH+TMjE6G7mBj7o/8l9d2E2q8IB0jMx2PK8KtVQv6XHDw==
+length: 1080
+-->

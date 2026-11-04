@@ -62,6 +62,17 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 
 ## Current evidence and outstanding device checks
 
+External beta update, Nov 4: iPhone **2.0 (2)** is Waiting for Review in the public
+TestFlight group. Mac **0.1.0 (202611032345)** is notarized, stapled and
+[published with setup instructions](https://counterpart.dtmont.com/beta.html).
+A fresh download matched its SHA-256 and passed Gatekeeper/stapler checks.
+Production CloudKit and the APNs relay are provisioned; real production phone
+push delivery is unverified. Final Node 22/24 workflows each pass 792 companion
+checks, one skip and 55 contracts. Clean starters and multi-plate UI are included;
+the card is bundled, while MakerWorld originals must be imported. Original rig
+import, fresh-install enrollment and the physical-device rows below remain open.
+
+
 Current release branch `feat/testflight-readiness` integrates #295, layer pauses and #292.
 At `b734344`, official Linux Node 22/24 jobs each pass 55 contracts and 767 companion
 checks, with one existing macOS-only skip. Shared Swift: 164; iOS AppTests: 16;

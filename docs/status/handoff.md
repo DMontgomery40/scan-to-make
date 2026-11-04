@@ -78,9 +78,10 @@ remote native probes and the SSH tunnel were removed after verification.
    External group **Counterpart Public Beta** has build 2.0 (2), submitted for Beta App Review (build 1 remains unsubmitted).
    Automatic tester notifications are off; zero testers, no email invitations. Public link created
    **https://testflight.apple.com/join/S4tExVzp**, Open to Anyone. Apple says testers cannot join
-   until an approved build is in the group. No public announcement sent. App record currently
+   until an approved build is in the group. Review notes now include the live Mac download/setup link and starter details.
+   No tester email invitations sent. App record currently
    lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
-   Release branch `feat/testflight-readiness` is pushed through `121e8e3` (no PR yet).
+   Release branch is `feat/testflight-readiness` (no PR yet); release source is `9993978`.
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.
    - **Starter projects and multi-plate printing implemented on the release branch:** welcome/Home and
      the empty Mac workspace offer the scan platform, Counterpart caliper card and long vernier
@@ -112,15 +113,23 @@ remote native probes and the SSH tunnel were removed after verification.
      No records changed. Production `counterpart-relay` now serves `/relay/*`; its APNs probe returned
      `410 token_inactive / BadDeviceToken`, proving authentication, not phone delivery. Production key
      is topic-scoped to `com.scantomake`. Sandbox and installed development relay settings are unchanged.
-   - **Mac distribution in progress:** Developer ID certificate and matching Production CloudKit/APNs
+   - **Mac beta published:** Developer ID certificate and matching Production CloudKit/APNs
      profile are installed. Sparkle update key is in Keychain; notarization credential profile is
      `Counterpart-Production`. Build **0.1.0 (202611032345)** passed deep signature/entitlement checks
      and embedded Node/Python execution. `121e8e3` fixes Xcode's injected debug entitlement in distribution
      builds. The first notarization rejected Sparkle’s nested helper signatures. The release script now
      uses Xcode archive/export; all four helpers have Developer ID signatures and timestamps.
-     Retry **8569fc14-6619-42b0-aefb-ae0469545a65** is processing; artifacts:
-     `~/scan-to-make-work/mac-beta-export-202611032345/`. No downloadable notarized Mac release yet.
+     Retry **8569fc14-6619-42b0-aefb-ae0469545a65** was **Accepted**, then stapled and
+     accepted by Gatekeeper. [Release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.2)
+     and [beta setup](https://counterpart.dtmont.com/beta.html) are live. The downloaded ZIP
+     matched SHA-256 and passed Gatekeeper/stapler checks; signed `/appcast.xml` matches
+     local verified bytes. Artifacts/receipts: `~/scan-to-make-work/mac-beta-export-202611032345/`.
+     Native caches, intermediate payload, downloaded verification copy and Linux scratch are removed;
+     final archive, notarized ZIP, test results and compact receipts remain. Free disk is 5.2 GiB.
      Independent worker installer is qualified; fresh installation remains unaccepted.
+     No production app was installed over David's working development app. Production relay
+     settings must change only when both installed clients move to Production. The actual
+     Kass six-plate original was not downloaded by the browser attempt; its import remains open.
    - **Final implementation evidence:** official Linux workflow `testflight-ci-6124fb3` passes
      Node 22 and 24, each **792 companion + 55 contracts**, zero failures and one Mac-only skip.
      `78e6750` fixes the test race where a second pause matched the first pause's old event.
