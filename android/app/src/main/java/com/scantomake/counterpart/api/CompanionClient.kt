@@ -81,7 +81,7 @@ class CompanionClient(
                     if (m("/v1/objects(?:/printers)?") || m(one) || m("$one/passes/(0|[1-9][0-9]{0,15})/activity")) return "projects:read"
                     if (m("/healthz")) return "generation:health"
                     if (m("/v1/events") || m("/v1/settings") || m("/v1/devices")) return "projects:read"
-                    if (m("$one/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
+                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
                     if (m("$one/(filaments|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                 }
@@ -97,7 +97,7 @@ class CompanionClient(
                 "PUT" -> if (m("$one/scan")) return "captures:import"
                 "POST" -> {
                     if (m("/v1/blender/(check|update)")) return "projects:write"
-                    if (m("/v1/objects") || m("$one/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth)")) return "captures:import"
+                    if (m("/v1/objects") || m("$one/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
                     if (m("$one/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)")) return "printer-handoff:use"
                     if (m("/v1/devices/live-activity-tokens")) return "projects:write"
                     if (m("/v1/settings/(ai/test|fusion/setup)")) return "projects:write"
@@ -116,7 +116,8 @@ class CompanionClient(
             val code = error?.get("code").str
             val newer = path.startsWith("/v1/events") || path.startsWith("/v1/settings") || path.endsWith("/camera.jpg") || path.contains("/print/") ||
                 path.endsWith("/estimate") || path.contains("/asks/") || path.startsWith("/v1/devices") || path.endsWith("/settings") ||
-                path.startsWith("/v1/printers/") || path.startsWith("/v1/objects/printers/")
+                path.startsWith("/v1/printers/") || path.startsWith("/v1/objects/printers/") ||
+                path.endsWith("/capture-camera") || path.endsWith("/reconstruction") || path.contains("/reconstruction-preview")
             return when {
                 reply.status == 401 || reply.status == 403 -> CompanionException("pairing", "Connect to your computer again.")
                 reply.status == 404 && path == "/v1/objects" -> CompanionException("not-set-up", "Your computer isn't ready to make things yet. Open Counterpart on your computer.")
@@ -129,6 +130,10 @@ class CompanionClient(
                 reply.status == 409 -> CompanionException("conflict", message ?: "Wait until the current step finishes.")
                 reply.status == 503 -> CompanionException("unavailable", if (path.endsWith("/camera.jpg")) "The printer's camera isn't answering right now."
                     else "The printer isn't answering right now. Try again in a moment.")
+                // Reconstruction answers and camera metadata carry sentences written for the person
+                // (a stale preview, a mismatched capture): show them as they are.
+                reply.status == 400 && message != null && (path.endsWith("/reconstruction") || path.endsWith("/capture-camera")) ->
+                    CompanionException("invalid-answer", message)
                 reply.status == 400 && code == "invalid-request" -> CompanionException("invalid-request", "Your computer didn't accept that. Update Counterpart on your computer, then try again.")
                 else -> CompanionException("failed", "Something went wrong on your computer. Try again.")
             }
@@ -255,6 +260,33 @@ class CompanionClient(
     suspend fun setArchived(id: String, archived: Boolean) = changeProjectSettings(id, jsonOf("archived" to archived))
     suspend fun rename(id: String, title: String) = changeProjectSettings(id, jsonOf("title" to title))
     suspend fun duplicate(id: String) = one(request("POST", "/v1/objects/$id/duplicate", JsonObject(emptyMap())))
+
+    /**
+     * capture-camera v1 for the frames already uploaded (`POST …/capture-camera`, ≤ 4 MiB). Sent as raw
+     * bytes: 150 frames exceed the small-JSON cap in [request]. The companion binds every frame to the
+     * exact saved photo bytes and refuses a mismatch in words.
+     */
+    suspend fun addCaptureCamera(id: String, json: ByteArray): Project {
+        if (json.isEmpty() || json.size > 4 * 1024 * 1024)
+            throw CompanionException("invalid-capture-camera", "This scan's camera information couldn't be sent. Scan it again.")
+        val path = "/v1/objects/$id/capture-camera"
+        val reply = send("POST", path, json, "application/json").checked(path)
+        return one(parseObject(reply.body) ?: throw invalid())
+    }
+
+    /** The current reconstruction review's preview STL (≤ 64 MiB), only ever by its exact review id. */
+    suspend fun reconstructionPreview(id: String, reviewId: String): ByteArray {
+        if (!Pattern("[0-9a-f-]{36}", caseInsensitive = true).matches(reviewId))
+            throw CompanionException("invalid-review", "That question has been answered or replaced. Look again.")
+        val path = "/v1/objects/$id/reconstruction-preview.stl?reviewId=${encodeQueryValue(reviewId)}"
+        val reply = send("GET", path, limit = SCAN_LIMIT).checked(path.substringBefore("?"))
+        if (reply.body.isEmpty()) throw CompanionException("download-failed", "The rebuilt model couldn't be loaded. Try again.")
+        return reply.body
+    }
+
+    /** The explicit reconstruction answer, bound to the open review's id and hashes. */
+    suspend fun answerReconstruction(id: String, reviewId: String, answer: JsonObject): Project =
+        one(request("POST", "/v1/objects/$id/reconstruction", jsonOf("reviewId" to reviewId, "answer" to answer)))
     suspend fun delete(id: String) { request("DELETE", "/v1/objects/$id") }
     suspend fun passActivity(id: String, index: Int): List<Project.Activity> =
         request("GET", "/v1/objects/$id/passes/$index/activity").opt<List<Project.Activity>>("activity") ?: emptyList()

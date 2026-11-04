@@ -195,8 +195,18 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
 
             project.printConfirmation?.let { PrintConfirmationCard(project, it) { body -> run("confirm") { state.show(app.companion.answerPrintConfirmation(id, body)) } } }
 
+            // A reconstruction review replaces the generic Ask controls: Best Guess, words and photos
+            // cannot approve it (the companion refuses them), only the explicit preview answer counts.
+            val review = project.reconstructionReview
+            if (review != null) ReconstructionReviewCard(project, review, busy = working != null,
+                loadPreview = { app.companion.reconstructionPreview(id, review.id) },
+                answer = { body -> run("review") {
+                    try { state.show(app.companion.answerReconstruction(id, review.id, body)) }
+                    catch (e: CompanionException) { state.reload(id); throw e }
+                } })
+
             // The Mac's question.
-            project.openAsk?.let { ask ->
+            project.openAsk?.takeIf { review == null }?.let { ask ->
                 GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Icon(CIcons.Hand, null, tint = Palette.needsYou); Spacer(Modifier.width(8.dp)); Text("Your computer asks", fontWeight = FontWeight.SemiBold) }
                     Text(ask.question)

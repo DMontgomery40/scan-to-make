@@ -11,5 +11,9 @@ Read `android/README.md` first.
   `packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures`; add cases there, not copies here.
 - Build: `./gradlew assembleDebug`; lint: `./gradlew lintDebug`. Never commit `local.properties` or `build/`.
 - Pinning rules in `net/Transport.kt` and `pairing/` must not loosen (see README, "Security rules").
-- Scanning sends JPEG capture frames for the Mac to rebuild (no depth); it is a first version.
+- Scanning sends JPEG capture frames for the computer to rebuild (no depth). AR captures also send capture-camera v1
+  (saved-byte hashes, saved sizes/intrinsics, timestamps, camera centres) and start with `cameraMetadataRequired`;
+  every Android capture starts with `scaleQualificationRequired`, gated on `/healthz` `reconstructionReviewV1`.
+  Reconstruction reviews are answered in `ui/ReconstructionReview.kt` against the real preview mesh — never
+  through Best Guess/closeup. It is still a first version.
 - Not verified on a device or against a real Mac yet: say so in any claim about it working.

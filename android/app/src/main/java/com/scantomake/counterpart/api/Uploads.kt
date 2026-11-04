@@ -23,8 +23,13 @@ class ProjectUploader(private val client: CompanionClient) {
 
     fun isSending(projectId: String) = projectId in sending
 
-    /** Sends whatever of `files` the Mac doesn't have yet, stopping at the first failure. Returns photos/frames sent. */
-    suspend fun send(files: List<UploadFile>, projectId: String, forMessage: Boolean = false, scanName: String = "scan.usdz"): Int {
+    /**
+     * Sends whatever of `files` the Mac doesn't have yet, stopping at the first failure. Returns
+     * photos/frames sent. With `resendCapture`, capture frames are always sent: a frame name already on
+     * the Mac must never silently stand for different bytes than the ones this phone recorded (the
+     * capture-camera hashes bind to the exact bytes, and the companion replaces a re-sent frame).
+     */
+    suspend fun send(files: List<UploadFile>, projectId: String, forMessage: Boolean = false, scanName: String = "scan.usdz", resendCapture: Boolean = false): Int {
         if (!sending.add(projectId)) throw CompanionException("busy", "This is already being sent.")
         try {
             val project = client.get(projectId)
@@ -35,7 +40,7 @@ class ProjectUploader(private val client: CompanionClient) {
                 when (f.kind) {
                     UploadFile.Kind.Scan -> project.scan == null
                     UploadFile.Kind.Photo -> f.name !in photos
-                    UploadFile.Kind.Capture -> f.name !in captured
+                    UploadFile.Kind.Capture -> resendCapture || f.name !in captured
                     UploadFile.Kind.Depth -> f.name !in depths
                 }
             }

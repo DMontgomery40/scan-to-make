@@ -58,6 +58,8 @@ data class Project(
     val messages: List<Message>? = null,
     val pendingPhotos: List<String>? = null,
     val plates: List<ProjectPlate>? = null,
+    /** A rebuild waiting on the person: which part is the object, or how big it is. */
+    val reconstructionReview: ReconstructionReview? = null,
     val raw: JsonObject = JsonObject(emptyMap()),
 ) {
     enum class State(val wire: String) {
@@ -97,7 +99,8 @@ data class Project(
                 printerDestinationId = o.opt("printerDestinationId"), printConfirmation = o.opt("printConfirmation"),
                 status = o.opt("status"), title = o.opt("title"), kind = o.opt("kind"), ask = o.opt("ask"), settings = o.opt("settings"),
                 outcome = o.opt("outcome"), archived = o.opt("archived"), credit = o["credit"].obj, files = o["files"].obj,
-                pendingFollowup = o.opt("pendingFollowup"), messages = o.opt("messages"), pendingPhotos = o.opt("pendingPhotos"), plates = o.opt("plates"), raw = o,
+                pendingFollowup = o.opt("pendingFollowup"), messages = o.opt("messages"), pendingPhotos = o.opt("pendingPhotos"), plates = o.opt("plates"),
+                reconstructionReview = o.opt("reconstructionReview"), raw = o,
             )
         }
     }
