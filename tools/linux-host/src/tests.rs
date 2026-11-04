@@ -208,10 +208,13 @@ fn the_applied_build_record_round_trips_and_refuses_garbage() {
 }
 
 #[test]
-fn modeling_work_blocks_an_upgrade_restart_and_other_work_does_not() {
+fn modeling_and_printing_block_an_upgrade_restart() {
     use crate::host::{cleanup_jobs_busy, objects_busy};
     assert_eq!(objects_busy(&json!({"objects": [{"state": "ready"}, {"state": "touching-up"}]})), Some(true));
-    assert_eq!(objects_busy(&json!({"objects": [{"state": "ready"}, {"state": "printing"}, {"state": "new"}]})), Some(false));
+    assert_eq!(objects_busy(&json!({"objects": [{"state": "ready"}, {"state": "printing"}, {"state": "new"}]})), Some(true));
+    assert_eq!(objects_busy(&json!({"objects": [{"state": "ready"}, {"state": "printed"}, {"state": "new"}]})), Some(false));
+    assert_eq!(objects_busy(&json!({"objects": [{}]})), None);
+    assert_eq!(objects_busy(&json!({"objects": [{"state": "future-active-state"}]})), None);
     assert_eq!(objects_busy(&json!({"unexpected": true})), None, "a malformed list is unknown, never idle");
     for status in ["queued", "running"] {
         assert_eq!(cleanup_jobs_busy(&json!({"items": [{"kind": "cleanup", "job": {"status": status}}]})), Some(true), "{status}");

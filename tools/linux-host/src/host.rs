@@ -450,11 +450,19 @@ fn control_request(context: &Context, method: &str, params: Value) -> io::Result
     Ok(envelope["result"].clone())
 }
 
-/// A project being modeled right now (`touching-up`). A print already
-/// dispatched keeps going on the printer across a restart, so it is not busy.
+/// Modeling and printing both reserve the running companion. `printing` can
+/// include preparation or an uncertain dispatch, not only an autonomous printer job.
 pub fn objects_busy(result: &Value) -> Option<bool> {
     let objects = result.get("objects")?.as_array()?;
-    Some(objects.iter().any(|object| object.get("state").and_then(Value::as_str) == Some("touching-up")))
+    let mut busy = false;
+    for object in objects {
+        match object.get("state")?.as_str()? {
+            "touching-up" | "printing" => busy = true,
+            "new" | "needs-closeup" | "ready" | "printed" | "failed" | "sent" | "confirmed" => {},
+            _ => return None,
+        }
+    }
+    Some(busy)
 }
 
 /// A scan-cleanup job waiting or running. Print handoffs are not modeling.
@@ -469,7 +477,7 @@ pub fn cleanup_jobs_busy(result: &Value) -> Option<bool> {
     Some(busy)
 }
 
-/// Whether the running companion is modeling. Restarting it aborts that work
+/// Whether the running companion has active project work. Restarting aborts that work
 /// (the next start records the pass interrupted), so setup asks first and
 /// refuses to restart rather than silently discarding it.
 fn companion_busy(context: &Context) -> io::Result<bool> {

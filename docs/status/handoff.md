@@ -282,7 +282,7 @@ remote native probes and the SSH tunnel were removed after verification.
      `/home/david/scan-to-make-work/linux-reconstruct`: COLMAP 3.12.6 (requires explicit `libposelib` package)
      and official OpenMVS 2.4.0 Ubuntu binaries, verified against release SHA-256
      `7104ae1ddd6ca38fbca9e0e4a70b20af59e21e0b497eb7181c864fbf38ca8d00`.
-     No Linux reconstruction source integration or geometry/scale acceptance yet.
+     Reconstruction tool source is integrated below; real-capture geometry/scale acceptance remains open.
      **Linux integration:** host `linux-host-runtime` @ `b304ec1` and desktop `linux-tauri-desktop`
      @ `25f5e17` are merged into this branch (`6d8864d`, `fd73fae`). Host state is deliberately
      `~/.local/share/counterpart` so the isolated model worker and service agree; the socket is private under
@@ -296,9 +296,16 @@ remote native probes and the SSH tunnel were removed after verification.
      The initial missing-module and relative-Node setup errors are fixed in that installed build.
      Parent implemented the first-run phantom Bambu destination fix at `40bdf46`: retain the generated config for
      Download/Update, hide it from printer choices only while unchanged and empty. No custom SSH route is hidden.
-     Rebuild from the integrated head, including the final Avahi decoding fix, before the next UI acceptance.
-     Parent also found stable-path .deb upgrades do not signal a changed runtime to setup; Repair can leave the
-     old companion alive. This needs a BUILD-ID-aware upgrade fix and visible installed-app verification.
+     **Installed upgrade recovery verified:** `linux-runtime-recovery` @ `9eac0e4e` is integrated. The installed
+     .deb and AppImage payload `g29f4e21f1c23-node24.22.2-x64` passed visible Repair setup: the old service PID
+     changed, the applied BUILD-ID matched, projects/identity/printer tools were retained, and a second Repair
+     kept the same PID. Settings no longer showed the phantom printer. Native plate selection and STL orbit/zoom
+     worked; AppImage closure left its copied companion alive. Final .deb Repair restored the /usr service.
+     Artifacts/receipts: agents-136 `~/scan-to-make-work/linux-recovery/{artifacts,receipts}/` and
+     `apps/linux/receipts/{implementation.md,verification.txt}`. No print, pairing or credentials were exercised.
+     Parent review tightened the restart guard to include `printing` (which includes preparation/dispatch),
+     and to refuse malformed/unknown object states. This follow-up is not in those installed packages and has
+     no active-job UI acceptance yet. Rebuild before claiming that guard works in the installed app.
      Host engineering evidence: 33 real-process checks; official CI passed at `2f6b7df` (not the final integrated
      head), focused Avahi checks passed at `b304ec1`. Integrated official CI at `40bdf46` passed contracts
      55/55, printer-handoff 108/113 (5 skipped), companion 801/802 (1 skipped), and all six Python tool suites.
@@ -308,8 +315,9 @@ remote native probes and the SSH tunnel were removed after verification.
      scratch on agents-173 was retained when the cleanup guard rejected recursive deletion; do not bypass it.
      Linux capture conversion still needs Python/Pillow/usd-core distribution. Pairing defaults match the Mac;
      nearby discovery, Tailscale pairing, provider/modeling and actual printer controls remain open.
-     **Reconstruction:** Muse pushed `linux-muse-reconstruction` @ `c814db7`, only `tools/linux-reconstruct`.
-     It is not integrated. Synthetic COLMAP/OpenMVS runs exercised camera scale, measurement resume and cancellation,
+     **Reconstruction:** `linux-muse-reconstruction` @ `081ba638` is integrated at `d610924`, only
+     `tools/linux-reconstruct`. It requires explicit region confirmation before scale/export; companion/client
+     wiring remains in progress. Synthetic COLMAP/OpenMVS runs exercised camera scale, measurement resume and cancellation,
      but the anchor crop retained a support disc in the measured width/depth. Object-region qualification and real
      captures remain unresolved. Parent still must wire camera metadata, needs-scale/measurement Ask and packaging
      with OpenMVS licence/source information. No automatic print-ready claim from those synthetic dimensions.
