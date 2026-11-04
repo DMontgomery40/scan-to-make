@@ -202,7 +202,7 @@ if(handoffConfig&&printHandoff&&captureDirectory){
     settings:companionSettings,runtimeSettings,camera:new CameraFrames(),printGate,
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),
     titleFor:async request=>modelAccess?generateTitle(request,'',{worker:modelAccess.projectWorker()}):undefined,
-    reportsCompletion:async note=>modelAccess?reportsCompletion(note,'',modelAccess.projectWorker()):'unknown',
+    reportsCompletion:async note=>{if(!modelAccess)throw Error('AI settings are unavailable on this Mac');return reportsCompletion(note,'',modelAccess.projectWorker());},
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
   // A project printing there counts too.

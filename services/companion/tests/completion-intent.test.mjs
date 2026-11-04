@@ -22,5 +22,6 @@ test('classification distinguishes changes, success and uncertainty without trun
     assert.equal(await reportsCompletion('DONE. mounted and working. thanks!!', await worker(t, reply)), expected);
   }
   assert.equal(await reportsCompletion('It works. ' + ' '.repeat(4000) + 'But widen the hole', await worker(t, {structured_output: {intent: 'works'}})), 'unknown');
-  assert.equal(await reportsCompletion('It works, but widen the hole', '/does/not/exist'), 'unknown');
+  // A model that can't be asked is not an uncertain answer: the caller logs it and says why.
+  await assert.rejects(reportsCompletion('It works, but widen the hole', '/does/not/exist'), /ENOENT|does\/not\/exist/);
 });

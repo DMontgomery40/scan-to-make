@@ -10,7 +10,8 @@ import {isolatedClaudeEnv} from '../touchup/invocation.js';
 const SCHEMA = {type: 'object', additionalProperties: false, required: ['intent'],
   properties: {intent: {type: 'string', enum: ['works', 'changes', 'unknown']}}};
 
-/** Classifies text only, with no tools or project files. Uncertainty never marks a project Done. */
+/** Classifies text only, with no tools or project files. Uncertainty never marks a project Done.
+ * A model that can't be asked (error, timeout, no output) rejects, so the caller can log and say why. */
 export async function reportsCompletion(note: string, claudePath: string, worker?:ProjectWorker): Promise<'works' | 'changes' | 'unknown'> {
   if (note.length > 4000) return 'unknown';
   const dir = await mkdtemp(join(tmpdir(), 'stm-completion-'));
@@ -25,6 +26,5 @@ export async function reportsCompletion(note: string, claudePath: string, worker
       {cwd: dir, env: isolatedClaudeEnv(process.env), timeout: 20_000, maxBuffer: 1024 * 1024});
     const intent = (JSON.parse(stdout) as {structured_output?: {intent?: unknown}}).structured_output?.intent;
     return intent === 'works' || intent === 'changes' ? intent : 'unknown';
-  } catch { return 'unknown'; }
-  finally { await rm(dir, {recursive: true, force: true}).catch(() => undefined); }
+  } finally { await rm(dir, {recursive: true, force: true}).catch(() => undefined); }
 }

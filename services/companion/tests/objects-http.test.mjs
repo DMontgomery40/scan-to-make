@@ -479,9 +479,19 @@ test('unavailable or uncertain classification saves the note without changing th
     await service.start(project.id); await service.settled(project.id);
     if (index === 1) await service.setStatus(project.id, 'works');
     const before = await store.get(project.id);
+    const logged = t.mock.method(console, 'error', () => {});
     const reply = await call('POST', `/v1/objects/${project.id}/corrections`, {note: 'DONE. mounted and working. thanks!!'});
+    logged.mock.restore();
     assert.equal(reply.status, 409);
     assert.match(reply.json.error.message, /message is saved/);
+    if (index === 0) {
+      assert.match(reply.json.error.message, /couldn't tell whether/, 'a real "unknown" answer is uncertainty');
+      assert.equal(logged.mock.callCount(), 0);
+    } else {
+      // Nov 4: a check that couldn't run (here a timeout) used to read as "couldn't tell" and left no trace.
+      assert.match(reply.json.error.message, /AI couldn't check .*\(it took too long\)/);
+      assert.match(String(logged.mock.calls[0].arguments[0]), new RegExp(`completion check for ${project.id} could not run: timed out`));
+    }
     const after = await store.get(project.id);
     assert.equal(after.pendingFollowup, 'DONE. mounted and working. thanks!!');
     assert.equal(after.state, before.state);
