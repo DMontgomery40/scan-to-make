@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "tool": "linux-reconstruct",
+  "toolVersion": "1.2.0",
+  "status": "design-only: nothing in this manifest is bundled yet; the Linux host/app packaging tasks consume it",
+  "layout": {
+    "prefix": "<app-payload>/reconstruction/",
+    "bin": "bin/linux-reconstruct (launcher from this directory, unchanged)",
+    "pythonEnv": ".venv/ created at install time inside the tool directory (never system Python)",
+    "colmap": "bin/colmap (or distro COLMAP via SCAN_TO_MAKE_COLMAP)",
+    "openmvs": "openmvs/ directory containing InterfaceCOLMAP, DensifyPointCloud, ReconstructMesh (SCAN_TO_MAKE_OPENMVS_DIR)",
+    "env": {
+      "SCAN_TO_MAKE_LINUX_RECONSTRUCT": "<prefix>/bin/linux-reconstruct",
+      "SCAN_TO_MAKE_OPENMVS_DIR": "<prefix>/openmvs",
+      "SCAN_TO_MAKE_COLMAP": "<prefix>/bin/colmap (only when not using the distro package)"
+    }
+  },
+  "components": [
+    {
+      "name": "COLMAP",
+      "version": "3.12.6",
+      "role": "CPU sparse reconstruction (feature_extractor, matchers, mapper, image_undistorter, model_converter)",
+      "licence": "BSD 3-Clause (COLMAP) — ship COPYING; bundled libraries keep their own notices (see COLMAP's license file)",
+      "source": "https://github.com/colmap/colmap/releases (3.12.6) or the distro package",
+      "acquire": "Prefer the distro/apt package where available. A bundled build must be the CPU build (the tool always passes --SiftExtraction.use_gpu 0); CUDA is never required.",
+      "verify": "colmap help | head -1  ->  COLMAP 3.12.6"
+    },
+    {
+      "name": "OpenMVS",
+      "version": "2.4.0",
+      "role": "Dense point cloud + mesh (InterfaceCOLMAP, DensifyPointCloud, ReconstructMesh), invoked as separate processes",
+      "licence": "AGPL-3.0 — distributing these binaries obliges a written source offer for OpenMVS 2.4.0 exactly as built; ship the AGPL text and the offer. Process separation does not remove the binary-distribution duties.",
+      "source": "https://github.com/cdcseacave/openMVS archive v2.4.0",
+      "sourceArchiveSha256": "7104ae1ddd6ca38fbca9e0e4a70b20af59e21e0b497eb7181c864fbf38ca8d00",
+      "acquire": "Build from the pinned archive on the target distro (CMake, -DCMAKE_BUILD_TYPE=Release); record the compiler and full flag set in the build receipt so the source offer is exact. Dependencies (Boost, Eigen, OpenCV, CGAL, etc.) come from the distro; list their package versions in the receipt.",
+      "verify": "InterfaceCOLMAP --help | head -1  ->  OpenMVS x64 v2.4.0"
+    },
+    {
+      "name": "Python",
+      "version": ">=3.11 (developed against 3.12/3.14)",
+      "role": "Runs the tool (stdlib plus usd-core only)",
+      "licence": "PSF License",
+      "acquire": "System interpreter to create .venv; the tool runs from .venv/bin/python via the launcher. Never install into the system interpreter (PEP 668).",
+      "verify": ".venv/bin/python --version"
+    },
+    {
+      "name": "usd-core (PyPI)",
+      "version": "26.8 (pinned in requirements.txt)",
+      "role": "USDZ write/validate (export) and USDZ read (qualify of Apple output)",
+      "licence": "Apache-2.0 (OpenUSD) — ship license in the venv as installed",
+      "acquire": "pip install -r requirements.txt into .venv at install time (wheel; no compiler needed)",
+      "verify": ".venv/bin/python -c \"import pxr; print('pxr ok')\""
+    },
+    {
+      "name": "Pillow",
+      "version": "per services/companion (currently unpinned there)",
+      "role": "NOT used by linux-reconstruct. Required by companion photo helpers (photo_overview.py, ai_tweak_stills.py) which run under the companion's Python, so it belongs in the companion payload manifest, not this tool's venv. Listed here so the combined installer does not double-count or omit it.",
+      "licence": "HPND (Pillow license)",
+      "acquire": "Owned by the companion/host packaging scope, not this manifest's installer steps."
+    }
+  ],
+  "installerSteps": [
+    "Copy tools/linux-reconstruct (source only, no .venv/caches) into <prefix>.",
+    "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt (usd-core==26.8).",
+    "Place COLMAP: distro package, or the pinned CPU build at bin/colmap.",
+    "Build OpenMVS 2.4.0 from the pinned archive; copy InterfaceCOLMAP, DensifyPointCloud, ReconstructMesh (+ RefineMesh/TextureMesh if later needed) into openmvs/; keep the source tree or a written offer per AGPL-3.0.",
+    "Write the launcher env (SCAN_TO_MAKE_LINUX_RECONSTRUCT / SCAN_TO_MAKE_OPENMVS_DIR / SCAN_TO_MAKE_COLMAP) into the host's service environment.",
+    "Run the smoke checks in verification; record a receipt (component versions, build flags, distro, uname) beside the payload.",
+    "Confirm capabilities.reconstructionReviewV1 reports true only after the smoke checks pass; do not advertise the capability from file presence alone in release packaging."
+  ],
+  "verification": [
+    "colmap help | head -1",
+    "InterfaceCOLMAP --help | head -1",
+    ".venv/bin/python -c \"import pxr\"",
+    ".venv/bin/python -m unittest discover -s tests (in tools/linux-reconstruct)",
+    "linux-reconstruct samples <fixture photos> /tmp/smoke.usdz full --save-masks /tmp/smoke-masks --work-dir /tmp/smoke-work  (expect exit 5 needs-object-region with a preview STL)"
+  ],
+  "updatePolicy": "Versions above are pinned. Bump one component at a time, rerun verification, and record the change in this manifest in the same commit.",
+  "notBundledYet": [
+    "No COLMAP or OpenMVS binaries in this repository",
+    "No .deb/AppImage wiring (apps/linux scope)",
+    "No on-device installer (tools/linux-host scope)"
+  ]
+}
