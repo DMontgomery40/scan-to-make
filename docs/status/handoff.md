@@ -130,8 +130,24 @@ remote native probes and the SSH tunnel were removed after verification.
    Cloud via FULU, Bambu Connect, X2D native; availability from configuration only) and accepts any id; same contract
    in both MCPs; companion refuses a change while that printer prints (409). The Mac picker is still gated to
    bambu-printer-mcp (`SettingsViews.swift:379`); show it for any MCP with `counterpart_print_route`. New PR off main.
-7. **Bambu Cloud printing is refused:** `net.start_print` -3120, HTTP 403 "internal blocking", every time. Untested
-   comparison: a cloud print from Bambu Studio itself. Also show it in plain words instead of the raw plug-in text.
+7. **Bambu Cloud printing is refused:** `net.start_print` -3120 (`PRINT_SP_POST_TASK_FAILED`), HTTP 403 "internal blocking",
+   every time. **Nov 4 finding:** Bambu Studio never sends this printer through `start_print` first. For a cloud-bound printer
+   with an IP, access code and SD card it sends `start_local_print_with_record` (LAN upload, task recorded in the account),
+   and `start_print` is its fallback (`BambuStudio/src/slic3r/GUI/Jobs/PrintJob.cpp:812-846`). So a Studio cloud print
+   is not a like-for-like comparison. **Fix, PRs open, not merged or installed:** bambu-printer-mcp
+   [#102](https://github.com/DMontgomery40/bambu-printer-mcp/pull/102) (1.1.55) and mcp-3D-printer-server
+   [#56](https://github.com/DMontgomery40/mcp-3D-printer-server/pull/56) (1.2.29). With no method given, a cloud print
+   sends with record in the cloud session, then `start_print` only after a `-2010`…`-2140` failure (before the print command).
+   Full suites pass (1036/0/11 and 713/0/6). **Still to do:** accept on the P1S from the Mac app with Connection = Bambu Cloud.
+   With record also POSTs a cloud task (`-2120` if refused), so it may still get the 403. Two other reported causes:
+   request content ([OrcaSlicer #13277](https://github.com/OrcaSlicer/OrcaSlicer/issues/13277): Studio worked where
+   Orca was refused) and a VPN's malware/tracker filter (NordVPN Threat Protection is on). On Nov 4 the Mac's MCP `.env`
+   is `BAMBU_DEFAULT_CONNECTION_MODE=lan_mqtt_ftps`, `…_TYPE=lan`.
+7a. **A change request can stall silently:** the Vivi pick's "Design again with the new prompts" (10:27, 10:32, 10:33
+   Nov 4) took `service.ts:972-976` ("couldn't tell whether it marks Done") three times, so no pass ran.
+   `completion-intent.ts` turns every `claude -p` error or 20 s timeout into `unknown` and logs nothing. Over ssh the CLI
+   says "Not logged in", but that is the locked keychain (the credential item was refreshed 06:19 Nov 4), so the
+   companion's real error is still unknown.
 8. **FULU through mcp-3D-printer-server crashes:** `create_directory …/.config/mcp-3d-printer-server/bambu-network/log`,
    because the launcher mounts only `~/.config/bambu-printer-mcp/bambu-network`. Fix in Complete Settings: carry the
    source MCP's session folder (`BAMBU_NETWORK_CONFIG_DIR`, or ask `bambu_network_bridge_status` for `configDir`).
