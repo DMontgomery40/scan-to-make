@@ -29,6 +29,7 @@ export interface CleanupRunner {
 /** Runs `ai-tweak-cli run <args>` with the user's model access; the Mac app's ModelAccessService.run fits. */
 export type AiWorker=(args:string[],options:{signal?:AbortSignal;timeoutMs?:number})=>Promise<{exitCode:number;stdout:string}>;
 export interface AiCleanupOptions {
+ revision?:string;
  /** From SCAN_TO_MAKE_AI_* (modelAccessFromEnv); 'none' keeps scan-correct. */
  access:ModelAccess;
  /** Absolute path to the built ai-tweak-cli.js, spawned directly when no worker is given. */
@@ -43,6 +44,7 @@ export interface CleanupOptions {
  blender:string; toolPath:string; correctTool:string; python?:string; timeoutMs?:number;
  converterAdapter?:string; adapter?:Exclude<CleanupRunner['adapter'],'ai-tweak'>; model?:string; baseUrl?:string; keyEnv?:string;
  ai?:AiCleanupOptions;
+ selectAI?:()=>Pick<AiCleanupOptions,'access'|'worker'|'revision'>;
  /** Host bootstrap enables post-correction printability. No printer credentials needed. */
  printable?:{bambu?:PrinterMcpProcess};
 }
@@ -148,13 +150,19 @@ async function command(python:string,args:string[],root:string,blender:string,ti
 
 /** Operator-selected executables/provider only; no executable or provider URL comes from the phone. */
 export function createScanCleanupRunner(options:CleanupOptions):ScanRunner{
+ if(options.selectAI){
+  const {selectAI,...fixed}=options;
+  const current=()=>createScanCleanupRunner({...fixed,ai:{...fixed.ai!,...selectAI()}});
+  const runner=current();
+  return {...runner,get cleanup(){return current().cleanup;},jobTimeoutMs:AI_CLEANUP_JOB_MS,snapshot:current};
+ }
  const repair=createScanRunner(options),timeout=options.timeoutMs??300000;
  const ai=options.ai&&options.ai.access.kind!=='none'?options.ai:undefined;
  const adapter:CleanupRunner['adapter']=ai?'ai-tweak':options.adapter??'scripted';
  const converter=options.converterAdapter??fileURLToPath(new URL('../python/capture_convert.py',import.meta.url));
  if(!isAbsolute(options.correctTool)||!isAbsolute(converter)||!['scripted','anthropic','openai','ai-tweak'].includes(adapter))throw Error('Invalid cleanup configuration');
  if(ai){validateAccess(ai.access);if(!isAbsolute(ai.cli)||!isAbsolute(ai.judgeTool))throw Error('Invalid cleanup configuration');}
- return {...repair,jobTimeoutMs:ai?AI_CLEANUP_JOB_MS:CLEANUP_JOB_MS,cleanup:{adapter,async run(stage,ctx){
+ return {...repair,selectionRevision:options.ai?.revision,jobTimeoutMs:ai?AI_CLEANUP_JOB_MS:CLEANUP_JOB_MS,cleanup:{adapter,async run(stage,ctx){
   if(stage==='correct'&&ai){const result=await aiCorrect(ai,options,ctx);if(options.printable)await makePrintable(options,ctx);return result;}
   const dimensions=ctx.reference?[...ctx.reference.dimensionsMm].sort((a,b)=>b-a):undefined;
   const reference=dimensions?['--reference-mm',...dimensions.map(String)]:[];
@@ -246,7 +254,7 @@ async function aiCorrect(ai:AiCleanupOptions,options:CleanupOptions,ctx:CleanupC
   for(const name of ['ai-tweak.json','pick.json'])await copyFile(join(out,name),join(keep,name)).catch(()=>undefined);
   let complete=false;
   try{complete=JSON.parse(await readFile(join(ctx.corrected,'report.json'),'utf8')).status==='complete';}catch{/* no export */}
-  if(result?.exitCode!==0||!complete)return fallback('The AI step could not finish, so the captured scan is kept.');
+  if(result?.exitCode!==0||!complete)return fallback('The selected AI could not finish. Check its login or key and choose a model with image and tool support; custom cleanup endpoints need the Responses API. The captured scan is kept.');
   return Buffer.from(result.stdout);
  }finally{await rm(work,{recursive:true,force:true});}
 }

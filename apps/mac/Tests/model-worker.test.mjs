@@ -18,7 +18,7 @@ async function fixture(t){
  await writeFile(join(cli,'ai-tweak-cli.js'),`
    const {execFileSync}=require('node:child_process');
    process.on('SIGTERM',()=>{});
-   process.stdout.write(JSON.stringify({pid:process.pid,pgid:Number(execFileSync('/bin/ps',['-o','pgid=','-p',String(process.pid)],{encoding:'utf8'}))})+'\\n');
+   process.stdout.write(JSON.stringify({judgeTool:process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL,pid:process.pid,pgid:Number(execFileSync('/bin/ps',['-o','pgid=','-p',String(process.pid)],{encoding:'utf8'}))})+'\\n');
    setInterval(()=>{},1000);
  `);
  return join(app,'Contents/MacOS/Counterpart');
@@ -33,6 +33,7 @@ test('compiled signed-entry helper execs Node in its own PID/group; forced shutd
  const ready=await Promise.race([once(child.stdout,'data'),closed.then(()=>{throw Error('helper exited before worker readiness')}),new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('helper readiness deadline')),5000);timer.unref();})]);
  const row=JSON.parse(ready[0].toString());workerPid=row.pid;
  assert.equal(row.pid,child.pid);assert.equal(row.pgid,child.pid);
+ assert.match(row.judgeTool??'',/Payload\/source\/tools\/ai-tweak-judge$/);
  process.kill(-child.pid,'SIGTERM'); // Deliberately ignored by the fixture worker.
  process.kill(-child.pid,'SIGKILL');
  const result=await Promise.race([closed,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('stdout remained open after SIGKILL')),2000);timer.unref();})]);

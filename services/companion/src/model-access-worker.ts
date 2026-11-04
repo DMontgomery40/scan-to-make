@@ -1,9 +1,10 @@
+import {StringDecoder} from 'node:string_decoder';
 import {spawn} from 'node:child_process';
 import {isAbsolute} from 'node:path';
 import {ModelAccessChoiceSchema,type ModelAccessChoice} from './model-access-protocol.js';
 
 export interface ModelWorkerResult {exitCode:number; stdout:string}
-export interface ModelWorkerOptions {signal?:AbortSignal; timeoutMs?:number}
+export interface ModelWorkerOptions {signal?:AbortSignal; timeoutMs?:number;onProgress?:(progress:import('./touchup/runner.js').TouchupProgress)=>void}
 export type ModelWorker = (choice:ModelAccessChoice,args:string[],options:ModelWorkerOptions)=>Promise<ModelWorkerResult>;
 
 /** The signed app alone resolves Keychain references and launches ai-tweak-cli.
@@ -11,7 +12,7 @@ export type ModelWorker = (choice:ModelAccessChoice,args:string[],options:ModelW
 export function createModelWorker(executable:string|undefined):ModelWorker {
   return async (choice,args,options) => {
     ModelAccessChoiceSchema.parse(choice);
-    if (!executable || !isAbsolute(executable) || !['check','run'].includes(args[0] ?? '')) throw new Error('Model worker unavailable');
+    if (!executable || !isAbsolute(executable) || !['check','run','project'].includes(args[0] ?? '')) throw new Error('Model worker unavailable');
     options.signal?.throwIfAborted();
     // Reuse the bridge's allowlisted child environment pattern. Never inherit
     // printer tokens, provider keys or arbitrary operator environment variables.
@@ -43,10 +44,17 @@ export function createModelWorker(executable:string|undefined):ModelWorker {
     };
     const timer = setTimeout(() => { exceeded = true; terminate(); },options.timeoutMs ?? 3900000);
     options.signal?.addEventListener('abort',terminate,{once:true});
+    let partial='';const decoder=new StringDecoder('utf8');
     child.stdout.on('data',(chunk:Buffer) => {
       bytes += chunk.length;
       if (bytes > 1024*1024) { exceeded = true; terminate(); }
-      else chunks.push(chunk);
+      else if(args[0]==='project') {
+        partial+=decoder.write(chunk);const lines=partial.split('\n');partial=lines.pop()!;
+        for(const line of lines){
+          try{const event=JSON.parse(line);if(event.type==='progress'){options.onProgress?.(event.progress);continue;}}catch{}
+          chunks.push(Buffer.from(line+'\n'));
+        }
+      } else chunks.push(chunk);
     });
     child.stdin.on('error',() => {});
     const completion = new Promise<number>((resolve,reject) => {
@@ -60,7 +68,7 @@ export function createModelWorker(executable:string|undefined):ModelWorker {
       const exitCode = await completion;
       options.signal?.throwIfAborted();
       if (exceeded) throw new Error('Model worker limit exceeded');
-      return {exitCode,stdout:Buffer.concat(chunks).toString('utf8')};
+      return {exitCode,stdout:Buffer.concat(chunks).toString('utf8')+partial};
     } finally {
       clearTimeout(timer); if (killTimer) clearTimeout(killTimer);
       options.signal?.removeEventListener('abort',terminate);

@@ -184,3 +184,10 @@ test('custom CLI login directories reach subscription helpers only',async t=>{
   assert.deepEqual(JSON.parse(result.stdout),['claude-code','codex-cli'].includes(choice.kind)?expected:{},choice.kind);
  }
 });
+
+test('project helper streams public progress while keeping its final response parseable',async t=>{
+ const {root}=await fixture(t),helper=join(root,'progress-helper');
+ await writeFile(helper,`#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'progress',progress:{seconds:1,toolCalls:1,activity:[{atMs:1,kind:'tool',text:'design_view'}]}}));console.log(JSON.stringify({toolCalls:1,seconds:1,exitCode:0}));});`,{mode:0o700});
+ const progress=[];const result=await createModelWorker(helper)({kind:'codex-cli'},['project','/unused'],{onProgress:p=>progress.push(p)});
+ assert.equal(progress.length,1);assert.equal(progress[0].activity[0].text,'design_view');assert.equal(JSON.parse(result.stdout).toolCalls,1);
+});

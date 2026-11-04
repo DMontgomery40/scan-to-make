@@ -6,7 +6,6 @@ import {readFile} from 'node:fs/promises';
 import {ScanProcessingStore,createScanCleanupRunner} from './scan-processing.js';
 import {dirname,isAbsolute,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {modelAccessFromEnv} from './ai-tweak.js';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {CaptureStore} from './capture-import.js';
 import {DetailStillStore} from './detail-stills.js';
@@ -53,7 +52,7 @@ const directory = process.env.SCAN_TO_MAKE_REMOTE_AUTH_DIR;
 const remoteAuth =
   directory === undefined ? undefined : await RemoteAuthStore.open(directory);
 // Invalid model preferences must not take the paired phone API offline.
-const modelAccess = remoteAuth ? await ModelAccessService.open(remoteAuth.directory).catch(() => undefined) : undefined;
+const modelAccess = remoteAuth ? await ModelAccessService.open(remoteAuth.directory,undefined,{legacyClaude:!!process.env.SCAN_TO_MAKE_CLAUDE_PATH}).catch(() => undefined) : undefined;
 
 const captureDirectory=process.env.SCAN_TO_MAKE_CAPTURE_DIR;
 if(captureDirectory!==undefined&&(!remoteAuth||!isAbsolute(captureDirectory)))throw new Error('Capture requires authentication and an absolute private directory');
@@ -66,8 +65,9 @@ const scanBlender=process.env.SCAN_TO_MAKE_SCAN_BLENDER;
 if(scanTool!==undefined||scanBlender!==undefined){
  if(!capture||!captureDirectory||!scanTool||!scanBlender)throw new Error('Scan processing requires authenticated capture storage, tool and Blender paths');
  Object.assign(capture,{scanProcessing:new ScanProcessingStore(capture.storage,capture.captures!,join(captureDirectory,'captures'),createScanCleanupRunner({toolPath:scanTool,blender:scanBlender,python:process.env.SCAN_TO_MAKE_CAPTURE_PYTHON??'python3',correctTool:process.env.SCAN_TO_MAKE_SCAN_CORRECT_TOOL??join(dirname(scanTool),'../scan-correct/correct.py'),adapter:process.env.SCAN_TO_MAKE_CORRECTION_ADAPTER as 'scripted'|'anthropic'|'openai'|undefined,model:process.env.SCAN_TO_MAKE_CORRECTION_MODEL,baseUrl:process.env.SCAN_TO_MAKE_CORRECTION_BASE_URL,keyEnv:process.env.SCAN_TO_MAKE_CORRECTION_KEY_ENV,printable:{},
-  // KAN-184: with SCAN_TO_MAKE_AI_ACCESS set, the correct stage is David's one-sentence AI step and its visual pick.
-  ai:{access:modelAccessFromEnv(process.env),cli:fileURLToPath(new URL('./ai-tweak-cli.js',import.meta.url)),judgeTool:process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL??join(dirname(scanTool),'../ai-tweak-judge')}}))});
+  // The saved selection, including phone changes, is snapshotted when cleanup is admitted.
+  selectAI:()=>modelAccess?.cleanupSnapshot()??{access:{kind:'none'}},
+  ai:{access:{kind:'none'},cli:fileURLToPath(new URL('./ai-tweak-cli.js',import.meta.url)),judgeTool:process.env.SCAN_TO_MAKE_AI_JUDGE_TOOL??join(dirname(scanTool),'../ai-tweak-judge')}}))});
 }
 const handoffConfigPath=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG||undefined;
 const handoffDirectory=process.env.SCAN_TO_MAKE_PRINTER_HANDOFF_DIR||undefined;
@@ -87,7 +87,7 @@ const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffService
 // PRD §8.10: a print and an update of its printer's MCP never overlap (the phone's handoff route prints on `current`).
 const printGate=new PrintGate();
 if(printHandoff)printHandoff.admit=()=>printGate.hold('current');
-// Objects: the touch-up runs through the user's own printer MCP and their own Claude login. Needs both.
+// Objects keep the user's printer MCP; each model pass snapshots the saved AI selection.
 const claudePath=process.env.SCAN_TO_MAKE_CLAUDE_PATH||undefined;
 if(claudePath!==undefined&&!isAbsolute(claudePath))throw new Error('SCAN_TO_MAKE_CLAUDE_PATH must be absolute');
 let objects:ObjectService|undefined;
@@ -166,7 +166,7 @@ const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,gate:printGate,co
     if(id!=='current')printerDestinations!.set(id,createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:id,onConnect:onConnect(id),relay:old.relay as import('@scan-to-make/printer-handoff').InMemoryElicitationRelay}));
   },
   busy:async id=>printGate.held(id)||printGate.held(printerCatalog?.canonical(id)??id)||(printerBusy?await printerBusy(id):false)}):undefined;
-if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
+if(handoffConfig&&printHandoff&&captureDirectory){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
   objectStoreForEvents=objectStore;
   // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
@@ -180,11 +180,13 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   }));
   printerDestinations=destinations;
   printerDirectory=new PrinterDirectory(catalog,id=>destinations.get(id)?.runner.session);
-  objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,runningHandoff:()=>runningHandoff()!,printerCatalog:catalog,printers:printerDirectory,
+  objects=new ObjectService({store:objectStore,runTouchup:input=>{if(!input.worker)throw Error('AI settings are unavailable. Open AI Settings on your Mac and retry.');return runTouchup(input);},modelAccess,requireModelAccess:true,claudePath:claudePath??'',handoff:handoffConfig,runningHandoff:()=>runningHandoff()!,printerCatalog:catalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(runningHandoff()!,path),
     print:{services:printHandoff,destinations},
     settings:companionSettings,runtimeSettings,camera:new CameraFrames(),printGate,
-    passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath), reportsCompletion:note=>reportsCompletion(note,claudePath),
+    passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),
+    titleFor:async request=>modelAccess?generateTitle(request,'',{worker:modelAccess.projectWorker()}):undefined,
+    reportsCompletion:async note=>modelAccess?reportsCompletion(note,'',modelAccess.projectWorker()):'unknown',
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
   // PRD §8.10: Update updates the install each printer runs, between prints.

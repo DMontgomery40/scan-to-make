@@ -24,7 +24,7 @@ export class RuntimeSettings {
     const snapshot=this.deps.modelAccess?.get();
     // Explicit allowlist: even a Keychain reference never reaches a phone.
     const choice=snapshot?.choice;
-    const ai=snapshot&&choice?{scope:'connection-test' as const,revision:snapshot.revision,choice:{kind:choice.kind,
+    const ai=snapshot&&choice?{scope:'model-jobs' as const,revision:snapshot.revision,choice:{kind:choice.kind,
       ...('provider' in choice?{provider:choice.provider}:{}),...('model' in choice?{model:choice.model}:{}),
       ...('url' in choice?{url:choice.url}:{})},check:snapshot.check}:undefined;
     return {...(ai?{ai}:{}),fusion:this.fusion()};

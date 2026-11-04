@@ -1,3 +1,5 @@
+import {selectedText} from './selected-text.js';
+import type {ProjectWorker} from '../touchup/runner.js';
 import {execFile} from 'node:child_process';
 import {mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -12,10 +14,14 @@ const SCHEMA = {type: 'object', additionalProperties: false, required: ['title']
  * A short title for a request ("Mic mount"), from the user's own Claude login
  * with a small, fast model. Best effort: undefined on any failure.
  */
-export async function generateTitle(request: string, claudePath: string, opts: {timeoutMs?: number} = {}): Promise<string | undefined> {
+export async function generateTitle(request: string, claudePath: string, opts: {timeoutMs?: number;worker?:ProjectWorker} = {}): Promise<string | undefined> {
   const dir = await mkdtemp(join(tmpdir(), 'stm-title-'));
   try {
     const prompt = `Name the thing this request is for in two to four plain words, title case only on the first word (for example "Mic mount" or "Shelf bracket"). Request:\n\n${request.slice(0, 2000)}`;
+    if(opts.worker){
+      const answer=await selectedText(opts.worker,prompt,SCHEMA,opts.timeoutMs??45000) as {title?:unknown}|undefined;
+      return typeof answer?.title==='string'&&answer.title.trim()?answer.title.trim().slice(0,40):undefined;
+    }
     const {stdout} = await promisify(execFile)(claudePath, ['-p', '--model', 'claude-sonnet-5-5', '--tools', '', '--strict-mcp-config', '--disable-slash-commands',
       '--setting-sources', '', '--settings', '{"disableAllHooks":true}', '--json-schema', JSON.stringify(SCHEMA), '--output-format', 'json', prompt],
       {cwd: dir, env: isolatedClaudeEnv(process.env), timeout: opts.timeoutMs ?? 45_000, maxBuffer: 1024 * 1024});

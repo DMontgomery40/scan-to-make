@@ -183,3 +183,20 @@ test('a close-up whose image is deleted after its record is read is skipped, not
  const {job}=await f.store.start(f.input);await f.store.wait();const result=(await f.store.load(f.input,job.jobId)).job;
  assert.equal(result.status,'succeeded');assert.deepEqual(result.detailStills.map(s=>s.id),[kept.still.id]);
 });
+
+test('changing AI selection while cleanup runs admits a new job instead of reusing the old provider',async t=>{
+ let selection='codex',entered,release;const running=new Promise(r=>entered=r),gate=new Promise(r=>release=r),seen=[];
+ const root=cleanupRunner();root.snapshot=()=>{
+  const chosen=selection,runner=cleanupRunner(),run=runner.cleanup.run;
+  return {...runner,selectionRevision:chosen,cleanup:{...runner.cleanup,run:async(stage,ctx)=>{
+   if(stage==='import'){seen.push(chosen);if(chosen==='codex'){entered();await gate;}}
+   return run(stage,ctx);
+  }}};
+ };
+ const f=await fixture(t,root),first=await f.store.start(f.input);await running;
+ let second;
+ try{selection='api';second=await f.store.start(f.input);assert.notEqual(second.job.jobId,first.job.jobId,'new selection must not join an admitted job');}
+ finally{release();await f.store.wait();}
+ assert.deepEqual(seen,['codex','api']);
+ assert.equal((await f.store.load(f.input,second.job.jobId)).job.status,'succeeded');
+});

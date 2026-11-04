@@ -51,7 +51,7 @@ export function publicTouchupText(text: string, env: NodeJS.ProcessEnv = {}): st
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, 2000);
 }
 
-interface ResultEvent {
+export interface ResultEvent {
   is_error?: boolean;
   result?: string;
   total_cost_usd?: number;
@@ -119,6 +119,8 @@ export interface WorkerRun {
   resultEvent?: ResultEvent; worker?: TouchupResult['worker']; toolCalls: number; stopReason?: string; stderrTail: string;
   exitCode: number | null; error?: NodeJS.ErrnoException; seconds: number; publicText: (text: string) => string;
 }
+export type ProjectWorker = (inv: TouchupInvocation, opts: {timeoutMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal}) => Promise<WorkerRun>;
+
 export async function runClaudeWorker(inv: TouchupInvocation, opts: {
   spawn?: typeof nodeSpawn; timeoutMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
 } = {}): Promise<WorkerRun> {
@@ -196,7 +198,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
 } = {}): Promise<TouchupResult> {
   const started0 = Date.now();
   if (opts.signal?.aborted) return {status: 'failed', reason: 'cancelled', renders: [], checkpoints: [], stats: {seconds: Math.round((Date.now() - started0) / 1000), toolCalls: 0}};
-  const run = await runClaudeWorker(inv, opts);
+  const run = await (inv.worker ?? runClaudeWorker)(inv, opts);
   const {resultEvent, worker, toolCalls, stopReason, stderrTail, publicText} = run;
   const exitCode = run.exitCode, ended = run.error ? {error: run.error} : {} as {error?: NodeJS.ErrnoException};
   const seconds = () => run.seconds;

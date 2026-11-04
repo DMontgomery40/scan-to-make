@@ -2,7 +2,7 @@ import type {CleanupRunner} from './scan-cleanup-runner.js';
 import {spawn} from 'node:child_process';
 import {mkdir,stat} from 'node:fs/promises';
 import {isAbsolute,join} from 'node:path';
-export interface ScanRunner {jobTimeoutMs?:number;cleanup?:CleanupRunner;run(stage:'repair'|'measure'|'render',input:string,output:string,sidecar:string,signal:AbortSignal,onProcessGroup?:(pgid:number)=>void|Promise<void>):Promise<Buffer>}
+export interface ScanRunner {selectionRevision?:string;snapshot?:()=>ScanRunner;jobTimeoutMs?:number;cleanup?:CleanupRunner;run(stage:'repair'|'measure'|'render',input:string,output:string,sidecar:string,signal:AbortSignal,onProcessGroup?:(pgid:number)=>void|Promise<void>):Promise<Buffer>}
 /** Only trusted host configuration may construct this runner. The entire job has a separate deadline. */
 export function createScanRunner(options:{blender:string;toolPath:string;python?:string;timeoutMs?:number}):ScanRunner {
  const {blender,toolPath}=options,timeout=options.timeoutMs??300000;

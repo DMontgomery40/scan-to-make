@@ -12,7 +12,7 @@
         "kind": "none"
       },
       "check": null,
-      "scope": "connection-test"
+      "scope": "model-jobs"
     },
     "fusion": {
       "state": "unavailable",

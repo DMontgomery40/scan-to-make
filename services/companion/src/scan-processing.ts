@@ -44,7 +44,7 @@ type LockOwner=z.infer<typeof OwnerSchema>;
 // Cancellation routes through this registry, so any same-process instance can cancel the owner.
 const activeJobs=new Map<string,{controller:AbortController;done?:Promise<void>}>();
 interface QueueEntry {
- jobId:string;r:Request;stillIds?:string[];authorize?:()=>Promise<void>;
+ runner:ScanRunner;jobId:string;r:Request;stillIds?:string[];authorize?:()=>Promise<void>;
  controller:AbortController;done:Promise<void>;finish:()=>void;store:ScanProcessingStore;
 }
 interface DirectoryQueue {pending:QueueEntry[];running?:QueueEntry;enqueueChain:Promise<unknown>;indexChain:Promise<unknown>;indexDirty:boolean}
@@ -224,9 +224,9 @@ export class ScanProcessingStore {
   if(authorize&&this.queue().pending.includes(entry))entry.authorize=authorize;
  }
  /** Close-ups a job uses when none are named: the AI step looks at all of them (up to 24). */
- private defaultStillCount(){return this.runner.cleanup?.adapter==='ai-tweak'?MAX_DETAIL_STILLS_PER_CAPTURE:4;}
- private pipelineMatches(job:ScanProcessingJob){
-  return this.runner.cleanup?!!job.pipelineStages&&job.correctionAdapter===this.runner.cleanup.adapter:!job.pipelineStages;
+ private defaultStillCount(runner:ScanRunner=this.runner){return runner.cleanup?.adapter==='ai-tweak'?MAX_DETAIL_STILLS_PER_CAPTURE:4;}
+ private pipelineMatches(job:ScanProcessingJob,runner:ScanRunner=this.runner){
+  return runner.cleanup?!!job.pipelineStages&&job.correctionAdapter===runner.cleanup.adapter:!job.pipelineStages;
  }
  // Enqueues serialize per directory, so the dedupe check and the job creation
  // cannot interleave into two jobs for one request.
@@ -268,12 +268,13 @@ export class ScanProcessingStore {
   }
  }
  private async enqueueLocked(r:Request,params:Params,trigger:Trigger,authorize?:()=>Promise<void>,signal?:AbortSignal,followUp=false){
+  const selectedRunner=this.runner.snapshot?.()??this.runner;
   if(this.closed)throw new ScanProcessingFailure('processing-unavailable');
   signal?.throwIfAborted();
   const capture=await this.captures.loadRetainedCapture(r.projectId,r.captureId);
   const captureSha256=capture.binding.capture.original.sha256;
   let retainedStills:Awaited<ReturnType<DetailStillStore['listRetainedDetailStills']>>['stills']=[];
-  if(this.runner.cleanup){
+  if(selectedRunner.cleanup){
    const stillStore=new DetailStillStore(this.projects,this.directory);
    retainedStills=(await stillStore.listRetainedDetailStills(r.projectId,r.captureId)).stills;
    // Explicit selections still fail before launch, as before the queue.
@@ -299,7 +300,7 @@ export class ScanProcessingStore {
     const waitingJob=existing.find(job=>job.jobId===waiting.jobId);
     // Only a waiting job from the same pipeline/adapter configuration can
     // absorb this follow-up; otherwise the requested correction never runs.
-    if(waitingJob&&this.pipelineMatches(waitingJob)){this.adoptAuthorize(waiting,authorize);return {job:structuredClone(waitingJob)};}
+    if(waitingJob&&waiting.runner.selectionRevision===selectedRunner.selectionRevision&&this.pipelineMatches(waitingJob,selectedRunner)){this.adoptAuthorize(waiting,authorize);return {job:structuredClone(waitingJob)};}
    }
    const newest=existing.find(job=>job.status!=='failed');
    if(newest?.reference&&params.reference===undefined)params={...params,reference:newest.reference};
@@ -311,15 +312,15 @@ export class ScanProcessingStore {
    if(job.status==='queued'||job.status==='running'){
     // Same pipeline/adapter identity as the succeeded pass: a live job from
     // another runner configuration is not this request's job.
-    if(!this.pipelineMatches(job))continue;
-    const entry=entryFor(job.jobId);if(!entry)continue;
+    if(!this.pipelineMatches(job,selectedRunner))continue;
+    const entry=entryFor(job.jobId);if(!entry||entry.runner.selectionRevision!==selectedRunner.selectionRevision)continue;
     // A running cleanup job already snapshotted its close-ups; only a
     // waiting job can absorb a follow-up for photos that arrived later.
-    if(this.runner.cleanup&&queue.running===entry){
+    if(selectedRunner.cleanup&&queue.running===entry){
      if(followUp)continue;
      // Any other request joins a running job only if its snapshot is still the
      // current selection: a deleted or newly added close-up needs a fresh job.
-     const effective=params.stillIds??retainedStills.slice(-this.defaultStillCount()).map(s=>s.id);
+     const effective=params.stillIds??retainedStills.slice(-this.defaultStillCount(selectedRunner)).map(s=>s.id);
      if(!job.detailStills||!sameIdSet(job.detailStills.map(s=>s.id),effective))continue;
     }
     if(sameStillRequest(entry.stillIds,params.stillIds)){this.adoptAuthorize(entry,authorize);return {job:structuredClone(job)};}
@@ -336,18 +337,18 @@ export class ScanProcessingStore {
    // A result from another pipeline or adapter is not the same job: after
    // the operator configures a real model, an old scripted result must not
    // satisfy new requests.
-   if(!this.pipelineMatches(job))continue;
-   if(this.runner.cleanup){
-    const effective=params.stillIds??retainedStills.slice(-this.defaultStillCount()).map(s=>s.id);
+   if(!this.pipelineMatches(job,selectedRunner))continue;
+   if(selectedRunner.cleanup){
+    const effective=params.stillIds??retainedStills.slice(-this.defaultStillCount(selectedRunner)).map(s=>s.id);
     if(!sameIdSet((job.detailStills??[]).map(s=>s.id),effective))continue;
    }
    return {job:structuredClone(job)};
   }
   const createdAtMs=Date.now();
-  const job:ScanProcessingJob=ScanProcessingJobSchema.parse({schema:SCAN_PROCESSING_SCHEMA_ID,jobId:randomUUID(),projectId:r.projectId,projectRevision:r.projectRevision,captureId:r.captureId,status:'queued',previewOnly:true,wallClockLimitMs:this.timeoutMs,reference:params.reference,captureSha256,trigger,createdAtMs,enqueuedAt:new Date(createdAtMs).toISOString(),...(this.runner.cleanup?{pipelineStages:SCAN_CLEANUP_STAGES.map(kind=>({kind,status:'queued'})),correctionAdapter:this.runner.cleanup.adapter}:{}),
+  const job:ScanProcessingJob=ScanProcessingJobSchema.parse({schema:SCAN_PROCESSING_SCHEMA_ID,jobId:randomUUID(),projectId:r.projectId,projectRevision:r.projectRevision,captureId:r.captureId,status:'queued',previewOnly:true,wallClockLimitMs:this.timeoutMs,reference:params.reference,captureSha256,trigger,createdAtMs,enqueuedAt:new Date(createdAtMs).toISOString(),...(selectedRunner.cleanup?{pipelineStages:SCAN_CLEANUP_STAGES.map(kind=>({kind,status:'queued'})),correctionAdapter:selectedRunner.cleanup?.adapter}:{}),
    stages:[{kind:'repair',status:'queued',params:{weldMm:.01,componentFraction:.01,componentMetric:'area',holeMaxEdges:0,voxelSizeMm:.3,forceVoxel:false,denoiseIterations:15,denoiseFactor:.5,denoiseMu:-.53,denoiseMaxMm:.35,sharpAngleDeg:30,deviationSamples:10000}},{kind:'measure',status:'queued',params:{units:'mm'}},{kind:'render',status:'queued',params:{units:'mm',resolution:512}}]});
   let finish!:()=>void;const done=new Promise<void>(resolve=>finish=resolve);
-  const entry:QueueEntry={jobId:job.jobId,r,stillIds:params.stillIds,authorize,controller:new AbortController(),done,finish,store:this};
+  const entry:QueueEntry={runner:selectedRunner,jobId:job.jobId,r,stillIds:params.stillIds,authorize,controller:new AbortController(),done,finish,store:this};
   // Registered before the record is visible, so reads and lock recovery in
   // this process always see a queued job as alive.
   activeJobs.set(job.jobId,{controller:entry.controller,done});
@@ -396,7 +397,7 @@ export class ScanProcessingStore {
     // Still bytes are snapshotted when the job starts, so close-ups that
     // arrived while it waited are included. Default: the newest four, or
     // every retained close-up when the AI step runs.
-    const ids=entry.stillIds??stills.slice(-this.defaultStillCount()).map(s=>s.id);
+    const ids=entry.stillIds??stills.slice(-(entry.runner.cleanup?.adapter==='ai-tweak'?MAX_DETAIL_STILLS_PER_CAPTURE:4)).map(s=>s.id);
     cleanup={source:capture.original,stills:[]};
     for(const id of ids){
      try{cleanup.stills.push(await stillStore.loadRetainedDetailStill(r.projectId,r.captureId,id));}
@@ -406,7 +407,7 @@ export class ScanProcessingStore {
     }
     job.detailStills=cleanup.stills.map(s=>s.still);
    }
-   await this.execute(r,job,capture.derived,capture.binding.capture.provenance.metersPerUnit,entry.controller,entry.authorize,cleanup,capture.materials);
+   await this.execute(r,job,capture.derived,capture.binding.capture.provenance.metersPerUnit,entry.controller,entry.authorize,cleanup,capture.materials,entry.runner);
   }catch{
    // Acquisition/snapshot failures happen before execute()'s own handling:
    // close the job out durably instead of leaving it queued forever.
@@ -434,7 +435,7 @@ export class ScanProcessingStore {
   const lock=join(this.directory,'.scan-processing-lock'),temp=join(lock,`.owner-${randomUUID()}`),owner=await readLockOwner(lock);
   try{await write(temp,Buffer.from(JSON.stringify({pid:process.pid,jobId,pgid,projectId:owner?.projectId,captureId:owner?.captureId})));await rename(temp,join(lock,'owner.json'));}finally{await rm(temp,{force:true});}
  }
- private async execute(r:Request,job:ScanProcessingJob,mesh:Buffer,metersPerUnit:number,controller:AbortController,authorize?:()=>Promise<void>,cleanup?:CleanupSnapshot,materials:Record<string,Buffer>={}){
+ private async execute(r:Request,job:ScanProcessingJob,mesh:Buffer,metersPerUnit:number,controller:AbortController,authorize?:()=>Promise<void>,cleanup?:CleanupSnapshot,materials:Record<string,Buffer>={},runner:ScanRunner=this.runner){
   const deadlineAt=Date.now()+this.timeoutMs,timer=setTimeout(()=>controller.abort('deadline-exceeded'),this.timeoutMs);let staging:string|undefined,registrationFailed=false;
   let activeStage:NonNullable<ScanProcessingJob['failureStage']>=cleanup?'import':'repair';
   try{
@@ -447,7 +448,7 @@ export class ScanProcessingStore {
     try{await this.recordProcessGroup(job.jobId,pgid);}catch(e){registrationFailed=true;controller.abort();throw e;}
    };
    if(cleanup){
-    const result=await runCleanup(this.runner,staging,job,cleanup,controller.signal,async(kind,status)=>{
+    const result=await runCleanup(runner,staging,job,cleanup,controller.signal,async(kind,status)=>{
      if(status==='running')activeStage=kind;
      const stage=job.pipelineStages!.find(s=>s.kind===kind)!;stage.status=status;
      if(status==='running')stage.startedAt=now();else stage.finishedAt=now();

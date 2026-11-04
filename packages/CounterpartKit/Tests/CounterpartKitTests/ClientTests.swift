@@ -420,7 +420,7 @@ final class CompanionClientTests: XCTestCase {
         let transport = FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) }
         let settings = try await client(transport).settings()
         XCTAssertEqual(settings.ai?.choice?.kind, "none")
-        XCTAssertEqual(settings.ai?.scope, "connection-test")
+        XCTAssertEqual(settings.ai?.scope, "model-jobs")
         XCTAssertEqual(settings.ai?.revision, "11111111-1111-4111-8111-111111111111")
         XCTAssertEqual(settings.fusion?.state, "unavailable")
         XCTAssertEqual(settings.fusion?.message, "Open Counterpart on your Mac to check Fusion setup.")

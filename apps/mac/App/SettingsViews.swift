@@ -601,14 +601,14 @@ struct AISettings: View {
 
     var body: some View {
         Form {
-            Section("AI connection test") {
-                Picker("Connection to test", selection:Binding(get:{ provider }, set:{ pick($0) })) {
+            Section("AI model jobs") {
+                Picker("AI provider", selection:Binding(get:{ provider }, set:{ pick($0) })) {
                     Text("Claude · your subscription").tag("claude")
                     Text("Codex · your subscription").tag("codex")
                     if choice.isAPIKey || choice.isEndpoint { Text(choice.displayName + " · your key").tag("other") }
                     Text("Other…").tag("pick-other")
                     Divider()
-                    Text("None").tag("none")
+                    Text("Off").tag("none")
                 }
                 .disabled(model.saving || model.unavailable)
                 LabeledContent("Status") { status }
@@ -620,7 +620,7 @@ struct AISettings: View {
                     }
                 }
                 if let problem = model.problem { Text(problem).font(.caption).foregroundStyle(.red) }
-                Text("These choices save and test connections. Current scan cleanup, designs and corrections use Claude Code independently of this choice.").font(.caption).foregroundStyle(.secondary)
+                Text("Choose the AI for your model jobs. New scan cleanup, designs and corrections use this choice. Jobs already running keep their provider.").font(.caption).foregroundStyle(.secondary)
             }
             BlenderAddonSettingsSection { action in
                 let socket = ModelAccessModel.socketPath(for: Installation(bundle: .main))
@@ -712,7 +712,7 @@ struct AISettings: View {
         case .connected: Label("Connected", systemImage:"checkmark.circle.fill").foregroundStyle(Color.okGreen)
         case .checking: HStack(spacing:6) { ProgressView().controlSize(.small); Text("Checking…").foregroundStyle(.secondary) }
         case .failed(let text): Label(text, systemImage:"exclamationmark.circle.fill").foregroundStyle(.red)
-        case .idle: Text(choice == .none ? "No connection selected" : model.unavailable ? "Counterpart isn’t running" : "Not tested yet").foregroundStyle(.secondary)
+        case .idle: Text(choice == .none ? "AI off" : model.unavailable ? "Counterpart isn’t running" : "Not tested yet").foregroundStyle(.secondary)
         }
     }
 

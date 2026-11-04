@@ -198,8 +198,8 @@ struct MacSettingsSections: View {
 
     private func aiSection(_ ai: CompanionSettings.AI) -> some View {
         Section {
-            Picker("Connection to test", selection: Binding(get: { ai.choice?.kind ?? "none" }, set: { kind in Task { await model.chooseAI(kind) } })) {
-                ForEach(SettingsSchema.aiKinds.filter { $0.fromPhone || $0.kind == ai.choice?.kind }, id: \.kind) { Text($0.kind == "none" ? "None" : $0.label).tag($0.kind) }
+            Picker("AI provider", selection: Binding(get: { ai.choice?.kind ?? "none" }, set: { kind in Task { await model.chooseAI(kind) } })) {
+                ForEach(SettingsSchema.aiKinds.filter { $0.fromPhone || $0.kind == ai.choice?.kind }, id: \.kind) { Text($0.kind == "none" ? "Off" : $0.label).tag($0.kind) }
             }
             .pickerStyle(.menu)
             HStack {
@@ -213,8 +213,8 @@ struct MacSettingsSections: View {
                 Spacer()
                 Button("Test") { Task { await model.testAI() } }.disabled(model.working != nil || ai.revision == nil)
             }
-        } header: { Text("AI connection test") } footer: {
-            Text("Save and test an AI connection on \(model.macName). Current scan cleanup, designs and corrections use Claude Code independently of this choice. API keys and endpoints are set up on the Mac, where keys stay.")
+        } header: { Text("AI model jobs") } footer: {
+            Text("Save and test an AI connection on \(model.macName). New scan cleanup, designs and corrections use this choice. Jobs already running keep their provider. API keys and endpoints are set up on the Mac, where keys stay.")
         }
     }
 
@@ -223,7 +223,7 @@ struct MacSettingsSections: View {
         switch check.state {
         case "connected": return "Connected"
         case "checking": return "Testing…"
-        case "skipped": return "No connection selected"
+        case "skipped": return "AI off"
         default: return check.message ?? "Not connected"
         }
     }

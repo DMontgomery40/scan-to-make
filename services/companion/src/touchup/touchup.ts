@@ -11,6 +11,7 @@ import {toolErrorText} from './blender.js';
 import {runTouchupWorker, type TouchupProgress, type TouchupResult} from './runner.js';
 
 export interface TouchupInput {
+  worker?: import('./runner.js').ProjectWorker;
   root: string;
   objectId: string;
   /** The scan as captured (model plus sidecars), or the current model for a correction pass. */
@@ -219,6 +220,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
     ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}),
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});
+  inv.worker = input.worker;
   const inputStlSha256 = await stlSha256(input.scan);
   const result = await (deps.run ?? runTouchupWorker)(inv, pass, {
     ...(inputStlSha256 ? {inputStlSha256} : {}),
