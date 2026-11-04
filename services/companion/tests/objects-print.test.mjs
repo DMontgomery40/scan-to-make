@@ -360,7 +360,7 @@ test("Bambu Studio's words reach the project: its error is the failure, its warn
   assert.equal(failed.state, 'failed');
   assert.equal(failed.failure, `${failing.error_string}\n${failing.sliced_plates[0].warning_message}`);
   assert.equal(failed.printConfirmation, undefined);
-  assert.deepEqual(await refused.tools(), ['lay_flat', 'slice_stl']);
+  assert.deepEqual(await refused.tools(), ['slice_stl']);
   // The floating cantilever: Studio's words as a native question with one "Print anyway" switch, then the printer's own.
   const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
   const warned = await run('lay-flat-floating-cantilever');
@@ -374,7 +374,7 @@ test("Bambu Studio's words reach the project: its error is the failure, its warn
   assert.match(printer.message, /^Fixture bed-clearance confirmation/);
   await warned.service.answerPrintConfirmation(warned.id, printer.id, {action: 'accept', content: {confirmed: true}});
   await warned.service.settled(warned.id);
-  assert.deepEqual(await warned.tools(), ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
+  assert.deepEqual(await warned.tools(), ['slice_stl', 'inspect_print_file', 'print_3mf']);
 });
 
 // KAN-224: the print sheet's estimate says what Print would, in Bambu Studio's words, through the same real runner.
@@ -407,7 +407,7 @@ test("an estimate carries Bambu Studio's words: its warning as slicerWarning, it
     assert.equal((await tools()).includes('print_3mf'), false, 'an estimate sends nothing');
     return {...outcome, service, id: object.id};
   };
-  // The floating cantilever on the lay_flat output: the estimate comes back, with Studio's warning word for word.
+  // A floating cantilever on the slice: the estimate comes back, with Studio's warning word for word.
   const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
   const warned = await estimate('lay-flat-floating-cantilever');
   assert.equal(warned.error, undefined);
@@ -450,4 +450,46 @@ test('a retained checkpoint in a failed capped project remains available for exp
   const sent = await service.settled(object.id);
   assert.equal(sent.state, 'sent');
   assert.equal(await readFile(join(store.dir(object.id), sent.current.model), 'utf8'), STL.toString());
+});
+
+// Counterpart is a bridge: the designer's supports choice goes to the slicer as it is, and the slicer orients the model.
+test("the designer's supports choice reaches the slicer as it is, and an MCP that can't take it is refused before slicing", async t => {
+  const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
+  const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
+  const estimate = async ({supports, mcpSupports, kind}) => {
+    const root = await mkdtemp(join(tmpdir(), 'objects-supports-'));
+    t.after(() => rm(root, {recursive: true, force: true}));
+    const log = join(root, 'calls.jsonl');
+    await writeFile(log, '');
+    const services = createPrintHandoffServices({backend: 'bambu-printer-mcp',
+      process: {command: process.execPath, args: [new URL('fixture-printer-server.mjs', fixtures).pathname, 'bambu', log], cwd: root,
+        env: {HANDOFF_FIXTURE_SLICE_SETTINGS: '1', ...(mcpSupports ? {HANDOFF_FIXTURE_SUPPORTS: '1'} : {}), HANDOFF_FIXTURE_SLICER_RESULT: new URL('slicer-results/cap-down-clean.json', fixtures).pathname}},
+      selection: {model: 'p1s', nozzleDiameterMm: 0.4, nozzleType: 'hardened_steel', bedType: 'textured_plate', material: 'PLA', plateIndex: 0},
+      timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 10000}}, join(root, 'bundles'));
+    const store = new ObjectStore(join(root, 'objects'));
+    const service = new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
+      handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, print: {services}});
+    const object = await store.create('An AirPods Max desk hanger.', kind);
+    await mkdir(join(store.dir(object.id), 'current'), {recursive: true});
+    await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
+    await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: [], ...(supports ? {supports} : {})}}));
+    const outcome = await service.estimate(object.id, {}).then(value => ({value}), error => ({error}));
+    const calls = (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(entry => entry.tool);
+    return {...outcome, slice: calls.find(entry => entry.tool === 'slice_stl'), tools: calls.map(entry => entry.tool)};
+  };
+  for (const supports of [{enabled: true, type: 'tree(auto)'}, {enabled: false}]) {
+    const sent = await estimate({supports, mcpSupports: true});
+    assert.equal(sent.error, undefined);
+    assert.equal(sent.slice.arguments.enable_support, supports.enabled, 'supports off is sent too');
+    assert.equal(sent.slice.arguments.support_type, supports.type);
+    assert.equal(sent.slice.arguments.orient, true, 'the slicer orients the model');
+    assert.equal(sent.tools.includes('lay_flat'), false);
+  }
+  // No choice from the designer: the slicer profile decides, as before.
+  const none = await estimate({mcpSupports: true});
+  assert.equal('enable_support' in none.slice.arguments, false);
+  // An installed MCP without the support arguments: refused in plain words, before anything is sliced.
+  const old = await estimate({supports: {enabled: true, type: 'tree(auto)'}});
+  assert.match(old.error?.message ?? '', /^Update bambu-printer-mcp in Settings → Printers so Counterpart can send this design’s supports to the slicer\./);
+  assert.deepEqual(old.tools, []);
 });

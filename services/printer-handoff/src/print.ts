@@ -289,13 +289,13 @@ export class PrinterHandoffRunner {
     const alreadySliced = plate?.sliced === true;
     // A 3MF already owns its per-part filaments and profile. Global STL defaults must not collapse them.
     if (threeMf) {
-      for (const key of ['loadFilaments', 'filamentProfile', 'filamentColours', 'templateName', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity'] as const) {
+      for (const key of ['loadFilaments', 'filamentProfile', 'filamentColours', 'templateName', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType'] as const) {
         if (input.slicer?.[key] === undefined) delete slicer[key];
       }
     }
     if (alreadySliced && slicer.pauseAtLayers?.length)
       throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced, so its layer pauses are the ones it was sliced with. Share the designer’s editable 3MF to add a pause.');
-    if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
+    if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
       throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced. Share the designer’s editable 3MF to change its slicing settings or copies.');
     // A chosen spool's profile (load_filaments) replaces the configured filament alias: MCPs refuse the two when they differ.
     if (input.slicer?.loadFilaments && input.slicer.filamentProfile === undefined) delete slicer.filamentProfile;
@@ -330,10 +330,12 @@ export class PrinterHandoffRunner {
           || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
           || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))
           || (slicer.pauseAtLayers?.length && !Object.hasOwn(sliceProperties, 'pause_at_layers'))
+          || (slicer.enableSupport !== undefined && !Object.hasOwn(sliceProperties, 'enable_support'))
+          || (slicer.supportType !== undefined && !Object.hasOwn(sliceProperties, 'support_type'))
           // mcp-3D-printer-server forwards repetitions only on its Bambu-compatible route; elsewhere it would slice one.
           || (slicer.repetitions !== undefined && slicer.repetitions > 1 && (!Object.hasOwn(sliceProperties, 'repetitions') || !isBambuSlicing(this.#config, selection, slicer)))) fail('print-settings-unsupported');
     }
-    // Every slice_stl argument but the model's path and whether lay_flat already chose its face.
+    // Every slice_stl argument but the model's path.
     const sliceArgs = {
       slice_plate: threeMf ? (selection.plateIndex ?? 0) + 1 : undefined,
       bambu_model: isBambuSlicing(this.#config, selection, slicer) ? selection.model : undefined,
@@ -349,6 +351,8 @@ export class PrinterHandoffRunner {
       layer_height: slicer.layerHeightMm,
       wall_loops: slicer.wallLoops,
       sparse_infill_density: slicer.sparseInfillDensity,
+      enable_support: slicer.enableSupport,
+      support_type: slicer.supportType,
       pause_at_layers: slicer.pauseAtLayers?.length ? slicer.pauseAtLayers : undefined,
       // Sent whenever it is set and the tool takes it, 1 included: a request for one copy overrides a configured 3.
       repetitions: slicer.repetitions !== undefined && (slicer.repetitions > 1 || Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'repetitions'))
@@ -356,9 +360,11 @@ export class PrinterHandoffRunner {
       use_printer_filaments: false,
       arrange: !threeMf || (slicer.repetitions ?? 1) > 1,
       ensure_on_bed: !threeMf,
+      // The slicer orients an STL itself (Bambu Studio's auto-orient); a 3MF keeps its placement.
+      orient: !threeMf,
     };
-    // The same model sliced the same way before (Print Again, or Print after Estimate): print that file. Only lay_flat
-    // and slice_stl are skipped; inspection, the printer checks, Studio's warning and the print call all run as always.
+    // The same model sliced the same way before (Print Again, or Print after Estimate): print that file. Only
+    // slice_stl is skipped; inspection, the printer checks, Studio's warning and the print call all run as always.
     // SSH, shells and other wrappers can change cwd or host before starting the MCP. Their
     // actual defaults are not visible here, so only cache direct local Node/npm launches.
     const localLaunch = /^(node|nodejs|npx)(\.exe|\.cmd)?$/i.test(basename(this.#config.process.command));
@@ -368,28 +374,16 @@ export class PrinterHandoffRunner {
       ? await presetDigests(sliceArgs, this.#config.process.cwd ?? process.cwd(), {...started.presets, ...this.#config.process.env}) : undefined;
     const cacheKey = input.sliceCache && !alreadySliced && presets ? sliceCacheKey({model: await readFile(input.stlPath), backend: this.#config.backend, presets,
       server: catalog.server, config: this.#config.process, env: started?.envSha256,
-      args: {...sliceArgs, lay_flat: !threeMf && session.hasTool('lay_flat')}}) : undefined;
+      args: sliceArgs}) : undefined;
     const reused = cacheKey ? await readSlice(input.sliceCache!.directory, cacheKey) : undefined;
+    // Counterpart is a bridge: the model goes to the slicer as it is, and the slicer orients it.
     let orientedStlPath = input.stlPath;
-    let laidFlat = false;
-    if (!reused && !threeMf && session.hasTool('lay_flat')) {
-      await progress('orienting');
-      const orientation = await call(session, 'lay_flat', {stl_path: input.stlPath}, local);
-      orientedStlPath = absolutePath(orientation);
-      // Newer MCPs explicitly return the unchanged model when no face can rest
-      // on the bed. Let the slicer orient it; older path-only results retain
-      // their established behavior.
-      laidFlat = orientation.structuredContent?.laid_flat !== false;
-      step('lay_flat');
-    }
     if (threeMf && !alreadySliced && !Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'slice_plate'))
       throw new PrinterMcpError('plate-selection-unsupported', undefined, 'Update your printer service to slice the selected 3MF plate.');
     if (!alreadySliced && !reused) await progress('slicing');
     const sliced = alreadySliced || reused ? undefined : await call(session, 'slice_stl', {
       stl_path: orientedStlPath,
       ...sliceArgs,
-      // lay_flat already chose the flat face; otherwise let the slicer orient.
-      orient: !threeMf && !laidFlat,
     }, {...local, onProgress: mcpProgress('slicing')});
     let slicedPath = sliced ? absolutePath(sliced) : input.stlPath;
     if (reused) {

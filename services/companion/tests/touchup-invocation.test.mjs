@@ -124,8 +124,9 @@ test('every pass plans how it prints, with the printer MCP\'s own fdm_design gui
     assert.doesNotMatch(rules, /Don't do print preparation/, 'supports and orientation are design choices now');
     assert.match(rules, /captured objects and new designs alike/);
     assert.doesNotMatch(rules, /PRINTER_FACTS|ENGINE_RULES|ENGINE_NAME/, 'no placeholder survives');
-    assert.match(rules, /re-orients it with lay_flat/, 'the worker knows the print step re-orients today');
-    assert.match(rules, /supports your plan needs are not added/, 'and that the print step generates no supports');
+    assert.doesNotMatch(rules, /lay_flat/, 'Counterpart no longer re-orients the model');
+    assert.match(rules, /Bambu Studio's own auto-orient chooses how it sits on the bed/, 'the worker knows the slicer orients it');
+    assert.match(rules, /only as your answer's supports says, off included/, 'and that its supports choice is what the print gets');
     // A Fusion pass's proxy passes the printer's read-only tools through, so both engines read the same facts.
     assert.match(rules, /get_printer_filaments/);
     assert.match(rules, /slicer_result/);

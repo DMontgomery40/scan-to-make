@@ -28,7 +28,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes} = {}) {
+async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -39,7 +39,7 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -65,17 +65,45 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
   return {root, log, stlPath, config, relay, runner, seen, steps, calls};
 }
 
+// Counterpart is a bridge: the model goes to the slicer as it is and the slicer orients it, even when the MCP offers lay_flat.
 for (const laidFlat of [false, true]) {
-  test(`slicing respects lay_flat's explicit laid_flat=${laidFlat} result`, async t => {
+  test(`an STL goes to the slicer as it is, with the slicer orienting it (lay_flat offered, laid_flat=${laidFlat})`, async t => {
     const f = await setup(t, {laidFlat});
     const result = await f.runner.run({stlPath: f.stlPath, print: false});
+    const calls = (await f.calls()).filter(call => call.tool);
+    assert.ok(!calls.some(call => call.tool === 'lay_flat'), 'Counterpart never re-orients the model itself');
+    const slice = calls.find(call => call.tool === 'slice_stl');
+    assert.equal(slice.arguments.orient, true, 'the slicer orients every STL');
+    assert.equal(slice.arguments.stl_path, f.stlPath);
+    assert.equal(result.orientedStlPath, f.stlPath);
+    assert.deepEqual(result.steps, ['discover', 'slice_stl', 'inspect']);
+    assert.ok(!calls.some(call => call.tool === 'print_3mf'));
+  });
+}
+
+for (const enableSupport of [true, false]) {
+  test(`the designer's supports choice reaches the slicer as it is (enable_support=${enableSupport})`, async t => {
+    const f = await setup(t, {supports: true});
+    await f.runner.run({stlPath: f.stlPath, print: false, slicer: {enableSupport, ...(enableSupport ? {supportType: 'tree(auto)'} : {})}});
     const slice = (await f.calls()).find(call => call.tool === 'slice_stl');
-    assert.equal(slice.arguments.orient, !laidFlat,
-      'the slicer must orient when the MCP could not find a resting face');
-    assert.equal(slice.arguments.stl_path, result.orientedStlPath);
-    if (!laidFlat) assert.equal(result.orientedStlPath, f.stlPath,
-      'the MCP returns the original model when no pose qualifies');
-    assert.ok(!(await f.calls()).some(call => call.tool === 'print_3mf'));
+    assert.equal(slice.arguments.enable_support, enableSupport, 'supports off is sent too, never left to the profile');
+    assert.equal(slice.arguments.support_type, enableSupport ? 'tree(auto)' : undefined);
+  });
+}
+
+test('no supports choice leaves the slicer profile in charge, as before', async t => {
+  const f = await setup(t, {supports: true});
+  await f.runner.run({stlPath: f.stlPath, print: false});
+  const slice = (await f.calls()).find(call => call.tool === 'slice_stl');
+  assert.equal('enable_support' in slice.arguments, false);
+  assert.equal('support_type' in slice.arguments, false);
+});
+
+for (const slicer of [{enableSupport: false}, {enableSupport: true, supportType: 'normal(auto)'}]) {
+  test(`a supports choice the installed MCP can't take is refused before slicing (${JSON.stringify(slicer)})`, async t => {
+    const f = await setup(t);
+    await assert.rejects(f.runner.run({stlPath: f.stlPath, slicer}), {code: 'print-settings-unsupported'});
+    assert.deepEqual((await f.calls()).filter(call => call.tool).map(call => call.tool), []);
   });
 }
 
@@ -210,23 +238,23 @@ test('tool arguments are validated against the discovered schema before the call
   assert.equal((await f.calls()).filter(entry => entry.tool === 'slice_stl').length, 0);
 });
 
-test('bambu sequence lays flat, slices, inspects and prints after phone confirmation, with no bed check', async t => {
+test('bambu sequence slices, inspects and prints after phone confirmation, with no bed check', async t => {
   const f = await setup(t);
   const result = await f.runner.run({stlPath: f.stlPath});
-  assert.deepEqual(result.steps, ['discover', 'lay_flat', 'slice_stl', 'inspect', 'print']);
-  assert.ok(result.orientedStlPath.endsWith('clean_flat.stl'));
+  assert.deepEqual(result.steps, ['discover', 'slice_stl', 'inspect', 'print']);
+  assert.equal(result.orientedStlPath, f.stlPath);
   assert.ok(result.slicedPath.endsWith('sliced.3mf'));
   assert.equal(result.inspection.tool, 'inspect_print_file');
   assert.equal(result.print.dispatch, 'started');
   const calls = (await f.calls()).filter(entry => entry.tool);
   // PRD §5.6: no camera_snapshot of the plate before printing; Bambu's own bed levelling finds a full plate.
-  assert.deepEqual(calls.map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
-  assert.deepEqual(calls[1].arguments, {
-    stl_path: result.orientedStlPath, bambu_model: 'p1s', nozzle_diameter: '0.4',
+  assert.deepEqual(calls.map(entry => entry.tool), ['slice_stl', 'inspect_print_file', 'print_3mf']);
+  assert.deepEqual(calls[0].arguments, {
+    stl_path: f.stlPath, bambu_model: 'p1s', nozzle_diameter: '0.4',
     bed_type: 'textured_plate', nozzle_type: 'hardened_steel',
-    use_printer_filaments: false, orient: false, arrange: true, ensure_on_bed: true,
+    use_printer_filaments: false, orient: true, arrange: true, ensure_on_bed: true,
   });
-  assert.equal(calls[3].arguments.three_mf_path, result.slicedPath);
+  assert.equal(calls[2].arguments.three_mf_path, result.slicedPath);
   assert.equal('cameraSnapshot' in f.seen.at(-1), false);
   assert.equal(f.relay.pending().length, 0);
 });
@@ -255,7 +283,7 @@ test('generic gcode sequence confirms temperatures then uploads with print set',
   const f = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server'});
   const result = await f.runner.run({stlPath: f.stlPath, selection: {printerType: 'klipper', material: 'PLA'}});
   const calls = (await f.calls()).filter(entry => entry.tool);
-  assert.deepEqual(calls.map(entry => entry.tool), ['lay_flat', 'slice_stl', 'confirm_temperatures', 'upload_gcode']);
+  assert.deepEqual(calls.map(entry => entry.tool), ['slice_stl', 'confirm_temperatures', 'upload_gcode']);
   assert.equal(result.inspection.tool, 'confirm_temperatures');
   assert.equal(calls.at(-1).arguments.print, true);
   assert.equal(calls.at(-1).arguments.type, 'klipper');
@@ -265,7 +293,7 @@ test('generic Bambu sequence prints the sliced 3MF with print_3mf', async t => {
   const f = await setup(t, {mode: 'generic', backend: 'mcp-3d-printer-server'});
   await f.runner.run({stlPath: f.stlPath, selection: {...selection, printerType: 'bambu'}});
   const calls = (await f.calls()).filter(entry => entry.tool);
-  assert.deepEqual(calls.map(entry => entry.tool), ['lay_flat', 'slice_stl', 'print_3mf']);
+  assert.deepEqual(calls.map(entry => entry.tool), ['slice_stl', 'print_3mf']);
   assert.equal(calls.at(-1).arguments.nozzle_diameter, '0.4');
 });
 
@@ -280,9 +308,10 @@ test('runBundle prints a claimed bundle and records the sliced artifact back', a
   assert.equal(outcome.result.print.dispatch, 'started');
   assert.equal(outcome.result.stlPath, store.stlPath(outcome.manifest));
   assert.equal(outcome.result.slicedPath, join(store.directory(bundle.id), outcome.manifest.artifacts.sliced.file));
-  assert.equal(outcome.result.orientedStlPath, join(store.directory(bundle.id), outcome.manifest.artifacts.oriented.file));
+  // The slicer orients the model itself: Counterpart records no re-oriented copy.
+  assert.equal(outcome.manifest.artifacts.oriented, undefined);
+  assert.equal(outcome.result.orientedStlPath, store.stlPath(outcome.manifest));
   assert.ok((await readFile(outcome.result.slicedPath)).length > 0);
-  assert.ok((await readFile(outcome.result.orientedStlPath)).length > 0);
   assert.ok(!outcome.result.slicedPath.includes('printer-handoff-run-'));
 });
 
@@ -357,18 +386,18 @@ for (const mode of ['bambu', 'generic-gcode']) for (const print of [true, false]
   });
 }
 
-test('failure saving the second artifact prevents dispatch despite the sliced artifact being saved', async t => {
+test('failure saving the sliced artifact prevents dispatch', async t => {
   const f = await setup(t);
   const store = new HandoffBundleStore(join(f.root, 'partial-artifacts'));
   const bundle = await store.create({stl, prompt: '', backend: 'bambu-printer-mcp', selection});
   const recordArtifact = store.recordArtifact.bind(store);
   store.recordArtifact = async (id, key, name, bytes) => {
-    if (key === 'oriented') throw Object.assign(Error('Cannot save oriented artifact'), {code: 'record-failed'});
+    if (key === 'sliced') throw Object.assign(Error('Cannot save sliced artifact'), {code: 'record-failed'});
     return recordArtifact(id, key, name, bytes);
   };
   await assert.rejects(f.runner.runBundle(store, bundle.id), {code: 'record-failed'});
   const manifest = await store.read(bundle.id);
-  assert.ok(manifest.artifacts.sliced);
+  assert.equal(manifest.artifacts.sliced, undefined);
   assert.equal(manifest.status, 'failed');
   assert.equal((await f.calls()).filter(call => call.tool === 'print_3mf').length, 0);
 });
@@ -463,7 +492,7 @@ test('progress reaches the caller before each operation, including the last prin
   const f = await setup(t);
   const progress = [];
   await f.runner.run({stlPath:f.stlPath, onProgress:async update => {progress.push(update.phase);}});
-  assert.deepEqual(progress, ['connecting','orienting','slicing','inspecting','slice-ready','checking-printer','requesting-print','accepted']);
+  assert.deepEqual(progress, ['connecting','slicing','inspecting','slice-ready','checking-printer','requesting-print','accepted']);
 });
 
 
@@ -600,7 +629,7 @@ for (const name of ['lay-flat-floating-cantilever', 'as-scanned-floating-cantile
       properties: {confirmed: {type: 'boolean', title: 'Print anyway', default: false}}});
     assert.equal(result.print.dispatch, 'started');
     const tools = (await f.calls()).filter(entry => entry.tool).map(entry => entry.tool);
-    assert.deepEqual(tools, ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
+    assert.deepEqual(tools, ['slice_stl', 'inspect_print_file', 'print_3mf']);
   });
 }
 
@@ -619,7 +648,7 @@ test("declining or not answering Bambu Studio's warning stops before the printer
   await assert.rejects(timedOut.runner.run({stlPath: timedOut.stlPath}), {code: 'slicer-warning-declined'});
   for (const f of [declined, timedOut]) {
     assert.equal(f.seen.length, 1, 'only Studio\'s question was asked');
-    assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file']);
+    assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['slice_stl', 'inspect_print_file']);
     assert.equal(f.relay.pending().length, 0);
   }
 });
@@ -652,7 +681,7 @@ test("Bambu Studio's slicing error blocks the print and keeps its own words", as
   assert.equal(read.status, 'failed');
   assert.equal(read.failure, 'slicer-error');
   assert.equal(read.artifacts.sliced, undefined, 'no sliced file to print');
-  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['lay_flat', 'slice_stl']);
+  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['slice_stl']);
   assert.equal(f.seen.length, 0, 'nothing to confirm: there is no print');
   // The estimate refuses the same slice, so the print sheet never offers it.
   await assert.rejects(f.runner.estimate({stlPath: f.stlPath}), {code: 'slicer-error', detail: words});
@@ -665,7 +694,7 @@ test('a clean Bambu Studio slice goes straight to the printer\'s own confirmatio
   assert.equal('slicerWarning' in result, false);
   assert.equal(f.seen.length, 1);
   assert.match(f.seen[0].message, /^Fixture bed-clearance confirmation/);
-  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf']);
+  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['slice_stl', 'inspect_print_file', 'print_3mf']);
 });
 
 test("an estimate reports Bambu Studio's warning without asking anything", async t => {
@@ -686,7 +715,7 @@ test('slicer reports fail closed and keep Studio\'s words', async () => {
     {failed: false, message: 'A.\nB.'}, 'line breaks kept, other control characters dropped, one copy per message');
 });
 
-test('Print Again prints the slice it made: no lay_flat or slice_stl, but the same inspection, printer checks and print_3mf', async t => {
+test('Print Again prints the slice it made: no slice_stl, but the same inspection, printer checks and print_3mf', async t => {
   const f = await setup(t);
   const sliceCache = {directory: join(f.root, 'slices')};
   const first = await f.runner.run({stlPath: f.stlPath, sliceCache});
@@ -694,7 +723,7 @@ test('Print Again prints the slice it made: no lay_flat or slice_stl, but the sa
   const again = await f.runner.run({stlPath: f.stlPath, sliceCache});
   assert.deepEqual(again.steps, ['discover', 'inspect', 'print']);
   const calls = (await f.calls()).filter(entry => entry.tool).map(entry => entry.tool);
-  assert.deepEqual(calls, ['lay_flat', 'slice_stl', 'inspect_print_file', 'print_3mf', 'inspect_print_file', 'print_3mf']);
+  assert.deepEqual(calls, ['slice_stl', 'inspect_print_file', 'print_3mf', 'inspect_print_file', 'print_3mf']);
   const printed = (await f.calls()).filter(entry => entry.tool === 'print_3mf').at(-1).arguments;
   assert.equal(printed.three_mf_path, again.slicedPath);
   assert.ok(again.slicedPath.endsWith('clean_sliced.3mf'));
@@ -782,7 +811,7 @@ test('Estimate, then Print of the same model and settings slices once', async t 
   const sliceCache = {directory: join(f.root, 'slices')};
   await f.runner.estimate({stlPath: f.stlPath, sliceCache}).catch(() => undefined);
   await f.runner.run({stlPath: f.stlPath, sliceCache});
-  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['lay_flat', 'slice_stl', 'inspect_print_file', 'inspect_print_file', 'print_3mf']);
+  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['slice_stl', 'inspect_print_file', 'inspect_print_file', 'print_3mf']);
 });
 
 test('cached generic G-code still confirms temperatures and uploads G-code after Estimate and on Print Again', async t => {
@@ -796,7 +825,7 @@ test('cached generic G-code still confirms temperatures and uploads G-code after
     assert.deepEqual(await readFile(printed.slicedPath), bytes);
   }
   assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool),
-    ['lay_flat', 'slice_stl', 'confirm_temperatures', 'confirm_temperatures', 'upload_gcode', 'confirm_temperatures', 'upload_gcode']);
+    ['slice_stl', 'confirm_temperatures', 'confirm_temperatures', 'upload_gcode', 'confirm_temperatures', 'upload_gcode']);
 });
 
 test('a running MCP keeps the .env it started with: its slices are keyed by that one until it restarts', async t => {

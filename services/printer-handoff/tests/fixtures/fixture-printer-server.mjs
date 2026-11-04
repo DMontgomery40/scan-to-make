@@ -28,6 +28,8 @@ const sliceProps = {
 };
 if (process.env.HANDOFF_FIXTURE_NO_COLOUR === '1') delete sliceProps.filament_colours;
 if (process.env.HANDOFF_FIXTURE_SLICE_SETTINGS === '1') Object.assign(sliceProps, {layer_height: number, wall_loops: integer, sparse_infill_density: string, repetitions: integer});
+// The slice_stl support arguments a newer MCP takes (enable_support, support_type).
+if (process.env.HANDOFF_FIXTURE_SUPPORTS === '1') Object.assign(sliceProps, {enable_support: bool, support_type: {type: 'string', enum: ['normal(auto)', 'tree(auto)', 'normal(manual)', 'tree(manual)']}});
 const bambuPrintProps = {
   connection_mode:string, connection_type:string, three_mf_path: string, bambu_model: string, bed_type: string, nozzle_type: string,
   nozzle_diameter: string, nozzle_diameters: {type: 'array', items: number}, plate_index: integer,
