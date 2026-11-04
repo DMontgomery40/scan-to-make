@@ -22,6 +22,14 @@ David, 2026-11-04: "we need to make sure regressions and overwrites dont happen 
   or a HEAD that isn't on `origin/main` (`scripts/trunk_guard.sh`, listed in `scripts/README.md`). The
   `STM_TRUNK_OVERRIDE` escape is logged and only for local debugging; never install that build for David.
 
+## The app staples onto the MCPs
+
+David, 2026-11-04: "agents are CONSTANTLY blurring the boundary and adding backend stuff that should be in mcp to the app itself". The MCPs change "basically everyday" for new printers, slicers, firmware and Blender/Fusion; the App Store can't.
+
+- Code that would have to change when a printer, slicer, firmware, filament system, Blender or Fusion changes goes in the MCPs (both of them), never in the app. The app calls tools, renders their structured results and passes the person's choices through.
+- In app code: no branching on MCP package or slicer, no printer-model tables, no matching on MCP or printer error codes or wording, no slicer setting keys or presets, no fallbacks for MCPs without the contract. A missing capability means "Update <MCP> in Settings → Printers".
+- Moving code out of the app: extend `counterpart/1` in both MCPs, publish, install through the app's Update, and only then delete the app code. The list and order are in PRD §8.0.
+
 ## Read bambu-printer-mcp before you build
 
 

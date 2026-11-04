@@ -17,7 +17,7 @@ How to change, gate, build, install and drive Counterpart. What is built and acc
 ## Changing code: one trunk
 
 - `main` is the only trunk. Branch from main, open a PR to main, and merge it once the gate passes. Feature branches never ship.
-- **Gate:** `CI_LOCAL_LINUX_HOSTS=agents-171 /usr/local/bin/python3 scripts/ci_local.py all --changed-only --base origin/main` on the Mac (Ubuntu jobs go to agents-171; never agents-173). Hosted Actions have no runner. Then `python3 scripts/branch_check.py --merge <branch>` must print SAFE (read it, don't chain it). Use one gate at a time per checkout.
+- **Gate:** `CI_LOCAL_LINUX_HOSTS=agents-171 /usr/local/bin/python3 scripts/ci_local.py all --changed-only --base origin/main` on the Mac (Ubuntu jobs go to agents-171; never agents-173). Hosted Actions have no runner. Then `python3 scripts/branch_check.py --merge <branch>` must print SAFE (read it, don't chain it). It includes the Jev boundary check (PRD §8.0). Use one gate at a time per checkout.
 - **Builds refuse non-main or dirty source** (`scripts/trunk_guard.sh`; the list is in [`../scripts/README.md`](../scripts/README.md)). `STM_TRUNK_OVERRIDE="<why>"` is logged and for local debugging only; never install that build for David.
 - **Attribution:** Counterpart commits carry the authoring model's `Co-Authored-By` line. Both MCP repos prohibit AI attribution and have their own review conventions; read each AGENTS.md. In the MCP repos merging publishes to npm.
 - `~/scan-to-make` on each machine tracks main and fast-forwards every 2 minutes. `ssh agents-136 stm-ci <ref>` tests a pushed commit on Linux.

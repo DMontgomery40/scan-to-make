@@ -33,15 +33,15 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | Project page, rename, Project Settings, Done/Works (§5.4) | Built; Done/Works checked on both Nov 2–3 | rename and settings acceptance partial; Compare versions not built (§18) |
 | Conversation bubbles; "DONE" marks Done without a pass (§5.4.1) | Built | Not accepted |
 | Change request reliability | Built | **open bug**: `objects/completion-intent.ts` turns errors and timeouts into `unknown` with nothing logged, so a change request can stall silently |
-| Print sheet: printer, estimate, quality, strength (§5.5) | Built; prints from the Mac app's Print button Nov 3 | — |
-| Per-part AMS colours for a multi-colour 3MF (§5.5, §8.5) | Built on Mac (#293) and iPhone (`5864c56`) | **Accepted on device Nov 4** (iPhone + P1S, David: "Yes, both colours are correct") |
+| Print sheet: printer, estimate, quality, strength (§5.5) | Built; prints from the Mac app's Print button Nov 3 | — · quality/strength numbers, slice estimate parsing: *In the app today; moves to the MCPs (§8.0).* |
+| Per-part AMS colours for a multi-colour 3MF (§5.5, §8.5) | Built on Mac (#293) and iPhone (`5864c56`) | **Accepted on device Nov 4** (iPhone + P1S, David: "Yes, both colours are correct") · nearest-spool matching: *In the app today; moves to the MCPs (§8.0).* |
 | A colour design from before colour parts asks before printing in one colour (§5.5) | Built (#306) | Not accepted |
-| Copies, pause before a layer (§5.5) | Built; P1S paused itself before layer 3 on Nov 3 (Mac, pre-release MCP build) | Not accepted on the published MCPs; mcp-3D-printer-server parity not on npm |
-| Plates of an imported 3MF; per-plate print and completion (§5.5) | Built | Not accepted |
+| Copies, pause before a layer (§5.5) | Built; P1S paused itself before layer 3 on Nov 3 (Mac, pre-release MCP build) | Not accepted on the published MCPs; mcp-3D-printer-server parity not on npm · per-slicer rules for copies and supports: *In the app today; moves to the MCPs (§8.0).* |
+| Plates of an imported 3MF; per-plate print and completion (§5.5) | Built | Not accepted · 3MF plate metadata parsing: *In the app today; moves to the MCPs (§8.0).* |
 | Pause, Resume, Stop (§5.7) | Built; worked from the Mac UI over local FULU Nov 3 (hand-copied MCP code) | Not accepted on the published MCP; phone Stop |
 | Bambu Cloud print route (§8.2) | Bambu refused cloud printing (-3120, HTTP 403) Nov 3. Fixed the way Bambu Studio sends it (`start_local_print_with_record` first), published in bambu-printer-mcp 1.1.55 and mcp-3d-printer-server 1.2.29 (#102, #56) | Not accepted: install through the app's Update, then a print with Connection = Bambu Cloud |
 | FULU through mcp-3D-printer-server | — | **open bug**: crashes on its config-dir mount |
-| Print a published model (§8.11) | Built; MakerWorld caliper import + real P1S estimate observed | Not accepted: print, browser download path |
+| Print a published model (§8.11) | Built; MakerWorld caliper import + real P1S estimate observed | Not accepted: print, browser download path · 3MF/G-code metadata parsing: *In the app today; moves to the MCPs (§8.0).* |
 | Notifications (§9.1) | Built; OS permission on | Not accepted: delivery of each event type |
 | Live Activity (§9.4) | Built; Sandbox relay test start/update/end seen on the Lock Screen | Not accepted: real print, Watch, production push |
 | Printer camera (§8.6.1) | Built; 12 reads in 23 s, ≤ 8.4 KB, 0 errors | sustained acceptance |
@@ -50,10 +50,12 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | AI provider routing (§7.5) | Built: Claude Code, Codex CLI, Anthropic/OpenAI API, OpenAI-compatible endpoint, Off | real Claude cleanup observed Nov 4; OpenCode not supported yet |
 | Design passes plan how the object prints (FDM prompt pack, `docs/design/fdm-prompt-pack`) | Published in bambu-printer-mcp 1.1.52 / mcp-3D-printer-server 1.2.26 (#99, #52) | Not accepted |
 | One app named Counterpart, one icon (§10) | Built; `/Applications/Counterpart.app` is the only registration for `com.scantomake.mac` | — |
-| Fusion design engine (§8.9) | Built; a private real-worker pass made a parametric cube | Not accepted |
+| Fusion design engine (§8.9) | Built; a private real-worker pass made a parametric cube | Not accepted · Fusion add-in install (`FusionSetup.swift`): *In the app today; moves to the MCPs (§8.0).* |
 | Help, docs site, credits (§5.9, §15) | Built; Help opens counterpart.dtmont.com/help.html on both | — |
 | No plate checks anywhere (§5.6) | Built in the app and both MCPs | — |
-| Remote MCP `/v1/mcp` (§8.12) | Built | Not accepted |
+| Finding and adding printers (§5.8) | Built: SSDP discovery, the Bambu DevModel/serial→model table, Add Printer's brand list | discovery, model table and brand list: *In the app today; moves to the MCPs (§8.0).* |
+| Blender add-on install and repair (§8.9) | Built (`touchup/addon-installer.ts`, `addon-repair.ts`) | *In the app today; moves to the MCPs (§8.0).* |
+| Remote MCP `/v1/mcp` (§8.12) | Built | Not accepted · its per-tool scope table: *In the app today; moves to the MCPs (§8.0).* |
 | Android app (§16) | Built (debug APK) | Not accepted: never run on a device or emulator |
 | Linux desktop (§17) | Built (.deb, AppImage) | Not accepted: only exercised on software-rendered XFCE; no pairing, print, provider or reconstruction-review acceptance |
 | TestFlight and Mac beta (§14) | 2.0 (3) uploaded; Mac v2.0-beta.4 notarized and published | external review approval; production push delivery |
@@ -569,6 +571,60 @@ Screenshots, the other tabs: `screens/mac-settings-general.jpg`, `screens/mac-se
 ## 8. Back end: printers, progress and events
 
 This section specifies every connection from the user's printer to their phone's Lock Screen. The **Existing**, **New** and **Fix** marks are historical: they record what the Nov 1 plan added to the code of that time. All of it is now on main; each status line says what is accepted.
+
+### 8.0 Boundary: the app staples onto the MCPs
+
+David, 2026-11-04: "we have to constantly make updates basically everyday in the mcp servers because of new printers, fixed bugs upstream ... multiple slicers, like 8 printer brands, all rolling out new firmware all the time, and then try to maintain parity as much as is reasonable with fusion mcp and blender mcp ... seperating that and just "stapling together" the front end of the app to the backend of the mcp servers, is the clever way to go, because the iOS App Store would be a nightmare dealing with that many updates. and agents are CONSTANTLY blurring the boundary and adding backend stuff that should be in mcp to the app itself".
+
+**The rule.** Code that would have to change when a printer, slicer, firmware, filament system, Blender or Fusion changes belongs in the MCPs, in both of them. The app calls tools, renders their structured results and passes the person's choices through. App code (the companion, printer-handoff and every client) has none of these:
+- branching on the MCP package or the slicer;
+- printer-model tables;
+- matching on MCP or printer error codes or wording;
+- slicer setting keys or presets;
+- fallbacks for MCPs without the contract.
+
+When a capability is missing, the app says "Update *MCP* in Settings → Printers" (`settingsUnsupported` does this). The `counterpart/1` contract (§8.4) is the seam. Every tool and result field the app reads is listed in [`docs/protocols/mcp-contract.md`](../../protocols/mcp-contract.md).
+
+**Stays in the app:**
+- capture and close-ups;
+- reconstruction (`tools/mac-reconstruct`, `tools/linux-reconstruct`);
+- scan cleanup (`tools/scan-repair`, `tools/scan-correct`, `tools/capture-mesh-convert`), which is the app per David on Oct 31;
+- the caliper generator (starter content);
+- the companion's pairing, auth, relay, events, notifications, Live Activities and CloudKit project store;
+- the MCP install/update lifecycle;
+- the print monitor as orchestration, fed by `counterpart_print_progress`;
+- #306's legacy-pass detection.
+
+**In the app today; moves to the MCPs.** Migration order, one item at a time. For each item:
+1. extend `counterpart/1` in both MCPs;
+2. publish both to npm;
+3. install them through the app's own Update and confirm in the real app;
+4. only then open the app PR that deletes the app code and requires the capability.
+
+Deleting app code before the published MCP has the replacement would regress installed devices.
+
+| # | In the app today (checked on main `d1f68252`) | Moves to |
+|---|---|---|
+| 1 | `services/companion/src/printing/print-settings.ts`: quality → layer height, strength → walls/infill, nozzle scaling | `slice_stl` takes `quality` and `strength`; the MCP owns the numbers |
+| 2 | `services/printer-handoff/src/mcp-client.ts` (~307): the `HMS 0500-0500-0001-0007` and "not safely idle" text matches on `print_3mf` errors | the MCP returns a structured refusal (`printer-command-rejected`, `printer-not-ready`) |
+| 3 | `services/printer-handoff/src/print.ts`: `isBambuSlicing` (124–128); which slicers accept supports and repetitions (365–374); `bambu_model` only for Bambu slicing | the MCP reports its slice capabilities and ignores what it can't apply |
+| 4 | `services/printer-handoff/src/counterpart.ts`: the `get_printer_status` fallback for MCPs without `counterpart/1`. `services/companion/src/objects/service.ts`: `backend === 'bambu-printer-mcp'` at 632, 722, 1332, 1337, 1378 and 1605 | deleted; the capability is required |
+| 5 | `services/printer-handoff/src/remote-mcp.ts`: the hard-coded per-tool scope table | scopes derived from the MCPs' tool annotations |
+| 6 | `services/companion/src/printing/discovery.ts` (SSDP, `BAMBU_SERIAL_MODELS` copied from the MCP's `SERIAL_MODELS`); `profiles.ts` and `setup.ts`; the Mac's Add Printer brand list (`PrinterSetupViews.swift`) | a discovery tool, each brand's MCP doing its own, and the MCP declaring its setup fields |
+| 7 | `services/companion/src/objects/colour-match.ts` (OKLab nearest spool before slicing), copied into ControlKit `Objects.swift`, CounterpartKit `Printers.swift`/`Project.swift`, the iPhone `PrintSheet.swift` and `apps/linux/src/types.ts` | the MCP proposes the per-part mapping (bambu has only post-slice `resolve_3mf_ams_slots`; mcp-3D has none); clients render it and send overrides |
+| 8 | `services/printer-handoff/src/slice-cache.ts`: a slice cache keyed on the MCP's env and preset files | the MCP |
+| 9 | `slice-estimate.ts`, `model-file.ts`, `slicer-report.ts`: parsing 3MF/G-code metadata (`Metadata/plate_*`, `filament_ids`, `result.json`) | structured results from `inspect_print_file`, `list_3mf_plate_objects` and `get_slice_settings` |
+| 10 | `services/companion/src/touchup/invocation.ts` (~42–75): how Bambu Studio orients and generates supports, and how to slice a checkpoint, written into the design prompt | the MCPs' `fdm_*` prompts |
+| 11 | `services/companion/src/touchup/addon-installer.ts`, `addon-repair.ts` (the Blender add-on); the Mac's `FusionSetup.swift` (the Fusion add-in at a pinned commit and hashes) | the MCP that proxies Blender or Fusion (`blender_mcp_status`, `fusion_mcp_status` and their setup) |
+| 12 | the FULU launcher (`~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh`, in neither repo) | bambu-printer-mcp |
+
+To review, not on the move list: the Mac's "Open in Blender" (`BlenderBridge.swift`) starts the person's own Blender with an inbox watcher. It's an external-editor action, not a printer path.
+
+**No client talks to a printer or an MCP directly.** The iPhone, Mac, Android and Linux apps reach printers only through the companion's HTTP API or control socket. Checked on main: their sources have no MQTT, FTPS, OctoPrint/Moonraker or MCP transport.
+
+**Enforcement:**
+- `services/companion/tests/mcp-contract.test.mjs` fails when app code starts reading an MCP tool that `docs/protocols/mcp-contract.md` doesn't list.
+- `scripts/branch_check.py --merge` asks the Jev checker whether the diff adds printer, slicer, firmware, Blender or Fusion knowledge to app code. If the checker can't answer, the gate fails closed. On 2026-11-04 the TypeSafe organization had no API credits (HTTP 402), so the check isn't calibrated yet.
 
 ### 8.1 Topology
 

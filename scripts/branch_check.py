@@ -17,9 +17,12 @@ Files shared without a conflict are listed as warnings: merge, then re-test the 
 Read-only: it fetches, never pushes, merges or deletes.
 """
 import argparse
+from pathlib import Path
 import subprocess
 import sys
 import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def git(*args, check=True):
@@ -68,6 +71,7 @@ def main():
     ap.add_argument('--main', default='origin/main')
     ap.add_argument('--active-hours', type=float, default=6.0, help='older branches are reported as stale, not blockers')
     ap.add_argument('--no-fetch', action='store_true')
+    ap.add_argument('--boundary-reviewed', metavar='WHY', help='merge although the boundary check flagged or could not check the diff; printed in the gate output')
     a = ap.parse_args()
     if not a.no_fetch:
         subprocess.run(['git', 'fetch', '-q', '--prune', 'origin'], check=True)
@@ -115,6 +119,14 @@ def main():
             problems.append(f'conflicts with {other} in {", ".join(sorted(clashes))}: agree the order; the later one rebases on the earlier.')
         else:
             warnings.append(f'shares {", ".join(shared)} with {other} (merges cleanly): re-test whichever lands second.')
+    # PRD §8.0: printer/slicer/firmware/Blender/Fusion knowledge belongs in the MCPs, not app code.
+    import boundary_check
+    if boundary_check.check(a.main, b['ref']) != 0:
+        if a.boundary_reviewed:
+            warnings.append(f'boundary check not clean; merging as reviewed: {a.boundary_reviewed}')
+        else:
+            problems.append('the boundary check flagged this diff or could not run (above): move that code to the MCPs (PRD §8.0), '
+                            'or pass --boundary-reviewed "<why it belongs in the app>".')
     print()
     for w in warnings:
         print('warning: ' + w)

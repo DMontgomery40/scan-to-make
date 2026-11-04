@@ -71,4 +71,6 @@ python3 scripts/branch_check.py                # every live branch: behind main,
 python3 scripts/branch_check.py --merge KAN-x  # exit 0 only if KAN-x is current with main and conflicts with nothing active
 ```
 
+`--merge` also runs `scripts/boundary_check.py` (PRD §8.0). It sends each added chunk of app code (not tests, docs or fixtures) to the configured Jev checker with one question: does it put printer, slicer, firmware, filament-system, Blender or Fusion knowledge into the app? A flagged chunk, or a checker that can't answer, makes the gate NOT SAFE. Move that code to the MCPs, or pass `--boundary-reviewed "<why it belongs in the app>"`, which is printed with the result. Jev's answer is a review signal, not proof. The key is read from `TYPESAFE_API_KEY` or `~/.config/jev/env`. The MCP names app code uses are pinned separately by `services/companion/tests/mcp-contract.test.mjs` against `docs/protocols/mcp-contract.md`.
+
 It uses git's real three-way merge, so squash-merged work counts as merged. If it says NOT SAFE: rebase on main, or agree the merge order with the other branch's owner (the later one rebases), re-run the tests at the new head (`stm-ci` / `ci_local.py`), push, and check again. Delete a branch or worktree only after GitHub shows the PR as merged.
