@@ -856,3 +856,19 @@ test('editing a selected filament preset at the same path invalidates its slice;
   await f.runner.run(input);
   assert.equal(await slices(), 4, 'an unreadable dependency cannot prove reuse is valid');
 });
+
+test('the printer MCP\'s design guidance is read as an MCP prompt, and an MCP without prompts gives none', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'printer-prompts-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const config = env => ({backend: 'bambu-printer-mcp', process: {command: process.execPath, args: [fixture, 'bambu', join(root, 'calls.jsonl')], cwd: root, env},
+    timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 5000}});
+  const serving = new PrinterMcpClient(config({HANDOFF_FIXTURE_PROMPTS: '1'}));
+  t.after(() => serving.close());
+  await serving.connect();
+  assert.equal(await serving.prompt('fdm_design'), 'Design the finished object the user wants, with the manufacturing plan as part of the design.');
+  assert.equal(await serving.prompt('fdm_unknown'), undefined, 'an unknown prompt is no guidance, not a failure');
+  const older = new PrinterMcpClient(config({}));
+  t.after(() => older.close());
+  await older.connect();
+  assert.equal(await older.prompt('fdm_design'), undefined);
+});
