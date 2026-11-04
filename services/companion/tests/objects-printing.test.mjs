@@ -572,6 +572,107 @@ test('Settings -> Printers reads and changes the MCP\'s own route, and has none 
   assert.deepEqual([legacy.route, legacy.choices, legacy.options], ['lan', ['lan', 'cloud'], undefined]);
 });
 
+// The phone's Settings -> Printers: the same printers.route and printers.chooseMcp the Mac uses, over HTTPS.
+test('the phone reads and changes a printer\'s connection and MCP, never while it prints, and only with settings scope', async t => {
+  const f = await setup(t, {reports: [status('IDLE', 0)], route: {mode: 'bambu_network', type: 'lan'}});
+  const chosen = [];
+  let setupBusy = false;
+  const {PrinterSetupError} = await import('../dist/printing/setup.js');
+  const printerSetup = {async chooseMcp(destinationId, backend) {
+    if (destinationId !== 'current') throw new PrinterSetupError('not-found', 'That printer is no longer there.');
+    if (setupBusy) throw new PrinterSetupError('conflict', 'This printer is printing. Change its MCP when the print finishes.');
+    chosen.push(backend); return {destinationId: 'clone-1'};
+  }};
+  const routes = createObjectRoutes(f.service, {printerSetup});
+  const scopes = [];
+  let denied = [];
+  const server = createServer((request, response) => void routes.handle(request, response, async scope => {
+    scopes.push(scope);
+    if (denied.includes(scope)) throw Object.assign(new Error('forbidden'), {name: 'RemoteAuthFailure'});
+  }, () => undefined).catch(error => { response.statusCode = error.name === 'RemoteAuthFailure' ? 403 : 500; response.end(); }));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}/v1/objects/printers`;
+  const call = async (method, path, body) => {
+    const response = await fetch(base + path, {method, headers: {'content-type': 'application/json'}, ...(body !== undefined ? {body: JSON.stringify(body)} : {})});
+    const text = await response.text();
+    return {status: response.status, json: text ? JSON.parse(text) : undefined};
+  };
+
+  const read = await call('GET', '/current/route');
+  assert.equal(read.status, 200);
+  assert.equal(read.json.route.route, 'lan');
+  assert.deepEqual(read.json.route.options.map(option => option.id), ['lan', 'cloud', 'developer'], 'the MCP\'s own options, as on the Mac');
+  assert.deepEqual(scopes, ['printer-handoff:use']);
+  scopes.length = 0;
+  const cloud = await call('PUT', '/current/route', {route: 'cloud'});
+  assert.equal(cloud.status, 200);
+  assert.deepEqual([cloud.json.route.route, cloud.json.route.type], ['cloud', 'cloud']);
+  assert.deepEqual(scopes, ['printer-handoff:use', 'projects:write'], 'a change needs settings as well as printing');
+  // Bad bodies, extra keys, and a token that can print but not change settings.
+  for (const body of [{}, {route: 'Cloud!'}, {route: 'cloud', destinationId: 'current'}, {route: 'cloud', extra: 1}, []])
+    assert.equal((await call('PUT', '/current/route', body)).status, 400, JSON.stringify(body));
+  assert.equal((await call('POST', '/current/route', {route: 'lan'})).status, 405);
+  denied = ['projects:write'];
+  assert.equal((await call('PUT', '/current/route', {route: 'lan'})).status, 403);
+  assert.equal((await call('PUT', '/current/mcp', {backend: 'mcp-3d-printer-server'})).status, 403);
+  denied = [];
+  assert.equal((await call('GET', '/elsewhere/route')).status, 404);
+
+  // A project printing there: the connection stays as it is (409), and the MCP call is never made.
+  await f.store.update(f.object.id, o => ({...o, state: 'printing'}));
+  const before = f.calls.filter(c => c.name === 'counterpart_print_route').length;
+  const refused = await call('PUT', '/current/route', {route: 'lan'});
+  assert.equal(refused.status, 409);
+  assert.match(refused.json.error.message, /printing/);
+  assert.equal(f.calls.filter(c => c.name === 'counterpart_print_route').length, before);
+  await f.store.update(f.object.id, o => ({...o, state: 'ready'}));
+  // A print started outside Counterpart since the last read (the cache still says ready): the change reads the
+  // printer live and is refused too, without calling the MCP's route tool.
+  assert.equal(await f.directory.printing('current'), false);
+  f.queue.splice(0, f.queue.length, status('RUNNING', 4));
+  const outside = f.calls.filter(c => c.name === 'counterpart_print_route').length;
+  assert.equal((await call('PUT', '/current/route', {route: 'lan'})).status, 409);
+  assert.equal(f.calls.filter(c => c.name === 'counterpart_print_route').length, outside);
+  f.queue.splice(0, f.queue.length, status('IDLE', 0));
+  assert.equal((await call('PUT', '/current/route', {route: 'cloud'})).status, 200, 'and allowed once it is idle again');
+
+  // Printer MCP: the companion's own chooseMcp, its refusals as HTTP statuses.
+  const mcp = await call('PUT', '/current/mcp', {backend: 'mcp-3d-printer-server'});
+  assert.deepEqual([mcp.status, mcp.json, chosen], [200, {destinationId: 'clone-1'}, ['mcp-3d-printer-server']]);
+  setupBusy = true;
+  assert.equal((await call('PUT', '/current/mcp', {backend: 'bambu-printer-mcp'})).status, 409);
+  setupBusy = false;
+  assert.equal((await call('PUT', '/elsewhere/mcp', {backend: 'bambu-printer-mcp'})).status, 404);
+  assert.equal((await call('PUT', '/current/mcp', {backend: 'octoprint'})).status, 400);
+  assert.equal((await call('GET', '/current/mcp')).status, 405);
+
+  // An MCP without the choice: null to read, and nothing to change.
+  const none = await setup(t, {});
+  const plain = createObjectRoutes(none.service);
+  const other = createServer((request, response) => void plain.handle(request, response, async () => {}, () => undefined));
+  await new Promise(resolve => other.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => other.close(resolve)));
+  const otherBase = `http://127.0.0.1:${other.address().port}/v1/objects/printers/current`;
+  assert.deepEqual(await (await fetch(`${otherBase}/route`)).json(), {route: null});
+  assert.equal((await fetch(`${otherBase}/route`, {method: 'PUT', body: JSON.stringify({route: 'cloud'})})).status, 409);
+  assert.equal((await fetch(`${otherBase}/mcp`, {method: 'PUT', body: JSON.stringify({backend: 'bambu-printer-mcp'})})).status, 503, 'a companion without printer setup says so');
+
+  // The Mac's own path refuses mid-print the same way.
+  await f.store.update(f.object.id, o => ({...o, state: 'printing'}));
+  await assert.rejects(f.service.printRoute('current', 'lan'), InvalidStateError);
+  assert.equal((await f.service.printRoute('current')).route, 'cloud', 'reading is fine while it prints');
+});
+
+test('status.get says whether this companion has the phone\'s printer choices', async t => {
+  const f = await setup(t, {});
+  const auth = {transport: 'lan', listDevices: async () => []};
+  const without = createControlDispatcher({auth, companionVersion: 'test', objects: f.service});
+  assert.equal((await without('status.get', {})).capabilities.printerChoices, false);
+  const withSetup = createControlDispatcher({auth, companionVersion: 'test', objects: f.service, printerSetup: {chooseMcp: async () => ({destinationId: 'current'})}});
+  assert.equal((await withSetup('status.get', {})).capabilities.printerChoices, true);
+});
+
 // Nov 3: Bambu Handy resumed a pick after Counterpart's Resume was refused, and the activity said "Printing again."
 test('a resume Counterpart did not send is logged as outside Counterpart; its own Resume keeps "Printing again."', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});

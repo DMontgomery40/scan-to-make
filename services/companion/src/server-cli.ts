@@ -15,7 +15,8 @@ import { startCompanionServer } from './server.js';
 import { instanceName } from './bonjour.js';
 import { computerName, discoverAddresses, localHostName, macDisplayName } from './lan-addresses.js';
 import { RemoteAuthStore } from './remote-auth.js';
-import { createPrintHandoffServices } from './print-handoff-http.js';
+import { createPrintHandoffServices, type PrintHandoffServices } from './print-handoff-http.js';
+import { remoteDestinationsFor } from './remote-mcp-http.js';
 import { PrinterMcpClient, PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
 import { PrinterDirectory } from './printing/directory.js';
 import { CameraFrames } from './printing/camera.js';
@@ -87,6 +88,9 @@ const printHandoff=handoffConfig===undefined?undefined:createPrintHandoffService
 // PRD §8.10: a print and an update of its printer's MCP never overlap (the phone's handoff route prints on `current`).
 const printGate=new PrintGate();
 if(printHandoff)printHandoff.admit=()=>printGate.hold('current');
+// docs/design/remote-mcp.md: `/v1/mcp` reaches every configured destination through its own shared session and relay.
+// It reads the live destination map below (Add, Remove and Complete Settings change it in place).
+if(printHandoff)printHandoff.remoteRelays=()=>[...(printerDestinations?.values()??[])].map(services=>services.relay);
 // Objects: the touch-up runs through the user's own printer MCP and their own Claude login. Needs both.
 const claudePath=process.env.SCAN_TO_MAKE_CLAUDE_PATH||undefined;
 if(claudePath!==undefined&&!isAbsolute(claudePath))throw new Error('SCAN_TO_MAKE_CLAUDE_PATH must be absolute');
@@ -166,20 +170,31 @@ const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,configs:()=>print
     if(id!=='current')printerDestinations!.set(id,createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:id,onConnect:onConnect(id),relay:old.relay as import('@scan-to-make/printer-handoff').InMemoryElicitationRelay}));
   },
   busy:async id=>printerBusy?await printerBusy(id):false}):undefined;
+// docs/design/remote-mcp.md: every configured printer and its services whenever printer handoff is configured, with
+// or without objects, so `/v1/mcp/<id>` reaches each one; the objects setup reuses them. Reload and Complete Settings
+// replace entries in this map in place, and `/v1/mcp` reads it live.
+if(handoffConfig&&printHandoff){
+  const services=printHandoff;
+  printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles});
+  const catalog=printerCatalog;
+  // `current` is the Mac app's own config and keeps the phone handoff route's services.
+  printerDestinations=new Map(catalog.destinations.map(destination=>{
+    const config=catalog.resolve(destination.id)!;
+    return [destination.id,destination.id==='current'?services:createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)})] as const;
+  }));
+  // PRD §8.10: Update updates the install each printer runs, between prints. The physical printer's own report is
+  // checked with or without objects (a remote `/v1/mcp` print has no project); objects add their project check below.
+  const live=printerDestinations, directory=new PrinterDirectory(catalog,id=>live.get(id)?.runner.session);
+  printerDirectory=directory;
+  printerBusy=id=>directory.printing(id);
+  if(mcpUpdates)directory.useVersions(mcpUpdates);
+}
 if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));
   objectStoreForEvents=objectStore;
   // Dispatched prints keep printing: ObjectService.resume() picks their monitors back up.
   await objectStore.recoverInterrupted({keepPrinting:true});
-  printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles});
-  const catalog=printerCatalog;
-  // `current` is the Mac app's own config and keeps the phone handoff route's services.
-  const destinations=new Map(catalog.destinations.map(destination=>{
-    const config=catalog.resolve(destination.id)!;
-    return [destination.id,destination.id==='current'?printHandoff:createPrintHandoffServices(config,handoffDirectory!,{pool:printerPool,destinationId:destination.id,onConnect:onConnect(destination.id)})] as const;
-  }));
-  printerDestinations=destinations;
-  printerDirectory=new PrinterDirectory(catalog,id=>destinations.get(id)?.runner.session);
+  const catalog=printerCatalog!, destinations=printerDestinations!;
   objects=new ObjectService({store:objectStore,runTouchup:input=>runTouchup(input),claudePath,handoff:handoffConfig,runningHandoff:()=>runningHandoff()!,printerCatalog:catalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(runningHandoff()!,path),
     print:{services:printHandoff,destinations},
@@ -187,10 +202,9 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),titleFor:request=>generateTitle(request,claudePath), reportsCompletion:note=>reportsCompletion(note,claudePath),
     ...(eventLog?{events:{emit:async draft=>{await eventLog.append(draft);}}}:{})});
   await companionSettings.load();
-  // PRD §8.10: Update updates the install each printer runs, between prints.
-  const service=objects, directory=printerDirectory;
+  // A project printing there counts too.
+  const service=objects, directory=printerDirectory!;
   printerBusy=async id=>await service.printerBusy(id)||await directory.printing(id);
-  printerDirectory.useVersions(mcpUpdates!);
   await mcpUpdates!.applyOverrides();
   const addonInstaller=new ConfiguredAddonInstaller(()=>runningHandoff()!,hostEnvironment(dataRoot));
   blenderAddon=new BlenderAddonRepair({gate:printGate,workRoot:dataRoot,listening:()=>listening(BLENDER_MCP_PORT),
@@ -203,7 +217,9 @@ if(handoffConfig&&printHandoff&&captureDirectory&&claudePath){
     }});
   await objects.resume();
 }
-if(mcpUpdates){if(!printerCatalog)await mcpUpdates.applyOverrides();mcpUpdates.start();}
+// The objects setup applies saved MCP overrides itself; otherwise apply them here, so every session (the phone's and
+// `/v1/mcp`'s) starts the version an Update chose.
+if(mcpUpdates){if(!objects)await mcpUpdates.applyOverrides();mcpUpdates.start();}
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
  createModelSizeRunner(async()=>{const running=runningHandoff();return running?.backend==='bambu-printer-mcp'?running.process:installedBambuProcess();}));
 // The port variable keeps its original name so existing operator setups still start.
@@ -234,11 +250,19 @@ const server = await startCompanionServer({
   ...(nearbyPairing === '1' ? { nearby: { name: macName ?? 'Scan to Make' } } : {}),
   capture,
   printHandoff,
+  ...(printHandoff ? {remoteMcp: {
+    bundleRoot: handoffDirectory!,
+    // The gate is held for the destination whose session actually serves the call (a duplicate's winner, as above).
+    admit: (id: string) => printGate.hold(printerCatalog?.canonical(id) ?? id),
+    // Each id is served by its live winner, read on every request like the gate's key above.
+    destinations: () => remoteDestinationsFor(printerDestinations ?? new Map(), id => printerCatalog?.canonical(id), printHandoff),
+  }} : {}),
   ...(objects ? {objects} : {}),
   ...(eventLog ? {events: eventLog} : {}),
   ...(liveActivityTokens ? {liveActivityTokens} : {}),
   ...(presence ? {presence} : {}),
   ...(mcpUpdates ? {mcpUpdates} : {}),
+  ...(printerSetup ? {printerSetup} : {}),
   ...(blenderAddon ? {blenderAddon} : {}),
   ...(icloud ? {icloud} : {}),
   remoteAuth,

@@ -14,13 +14,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
-    /// An explicit fit can use a scan as reference; only legacy records infer their job from capture evidence.
-    public var usesCopyWorkflow: Bool {
-        if kind == "fit" { return false }
-        if kind == "copy" { return true }
-        if scan != nil || !(capture ?? []).isEmpty { return true }
-        return instructions?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
-    }
+    /// The companion decides the job (`passKind`) and sends it as `kind`; the apps don't re-derive it.
+    public var usesCopyWorkflow: Bool { kind == "copy" }
 
     /// A 3MF model carries its parts' filament assignments (a published file, or a design in several
     /// colours), so the sheets don't offer one spool for the whole model. An STL uses the normal material controls.

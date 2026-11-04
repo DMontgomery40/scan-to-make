@@ -137,6 +137,7 @@ import CounterpartKit
         case "printing": route = .printing(ids.clip)
         // The one-colour sheet: v1 prints one filament (PRD §5.5); "print" shows the same until parts arrive (M3b).
         case "print", "print-one": route = .print(ids.mic)
+        case "print-pauses": Fixtures.pauses = [12, 140]; route = .print(ids.mic)
         case "print-noams": Fixtures.printer = "mcp-garage"; route = .print(ids.mic)
         case "print-loaded": Fixtures.printer = "mcp-ender"; route = .print(ids.mic)
         case "confirm": Fixtures.confirmation = "supported"; route = .project(ids.mic)
@@ -148,6 +149,7 @@ import CounterpartKit
         case "new": route = .newProject
         case "printers": route = .printers
         case "printer": debugPrinter = "current"; route = .printers
+        case "printer-connection": Fixtures.idlePrinter = true; debugSection = "connection"; debugPrinter = "current"; route = .printers
         case "printer-update": debugPrinter = "mcp-ender"; route = .printers
         default: break
         }

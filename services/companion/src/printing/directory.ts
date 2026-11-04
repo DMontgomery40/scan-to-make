@@ -80,6 +80,11 @@ export class PrinterDirectory {
     const id = this.catalog.canonical(destinationId);
     return id ? this.#reports.get(id)?.report : undefined;
   }
+  /** The readiness last read (ready, busy, offline, unknown), without asking the printer again. */
+  lastState(destinationId: string): string | undefined {
+    const id = this.catalog.canonical(destinationId);
+    return id ? this.#reports.get(id)?.state : undefined;
+  }
 
   /** Call from the session's onConnect: reads `counterpart_printer_info` when present, then records capabilities. */
   connected(destinationId: string, catalog: PrinterToolCatalog): void {

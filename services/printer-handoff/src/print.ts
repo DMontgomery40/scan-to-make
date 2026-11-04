@@ -12,13 +12,13 @@ import {inspectModelFile} from './model-file.js';
 import {slicerReport} from './slicer-report.js';
 import {keepSlice, readSlice, sliceCacheKey, presetDigests} from './slice-cache.js';
 import type {HandoffBundleStore} from './bundle.js';
-import {PrinterMcpError, toolResultJson, toolResultText, type PrinterToolCatalog} from './mcp-client.js';
+import {PrinterMcpError, toolResultJson, toolResultText, type McpProgress, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
-import {readPrintRoute} from './counterpart.js';
 
 export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'print';
-export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'resolving-printer-error' | 'requesting-print' | 'accepted';
-export interface PrintProgress {phase: PrintPhase; estimate?: SliceEstimate}
+export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'requesting-print' | 'accepted';
+/** `mcp`: the printer MCP's own progress during that phase (slicing, requesting the print), when it sends any. */
+export interface PrintProgress {phase: PrintPhase; estimate?: SliceEstimate; mcp?: McpProgress}
 export interface PrintRunInput {
   onProgress?: (update: PrintProgress) => Promise<void>;
   /** Persist a non-replayable intent before sending the print tool call. */
@@ -91,7 +91,7 @@ function filtered(session: PrinterSession, name: string, args: Record<string, un
   return Object.fromEntries(Object.entries(clean).filter(([key]) => allowed.has(key)));
 }
 const DISPATCH_TOOLS = ['print_3mf', 'upload_gcode', 'process_and_print_stl'];
-interface CallOptions {signal?: AbortSignal; beforeDispatch?: () => Promise<void>; elicitationContext?: ElicitationContext; failFast?: boolean}
+interface CallOptions {signal?: AbortSignal; beforeDispatch?: () => Promise<void>; elicitationContext?: ElicitationContext; failFast?: boolean; onProgress?: (progress: McpProgress) => void}
 async function call(session: PrinterSession, name: string, args: Record<string, unknown>, options: CallOptions = {}) {
   return session.call(name, filtered(session, name, args), {
     ...(options.signal ? {signal: options.signal} : {}),
@@ -99,6 +99,7 @@ async function call(session: PrinterSession, name: string, args: Record<string, 
     ...(options.beforeDispatch ? {beforeDispatch: options.beforeDispatch} : {}),
     ...(options.elicitationContext ? {elicitationContext: options.elicitationContext} : {}),
     ...(options.failFast ? {failFast: true} : {}),
+    ...(options.onProgress ? {onProgress: options.onProgress} : {}),
   });
 }
 function absolutePath(result: Parameters<typeof toolResultText>[0]): string {
@@ -176,7 +177,7 @@ export class PrinterHandoffRunner {
   }
 
   /**
-   * Lays the model flat and slices it exactly as a print would, then reads the
+   * Slices the model exactly as a print would, then reads the
    * time, grams and settings from the sliced file. Never prints.
    */
   async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal; sliceCache?: PrintRunInput['sliceCache']}): Promise<{estimate?: SliceEstimate; settings: SliceSettings; slicerWarning?: string}> {
@@ -269,7 +270,7 @@ export class PrinterHandoffRunner {
   }
 
   /**
-   * Runs one handoff: lay flat -> slice -> inspect -> print, using the tool
+   * Runs one handoff: slice -> inspect -> print, using the tool
    * sequence of the configured backend. Print confirmations are elicited by
    * the server during the print call and answered through the relay.
    */
@@ -288,13 +289,13 @@ export class PrinterHandoffRunner {
     const alreadySliced = plate?.sliced === true;
     // A 3MF already owns its per-part filaments and profile. Global STL defaults must not collapse them.
     if (threeMf) {
-      for (const key of ['loadFilaments', 'filamentProfile', 'filamentColours', 'templateName', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity'] as const) {
+      for (const key of ['loadFilaments', 'filamentProfile', 'filamentColours', 'templateName', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType'] as const) {
         if (input.slicer?.[key] === undefined) delete slicer[key];
       }
     }
     if (alreadySliced && slicer.pauseAtLayers?.length)
       throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced, so its layer pauses are the ones it was sliced with. Share the designer’s editable 3MF to add a pause.');
-    if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
+    if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
       throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced. Share the designer’s editable 3MF to change its slicing settings or copies.');
     // A chosen spool's profile (load_filaments) replaces the configured filament alias: MCPs refuse the two when they differ.
     if (input.slicer?.loadFilaments && input.slicer.filamentProfile === undefined) delete slicer.filamentProfile;
@@ -307,8 +308,8 @@ export class PrinterHandoffRunner {
     // without a known model may ask for it, so it holds the mutex then.
     const signal = input.signal;
     const local: CallOptions = {signal, ...(shared ? (selection.model ? {} : {elicitationContext: tag}) : {elicitationContext: tag})};
-    const read: CallOptions = {signal, ...(shared ? {} : {elicitationContext: tag})};
     const progress = async (phase: PrintPhase, estimate?: SliceEstimate) => { await input.onProgress?.({phase, ...(estimate ? {estimate} : {})}); };
+    const mcpProgress = (phase: PrintPhase) => (mcp: McpProgress) => { void input.onProgress?.({phase, mcp})?.catch(() => undefined); };
     await progress('connecting');
     const catalog = await session.connect(signal ? {signal} : {});
     step('discover');
@@ -329,10 +330,14 @@ export class PrinterHandoffRunner {
           || (slicer.wallLoops !== undefined && !Object.hasOwn(sliceProperties, 'wall_loops'))
           || (slicer.sparseInfillDensity !== undefined && !Object.hasOwn(sliceProperties, 'sparse_infill_density'))
           || (slicer.pauseAtLayers?.length && !Object.hasOwn(sliceProperties, 'pause_at_layers'))
+          // Only Bambu-compatible slicing takes the designer's supports; PrusaSlicer and Cura refuse them.
+          || ((slicer.enableSupport !== undefined || slicer.supportType !== undefined) && !isBambuSlicing(this.#config, selection, slicer))
+          || (slicer.enableSupport !== undefined && !Object.hasOwn(sliceProperties, 'enable_support'))
+          || (slicer.supportType !== undefined && !Object.hasOwn(sliceProperties, 'support_type'))
           // mcp-3D-printer-server forwards repetitions only on its Bambu-compatible route; elsewhere it would slice one.
           || (slicer.repetitions !== undefined && slicer.repetitions > 1 && (!Object.hasOwn(sliceProperties, 'repetitions') || !isBambuSlicing(this.#config, selection, slicer)))) fail('print-settings-unsupported');
     }
-    // Every slice_stl argument but the model's path and whether lay_flat already chose its face.
+    // Every slice_stl argument but the model's path.
     const sliceArgs = {
       slice_plate: threeMf ? (selection.plateIndex ?? 0) + 1 : undefined,
       bambu_model: isBambuSlicing(this.#config, selection, slicer) ? selection.model : undefined,
@@ -348,6 +353,8 @@ export class PrinterHandoffRunner {
       layer_height: slicer.layerHeightMm,
       wall_loops: slicer.wallLoops,
       sparse_infill_density: slicer.sparseInfillDensity,
+      enable_support: slicer.enableSupport,
+      support_type: slicer.supportType,
       pause_at_layers: slicer.pauseAtLayers?.length ? slicer.pauseAtLayers : undefined,
       // Sent whenever it is set and the tool takes it, 1 included: a request for one copy overrides a configured 3.
       repetitions: slicer.repetitions !== undefined && (slicer.repetitions > 1 || Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'repetitions'))
@@ -355,9 +362,12 @@ export class PrinterHandoffRunner {
       use_printer_filaments: false,
       arrange: !threeMf || (slicer.repetitions ?? 1) > 1,
       ensure_on_bed: !threeMf,
+      // The slicer orients an STL itself (Bambu Studio's auto-orient); a 3MF keeps its placement. Other slicers
+      // (PrusaSlicer, Cura) have no auto-orient through the MCP: the model goes to them as it is.
+      orient: threeMf ? false : isBambuSlicing(this.#config, selection, slicer) ? true : undefined,
     };
-    // The same model sliced the same way before (Print Again, or Print after Estimate): print that file. Only lay_flat
-    // and slice_stl are skipped; inspection, the printer checks, Studio's warning and the print call all run as always.
+    // The same model sliced the same way before (Print Again, or Print after Estimate): print that file. Only
+    // slice_stl is skipped; inspection, the printer checks, Studio's warning and the print call all run as always.
     // SSH, shells and other wrappers can change cwd or host before starting the MCP. Their
     // actual defaults are not visible here, so only cache direct local Node/npm launches.
     const localLaunch = /^(node|nodejs|npx)(\.exe|\.cmd)?$/i.test(basename(this.#config.process.command));
@@ -367,29 +377,17 @@ export class PrinterHandoffRunner {
       ? await presetDigests(sliceArgs, this.#config.process.cwd ?? process.cwd(), {...started.presets, ...this.#config.process.env}) : undefined;
     const cacheKey = input.sliceCache && !alreadySliced && presets ? sliceCacheKey({model: await readFile(input.stlPath), backend: this.#config.backend, presets,
       server: catalog.server, config: this.#config.process, env: started?.envSha256,
-      args: {...sliceArgs, lay_flat: !threeMf && session.hasTool('lay_flat')}}) : undefined;
+      args: sliceArgs}) : undefined;
     const reused = cacheKey ? await readSlice(input.sliceCache!.directory, cacheKey) : undefined;
+    // Counterpart is a bridge: the model goes to the slicer as it is, and the slicer orients it.
     let orientedStlPath = input.stlPath;
-    let laidFlat = false;
-    if (!reused && !threeMf && session.hasTool('lay_flat')) {
-      await progress('orienting');
-      const orientation = await call(session, 'lay_flat', {stl_path: input.stlPath}, local);
-      orientedStlPath = absolutePath(orientation);
-      // Newer MCPs explicitly return the unchanged model when no face can rest
-      // on the bed. Let the slicer orient it; older path-only results retain
-      // their established behavior.
-      laidFlat = orientation.structuredContent?.laid_flat !== false;
-      step('lay_flat');
-    }
     if (threeMf && !alreadySliced && !Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'slice_plate'))
       throw new PrinterMcpError('plate-selection-unsupported', undefined, 'Update your printer service to slice the selected 3MF plate.');
     if (!alreadySliced && !reused) await progress('slicing');
     const sliced = alreadySliced || reused ? undefined : await call(session, 'slice_stl', {
       stl_path: orientedStlPath,
       ...sliceArgs,
-      // lay_flat already chose the flat face; otherwise let the slicer orient.
-      orient: !threeMf && !laidFlat,
-    }, local);
+    }, {...local, onProgress: mcpProgress('slicing')});
     let slicedPath = sliced ? absolutePath(sliced) : input.stlPath;
     if (reused) {
       // Named as a fresh slice of this input would be: the printer's job is named after the file.
@@ -431,19 +429,7 @@ export class PrinterHandoffRunner {
     // PRD §5.6: no bed check. Bambu's own bed levelling finds a full plate; the MCP's own confirmation is relayed as it asks.
     const printContext: ElicitationContext = tag;
 
-    // A rejected unsigned command leaves a software HMS error. FULU's authenticated
-    // route can recover it only through the server's own human confirmation. The route
-    // is the MCP's own setting, so ask it rather than keeping a copy here.
-    if (this.#config.backend === 'bambu-printer-mcp' && session.hasTool('get_printer_status') && session.hasTool('clear_hms_errors')
-        // The route only decides this optional recovery: a failed read skips it, never the print.
-        && (await readPrintRoute(session, {signal}).catch(error => { if (signal?.aborted) throw error; return undefined; }))?.mode === 'bambu_network') {
-      const status = resultValue(await call(session, 'get_printer_status', {}, read)) as {raw?: {hms?: {attr?: number; code?: number}[]}};
-      const errors = status?.raw?.hms;
-      if (Array.isArray(errors) && errors.length === 1 && errors[0]?.attr === 0x05000500 && errors[0]?.code === 0x00010007) {
-        await progress('resolving-printer-error');
-        await call(session, 'clear_hms_errors', {bambu_model:selection.model}, {signal, elicitationContext: tag});
-      }
-    }
+    // The printer MCP owns its route and the printer's errors: Print never clears one itself.
     await progress('requesting-print');
     let printed: unknown;
     if (this.#config.backend === 'bambu-printer-mcp' || slicedPath.toLowerCase().endsWith('.3mf') || selection.printerType === 'bambu') {
@@ -465,7 +451,7 @@ export class PrinterHandoffRunner {
         vibration_calibration: printOptions.vibrationCalibration,
         layer_inspect: printOptions.layerInspect,
         timelapse: printOptions.timelapse,
-      }, {signal, beforeDispatch: input.beforePrint, elicitationContext: printContext});
+      }, {signal, beforeDispatch: input.beforePrint, elicitationContext: printContext, onProgress: mcpProgress('requesting-print')});
       printed = resultValue(result);
     } else {
       const result = await call(session, 'upload_gcode', {
@@ -476,7 +462,7 @@ export class PrinterHandoffRunner {
         type: selection.printerType,
         host: selection.host,
         port: selection.port,
-      }, {signal, beforeDispatch: input.beforePrint, elicitationContext: printContext});
+      }, {signal, beforeDispatch: input.beforePrint, elicitationContext: printContext, onProgress: mcpProgress('requesting-print')});
       printed = resultValue(result);
     }
     step('print');

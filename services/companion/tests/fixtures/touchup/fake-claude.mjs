@@ -60,6 +60,12 @@ switch (scenario) {
     result({status: 'done', summary: 'Two colours.',
       parts: [{name: 'body', colour: 'black'}, {colour: '#ffd200'}, 'oops', {name: 'x'.repeat(300), colour: '#FFF', material: 7}]});
     break;
+  // The designer's supports choice, as the worker answers it (SUPPORTS: a JSON value for the answer's supports).
+  case 'supports':
+    toolUse();
+    writeFileSync('out/checkpoints/01.stl', stl); writeFileSync('out/touched.stl', stl);
+    result({status: 'done', summary: 'Made the hanger.', supports: JSON.parse(process.env.SUPPORTS ?? 'null')});
+    break;
   case 'needs_closeup':
     toolUse('Read');
     result({status: 'needs_closeup', closeup: 'the underside', summary: 'The underside is not visible in any photo.'});

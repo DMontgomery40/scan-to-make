@@ -1,7 +1,7 @@
 import type {CallToolResult, Tool} from '@modelcontextprotocol/sdk/types.js';
 import type {PrinterHandoffConfig} from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
-import {PrinterMcpClient, PrinterMcpError, type PrinterToolCatalog} from './mcp-client.js';
+import {PrinterMcpClient, PrinterMcpError, type PrinterToolCallOptions, type PrinterToolCatalog} from './mcp-client.js';
 
 /** Time, injectable so the pool's lifetime and backoff are testable without real waits. */
 export interface SessionClock {
@@ -49,7 +49,14 @@ export interface SessionHealth {
   holders: number;
 }
 
-export type SessionClient = Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool' | 'getTool' | 'catalog'>;
+export type SessionClient = Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool' | 'getTool' | 'catalog'>
+  & Partial<Pick<PrinterMcpClient, 'listPrompts' | 'getPrompt' | 'listResources' | 'readResource'>>;
+/** Prompt and resource requests a transparent adapter passes through (`/v1/mcp`). */
+export type PassthroughRequest =
+  | {method: 'prompts/list'; cursor?: string}
+  | {method: 'prompts/get'; name: string; arguments?: Record<string, string>}
+  | {method: 'resources/list'; cursor?: string}
+  | {method: 'resources/read'; uri: string};
 export type SessionClientFactory = (config: PrinterHandoffConfig, options: {relay?: ElicitationRelay; onStderr?: (chunk: string) => void; onClose: () => void}) => SessionClient;
 
 export interface PrinterSessionOptions {
@@ -72,10 +79,16 @@ export interface SessionCallOptions {
   elicitationContext?: ElicitationContext;
   /** Overrides MUTATING_TOOLS for this call. */
   exclusive?: boolean;
+  /** The MCP's progress notifications for this call. */
+  onProgress?: PrinterToolCallOptions['onProgress'];
   /** During a reconnect backoff, fail at once with `printer-unreachable` instead of waiting it out. */
   failFast?: boolean;
   /** The caller already holds the mutex through exclusive(): don't take it again, but tag questions as its holder. */
   held?: boolean;
+  /** Stop waiting for the mutex after this long and fail with `printer-busy`; the call itself is not limited by it. */
+  lockTimeoutMs?: number;
+  /** Return the server's result as it is (errors and media included), for a transparent adapter. */
+  forwardResult?: boolean;
 }
 
 function sleep(clock: SessionClock, ms: number, signal?: AbortSignal): Promise<void> {
@@ -169,13 +182,15 @@ export class PrinterSession {
     let unlock: (() => void) | undefined;
     try {
       const exclusive = options.held === true || (options.exclusive ?? (MUTATING_TOOLS.has(name) || options.elicitationContext !== undefined));
-      if (exclusive && !options.held) unlock = await this.#lock(options.signal);
+      if (exclusive && !options.held) unlock = await this.#timedLock(options.signal, options.lockTimeoutMs);
       const client = await this.#ensure(options);
       const result = await client.callTool(name, args, {
         ...(options.signal ? {signal: options.signal} : {}),
         ...(options.timeoutMs !== undefined ? {timeoutMs: options.timeoutMs} : {}),
         ...(options.dispatchSensitive ? {dispatchSensitive: true} : {}),
         ...(options.beforeDispatch ? {beforeDispatch: options.beforeDispatch} : {}),
+        ...(options.forwardResult ? {forwardResult: true} : {}),
+        ...(options.onProgress ? {onProgress: options.onProgress} : {}),
         // Only the mutex holder tags questions; any other question goes untagged.
         ...(exclusive ? {elicitationContext: options.elicitationContext ?? {}} : {}),
       });
@@ -194,6 +209,48 @@ export class PrinterSession {
       this.#inflight--;
       this.#scheduleIdle();
     }
+  }
+
+  /**
+   * A prompt or resource request on the shared connection. With a context it runs under the mutex
+   * (waiting at most `lockTimeoutMs`), so a question the server asks meanwhile is tagged as the caller's.
+   */
+  async passthrough(request: PassthroughRequest, options: {signal?: AbortSignal; elicitationContext?: ElicitationContext; lockTimeoutMs?: number;
+    timeoutMs?: number; beforeDispatch?: () => Promise<void>} = {}): Promise<unknown> {
+    this.#inflight++;
+    this.#cancelIdle();
+    let unlock: (() => void) | undefined;
+    try {
+      const context = options.elicitationContext;
+      if (context) unlock = await this.#timedLock(options.signal, options.lockTimeoutMs);
+      const client = await this.#ensure(options);
+      await options.beforeDispatch?.();
+      const forwarded = {...(options.signal ? {signal: options.signal} : {}), ...(context ? {context} : {}),
+        ...(options.timeoutMs !== undefined ? {timeoutMs: options.timeoutMs} : {})};
+      try {
+        switch (request.method) {
+          case 'prompts/list': if (client.listPrompts) return await client.listPrompts(request.cursor, forwarded); break;
+          case 'prompts/get': if (client.getPrompt) return await client.getPrompt(request.name, request.arguments, forwarded); break;
+          case 'resources/list': if (client.listResources) return await client.listResources(request.cursor, forwarded); break;
+          case 'resources/read': if (client.readResource) return await client.readResource(request.uri, forwarded); break;
+        }
+      } catch (error) {
+        if (unlock && (error as PrinterMcpError).incomplete) await this.#quarantine();
+        throw error;
+      }
+      throw new PrinterMcpError('unsupported');
+    } finally {
+      unlock?.();
+      this.#inflight--;
+      this.#scheduleIdle();
+    }
+  }
+
+  async #timedLock(signal: AbortSignal | undefined, lockTimeoutMs: number | undefined): Promise<() => void> {
+    if (lockTimeoutMs === undefined) return this.#lock(signal);
+    const waited = signal ? AbortSignal.any([signal, AbortSignal.timeout(lockTimeoutMs)]) : AbortSignal.timeout(lockTimeoutMs);
+    try { return await this.#lock(waited); }
+    catch (error) { throw signal?.aborted ? error : new PrinterMcpError('printer-busy'); }
   }
 
   /** Runs `work` holding the destination's mutex: no mutating call starts meanwhile. */

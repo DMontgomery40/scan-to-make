@@ -44,6 +44,8 @@ export interface TouchupDeps {
   stopBlender?: typeof stopOwnedBlender;
   client?: (handoff: PrinterHandoffConfig) => Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool' | 'getTool'>;
   prepare?: typeof prepareTouchupPass;
+  /** The printer MCP's own design guidance for this pass (its `fdm_design` prompt), if it serves one. */
+  guidance?: (handoff: PrinterHandoffConfig, signal?: AbortSignal) => Promise<string | undefined>;
   run?: (inv: TouchupInvocation, pass: TouchupPass, opts: Parameters<typeof runTouchupWorker>[2]) => Promise<TouchupResult>;
   lockPath?: string;
   fusionLockPath?: string;
@@ -94,6 +96,20 @@ export async function acquireBlenderLock(lockPath = BLENDER_LOCK_PATH, opts: {po
       continue;
     }
     await new Promise(resolve => setTimeout(resolve, opts.pollMs ?? 1000));
+  }
+}
+
+/** The printer MCP owns the manufacturing guidance; an MCP without it just gives the pass none. */
+export async function printerDesignGuidance(handoff: PrinterHandoffConfig, signal?: AbortSignal): Promise<string | undefined> {
+  const client = new PrinterMcpClient(handoff);
+  try {
+    await client.connect(signal);
+    return await client.prompt('fdm_design', signal ? {signal} : {});
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return undefined;
+  } finally {
+    await client.close().catch(() => undefined);
   }
 }
 
@@ -214,9 +230,10 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   // Older CLI callers use a note plus a single STL for a revision. The object
   // service supplies the explicit flag, including false for failed first passes.
   const currentModel = input.currentModel ?? (input.note !== undefined && input.scan.length === 1 && input.scan[0]!.toLowerCase().endsWith('.stl'));
+  const guidance = await (deps.guidance ?? printerDesignGuidance)(input.handoff, input.signal);
   input.onStage?.('working', choice.engine);
   const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
-    ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}),
+    ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}), ...(guidance ? {guidance} : {}),
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});
   const inputStlSha256 = await stlSha256(input.scan);

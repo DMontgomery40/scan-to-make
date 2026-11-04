@@ -20,6 +20,17 @@ public struct PrinterDestination: Codable, Identifiable, Equatable, Hashable, Se
     public var capabilities: Capabilities?
     /// The MCP install that serves it, for `POST /v1/printers/mcp/<mcpId>/update` (PRD §8.10).
     public var mcpId: String?
+    /// The same printer reached through both MCPs, the one in use first (`PUT …/printers/<id>/mcp`). Absent on older Macs.
+    public var mcps: [McpChoice]?
+
+    /// One MCP that reaches this printer, and the printer's id through it.
+    public struct McpChoice: Codable, Equatable, Hashable, Sendable {
+        public var backend: String
+        public var destinationId: String
+        public init(backend: String, destinationId: String) { self.backend = backend; self.destinationId = destinationId }
+        /// The MCP as people know it.
+        public var name: String { PrinterDestination.mcpName(backend) }
+    }
 
     public struct Capabilities: Codable, Equatable, Hashable, Sendable {
         public struct Server: Codable, Equatable, Hashable, Sendable { public var name: String; public var version: String }
@@ -68,7 +79,12 @@ public struct PrinterDestination: Codable, Identifiable, Equatable, Hashable, Se
 
     public var isBambu: Bool { backend == "bambu-printer-mcp" }
     /// The MCP that reaches it, as the user knows it.
-    public var via: String { isBambu ? "bambu-printer-mcp" : "mcp-3D-printer-server" }
+    public var via: String { Self.mcpName(backend) }
+    public static func mcpName(_ backend: String) -> String { backend == "bambu-printer-mcp" ? "bambu-printer-mcp" : "mcp-3D-printer-server" }
+    /// Both MCPs reach it: Settings → Printers offers the choice.
+    public var offersMcpChoice: Bool { (mcps?.count ?? 0) > 1 }
+    /// Its MCP's slicer takes `pause_at_layers`: the print sheet offers "Before layer N" pauses.
+    public var offersLayerPauses: Bool { capabilities?.layerPauses ?? false }
     /// Ready to take a print, when the Mac knows; nil when it hasn't read the printer yet.
     public var isReady: Bool? { state.flatMap { $0 == "unknown" ? nil : $0 == "ready" } }
     public var isOffline: Bool { state == "offline" }
@@ -84,6 +100,43 @@ public struct PrinterDestination: Codable, Identifiable, Equatable, Hashable, Se
     public var modelName: String { model ?? (isBambu ? "Bambu Lab printer" : "3D printer") }
 }
 
+/// How a printer's MCP reaches the printer (`GET …/printers/<id>/route`): the MCP's own setting
+/// (`counterpart_print_route`, both MCPs) with its own words for each connection. Counterpart keeps no copy.
+public struct PrinterConnection: Codable, Equatable, Sendable {
+    public struct Option: Codable, Equatable, Hashable, Sendable {
+        public var id: String
+        public var label: String
+        public var available: Bool
+        /// Why it can't be chosen, when `available` is false.
+        public var reason: String?
+        /// What Pause, Resume and Stop do on this connection, in the MCP's words.
+        public var controls: String?
+        public init(id: String, label: String, available: Bool = true, reason: String? = nil, controls: String? = nil) {
+            self.id = id; self.label = label; self.available = available; self.reason = reason; self.controls = controls
+        }
+    }
+    /// `lan`, `cloud`, `developer`, or a newer id the MCP names.
+    public var route: String
+    public var mode: String
+    public var type: String
+    public var choices: [String]
+    /// Nil from an MCP that reports only `choices`.
+    public var options: [Option]?
+    public var savedTo: String?
+    public init(route: String, mode: String = "", type: String = "", choices: [String], options: [Option]? = nil, savedTo: String? = nil) {
+        self.route = route; self.mode = mode; self.type = type; self.choices = choices; self.options = options; self.savedTo = savedTo
+    }
+
+    /// Every choice with the MCP's words, or the known names for an MCP without `options`.
+    public var shown: [Option] {
+        choices.map { id in options?.first { $0.id == id } ?? Option(id: id, label: Self.fallbackLabel(id)) }
+    }
+    public var current: Option? { shown.first { $0.id == route } }
+    static func fallbackLabel(_ id: String) -> String {
+        switch id { case "lan": "Local network"; case "cloud": "Bambu Cloud"; case "developer": "Local network, Developer Mode"; default: id }
+    }
+}
+
 public struct PrinterCatalog: Codable, Equatable, Sendable {
     public var destinations: [PrinterDestination]
     public var defaultDestinationId: String
@@ -92,6 +145,12 @@ public struct PrinterCatalog: Codable, Equatable, Sendable {
     }
     public func destination(_ id: String?) -> PrinterDestination? {
         destinations.first { $0.id == (id ?? defaultDestinationId) }
+    }
+    /// The listed printer an id stands for now: itself, or the printer it became after a Printer MCP change
+    /// (its id through the other MCP, in `mcps`).
+    public func listed(_ id: String) -> String? {
+        if destinations.contains(where: { $0.id == id }) { return id }
+        return destinations.first { $0.mcps?.contains { $0.destinationId == id } == true }?.id
     }
 }
 
@@ -181,12 +240,19 @@ public struct PrintChoice: Equatable, Sendable {
     /// How many on the plate (`slice_stl` `repetitions`), only when you chose a number: nil leaves the printer
     /// profile's own count (KAN-214 #230).
     public var copies: Int?
-    public init(colour: PrintColour?, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil) {
+    /// The layers the printer stops before (the slicer's "Add pause", for magnets or nuts). Empty: no pause, and
+    /// no key, so the body stays one every companion accepts.
+    public var pauseBeforeLayers: [Int]
+    public init(colour: PrintColour?, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil,
+                pauseBeforeLayers: [Int] = []) {
         self.colour = colour; self.quality = quality; self.strength = strength; self.checked = checked; self.copies = copies.map { max(1, $0) }
+        self.pauseBeforeLayers = Array(Array(Set(pauseBeforeLayers.filter { $0 >= 2 })).sorted().prefix(Self.maxPauses))
     }
     public init(filament: PrinterFilament, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil) {
         self.init(colour: .tray(filament), quality: quality, strength: strength, checked: checked, copies: copies)
     }
+    /// The companion takes at most 16 pauses.
+    public static let maxPauses = 16
 
     /// The `POST …/print` body. Standard quality and strength send nothing (the MCP's preset decides), and a
     /// chosen tray goes as `filament`, so a plain print is the body every companion accepts.
@@ -197,6 +263,7 @@ public struct PrintChoice: Equatable, Sendable {
         if strength != .standard { json["strength"] = strength.rawValue }
         // Only a number you chose; otherwise the printer profile's count applies.
         if let copies { json["copies"] = copies }
+        if !pauseBeforeLayers.isEmpty { json["pauseBeforeLayers"] = pauseBeforeLayers }
         return json
     }
 

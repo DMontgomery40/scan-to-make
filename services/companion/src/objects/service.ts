@@ -67,6 +67,12 @@ const FILE_KINDS = {
   model: {extensions: ['.stl', '.3mf'], limit: 64 * 1024 * 1024, words: 'a 3MF or STL model'},
 } as const;
 /** The first bytes must agree with the extension. */
+/** The designer's supports choice for the current model, as slice_stl takes it; nothing when the design made none. */
+function designedSupports(object: StmObject): Pick<PrinterSlicer, 'enableSupport' | 'supportType'> {
+  const supports = object.kind === 'published' ? undefined : object.current?.supports;
+  return supports ? {enableSupport: supports.enabled, ...(supports.enabled && supports.type ? {supportType: supports.type} : {})} : {};
+}
+
 function looksLike(extension: string, head: Buffer): boolean {
   switch (extension) {
     case '.jpg': case '.jpeg': return head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
@@ -188,7 +194,10 @@ function isMultipart(object: Pick<StmObject, 'current'>): boolean {
  * with a scan (LiDAR or a handheld capture) is a copy, even with a request ("Copy this. Close up the bottom."),
  * since the phone sends only the request; a request with photos alone is a new design.
  */
-export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions'>): PassKind {
+export function passKind(object: Pick<StmObject, 'kind' | 'scan' | 'capture' | 'instructions' | 'current'>): PassKind {
+  // A copy needs something to copy: one that never received a scan or capture is its request, a new design.
+  // Its model, if any, came from passes run on the request alone (the Nov 2 guitar pick); a duplicate keeps its source's scan.
+  if (object.kind === 'copy' && !object.scan && !object.capture?.length && object.instructions?.trim()) return 'fit';
   if (object.kind) return object.kind;
   // PRD §8.11: a link to a published model's page prints the designer's file; it is never designed.
   if (publishedLink(object.instructions)) return 'published';
@@ -334,15 +343,18 @@ export class ObjectService {
       const source = await this.get(id);
       if (!source.current) throw new InvalidStateError('There is no model to duplicate yet.');
       if (source.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
-      const duplicate = await this.#deps.store.create(source.instructions, passKind(source));
+      const kind = passKind(source);
+      const duplicate = await this.#deps.store.create(source.instructions, kind);
       try {
         const current = source.current;
+        // A copy keeps the scan it copies, or with nothing scanned its request would read as a new design.
+        const scan = kind === 'copy' ? source.scan : undefined;
         // Duplicate the chosen original, not every alternate file or an earlier plate.
         const receipt = source.kind === 'published' ? source.files?.receipts?.find(file => file.path === current.model) : undefined;
         const files = receipt ? {original: [receipt.path], current: receipt.path, receipts: [receipt]} : undefined;
         const publishedSelection = source.publishedSelection ? {...source.publishedSelection, fileIndex: 0} : undefined;
         // A designed multi-colour model prints its 3MF but is corrected from the merged mesh beside it: both copy.
-        const paths = [current.model, ...(isMultipart(source) && source.kind !== 'published' ? ['current/model.stl'] : []), ...current.renders, ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
+        const paths = [current.model, ...(isMultipart(source) && source.kind !== 'published' ? ['current/model.stl'] : []), ...current.renders, ...(scan ? [`scan/${scan}`] : []), ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
         for (const path of new Set(paths)) {
           if (isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..')) throw new InvalidFileError('The model has an invalid file path.');
           const target = join(this.dir(duplicate.id), path);
@@ -353,7 +365,7 @@ export class ObjectService {
         const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current,
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
           preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {}),
-          ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {})}));
+          ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {}), ...(scan ? {scan} : {})}));
         await this.#emit({id: randomUUID(), type: 'project.updated', projectId: result.id, data: {keys: ['created']}});
         return this.#changed(result);
       } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }
@@ -1064,7 +1076,7 @@ export class ObjectService {
     const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
       ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {}),
       ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})};
-    const sliced = {...slicer, ...overrides};
+    const sliced = {...slicer, ...overrides, ...designedSupports(object)};
     const stl = await this.#modelBytes(object);
     const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
@@ -1085,7 +1097,6 @@ export class ObjectService {
     const messages: Record<PrintProgress['phase'], string> = {
       connecting:'Connecting to your printer service…', orienting:'Orienting the model for printing…', slicing:'Slicing the model…',
       inspecting:'Checking the sliced print file…', 'slice-ready':'Sliced file saved.', 'checking-printer':'Checking the printer…',
-      'resolving-printer-error':'The printer needs your acknowledgment of its rejected command.',
       'requesting-print':'Requesting print. Waiting for the printer service…', accepted:'Print request accepted.',
     };
     const eventBase = {projectId: id, printId, ...(printDestination ? {destinationId: printDestination.id, printerName: printDestination.name} : {})};
@@ -1122,7 +1133,7 @@ export class ObjectService {
           };
           if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
             return refused('failed', 'Printer confirmation timed out; no print was sent. Press Print to try again.');
-          if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') return refused('ready', settingsUnsupported(runner.backend, options));
+          if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') return refused('ready', settingsUnsupported(runner.backend, {...options, supports: !!object.current?.supports}));
           return refused('failed', error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error));
         })
       .then(o => this.#changed(o))
@@ -1386,6 +1397,10 @@ export class ObjectService {
   async printRoute(destinationId: string, route?: PrintRoute['route']): Promise<PrintRoute | undefined> {
     const session = this.#deps.printers?.session(destinationId);
     if (!session) throw new ObjectNotFoundError();
+    // Never mid-print: a project printing there, or the printer printing now (a bounded live read, as the Printer
+    // MCP choice does, so a print started outside Counterpart since the last read is refused too).
+    if (route && (await this.printerBusy(destinationId) || await this.#deps.printers?.printing(destinationId)))
+      throw new InvalidStateError('This printer is printing. Change its connection when the print finishes.');
     await session.connect();
     if (!session.hasTool('counterpart_print_route')) return undefined;
     return route ? await setPrintRoute(session, route) : await readPrintRoute(session);
@@ -1513,7 +1528,8 @@ export class ObjectService {
         : await this.#multipartColour(object, {}, services.selection, services.runner.backend).catch(() => undefined);
     const slicer = {...overrides, ...(multipart?.slicer ?? {})};
     const model = await this.#modelBytes(object);
-    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0, multipart?.selection?.amsMapping ?? null, multipart?.slicer?.loadFilaments ?? null, multipart?.slicer?.filamentColours ?? null]);
+    const supports = designedSupports(object);
+    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0, supports, multipart?.selection?.amsMapping ?? null, multipart?.slicer?.loadFilaments ?? null, multipart?.slicer?.filamentColours ?? null]);
     let running = this.#estimates2.get(key);
     if (!running) {
       const runner = services.runner;
@@ -1522,7 +1538,7 @@ export class ObjectService {
         try {
           const stlPath = join(work, object.current!.model.toLowerCase().endsWith('.3mf') ? 'model.3mf' : 'model.stl');
           await writeFile(stlPath, model);
-          const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys(slicer).length ? {slicer} : {}),
+          const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys({...slicer, ...supports}).length ? {slicer: {...slicer, ...supports}} : {}),
             signal: AbortSignal.timeout(150_000), sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')}});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
@@ -1540,7 +1556,7 @@ export class ObjectService {
     }
     try { return structuredClone(await running); }
     catch (error) {
-      if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength}));
+      if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, supports: supports.enableSupport !== undefined}));
       // Bambu Studio refused the slice: its own words, exactly what a Print of the same model fails with.
       if (error instanceof PrinterMcpError && ['slicer-error', 'copies-multiple-plates'].includes(error.code) && error.detail) throw new SlicerRefusedError(error.detail);
       throw new InvalidStateError(error instanceof PrinterMcpError && error.detail ? `Couldn't slice it for an estimate: ${error.detail}` : "Couldn't slice it for an estimate. Check the printer service, then try again.");
@@ -1643,6 +1659,8 @@ export class ObjectService {
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
     const kind: PassKind = passKind(object);
+    // Keep the decision: once this pass makes a model, a copy with nothing scanned would otherwise read as a copy again.
+    if (object.kind !== kind) object = await store.update(object.id, o => ({...o, kind}));
     // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.
     const build = kind !== 'published' && !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
@@ -1959,7 +1977,7 @@ export class ObjectService {
       else await rm(join(currentDir, 'model.3mf'), {force: true});
       current = {model: join('current', result.parts ? 'model.3mf' : 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
         ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}),
-        ...(result.changes?.length ? {changes: result.changes} : {}), engine, ...(design ? {design} : {})};
+        ...(result.changes?.length ? {changes: result.changes} : {}), ...(result.supports ? {supports: result.supports} : {}), engine, ...(design ? {design} : {})};
     }
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'

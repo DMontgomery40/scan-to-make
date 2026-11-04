@@ -10,6 +10,7 @@ import {LiveActivityTokenUploadSchema} from '@scan-to-make/contracts/counterpart
 import type {ObjectService} from './objects/service.js';
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
 import {createPrintHandoffRoutes,type PrintHandoffServices} from './print-handoff-http.js';
+import {handleRemoteMcp,isRemoteMcpPath,type RemoteMcpServices} from './remote-mcp-http.js';
 import {acquireInstanceLock} from './instance-lock.js';
 import { createServer, type IncomingMessage, type RequestListener } from 'node:http';
 import {createServer as createHttpsServer} from 'node:https';
@@ -126,6 +127,8 @@ export async function startCompanionServer(
     lanTls?: {cert: Buffer; key: Buffer};
     capture?: CaptureServices;
     printHandoff?: PrintHandoffServices;
+    /** `/v1/mcp`: every configured printer MCP, passed through to paired remote devices (docs/design/remote-mcp.md). */
+    remoteMcp?: RemoteMcpServices;
     /** Objects (scan or instructions → touch-up → print), when touch-ups are set up. */
     objects?: ObjectService;
     /** The event log behind GET /v1/events (PRD §8.7). */
@@ -151,6 +154,8 @@ export async function startCompanionServer(
     nearby?: {name: string; advertise?: typeof advertise};
     /** The Mac's name as people know it ("Mac mini"), in /healthz so the phone can say which Mac it reached. */
     name?: string;
+    /** Settings -> Printers on the phone: which MCP a printer uses (`PUT /v1/objects/printers/<id>/mcp`). */
+    printerSetup?: Pick<import('./printing/setup.js').PrinterSetup, 'chooseMcp'>;
   } = {}
 ): Promise<{
   url: string;
@@ -198,12 +203,13 @@ export async function startCompanionServer(
     throw new Error('Invalid local port');
   if(options.capture&&!auth)throw new Error('Capture routes require explicit authentication');
   if(options.printHandoff&&!auth)throw new Error('Printer handoff routes require explicit authentication');
+  if(options.remoteMcp&&!auth)throw new Error('Remote MCP requires explicit authentication');
   // One companion process per capture directory: scan processing assumes its
   // jobs, workers and cancellation all live in this process.
   const instanceLock=options.capture?.scanProcessing?await acquireInstanceLock(options.capture.scanProcessing.directory):undefined;
   const captureRoutes=options.capture?createCaptureRoutes(options.capture):undefined;
   const printHandoffRoutes=options.printHandoff?createPrintHandoffRoutes(options.printHandoff):undefined;
-  const objectRoutes=options.objects?createObjectRoutes(options.objects):undefined;
+  const objectRoutes=options.objects?createObjectRoutes(options.objects,options.printerSetup?{printerSetup:options.printerSetup}:{}):undefined;
   const eventRoutes=options.events?createEventRoutes(options.events):undefined;
   let authority = '';
   const handler: RequestListener = async (request, response) => {
@@ -258,7 +264,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, colourMapping: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, colourMapping: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printerChoices: !!options.objects && !!options.printerSetup } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
@@ -354,8 +360,16 @@ export async function startCompanionServer(
         }
         return;
       }
+      if(options.remoteMcp&&auth&&isRemoteMcpPath(request.url)){
+        await handleRemoteMcp(options.remoteMcp,request,response,async()=>{
+          const {deviceId,token}=credential();
+          const device=await auth.device(login,deviceId,token);
+          void options.presence?.seen(device.deviceId,singleHeader(request,'x-scan-device-model')).catch(()=>undefined);
+          return device;
+        });return;
+      }
       if(printHandoffRoutes&&request.url?.startsWith('/v1/printer-handoff/')){
-        await printHandoffRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
+        await printHandoffRoutes.handle(request,response,authorize,name=>singleHeader(request,name),()=>credential().deviceId);return;
       }
       if (auth && request.url === '/v1/auth/refresh') {
         // Rolling refresh: the same credential, valid for another full lifetime. No body.
