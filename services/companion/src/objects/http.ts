@@ -5,7 +5,7 @@ import {readFile, realpath, open} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {basename, join, isAbsolute, sep} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
-import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, projectStatus, type ObjectService} from './service.js';
+import {InvalidAnswerError, InvalidCaptureManifestError, InvalidStateError, passKind, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {CompanionSettingsPatchSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {objectStatus, projectTitle} from '../events/words.js';
@@ -79,7 +79,8 @@ export function publicObject(object: StmObject): PublicObject {
   const canRetryCleanup = object.state === 'failed' && lastPass?.status === 'capped'
     && !!object.failure && lastPass.activity?.at(-1)?.text === object.failure;
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
-  return {...object, title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
+  // The companion's decision (copy, new design or published), so neither app re-derives it.
+  return {...object, kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
     passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass,
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};

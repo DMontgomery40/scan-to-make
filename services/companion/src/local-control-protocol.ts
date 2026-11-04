@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {ModelAccessChoiceSchema} from './model-access-protocol.js';
 import {PrinterFormSchema} from './printing/setup.js';
-import {CompanionSettingsPatchSchema, ProjectSettingsPatchSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema} from '@scan-to-make/contracts/counterpart';
+import {CompanionSettingsPatchSchema, ProjectSettingsPatchSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema, PrintSettingsSchema} from '@scan-to-make/contracts/counterpart';
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -74,7 +74,7 @@ export const parameters = {
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
     name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
   }).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(), colour: PrintColourSchema.optional(),
-    copies: z.number().int().min(1).max(64).optional()}),
+    copies: z.number().int().min(1).max(64).optional(), pauseBeforeLayers: PrintSettingsSchema.shape.pauseBeforeLayers}),
   'objects.estimate': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(),
     copies: z.number().int().min(1).max(64).optional()}),
   'objects.pausePrint': z.strictObject({id: z.uuid()}),
@@ -82,7 +82,7 @@ export const parameters = {
   'objects.cancelPrint': z.strictObject({id: z.uuid()}),
   'objects.camera': z.strictObject({id: z.uuid()}),
   'printers.camera': z.strictObject({destinationId: z.string().min(1).max(256)}),
-  'printers.route': z.strictObject({destinationId: z.string().min(1).max(256), route: z.enum(['lan', 'cloud']).optional()}),
+  'printers.route': z.strictObject({destinationId: z.string().min(1).max(256), route: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/).optional()}),
   'printers.mcps': empty,
   'printers.installMcp': z.strictObject({package: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server'])}),
   'printers.discover': empty,
