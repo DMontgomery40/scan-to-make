@@ -114,7 +114,7 @@ test('real mcp-3D-printer-server discovery exposes the generic G-code handoff to
   assert.match(catalog.server.name, /3d|printer/i);
 });
 
-test('real server OctoPrint path: lay_flat → slice → confirm_temperatures → upload_gcode after confirmation', {skip: !enabled}, async t => {
+test('real server OctoPrint path: slice → confirm_temperatures → upload_gcode after confirmation', {skip: !enabled}, async t => {
   const {absoluteEntry, root} = await resolvePaths();
   const fake = await startFakePrinter('octoprint');
   t.after(() => fake.close());
@@ -124,10 +124,11 @@ test('real server OctoPrint path: lay_flat → slice → confirm_temperatures �
   relay.subscribe(p => prompts.push(p.message));
   const runner = new PrinterHandoffRunner(config, {relay});
   const result = await runner.run({stlPath});
-  assert.deepEqual(result.steps, ['discover', 'lay_flat', 'slice_stl', 'inspect', 'print']);
+  assert.deepEqual(result.steps, ['discover', 'slice_stl', 'inspect', 'print']);
   assert.equal(result.inspection.tool, 'confirm_temperatures');
   assert.equal(result.print?.printRequested, true);
-  assert.ok(result.orientedStlPath.endsWith('_flat.stl'));
+  // The model goes to the slicer as it is.
+  assert.equal(result.orientedStlPath, stlPath);
   assert.ok(result.slicedPath.endsWith('.gcode'));
   const posts = fake.requests.filter(r => r.method === 'POST');
   assert.equal(posts.length, 1, 'one upload-and-print POST expected');

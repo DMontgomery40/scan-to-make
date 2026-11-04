@@ -6,7 +6,7 @@ import {tmpdir, userInfo} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
-import {buildTouchupInvocation, TOUCHUP_RESULT_SCHEMA, TOUCHUP_SYSTEM_RULES, TOUCHUP_INSTRUCTION} from '../dist/touchup/invocation.js';
+import {buildTouchupInvocation, systemRules, TOUCHUP_RESULT_SCHEMA, TOUCHUP_SYSTEM_RULES, TOUCHUP_INSTRUCTION} from '../dist/touchup/invocation.js';
 
 const fixtures = fileURLToPath(new URL('./fixtures/touchup/', import.meta.url));
 async function pass() {
@@ -114,6 +114,29 @@ test('the rules ask for the fixes the photos show, not just caution', () => {
   assert.match(TOUCHUP_SYSTEM_RULES, /too faint/);
   assert.match(TOUCHUP_SYSTEM_RULES, /Keep real surface detail the photos confirm/);
   assert.equal(/never smooth captured surface/.test(TOUCHUP_SYSTEM_RULES), false, 'a lumpy surface the photos show flat must be fixable');
+});
+
+test('every pass plans how it prints, with the printer MCP\'s own fdm_design guidance, for copies and new designs alike', async () => {
+  const guidance = 'Design the finished object the user wants, with the manufacturing plan as part of the design.';
+  for (const engine of ['blender', 'fusion']) {
+    const rules = systemRules(engine, guidance);
+    assert.ok(rules.endsWith(`Manufacturing guidance from the printer MCP (its fdm_design prompt):\n${guidance}`), engine);
+    assert.doesNotMatch(rules, /Don't do print preparation/, 'supports and orientation are design choices now');
+    assert.match(rules, /captured objects and new designs alike/);
+    assert.doesNotMatch(rules, /PRINTER_FACTS|ENGINE_RULES|ENGINE_NAME/, 'no placeholder survives');
+    assert.doesNotMatch(rules, /lay_flat/, 'Counterpart no longer re-orients the model');
+    assert.match(rules, /Bambu Studio's own auto-orient chooses how it sits on the bed/, 'the worker knows the slicer orients it');
+    assert.match(rules, /only as your answer's supports says, off included/, 'and that its supports choice is what the print gets');
+    assert.match(rules, /slice_stl with orient true and enable_support set as your answer will set it/, 'its check slice matches the print');
+    // A Fusion pass's proxy passes the printer's read-only tools through, so both engines read the same facts.
+    assert.match(rules, /get_printer_filaments/);
+    assert.match(rules, /slicer_result/);
+    assert.doesNotMatch(systemRules(engine), /Manufacturing guidance from the printer MCP/, 'an MCP without the prompt adds nothing');
+  }
+  // Every provider reads the same rules from --append-system-prompt (project-worker.ts).
+  const inv = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv, guidance});
+  assert.ok(valueOf(inv.args, '--append-system-prompt').endsWith(guidance));
+  assert.equal(valueOf(buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv}).args, '--append-system-prompt'), TOUCHUP_SYSTEM_RULES);
 });
 
 test('the worker loads none of the user\'s personal Claude settings', async () => {

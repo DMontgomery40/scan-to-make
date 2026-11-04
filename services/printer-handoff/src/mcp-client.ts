@@ -235,6 +235,24 @@ export class PrinterMcpClient {
     if (!compiled(args)) fail('invalid-tool-arguments');
   }
 
+  /**
+   * The text of one of the server's MCP prompts, such as its `fdm_design` guidance. Undefined when the
+   * installed MCP predates prompts or doesn't have that one: guidance is optional, never a reason to fail.
+   */
+  async prompt(name: string, options: {signal?: AbortSignal; timeoutMs?: number} = {}): Promise<string | undefined> {
+    if (!this.#client || !this.#catalog) fail('not-connected');
+    if (!this.#client.getServerCapabilities()?.prompts) return undefined;
+    const timeout = options.timeoutMs ?? 15_000;
+    try {
+      const result = await this.#client.getPrompt({name}, {signal: options.signal, timeout, maxTotalTimeout: timeout});
+      const text = result.messages.flatMap(message => message.content.type === 'text' ? [message.content.text] : []).join('\n\n').trim();
+      return text && Buffer.byteLength(text) <= MAX_RESULT_BYTES ? text : undefined;
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
+      return undefined;
+    }
+  }
+
   async callTool(name: string, args: Record<string, unknown> = {}, options: PrinterToolCallOptions = {}): Promise<CallToolResult> {
     if (!options.elicitationContext) return this.#callTool(name, args, options);
     const previous = this.#elicitationContext, before = new Set(this.#outstandingElicitations);
