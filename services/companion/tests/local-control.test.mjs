@@ -242,7 +242,7 @@ test('long methods get their own socket deadline; everything else keeps 10 s', a
   const {methodDeadlineMs} = await import('../dist/local-control.js');
   assert.equal(methodDeadlineMs('objects.correct', {}), 25000);
   assert.equal(methodDeadlineMs('objects.estimate', {}), 180000);
-  assert.equal(methodDeadlineMs('objects.cancelPrint', {}), 130000);
+  assert.equal(methodDeadlineMs('objects.cancelPrint', {}), 730000, 'the printer question window (10 min) plus 2 min, plus 10 s');
   assert.equal(methodDeadlineMs('objects.get', {}), undefined);
 });
 
