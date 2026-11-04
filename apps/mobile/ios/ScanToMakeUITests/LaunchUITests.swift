@@ -350,7 +350,8 @@ final class PrintScreensUITests: XCTestCase {
         XCTAssertTrue(add.waitForExistence(timeout: 10))
         XCTAssertTrue(add.isEnabled)
         add.tap()
-        XCTAssertTrue(app.steppers["Before layer 2 of 212"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.steppers["pause-0"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Before layer", "212")).firstMatch.exists)
         XCTAssertTrue(app.buttons["print-now"].isEnabled)
     }
 
@@ -421,8 +422,8 @@ final class SettingsAndFirstRunUITests: XCTestCase {
 
     func testNotificationsForThisIPhoneAndTheMac() {
         let app = launch("notifications")
-        // This iPhone's switches come from the Mac's settings for this device: "Print started" is off there.
-        let started = app.switches["Print started"].firstMatch
+        // This device's Live Activity switch is off; the Mac alert is a separate setting.
+        let started = app.switches["Print started (Live Activity)"].firstMatch
         XCTAssertTrue(started.waitForExistence(timeout: 20))
         XCTAssertEqual(started.value as? String, "0")
         XCTAssertTrue(app.switches["Ready to print"].firstMatch.exists)
