@@ -4,7 +4,10 @@ import {CallToolRequestSchema, ListToolsRequestSchema} from '@modelcontextprotoc
 import {PrinterMcpClient, PrinterMcpError} from './mcp-client.js';
 import type {PrinterHandoffConfig} from './config.js';
 
-const TOOLS = new Set(['fusion_mcp_status', 'fusion_mcp_call', 'fusion_mcp_export']);
+const FUSION_TOOLS = new Set(['fusion_mcp_status', 'fusion_mcp_call', 'fusion_mcp_export']);
+/** What a design pass reads to plan the print (the MCP's fdm_design guidance): the printer, its filaments and a check slice. */
+const PRINTER_TOOLS = new Set(['counterpart_printer_info', 'get_printer_filaments', 'get_slice_settings', 'slice_stl']);
+const TOOLS = new Set([...FUSION_TOOLS, ...PRINTER_TOOLS]);
 type Upstream = Pick<PrinterMcpClient, 'catalog' | 'callTool'>;
 
 /** A pass owns the binding; worker arguments can never select another document.
@@ -29,7 +32,8 @@ export function createBoundFusionServer(upstream: Upstream, documentId: string):
     if ('document_id' in args || nested && typeof nested === 'object' && 'document_id' in nested)
       throw new Error('The pass selects the Fusion document binding');
     try {
-      return await upstream.callTool(name, name === 'fusion_mcp_status' ? args : {...args, document_id: documentId}, {signal: extra.signal, forwardResult: true});
+      const bound = name === 'fusion_mcp_call' || name === 'fusion_mcp_export';
+      return await upstream.callTool(name, bound ? {...args, document_id: documentId} : args, {signal: extra.signal, forwardResult: true});
     } catch (error) {
       if (!(error instanceof PrinterMcpError)) throw error;
       return {isError: true, content: [{type: 'text', text: error.detail ?? error.message}]};

@@ -186,18 +186,22 @@ remote native probes and the SSH tunnel were removed after verification.
      without an AMS mapping; it needs the MCP to pick the nearest loaded tray per part colour (both MCPs; mcp-3D has
      no 3MF tool). This is ask 41, the "Vivi" pick.
    - **#297** `docs/site-mcp-backend`: site says the MCPs are the backend and links their docs sites.
-4. **Combined MCP releases authorized and in progress; no publication receipt yet (Nov 4).**
+4. **Both combined MCP releases published Nov 4; actual app Update/acceptance in progress.**
    The [FDM/MCP thread](t3-thread://v2/11412686-e469-46d5-8f3a-5aaa68539c60/0df403d6-0993-4ddb-8d4a-4f20d2ca9186)
    owns both integrations, merges, npm publication and Counterpart's visible MCP Update/acceptance while idle.
    Do not start a competing release or copy `dist` into the installed app.
    - bambu-printer-mcp [#99](https://github.com/DMontgomery40/bambu-printer-mcp/pull/99),
-     `release/1.1.52` @ `4185980`: control route `587461b` (including camera/Fusion fixes), Studio 2.9 and FDM prompts.
-     Supersedes #95–#98. Latest reported published npm version is 1.1.51; confirm registry receipts after release.
+     merged as `ff32e5e`: control route (including camera/Fusion fixes), Studio 2.9, FDM prompts and X2D route selection.
+     npm **1.1.52** published at 08:06:24Z (Publish Package run `41796513132`); registry latest independently
+     verified. Release/tag v1.1.52 and MCPB asset published; #95–#98 closed as released.
    - mcp-3D-printer-server [#52](https://github.com/DMontgomery40/mcp-3D-printer-server/pull/52),
-     `release/1.2.26` @ `89b00d2`: `afcf378` controls/layer pauses plus camera, Studio 2.9 and FDM prompts.
-     Supersedes #49–#51. Latest reported published npm version is 1.2.25; package/site checks passed.
+     merged as `a08c794`: controls/layer pauses, camera, selected 3MF plate parity, Studio 2.9 and FDM prompts.
+     npm **1.2.26** published at 08:04:34Z (Publish Package run `41796478364`); registry latest independently
+     verified. Release/tag v1.2.26 published; #49–#51 closed as released.
+   - Both published packages advertise all four FDM prompts. That startup check is engineering evidence only;
+     installed app Update/visible-control acceptance remains with the MCP owner.
    - This TestFlight thread owns handoff/distribution/site/appcast, app packaging and Counterpart
-     [#298](https://github.com/DMontgomery40/scan-to-make/pull/298) @ `faaff20` integration.
+     [#298](https://github.com/DMontgomery40/scan-to-make/pull/298) integration (updated onto this release branch at `1aa04ba`; code unchanged).
      #298 changes the companion payload, requiring a new Mac release; MCP-only releases need no new iPhone build.
      Its status-doc edits were removed by the MCP owner and reconciled here. Do not replace the installed app
      during that thread's MCP update/acceptance; coordinate the later Mac upgrade explicitly.
@@ -273,7 +277,7 @@ remote native probes and the SSH tunnel were removed after verification.
 - FDM design guidance lives in both MCPs as `fdm_design`, `fdm_multicolor`, `fdm_assembly`, `fdm_after_slice`
   prompts and a resource. Counterpart fetches `fdm_design` for design and copy passes; the guidance is maintained
   in the MCPs, not duplicated in the app. Developer notes: `docs/design/fdm-prompt-pack/` in #298.
-  Publish the combined MCP releases first; then integrate #298 and release its Mac companion payload.
+  The combined MCPs are published; integrate reviewed #298 and release its Mac companion payload next.
   Acceptance means New project / Ask for changes through Counterpart, with the published MCP providing guidance.
 - Printing picks is authorized; the Sandbox APNs key and relay are provisioned (`counterpart-relay-sandbox`).
 

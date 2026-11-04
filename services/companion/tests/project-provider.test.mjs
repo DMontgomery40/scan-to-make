@@ -9,20 +9,27 @@ import {ModelAccessService} from '../dist/model-access.js';
 async function fixture(t){const root=await mkdtemp('/tmp/project-provider-');t.after(()=>rm(root,{recursive:true,force:true}));return root;}
 const request=root=>({cwd:root,args:['-p','--mcp-config',join(root,'mcp.json'),'--append-system-prompt','Design a bracket','--json-schema',JSON.stringify({type:'object',properties:{status:{type:'string'},summary:{type:'string'}},required:['status','summary']}),'Make a bracket'],mcpConfig:{mcpServers:{printer:{command:process.execPath,args:[resolve('tests/fixtures/project-provider-mcp.mjs')],env:{RECEIPT:join(root,'receipt.json')}}}}});
 async function server(t,handler){const s=createServer(handler);await new Promise(r=>s.listen(0,'127.0.0.1',r));t.after(()=>{s.closeAllConnections();return new Promise(r=>s.close(r));});return `http://127.0.0.1:${s.address().port}/v1`;}
-for(const kind of ['endpoint','openai','anthropic'])test(`${kind} executes real MCP tools, returns tool images to the model and isolates its credential`,async t=>{
+for(const kind of ['endpoint','openai','anthropic'])test(`${kind} executes real MCP tools, returns images and structured slicer feedback to the model and isolates its credential`,async t=>{
  const root=await fixture(t),seen=[];
  const endpoint=await server(t,async(req,res)=>{let text='';for await(const chunk of req)text+=chunk;const body=JSON.parse(text);seen.push({body,headers:req.headers});res.setHeader('content-type','application/json');
-  const use=seen.length===1;
-  if(kind==='anthropic')res.end(JSON.stringify({content:use?[{type:'tool_use',id:'call1',name:'mcp_printer_design_view',input:{}}]:[{type:'tool_use',id:'finish',name:'finish',input:{status:'done',summary:'Bracket complete'}}]}));
-  else res.end(JSON.stringify({choices:[{message:{role:'assistant',content:null,tool_calls:[{id:use?'call1':'finish',type:'function',function:{name:use?'mcp_printer_design_view':'finish',arguments:use?'{}':JSON.stringify({status:'done',summary:'Bracket complete'})}}]}}]}));
+  const use=seen.length<3,tool=seen.length===1?'mcp_printer_design_view':'mcp_printer_slice_stl';
+  if(kind==='anthropic')res.end(JSON.stringify({content:use?[{type:'tool_use',id:`call${seen.length}`,name:tool,input:{}}]:[{type:'tool_use',id:'finish',name:'finish',input:{status:'done',summary:'Bracket complete'}}]}));
+  else res.end(JSON.stringify({choices:[{message:{role:'assistant',content:null,tool_calls:[{id:use?`call${seen.length}`:'finish',type:'function',function:{name:use?tool:'finish',arguments:use?'{}':JSON.stringify({status:'done',summary:'Bracket complete'})}}]}}]}));
  });
  const original=global.fetch;if(kind!=='endpoint'){global.fetch=(url,opts)=>original(String(url).replace(kind==='anthropic'?'https://api.anthropic.com/v1':'https://api.openai.com/v1',endpoint),opts);t.after(()=>global.fetch=original);}
  const access=kind==='endpoint'?{kind,url:endpoint,model:'vision-tools',keyEnv:'MODEL_SECRET'}:{kind:'api',provider:kind,model:'vision-tools',keyEnv:'MODEL_SECRET'};
  const result=await runProjectModel(request(root),{access,env:{HOME:root,PATH:process.env.PATH,MODEL_SECRET:'private-key'}});
- assert.equal(result.resultEvent.structured_output.summary,'Bracket complete');assert.equal(seen.length,2);
+ assert.equal(result.resultEvent.structured_output.summary,'Bracket complete');assert.equal(seen.length,3);
  assert.equal(kind==='anthropic'?seen[0].headers['x-api-key']:seen[0].headers.authorization,kind==='anthropic'?'private-key':'Bearer private-key');
- const receipt=JSON.parse(await readFile(join(root,'receipt.json'),'utf8'));assert.deepEqual(receipt,{called:'design_view',secretPresent:false});
+ const receipt=JSON.parse(await readFile(join(root,'receipt.json'),'utf8'));assert.deepEqual(receipt,{called:'slice_stl',secretPresent:false});
  assert.match(JSON.stringify(seen[1].body.messages),kind==='anthropic'?/"media_type":"image\/png"/:/data:image\/png;base64,iVBOR/);
+ const messages=seen[2].body.messages;
+ const sliceResult=kind==='anthropic'
+  ? messages.flatMap(m=>Array.isArray(m.content)?m.content:[]).find(b=>b.type==='tool_result'&&b.tool_use_id==='call2').content.map(b=>b.text??'').join('\n')
+  : messages.find(m=>m.role==='tool'&&m.tool_call_id==='call2').content;
+ assert.match(sliceResult,/out\/part.gcode/);
+ const structured=JSON.parse(sliceResult.split('Structured result:\n')[1]);
+ assert.deepEqual(structured.slicer_result,{return_code:0,error:null,plates:[{plate_index:1,warnings:['floating cantilever needs supports']}]});
  assert(!JSON.stringify(result).includes('private-key'));
 });
 

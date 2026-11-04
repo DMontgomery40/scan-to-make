@@ -157,7 +157,11 @@ async function runApi(request:Request,options:AiTweakOptions,signal:AbortSignal,
    }
    const tool=dispatch.get(name);if(!tool)throw Error('Unknown tool');
    const result=await tool.client.callTool(tool.name,args,{signal,timeoutMs:120000});
-   return (result.content??[]).filter((b:any)=>b.type==='text'||b.type==='image') as Block[];
+   const blocks=(result.content??[]).filter((b:any)=>b.type==='text'||b.type==='image') as Block[];
+   // MCP tools can put their warnings/data only in structuredContent. Both API
+   // dialects need it in the tool reply alongside the existing text and images.
+   if(result.structuredContent!==undefined)blocks.push(textBlock(`Structured result:\n${JSON.stringify(result.structuredContent)}`));
+   return blocks;
   };
   for(;;){
    signal.throwIfAborted();

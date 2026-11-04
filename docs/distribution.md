@@ -56,13 +56,15 @@ independently of David's existing setup:
 - The app's Download/Update MCP actions install npm's latest version independently
   of the iPhone or Mac release. David authorized both combined MCP releases after
   checks on Nov 4; the previous release hold is superseded. The FDM/MCP thread owns
-  bambu-printer-mcp #99 (1.1.52) and mcp-3D-printer-server #52 (1.2.26), publication
-  and the actual app's MCP Update/acceptance. Publication receipts are still pending.
+  the actual app's MCP Update/acceptance. Both combined releases are now published:
+  bambu-printer-mcp **1.1.52** (#99, merge `ff32e5e`, publish run `41796513132`)
+  and mcp-3d-printer-server **1.2.26** (#52, merge `a08c794`, publish run `41796478364`).
+  Registry latest was independently verified for both on Nov 4; visible app acceptance remains open.
   Do not hand-copy local feature-branch builds. Accept print controls using the
   visible Counterpart UI with exactly the published packages users receive.
 - Counterpart #298 consumes the MCP's FDM guidance and changes the bundled companion.
-  This release thread owns its integration and a new Mac release after the MCPs
-  publish. The current Mac download does not yet contain #298; these companion-only
+  This release thread owns its integration and a new Mac release; both MCPs now
+  serve the required prompts. The current Mac download does not yet contain #298; these companion-only
   changes do not require a new TestFlight phone build.
 - The legacy macOS installer and Docker image pin older MCP versions. They do not
   reproduce the currently accepted feature-branch installation.
