@@ -659,9 +659,18 @@ remote native probes and the SSH tunnel were removed after verification.
     Root cause established by that owner: pre-#293 design retained only the merged STL; its two colour
     3MFs stayed in old pass output under noncanonical names, with no current filaments/model.3mf.
     The actual slice/dispatch was one black body/tray 0, so no MCP mapping bug is established. Owner
-    is implementing a producing-pass-bound legacy colour-loss explanation and explicit remake/one-colour
-    choice on main; no automatic adoption of ambiguous old outputs. Parent did not start the new pick
-    pass now running. Do not mark colour acceptance passed or reprint. David also reports another Device Hub use;
+    merged #306 as `5d4429b0`: producing-pass-bound legacy colour-loss explanation and explicit
+    remake/one-colour choice; no automatic adoption of ambiguous outputs. Release integrated main
+    as `c5762972`, preserving starter/plate/provider and reconstruction work. Signed Mac build
+    **202611041137** succeeded with matching installed app entitlements, both Node entitlements and
+    packaged reconstruction qualification checked. Official `stm-ci c5762972` passed all suites
+    (58 contracts, 125 printer-handoff plus 5 skips, 886 companion plus 1 skip, and Python tools).
+    These are engineering checks; deployment waits for idle. Receipt/build:
+    `~/scan-to-make-work/mac-legacy-colour-202611041137/`.
+    **User-started colour print active:** bundle `e592f12e-e5a0-4821-9f56-2cdacb8d6f5e`, dispatched
+    18:34:41Z, uses current/model.3mf and AMS mapping `[0, 1]`; actual Mac UI at 18:40Z shows
+    Printing and P1S Busy. Parent initiated neither the design nor print. Keep installs/restarts held
+    until it settles. Physical colour result and iPhone menu acceptance remain open; no reprint. David also reports another Device Hub use;
     read-only check at 11:15 MST found no Xcode DeviceHub process or events in its previous 8 minutes.
     David clarified this was an iOS lock-screen/Settings notice saying the device was viewed through
     Device Hub, not an observed agent tool call or reopened Mac window. USB read-only display info
