@@ -59,6 +59,19 @@ test('a copy started with nothing scanned designs its request, and stays a desig
   assert.equal(f.inputs[1].kind, 'fit', 'the model it made is not a scan to copy');
 });
 
+test('an unscanned copy that already made a model from its request is a new design (the Nov 2 guitar pick)', async t => {
+  const f = await setup(t, [{}]);
+  const object = await f.service.create('A guitar pick that says Vivi', 'copy');
+  // Made before the fix: Blender passes on the request alone left a model and the kind "copy".
+  await mkdir(join(f.store.dir(object.id), 'current'), {recursive: true});
+  await writeFile(join(f.store.dir(object.id), 'current', 'model.stl'), 'solid pick');
+  await f.store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
+  await f.service.correct(object.id, 'Thinner');
+  await f.service.settled(object.id);
+  assert.equal(f.inputs[0].kind, 'fit');
+  assert.equal((await f.store.get(object.id)).kind, 'fit');
+});
+
 test('a design pass reports stages with an estimate, its title, what changed, and its Fusion design for next time', async t => {
   const f = await setup(t, [
     {wait: true, engine: 'fusion', result: {summary: 'A clamp-on mount.', title: 'Clamp mount', changes: [{tag: 'added', text: 'A 25 mm clamp'}, {tag: 'estimated', text: 'Stand pole 25 mm', toleranceMm: 1}]}},
@@ -173,7 +186,8 @@ test('without a kind, a scan is a copy even with a request; a request with photo
   assert.equal(passKind({kind: 'copy', scan: 'scan.usdz', instructions: 'Close up the bottom.'}), 'copy');
   assert.equal(passKind({kind: 'copy', capture: ['0001.heic']}), 'copy');
   assert.equal(passKind({kind: 'copy'}), 'copy', 'no request and no scan: nothing to design');
-  assert.equal(passKind({kind: 'copy', instructions: 'Clean it up', current: {model: 'current/model.stl', renders: []}}), 'copy', 'a duplicated copy keeps cleaning its model');
+  assert.equal(passKind({kind: 'copy', scan: 'scan.usdz', instructions: 'Clean it up', current: {model: 'current/model.stl', renders: []}}), 'copy', 'a duplicated copy keeps its scan and keeps cleaning its model');
+  assert.equal(passKind({kind: 'copy', instructions: 'A pick that says Vivi', current: {model: 'current/model.stl', renders: []}}), 'fit', 'a model made from the request alone is a design');
 });
 
 test('an Ask pointing at a PNG render is still served at asks/<id>.jpg, as the protocol says', async t => {
