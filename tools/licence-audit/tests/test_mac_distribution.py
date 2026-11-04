@@ -101,7 +101,7 @@ class MacDistributionTests(unittest.TestCase):
 
     def test_stale_worker_and_package_manager_payloads_are_rejected(self):
         payload = self.root / 'Payload'
-        for name in ['capture-fit-eval', 'capture-pipeline', 'capture-mesh-convert', 'mac-reconstruct', 'scan-repair']:
+        for name in [Path(p).name for p in self.manifest['sourcePaths'] if p.startswith('tools/')] + ['scan-repair']:
             (payload / 'source/tools' / name).mkdir(parents=True)
         with self.assertRaisesRegex(ValueError, 'tool folders'):
             verify_payload(self.root, payload)
@@ -114,7 +114,7 @@ class MacDistributionTests(unittest.TestCase):
 
     def test_unlisted_python_wheel_is_rejected(self):
         payload = self.root / 'Payload'
-        for name in ['capture-fit-eval', 'capture-pipeline', 'capture-mesh-convert', 'mac-reconstruct']:
+        for name in [Path(p).name for p in self.manifest['sourcePaths'] if p.startswith('tools/')]:
             (payload / 'source/tools' / name).mkdir(parents=True)
         (payload / 'node').mkdir()
         self.add_helper(payload)
@@ -125,6 +125,7 @@ class MacDistributionTests(unittest.TestCase):
             verify_payload(self.root, payload)
 
     def add_helper(self, payload):
+        (payload / 'BUILD-ID').write_text('mac-' + 'a' * 64 + '\n')
         (payload / 'bin').mkdir(parents=True)
         executable = payload / 'bin/mac-reconstruct'
         executable.write_bytes(b'\xcf\xfa\xed\xfe' + bytes(64))

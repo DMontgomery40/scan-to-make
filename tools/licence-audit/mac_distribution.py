@@ -161,8 +161,11 @@ def verify_payload(root: Path, payload: Path) -> None:
     actual_tools = {p.name for p in (payload / "source/tools").iterdir()}
     if actual_tools != expected_tools:
         raise ValueError("Payload tool folders differ from audited source manifest")
-    if {p.name for p in payload.iterdir()} != {"node", "python", "source", "bin"}:
+    if {p.name for p in payload.iterdir()} != {"node", "python", "source", "bin", "BUILD-ID"}:
         raise ValueError("Unapproved top-level runtime payload")
+    identity = payload / "BUILD-ID"
+    if identity.is_symlink() or not identity.is_file() or not re.fullmatch(r"mac-[0-9a-f]{64}\n", identity.read_text()):
+        raise ValueError("Invalid payload BUILD-ID")
     binary_directory = payload / "bin"
     if binary_directory.is_symlink() or {p.name for p in binary_directory.iterdir()} != {"mac-reconstruct"}:
         raise ValueError("Unapproved first-party executable directory")
