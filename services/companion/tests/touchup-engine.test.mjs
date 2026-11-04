@@ -67,9 +67,11 @@ test('a Fusion pass never touches Blender: no lock, no launch, no scene reset', 
     resetScene: async () => { log.push('resetScene'); },
     client: fusion.client,
     prepare: async args => { log.push('prepare'); return prepareTouchupPass(args); },
-    run: async (inv, pass) => { log.push('run'); assert.match(inv.args.join(' '), /fusion_mcp_export/); return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
+    guidance: async config => { log.push('guidance'); assert.equal(config, handoff, 'the guidance comes from the configured printer MCP'); return 'Plan the print as part of the design.'; },
+    run: async (inv, pass) => { log.push('run'); assert.match(inv.args.join(' '), /fusion_mcp_export/);
+      assert.match(inv.args[inv.args.indexOf('--append-system-prompt') + 1], /its fdm_design prompt\):\nPlan the print as part of the design\.$/); return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
   });
-  assert.deepEqual(log, ['prepare', 'run']);
+  assert.deepEqual(log, ['prepare', 'guidance', 'run']);
   assert.equal(result.engine, 'fusion');
   assert.deepEqual(stages, [['preparing', 'blender'], ['working', 'fusion']]);
 });

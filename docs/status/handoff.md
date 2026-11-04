@@ -243,6 +243,11 @@ remote native probes and the SSH tunnel were removed after verification.
 - Printer settings live in each MCP's `.env`; Counterpart edits them, it never keeps its own copy.
 - The 5-second hold on FULU controls stays.
 - Printing picks is authorized; the Sandbox APNs key and relay are provisioned (`counterpart-relay-sandbox`).
+- FDM design guidance (David's prompt pack, Nov 3) lives in **both MCPs** as MCP prompts (`fdm_design`, `fdm_multicolor`,
+  `fdm_assembly`, `fdm_after_slice`) and a resource; Counterpart only fetches `fdm_design` and appends it to the worker's
+  rules. David, Nov 4: "it 1000000% must be in the mcps but very little has to be in the app". It applies to copy passes
+  too ("when this applies more, it should be known and done"). Developer notes and evaluation cases:
+  `docs/design/fdm-prompt-pack/`.
 
 ## Done or superseded (verified; don't redo)
 

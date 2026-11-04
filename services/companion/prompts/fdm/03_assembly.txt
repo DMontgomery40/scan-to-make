@@ -1,9 +1,0 @@
-Apply this guidance when a split, insert, or joint may materially improve the result.
-
-Compare assembly against the best practical one-piece approach, including reasonable supports. A split earns its place by improving important surfaces, layer strength, fit, color efficiency, support access, repairability, or bed fit enough to justify handling and joining the pieces. Prefer a one-piece solution when its support cleanup is easier than assembly and the alternatives meet the other important requirements comparably well. Respect an explicit one-piece or no-glue requirement.
-
-Put boundaries where they are structurally sensible and visually deliberate. Use shoulders, keys, overlapping faces, tabs, or pins to locate parts and resist sliding or rotation as appropriate. Include fit clearance, lead-ins, adhesive space where needed, and a feasible insertion path. Check the assembled geometry and the order of operations, not only the separated pieces. Avoid joints whose screws, clamps, or mating faces become inaccessible during assembly.
-
-For suitable lightly loaded rigid details, a locating pocket plus a compatible adhesive can be the simplest reliable solution. For a loaded clamp, a joint under peel or repeated bending, or a serviceable assembly, consider fasteners or mechanically captured geometry. Do not assume a tiny glued butt joint can carry the same load as an intact printed section. Select adhesive from evidence for the actual materials and conditions; superglue is an option, not a universal material property.
-
-State the practical consequence directly: which parts print in which orientations and colors, how they locate, how they are retained, which supplies are needed, and the estimated hands-on work. Keep hands-on time separate from adhesive cure time. Check a small joint sample only when its uncertain fit or strength would change the design decision.

@@ -4,7 +4,6 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import type {PrinterMcpProcess, PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import type {TouchupPass} from './inputs.js';
-import {fdmGuidance} from './fdm-guidance.js';
 
 export const TOUCHUP_INSTRUCTION = 'Look at the pictures of this, and then tweak the scan based on that.';
 
@@ -51,7 +50,7 @@ const SYSTEM_RULES_TEMPLATE = `You are making a useful 3D object for a person. U
 - For a new design, construct the complete functional geometry ENGINE_NAME. Procedural modeling, profiles, booleans, curves, modifiers and multiple iterations are available. A collection of rough primitives is a starting sketch, not a finished mount, clip, bracket or enclosure.
 - For a captured object, fix defects supported by the photos with targeted edits: raise features that are missing or too faint, and flatten or smooth surfaces the photos show are flat or smooth. Keep real surface detail the photos confirm, including texture, stitches and edges. Use Blender's existing sculpt and modifier tools for that cleanup.
 - Use measured or published dimensions when available. Distinguish measurements from estimates. Make reasonable choices for noncritical details; ask for a close-up or measurement when a missing interface dimension prevents a useful fit.
-- Plan how it will be printed as part of the design, following the manufacturing guidance below, for captured objects and new designs alike. For a captured object, that plan works with the captured shape: change it where printing it well calls for that, and keep the real surface detail the photos confirm.
+- Plan how it will be printed as part of the design, following the printer MCP's manufacturing guidance when it is given below, for captured objects and new designs alike. For a captured object, that plan works with the captured shape: change it where printing it well calls for that, and keep the real surface detail the photos confirm.
 - PRINTER_FACTS
 - This pass exports one STL, in the orientation the object is used in. The print step then lays it on its largest flat face and lets the slicer arrange and support it, so a print orientation you choose is not kept yet. When your plan depends on a particular print orientation, supports, separate colours or separate parts, say so in the changes list (tag assumed) and in the summary instead of dropping it silently.
 - Scans from the phone are in metres. A current-model STL supplied for revision is already in millimetres. Build new designs in millimetres and export every STL in millimetres, the unit printers use.
@@ -59,13 +58,9 @@ const SYSTEM_RULES_TEMPLATE = `You are making a useful 3D object for a person. U
 - Render and inspect the candidate from all six sides against the request and reference photos. For a captured object, compare the rear and underside explicitly with the supplied photos, accounting for the object being turned over between photographs. A smooth, closed scan surface can still be a reconstruction defect. Before calling any region unseen, check all supplied views and identify which views support that conclusion; do not infer missing photographic coverage from missing mesh detail. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the attachment interfaces, assembly path and dimensions; revise defects you can see. Successful export alone does not establish that the design works.
 - Export the final model to out/touched.stl and clear PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png). Explain what the part does and any remaining fit assumptions in the final summary.
 - If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.
-- If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.
+- If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.`;
 
-Manufacturing guidance:
-MANUFACTURING_GUIDANCE`;
-
-const BLENDER_PRINTER_FACTS = "The printer MCP is connected. When they could change a decision, read the printer's live filaments with get_printer_filaments and its slicing settings with get_slice_settings. To check a consequential choice, slice a checkpoint with slice_stl and read its structured slicer_result (return code, error and each plate's warning), not only the file path. That slice is your check: the print step slices the exported model again.";
-const FUSION_PRINTER_FACTS = "This pass reaches only Fusion's tools, so the printer, its filaments and the slicer aren't visible to you. Treat them as unknown and label the assumptions you make; the print step slices the exported model.";
+const PRINTER_FACTS = "The printer MCP is connected. When they could change a decision, read the printer's live filaments with get_printer_filaments and its slicing settings with get_slice_settings. To check a consequential choice, slice a checkpoint with slice_stl and read its structured slicer_result (return code, error and each plate's warning), not only the file path. That slice is your check: the print step slices the exported model again.";
 
 /** Only what Claude Code needs to find the user's own login. Never printer tokens or provider keys. */
 const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHELL', 'CLAUDE_CONFIG_DIR'] as const;
@@ -129,17 +124,17 @@ function prompt(pass: TouchupPass, instructions?: string, note?: string, summary
 /** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
 export const BLENDER_RULES = "- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).";
 /** The system rules for an engine. */
-export function systemRules(engine: DesignEngine = 'blender'): string {
+export function systemRules(engine: DesignEngine = 'blender', guidance?: string): string {
   return SYSTEM_RULES_TEMPLATE.replace('- ENGINE_RULES', engine === 'fusion' ? FUSION_RULES : BLENDER_RULES)
     .replace('ENGINE_NAME', engine === 'fusion' ? 'in Fusion through the printer MCP (only its fusion_mcp_* tools)' : 'using Blender through MCP')
-    .replace('PRINTER_FACTS', engine === 'fusion' ? FUSION_PRINTER_FACTS : BLENDER_PRINTER_FACTS)
-    .replace('MANUFACTURING_GUIDANCE', () => fdmGuidance('01_core'));
+    .replace('PRINTER_FACTS', () => PRINTER_FACTS)
+    + (guidance?.trim() ? `\n\nManufacturing guidance from the printer MCP (its fdm_design prompt):\n${guidance.trim()}` : '');
 }
 /** The Blender rules, as every copy and every Blender design pass gets them. */
 export const TOUCHUP_SYSTEM_RULES = systemRules('blender');
 
 export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; sourceEnv?: NodeJS.ProcessEnv;
-  engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: {f3d: string; parameters?: string}}): TouchupInvocation {
+  engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: {f3d: string; parameters?: string}; guidance?: string}): TouchupInvocation {
   const {pass} = input;
   let printer = printerServer(input.printer);
   if (input.engine === 'fusion') {
@@ -163,7 +158,7 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--disable-slash-commands',
     '--setting-sources', '',
     '--settings', '{"disableAllHooks":true}',
-    '--append-system-prompt', systemRules(input.engine),
+    '--append-system-prompt', systemRules(input.engine, input.guidance),
     '--json-schema', JSON.stringify(TOUCHUP_RESULT_SCHEMA),
     '--output-format', 'stream-json',
     '--verbose',
