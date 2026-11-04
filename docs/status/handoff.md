@@ -36,7 +36,12 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 - **Orientation/support incident (Nov 4):** the AirPods hanger was reported printing upright with supports off
   although its design planned side-down printing. The orientation/support-plan fix is owned by thread
   `56a66f4e-49b6-49ee-b167-550b55157819`, targeting main after #293 to preserve 3MF placement and AMS mapping.
-  Release owner integrates it with #298/provider guidance. No fix or UI acceptance is claimed yet.
+  Release owner integrates it with #298/provider guidance. David's updated scope supersedes the earlier plan:
+  drop `lay_flat`, pass every STL to the slicer with `orient: true`, preserve 3MF placement, and pass the
+  designer's structured support on/off/type directly to `slice_stl`. Include support args in slice-cache
+  identity; use the existing unsupported-settings refusal. No stored rotation, hash-bound plan, receipt
+  checks, missing-plan Ask or walls/infill minimum Asks. Counterpart is a bridge to the slicer.
+  No fix or UI acceptance is claimed yet.
   Mac UI, companion restarts, installs and MCP Update remain held until the release owner hands control back.
 - No user memories (AGENTS.md). Push after every feature. Clean up worktrees, branches, venvs and build bloat you made.
 - iOS/macOS 27.x, Liquid Glass; read current Apple docs. Use Apple's frameworks; don't hand-roll what Apple ships.
