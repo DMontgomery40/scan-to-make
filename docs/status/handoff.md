@@ -94,7 +94,7 @@ remote native probes and the SSH tunnel were removed after verification.
    Counterpart), ID **6830483457**, bundle `com.scantomake`, **Full Access** verified. User chose
    a public link for external testers. Source `c438efa` was cloud-signed, exported, validated and
    uploaded as **2.0 (2)** at 23:19 Mountain. Build 1 was removed from review and build 2
-   submitted at 23:32; it is **Waiting for Review**. Build 2 includes starters and multi-plate UI. Internal group
+   submitted at 23:32; last observed **Waiting for Review**. Build 2 includes starters and multi-plate UI. Internal group
    `Counterpart Team` exists; description and user-supplied review/feedback contacts are saved.
    External group **Counterpart Public Beta** has build 2.0 (2), submitted for Beta App Review (build 1 remains unsubmitted).
    Automatic tester notifications are off; zero testers, no email invitations. Public link created
@@ -102,7 +102,7 @@ remote native probes and the SSH tunnel were removed after verification.
    until an approved build is in the group. Review notes now include the live Mac download/setup link and starter details.
    No tester email invitations sent. App record currently
    lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
-   Release branch is `feat/testflight-readiness` (no PR yet); release source is `e7d5f6d`.
+   Release branch is `feat/testflight-readiness` (no PR yet); public Mac release source is `fbd1a69b`; iPhone build 3 source is `4a894769`.
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.
    **Latest upload:** **2.0 (3)** from `4a894769` passed distribution checks and uploaded
    successfully Nov 4 16:16:47Z; Apple reports processing. Receipt/archive/IPA/logs:
@@ -144,16 +144,17 @@ remote native probes and the SSH tunnel were removed after verification.
      No records changed. Production `counterpart-relay` now serves `/relay/*`; its APNs probe returned
      `410 token_inactive / BadDeviceToken`, proving authentication, not phone delivery. Production key
      is topic-scoped to `com.scantomake`. Sandbox and installed development relay settings are unchanged.
-   - **Mac beta published:** build **0.1.0 (202611040120)**, source `e7d5f6d` (#298), contains
-     MCP FDM guidance and the structured-result fix for API workers. Developer ID + Production
-     CloudKit/APNs export verified; Node/Python start; all five changed runtime modules match.
-     Notarization **6fa11899-18fc-4671-91c1-388f50ccb7dd** was **Accepted**, stapled and
-     accepted by Gatekeeper. [Release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.3)
-     and [setup](https://counterpart.dtmont.com/beta.html) identify this build. ZIP SHA-256:
-     `88557aa0bd97bc696c3bc3beceef2c21f78c2338b3fe4c3a3eca11334a95288e`.
-     Artifacts/receipts: `~/scan-to-make-work/mac-beta-export-202611040120/`.
+   - **Mac beta published:** **0.1.0 (202611040930)**, source `fbd1a69b`, includes final main
+     through #293 and the release integrations. Developer ID + Production CloudKit/APNs export
+     verified, including both Node entitlements; Node/Python and USD qualifier start; eight checked
+     runtime modules match. Notarization **1f95f6b5-a85d-44b8-94a1-8aaf8b67d43e** Accepted,
+     stapled and Gatekeeper-accepted. [Release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.4)
+     and [setup](https://counterpart.dtmont.com/beta.html) identify this build. Published ZIP SHA-256:
+     `4447c3b7e3eede94b87a24dd53ce9511aad9d89b48d96a294693da47e2a8e627`, checked by downloading
+     the release bytes. Live setup page and signed appcast match committed bytes. Cloudflare deployment
+     `3b957cde-8773-4266-9f06-6a75bb45302d`. Receipts: `~/scan-to-make-work/mac-beta-export-202611040930/`.
      Notary profile `Counterpart-Production` and private Sparkle key stay in Keychain.
-     The previous v2.0-beta.2 download remains available. Temporary payload and Xcode caches
+     The previous v2.0-beta.3 download remains available. Temporary payload and Xcode caches
      removed; retain the final archive/ZIP and compact receipts. Independent worker installer
      is qualified; fresh-install and real design/print acceptance remain open.
      No production app was installed over David's working development app. Production relay

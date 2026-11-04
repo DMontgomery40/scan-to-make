@@ -14,7 +14,7 @@ exported and uploaded **2.0 (2)** on 2026-11-03 at 23:19 Mountain. The app and b
 extensions passed signature, version and Production entitlement checks. Source:
 `c438efa`; artifact: `~/scan-to-make-work/testflight-2.0-2/`. Apple accepted the
 upload and finished processing. Build 1 was removed from review; build 2 was submitted
-at 23:32 and now shows **Waiting for Review** for the external
+at 23:32 and last showed **Waiting for Review** for the external
 `Counterpart Public Beta` group. Automatic tester notifications are off. The public link is **https://testflight.apple.com/join/S4tExVzp**, open to anyone.
 Apple displays: “Testers cannot join public link until this group has an approved build.”
 No tester email invitations were sent. The Mac release and beta setup page are published;
@@ -47,7 +47,8 @@ the ticket is stapled and Gatekeeper accepts the app. Artifacts and receipts:
 `Counterpart-Production`; the private Sparkle update key remains in Keychain.
 
 ZIP SHA-256: `4447c3b7e3eede94b87a24dd53ce9511aad9d89b48d96a294693da47e2a8e627`.
-The setup page and signed Sparkle feed point to this release. Prior beta 3 remains available.
+The live setup page and signed Sparkle feed were fetched and match the committed bytes.
+The published ZIP was downloaded and its hash matches the signed artifact. Prior beta 3 remains available.
 The Production app was not installed over David’s development build 900.
 A downloaded-file check is not fresh-install acceptance. Verify installation
 independently of David's existing setup:
