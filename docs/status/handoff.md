@@ -629,7 +629,8 @@ remote native probes and the SSH tunnel were removed after verification.
     only to Mac. Mobile PrintSheet explicitly directs users to Mac for changing a colour's spool. Muse
     implementation child `428fc779-7752-4874-8a67-8dedf20b7615` owns mobile/shared-client parity in
     an isolated worktree; existing mapping API/model-version/estimate guards must be reused. Parent
-    retains integration/install ownership; child has no physical-phone/viewer/deploy/print permission.
+    retains integration/install ownership; this child's task is source/build only. Coordinate any physical
+    acceptance with the parent; this task boundary is not a general device-tools ban.
     David reports a physical print completed with WRONG AMS colours and the plate is now clear.
     Merge owner `5bc59bdb` has been asked to coordinate the existing AMS/MCP owners on that print's
     backend receipts (last observed project Guitar pick `a2bfa85a-9700-495d-a86c-d4c6d521502e`).
@@ -645,9 +646,16 @@ remote native probes and the SSH tunnel were removed after verification.
     after that notice still lists LCD only. Retained phone logs spanning 11:01:55–11:16:51 MST contain
     no dtremotedisplayd/CoreDeviceScreenSharing/blackening event in that interval. A delayed earlier-session
     notice is plausible, not proven; no new viewer or responsible agent established. Evidence retained in
-    `camera-recurrence-20261104/ios-notice-*` and `displays-after-ios-notice.json`. All physical viewers stay off.
-    Keep physical-phone viewers/screen sharing/recording off during capture acceptance; use USB syslog
-    only. Other agents remain off Davica3. Private logs and retained archives (not committed):
+    `camera-recurrence-20261104/ios-notice-*` and `displays-after-ios-notice.json`.
+    **David's clarification supersedes the blanket “never” instruction:** Device Hub, mirroring,
+    recording, T3 device tools and devicectl are not banned. Be aware of which viewers and connections
+    are attached while camera/scanning work runs: a continuity display can blacken camera/LiDAR frames.
+    Account for that interference before diagnosing an app bug; use viewer-free physical operation and
+    USB logs when isolating capture behavior. Earlier persistent-black-camera incidents include an
+    unknown cause; this session does not explain every incident. Coordinate shared phone use with the
+    current acceptance owner. Correction relayed to the merge/phone owner and iOS implementation child
+    for onward delivery to their recipients. No permanent prohibition belongs in AGENTS.md or memory.
+    Private logs and retained archives (not committed):
     `~/scan-to-make-work/camera-recurrence-20261104/`, especially `mac-coredevice-trigger.log`,
     `blackout-trigger-all.log`, `current-repro-retained.logarchive`, and `displays-after-devicehub-quit.json`.
 14. **Caliper card** (`KAN-209-caliper`, unmerged; evidence `~/scan-to-make-work/caliper/`): rename to Counterpart,
