@@ -234,7 +234,7 @@ struct MacSettingsSections: View {
                     Button(fusion.state == "not-set-up" ? "Set Up" : "Set Up Again") { Task { await model.setUpFusion() } }.disabled(model.working != nil)
                 }
             }
-        } header: { Text("Design with Fusion") }
+        } header: { Text("Design with Fusion · Optional") }
         .task(id: fusion.state) {
             guard fusion.state == "setting-up" else { return }
             while !Task.isCancelled {

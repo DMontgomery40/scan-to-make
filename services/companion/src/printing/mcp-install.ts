@@ -47,6 +47,16 @@ export function hostEnvironment(dataRoot: string): InstallEnvironment {
 /** The npm package for a backend. */
 export function packageName(backend: PrinterHandoffConfig['backend']): string { return backend; }
 
+/** The app's own copy of a package (`<appPrinters>/bambu` or `<appPrinters>/generic`): where Download and a fresh copy install it. */
+export function appInstall(pkg: PrinterHandoffConfig['backend'], env: Pick<InstallEnvironment, 'appPrinters'>, node?: string): McpInstall & {type: 'app'} {
+  const prefix = join(env.appPrinters, pkg === 'bambu-printer-mcp' ? 'bambu' : 'generic');
+  return {type: 'app', pkg, prefix, ...(node ? {node} : {}), entry: join(prefix, 'lib', 'node_modules', pkg, 'dist', 'index.js')};
+}
+/** The id `printers.updateMcp` and the mcp.update.* events use for the app's own copy of a package. */
+export function appMcpId(pkg: PrinterHandoffConfig['backend'], env: Pick<InstallEnvironment, 'appPrinters'>): string {
+  return mcpIdFor(appInstall(pkg, env), {backend: pkg, process: {command: '/'}} as PrinterHandoffConfig);
+}
+
 /** Every printer on the same MCP install shares one id. */
 export function mcpIdFor(install: ResolvedMcpInstall, config: PrinterHandoffConfig): string {
   const key = install.type === 'unresolved'

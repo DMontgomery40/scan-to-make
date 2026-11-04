@@ -25,7 +25,7 @@ New session? Read [`docs/status/handoff.md`](docs/status/handoff.md) for how to 
 tstack (github.com/t3dotgg/tstack) is installed in ~/.claude/skills and ~/.codex/skills on the Mac and the Linux boxes: council, full-send, full-stop, sol-loop, file-pr, babysit-pr, takeover, modernize, leaving-pr-comments. In T3 Code they use delegate_task and watch_pull_request.
 - Council members: Claude Opus 5.5 (claude-opus-5-5), Muse Wonder (muse-wonder-1.0), Codex GPT-6.1 Sol (gpt-6.1-sol), each at high reasoning effort. For UI work, council scores screenshots of the real app out of 10, compared with the best apps Apple features, and iterates until every member gives 9 or more.
 - In this repo, full-send's merge gate also includes this repo's own gate: `scripts/ci_local.py` and `scripts/branch_check.py --merge` printing SAFE (hosted Actions have no runner).
-- In bambu-printer-mcp and mcp-3D-printer-server, use full-stop, never full-send: merging there publishes to npm, and releases are held until David says otherwise.
+- In bambu-printer-mcp and mcp-3D-printer-server, merging publishes to npm. David lifted the release hold on 2026-11-04 (bambu-printer-mcp 1.1.52, mcp-3D-printer-server 1.2.26 are published), so branch new work from those mains. Before merging there, confirm merge authority for that PR, and leave installing a new version into the app to whoever owns MCP Update.
 
 ## Local PR checks
 
