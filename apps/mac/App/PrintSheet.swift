@@ -42,6 +42,8 @@ struct PrintSheet: View {
         _strength = State(initialValue: last.strength)
         _copies = State(initialValue: last.copies ?? 1)
         _copiesPicked = State(initialValue: last.copies != nil)
+        // Print Another keeps the last print's pauses (the magnets go in at the same layers); saved defaults have none.
+        _pauses = State(initialValue: opened.print?.settings?.pauseBeforeLayers ?? [])
         lastColour = last.colour
     }
 
