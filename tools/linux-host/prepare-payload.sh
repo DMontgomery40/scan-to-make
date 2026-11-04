@@ -77,6 +77,7 @@ done
 
 # The reconstruction runtime closure (tools/linux-reconstruct/packaging/build-linux-payload.sh),
 # when the packager provides it: copied whole, with its BUILD-ID preserved for the receipt.
+reconstruction_identity=none
 if [ -n "${RECONSTRUCTION_PAYLOAD:-}" ]; then
   [ -x "$RECONSTRUCTION_PAYLOAD/bin/linux-reconstruct" ] && [ -f "$RECONSTRUCTION_PAYLOAD/BUILD-ID" ] \
     || { echo "RECONSTRUCTION_PAYLOAD is not a built reconstruction payload: $RECONSTRUCTION_PAYLOAD" >&2; exit 1; }
@@ -84,9 +85,10 @@ if [ -n "${RECONSTRUCTION_PAYLOAD:-}" ]; then
   env -i HOME="$work" "$payload/reconstruction/bin/linux-reconstruct" check --mode samples >/dev/null \
     || { echo 'Packaged reconstruction runtime does not run relocated' >&2; exit 1; }
   echo "Reconstruction: $(cat "$payload/reconstruction/BUILD-ID")"
+  reconstruction_identity=$(sha256sum "$payload/reconstruction/manifest.json" | cut -c1-12)
 fi
 
-printf 'g%s-node%s-%s\n' "${commit:0:12}" "$node_version" "$node_arch" > "$stage/BUILD-ID"
+printf 'g%s-node%s-%s-r%s\n' "${commit:0:12}" "$node_version" "$node_arch" "$reconstruction_identity" > "$stage/BUILD-ID"
 chmod -R go-w "$stage"
 # These links must survive packaging: the workspace packages and npm (Settings → Printers → Download/Update).
 find "$stage" -type l -not -path '*/node_modules/.bin/*' -printf '%P -> %l\n' | sort > "$stage/SYMLINKS"

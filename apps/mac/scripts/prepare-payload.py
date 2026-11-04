@@ -74,6 +74,13 @@ with tempfile.TemporaryDirectory() as temporary:
     for path in (payload / 'python/bin').glob('pip*'): path.unlink()
     run(python, '-m', 'compileall', '-q', '--invalidation-mode', 'unchecked-hash',
         '-o', '0', '-o', '1', '-o', '2', '-s', payload, payload / 'python/lib', source / 'tools')
+    # Bind readiness to the actual supplied source archive and pinned runtime
+    # manifest, including when SOURCE_ARCHIVE differs from this checkout's HEAD.
+    identity = hashlib.sha256(Path(archive).read_bytes())
+    identity.update(json.dumps(MANIFEST, sort_keys=True).encode())
+    (payload / 'BUILD-ID').write_text('mac-' + identity.hexdigest() + '\n')
+    run(source / 'tools/linux-reconstruct/linux-reconstruct', 'check', '--mode', 'qualify',
+        env={'HOME': str(work), 'PATH': '/usr/bin:/bin'})
     run(python, REPO / 'tools/licence-audit/mac_distribution.py', '--repo-root', REPO, '--payload', payload)
     if (MAC / 'Payload').exists(): shutil.rmtree(MAC / 'Payload')
     shutil.move(str(payload), MAC / 'Payload')
