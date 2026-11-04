@@ -21,5 +21,15 @@ python3 -m unittest discover -s "$app/tests" -p "test_*.py"
 cd "$app"
 npm ci
 npm test
+# linuxdeploy scans resource ELFs without Python's wheel-loading context.
+# Make the already bundled private libraries visible during packaging only.
+reconstruction="$app/src-tauri/bundle-resources/Payload/reconstruction"
+if [[ -d "$reconstruction" ]]; then
+  library_paths="$reconstruction/lib:$reconstruction/colmap-root/usr/lib/x86_64-linux-gnu:$reconstruction/python/lib"
+  for wheel_libs in "$reconstruction"/python/lib/python*/site-packages/*.libs; do
+    [[ ! -d "$wheel_libs" ]] || library_paths="$library_paths:$wheel_libs"
+  done
+  export LD_LIBRARY_PATH="$library_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 TMPDIR="$app/src-tauri/build-tmp" npm run tauri build -- --config src-tauri/tauri.bundle.conf.json
 "$app/scripts/verify-packages.sh" "$app"/src-tauri/target/release/bundle/deb/*.deb "$app"/src-tauri/target/release/bundle/appimage/*.AppImage
