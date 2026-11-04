@@ -169,6 +169,63 @@ fn store_binds_a_fresh_reference() {
 }
 
 #[test]
+fn build_ids_are_strict() {
+    use crate::host::parse_build_id;
+    assert_eq!(parse_build_id("g40bdf460e11d-node24.22.2-x64\n").unwrap(), "g40bdf460e11d-node24.22.2-x64");
+    for bad in ["", " ", "has space", "under_score", "slash/id", "line\nbreak"] { assert!(parse_build_id(bad).is_err(), "{bad:?}"); }
+    assert!(parse_build_id(&"a".repeat(65)).is_err());
+    assert!(parse_build_id(&"a".repeat(64)).is_ok());
+}
+
+#[test]
+fn a_new_build_at_the_same_path_still_needs_a_restart() {
+    use crate::host::runtime_change_pending;
+    let new = "gbbbbbbbbbbbb-node24.22.2-x64";
+    let old = "gaaaaaaaaaaaa-node24.22.2-x64";
+    // A .deb replaced at the stable path: no link tells the story, the BUILD-ID does.
+    assert!(runtime_change_pending(new, Some(old), None), "upgraded package, old process");
+    assert!(runtime_change_pending(new, None, None), "no applied record yet");
+    assert!(!runtime_change_pending(new, Some(new), None), "same-build setup keeps the live service");
+    // Copied (AppImage) runtime: the link and the applied record must both agree.
+    assert!(runtime_change_pending(new, Some(new), Some(false)), "link names another build");
+    assert!(runtime_change_pending(new, Some(old), Some(true)), "failed restart after the link flipped is retried");
+    assert!(!runtime_change_pending(new, Some(new), Some(true)));
+}
+
+#[test]
+fn the_applied_build_record_round_trips_and_refuses_garbage() {
+    use crate::host::{read_applied_build_id, record_applied_build_id};
+    let dir = std::env::temp_dir().join(format!("counterpart-host-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("applied-build-id");
+    assert_eq!(read_applied_build_id(&file), None, "missing record is unapplied");
+    record_applied_build_id(&file, "g40bdf460e11d-node24.22.2-x64").unwrap();
+    assert_eq!(read_applied_build_id(&file).as_deref(), Some("g40bdf460e11d-node24.22.2-x64"));
+    std::fs::write(&file, "not a build id\n").unwrap();
+    assert_eq!(read_applied_build_id(&file), None, "a damaged record is unapplied, not a crash");
+    assert!(record_applied_build_id(&file, "bad id").is_err());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn modeling_work_blocks_an_upgrade_restart_and_other_work_does_not() {
+    use crate::host::{cleanup_jobs_busy, objects_busy};
+    assert_eq!(objects_busy(&json!({"objects": [{"state": "ready"}, {"state": "touching-up"}]})), Some(true));
+    assert_eq!(objects_busy(&json!({"objects": [{"state": "ready"}, {"state": "printing"}, {"state": "new"}]})), Some(false));
+    assert_eq!(objects_busy(&json!({"unexpected": true})), None, "a malformed list is unknown, never idle");
+    for status in ["queued", "running"] {
+        assert_eq!(cleanup_jobs_busy(&json!({"items": [{"kind": "cleanup", "job": {"status": status}}]})), Some(true), "{status}");
+    }
+    assert_eq!(cleanup_jobs_busy(&json!({"items": [
+        {"kind": "cleanup", "job": {"status": "succeeded"}},
+        {"kind": "cleanup", "job": {"status": "failed"}},
+        {"kind": "print", "job": {"status": "running"}},
+    ]})), Some(false));
+    assert_eq!(cleanup_jobs_busy(&json!({"items": [{"kind": "cleanup", "job": {}}]})), None);
+    assert_eq!(cleanup_jobs_busy(&json!({})), None);
+}
+
+#[test]
 fn unit_quotes_systemd_specifiers() {
     let text = crate::host::unit_text(std::path::Path::new("/home/a b/%x$y/host/counterpart-host"));
     assert!(text.contains("ExecStart=\"/home/a b/%%x$$y/host/counterpart-host\" serve\n"));
