@@ -798,6 +798,29 @@ test('cached generic G-code still confirms temperatures and uploads G-code after
     ['lay_flat', 'slice_stl', 'confirm_temperatures', 'confirm_temperatures', 'upload_gcode', 'confirm_temperatures', 'upload_gcode']);
 });
 
+test('editing a preset the MCP reads from its .env or environment invalidates its slice', async t => {
+  const f = await setup(t);
+  const slices = async () => (await f.calls()).filter(call => call.tool === 'slice_stl').length;
+  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}};
+  await writeFile(join(f.root, 'machine.json'), JSON.stringify({layer_height: 0.2}));
+  await writeFile(join(f.root, '.env'), 'BAMBU_SLICER_PROFILE=machine.json\n');
+  await f.runner.run(input);
+  await f.runner.run(input);
+  assert.equal(await slices(), 1, 'unchanged .env preset can be reused');
+  await writeFile(join(f.root, 'machine.json'), JSON.stringify({layer_height: 0.28}));
+  await f.runner.run(input);
+  assert.equal(await slices(), 2, 'an edited .env preset at the same path needs a new slice');
+  const filament = join(f.root, 'filament.json');
+  await writeFile(filament, JSON.stringify({nozzle_temperature: [220]}));
+  const runner = new PrinterHandoffRunner({...f.config, process: {...f.config.process, env: {...f.config.process.env, FILAMENT_PROFILE: filament}}}, {relay: f.relay});
+  await runner.run(input);
+  await runner.run(input);
+  assert.equal(await slices(), 3);
+  await writeFile(filament, JSON.stringify({nozzle_temperature: [240]}));
+  await runner.run(input);
+  assert.equal(await slices(), 4, 'an edited environment preset needs a new slice');
+});
+
 test('editing a selected filament preset at the same path invalidates its slice; unreadable presets are never reused', async t => {
   const f = await setup(t);
   const preset = join(f.root, 'custom-filament.json');
