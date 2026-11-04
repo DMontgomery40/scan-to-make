@@ -109,6 +109,8 @@ def parser():
             frame.add_argument("--pca-orientation", dest="keep_orientation", action="store_false",
                                help="reorient with PCA and ground Z=0")
         if command == "repair":
+            s.add_argument("--table-skirt", choices=("auto", "keep"), default="auto", help="conservatively remove a thin dark table skirt when authored up is known")
+            s.add_argument("--up-axis", choices=("X", "Y", "Z"), help="authored capture up axis; used to exclude table/shadow colour donors")
             s.add_argument("--weld-mm", type=float, default=.01)
             s.add_argument("--component-fraction", type=float, default=.01)
             s.add_argument("--component-metric", choices=("area","volume"), default="area")
@@ -148,6 +150,11 @@ def main():
             if sidecar.get("unitsAuthored") is not True:
                 raise ValueError("sidecar requires unitsAuthored: true")
             scale = float(sidecar["metersPerUnit"])*1000
+            if a.command == "repair" and not a.up_axis:
+                axis = sidecar.get("upAxis")
+                if axis is not None and axis not in ("X", "Y", "Z"):
+                    raise ValueError("invalid authored up axis")
+                config["up_axis"] = axis
         else:
             scale = {"m":1000, "cm":10,"mm":1}[a.units]
         if not math.isfinite(scale) or scale <= 0:

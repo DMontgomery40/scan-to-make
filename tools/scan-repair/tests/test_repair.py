@@ -187,9 +187,9 @@ class RepairTests(unittest.TestCase):
         smoothed = self.repair(self.mesh("knurl.obj", vertices, faces), "--denoise-scope", "all", name="knurl-all")
         self.assertLess(next(o for o in smoothed["operations"] if o["name"]=="denoise")["capturedRelief"]["ratio"], .9)
 
-    def test_default_smooths_only_filled_faces_and_their_rim(self):
+    def test_default_keeps_captured_rim_fixed(self):
         # A noisy sphere with an open cap: the hole is filled, then re-filled as a faired patch.
-        # Taubin may move that patch and its rim; every other captured vertex keeps its place.
+        # Taubin may move inferred interior vertices; every captured vertex, including the rim, stays fixed.
         # The cap is small enough that its rim (about 26 degrees) is not a sharp crease.
         vertices, faces = icosphere(20, 4, noise=.05, seed=11)
         faces = [f for f in faces if not all(vertices[i][2] > 18 for i in f)]
@@ -210,7 +210,7 @@ class RepairTests(unittest.TestCase):
                (self.base/"open-cap"/"repaired.obj").read_text().splitlines() if line.startswith("v ")]
         moves = [math.dist(a, b) for a, b in zip(out, vertices, strict=False)]
         self.assertLess(max(m for i, m in enumerate(moves) if i not in rim), 1e-4)
-        self.assertGreater(max(moves[i] for i in rim), 1e-3)
+        self.assertLess(max(moves[i] for i in rim), 1e-4)
         self.assertLessEqual(max(moves), .35+1e-4)
         # The faired patch itself moves too: compare it with the same repair without cycles.
         off = self.repair(self.mesh("open-cap.obj", vertices, faces), "--orient", "keep",
@@ -303,8 +303,8 @@ class RepairTests(unittest.TestCase):
         self.assertTrue(export["inferredFaceRanges"])
         self.assertIn("approximately", export["inferredNote"])
 
-    def test_textured_refill_marks_inferred_faces_unbound(self):
-        # Captured faces keep their UVs and texture; every inferred face is explicitly unbound.
+    def test_textured_refill_assigns_neutral_material_only_to_inferred_faces(self):
+        # Captured faces keep their UVs and texture; every inferred face has an explicit neutral material.
         vertices, faces = fan_box()
         folder = self.base/"textured-fan"
         folder.mkdir()
@@ -333,13 +333,69 @@ class RepairTests(unittest.TestCase):
                 corners = [tuple(map(int, c.split("/"))) for c in line.split()[1:]]
                 top = all(abs(points[v-1][2]-10) < 1e-6 for v,_ in corners)
                 self.assertEqual(number in inferred, top)
-                self.assertEqual(current, "unbound" if top else "skin")
+                self.assertEqual(current, "stm_inferred_fill" if top else "skin")
                 if not top:
                     for v,t in corners:
                         x,y,z = points[v-1]
                         self.assertAlmostEqual(uvs[t-1][0], x/40, places=5)
                         self.assertAlmostEqual(uvs[t-1][1], y/20+z/100, places=5)
         self.assertEqual(len(inferred), next(o for o in r["operations"] if o["name"]=="refillCoarse")["inferredFaces"])
+
+    def test_hole_fill_uses_object_colour_without_captured_uv_changes(self):
+        # The bottom is missing. Object colour comes from the top face; walls
+        # touching the table band cannot donate colour to the new underside.
+        folder = self.base/"fill-colour"
+        folder.mkdir()
+        points = [(x*10,y*10,(z+1)*10) for x,y,z in CUBE]
+        lines = ["mtllib mesh.mtl"] + ["v %s %s %s" % p for p in points]
+        lines += ["vt .25 .5", "usemtl object"]
+        lines += ["f "+" ".join(f"{i+1}/1" for i in f) for f in FACES[1:]]
+        (folder/"scan.obj").write_text("\n".join(lines)+"\n")
+        (folder/"mesh.mtl").write_text("newmtl object\nKd .7 .4 .2\n")
+        r = self.repair(folder/"scan.obj", "--up-axis", "Z", "--coarse-fill", "keep",
+                        "--denoise-iterations", "0", "--orient", "keep", name="fill-colour-out")
+        material = next(o for o in r["operations"] if o["name"] == "fillMaterial")
+        self.assertEqual(material["faces"], 2)
+        self.assertGreater(material["donorFaces"], 0)
+        for got,want in zip(material["patches"][0]["colourLinearRgb"], [.7,.4,.2]):
+            self.assertAlmostEqual(got,want,places=5)
+        out = self.base/"fill-colour-out"
+        self.assertIn("newmtl stm_inferred_fill", (out/"mesh.mtl").read_text())
+        current = None
+        for line in (out/"repaired.obj").read_text().splitlines():
+            if line.startswith("usemtl "): current = line.split()[1]
+            elif line.startswith("f "):
+                ids = [int(x.split("/")[0])-1 for x in line.split()[1:]]
+                verts = [tuple(map(float,x.split()[1:])) for x in (out/"repaired.obj").read_text().splitlines() if x.startswith("v ")]
+                bottom = all(abs(verts[i][2]) < 1e-6 for i in ids)
+                self.assertEqual(current, "stm_inferred_fill" if bottom else "object")
+
+    def test_table_sheet_requires_thin_dark_low_geometry(self):
+        for thickness,colour,elevated,expected in [(2,.02,False,True),(8,.02,False,False),(2,.8,False,False),(2,.02,True,False)]:
+            with self.subTest(thickness=thickness,colour=colour,elevated=elevated):
+                vertices,faces=fan_box(size=(40,40,40),step=2,fans=())
+                low=20 if elevated else 2
+                selected=[f for f in faces if all(vertices[i][0]==0 and 16<=vertices[i][1]<=24 and low<=vertices[i][2]<=low+thickness for i in f)]
+                edges={}
+                for f in selected:
+                    for a,b in zip(f, f[1:]+f[:1]):
+                        key=tuple(sorted((a,b)));edges[key]=edges.get(key,0)+1
+                ids=sorted({i for f in selected for i in f});new={i:len(vertices)+n for n,i in enumerate(ids)}
+                vertices += [(vertices[i][0]-4,vertices[i][1],vertices[i][2]) for i in ids]
+                captured=[f for f in faces if f not in selected]
+                sheet=[tuple(new[i] for i in f) for f in selected]+[(a,b,new[b],new[a]) for (a,b),n in edges.items() if n==1]
+                folder=self.base/f'sheet-{thickness}-{colour}-{elevated}';folder.mkdir()
+                lines=['mtllib mesh.mtl']+['v %s %s %s'%v for v in vertices]+['vt .5 .5','usemtl object']
+                lines+=['f '+' '.join(f'{i+1}/1' for i in f) for f in captured]+['usemtl sheet']
+                lines+=['f '+' '.join(f'{i+1}/1' for i in f) for f in sheet]
+                (folder/'mesh.obj').write_text('\n'.join(lines)+'\n')
+                (folder/'mesh.mtl').write_text(f'newmtl object\nKd .8 .8 .8\nnewmtl sheet\nKd {colour} {colour} {colour}\n')
+                report=self.repair(folder/'mesh.obj','--up-axis','Z','--table-skirt','auto','--denoise-iterations','0',
+                                   '--coarse-fill','keep','--orient','keep',name=folder.name+'-out')
+                trim=next(op for op in report['operations'] if op['name']=='trimTableSkirt')
+                self.assertEqual(trim['removedFaces']>0,expected,trim)
+                self.assertEqual(trim['capturedMaxMoveMm'],0)
+                self.assertAlmostEqual(report['after']['bboxMm']['min'][0],0 if expected else -4,places=5)
 
     def test_fan_pinned_to_captured_face_is_skipped(self):
         # A captured triangle shares only the fan centre; replacing the fan would delete it.

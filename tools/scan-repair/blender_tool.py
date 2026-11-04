@@ -251,15 +251,11 @@ def drop_outliers(bm, movable, enabled=True):
 
 
 def filled_vertices(bm):
-    """Vertices of filled faces (hole fills and coarse refills), including their rim: the seam
-    they share with captured faces."""
+    """Only inferred interior vertices are movable; the captured rim stays fixed."""
     bm.verts.index_update()
     marks = [l for l in (bm.faces.layers.int.get(INFERRED),bm.faces.layers.int.get(FILLED)) if l is not None]
-    filled = np.zeros(len(bm.verts),dtype=bool)
-    for f in bm.faces:
-        if any(f[l] > 0 for l in marks):
-            filled[[v.index for v in f.verts]] = True
-    return filled
+    return np.array([bool(v.link_faces) and all(any(f[l]>0 for l in marks) for f in v.link_faces)
+                     for v in bm.verts],dtype=bool)
 
 
 def denoise(bm,a,region):
@@ -391,7 +387,7 @@ def lattice(poly, target):
     return np.concatenate(keep)
 
 
-def rebuild(bm, region, layer, target, ident):
+def rebuild(bm, region, layer, target, ident, projection=None):
     """Replace a disk region with a constrained-Delaunay lattice patch on its best-fit plane.
 
     Rim vertices and edges belong to captured faces and are reused unchanged. Returns a
@@ -408,7 +404,7 @@ def rebuild(bm, region, layer, target, ident):
     if any(g not in owned for v in verts for g in v.link_faces) or any(
             not e.link_faces for v in verts for e in v.link_edges):
         return "interior vertex touches captured geometry"
-    normal = np.sum([np.array(f.normal)*f.calc_area() for f in region],axis=0)
+    normal = np.array(projection) if projection is not None else np.sum([np.array(f.normal)*f.calc_area() for f in region],axis=0)
     if not np.linalg.norm(normal):
         return "no dominant normal"
     # Float64 projection keeps collinear rim points exactly collinear (no rim slivers).
@@ -616,11 +612,178 @@ def orient(bm, frame):
             "inputCentreMm":centre.tolist(),"translationMm":list(shift)}
 
 
-def export(bm,out,uv=False,libraries=(),materials=()):
+def colour_sampler(obj, uv):
+    """Cache base-colour pixels once; unsupported mappings supply no evidence."""
+    materials = []
+    for mat in obj.data.materials:
+        node = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None) if mat and mat.node_tree else None
+        base = node.inputs.get("Base Color") if node else None
+        if base and base.is_linked:
+            source = base.links[0].from_node
+            if source.type != "TEX_IMAGE" or not source.image or source.inputs["Vector"].is_linked:
+                materials.append(None); continue
+            image = source.image; w,h = image.size
+            if not w or not h or image.channels < 3:
+                materials.append(None); continue
+            pixels = np.array(image.pixels[:], dtype=np.float32).reshape(h,w,image.channels)[:,:,:3]
+            # Blender exposes byte-image pixels in their declared colour space. Kd is linear.
+            if image.colorspace_settings.name == "sRGB":
+                pixels = np.where(pixels <= .04045, pixels/12.92, ((pixels+.055)/1.055)**2.4)
+            elif image.colorspace_settings.name not in ("Linear Rec.709", "Linear", "Non-Color"):
+                materials.append(None); continue
+            materials.append((pixels, source.extension))
+        else:
+            materials.append(np.array(base.default_value[:3] if base else mat.diffuse_color[:3]) if mat else None)
+    def sample(face):
+        if face.material_index >= len(materials): return None
+        data = materials[face.material_index]
+        if not isinstance(data,tuple): return data
+        pixels, extension = data; h,w,_ = pixels.shape
+        point = sum((loop[uv].uv for loop in face.loops), Vector((0,0)))/len(face.loops)
+        if not all(math.isfinite(v) for v in point): return None
+        if extension == "REPEAT": point = Vector((point.x%1, point.y%1))
+        elif extension == "CLIP":
+            if any(v<0 or v>1 for v in point): return None
+        elif extension != "EXTEND": return None
+        x,y = min(w-1,max(0,int(point.x*w))), min(h-1,max(0,int(point.y*h)))
+        return pixels[y,x]
+    return sample
+
+def trim_table_skirt(obj, bm, a):
+    """Remove only a dark, thin, creased disk in the low support skirt.
+
+    The cut is a replacement disk on the existing rim: all other faces and all
+    rim vertices survive. Ambiguous regions stay, with the failed checks reported.
+    """
+    report={"name":"trimTableSkirt","removedFaces":0,"regions":[],"capturedMaxMoveMm":0.0,
+            "rule":"low 30% (max 15 mm); inward thickness <= 10% height (max 5 mm); disk; area <= 2%; paired opposite faces; plane RMS <= 1.5 mm and total plane thickness <= local limit; >= 1/3 rim edges creased >=45deg; <=70% adjacent object brightness"}
+    uv=bm.loops.layers.uv.active
+    if not a.get("up_axis") or uv is None or a.get("table_skirt","auto")=="keep":
+        report["skipped"]="requires authored up axis and texture, or explicitly kept";return report
+    sample=colour_sampler(obj,uv)
+    axis="XYZ".index(a["up_axis"]);low=min(v.co[axis] for v in bm.verts);height=max(v.co[axis] for v in bm.verts)-low
+    if height<10:report["skipped"]="object too thin to distinguish from a table sheet";return report
+    band=min(15,height*.3);thickness_limit=min(5,height*.1)
+    mark=bm.faces.layers.int.get(INFERRED) or bm.faces.layers.int.new(INFERRED)
+    bm.faces.ensure_lookup_table();bm.faces.index_update()
+    tree=BVHTree.FromBMesh(bm);candidate=set();pairs={};total=sum(f.calc_area() for f in bm.faces)
+    target=math.sqrt(4*float(np.median([f.calc_area() for f in bm.faces]))/math.sqrt(3))
+    for f in bm.faces:
+        if max(v.co[axis] for v in f.verts)>low+band:continue
+        point=f.calc_center_median();hit,normal,index,_=tree.ray_cast(point-f.normal*.001,-f.normal)
+        if hit is not None and (hit-point).length<=thickness_limit and normal.dot(f.normal)<-.25:
+            other=bm.faces[index]
+            if max(v.co[axis] for v in other.verts)>low+band:continue
+            candidate.update((f,other));pairs.setdefault(f,set()).add(other);pairs.setdefault(other,set()).add(f)
+    seen=set();regions=[]
+    for f in bm.faces:
+        if f not in candidate or f in seen:continue
+        stack=[f];seen.add(f);region=[]
+        while stack:
+            g=stack.pop();region.append(g)
+            neighbours={other for e in g.edges for other in e.link_faces}|pairs.get(g,set())
+            for other in neighbours:
+                if other in candidate and other not in seen:seen.add(other);stack.append(other)
+        # Include the thin sheet's side walls when all of their vertices already belong
+        # to its two observed sides. No outward ring growth into captured body faces.
+        verts={v for f in region for v in f.verts}
+        region=[f for f in bm.faces if all(v in verts for v in f.verts)]
+        regions.append(region)
+    for number,region in enumerate(regions,1):
+        if len(region)<4 or any(not f.is_valid or f[mark] for f in region):continue
+        owned=set(region);area=sum(f.calc_area() for f in region);loop=rim_loop(region)
+        points=np.array([tuple(v.co) for v in dict.fromkeys(v for f in region for v in f.verts)])
+        eigen,basis=np.linalg.eigh(np.cov(points.T));distance=(points-points.mean(axis=0))@basis[:,0]
+        rms=float(np.sqrt(np.mean(distance**2)))
+        boundary={e for f in region for e in f.edges if sum(g in owned for g in e.link_faces)==1}
+        creased=sum(e.calc_face_angle(0)>=math.radians(45) for e in boundary)/max(1,len(boundary))
+        visited=set(region);front=set(region)
+        for _ in range(8):
+            front={g for f in front for e in f.edges for g in e.link_faces}-visited;visited.update(front)
+        donors=[f for f in visited-owned if f.normal[axis]>-.2 and f.calc_center_median()[axis]>low+4 and f not in candidate]
+        bright=lambda faces:[float(np.mean(c)) for f in faces if (c:=sample(f)) is not None and np.isfinite(c).all()]
+        dark,light=bright(region),bright(donors)
+        ratio=float(np.median(dark)/np.median(light)) if dark and light and np.median(light)>0 else None
+        reasons=[]
+        if loop is None:reasons.append("not a separable disk")
+        if area>total*.02:reasons.append("too much object surface")
+        if rms>1.5 or float(np.ptp(distance))>thickness_limit:reasons.append("not a thin planar sheet")
+        if creased<1/3:reasons.append("no clear attachment crease")
+        if ratio is None or ratio>.7:reasons.append("not distinct from object colour")
+        item={"faces":len(region),"areaMm2":area,"planeRmsMm":rms,"creasedBoundaryFraction":creased,
+              "brightnessRatio":ratio,"boundsMm":[points.min(axis=0).tolist(),points.max(axis=0).tolist()],"reasons":reasons}
+        report["regions"].append(item)
+        if reasons:continue
+        kept={v:v.co.copy() for v in bm.verts if any(f not in owned for f in v.link_faces)}
+        # Reuse the existing bounded, disk-preserving repair primitive, not a clipping plane.
+        reason=rebuild(bm,region,mark,target,100000+number)
+        if reason == "rim does not project to a simple polygon":
+            rim_points=np.array([tuple(v.co) for v in loop]);_,rim_basis=np.linalg.eigh(np.cov(rim_points.T))
+            reason=rebuild(bm,region,mark,target,100000+number,projection=rim_basis[:,0])
+            item["projection"]="best-fit rim plane"
+        if reason:item["reasons"].append(reason);continue
+        report["removedFaces"]+=len(region)
+        report["capturedMaxMoveMm"]=max(report["capturedMaxMoveMm"],max(((v.co-co).length for v,co in kept.items()),default=0))
+        normals(bm)
+    return report
+
+
+def fill_materials(obj, bm, a, declared):
+    """Uniform inferred colour, sampled only from adjacent non-inferred object faces.
+
+    Never sample a downward-facing face or the low table band. Missing trustworthy
+    donors use neutral grey and are reported, rather than projecting table texture.
+    This changes no captured face, position, UV or material assignment.
+    """
+    marks = [l for l in (bm.faces.layers.int.get(INFERRED), bm.faces.layers.int.get(FILLED)) if l is not None]
+    guessed = {f for f in bm.faces if any(f[l] > 0 for l in marks)}
+    uv = bm.loops.layers.uv.active
+    if not guessed or uv is None:
+        return {}, [], {"name":"fillMaterial", "faces":0, "donorFaces":0, "patches":[]}
+    sample = colour_sampler(obj,uv)
+    axis = "XYZ".index(a["up_axis"]) if a.get("up_axis") else None
+    floor = min(v.co[axis] for v in bm.verts) if axis is not None else None
+    band = max(2.0,min(10.0,(max(v.co[axis] for v in bm.verts)-floor)*.2)) if axis is not None else 2.0
+    colours, assignments, patches, seen = [], {}, [], set()
+    for seed in bm.faces:
+        if seed not in guessed or seed in seen: continue
+        patch, queue = [], [seed]; seen.add(seed)
+        while queue:
+            f=queue.pop();patch.append(f)
+            for e in f.edges:
+                for other in e.link_faces:
+                    if other in guessed and other not in seen:seen.add(other);queue.append(other)
+        frontier=set(patch);visited=set(patch);donors={}
+        # Walk nearby face rings, never crossing into another inferred patch.
+        for _ in range(24):
+            frontier={g for f in frontier for e in f.edges for g in e.link_faces if g not in visited and g not in guessed}
+            visited.update(frontier)
+            for f in frontier:
+                if axis is None or f.normal[axis] < -.2 or min(v.co[axis] for v in f.verts) <= floor+band:continue
+                c=sample(f)
+                if c is not None and np.isfinite(c).all():donors[f]=c
+        samples=np.array(list(donors.values()))
+        if len(samples):
+            light=samples @ np.array([.2126,.7152,.0722])
+            # Robust to dark stitch crevices/shadows; do not stretch a detailed texture.
+            rgb=np.median(samples[light >= np.quantile(light,.5)],axis=0).clip(0,1)
+        else:rgb=np.array([.5,.5,.5])
+        name="stm_inferred_fill";suffix=0
+        while name in declared or any(n==name for n,c in colours):suffix+=1;name=f"stm_inferred_fill_{suffix}"
+        colours.append((name,rgb.tolist()))
+        for f in patch:assignments[f]=name
+        patches.append({"faces":len(patch),"donorFaces":len(donors),"colourLinearRgb":rgb.tolist(),
+                        "fallback":None if donors else "no trustworthy adjacent object colour", "material":name})
+    return assignments,colours,{"name":"fillMaterial","faces":len(assignments),"donorFaces":sum(p["donorFaces"] for p in patches),
+                               "upAxis":a.get("up_axis"),"excludedTableBandMm":band,"patches":patches}
+
+
+def export(bm,out,uv=False,libraries=(),materials=(),fill_names=None):
     """Write mm OBJ/STL; with uv, one vt per face corner keeps authored seams."""
     bm.verts.index_update()
     layer = bm.loops.layers.uv.active if uv else None
     inferred = bm.faces.layers.int.get(INFERRED)
+    holes = bm.faces.layers.int.get(FILLED)
     ranges = []
     with (out/"repaired.obj").open("w") as f:
         f.write("# units: mm\n")
@@ -634,7 +797,7 @@ def export(bm,out,uv=False,libraries=(),materials=()):
                     f.write("vt "+" ".join(format(c,".9g") for c in loop[layer].uv)+"\n")
         current, corner = None, 1
         for number,face in enumerate(bm.faces,1):
-            guess = inferred is not None and face[inferred] > 0
+            guess = (inferred is not None and face[inferred] > 0) or (holes is not None and face[holes] > 0)
             if guess:
                 # 1-based OBJ face ranges of inferred (re-filled) surface.
                 if ranges and ranges[-1][1] == number-1:
@@ -644,7 +807,7 @@ def export(bm,out,uv=False,libraries=(),materials=()):
             name = materials[face.material_index] if face.material_index < len(materials) else None
             # Inferred faces carry no captured texture, even before any captured face.
             if guess and materials:
-                name = "unbound"
+                name = (fill_names or {}).get(face,"unbound")
             # A face without a material after an assigned run needs an explicit reset,
             # as capture-mesh-convert writes; otherwise it inherits the previous texture.
             name = name or (current and "unbound")
@@ -699,6 +862,8 @@ def repair(obj,bm,a):
             bmesh.ops.delete(bm,geom=list(group),context="VERTS")
             removed += 1
     ops.append({"name":"dropComponents","metric":a["component_metric"],"fractionOfLargest":a["component_fraction"],"removed":removed})
+    normals(bm)  # Thickness rays need consistent outward winding before classification.
+    ops.append(trim_table_skirt(obj,bm,a))
     # The layer precedes the fill: adding a layer invalidates element references.
     holes = bm.faces.layers.int.get(FILLED) or bm.faces.layers.int.new(FILLED)
     filled = bmesh.ops.holes_fill(bm,edges=[e for e in bm.edges if e.is_boundary],sides=a["hole_max_edges"])
@@ -724,7 +889,7 @@ def repair(obj,bm,a):
         bm.from_mesh(obj.data)
         normals(bm)
     ops.append({"name":"voxelRemesh","applied":fallback,"forced":a["force_voxel"],"voxelSizeMm":a["voxel_size_mm"],"adaptivity":0})
-    # Captured surface is measurement: by default only filled faces and their rim move.
+    # Captured surface is measurement: by default only inferred interior vertices move.
     # A voxel remesh has already rebuilt every face, so then the whole surface is smoothed.
     captured = ~filled_vertices(bm)
     region = np.ones(len(captured),dtype=bool) if a["denoise_scope"] == "all" or fallback else ~captured
@@ -759,6 +924,8 @@ def repair(obj,bm,a):
         raise ValueError("repair could not produce topologically watertight geometry; no successful report")
     dev = deviation(original,bm,a["deviation_samples"])
     original.free()
+    material = a.get("material") or {}
+    fill_names, fill_colours, fill_report = fill_materials(obj,bm,a,material.get("names",[]))
     transform = orient(bm,a["orient"])
     ops.append({"name":"orient",**transform})
     # Remeshing and decimation rebuild the surface, so source UVs no longer describe it.
@@ -774,9 +941,17 @@ def repair(obj,bm,a):
              for m in obj.data.materials] if files else []
     out = Path(a["out"])
     out.mkdir(parents=True,exist_ok=True)
-    ranges = export(bm,out,uv=uv_note is None,libraries=material.get("libraries",[]) if files else [],materials=names)
+    if not files:
+        fill_names,fill_colours = {},[]
+        fill_report={"name":"fillMaterial","faces":0,"donorFaces":0,"patches":[],"skipped":uv_note or "no retained material library"}
+    ops.append(fill_report)
+    ranges = export(bm,out,fill_names=fill_names,uv=uv_note is None,libraries=material.get("libraries",[]) if files else [],materials=names)
     for name in files:
         shutil.copyfile(Path(material["stage"])/name,out/name)
+    if fill_colours:
+        with (out/material["libraries"][0]).open("a") as stream:
+            for name,rgb in fill_colours:
+                stream.write("\nnewmtl "+name+"\nKd "+" ".join(format(c,".9g") for c in rgb)+"\n")
     ops.append({"name":"export","uvRetained":uv_note is None,"uvNote":uv_note,
                 "uvCorners":sum(len(f.loops) for f in bm.faces) if uv_note is None else 0,"materialFiles":files,
                 "materialNote":"UVs not retained" if uv_note else material.get("note"),

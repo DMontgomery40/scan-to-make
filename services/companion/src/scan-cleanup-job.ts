@@ -41,7 +41,7 @@ export async function runCleanup(runner:ScanRunner,root:string,job:ScanProcessin
    const bytes=await readBoundedCaptureFile(join(ctx.imported,artifact.path),64*1024*1024);
    if(bytes.length!==artifact.bytes||sha(bytes)!==artifact.sha256)throw Error('Converter output mismatch');
   }
-  await write(sidecar,JSON.stringify({unitsAuthored:true,metersPerUnit:receipt.provenance.metersPerUnit}));ctx.metersPerUnit=receipt.provenance.metersPerUnit;
+  await write(sidecar,JSON.stringify({unitsAuthored:true,metersPerUnit:receipt.provenance.metersPerUnit,upAxis:receipt.provenance.upAxis}));ctx.metersPerUnit=receipt.provenance.metersPerUnit;
   return {receipt,report};
  });
  const repair=await stage('repair',async()=>{
