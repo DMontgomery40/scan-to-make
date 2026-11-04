@@ -99,7 +99,15 @@ class ArCapture(private val session: Session, private val folder: File, private 
 
     fun frames() = count.get()
 
-    fun reset() { count.set(0); lastPose = null; anchor = null; sectors.fill(false); saves.clear() }
+    @Synchronized
+    fun reset() {
+        check(saves.all { it.isDone }) { "The previous scan is still saving." }
+        folder.listFiles()?.filter {
+            Regex("[0-9]{4}\\.jpg(?:\\.part)?").matches(it.name) ||
+                it.name in setOf("capture-camera.json", "capture-kind", "finished")
+        }?.forEach { check(it.delete()) { "The previous scan could not be cleared." } }
+        count.set(0); lastPose = null; anchor = null; sectors.fill(false); saves.clear()
+    }
 
     /** What finishing a capture learned from the encoder: the frames actually saved, and how many failed. */
     data class SavedFrames(val frames: List<CaptureCameraFrame>, val failed: Int)
@@ -110,7 +118,9 @@ class ArCapture(private val session: Session, private val folder: File, private 
      * this returns, and must look at `failed` rather than assuming the submitted count was saved.
      */
     suspend fun awaitSaved(): SavedFrames = withContext(Dispatchers.IO) {
-        val pending = synchronized(saves) { saves.toList() }
+        // The same lock guards camera-frame submission. Stop cannot miss a frame whose
+        // capture was already in progress when Done was tapped.
+        val pending = synchronized(this@ArCapture) { recording = false; saves.toList() }
         val saved = mutableListOf<CaptureCameraFrame>()
         var failed = 0
         for (future in pending) {
@@ -179,6 +189,7 @@ class ArCapture(private val session: Session, private val folder: File, private 
         } catch (_: NotYetAvailableException) { null } catch (_: Exception) { null }
     }
 
+    @Synchronized
     private fun track(frame: Frame) {
         val camera = frame.camera
         val tracking = camera.trackingState == TrackingState.TRACKING
@@ -277,6 +288,6 @@ class ArCapture(private val session: Session, private val folder: File, private 
             timestampMs = maxOf(0, snapshot.timestampMs), tracking = snapshot.tracking, center = snapshot.center)
     }
 
-    /** Never blocks: finishing awaits [awaitSaved]; on dispose the queue is simply dropped. */
+    /** Never blocks: finishing awaits [awaitSaved]; disposal lets queued writes drain. */
     fun close() { encoder.shutdown() }
 }

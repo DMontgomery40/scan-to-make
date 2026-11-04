@@ -196,14 +196,16 @@ private fun ArScan(folder: File, finish: (Int, String) -> Unit) {
         }
     }, Modifier.fillMaxSize())
     Overlay(progress, recording, finishing, problem, if (capture.depthSupported) "ARCore · Depth API on" else "ARCore · motion tracking (this phone has no Depth API)",
-        start = { problem = null; capture.reset(); capture.recording = true; recording = true },
+        start = {
+            try { capture.reset(); problem = null; capture.recording = true; recording = true }
+            catch (_: Exception) { problem = "The previous scan could not be cleared. Wait for it to finish saving, then try again." }
+        },
         stop = {
             capture.recording = false; recording = false; finishing = true; problem = null
             scope.launch {
                 // Wait for the encoder off the UI thread; only saved frames (with their camera metadata)
                 // may become the finished capture.
                 val saved = try { capture.awaitSaved() } catch (_: Exception) { null }
-                finishing = false
                 if (saved == null || saved.frames.size < MIN_FRAMES) {
                     problem = "Only ${saved?.frames?.size ?: 0} frames could be saved; at least $MIN_FRAMES are needed. Start again and keep walking slowly."
                 } else {
@@ -216,6 +218,7 @@ private fun ArScan(folder: File, finish: (Int, String) -> Unit) {
                     if (written) finish(saved.frames.size, "ar")
                     else problem = "The scan's camera information couldn't be saved on this phone. Free some space and scan again."
                 }
+                finishing = false
             }
         })
 }
@@ -261,7 +264,10 @@ private fun PhotoScan(folder: File, finish: (Int, String) -> Unit) {
         view
     }, Modifier.fillMaxSize())
     Overlay(ScanProgress(frames = frames, tracking = true), recording, finishing, problem, "Photos every 1.5 s (no ARCore on this phone)",
-        start = { folder.listFiles()?.forEach { it.delete() }; submitted.set(0); frames = 0; problem = null; recording = true },
+        start = {
+            if (pending.get() > 0) problem = "The camera is still saving photos. Wait a moment before starting again."
+            else { folder.listFiles()?.forEach { it.delete() }; submitted.set(0); frames = 0; problem = null; recording = true }
+        },
         stop = {
             recording = false; finishing = true; problem = null
             scope.launch {

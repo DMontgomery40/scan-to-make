@@ -362,7 +362,23 @@ remote native probes and the SSH tunnel were removed after verification.
      geometry. Public review schemas stay unchanged. Parent made Apple raw-cache publication atomic and
      removed a project-read fallback that could silently clear the qualification flag.
      `reconstructionReviewV1` is currently tool-presence-based; runtime packaging/smoke verification is still
-     required. The Android owner wires metadata/manifest/review UI; the Linux UI owner wires its review surface.
+     required. Android `029b00fb` and Linux review UI `19af6236` are now integrated. Android binds saved JPEG
+     metadata to its bytes, uploads camera metadata before its qualification-required manifest, retains originals,
+     and renders region/crop/measurement review. Linux renders the same review and reads only its current preview
+     through the native bounded file bridge. Both hide generic Ask while review is pending.
+     Parent review fixed Android's last-frame submission/Done race and clears prior frames on Start Again;
+     it also prevents restarting plain-photo capture while saves are pending. Linux measurement axes no longer
+     claim world directions for an arbitrarily oriented reconstruction, and crop helpers dispose their GPU
+     geometry/materials when replaced. Parent's merged-source Android build/lint and 47 tests passed on
+     agents-173; Linux frontend build and 12 tests passed on agents-136. Android APK and receipts retained at
+     agents-173 `~/scan-to-make-work/review-integration/artifacts/`; APK SHA-256
+     `5279470750fb944ff390f1fbf3f43cddb0f9e3666586bf52ab668a34454edf3b`. No app/device installation by parent.
+     Android delegate reported build/lint and 47 checks passing; Linux reported frontend 12, Rust 13 and packaging
+     10 passing. Linux's installed `g0d2eb8b2d82f-node24.22.2-x64` passed native Repair and retained-project/3D
+     checks; it predates the final runtime packaging. No reconstruction-review UI acceptance was demonstrated:
+     the desktop imports models/photos/scan files, while handheld captures enter via authenticated phone upload.
+     Android device remains unavailable after the recorded T3 emulator failure; no bypass attempted. Real phone
+     capture, region/scale interaction, pairing and resulting geometry remain unaccepted on both hosts.
      Reconstruction owner proceeds with actual runtime packaging, not only the design manifest. Mac's existing
      CPython/Pillow/usd-core closure can serve qualification; Linux needs the executable reconstruction closure.
      Correct the draft dependency manifest against actual binary/source archives and existing licence inventory

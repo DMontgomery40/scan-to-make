@@ -21,9 +21,9 @@ import type {
 type Box = { min: Vec3; max: Vec3 };
 const AXES: Axis[] = ["x", "y", "z"];
 const AXIS_NAME: Record<Axis, string> = {
-  x: "left-to-right (X)",
-  y: "front-to-back (Y)",
-  z: "bottom-to-top (Z)",
+  x: "X (highlighted side)",
+  y: "Y (highlighted side)",
+  z: "Z (highlighted side)",
 };
 
 /** Three.js preview in raw preview coordinates, with the chosen part lit amber. */
@@ -114,6 +114,16 @@ function ReviewStage({
           group.add(new T.Mesh(geometry, material));
           const helpers = new T.Group();
           group.add(helpers);
+          const clearHelpers = () => {
+            helpers.traverse((object) => {
+              if (object instanceof T.Mesh || object instanceof T.Line) {
+                object.geometry.dispose();
+                const materials = Array.isArray(object.material) ? object.material : [object.material];
+                materials.forEach((item) => item.dispose());
+              }
+            });
+            helpers.clear();
+          };
           scene.add(new T.HemisphereLight(0xffffff, 0x4e5b57, 1.5));
           const light = new T.DirectionalLight(0xffffff, 2.2);
           light.position.set(radius * 2, radius * 3, radius * 2);
@@ -166,7 +176,7 @@ function ReviewStage({
               }
             }
             geometry.getAttribute("color").needsUpdate = true;
-            helpers.clear();
+            clearHelpers();
             if (box) {
               const size = new T.Vector3(
                 box.max[0] - box.min[0],
@@ -178,8 +188,11 @@ function ReviewStage({
                 (box.min[1] + box.max[1]) / 2,
                 (box.min[2] + box.max[2]) / 2,
               );
+              const boxGeometry = new T.BoxGeometry(size.x, size.y, size.z);
+              const edgeGeometry = new T.EdgesGeometry(boxGeometry);
+              boxGeometry.dispose();
               const edges = new T.LineSegments(
-                new T.EdgesGeometry(new T.BoxGeometry(size.x, size.y, size.z)),
+                edgeGeometry,
                 new T.LineBasicMaterial({ color: 0xffb020 }),
               );
               edges.position.copy(mid);
@@ -248,6 +261,7 @@ function ReviewStage({
             observer.disconnect();
             document.removeEventListener("visibilitychange", render);
             controls.dispose();
+            clearHelpers();
             geometry.dispose();
             material.dispose();
             renderer?.dispose();
