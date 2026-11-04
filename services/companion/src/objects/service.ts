@@ -1,10 +1,10 @@
-import {copyFile, mkdir, mkdtemp, open, readFile, rename, rm, stat, writeFile} from 'node:fs/promises';
+import {copyFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
+import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -163,6 +163,18 @@ export interface ColourMappingFilament extends ModelFilament {
   slot?: number; distance?: number; materialMismatch?: boolean; guessed?: boolean;
 }
 export interface ColourMapping {filaments: ColourMappingFilament[]; trays: FilamentChoice[]; modelVersion?: string}
+/**
+ * Print's question for a design made in several colours before Counterpart kept each colour as its own part
+ * (`#legacyColourDesign`): its model is the merged STL, so it would print in one colour.
+ */
+const LEGACY_COLOUR_ASK: PrintAsk = {
+  message: 'This design was made in several colours before Counterpart kept each colour as its own part, so it would print in one colour. Make it again to keep its colours, or print it in one colour.',
+  title: 'Colours',
+  choices: [{value: 'one-colour', title: 'Print it in one colour'}, {value: 'remake', title: 'Make it again in colour'}],
+  proceed: 'one-colour',
+};
+/** What "Make it again in colour" asks for, sent as the person's own message. */
+const REMAKE_IN_COLOUR = 'Make this design again in the colours it was designed with, with each colour as its own part.';
 const BAMBU_TO_STATUS: Record<string, string> = {idle: 'IDLE', preparing: 'PREPARE', printing: 'RUNNING', paused: 'PAUSE', finished: 'FINISH', failed: 'FAILED', cancelled: 'FAILED', offline: 'OFFLINE', busy: 'UNKNOWN'};
 
 export type ObjectPrintAnswer = {action: 'accept'; content: Record<string, ConfirmationValue>} | {action: 'decline' | 'cancel'; content?: never};
@@ -237,6 +249,8 @@ export class ObjectService {
   readonly #controllers = new Map<string, AbortController>();
   readonly #confirmations = new Map<string, {pending: PendingElicitation; printing: NonNullable<ObjectServiceDeps['print']>; timer: ReturnType<typeof setTimeout>}>();
   readonly #cancelledPrints = new Set<string>();
+  /** Projects whose print the person stopped to make the design again in colour: that pass starts once the print ends. */
+  readonly #remakes = new Set<string>();
   /** Per-print spool rechecks, run again when the printer's confirmation is accepted (it can wait minutes). */
   readonly #dispatchRechecks = new Map<string, () => Promise<void>>();
   /** Why a recheck declined a print, kept so the settled project still explains itself. */
@@ -1101,6 +1115,7 @@ export class ObjectService {
       ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})};
     const sliced = {...slicer, ...overrides, ...designedSupports(object)};
     const stl = await this.#modelBytes(object);
+    const ask = await this.#legacyColourDesign(object) ? LEGACY_COLOUR_ASK : undefined;
     const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
     const print = {bundleId: manifest.id, printId, ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
@@ -1134,7 +1149,7 @@ export class ObjectService {
     if (recheckTrays) this.#dispatchRechecks.set(id, recheckTrays);
     // Print Again prints the slice it made last time when nothing that shapes it changed (slice-cache.ts).
     const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')},
-      ...(recheckTrays ? {beforePrint: recheckTrays} : {}), ...(Object.keys(sliced).length ? {slicer: sliced} : {})})
+      ...(recheckTrays ? {beforePrint: recheckTrays} : {}), ...(Object.keys(sliced).length ? {slicer: sliced} : {}), ...(ask ? {ask} : {})})
       .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch),
         async error => {
           const status = (await bundles.read(manifest.id).catch(() => undefined))?.status;
@@ -1160,6 +1175,11 @@ export class ObjectService {
           if (recheckFailure) return refused('failed', recheckFailure);
           if (this.#expiredConfirmations.has(id) || (this.#confirmations.get(id)?.pending.expiresAtMs ?? Infinity) <= Date.now())
             return refused('failed', 'Printer confirmation timed out; no print was sent. Press Print to try again.');
+          // The person answered Print's own question: nothing was sliced or sent. "Make it again" starts that pass once this print ends.
+          if (error instanceof PrinterMcpError && error.code === 'print-choice') {
+            if (error.detail === 'remake') this.#remakes.add(id);
+            return refused('ready', error.detail === 'remake' ? 'Not printed. Making it again in colour.' : 'Not printed.');
+          }
           if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') return refused('ready', settingsUnsupported(runner.backend, {...options, supports: !!object.current?.supports}));
           return refused('failed', error instanceof PrinterMcpError && error.detail ? error.detail : error instanceof Error ? error.message : String(error));
         })
@@ -1172,6 +1192,8 @@ export class ObjectService {
         this.#recheckFailures.delete(id);
         this.#cancelledPrints.delete(id);
         this.#expiredConfirmations.delete(id);
+        if (this.#remakes.delete(id)) void this.correct(id, REMAKE_IN_COLOUR).catch(async error => this.#changed(await this.#deps.store.update(id, o =>
+          ({...o, failure: `Couldn't start making it again: ${error instanceof Error ? error.message : String(error)}`}))));
       });
     this.#running.set(id, work);
     return this.#changed(started);
@@ -1501,6 +1523,35 @@ export class ObjectService {
     const line = {pause: 'Pause sent.', resume: 'Resume sent.', cancel: 'Stop sent.'}[action];
     return this.#changed(await this.#deps.store.update(id, o => ({...o, printConfirmation: undefined,
       ...(o.print ? {print: {...o.print, events: [...(o.print.events ?? []), {atMs: Date.now(), message: line}].slice(-20)}} : {})})));
+  }
+
+  /**
+   * A design made in several colours before Counterpart kept each colour as its own part (#293): its model is the
+   * merged STL, while the pass that made that STL also left a 3MF whose parts print on different filaments or
+   * colours. Only that pass counts (matched by the STL's bytes), so a later one-colour redesign never asks, and an
+   * assembly of parts on one filament is an ordinary one-colour model. Nothing is adopted or changed here.
+   */
+  async #legacyColourDesign(object: StmObject): Promise<boolean> {
+    if (!object.current || isMultipart(object) || object.kind === 'published') return false;
+    const current = await readFile(join(this.#deps.store.dir(object.id), object.current.model)).catch(() => undefined);
+    if (!current) return false;
+    const digest = createHash('sha256').update(current).digest('hex');
+    for (const pass of [...object.passes].reverse()) {
+      if (!pass.dir) continue;
+      const out = join(isAbsolute(pass.dir) ? pass.dir : join(this.#deps.store.dir(object.id), pass.dir), 'out');
+      const made = await readFile(join(out, 'touched.stl')).catch(() => undefined);
+      if (!made || createHash('sha256').update(made).digest('hex') !== digest) continue;
+      for (const name of await readdir(out).catch(() => [] as string[])) {
+        if (extname(name).toLowerCase() !== '.3mf') continue;
+        const info = await stat(join(out, name)).catch(() => undefined);
+        if (!info?.isFile() || info.size > 64 * 1024 * 1024) continue;
+        const filaments = modelFilaments(await readFile(join(out, name)).catch(() => Buffer.alloc(0)));
+        if (new Set(filaments.map(filament => filament.index)).size > 1
+          || new Set(filaments.flatMap(filament => filament.colour ? [filament.colour] : [])).size > 1) return true;
+      }
+      return false;
+    }
+    return false;
   }
 
   async #modelBytes(object: StmObject): Promise<Buffer> {
