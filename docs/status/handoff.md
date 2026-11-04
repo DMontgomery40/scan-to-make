@@ -3,7 +3,9 @@
 The one handoff. Update this file in place when you stop; never add a numbered or dated copy, a prompt file,
 or a "continuation" section on top. Git history has every older version.
 
-Last verified: **2026-11-03, 17:05 Mountain**, against GitHub, the Mac, the installed apps and the printer.
+Last device verification: **2026-11-03, 17:05 Mountain**; deployment updated at 18:24.
+Handoff corrected **2026-11-03 evening** after David rejected the prior agent's FULU stopping premise;
+repository and public-source review only, no new device acceptance.
 Status of each of David's asks: [`asks.md`](asks.md). Hands-on review list: [`app-review-2026-11-02.md`](app-review-2026-11-02.md).
 What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey in [`../design/journey.md`](../design/journey.md).
 
@@ -60,39 +62,44 @@ Every deployment, companion restart and rollback is logged in
 0. **Phone:** the "nothing loads" of 15:40 was the phone on Tailscale instead of David's WireGuard; fixed on his side.
    Still to fix in the phone app: `SettingsView.swift:34` shows **"Connected now" while `reachable` is unknown**; a
    request with no answer must end in "Can't reach it", not a spinner.
-1. **Remote Pause/Resume/Stop are refused by the printer: what can be done is shipped; Developer Mode acceptance open.**
-   Bambu's authorization control lets a cloud-bound P1S (01.10) take these only from Bambu Studio and Bambu Handy.
-   FULU's 02.05 plug-in gets 0x0502400A (malformed signature header); Studio's 02.08 plug-in in our helper, even with
-   a signed-in cloud session, the printer selected and subscribed (`exp/native-plugin-controls`, local stash on the
-   Mac worktree), never installs the printer certificate for a non-Bambu app. Making it believe it is Studio, or
-   signing with keys extracted from Bambu Connect, bypasses Bambu's authorization: not built, by decision.
-   **Shipped (installed 17:00):** both MCPs' `counterpart_print_route` offer `lan` (FULU), `cloud` (FULU) and
-   `developer` (direct LAN, unsigned controls, for LAN Only + Developer Mode) with `options` (label, available,
-   reason, controls); a refusal 0x05024007-0x0502400B says Studio/Handy or Developer Mode; the Mac picker shows the
-   MCP's options for either MCP (checked in the real app). bambu-printer-mcp `300e88e` (1019/0), mcp-3D `5987381`
-   (649/0), Counterpart `604fe55` (stm-ci ALL PASS). **Open:** a real Stop on the Developer Mode connection (needs
-   David to turn on LAN Only + Developer Mode), and a real refused Stop in the app showing the new words. Done
-   since: the direct route now sends Studio's control JSON with its own sequence id and waits for the printer's
-   answer; a refusal (not really in Developer Mode) says so, an answer confirms (bambu-printer-mcp `997d77d`
-   1023/0, mcp-3D `d51c2c4` 653/0). Earlier detail: Nov 3 afternoon: tried lead (a) through the existing
-   native helper with Bambu Studio's 02.08.02.61 plug-in (`exp/native-plugin-controls`, `be88434`, pushed, rolled back
-   from the live MCP). The helper reaches the printer and gets replies (`ledctrl` answered `success`, unsigned), but the
-   plug-in never reports `device_cert_installed` (private or Studio config folder, `lan_only` 0 or 1), so every
-   protected control returns -4 unsent. Likely missing: a plug-in cloud session (`connect_server`), which Studio and
-   FULU have. Next lead there, or (b) below. FULU's own `ledctrl` is also accepted unsigned, so the light can't
-   discriminate signing; only pause/stop/resume do. Every Pause and Stop sent today reached the P1S and got
-   the signed reply `err_code 84033546` (0x0502400A), over LAN and over Bambu Cloud. Tried and ruled out: flag 1,
-   32-bit sequence ids, the cloud route, FULU's client identity headers (`X-BBL-Client-*`, now sent; changed nothing).
-   Remaining leads, untested: (a) FULU's runtime uses Bambu's plug-in **02.05.02.58** while Bambu Studio on this Mac
-   uses **02.08.02.61**, so a newer plug-in in the bridge; (b) LAN-only + Developer mode on the printer (David's call,
-   disconnects Bambu Cloud/Handy). Bambu Studio itself pauses and resumes this printer fine.
-2a. **Resume is lost when the MCP restarts during a pause: fixed in code, staged, not yet accepted.** Both MCPs
+1. **Remote Pause/Resume/Stop through FULU: unresolved; continue investigating.** David rejected the previous
+   agent's decision to stop at Bambu's authorization restrictions. His task is control of his own printer through
+   the open-source MCP/FULU stack. Developer Mode is an available alternative, not an agreed prerequisite or a
+   demonstrated exclusive solution. Preserve the current cloud-bound configuration while investigating.
+   **Context checked Nov 3:** [SFC's May 18 statement](https://sfconservancy.org/news/2026/may/18/bambu-studio-3d-printer-agpl-violation-response/)
+   reports two confirmed AGPL violations and launches networking-library reverse engineering and maintenance of
+   the Orca fork. [FULU's fork](https://github.com/FULU-Foundation/OrcaSlicer-bambulab) and
+   [SFC's baltobu work](https://f.sfconservancy.org/baltobu) are relevant engineering sources. Attribute SFC's
+   conclusions to SFC; the prior agent's refusal to investigate further was not a technical finding.
+   **Observed in the previous session:** the cloud-bound P1S (01.10) accepted Studio Pause/Resume. FULU's
+   02.05.02.58 plug-in returned `84033546` (`0x0502400A`) for Pause/Stop over LAN and cloud. The native helper
+   using Studio's 02.08.02.61 plug-in returned -4 without sending protected controls and never reported
+   `device_cert_installed`, including the later signed-in/selected/subscribed experiment. Neither result proves
+   other third-party paths cannot work. Unsigned `ledctrl` succeeded and cannot validate control signing.
+   **Already tried:** flag 1, 32-bit sequence IDs, cloud transport and `X-BBL-Client-*` headers did not resolve
+   the FULU refusal. Private/Studio config folders and `lan_only` 0/1 did not resolve the native helper's
+   certificate exchange. Preserve these results rather than repeating them without a new discriminating probe.
+   **Next investigation:** compare upstream FULU's initialization/certificate sequence with the MCP
+   bridge; inspect public baltobu networking work and newer compatible Linux plug-ins. The Mac-native 02.08
+   helper experiment does not test a newer Linux plug-in in FULU. Upstream `LinuxPluginHost.cpp` exposes
+   `net.install_device_cert` as a void call followed by `{ok:true,value:0}`: that response proves invocation,
+   not certificate installation. Capture the asynchronous certificate event and printer reply separately.
+   First recover a reproducible failure through Counterpart and a redacted trace; change one variable per
+   experiment. Acceptance remains Pause, Resume and Stop in the real app, confirmed by the printer.
+   **Shipped, not acceptance:** both MCPs offer `lan` (FULU), `cloud` (FULU) and `developer` (direct LAN) with
+   route options consumed by the Mac picker. Installed refusal guidance currently recommends Studio/Handy or
+   Developer Mode; revisit its exclusive wording as part of the fix. Counterpart `604fe55` passed stm-ci;
+   bambu-printer-mcp `997d77d` passed 1023 tests, mcp-3D `d51c2c4` passed 653 (previous-session results).
+   Direct controls now wait for the printer's correlated answer instead of reporting a publish as success.
+   These builds became active after the 18:24 companion restart. No new printer test, deployment or runtime
+   change was made while correcting this handoff. `exp/native-plugin-controls` remains a rolled-back experiment.
+2a. **Resume is lost when the MCP restarts during a pause: fix active, not yet accepted.** Both MCPs
    kept "the job this server inspected and started" in memory, so any restart during a pause refused Resume for
    the rest of the print (today's pick: three Resume presses from the phone at 16:14-16:15 refused). Now each
    printer's record is a private file (`BAMBU_RESUME_STATE_DIR`, else `~/.config/bambu-printer-mcp/resume` and
    `~/.config/mcp-3d-printer-server/resume`), reloaded on start; every resume check still runs. bambu-printer-mcp
-   `c0c988b` (full suite 1017/0) is copied into the live install but **not active until the next companion
-   restart** (held while the stranded pick is paused); mcp-3D-printer-server `45551f1` (648/0) is built in place.
+   `c0c988b` (full suite 1017/0) is included in the active `997d77d` build; mcp-3D-printer-server
+   `45551f1` (648/0) is included in `d51c2c4`. Both became active at the 18:24 companion restart.
    Acceptance: a pick with a pause, restart the companion during the pause, Resume from the app.
 2. **Resume from the app after a pause: fixed in code, not yet re-tested.** Nov 3 15:18: the pick paused itself before
    layer 2 (`pause_at_layers` works); Resume in the app reached the MCP, which asked its unverifiable-resume question.
