@@ -63,6 +63,7 @@ const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHE
 
 export interface McpServerEntry {command: string; args: string[]; env?: Record<string, string>}
 export interface TouchupInvocation {
+  worker?: import('./runner.js').ProjectWorker;
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;

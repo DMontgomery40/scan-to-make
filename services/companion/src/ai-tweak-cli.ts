@@ -86,6 +86,15 @@ export function optionsFromEnv(env:NodeJS.ProcessEnv=process.env):AiTweakOptions
 
 async function main(argv:string[]){
  const [command,...rest]=argv;
+ if(command==='project'){
+  const {runProjectRequest}=await import('./project-worker.js');
+  const controller=new AbortController();
+  for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,()=>controller.abort());
+  const initial=optionsFromEnv();
+  const options=initial.access.kind==='api'||initial.access.kind==='endpoint'?initial:await resolveOptions();
+  const result=await runProjectRequest(rest[0]!,options,controller.signal,progress=>process.stdout.write(JSON.stringify({type:'progress',progress})+'\n'));
+  process.stdout.write(JSON.stringify(result)+'\n');return 0;
+ }
  if(command==='check'){
   const controller=new AbortController();
   for(const signal of ['SIGINT','SIGTERM'] as const)process.on(signal,()=>controller.abort());

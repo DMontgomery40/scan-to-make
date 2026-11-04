@@ -1,0 +1,67 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,readFile,rm,mkdir} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
+import {createServer} from 'node:http';
+import {runProjectModel} from '../dist/project-worker.js';
+import {ModelAccessService} from '../dist/model-access.js';
+
+async function fixture(t){const root=await mkdtemp('/tmp/project-provider-');t.after(()=>rm(root,{recursive:true,force:true}));return root;}
+const request=root=>({cwd:root,args:['-p','--mcp-config',join(root,'mcp.json'),'--append-system-prompt','Design a bracket','--json-schema',JSON.stringify({type:'object',properties:{status:{type:'string'},summary:{type:'string'}},required:['status','summary']}),'Make a bracket'],mcpConfig:{mcpServers:{printer:{command:process.execPath,args:[resolve('tests/fixtures/project-provider-mcp.mjs')],env:{RECEIPT:join(root,'receipt.json')}}}}});
+async function server(t,handler){const s=createServer(handler);await new Promise(r=>s.listen(0,'127.0.0.1',r));t.after(()=>{s.closeAllConnections();return new Promise(r=>s.close(r));});return `http://127.0.0.1:${s.address().port}/v1`;}
+for(const kind of ['endpoint','openai','anthropic'])test(`${kind} executes real MCP tools, returns tool images to the model and isolates its credential`,async t=>{
+ const root=await fixture(t),seen=[];
+ const endpoint=await server(t,async(req,res)=>{let text='';for await(const chunk of req)text+=chunk;const body=JSON.parse(text);seen.push({body,headers:req.headers});res.setHeader('content-type','application/json');
+  const use=seen.length===1;
+  if(kind==='anthropic')res.end(JSON.stringify({content:use?[{type:'tool_use',id:'call1',name:'mcp_printer_design_view',input:{}}]:[{type:'tool_use',id:'finish',name:'finish',input:{status:'done',summary:'Bracket complete'}}]}));
+  else res.end(JSON.stringify({choices:[{message:{role:'assistant',content:null,tool_calls:[{id:use?'call1':'finish',type:'function',function:{name:use?'mcp_printer_design_view':'finish',arguments:use?'{}':JSON.stringify({status:'done',summary:'Bracket complete'})}}]}}]}));
+ });
+ const original=global.fetch;if(kind!=='endpoint'){global.fetch=(url,opts)=>original(String(url).replace(kind==='anthropic'?'https://api.anthropic.com/v1':'https://api.openai.com/v1',endpoint),opts);t.after(()=>global.fetch=original);}
+ const access=kind==='endpoint'?{kind,url:endpoint,model:'vision-tools',keyEnv:'MODEL_SECRET'}:{kind:'api',provider:kind,model:'vision-tools',keyEnv:'MODEL_SECRET'};
+ const result=await runProjectModel(request(root),{access,env:{HOME:root,PATH:process.env.PATH,MODEL_SECRET:'private-key'}});
+ assert.equal(result.resultEvent.structured_output.summary,'Bracket complete');assert.equal(seen.length,2);
+ assert.equal(kind==='anthropic'?seen[0].headers['x-api-key']:seen[0].headers.authorization,kind==='anthropic'?'private-key':'Bearer private-key');
+ const receipt=JSON.parse(await readFile(join(root,'receipt.json'),'utf8'));assert.deepEqual(receipt,{called:'design_view',secretPresent:false});
+ assert.match(JSON.stringify(seen[1].body.messages),kind==='anthropic'?/"media_type":"image\/png"/:/data:image\/png;base64,iVBOR/);
+ assert(!JSON.stringify(result).includes('private-key'));
+});
+
+test('API refusal is actionable, does not echo response secrets, and never falls back to Claude',async t=>{
+ const root=await fixture(t),url=await server(t,(_q,res)=>{res.writeHead(400);res.end('private-key unsupported images');});
+ const req=request(root);req.mcpConfig={mcpServers:{}};
+ const result=await runProjectModel(req,{access:{kind:'endpoint',url,model:'text-only'},claudePath:'/must-not-run'});
+ assert.equal(result.exitCode,1);assert.match(result.resultEvent.result,/tool calling and image support/);assert(!JSON.stringify(result).includes('private-key'));
+});
+
+test('API cancellation and deadline interrupt the HTTP request',async t=>{
+ const root=await fixture(t),url=await server(t,()=>{}),req=request(root);req.mcpConfig={mcpServers:{}};
+ const opts={access:{kind:'endpoint',url,model:'slow'}};
+ const c=new AbortController();const running=runProjectModel(req,opts,c.signal);setTimeout(()=>c.abort(),30);
+ assert.equal((await running).stopReason,'cancelled');
+ assert.equal((await runProjectModel({...req,timeoutMs:30},opts)).stopReason,'time limit exceeded');
+});
+
+test('legacy initialization preserves configured Claude only when no saved choice exists; explicit Off survives restart',async t=>{
+ const root=await fixture(t),worker=async()=>({exitCode:0,stdout:'{}'});
+ let service=await ModelAccessService.open(root,worker,{legacyClaude:true});assert.equal(service.get().choice.kind,'claude-code');
+ await service.set(service.get().revision,{kind:'none'});service=await ModelAccessService.open(root,worker,{legacyClaude:true});assert.equal(service.get().choice.kind,'none');assert.throws(()=>service.projectWorker(),/AI is off/);
+});
+
+test('Codex uses its own login and only the pass MCP; cancellation reaps the worker',async t=>{
+ const root=await fixture(t);await mkdir(join(root,'.codex'));await writeFile(join(root,'.codex','auth.json'),'login-fixture');
+ const cli=join(root,'codex'),receipt=join(root,'codex.json');
+ await writeFile(cli,`#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2);fs.writeFileSync(${JSON.stringify(receipt)},JSON.stringify({auth:fs.readFileSync(process.env.CODEX_HOME+'/auth.json','utf8'),config:fs.readFileSync(process.env.CODEX_HOME+'/config.toml','utf8'),hasKey:!!process.env.MODEL_SECRET,pid:process.pid}));fs.writeFileSync(args[args.indexOf('-o')+1],JSON.stringify({status:'done',summary:'Codex fixture'}));console.log(JSON.stringify({type:'item.completed',item:{type:'mcp_tool_call'}}));`,{mode:0o700});
+ const result=await runProjectModel(request(root),{access:{kind:'codex-cli'},codexPath:cli,env:{HOME:root,MODEL_SECRET:'private-key'}});
+ assert.equal(result.resultEvent.structured_output.summary,'Codex fixture');assert.equal(result.toolCalls,1);
+ const recorded=JSON.parse(await readFile(receipt,'utf8'));assert.equal(recorded.auth,'login-fixture');assert.equal(recorded.hasKey,false);assert.match(recorded.config,/mcp_servers\."printer"/);assert.match(recorded.config,/project-mcp-cli/);
+ assert.equal(await readFile(join(root,'.codex','auth.json'),'utf8'),'login-fixture');
+ await writeFile(cli,`#!${process.execPath}\nsetInterval(()=>{},1000);`,{mode:0o700});
+ assert.equal((await runProjectModel({...request(root),timeoutMs:40},{access:{kind:'codex-cli'},codexPath:cli,env:{HOME:root}})).stopReason,'time limit exceeded');
+});
+
+test('provider-supplied key echoes are redacted from final results',async t=>{
+ const root=await fixture(t),url=await server(t,(_q,res)=>res.end(JSON.stringify({choices:[{message:{role:'assistant',tool_calls:[{id:'f',type:'function',function:{name:'finish',arguments:JSON.stringify({status:'failed',summary:'private-key'})}}]}}]})));
+ const req=request(root);req.mcpConfig={mcpServers:{}};
+ const result=await runProjectModel(req,{access:{kind:'endpoint',url,model:'test',keyEnv:'MODEL_SECRET'},env:{MODEL_SECRET:'private-key'}});
+ assert.equal(result.resultEvent.structured_output.summary,'[redacted]');assert(!JSON.stringify(result).includes('private-key'));
+});

@@ -43,6 +43,7 @@ export interface CleanupOptions {
  blender:string; toolPath:string; correctTool:string; python?:string; timeoutMs?:number;
  converterAdapter?:string; adapter?:Exclude<CleanupRunner['adapter'],'ai-tweak'>; model?:string; baseUrl?:string; keyEnv?:string;
  ai?:AiCleanupOptions;
+ selectAI?:()=>Pick<AiCleanupOptions,'access'|'worker'>;
  /** Host bootstrap enables post-correction printability. No printer credentials needed. */
  printable?:{bambu?:PrinterMcpProcess};
 }
@@ -148,6 +149,12 @@ async function command(python:string,args:string[],root:string,blender:string,ti
 
 /** Operator-selected executables/provider only; no executable or provider URL comes from the phone. */
 export function createScanCleanupRunner(options:CleanupOptions):ScanRunner{
+ if(options.selectAI){
+  const {selectAI,...fixed}=options;
+  const current=()=>createScanCleanupRunner({...fixed,ai:{...fixed.ai!,...selectAI()}});
+  const runner=current();
+  return {...runner,get cleanup(){return current().cleanup;},jobTimeoutMs:AI_CLEANUP_JOB_MS,snapshot:current};
+ }
  const repair=createScanRunner(options),timeout=options.timeoutMs??300000;
  const ai=options.ai&&options.ai.access.kind!=='none'?options.ai:undefined;
  const adapter:CleanupRunner['adapter']=ai?'ai-tweak':options.adapter??'scripted';

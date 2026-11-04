@@ -110,6 +110,8 @@ export interface ObjectServiceDeps {
   /** Bounding box in millimetres, from the user's printer MCP (get_stl_info). */
   stlInfo: (stlPath: string) => Promise<[number, number, number] | undefined>;
   claudePath: string;
+  modelAccess?: import('../model-access.js').ModelAccessService;
+  requireModelAccess?:boolean;
   handoff: PrinterHandoffConfig;
   /** The handoff profile as the companion runs it now: after an MCP update (PRD §8.10) it carries that update's command. */
   runningHandoff?: () => PrinterHandoffConfig;
@@ -1428,6 +1430,8 @@ export class ObjectService {
   }
 
   async #reservedPass(object: StmObject, opts: {note?: string; messageId?: string; photos?: string[]; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}, release: () => void): Promise<StmObject> {
+    if(this.#deps.requireModelAccess&&!this.#deps.modelAccess)throw new InvalidStateError('AI settings are unavailable. Open AI Settings on your Mac and retry.');
+    const worker = this.#deps.modelAccess?.projectWorker();
     await this.#requireCaptureCompletion(object);
     const store = this.#deps.store, dir = store.dir(object.id);
     const fromCurrent = opts.note !== undefined && object.current !== undefined;
@@ -1490,7 +1494,7 @@ export class ObjectService {
     if (kind === 'published') {
       // PRD §8.11: never the design pass. The worker gets the designer's own file, or the project asks for it.
       const published = (async () => {
-        try { return await this.#getPublished(object, opts.note, photos, startedAtMs, controller.signal, onProgress, id => stage(id)); }
+        try { return await this.#getPublished(object, opts.note, photos, startedAtMs, controller.signal, onProgress, id => stage(id), worker); }
         finally { stage('saving'); await writing; }
       })()
         .then(result => this.#finishPublished(object.id, startedAtMs, result))
@@ -1503,7 +1507,7 @@ export class ObjectService {
       let scanName = object.scan;
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
       const scan = fromCurrent ? [join(dir, object.current!.model)] : scanName ? [join(dir, 'scan', scanName)] : [];
-      const input: TouchupInput = {root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
+      const input: TouchupInput = {worker, root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
         kind, ...(object.preferences?.designEngine && object.preferences.designEngine !== 'auto' ? {preferredEngine: object.preferences.designEngine} : {}), onStage: (id, chosen) => stage(id, chosen),
         ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
           ? {design: {f3d: join(dir, object.current.design.f3d), ...(object.current.design.parameters ? {parameters: join(dir, object.current.design.parameters)} : {})}} : {}),
@@ -1520,12 +1524,12 @@ export class ObjectService {
 
   /** Runs the published-model worker for the project's link (or the one in a correction). */
   async #getPublished(object: StmObject, note: string | undefined, photos: string[], startedAtMs: number, signal: AbortSignal,
-    onProgress: NonNullable<TouchupInput['onProgress']>, stage: (id: StageId) => void): Promise<PublishedResult> {
+    onProgress: NonNullable<TouchupInput['onProgress']>, stage: (id: StageId) => void, worker?: import('../touchup/runner.js').ProjectWorker): Promise<PublishedResult> {
     const link = publishedLink(note) ?? publishedLink(object.instructions) ?? (object.credit ? {url: object.credit.url, site: object.credit.site ?? new URL(object.credit.url).hostname} : undefined);
     if (!link) return {status: 'needs_file'};
     const request = [object.instructions?.trim(), note?.trim()].filter(Boolean).join('\n\n');
     const run = this.#deps.runPublished ?? (input => defaultRunPublished(input));
-    return run({root: join(this.dir(object.id), 'passes'), photos, request, link, claudePath: this.#deps.claudePath,
+    return run({worker, root: join(this.dir(object.id), 'passes'), photos, request, link, claudePath: this.#deps.claudePath,
       startedAtMs, signal, onProgress, onStage: stage});
   }
 

@@ -20,7 +20,7 @@ test('phone AI projection excludes credentials/references and reuses exact revis
   const keychainRef=randomUUID();
   await ai.set(ai.get().revision,{kind:'api',provider:'openai',model:'gpt-5',keychainRef});
   const snapshot=service.snapshot().ai;
-  assert.equal(snapshot.scope,'connection-test');
+  assert.equal(snapshot.scope,'model-jobs');
   assert.deepEqual(snapshot.choice,{kind:'api',provider:'openai',model:'gpt-5'});
   assert(!JSON.stringify(snapshot).includes(keychainRef));
   await assert.rejects(service.setAI({expectedRevision:snapshot.revision,choice:{kind:'endpoint',url:'http://localhost',model:'x'}}));

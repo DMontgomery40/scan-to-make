@@ -55,16 +55,11 @@ without changing that permission.
 ## AI and Fusion runtime bridge
 
 `ai` projects the existing ModelAccessService revision, choice metadata and check result,
-with `scope: "connection-test"`. This saves/tests a connection only. Current ObjectService
-cleanup, design and correction jobs still use their configured Claude Code executable;
-ModelAccessService.run is not wired into those jobs. Choosing None does not disable them.
-The phone names this section AI connection test and explains the scope. Provider routing
-for actual model jobs remains separate unfinished work; no Codex worker is introduced here.
-Keychain references and credentials stay on the Mac. A standalone AI PATCH requires
-`ai.expectedRevision` and accepts only `none`, `claude-code` or `codex-cli`; other sections
-cannot share that PATCH. Stale revisions return conflict. `POST /v1/settings/ai/test`
-accepts `{revision}` and uses the same app worker as the Mac's Test button. API and endpoint
-choices remain configurable only on the Mac; their nonsensitive metadata can be displayed.
+with `scope: "model-jobs"`. The same persisted choice controls project designs, corrections,
+published-model retrieval, title/completion helpers and capture cleanup. Each admitted job
+captures its selection before waiting or preparing inputs; changes affect subsequent jobs.
+`none` refuses new project model jobs and leaves deterministic capture repair available.
+Phone changes use the same ModelAccessService as Mac settings. Credentials remain in Keychain.
 
 `fusion` is ephemeral Mac-reported installation/running state, not a saved assertion that
 a connection still works. Passive settings refresh never launches an MCP or Fusion and
@@ -89,3 +84,39 @@ complete GUI work. Manual and phone setup share the existing Mac install operati
 The phone shows Set Up Again for an installed but unchecked setup, and preserves the exact
 failure message when setup needs attention. Transport/unit tests do not establish live
 provider login, live Fusion setup, or native phone acceptance.
+
+
+### Model execution boundary
+
+`modelAccess.json` is authoritative for new work, including phone changes. The signed
+`--model-worker project <private-request-file>` helper resolves API credentials in Keychain.
+It receives metadata on stdin; credentials never appear in arguments, request files or
+companion environment. MCP children start through a private-file trampoline with an explicit, minimal
+environment and their printer configuration; printer secrets also stay out of arguments. Native CLI environments exclude inherited API keys. Codex gets a private
+HOME/config, a temporary copy of its login, and only the pass MCP. Refreshed login tokens
+use the existing compare-and-swap writeback before the temporary home is removed.
+
+Claude Code retains the existing isolated worker. Codex uses native `exec` with MCP and
+image tools. Project API jobs use Anthropic Messages or OpenAI Chat Completions (including
+compatible endpoints) with actual MCP tool/result turns and image content. Unsupported
+models fail with capability guidance; they never fall back to Claude. Provider errors,
+progress and final summaries are redacted. Published sites needing a signed-in browser
+may require the person to add the original file when using a provider without Claude's
+Chrome integration. Title and completion helpers use the same selected provider, with
+MCP/browser/file tools disabled and short deadlines.
+
+Capture cleanup keeps the existing sealed ai-tweak pipeline: Claude/Anthropic through
+Claude Code, Codex/OpenAI/compatible Responses endpoints through Codex. It snapshots the
+choice at queue admission. Compatible servers must support Responses for this capture
+pipeline and Chat Completions for project jobs, with tools and images in both. A failed
+AI cleanup keeps the captured scan and records the fallback; it never substitutes Claude.
+
+For legacy installations with no preferences file and an explicitly configured Claude
+path, initialization writes a Claude choice. Existing saved `none` is always preserved:
+older records cannot distinguish default None from an intentional Off. Such installations
+must choose a provider once; silently overriding Off is forbidden.
+
+OpenCode is not yet a supported choice. Its installed `run --help` and current native MCP
+configuration were inspected. Remaining work is a sealed login/config adapter, stream and
+structured-result normalization, auth refresh/cancellation qualification, and matching
+Swift/protocol choices; no unqualified runner is advertised as working.

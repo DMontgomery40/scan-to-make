@@ -26,7 +26,7 @@ extension ModelAccessModel {
     }
 }
 
-/// Connection checks shared by first run and Settings; current model jobs use Claude.
+/// Connection checks shared by first run and Settings; new model jobs use the saved choice.
 struct ModelAccessPane: View {
     enum Context { case firstRun, settings }
     @ObservedObject var model: ModelAccessModel
@@ -46,9 +46,9 @@ struct ModelAccessPane: View {
 
     var body: some View {
         VStack(alignment:.leading, spacing:0) {
-            Text("AI connection test")
+            Text("AI model jobs")
                 .font(.system(size:20, weight:.semibold))
-            Text("Save and test an AI connection. Current scan cleanup, designs and corrections use Claude Code independently of this choice.")
+            Text("Choose the AI for your model jobs. New scan cleanup, designs and corrections use this choice. Jobs already running keep their provider.")
                 .font(.system(size:13)).foregroundStyle(.secondary)
                 .fixedSize(horizontal:false, vertical:true)
                 .padding(.top,6).padding(.bottom,18)
@@ -96,11 +96,11 @@ struct ModelAccessPane: View {
                 .disabled(model.saving)
                 statusRow
             }
-            // First run skips with its footer button; Settings can clear the saved test connection.
+            // First run skips with its footer button; Settings can clear the saved connection.
             if context == .settings {
                 card(selected:choice == .none && door == nil,
-                     title:"No connection selected",
-                     caption:"Clear this saved test connection. Model jobs continue using Claude Code.",
+                     title:"AI off",
+                     caption:"Turn off AI model jobs. You can still use existing models and print.",
                      select:{ door = nil; if choice != .none { Task { await model.choose(.none) } } }) { EmptyView() }
             }
             DisclosureGroup("Other options", isExpanded:$otherOptions) {
@@ -193,7 +193,7 @@ struct ModelAccessPane: View {
     private var footer: some View {
         HStack {
             Spacer()
-            // Finish only once the companion confirms no saved test connection; a failed save keeps setup open with its message.
+            // Finish only once the companion confirms no saved connection; a failed save keeps setup open with its message.
             Button("Skip connection test") {
                 Task { if await model.skipAI() { onDone() } }
             }

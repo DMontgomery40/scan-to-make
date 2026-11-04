@@ -139,7 +139,7 @@ export async function runPublishedWorker(inv: TouchupInvocation, pass: TouchupPa
   onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal; startedAtMs?: number;
 } = {}): Promise<PublishedResult> {
   const startedAtMs = opts.startedAtMs ?? Date.now();
-  const run = await runClaudeWorker(inv, {...(opts.spawn ? {spawn: opts.spawn} : {}), ...(opts.onProgress ? {onProgress: opts.onProgress} : {}), ...(opts.signal ? {signal: opts.signal} : {})});
+  const run = await (inv.worker ?? runClaudeWorker)(inv, {...(opts.spawn ? {spawn: opts.spawn} : {}), ...(opts.onProgress ? {onProgress: opts.onProgress} : {}), ...(opts.signal ? {signal: opts.signal} : {})});
   const answer = run.resultEvent?.structured_output as Record<string, unknown> | undefined;
   const credit = model(answer, link);
   const withModel = credit ? {model: credit} : {};
@@ -164,6 +164,7 @@ export async function runPublishedWorker(inv: TouchupInvocation, pass: TouchupPa
 }
 
 export interface PublishedPassInput {
+  worker?: import('../touchup/runner.js').ProjectWorker;
   root: string; photos: string[]; request: string; link: {url: string; site: string};
   claudePath: string; designTools?: string[];
   startedAtMs: number; signal?: AbortSignal; onProgress?: (progress: TouchupProgress) => void; onStage?: (id: 'working') => void;
@@ -175,6 +176,7 @@ export async function defaultRunPublished(input: PublishedPassInput, deps: {chro
   input.onStage?.('working');
   const inv = buildPublishedInvocation({pass, claudePath: input.claudePath, request: input.request, link: input.link,
     chrome: (deps.chrome ?? chromeAvailable)()});
+  inv.worker = input.worker;
   return runPublishedWorker(inv, pass, input.link, {startedAtMs: input.startedAtMs, ...(deps.downloads ? {downloads: deps.downloads} : {}),
     ...(deps.spawn ? {spawn: deps.spawn} : {}), ...(input.onProgress ? {onProgress: input.onProgress} : {}), ...(input.signal ? {signal: input.signal} : {})});
 }

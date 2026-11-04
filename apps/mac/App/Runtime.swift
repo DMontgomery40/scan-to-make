@@ -92,7 +92,7 @@ func launchModelWorker(_ installation: Installation) -> Never {
     umask(0o077)
     do {
         let args = Array(CommandLine.arguments.dropFirst(2))
-        guard let mode = args.first, ["check", "run"].contains(mode), mode != "check" || args.count == 1 else { exit(2) }
+        guard let mode = args.first, ["check", "run", "project"].contains(mode), mode != "check" || args.count == 1 else { exit(2) }
         var input = Data()
         while let chunk = try FileHandle.standardInput.read(upToCount: 4096), !chunk.isEmpty {
             input.append(chunk)

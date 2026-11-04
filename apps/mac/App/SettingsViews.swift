@@ -620,7 +620,7 @@ struct AISettings: View {
                     }
                 }
                 if let problem = model.problem { Text(problem).font(.caption).foregroundStyle(.red) }
-                Text("These choices save and test connections. Current scan cleanup, designs and corrections use Claude Code independently of this choice.").font(.caption).foregroundStyle(.secondary)
+                Text("Choose the AI for your model jobs. New scan cleanup, designs and corrections use this choice. Jobs already running keep their provider.").font(.caption).foregroundStyle(.secondary)
             }
             BlenderAddonSettingsSection { action in
                 let socket = ModelAccessModel.socketPath(for: Installation(bundle: .main))
