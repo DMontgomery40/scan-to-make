@@ -108,6 +108,12 @@ remote native probes and the SSH tunnel were removed after verification.
    successfully Nov 4 16:16:47Z; Apple reports processing. Receipt/archive/IPA/logs:
    `~/scan-to-make-work/testflight-2.0-3/`. Build 3 group assignment and external review
    submission remain unverified; build 2 above is the last observed group state. No phone install.
+   **Matching public Mac update:** v2.0-beta.4, build **202611040930**, source `fbd1a69b`,
+   signed for Production, notarized (submission `1f95f6b5-a85d-44b8-94a1-8aaf8b67d43e`
+   Accepted), stapled and Gatekeeper-accepted. Download/setup page and signed Sparkle feed
+   updated. Receipt/archive/ZIP: `~/scan-to-make-work/mac-beta-export-202611040930/`.
+   It includes final main and both MCP updater/native-module fixes. Development build 900
+   stays installed; no Production relay or phone changes. Fresh-install acceptance remains open.
    - **Starter projects and multi-plate printing implemented on the release branch:** welcome/Home and
      the empty Mac workspace offer the scan platform, Counterpart caliper card and long vernier
      with depth gauge. The card ships fresh generated model files, branding, QR and preview.

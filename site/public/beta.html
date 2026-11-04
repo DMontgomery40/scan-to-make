@@ -17,11 +17,11 @@
 <section id="install">
 <h2>Install the beta</h2>
 <p>Requires an Apple silicon Mac with macOS 27 and an iPhone with iOS 27. LiDAR capture needs a LiDAR-equipped iPhone. Linux desktop support and OpenCode integration are coming soon.</p>
-<p id="mac-release"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.3/ScanToMake-202611040120.zip">Download Counterpart for Mac</a></p>
-<p>Mac version 0.1.0, build 202611040120 · Apple silicon · signed, notarized and verified by Gatekeeper.</p>
-<p>This build adds design guidance from your printer MCP and passes structured slicer feedback to API providers.</p>
+<p id="mac-release"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.4/ScanToMake-202611040930.zip">Download Counterpart for Mac</a></p>
+<p>Mac version 0.1.0, build 202611040930 · Apple silicon · signed, notarized and verified by Gatekeeper.</p>
+<p>This build updates printer setup and MCP downloads, adds editable AMS colour mapping and layer pauses, and passes the designer’s support settings to the slicer. STL models use the slicer’s automatic orientation; 3MF models keep their placement.</p>
 <p><a class="button" href="https://testflight.apple.com/join/S4tExVzp">Open the iPhone TestFlight beta</a></p>
-<p>iPhone build 2.0 (2) is waiting for Apple’s external beta review. TestFlight will accept testers through this public link after approval; no email invitation is needed.</p>
+<p>iPhone build 2.0 (3) has been uploaded to Apple. External beta approval is still required before testers can join through this public link; no email invitation is needed.</p>
 <ol>
 <li>Move Counterpart to Applications and open it. Allow Local Network access so it can reach your phone and printer.</li>
 <li>Keep Counterpart running on the Mac. On your iPhone, open the TestFlight app and connect to the Mac. You can also use Add a Phone in Counterpart’s Mac menu to show a pairing code.</li>
@@ -31,7 +31,7 @@
 </section>
 <section id="cleanup">
 <h2>Set up scan cleanup</h2>
-<p>Cleanup workers are installed separately from the signed app. You need Python 3.12 and Blender 5.0.1. Open Counterpart once, then follow the <a href="https://github.com/DMontgomery40/scan-to-make/blob/e7d5f6d/deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app">independent worker installation instructions</a> using source revision <code>e7d5f6d</code>. The installer checks the workers before saving their paths. Restart Counterpart when idle afterward.</p>
+<p>Cleanup workers are installed separately from the signed app. You need Python 3.12 and Blender 5.0.1. Open Counterpart once, then follow the <a href="https://github.com/DMontgomery40/scan-to-make/blob/fbd1a69b/deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app">independent worker installation instructions</a> using source revision <code>fbd1a69b</code>. The installer checks the workers before saving their paths. Restart Counterpart when idle afterward.</p>
 <p>Printing existing models does not require the AI connection or cleanup workers. API-based cleanup retains the documented CLI requirements; custom endpoints need the Responses API.</p>
 </section>
 <section id="starters">
@@ -46,7 +46,7 @@
 <section id="test">
 <h2>What to test</h2>
 <p>Try pairing, the starter card, plate selection, printing, and one design or cleanup job with your chosen provider. For LiDAR capture, inspect every side of the result and check the camera and Face ID afterward. Send feedback through TestFlight with your phone model, Mac build, printer model and MCP version.</p>
-<p>This beta still needs fresh-install and physical-device acceptance for capture quality, phone printer controls, real-print alerts and Watch delivery. Printer fixes are published in bambu-printer-mcp 1.1.52 and mcp-3d-printer-server 1.2.26. Use the app’s Download or Update MCP action to get the latest published package. Verification through the app with these releases is in progress.</p>
+<p>This beta still needs fresh-install and physical-device acceptance for capture quality, phone printer controls, real-print alerts and Watch delivery. Printer fixes are published in bambu-printer-mcp 1.1.54 and mcp-3d-printer-server 1.2.28. Use the app’s Download or Update MCP action to get the latest published package. Verification through the app with these releases is in progress.</p>
 <p>For TestFlight Live Activities, enable the relay in Mac Settings → Advanced with <code>https://counterpart.dtmont.com/relay/v1</code>. Production APNs authentication is verified; delivery to a TestFlight phone is still being tested.</p>
 </section>
 <p><a href="help.html">Read the full guide</a> · <a href="help.html#privacy">Privacy and your AI provider</a></p>

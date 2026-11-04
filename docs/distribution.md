@@ -31,21 +31,24 @@ No physical phone installation or production relay change was made.
 
 Xcode used cloud-managed Apple Distribution signing for the iPhone. A Developer ID
 Application certificate and matching Production profile are installed for the Mac.
-The current [Mac beta release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.3)
-is **0.1.0 (202611040120)**, source `e7d5f6d` (#298), published Nov 4.
-It retrieves FDM guidance from the selected MCP and forwards structured slicer feedback
-to API design workers. Both published MCPs supply the required prompts.
+The current [Mac beta release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.4)
+is **0.1.0 (202611040930)**, source `fbd1a69b`, published Nov 4. It includes the final main
+queue through #293, provider routing, starters/plates, reconstruction qualification,
+MCP updater script authorization and the signed Node native-module entitlement.
+STLs use the slicer’s auto-orientation, 3MF placement is retained, and designer support
+settings reach the slicer. Multi-colour 3MFs retain their model and editable AMS mapping.
 
-The archive/export passed distribution signature and Production entitlement checks;
-embedded Node/Python start and all five changed runtime modules match the prepared payload.
-Notarization submission `6fa11899-18fc-4671-91c1-388f50ccb7dd` was **Accepted**;
-the ticket is stapled and Gatekeeper accepts the app. Artifacts and compact receipts:
-`~/scan-to-make-work/mac-beta-export-202611040120/`. The Keychain notary profile is
-`Counterpart-Production`; the private Sparkle update key is also in Keychain.
+The archive/export passed distribution signatures and Production entitlement checks,
+including both required signed-Node entitlements. Embedded Node/Python start; USD qualifier
+readiness passes under an empty environment; eight runtime modules match the prepared payload.
+Notarization submission `1f95f6b5-a85d-44b8-94a1-8aaf8b67d43e` was **Accepted**;
+the ticket is stapled and Gatekeeper accepts the app. Artifacts and receipts:
+`~/scan-to-make-work/mac-beta-export-202611040930/`. The Keychain notary profile is
+`Counterpart-Production`; the private Sparkle update key remains in Keychain.
 
-ZIP SHA-256: `88557aa0bd97bc696c3bc3beceef2c21f78c2338b3fe4c3a3eca11334a95288e`.
-The setup page and signed Sparkle feed point to this release. The prior Mac beta remains
-available as v2.0-beta.2; no app was installed over David's working development app.
+ZIP SHA-256: `4447c3b7e3eede94b87a24dd53ce9511aad9d89b48d96a294693da47e2a8e627`.
+The setup page and signed Sparkle feed point to this release. Prior beta 3 remains available.
+The Production app was not installed over David’s development build 900.
 A downloaded-file check is not fresh-install acceptance. Verify installation
 independently of David's existing setup:
 
@@ -65,11 +68,11 @@ independently of David's existing setup:
 - The installed development Mac build **202611040900** includes #298 guidance, the orientation/support
   bridge and updater fixes. Final main **127721fa**, including #293 multi-colour 3MF/AMS mapping,
   is integrated into the release branch at **167b5770**, alongside Android/Linux and reconstruction.
-  This source integration is not a new public artifact or physical-print acceptance.
+  Public Mac beta 4 now carries this integration; physical-print acceptance remains open.
 - The hand-copied version-label obstacle is resolved by the newer npm release. The updater now authorizes
   the selected package's postinstall and verifies it before swapping; bundled Node permits third-party
   native modules under Hardened Runtime. `--loglevel=notice` also preserves the verification banner
-  when the user's npm configuration is silent. The next public Mac build must carry all these fixes.
+  when the user's npm configuration is silent. Public Mac beta 4 carries all these fixes.
 - The legacy macOS installer and Docker image pin older MCP versions. They do not
   reproduce the currently accepted feature-branch installation.
 

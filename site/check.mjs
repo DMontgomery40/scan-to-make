@@ -26,7 +26,7 @@ for (const page of pages) {
   if (/Scan to Make/.test(html)) fail(`${page}: still says Scan to Make`);
   for (const [, href] of html.matchAll(/href="([^"]+)"/g)) {
     if (/^(https?:|mailto:)/.test(href)) {
-      if (!/^https:\/\/(testflight\.apple\.com\/join\/S4tExVzp$|github\.com\/DMontgomery40\/scan-to-make\/(blob\/e7d5f6d\/deploy\/companion\/README\.md|releases\/download\/v2\.0-beta\.3\/ScanToMake-202611040120\.zip)|fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href) && !PUBLIC.test(href)) fail(`${page}: outside link not on the public list: ${href}`);
+      if (!/^https:\/\/(testflight\.apple\.com\/join\/S4tExVzp$|github\.com\/DMontgomery40\/scan-to-make\/(blob\/fbd1a69b\/deploy\/companion\/README\.md|releases\/download\/v2\.0-beta\.4\/ScanToMake-202611040930\.zip)|fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href) && !PUBLIC.test(href)) fail(`${page}: outside link not on the public list: ${href}`);
       continue;
     }
     const [file, hash] = href.replace(/^\//, '').split('#');

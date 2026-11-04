@@ -5,14 +5,14 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <title>Counterpart</title>
         <item>
             <title>0.1.0</title>
-            <pubDate>Wed, 04 Nov 2026 01:29:45 -0700</pubDate>
-            <sparkle:version>202611040120</sparkle:version>
+            <pubDate>Wed, 04 Nov 2026 09:27:17 -0700</pubDate>
+            <sparkle:version>202611040930</sparkle:version>
             <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>27.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.3/ScanToMake-202611040120.zip" length="165651441" type="application/octet-stream" sparkle:edSignature="AkQbejHe6cKEinphN8i0UstdslqhdwQLgXz5x54JzNc801k1oZNdNKeRpauzZeGNJx6dwsxztHpDIkKk2vRHBg=="></enclosure>
+            <enclosure url="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.4/ScanToMake-202611040930.zip" length="166157107" type="application/octet-stream" sparkle:edSignature="74SAHZpBj4Q1JP7qAPrv1PBNBAQ8MAgZlCthh6FIix/rOzfuPUiWf/8CWTdPENe0+CkjpFXp21oecUkMGOU2Cg=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: XRE6hasCF/ztTXl2IjAZUQ/54WW+H86sk+EW9JCdwbBL2ToL5mbMcDec4ba/HOuVRDG9fGwq90Dd6rIRcrcnAA==
+edSignature: 7BTZ21/cb+MYOwSNfEGMy8PcIRE4lzEljlgjvU4srvPUeXCtahQs3j0jYOEqflyphrlK1zC8SEVsikRAyUs/DA==
 length: 1080
 -->
