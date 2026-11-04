@@ -20,7 +20,10 @@ artifact and exact setup instructions that a fresh Mac can follow. Verify that
 installation independently of David's existing setup:
 
 - [Mac distribution inventory](../apps/mac/DISTRIBUTION.md) excludes cleanup workers
-  from the app payload. Supply a supported independent installation path for them.
+  from the app payload. The [independent source installer](../deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app)
+  now qualifies and attaches them without another service or global installs.
+  It requires an existing Python 3.12 and Blender 5.0.1; include these prerequisites
+  and the exact release source commit in beta setup instructions.
 - The app's Download MCP action installs npm's latest version. Local feature-branch
   fixes are not delivered by that action. The two MCP npm releases remain held;
   do not merge/publish them to solve this implicitly. Identify and test the exact

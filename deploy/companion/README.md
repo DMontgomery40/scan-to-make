@@ -107,6 +107,63 @@ removes captures and pairing state, so use ordinary `down` when preserving data.
 
 ## macOS
 
+### Independent workers for the signed Counterpart Mac app
+
+For the signed Mac app, use this source-only setup instead of installing a second
+companion service. It installs the existing repair/correction/judge tools and
+their Python packages outside the app. It does not install Homebrew, printer MCPs,
+Blender, a login item, or another listener.
+
+Use a local checkout containing the beta's exact release commit, an existing
+**Python 3.12 with venv/ensurepip**, and **Blender 5.0.1**. The app's stripped Python
+runtime does not include pip and cannot bootstrap this independent environment.
+Open Counterpart once so its private `companion.env` exists. Then, while no cleanup
+job is running, run from the checkout:
+
+```sh
+/opt/homebrew/bin/python3.12 deploy/companion/install-workers.py \
+  --revision "${RELEASE_COMMIT:?Set the beta release source commit}" \
+  --python /opt/homebrew/bin/python3.12 \
+  --blender /Applications/Blender.app/Contents/MacOS/Blender \
+  --env-file "$HOME/Library/Application Support/Scan to Make/companion.env"
+```
+
+Select the actual Python/Blender executables on your Mac. For a custom app state
+directory, pass that directory's `companion.env`. Omit `--env-file` to install and
+qualify workers without changing app configuration. Optional `--root` selects an
+independent installation directory; the default is
+`~/Library/Application Support/Counterpart Workers/<resolved source SHA>/`.
+Existing revision directories are never replaced. To retry a failed setup, use
+the same command: its incomplete owned revision directory is removed on failure.
+
+The helper uses `git archive` of the resolved commit, so uncommitted files and
+credentials are not copied. It retains the source archive and original LICENSE
+files, creates a private venv, and installs the existing exact requirement pins
+(`usd-core`, Pillow, and `pillow-heif`) as wheels directly from PyPI, without a pip
+cache or global package changes. `python-install.json` records downloaded wheel
+URLs/hashes; `installation.json` records the source archive hash, commit and runtime
+versions. No worker or wheel is copied into the signed app.
+
+Before app configuration changes, the existing tests must pass with **no skips**:
+real HEIC encode/decode, Python/Blender/descendant network denial, and a synthetic
+repair → loopback model correction → measured mesh export. This uses no paid model
+account, real scan, printer, or user project. A missing/deprecated `sandbox-exec`
+fails qualification. Failed setup leaves the existing env file untouched.
+
+After qualification, `--env-file` atomically appends only worker paths, preserving
+the existing settings and credential bytes and keeping mode 0600. It does not
+restart the app or companion. Restart Counterpart when idle to load the paths.
+To undo activation, remove the final `# Independent Counterpart cleanup worker
+paths` block from `companion.env` while idle, then restart. Keep previous worker
+directories while any saved configuration still references them.
+
+This is an independent local source installation using the existing distribution
+boundary. It does not establish terms for redistributing prebuilt GPL components;
+retain the upstream wheel notices and the worker source/licenses when maintaining
+or sharing an installation. See the [Mac inventory](../../apps/mac/DISTRIBUTION.md).
+
+### Full legacy companion service
+
 Choose the connection you already use. **I'm already set up:** if the phone can
 reach this Mac on your LAN, including through an existing WireGuard, Firewalla or
 other VPN tunnel, no Tailscale account is needed. Use the Mac's LAN IPv4 address:
@@ -312,6 +369,7 @@ docker build --platform linux/amd64 -t scan-to-make-companion:local -f deploy/co
 bash deploy/companion/smoke.sh
 bash -n deploy/companion/install-macos.sh
 python3 deploy/companion/test_macos.py -v
+python3 deploy/companion/test_install_workers.py -v
 ```
 
 The smoke test creates an isolated temporary container/volume, initializes

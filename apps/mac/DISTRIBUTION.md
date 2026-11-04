@@ -37,6 +37,14 @@ metadata. A new app-owned installation therefore needs separately installed
 cleanup workers to provide repair/correction. Capture conversion still works
 with the two approved wheels.
 
+The user-run [independent worker installer](../../deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app)
+can provision those workers from an exact local source commit into a separate
+private directory, using an existing Python 3.12 and Blender 5.0.1. It retains
+worker source/licenses and wheel download receipts, qualifies the existing
+HEIC/network-isolation/cleanup tests, and optionally attaches only their paths to
+the app's `companion.env`. It does not modify the app payload or install another
+companion service. The legacy full companion installer remains a different path.
+
 Blender is not bundled or fetched by this app. An existing worker installation
 can invoke the unmodified Blender CLI in a separate process, matching PRD L06.
 The independently installed worker's licence/source obligations remain with that

@@ -242,11 +242,16 @@ set its public key as `SPARKLE_PUBLIC_KEY` and the HTTPS appcast location as
 `SPARKLE_FEED_URL`. No private key belongs in Git. See [Sparkle setup](https://sparkle-project.org/documentation/)
 and [publishing](https://sparkle-project.org/documentation/publishing/).
 
-`scripts/release.sh` requires Developer ID, an increasing build number, a Keychain
+`scripts/release.sh` requires Developer ID, a matching Developer ID CloudKit profile
+(`MAC_PROVISIONING_PROFILE`), an increasing build number, a Keychain
 notary profile, the public key/feed URL and Sparkle tools. It builds with Hardened
-Runtime, verifies signatures, notarizes/staples, and creates an EdDSA-signed
+Runtime and explicit production CloudKit/APNs entitlements, verifies distribution
+signatures and entitlements, notarizes/staples, checks Gatekeeper, and creates an EdDSA-signed
 appcast and ZIP without uploading. Run it when Developer Program membership and
 Developer ID signing are available. Development builds never attempt notarization.
+
+See [external beta distribution](../../docs/distribution.md) for the full phone/Mac
+release procedure, production relay settings and remaining fresh-install prerequisites.
 
 Configured release builds start Sparkle checks only when the app agent is not
 enabled and no legacy installation remains. Downloads are not automatic. This
