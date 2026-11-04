@@ -1206,9 +1206,9 @@ export class ObjectService {
   async printRoute(destinationId: string, route?: PrintRoute['route']): Promise<PrintRoute | undefined> {
     const session = this.#deps.printers?.session(destinationId);
     if (!session) throw new ObjectNotFoundError();
-    // Never mid-print: a project printing there, or the printer last read as printing (no fresh read, so the
-    // change stays inside the caller's time limit).
-    if (route && (await this.printerBusy(destinationId) || this.#deps.printers?.lastState(destinationId) === 'busy'))
+    // Never mid-print: a project printing there, or the printer printing now (a bounded live read, as the Printer
+    // MCP choice does, so a print started outside Counterpart since the last read is refused too).
+    if (route && (await this.printerBusy(destinationId) || await this.#deps.printers?.printing(destinationId)))
       throw new InvalidStateError('This printer is printing. Change its connection when the print finishes.');
     await session.connect();
     if (!session.hasTool('counterpart_print_route')) return undefined;

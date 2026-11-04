@@ -444,12 +444,15 @@ test('the phone reads and changes a printer\'s connection and MCP, never while i
   assert.match(refused.json.error.message, /printing/);
   assert.equal(f.calls.filter(c => c.name === 'counterpart_print_route').length, before);
   await f.store.update(f.object.id, o => ({...o, state: 'ready'}));
-  // The printer itself last read as printing (a print Counterpart has no project for): refused too.
-  f.queue.splice(0, f.queue.length, status('RUNNING', 4));
-  assert.equal(await f.directory.printing('current'), true);
-  assert.equal((await call('PUT', '/current/route', {route: 'lan'})).status, 409);
-  f.queue.splice(0, f.queue.length, status('IDLE', 0));
+  // A print started outside Counterpart since the last read (the cache still says ready): the change reads the
+  // printer live and is refused too, without calling the MCP's route tool.
   assert.equal(await f.directory.printing('current'), false);
+  f.queue.splice(0, f.queue.length, status('RUNNING', 4));
+  const outside = f.calls.filter(c => c.name === 'counterpart_print_route').length;
+  assert.equal((await call('PUT', '/current/route', {route: 'lan'})).status, 409);
+  assert.equal(f.calls.filter(c => c.name === 'counterpart_print_route').length, outside);
+  f.queue.splice(0, f.queue.length, status('IDLE', 0));
+  assert.equal((await call('PUT', '/current/route', {route: 'lan'})).status, 200, 'and allowed once it is idle again');
 
   // Printer MCP: the companion's own chooseMcp, its refusals as HTTP statuses.
   const mcp = await call('PUT', '/current/mcp', {backend: 'mcp-3d-printer-server'});
