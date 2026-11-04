@@ -16,6 +16,12 @@ export const REMOTE_SCOPES = [
   'prepared-jobs:prepare',
   'prints:approve',
   'printer-handoff:use',
+  // `/v1/mcp` (docs/design/remote-mcp.md): granted only by `remote-auth-cli pair-mcp`, never to phones.
+  'mcp:read',
+  'mcp:design',
+  'mcp:control',
+  'mcp:print',
+  'mcp:raw',
 ] as const;
 export const RemoteScopeSchema = z.enum(REMOTE_SCOPES);
 export type RemoteScope = z.infer<typeof RemoteScopeSchema>;

@@ -166,6 +166,18 @@ remote native probes and the SSH tunnel were removed after verification.
 16. **The whole MCP toolset, remotely, through the companion: `/v1/mcp`** (from David's Claude Duet chat, Nov 3).
     The goal is that a remote Claude session (or any MCP client) can use *everything* both MCPs do, through the
     companion's existing front door, not a second one.
+    - **Built, not deployed (Nov 4, branch `feat/remote-mcp`):** design in
+      [`../design/remote-mcp.md`](../design/remote-mcp.md); pairing and connecting in
+      [`../tailscale-setup.md`](../tailscale-setup.md#remote-mcp-clients-v1mcp). It covers:
+      - `/v1/mcp` (`current`) and `/v1/mcp/<destinationId>` on each destination's shared session;
+      - scopes `mcp:read|design|control|print|raw`, with `pair-mcp` to grant them;
+      - path confinement to `<bundle store>/remote/<deviceId>/`;
+      - remote questions tagged with the device, cancelled at once until a screen shows them.
+
+      Loopback tests: `services/companion/tests/remote-mcp.test.mjs`.
+    - **Blocks real use:** on Nov 4 the Mac had **no Tailscale** and the companion was LAN-only (its certificate names
+      only `192.168.68.123`). A cloud session has no path in until David picks one: Serve mode, a subnet route, or a
+      certificate that names the tailnet address. Open questions are listed at the end of the design doc.
     - **What exists, read it first:** the companion already sits behind **Tailscale Serve** with per-phone pairing
       and revocation (`docs/tailscale-setup.md`); NET-001 (team vote, Oct 14) ruled out **Funnel**. So "Funnel in
       front of each MCP's HTTP mode" is the wrong answer here, and so is a separate WireGuard/wstunnel path for the

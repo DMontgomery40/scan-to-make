@@ -10,6 +10,7 @@ import {LiveActivityTokenUploadSchema} from '@scan-to-make/contracts/counterpart
 import type {ObjectService} from './objects/service.js';
 import {createCaptureRoutes,type CaptureServices} from './capture-http.js';
 import {createPrintHandoffRoutes,type PrintHandoffServices} from './print-handoff-http.js';
+import {handleRemoteMcp,isRemoteMcpPath,type RemoteMcpServices} from './remote-mcp-http.js';
 import {acquireInstanceLock} from './instance-lock.js';
 import { createServer, type IncomingMessage, type RequestListener } from 'node:http';
 import {createServer as createHttpsServer} from 'node:https';
@@ -126,6 +127,8 @@ export async function startCompanionServer(
     lanTls?: {cert: Buffer; key: Buffer};
     capture?: CaptureServices;
     printHandoff?: PrintHandoffServices;
+    /** `/v1/mcp`: every configured printer MCP, passed through to paired remote devices (docs/design/remote-mcp.md). */
+    remoteMcp?: RemoteMcpServices;
     /** Objects (scan or instructions → touch-up → print), when touch-ups are set up. */
     objects?: ObjectService;
     /** The event log behind GET /v1/events (PRD §8.7). */
@@ -198,6 +201,7 @@ export async function startCompanionServer(
     throw new Error('Invalid local port');
   if(options.capture&&!auth)throw new Error('Capture routes require explicit authentication');
   if(options.printHandoff&&!auth)throw new Error('Printer handoff routes require explicit authentication');
+  if(options.remoteMcp&&!auth)throw new Error('Remote MCP requires explicit authentication');
   // One companion process per capture directory: scan processing assumes its
   // jobs, workers and cancellation all live in this process.
   const instanceLock=options.capture?.scanProcessing?await acquireInstanceLock(options.capture.scanProcessing.directory):undefined;
@@ -354,8 +358,16 @@ export async function startCompanionServer(
         }
         return;
       }
+      if(options.remoteMcp&&auth&&isRemoteMcpPath(request.url)){
+        await handleRemoteMcp(options.remoteMcp,request,response,async()=>{
+          const {deviceId,token}=credential();
+          const device=await auth.device(login,deviceId,token);
+          void options.presence?.seen(device.deviceId,singleHeader(request,'x-scan-device-model')).catch(()=>undefined);
+          return device;
+        });return;
+      }
       if(printHandoffRoutes&&request.url?.startsWith('/v1/printer-handoff/')){
-        await printHandoffRoutes.handle(request,response,authorize,name=>singleHeader(request,name));return;
+        await printHandoffRoutes.handle(request,response,authorize,name=>singleHeader(request,name),()=>credential().deviceId);return;
       }
       if (auth && request.url === '/v1/auth/refresh') {
         // Rolling refresh: the same credential, valid for another full lifetime. No body.
