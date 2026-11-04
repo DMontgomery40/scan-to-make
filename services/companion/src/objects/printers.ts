@@ -4,7 +4,7 @@ import {access, readFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {basename, delimiter, dirname, isAbsolute, join, resolve} from 'node:path';
 import {parseEnv} from 'node:util';
-import {printerHandoffConfigSchema, printerSelectionSchema, type PrinterBackend, type PrinterHandoffConfig, type PrinterMcpProcess} from '@scan-to-make/printer-handoff';
+import {printerHandoffConfigSchema, printerTypeSchema, type PrinterBackend, type PrinterHandoffConfig, type PrinterMcpProcess} from '@scan-to-make/printer-handoff';
 import {parseToml} from './toml.js';
 import {findBambuRoute, readProfiles, readsRouteSettings, settingsGap, type RouteSource} from '../printing/profiles.js';
 import {hostEnvironment, resolveMcpInstall} from '../printing/mcp-install.js';
@@ -150,7 +150,7 @@ async function metadata(config: PrinterHandoffConfig, envPath?: string) {
   const model = config.selection?.model ?? (bambu ? text(env.BAMBU_PRINTER_MODEL) : undefined) ?? text(env.BAMBU_MODEL);
   const address = publicAddress(host);
   // The configured selection outranks the MCP's environment.
-  const printerType = printerSelectionSchema.shape.printerType.safeParse(bambu ? 'bambu' : config.selection?.printerType ?? text(env.PRINTER_TYPE)?.toLowerCase());
+  const printerType = printerTypeSchema.safeParse(bambu ? 'bambu' : config.selection?.printerType ?? text(env.PRINTER_TYPE)?.toLowerCase());
   const bambuKind = bambu || serial !== undefined || (printerType.success && printerType.data === 'bambu');
   // One printer, one destination (PRD §8.2): the Bambu serial when known, else
   // the lowercased host:port. A Bambu printer's address is its host (its ports are fixed);
