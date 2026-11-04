@@ -1,0 +1,93 @@
+package com.scantomake.counterpart.app
+
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.scantomake.counterpart.MainActivity
+import com.scantomake.counterpart.R
+import com.scantomake.counterpart.api.CounterpartEvent
+
+/**
+ * Notifications from the Mac's event log. The iPhone app gets these through CloudKit pushes that the Mac writes;
+ * Android has no CloudKit, so the phone reads `GET /v1/events` itself (EventCheckWorker, WatchService) and shows
+ * the companion's own words. Levels follow events.md: none (never shown), passive, active, timeSensitive.
+ */
+object Notifications {
+    const val READY = "ready"
+    const val NEEDS_YOU = "needs-you"
+    const val PRINT = "print"
+    const val PROBLEMS = "problems"
+    const val WATCHING = "watching"
+    private const val CURSOR = "eventsCursor"
+    private const val SEEN = "eventsSeen"
+
+    fun createChannels(context: Context) {
+        if (Build.VERSION.SDK_INT < 26) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannels(listOf(
+            NotificationChannel(READY, "Ready to print", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "Your Mac finished a design or a scan" },
+            NotificationChannel(NEEDS_YOU, "Needs you", NotificationManager.IMPORTANCE_HIGH).apply { description = "It needs a photo or a yes from you" },
+            NotificationChannel(PRINT, "Print progress", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "The print is halfway, done, or cancelled" },
+            NotificationChannel(PROBLEMS, "Print problems", NotificationManager.IMPORTANCE_HIGH).apply { description = "The printer paused, stopped or needs a yes" },
+            NotificationChannel(WATCHING, "Following your Mac", NotificationManager.IMPORTANCE_LOW).apply { description = "Shown while Counterpart follows a print or a design" },
+        ))
+    }
+
+    fun allowed(context: Context): Boolean = Build.VERSION.SDK_INT < 33 ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    /** The newest event seq already handled, or null before the first read. */
+    fun cursor(context: Context): Int? = Counterpart.instance.prefs.getInt(CURSOR, -1).takeIf { it >= 0 }
+
+    fun setCursor(context: Context, seq: Int) {
+        val prefs = Counterpart.instance.prefs
+        if (seq > prefs.getInt(CURSOR, -1)) prefs.edit().putInt(CURSOR, seq).apply()
+    }
+
+    @Synchronized fun markSeen(context: Context, id: String, seq: Int) {
+        val prefs = Counterpart.instance.prefs
+        val seen = (prefs.getString(SEEN, "") ?: "").split(",").filter { it.isNotEmpty() }.takeLast(199) + id
+        prefs.edit().putString(SEEN, seen.joinToString(",")).apply()
+        setCursor(context, seq)
+    }
+
+    @Synchronized fun wasSeen(id: String): Boolean = (Counterpart.instance.prefs.getString(SEEN, "") ?: "").split(",").contains(id)
+
+    private fun channel(event: CounterpartEvent): String = when {
+        event.notify == "timeSensitive" -> PROBLEMS
+        event.type == "pass.ask" -> NEEDS_YOU
+        event.type.startsWith("pass.") -> READY
+        else -> PRINT
+    }
+
+    /** Shows one event, once (de-duplicated by its id). */
+    fun post(context: Context, event: CounterpartEvent) {
+        if (event.notify == "none" || wasSeen(event.id)) { markSeen(context, event.id, event.seq); return }
+        markSeen(context, event.id, event.seq)
+        if (!allowed(context)) return
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            event.projectId?.let { putExtra(MainActivity.EXTRA_PROJECT, it) }
+        }
+        val pending = PendingIntent.getActivity(context, event.seq, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val builder = NotificationCompat.Builder(context, channel(event))
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(0xFFFF732E.toInt())
+            .setContentTitle(event.title)
+            .setContentText(event.body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(event.body))
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .setPriority(if (event.notify == "timeSensitive") NotificationCompat.PRIORITY_HIGH else if (event.notify == "passive") NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_DEFAULT)
+            .setOnlyAlertOnce(event.notify == "passive")
+        try { NotificationManagerCompat.from(context).notify(event.projectId ?: event.id, 1, builder.build()) } catch (_: SecurityException) {}
+    }
+}

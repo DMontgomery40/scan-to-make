@@ -1,0 +1,7 @@
+-keepattributes *Annotation*, InnerClasses
+-keep,includedescriptorclasses class com.scantomake.counterpart.**$$serializer { *; }
+-keepclassmembers class com.scantomake.counterpart.** { *** Companion; }
+-keepclasseswithmembers class com.scantomake.counterpart.** { kotlinx.serialization.KSerializer serializer(...); }
+-dontwarn org.bouncycastle.**
+-dontwarn org.conscrypt.**
+-dontwarn org.openjsse.**
