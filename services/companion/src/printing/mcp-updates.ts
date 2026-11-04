@@ -10,7 +10,10 @@ import {appInstall, findNpm, installedVersion, mcpIdFor, resolveMcpInstall, type
 export const MCP_UPDATE_TIMEOUT_MS = 10 * 60_000;
 /** PRD §8.10: the latest version is checked once a day, and when Settings opens (a list read after an hour). */
 export const LATEST_EVERY_MS = 24 * 60 * 60_000;
-export const LATEST_ON_VIEW_MS = 60 * 60_000;
+/** Settings opening asks npm again after this long: a release from minutes ago shows up the next time it opens. */
+export const LATEST_ON_VIEW_MS = 5 * 60_000;
+/** When npm is slow to answer Update, a check this recent stands in for it. */
+const RECENT_ANSWER_MS = 60 * 60_000;
 export const WAIT_POLL_MS = 15_000;
 export const LOG_TAIL_BYTES = 4096;
 /** How long Update waits for npm before answering (the Mac app's control requests give up after 10 s). */
@@ -251,12 +254,16 @@ export class McpUpdater {
       // npx inside a wrapper: the version is in a command Counterpart doesn't own.
       : first.install.type === 'npx' && first.install.via ? `${first.install.spec} run through ssh, whose command Counterpart can't change` : undefined;
     if (found && !options.fresh) return {mcpId, state: 'unresolved', found, ...(fromVersion ? {fromVersion} : {})};
-    // Answer within the Mac app's 10 s: a recent check is used; a slow npm is asked again on the next tap (it keeps running).
+    // Update is the person asking now, so npm is asked now: a version published minutes ago is the one installed
+    // (Nov 4: a cached answer installed 1.1.55 half an hour after 1.1.56 was out). Answer within the Mac app's 10 s:
+    // when npm is slow, an answer from the last hour is used; with none, a slow npm is asked again on the next tap.
     const cached = this.#latest.get(pkg);
-    const looking = cached?.version && this.#now() - cached.atMs < LATEST_ON_VIEW_MS ? Promise.resolve(cached.version) : this.checkLatest(pkg).catch(() => undefined);
+    const recent = cached?.version && this.#now() - cached.atMs < RECENT_ANSWER_MS ? cached.version : undefined;
+    const asking = this.checkLatest(pkg).catch(() => undefined);
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const latest = await Promise.race([looking, new Promise<'slow'>(resolve => { timer = setTimeout(() => resolve('slow'), this.#deps.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS); })])
+    const answer = await Promise.race([asking, new Promise<'slow'>(resolve => { timer = setTimeout(() => resolve('slow'), this.#deps.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS); })])
       .finally(() => clearTimeout(timer));
+    const latest = answer === 'slow' ? recent ?? 'slow' : answer ?? recent;
     if (latest === 'slow') throw new McpUpdateError('unavailable', `npm is slow to answer for ${pkg}. Try Update again in a moment.`);
     if (!latest) throw new McpUpdateError('unavailable', `Counterpart couldn't ask npm for the latest ${pkg}. Check this Mac's internet connection, or install Node.js so npm is there.`);
     if (!options.fresh && fromVersion && !newer(latest, fromVersion)) return {mcpId, state: 'current', fromVersion, toVersion: latest};

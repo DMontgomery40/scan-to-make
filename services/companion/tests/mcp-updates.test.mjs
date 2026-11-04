@@ -423,6 +423,15 @@ test('review fixes, round three: one update per set of files, npx ranges, a slow
   release();
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal((await slow.update(id)).state, 'started');
+  // Update asks npm again even with a fresh cached answer: a version published since is the one installed.
+  let published = '1.1.50';
+  const asks = new McpUpdater({destinations: () => [{id: 'p1s', config: bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40'])}], env: mac({'/opt/homebrew/bin/npm': ''}),
+    overrides: new McpOverrides(join(tmpdir(), `o-${Date.now()}-fresh.json`)), session: () => ({restart: async () => {}, connect: async () => ({server: {version: published}})}),
+    busy: async () => false, runningVersion: () => '1.1.40', node: '/n', path: '/nowhere', lookupTimeoutMs: 200,
+    run: async (_command, args) => args.includes('view') ? {code: 0, output: published + '\n'} : {code: 0, output: ''}});
+  assert.equal(await asks.checkLatest('bambu-printer-mcp'), '1.1.50');
+  published = '1.1.51';
+  assert.equal((await asks.update(asks.mcpId('p1s'))).toVersion, '1.1.51', 'not the 1.1.50 cached a moment ago');
   // A release beats its prereleases.
   const {newerVersion} = await import('../dist/printing/directory.js');
   assert.deepEqual([newerVersion('1.2.0', '1.2.0-dev'), newerVersion('1.2.0-dev', '1.2.0'), newerVersion('1.2.0-beta.2', '1.2.0-beta.10'), newerVersion('1.2.1', '1.2.0'), newerVersion('1.2.0', '1.2.0')],
