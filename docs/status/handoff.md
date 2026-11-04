@@ -231,8 +231,15 @@ remote native probes and the SSH tunnel were removed after verification.
      jobs, parent restarted only `com.scantomake.mac.companion` via launchctl. Settings then offered Update Add-on;
      clicked it, closed Blender's untouched startup scene normally, and Check Again reported Blender set up.
      AirPods 25 mm + FDM request and Stove FDM request were resent through the actual Send buttons at
-     1793790273706 / 1793790324011; both showed Working, AirPods had real Blender tool activity. Keep app/MCP
-     restarts and updates held until those passes settle. No app replacement, config-file edit or printer start.
+     1793790273706 / 1793790324011; both showed Working, AirPods had real Blender tool activity.
+     **Current handoff:** both passes are now done/Ready; a fresh saved-object scan showed no touching-up or
+     printing projects. AirPods monitor records ended/cancelled at 2026-11-04T11:34:23.486Z. Parent sent literal
+     "settled" directly to MCP owner and merge owner. MCP owner checked the actual app idle at 12:14Z
+     (P1S Ready; no Working/Printing), clicked nothing, and returned Mac UI to this release owner because
+     the updater is blocked by npm's install-script policy. Revised order agreed directly with both owners:
+     release owner packages/installs the combined Mac build with the updater fix first; then explicitly
+     hands UI to MCP owner for Update. Other agents' UI/restarts remain held. No autonomous print/reprint.
+     The recovery itself made no app replacement, config-file edit or printer start.
      Installed app still predates #298; sending the FDM request does not prove new MCP prompt consumption.
      Their incoming "releases held" note predates the authorized publications below; the publication receipts and
      revoked hold were sent back directly. The orchestrator must coordinate installed MCP Update with the FDM/MCP
@@ -252,10 +259,16 @@ remote native probes and the SSH tunnel were removed after verification.
      in Mac build 202611040120. MCP-only releases need no new iPhone build.
      Its status-doc edits were removed by the MCP owner and reconciled here. Do not replace the installed app
      during that thread's MCP update/acceptance; coordinate the later Mac upgrade explicitly.
-   - **Installed updater obstacle:** the hand-copied Bambu build already reports 1.1.52, so the
-     version-only comparison hides Update for genuine npm 1.1.52. MCP owner presented metadata
-     relabel / new npm version / updater change options. The owners now plan annotation releases
-     Bambu 1.1.53 / generic 1.2.27, then the visible Update action; no duplicate release from this thread.
+   - **Installed updater obstacle:** the hand-copied Bambu build reports 1.1.52. Newer releases exposed Update,
+     but the earlier update failed at 11:34:59Z: Homebrew npm 11.20.0 skipped Bambu's required postinstall
+     under allowScripts, and Counterpart retained the old copy. Latest published versions reported by MCP
+     owner are Bambu **1.1.54** (`e1fbc69`) and generic **1.2.28** (`381ff87`), including support arguments.
+     Parent's companion fix authorizes only the selected package with `--allow-scripts=<pkg>` on global
+     Download/Update, enables foreground scripts and verifies any declared postinstall banner before swap.
+     Checkout `npm ci` is unchanged. Focused Linux companion build and updater checks pass (30/30);
+     the installed app still lacks this fix, so UI Update acceptance remains blocked until packaging.
+     Earlier integrated source `07241c503` passed official agents-136 CI: contracts 58, printer-handoff
+     108 (5 skipped), companion 811 (1 skipped), and all six Python suites; this is engineering evidence.
      MCP owner checked Settings: Developer Mode was already selected; saved credentials returned a fresh
      status at 10:37:36Z on Nov 4. No route change was needed; actual released control acceptance remains open.
      No metadata or project state was changed by this release thread. The 05:49 project has an
