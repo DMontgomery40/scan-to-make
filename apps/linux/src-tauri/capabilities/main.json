@@ -1,0 +1,1 @@
+{"identifier":"main-window","description":"Local Counterpart window only. No renderer filesystem, shell, HTTP, or navigation permission.","windows":["main"],"permissions":["core:default"]}

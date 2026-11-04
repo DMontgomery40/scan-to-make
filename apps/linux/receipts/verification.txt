@@ -1,0 +1,98 @@
+Final Linux engineering checks, 2026-11-04
+Payload ga41b298a488d-node24.22.2-x64
+
+{"internalDependencies":5,"exportsChecked":60,"lanAddressModule":"imported","resources":"/home/david/scan-to-make-work/linux-desktop/app/src-tauri/build-tmp/verify.vxdpzW/deb/usr/lib/Counterpart"}
+11.19.1
+11.19.1
+{"internalDependencies":5,"exportsChecked":60,"lanAddressModule":"imported","resources":"/home/david/scan-to-make-work/linux-desktop/app/src-tauri/build-tmp/verify.vxdpzW/appimage/squashfs-root/usr/lib/Counterpart"}
+11.19.1
+11.19.1
+ee7791f4283467b1fbdc9870ab8b1854061009b02b50169e4895673f486e5ea8  /home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/bundle/deb/Counterpart_0.1.0_amd64.deb
+2084175db2618cdc61c926e8528d94ba62a8a35175871c9ef1f683a19763cafa  /home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/bundle/appimage/Counterpart_0.1.0_amd64.AppImage
+
+frontend-tests
+
+> counterpart-linux@0.1.0 test
+> tsx --test tests/*.test.ts
+
+✔ a print sheet rejects a changed plate and never adopts it (0.622024ms)
+✔ read issued before a mutation cannot overwrite its result (0.120946ms)
+✔ search includes conversation but excludes paths and identifiers (0.159996ms)
+✔ layer pauses use exact integers within the estimate, unique and sorted (0.595009ms)
+✔ dynamic questions preserve primitives and reject unsupported schema (0.370244ms)
+✔ a late mutation response cannot replace newer project state (0.310089ms)
+✔ an interrupted send becomes uncertain and cannot replay (0.528932ms)
+✔ a queued correction waits while active and preserves photo ownership (0.603257ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 80.415933
+
+rust-tests
+   Compiling counterpart v0.1.0 (/home/david/scan-to-make-work/linux-desktop/app/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.40s
+     Running unittests src/main.rs (src-tauri/target/debug/deps/counterpart-897363b832eaee90)
+
+running 12 tests
+test filesystem_tests::rejects_unsafe_persisted_correction_queue ... ok
+test filesystem_tests::rejects_symlinks_escaping_project ... ok
+test protocol::tests::permits_independent_confirmation_deadlines ... ok
+test protocol::tests::rejects_path_and_shell_escape_hatches ... ok
+test tests::scope_rejects_traversal_and_unreferenced_files ... ok
+test protocol::tests::validates_request_identity ... ok
+test protocol::socket_tests::refuses_nonprivate_socket ... ok
+test protocol::socket_tests::reads_fragmented_replies ... ok
+test protocol::socket_tests::answer_can_finish_while_control_request_is_pending ... ok
+test protocol::socket_tests::bounds_requests_before_connecting ... ok
+test protocol::socket_tests::refuses_oversized_response ... ok
+test protocol::socket_tests::disconnect_never_replays_a_mutation ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+
+packaging-tests
+..
+----------------------------------------------------------------------
+Ran 2 tests in 0.008s
+
+OK
+
+build
+
+> counterpart-linux@0.1.0 tauri
+> tauri build --config src-tauri/tauri.bundle.conf.json
+
+        Info Looking up installed tauri packages to check mismatched versions...
+     Running beforeBuildCommand `npm run build`
+
+> counterpart-linux@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.7 building client environment for production...
+transforming...
+✓ 99 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                          0.35 kB │ gzip:   0.26 kB
+dist/assets/vernier-Bw7Dq95P.png        12.33 kB
+dist/assets/caliper-EfE5_o4_.png        15.94 kB
+dist/assets/index-COvV266T.css          11.96 kB │ gzip:   3.61 kB
+dist/assets/STLLoader-CeQTKsJB.js        3.03 kB │ gzip:   1.47 kB
+dist/assets/OrbitControls-C11CwpE4.js   19.18 kB │ gzip:   4.36 kB
+dist/assets/index-DhhsfRU0.js          320.05 kB │ gzip: 102.19 kB
+dist/assets/three.module-Dcbj-bkz.js   704.69 kB │ gzip: 181.05 kB
+✓ built in 1.35s
+   Compiling counterpart v0.1.0 (/home/david/scan-to-make-work/linux-desktop/app/src-tauri)
+    Finished `release` profile [optimized] target(s) in 1m 21s
+       Built application at: /home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/counterpart
+        Info Patching /home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/counterpart with bundle type information: deb
+    Bundling Counterpart_0.1.0_amd64.deb (/home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/bundle/deb/Counterpart_0.1.0_amd64.deb)
+        Info Patching /home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/counterpart with bundle type information: appimage
+    Bundling Counterpart_0.1.0_amd64.AppImage (/home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/bundle/appimage/Counterpart_0.1.0_amd64.AppImage)
+    Finished 2 bundles at:
+        /home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/bundle/deb/Counterpart_0.1.0_amd64.deb (70.21 MiB)
+        /home/david/scan-to-make-work/linux-desktop/app/src-tauri/target/release/bundle/appimage/Counterpart_0.1.0_amd64.AppImage (131.07 MiB)

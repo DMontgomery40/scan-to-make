@@ -1,0 +1,11 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/resources/
+src-tauri/gen/
+*.log
+shared/
+src-tauri/build-tmp/
+src-tauri/resources-build.*/
+src-tauri/bundle-resources/
+**/__pycache__/
