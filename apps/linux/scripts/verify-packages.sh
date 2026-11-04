@@ -16,5 +16,18 @@ for root in "$work/deb/usr/lib/Counterpart" "$work/appimage/squashfs-root/usr/li
   "$root/Payload/node/bin/node" "$app/scripts/check-bundled-runtime.mjs" "$root"
   PATH="$root/Payload/node/bin:$PATH" "$root/Payload/node/bin/npm" --version
   PATH="$root/Payload/node/bin:$PATH" "$root/Payload/node/bin/npx" --version
+  if [[ -d "$root/Payload/reconstruction" ]]; then
+    reconstruction="$root/Payload/reconstruction"
+    python3 - "$reconstruction" <<'PY'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+identity = (root / 'BUILD-ID').read_text().strip()
+if json.loads((root / 'manifest.json').read_text())['buildId'] != identity:
+    raise SystemExit('Packaged reconstruction identity differs from its manifest')
+print('Verifying packaged reconstruction:', identity)
+PY
+    env -i HOME="$work" "$reconstruction/bin/linux-reconstruct" check --mode samples
+  fi
 done
 sha256sum "$deb" "$appimage"
