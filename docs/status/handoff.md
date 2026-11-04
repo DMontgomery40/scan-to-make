@@ -31,10 +31,10 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 
 | What | Version | From |
 |---|---|---|
-| Mac app `/Applications/Counterpart.app` | **202611032022** | main @ `2f7f43e` (includes #295, pause-at-layer, and the Resume confirmation deadlock fix) |
+| Mac app `/Applications/Counterpart.app` | **202611032022** | main @ `2f7f43e` (Resume confirmation deadlock fix; source audit found #295/pause-at-layer absent from this main build, contrary to the older handoff) |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **202611022325** | old: has none of #294/#295 or pause-at-layer |
 | bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `587461b` (active since 20:17) (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
-| mcp-3D-printer-server | `~/mcp-3D-printer-server` on `feat/bambu-complete` @ `56d8fb9`, built in place | runs from its own folder and `.env` |
+| mcp-3D-printer-server | live dist from `56d8fb9`; source `feat/bambu-complete` now `afcf378` (new layer-pause parity not deployed) | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
 | FULU runtime | Colima profile `bambu-fulu`, image `bpm-fulu-e2e:runtime`, plug-in **02.05.02.58** | launcher `~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh` (in neither repo) |
 | P1S | `01P00C4B2500106`, 192.168.68.148, firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode | AMS A1 black PLA, A2 yellow PLA, A3 PETG |
@@ -69,9 +69,37 @@ remote native probes and the SSH tunnel were removed after verification.
 
 ## Open, in order
 
-0. **Phone:** the "nothing loads" of 15:40 was the phone on Tailscale instead of David's WireGuard; fixed on his side.
-   Still to fix in the phone app: `SettingsView.swift:34` shows **"Connected now" while `reachable` is unknown**; a
-   request with no answer must end in "Can't reach it", not a spinner.
+0. **External TestFlight, in progress.** App Store listing is **Counterpart 3D** (icon remains
+   Counterpart), ID **6830483457**, bundle `com.scantomake`, **Full Access** verified. User chose
+   a public link for external testers. Source `b734344` was cloud-signed, exported, validated and
+   uploaded as **2.0 (1)** at 22:19 Mountain; Apple accepted it for processing. Internal group
+   `Counterpart Team` exists; description and user-supplied review/feedback contacts are saved.
+   No external group, review submission, or public link is yet confirmed. App record currently
+   lists iOS and macOS drafts; do not remove the Mac platform without understanding that choice.
+   Release branch `feat/testflight-readiness` is pushed through `ab455a6` (no PR yet).
+   `docs/distribution.md` contains the release procedure and remaining production prerequisites.
+   - **Latest direction:** Linux computer support coming soon, including Tailscale; bring-your-own-AI
+     includes Claude Code, Codex, OpenCode and OpenAI-compatible APIs (OpenRouter/local models).
+     The saved beta copy describes these integrations as expanding during beta. No public
+     24-hour promise. Main project worker routing is still Claude-specific despite existing
+     Codex/API adapters; close that gap rather than require Claude Code permanently.
+   - **Phone connectivity fix is implemented:** unknown shows Checking, failed requests mark
+     unreachable, successful poll recovery reloads; bounded JSON metadata requests preserve long
+     downloads. David explicitly says his phone is connected. A developer-tool tunnel being
+     unavailable is not evidence of app failure. No fresh phone build installed this session.
+   - **Production services remain:** CloudKit Console is signed in, at its What's New dialog;
+     schema deployment not performed. CLI cktool has no management token. The production relay
+     probe returned HTTP 405, not a valid relay/APNs receipt. Do not point the installed development
+     phone/Mac at production yet. No notarized Mac companion/download exists yet; independent
+     worker installer is implemented and qualified but fresh-install activation remains unaccepted.
+   - **Evidence:** `~/scan-to-make-work/testflight-2.0-1/` holds archive/IPA; official Linux CI at
+     `~/scan-to-make-work/testflight-ci-b734344/` passes Node 22/24 (each 55 contracts + 767 companion,
+     one macOS-only skip). Shared 164; iOS app 16; print UI 15 across corrected reruns; Mac 147 +
+     one skip before final format/#292 integration. Independent review found no substantive issues.
+     `ab455a6` fixes export PATH (Homebrew rsync incompatibility) and codesign certificate verbosity;
+     real IPA validation passes, eight release-script tests pass on Linux. These are engineering
+     checks, not device acceptance. Old inactive codex-integration build caches were removed;
+     logs/results remain. Linux CI scratch checkout/venvs removed; shared caches retained.
 1. **Remote Pause/Resume/Stop: accepted on Mac through local FULU.** Root cause was the MCP's
    `String(20_000 + Date.now() % 1_000_000)` IDs. On this P1S 01.10, signed controls must use string IDs
    in Studio's **20000–29999** window. Read-only probes accepted signature verification at 20000, 20001,
@@ -101,12 +129,8 @@ remote native probes and the SSH tunnel were removed after verification.
    The printer still returns FTPS 550 for this plug-in-uploaded file, so the existing confirmation is expected.
    Phone parity for the waiting/confirmation flow is not yet checked.
 3. **Merge the open Counterpart PRs**, in this order, each through the merge flow below:
-   - **#295** `feat/add-printer` (head `fef3ef1`): installed and in use. Includes print failures as events
-     (review item 23), Print Again reuses its slice, the review fixes (cached G-code format, preset contents and
-     `.env` in the slice cache key, JPEG camera replies, manual port, stale Check result).
-   - **`feat/pause-at-layer`** (stacked on #295, head `539ef23`, pushed, **no PR yet**; `stm-ci` ALL PASS on `539ef23`): pause rows in the Mac print
-     sheet, `pauseBeforeLayers` → `pause_at_layers`, `capabilities.layerPauses`, refused controls kept.
-   - **#292** `feat/new-design-without-scan`: a copy request with nothing scanned runs as a new design (Fusion).
+   - **#295 and `feat/pause-at-layer`** are integrated into the release branch at `e44d467`.
+     **#292** is integrated at `b734344`. Not merged to main or freshly deployed to David's devices.
    - **#293** `feat/keep-multicolour-model`: keeps a pass's 3MF. **Don't install alone:** a designed 3MF would print
      without an AMS mapping; it needs the MCP to pick the nearest loaded tray per part colour (both MCPs; mcp-3D has
      no 3MF tool). This is ask 41, the "Vivi" pick.
@@ -117,13 +141,17 @@ remote native probes and the SSH tunnel were removed after verification.
      client headers. Before a PR: strip the `Co-Authored-By` trailers on `c03a9bb`, `f4433b6`, `84aa077`, `7146550`
      (that repo forbids AI attribution), CHANGELOG, code-review gate. Open PRs there: #95 camera stream, #96 Fusion
      document binding, **#97 Studio 2.9 bare-`M` temperature marker (not in the deployed build)**.
-   - mcp-3D-printer-server `feat/bambu-complete` (`45551f1`): AMS, Pause/Resume/Stop, FULU route,
-     `counterpart_print_route`, bambu-printer-mcp's safety modules. **Missing here, must be ported:** `pause_at_layers`,
-     the Resume pause-notice fix, refusal reporting. Open PRs: #49 camera stream, #50 Studio 2.9.
-5. **Phone parity.** The phone build is a day old. Needed: a new build with #294/#295; Printer MCP and Connection
-   pickers in Settings → Printers (`PrintersView.swift`) with phone HTTPS routes (existing PRINT/SETTINGS scope,
-   capability flag, `docs/protocols/objects-api.md`); the Pause section in the phone print sheet. Build: Release,
-   `STM_ENTITLEMENTS_SUFFIX=+CloudKit`, `/usr/bin/lockf -k ~/.stm-ios.lock`, install with `devicectl`, confirm by screenshot.
+   - mcp-3D-printer-server `feat/bambu-complete` is pushed at **`afcf378`**: existing control fixes
+     plus layer-pause parity, preserved project pauses, exact-layer placement verification and
+     refusal of already sliced files missing requested pauses. The packed tarball now includes
+     `control-reply.js`. Linux: 663 pass / 6 optional skips; packed stdio/HTTP/SSE and site pass.
+     Logs: `~/scan-to-make-work/testflight-generic-parity/`. Local dist/live install not rebuilt.
+     No PR or npm release. Preserve unrelated untracked .env backup, private models and scratch.
+5. **Phone parity implemented on the release branch:** Settings → Printers exposes MCP and
+   route selection through authorized routes and per-physical-printer reservations; phone print
+   sheet has layer pauses and Resume-specific confirmation. Finished print removes live controls,
+   camera polling and remaining-time claims; small size/weight values no longer round to zero.
+   `b845a54` contains these changes; physical acceptance remains. No new build installed on Davica3.
 6. **Connection choice per printer from every viable route** (David: "whether i want to print through fulu or bambu
    over lan or bambu cloud, or whatever other viable options exist"). Both MCPs' `counterpart_print_route` know only
    `lan`/`cloud`. Agreed plan: the MCP reports `options: [{id,label,available,reason?}]` (direct LAN, FULU LAN, Bambu
@@ -132,24 +160,19 @@ remote native probes and the SSH tunnel were removed after verification.
    bambu-printer-mcp (`SettingsViews.swift:379`); show it for any MCP with `counterpart_print_route`. New PR off main.
 7. **Bambu Cloud printing is refused:** `net.start_print` -3120, HTTP 403 "internal blocking", every time. Untested
    comparison: a cloud print from Bambu Studio itself. Also show it in plain words instead of the raw plug-in text.
-8. **FULU through mcp-3D-printer-server crashes:** `create_directory …/.config/mcp-3d-printer-server/bambu-network/log`,
-   because the launcher mounts only `~/.config/bambu-printer-mcp/bambu-network`. Fix in Complete Settings: carry the
-   source MCP's session folder (`BAMBU_NETWORK_CONFIG_DIR`, or ask `bambu_network_bridge_status` for `configDir`).
-   Then check two bridge containers sharing one login don't log each other out. Unexplained: at 12:52 `printers.route`
-   for the mcp-3D printer returned `cloud` while its `.env` says `lan`.
-9. **Duplicate phone alerts and Live Activities.** Every event reaches the phone twice: a CloudKit subscription
-   alert (thumbnail added by the Notification Service extension, `CloudNotificationSubscriptions.swift:34`,
-   `NotificationService.swift:36`) and the relay's own alert (`EventRelay.swift:123`). Pick one owner per event type
-   from the PRD/asks before changing it. **Live Activities.** The two orange "0%" items in the Mac menu bar are the iPhone's print Live Activities, mirrored
-   by macOS. The relay ends an activity only on `print.done`/`failed`/`cancelled` (`EventRelayPolicy.swift:208`), not on
-   `print.not-started`; retrying a project may also orphan its earlier activity (not verified). Separately, on Nov 2 a
-   real print's Lock Screen activity stayed at 0% "Waiting for an update" while the app advanced. Not diagnosed.
+8. **FULU setup carryover implemented** in `b845a54`: copy `BAMBU_NETWORK_CONFIG_DIR`
+   from source MCP configuration, or read-only bridge status for an already copied route; preserve
+   explicit target configuration. Focused 21 checks pass. Actual second-MCP setup still unaccepted.
+9. **Duplicate alerts and Live Activity recovery implemented** in `7292111`: CloudKit owns
+   discrete alerts, ActivityKit pause/end are silent; started subscription is made silent in place.
+   Recovery keeps bounded persisted events, ends `print.not-started`, respects terminal precedence,
+   recovers late tokens and retires older activities. No fresh phone/Watch or production delivery receipt.
 10. **Workarounds left from the old route bug:** `print.ts:434` auto-clears HMS `0500_0500_0001_0007` before printing,
     `PrintingView.swift:167` special-cases the same code, and `printer-handoff.json` `selection.connectionMode` still
     exists in the config schema. `mcp-client.ts:237` resets timeouts on progress but never forwards the progress.
-11. **Review list items still open** (`app-review-2026-11-02.md`): 5 (0.6 mm shown as 1 mm), 6 ("0 g"), 10 (spool
-    names "A1 · PLA PLA Basic PLA #000000", seen today), 11, 12 ("Your printer MCP's preset", seen today), 14–17
-    (phone finished-print screen), 19/19a (accessibility presses), 22 (the "I checked the printer" toggle), 24, 25, 28.
+11. **Review list:** 5/6 and 14–17 have release-branch fixes/tests, still need device acceptance.
+    Items still open (`app-review-2026-11-02.md`): 10 (spool
+    names "A1 · PLA PLA Basic PLA #000000", seen today), 11, 12 ("Your printer MCP's preset", seen today), 19/19a (accessibility presses), 22 (the "I checked the printer" toggle), 24, 25, 28.
     Items 1–4 and 5a belong with #293/ask 41.
 12. **Phone stopped connecting once** (12:16–12:33): the Mac left the phone's TCP handshakes on 9077 in SYN_RCVD
     while other hosts connected; a companion restart cleared it. Not root-caused. NordVPN Threat Protection (a network
@@ -199,8 +222,7 @@ remote native probes and the SSH tunnel were removed after verification.
   Actions have no runner: every hosted check fails with 0 steps, also on main); comment `@codex review`; wait for
   Codex (Cursor is slow) on the exact head; fix findings; `python3 scripts/branch_check.py --merge <branch>` must print
   SAFE (read it, don't chain it); squash-merge. Delete branches only after GitHub shows MERGED.
-- **Attribution:** Counterpart commits end with the Co-Authored-By line from the session; the two MCP repos allow no
-  AI attribution at all and want "@codex review" in commit messages.
+- **Attribution:** Counterpart commits use `Co-Authored-By: Codex <noreply@openai.com>`; both MCP repos prohibit AI attribution. Bambu requires its review convention; generic MCP forbids unsolicited `@codex review`. Read each current AGENTS.md.
 - **Mac build:** commit first, then `bash apps/mac/scripts/prepare-payload.sh` (archives git HEAD; without it the build
   reuses an old companion), then xcodebuild Release with `CURRENT_PROJECT_VERSION=<yyyymmddhhmm>`
   `STM_ENTITLEMENTS_SUFFIX=+CloudKit -allowProvisioningUpdates`, derived data `~/scan-to-make-work/dd/codex-mac`, under

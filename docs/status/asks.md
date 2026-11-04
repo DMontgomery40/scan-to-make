@@ -55,9 +55,23 @@ The owner is whoever the lead assigns. Repeats count how often the ask came up a
 | 39 | Real-world testing of the user experience | 1 | ongoing | Each fix tested on his devices |
 | 40 | Second opinions (advisor, Codex) | 2 | **ongoing**: competing Claude executors stopped; tool-disabled Claude advice, independent integration review and GitHub reviews used | — |
 | 41 | A request's text and colours reach the print (guitar pick saying "vivi" in the named colours) | 1 | **open**: Nov 2, the guitar pick printed with no name. Print offers only one colour, and the preview shows geometry only, with no text | The requested name and colours are in the model, the preview and the print sheet |
-| 42 | Pause at a chosen layer to drop in magnets, as Bambu Studio and OrcaSlicer do | 1 | **on Mac, observed**: print sheet → Pause → "Before layer N of T"; bambu-printer-mcp `pause_at_layers` has the slicer write the printer's own pause. On Nov 3 at 14:18 the P1S paused itself before layer 3. Resume from the Mac app accepted at 20:25; see row 2. Not on the phone or in mcp-3D-printer-server yet; PR not opened | He sets a pause layer in the app and the printer stops there |
+| 42 | Pause at a chosen layer to drop in magnets, as Bambu Studio and OrcaSlicer do | 1 | **on Mac, observed**: print sheet → Pause → "Before layer N of T"; bambu-printer-mcp `pause_at_layers` has the slicer write the printer's own pause. On Nov 3 at 14:18 the P1S paused itself before layer 3. Resume from the Mac app accepted at 20:25; see row 2. Phone implementation is on `feat/testflight-readiness`; generic MCP parity is pushed at `afcf378` (663 tests pass, package/site checks pass), not deployed or hardware-accepted; PR not opened | He sets a pause layer in the app and the printer stops there |
+
+| 43 | Linux computer companion, with Tailscale connectivity | Nov 3 | **requested, not shipped**: David wants Linux soon; the beta description says coming soon. Reuse the MCP backend and qualify UI, enrollment, workers and Apple-dependent reconstruction/CloudKit alternatives | Fresh Linux install pairs with the phone and completes the supported workflow |
+| 44 | Bring your own AI: Claude Code, Codex, OpenCode and OpenAI-compatible APIs, including OpenRouter/local models | Nov 3 | **partially implemented**: Codex/API adapters and connection tests exist; main project jobs still use the Claude-specific worker dependency. Complete routing and verify supported tool/image capabilities; do not market Claude Code as a permanent requirement | The selected provider performs a real design/cleanup pass |
 
 ## Current evidence and outstanding device checks
+
+Current release branch `feat/testflight-readiness` integrates #295, layer pauses and #292.
+At `b734344`, official Linux Node 22/24 jobs each pass 55 contracts and 767 companion
+checks, with one existing macOS-only skip. Shared Swift: 164; iOS AppTests: 16;
+print UI: all 15 across initial and corrected assertion reruns; Mac: 147 plus one
+existing skip before the final format/#292 integration. Independent code review
+found no substantive issues. Exported production IPA 2.0 (1) passed app/extension
+signature and entitlement checks and was uploaded to Apple. These do not establish
+new physical-device acceptance. Phone connectivity, printer settings, layer pauses,
+finished-state UI, nonzero small measurements and duplicate-alert/recovery fixes
+are on this branch; the installed phone/Mac have not been replaced in this session.
 
 The combined workflow run at `7c6e09e1` passed the complete phone UI suite, Mac build, capture
 lifecycle, packaging, contracts, printer handoff, pipeline and license jobs. Its two companion
