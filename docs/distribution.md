@@ -128,10 +128,10 @@ Suggested Beta App Description:
 > connections over Tailscale. The iPhone app requires iOS 27; LiDAR scanning
 > requires compatible hardware.
 >
-> Bring your own AI. Provider support is expanding during the beta to include
-> Claude Code, Codex, OpenCode, and OpenAI-compatible APIs, including OpenRouter
-> and local model servers. Available workflows depend on the selected provider's
-> capabilities.
+> Bring your own AI. Settings already offer Claude Code, Codex, API keys, and
+> custom OpenAI-compatible endpoints, including OpenRouter and local model
+> servers. Applying the selected provider across every project workflow is being
+> completed during the beta. OpenCode integration is planned.
 >
 > Setup and updates: https://counterpart.dtmont.com/help
 

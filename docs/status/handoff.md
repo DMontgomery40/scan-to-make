@@ -80,7 +80,8 @@ remote native probes and the SSH tunnel were removed after verification.
    `docs/distribution.md` contains the release procedure and remaining production prerequisites.
    - **Latest direction:** Linux computer support coming soon, including Tailscale; bring-your-own-AI
      includes Claude Code, Codex, OpenCode and OpenAI-compatible APIs (OpenRouter/local models).
-     The saved beta copy describes these integrations as expanding during beta. No public
+     The saved beta copy identifies Codex/API/endpoint settings as existing options; project routing
+     remains an integration bug, and OpenCode is planned. No public
      24-hour promise. Main project worker routing is still Claude-specific despite existing
      Codex/API adapters; close that gap rather than require Claude Code permanently.
    - **Phone connectivity fix is implemented:** unknown shows Checking, failed requests mark
