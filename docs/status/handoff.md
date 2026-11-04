@@ -31,8 +31,8 @@ What to build: [`../design/overhaul/PRD.md`](../design/overhaul/PRD.md), journey
 |---|---|---|
 | Mac app `/Applications/Counterpart.app` | **202611031655** | `feat/pause-at-layer` @ `604fe55` (contains all of #295) |
 | iPhone "Davica3" (`00008150-001A488C3642401C`) | **202611022325** | old: has none of #294/#295 or pause-at-layer |
-| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `300e88e` (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
-| mcp-3D-printer-server | `~/mcp-3D-printer-server` on `feat/bambu-complete` @ `5987381`, built in place | runs from its own folder and `.env` |
+| bambu-printer-mcp (what Counterpart runs) | 1.1.46 install + dist from `feat/one-printer-control-route` @ `997d77d` (staged; active after the next companion restart) (a built `native/bambu-native-print` from `exp/native-plugin-controls` sits beside it, unused for a P1S) | `~/Library/Application Support/Scan to Make/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist` |
+| mcp-3D-printer-server | `~/mcp-3D-printer-server` on `feat/bambu-complete` @ `d51c2c4`, built in place | runs from its own folder and `.env` |
 | bambu-printer-mcp config | `~/bambu-printer-mcp/.env` (the ssh forced command `cd`s there): `BAMBU_DEFAULT_CONNECTION_MODE=bambu_network`, `…_TYPE=lan` | Counterpart's own environment never crosses the ssh hop |
 | FULU runtime | Colima profile `bambu-fulu`, image `bpm-fulu-e2e:runtime`, plug-in **02.05.02.58** | launcher `~/Library/Application Support/Scan to Make/printers/fulu-authenticated-lan.sh` (in neither repo) |
 | P1S | `01P00C4B2500106`, 192.168.68.148, firmware 01.10.00.00, cloud-bound, not LAN-only/Developer mode | AMS A1 black PLA, A2 yellow PLA, A3 PETG |
@@ -71,9 +71,10 @@ Every deployment, companion restart and rollback is logged in
    reason, controls); a refusal 0x05024007-0x0502400B says Studio/Handy or Developer Mode; the Mac picker shows the
    MCP's options for either MCP (checked in the real app). bambu-printer-mcp `300e88e` (1019/0), mcp-3D `5987381`
    (649/0), Counterpart `604fe55` (stm-ci ALL PASS). **Open:** a real Stop on the Developer Mode connection (needs
-   David to turn on LAN Only + Developer Mode), and a real refused Stop in the app showing the new words. The direct
-   route doesn't read the printer's reply to a control, so an unsigned control to a printer *not* in Developer Mode
-   still reports "sent"; add the reply check (both MCPs). Earlier detail: Nov 3 afternoon: tried lead (a) through the existing
+   David to turn on LAN Only + Developer Mode), and a real refused Stop in the app showing the new words. Done
+   since: the direct route now sends Studio's control JSON with its own sequence id and waits for the printer's
+   answer; a refusal (not really in Developer Mode) says so, an answer confirms (bambu-printer-mcp `997d77d`
+   1023/0, mcp-3D `d51c2c4` 653/0). Earlier detail: Nov 3 afternoon: tried lead (a) through the existing
    native helper with Bambu Studio's 02.08.02.61 plug-in (`exp/native-plugin-controls`, `be88434`, pushed, rolled back
    from the live MCP). The helper reaches the printer and gets replies (`ledctrl` answered `success`, unsigned), but the
    plug-in never reports `device_cert_installed` (private or Studio config folder, `lan_only` 0 or 1), so every
