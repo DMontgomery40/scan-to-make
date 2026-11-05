@@ -11,8 +11,6 @@ import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {createPrintHandoffServices} from '../dist/print-handoff-http.js';
 import {PrinterSessionPool, toolClass, callClass} from '@scan-to-make/printer-handoff';
-import {execFileSync} from 'node:child_process';
-import {existsSync} from 'node:fs';
 
 const sdk = path => new URL(`../../printer-handoff/node_modules/@modelcontextprotocol/sdk/dist/esm/${path}`, import.meta.url).href;
 const {Client} = await import(sdk('client/index.js'));
@@ -103,24 +101,20 @@ test('the front door: no token, wrong login, a revoked device and a non-MCP devi
   assert.deepEqual(await f.calls(), []);
 });
 
-test('classes: overrides, annotations, missing annotations and name floors', () => {
-  assert.equal(toolClass({name: 'get_printer_status'}), 'read');
-  assert.equal(toolClass({name: 'counterpart_print_route', annotations: {readOnlyHint: true}}), 'control');
-  assert.equal(toolClass({name: 'print_3mf'}), 'print');
-  assert.equal(toolClass({name: 'mystery'}), 'raw');
-  assert.equal(toolClass({name: 'peek', annotations: {readOnlyHint: true}}), 'read');
-  assert.equal(toolClass({name: 'shape', annotations: {readOnlyHint: false, destructiveHint: false, openWorldHint: false}}), 'design');
-  assert.equal(toolClass({name: 'fan', annotations: {destructiveHint: false}}), 'control');
-  assert.equal(toolClass({name: 'wipe', annotations: {readOnlyHint: false}}), 'print');
-  assert.equal(toolClass({name: 'set_light', annotations: {readOnlyHint: true}}), 'control');
-  assert.equal(toolClass({name: 'upload_file', annotations: {destructiveHint: false}}), 'print');
-  assert.equal(toolClass({name: 'bambu_network_call', annotations: {readOnlyHint: true}}), 'raw');
-  assert.equal(toolClass({name: 'upload_gcode', annotations: {readOnlyHint: true}}), 'raw');
-  assert.equal(toolClass({name: 'only_open_world', annotations: {openWorldHint: false}}), 'raw');
-  assert.equal(toolClass({name: 'save_template', annotations: {readOnlyHint: false, destructiveHint: false, openWorldHint: false}}), 'raw');
-  assert.equal(callClass({name: 'fusion_mcp_status'}, {launch: true}), 'design');
-  assert.equal(callClass({name: 'blender_mcp_status'}, {connect: true}), 'design');
-  assert.equal(callClass({name: 'fusion_mcp_status'}, {}), 'read');
+test('classes come only from what the MCP declares (_meta["counterpart/remote"]); an undeclared tool is raw', () => {
+  const declared = (scope, extra = {}) => ({_meta: {'counterpart/remote': {scope, ...extra}}});
+  assert.equal(toolClass({name: 'get_printer_status', ...declared('read')}), 'read');
+  assert.equal(toolClass({name: 'print_3mf', ...declared('print')}), 'print');
+  // No tool name or annotation is read: a tool's name never makes it more trusted or less (PRD §8.0 item 5).
+  assert.equal(toolClass({name: 'get_printer_status'}), 'raw', 'an MCP from before the declarations');
+  assert.equal(toolClass({name: 'peek', annotations: {readOnlyHint: true}}), 'raw', 'annotations are hints, not scopes');
+  assert.equal(toolClass({name: 'peek', ...declared('everything')}), 'raw', 'an unknown scope is raw');
+  assert.equal(toolClass({name: 'set_light', annotations: {readOnlyHint: true}, ...declared('control')}), 'control');
+  const status = {name: 'fusion_mcp_status', ...declared('read', {raisedBy: {launch: 'design', other: 'nonsense'}})};
+  assert.equal(callClass(status, {launch: true}), 'design');
+  assert.equal(callClass(status, {launch: 'yes'}), 'read', 'only a true argument raises it');
+  assert.equal(callClass(status, {}), 'read');
+  assert.equal(callClass({name: 'x', ...declared('print', {raisedBy: {launch: 'design'}})}, {launch: true}), 'print', 'never lowered');
 });
 
 test('tools/list is filtered by scope and calls outside scope never reach the MCP', async t => {
@@ -363,35 +357,6 @@ test('a question a prompt asks is tagged with the remote device, not left untagg
 
 // Every argument key in both upstream MCPs must be classed: refused, path, injected or known plain.
 // Skipped (visibly) where the sibling repos are not checked out, as on the Linux CI boxes.
-const KNOWN_PLAIN = new Set(`all allow_mix_temp ams_id ams_mapping ams_mapping2 ams_mapping_bridge ams_mapping_info ams_slots angle_x angle_y
-angle_z apply_modifiers arguments arrange bed_leveling bed_temperature bed_type bind_document body_name client_job_id clone_objects
-component confirm_during_print confirmed connect document_id enable_timelapse ensure_on_bed execute experimental extension_height
-external_change_assist filament filament_colours filename flag flow_calibration gcode include_schemas items launch layer_height
-layer_inspect load_filament_ids material message_json method min_save name nozzle_mapping nozzle_temperature nozzle_type
-nozzle_volume_type nozzles_info object_names orient pause_at_layers payload plate_index preset_name print project_name qos
-repetitions rotate rotate_x rotate_y rotate_z scale scale_x scale_y scale_z skip_modified_gcodes skip_objects slice_plate slot_id
-sparse_infill_density speed support_enabled task_name temperature template_name timelapse timeout_ms tolerance tool_name
-tool_names try_emmc_print uptodate use_ams use_printer_filaments user_prompt version vibration_calibration wall_loops with_agent
-confirm mode fan light object_ids action auto_match_ams operations parts extension_inches extruder_temp bed_temp scale_factor
-translate_x translate_y translate_z section transformation_type value_x value_y value_z custom_min_x custom_min_y custom_min_z
-custom_max_x custom_max_y custom_max_z width height platform run_bridge_probe probe_timeout_ms
-enable_support support_type support_threshold_angle include_preview`.split(/\s+/));
-test('every upstream argument key is classed', t => {
-  const home = process.env.HOME ?? '';
-  const sources = ['bambu-printer-mcp', 'mcp-3D-printer-server'].map(repo => join(home, repo)).filter(dir => existsSync(join(dir, 'src/index.ts')));
-  if (sources.length < 2) { t.skip('upstream MCP repos not checked out beside this one'); return; }
-  const keys = new Set();
-  for (const dir of sources) {
-    const text = execFileSync('git', ['-C', dir, 'show', 'origin/main:src/index.ts'], {encoding: 'utf8', maxBuffer: 64 * 1024 * 1024});
-    // A property definition, on one line or spread over several: `key: {` then its schema keywords.
-    for (const match of text.matchAll(/^\s+([a-z_][a-z0-9_]*):\s*\{\s*(?:\/\/[^\n]*\s*)?(?:type|description|enum|anyOf|oneOf|items|properties)\b/gm)) keys.add(match[1]);
-  }
-  const refused = /^(host|port|dev_ip|dev_id|bambu_serial|bambu_token|api_key|password|username|user_info|country_code|connection_type|connection_mode|route|bambu_model|nozzle_diameter|nozzle_diameters|bridge_command|slicer_path|ffmpeg_path|plugin_dir|runtime_dir|template_dir|config_filename|bambu_network_method|use_ssl_for_mqtt|use_ssl_for_ftp|slicer_type|extra_options|allow_mutating_method|type)$|config_dir$/;
-  const path = /(?:path|dir|directory|_file)$|^(?:filament_profile|slicer_profile|load_filaments|source_f3d)$/;
-  const unclassed = [...keys].filter(key => !refused.test(key) && !path.test(key) && !KNOWN_PLAIN.has(key));
-  assert.deepEqual(unclassed, [], 'new upstream argument keys need a class in remote-mcp.ts');
-});
-
 test('a server error on a prompt or resource is returned as it is and never ends the shared session', async t => {
   const f = await setup(t);
   const client = await f.connect();

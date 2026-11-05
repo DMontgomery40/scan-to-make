@@ -12,6 +12,7 @@ import {PrinterMcpError} from './mcp-client.js';
 import type {PrinterSession} from './session.js';
 import type {ElicitationRelay} from './elicitation.js';
 import type {PrinterHandoffConfig} from './config.js';
+import {routeArgs} from './counterpart.js';
 
 /**
  * `/v1/mcp` (docs/design/remote-mcp.md): one paired remote device's view of one printer MCP.
@@ -23,61 +24,51 @@ export const REMOTE_CLASSES = ['read', 'design', 'control', 'print', 'raw'] as c
 export type RemoteClass = typeof REMOTE_CLASSES[number];
 const RANK: Record<RemoteClass, number> = {read: 0, design: 1, control: 2, print: 3, raw: 4};
 
-/** Tools Counterpart already calls (printer-handoff/src, companion/src), classed by hand. */
-export const REMOTE_OVERRIDES: Readonly<Record<string, RemoteClass>> = Object.freeze({
-  get_printer_status: 'read', get_printer_filaments: 'read', inspect_print_file: 'read', counterpart_printer_info: 'read',
-  counterpart_print_progress: 'read', camera_snapshot: 'read', get_stl_info: 'read', confirm_temperatures: 'read',
-  blender_mcp_status: 'read', fusion_mcp_status: 'read',
-  slice_stl: 'design', lay_flat: 'design', counterpart_make_3mf: 'design',
-  pause_print: 'control', resume_print: 'control', cancel_print: 'control', clear_hms_errors: 'control', counterpart_print_route: 'control',
-  print_3mf: 'print',
-  // Copies into the MCP's global template registry, outside any folder a device may write.
-  save_template: 'raw',
-});
-/** Name floors: raise a class, never lower it, whatever the annotations say. */
-const FLOORS: readonly [RegExp, RemoteClass][] = [
-  [/_call$|_rpc$|gcode|native_control|^blender_mcp_edit_model$/, 'raw'],
-  [/^(?:upload_|start_|print_|delete_|process_and_print)/, 'print'],
-  [/^(?:set_|clear_|pause_|resume_|cancel_|skip_|reread_)/, 'control'],
-];
-
-export function toolClass(tool: Pick<Tool, 'name' | 'annotations'>): RemoteClass {
-  let base: RemoteClass | undefined = REMOTE_OVERRIDES[tool.name];
-  if (!base) {
-    const a = tool.annotations ?? {};
-    if (a.readOnlyHint === undefined && a.destructiveHint === undefined) base = 'raw';
-    else if (a.readOnlyHint === true) base = 'read';
-    else if (a.destructiveHint === false && a.openWorldHint === false) base = 'design';
-    else if (a.destructiveHint === false) base = 'control';
-    else base = 'print';
-  }
-  for (const [pattern, floor] of FLOORS) if (pattern.test(tool.name) && RANK[floor] > RANK[base]) base = floor;
-  return base;
-}
-
 /**
- * The class of one call: the tool's class, raised when its arguments start a program
- * (`fusion_mcp_status launch`, `blender_mcp_status connect`).
+ * What the printer MCP declares for remote devices, per tool, in `_meta["counterpart/remote"]` (bambu-printer-mcp
+ * 1.1.64+, mcp-3d-printer-server 1.2.42+): the least scope that may call it, the arguments that raise that scope,
+ * and the arguments that are not plain values. Counterpart keeps no tool or argument names of its own (PRD §8.0):
+ * a tool without a declaration (an older MCP) is raw, so only a device trusted with everything sees it.
  */
-export function callClass(tool: Pick<Tool, 'name' | 'annotations'>, args: Record<string, unknown>): RemoteClass {
-  const cls = toolClass(tool);
-  const starts = (tool.name === 'fusion_mcp_status' && args.launch === true) || (tool.name === 'blender_mcp_status' && args.connect === true);
-  return starts && RANK[cls] < RANK.design ? 'design' : cls;
-}
+export const REMOTE_META_KEY = 'counterpart/remote';
+export type ArgumentKind = 'config' | 'config-top' | 'path' | 'output';
+export interface RemoteDeclaration {scope: RemoteClass; raisedBy: Record<string, RemoteClass>; arguments: Record<string, ArgumentKind>}
+const KINDS: readonly ArgumentKind[] = ['config', 'config-top', 'path', 'output'];
+const isClass = (value: unknown): value is RemoteClass => typeof value === 'string' && (REMOTE_CLASSES as readonly string[]).includes(value);
 
-/**
- * Filled from the destination's own config, never the caller (whose values for these keys are refused):
- * the printer model and nozzle (bambu requires `bambu_model`), and for mcp-3D-printer-server its target printer.
- */
-export function injectedArguments(tool: Pick<Tool, 'inputSchema'>, selection: PrinterHandoffConfig['selection'],
-  backend: PrinterHandoffConfig['backend']): Record<string, unknown> {
-  const properties = tool.inputSchema.properties ?? {};
-  const nozzle = selection?.nozzleDiameterMm;
-  // As Counterpart's own calls do (counterpart.ts printerTarget): mcp-3D-printer-server is pointed at the
-  // destination's printer per call; bambu-printer-mcp takes its printer from its .env.
-  const target = backend === 'mcp-3d-printer-server' ? {host: selection?.host, type: selection?.printerType, port: selection?.port} : {};
+type DeclaredTool = Pick<Tool, 'name'> & {_meta?: Tool['_meta']};
+export function remoteDeclaration(tool: DeclaredTool): RemoteDeclaration {
+  const declared = tool._meta?.[REMOTE_META_KEY] as {scope?: unknown; raisedBy?: unknown; arguments?: unknown} | undefined;
+  const entries = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value) ? Object.entries(value) : [];
   return {
-    ...Object.fromEntries(Object.entries(target).filter(([key, value]) => value !== undefined && key in properties)),
+    scope: isClass(declared?.scope) ? declared.scope : 'raw',
+    raisedBy: Object.fromEntries(entries(declared?.raisedBy).filter(([, scope]) => isClass(scope))) as Record<string, RemoteClass>,
+    arguments: Object.fromEntries(entries(declared?.arguments).filter(([, kind]) => KINDS.includes(kind as ArgumentKind))) as Record<string, ArgumentKind>,
+  };
+}
+
+export function toolClass(tool: DeclaredTool): RemoteClass {
+  return remoteDeclaration(tool).scope;
+}
+
+/** The class of one call: the tool's class, raised by a true argument the MCP declares (`fusion_mcp_status` `launch`). */
+export function callClass(tool: DeclaredTool, args: Record<string, unknown>): RemoteClass {
+  const {scope, raisedBy} = remoteDeclaration(tool);
+  let cls = scope;
+  for (const [key, raised] of Object.entries(raisedBy)) if (args[key] === true && RANK[raised] > RANK[cls]) cls = raised;
+  return cls;
+}
+
+/**
+ * Filled from the destination's own config, never the caller (whose values for these arguments are refused):
+ * the printer model and nozzle, and the printer target Counterpart's own calls send (`routeArgs`).
+ */
+export function injectedArguments(tool: Pick<Tool, 'inputSchema'>, config: Pick<PrinterHandoffConfig, 'backend' | 'selection' | 'process'>): Record<string, unknown> {
+  const properties = tool.inputSchema.properties ?? {};
+  const selection = config.selection;
+  const nozzle = selection?.nozzleDiameterMm;
+  return {
+    ...Object.fromEntries(Object.entries(routeArgs(config as PrinterHandoffConfig)).filter(([key, value]) => value !== undefined && key in properties)),
     ...('bambu_model' in properties && selection?.model ? {bambu_model: selection.model} : {}),
     ...('nozzle_diameter' in properties && nozzle !== undefined ? {nozzle_diameter: String(nozzle)} : {}),
   };
@@ -87,15 +78,9 @@ export class ArgumentRefused extends Error {
   constructor(readonly argument: string, reason: string) { super(`Argument ${argument} refused: ${reason}`); }
 }
 
-/** The destination's .env chooses printer, account, hardware and programs. */
-const REFUSED_KEYS = new Set(['host', 'port', 'dev_ip', 'dev_id', 'bambu_serial', 'bambu_token', 'api_key', 'password', 'username',
-  'user_info', 'country_code', 'connection_type', 'connection_mode', 'route', 'bambu_model', 'nozzle_diameter', 'bridge_command',
-  'slicer_path', 'ffmpeg_path', 'plugin_dir', 'runtime_dir', 'template_dir', 'config_filename',
-  'bambu_network_method', 'use_ssl_for_mqtt', 'use_ssl_for_ftp', 'slicer_type', 'extra_options', 'nozzle_diameters',
-  'allow_mutating_method']);
-const refusedKey = (toolName: string, key: string, depth: number) =>
-  (REFUSED_KEYS.has(key) && !(key === 'route' && toolName === 'counterpart_print_route')) || /config_dir$/.test(key)
-  || (depth === 0 && key === 'type');
+/** The destination's configuration chooses this argument: a device may not set it. */
+const refused = (kinds: Record<string, ArgumentKind>, key: string, depth: number) =>
+  kinds[key] === 'config' || (depth === 0 && kinds[key] === 'config-top');
 
 /**
  * The tool as a remote device sees it: arguments it may not set (refused, or filled from the destination)
@@ -104,15 +89,13 @@ const refusedKey = (toolName: string, key: string, depth: number) =>
 export function remoteTool(tool: Tool): Tool {
   const copy = structuredClone(tool);
   const schema = copy.inputSchema;
+  const kinds = remoteDeclaration(tool).arguments;
   if (schema.properties) {
-    for (const key of Object.keys(schema.properties)) if (refusedKey(tool.name, key, 0)) delete schema.properties[key];
+    for (const key of Object.keys(schema.properties)) if (refused(kinds, key, 0)) delete schema.properties[key];
     if (Array.isArray(schema.required)) schema.required = schema.required.filter(key => key in schema.properties!);
   }
   return copy;
 }
-const PROFILE_KEYS = new Set(['filament_profile', 'slicer_profile', 'load_filaments', 'source_f3d']);
-const isPathKey = (key: string) => /(?:path|dir|directory|_file)$/.test(key) || PROFILE_KEYS.has(key);
-const isOutputKey = (key: string) => /^output_|^out_path$|^save_path$/.test(key);
 const pathLike = (value: string) => /[\\/]/.test(value) || value.startsWith('~') || value.includes('..') || value.includes('\0');
 
 export interface ArgumentPolicy {
@@ -141,10 +124,11 @@ async function confinedPath(argument: string, value: string, roots: string[], ow
 }
 
 /**
- * Checks a tool's (or prompt's) arguments before anything reaches the MCP. Writes, and every path a
- * non-read tool uses, stay in the device's own folder; read tools may also read the bundle store.
+ * Checks a tool's (or prompt's) arguments before anything reaches the MCP, by the kinds the MCP declares for it.
+ * Writes, and every path a non-read tool uses, stay in the device's own folder; read tools may also read the bundle
+ * store. A value that looks like a path is refused in any argument not declared a path.
  */
-export async function checkRemoteArguments(toolName: string, cls: RemoteClass, args: unknown, policy: ArgumentPolicy): Promise<void> {
+export async function checkRemoteArguments(kinds: Record<string, ArgumentKind>, cls: RemoteClass, args: unknown, policy: ArgumentPolicy): Promise<void> {
   // The bundle store is created lazily by the phone's first handoff; a remote device may come first.
   await mkdir(policy.bundleRoot, {recursive: true, mode: 0o700});
   const store = await realpath(policy.bundleRoot);
@@ -156,15 +140,15 @@ export async function checkRemoteArguments(toolName: string, cls: RemoteClass, a
     if (value && typeof value === 'object') {
       for (const [child, item] of Object.entries(value)) {
         const at = where ? `${where}.${child}` : child;
-        if (refusedKey(toolName, child, depth))
+        if (refused(kinds, child, depth))
           throw new ArgumentRefused(at, 'the printer configuration on the Mac chooses this');
         await visit(item, child, depth + 1, at);
       }
       return;
     }
     if (typeof value !== 'string') return;
-    if (key && isPathKey(key)) {
-      const roots = cls === 'read' && !isOutputKey(key) ? [own, store] : [own];
+    if (key && (kinds[key] === 'path' || kinds[key] === 'output')) {
+      const roots = cls === 'read' && kinds[key] !== 'output' ? [own, store] : [own];
       for (const part of value.split(/[;|]/)) await confinedPath(where, part.trim(), roots, own, join(store, 'remote'));
     } else if (pathLike(value)) throw new ArgumentRefused(where, 'file paths go only in path arguments');
   };
@@ -241,7 +225,8 @@ export async function createRemoteMcpServer(session: PrinterSession, caller: Rem
     const tool = visible().find(candidate => candidate.name === name);
     const cls = tool ? callClass(tool, args) : undefined;
     if (!tool || !cls || !caller.classes.has(cls)) return failure(`Tool ${name} is not available to this device.`);
-    try { await checkRemoteArguments(name, cls, args, policy); }
+    const kinds = remoteDeclaration(tool).arguments;
+    try { await checkRemoteArguments(kinds, cls, args, policy); }
     catch (error) { if (error instanceof ArgumentRefused) return failure(error.message); throw error; }
     let release: (() => void) | undefined;
     const stopQuestions = watchQuestions();
@@ -250,10 +235,10 @@ export async function createRemoteMcpServer(session: PrinterSession, caller: Rem
       if (cls !== 'read') release = options.admit?.();
       // No signal: a dispatched call runs to its own timeout even if the remote client goes away,
       // so a closed socket never quarantines the session the app shares.
-      return await session.call(name, {...args, ...injectedArguments(tool, session.config.selection, session.backend)}, {
+      return await session.call(name, {...args, ...injectedArguments(tool, session.config)}, {
         exclusive: true, forwardResult: true, lockTimeoutMs, timeoutMs: options.toolTimeoutMs ?? 120_000, elicitationContext: context,
         // After the mutex and right before dispatch: the device, and its paths (nothing may have moved since).
-        beforeDispatch: async () => { await caller.reauthorize(cls); await checkRemoteArguments(name, cls, args, policy); },
+        beforeDispatch: async () => { await caller.reauthorize(cls); await checkRemoteArguments(kinds, cls, args, policy); },
       }) as CallToolResult;
     } catch (error) {
       if (error instanceof ArgumentRefused) return failure(error.message);
@@ -287,7 +272,7 @@ export async function createRemoteMcpServer(session: PrinterSession, caller: Rem
       // Checked after the mutex, right before the request, as for tools.
       beforeDispatch: async () => { await caller.reauthorize('read'); await check?.(); }});
   const checkPromptArgs = async (args: Record<string, string> | undefined) => {
-    try { await checkRemoteArguments('', 'read', args ?? {}, policy); }
+    try { await checkRemoteArguments({}, 'read', args ?? {}, policy); }
     catch (error) { if (error instanceof ArgumentRefused) throw rpcError(ErrorCode.InvalidParams, error.message); throw error; }
   };
   if (upstream.prompts) {

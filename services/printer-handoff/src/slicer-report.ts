@@ -1,43 +1,31 @@
 /**
- * Bambu Studio's own verdict on a slice. bambu-printer-mcp's `slice_stl` returns the CLI's
- * `<outputdir>/result.json`, parsed verbatim, as `structuredContent.slicer_result`; an older MCP
- * returns only the path, and then there is no report.
- *
- * result.json carries `return_code` (0 on success), `error_string`, and per plate
- * `sliced_plates[].warning_message`: the words Studio shows the user, such as "It seems object
- * x.stl has floating cantilever. Please re-orient the object or enable support generation."
+ * The printer MCP's verdict on a slice: `slicer_report` in a slicing tool's structured content (bambu-printer-mcp
+ * 1.1.64+, mcp-3d-printer-server 1.2.42+), read from the slicer's own result. Counterpart never reads the slicer's
+ * formats (PRD §8.0 item 9).
  */
 export interface SlicerReport {
-  /** Studio refused the slice: nothing may be printed from it. */
+  /** The slicer refused the slice: nothing may be printed from it. */
   failed: boolean;
-  /** Studio's own words, verbatim: the error and its plates' messages, or the warnings of a slice that worked. */
+  /** The slicer's own words, verbatim: the error and its plates' messages, or the warnings of a slice that worked. */
   message?: string;
-  /** Number of distinct output plates explicitly identified by the slicer. */
+  /** Number of distinct output plates the slicer identified. */
   plateCount?: number;
 }
 
-const MAX_MESSAGE = 2000;
+const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-// Line breaks stay (Studio lists one empty layer per line); other control characters go.
-const clean = (text: string) => text.replace(/\r\n?/g, '\n').replace(/[\x00-\x09\x0b-\x1f\x7f]/g, ' ').trim();
-
-/** The report in a `slice_stl` result's structured content, or undefined when the MCP gave none. */
+/** The report in a slicing result's structured content, or undefined when the MCP gave none. */
 export function slicerReport(structuredContent: unknown): SlicerReport | undefined {
-  const result = record(structuredContent) ? structuredContent.slicer_result : undefined;
-  if (!record(result)) return undefined;
-  const plates = Array.isArray(result.sliced_plates) ? result.sliced_plates : [];
-  const ids = plates.map(plate => record(plate) ? plate.id : undefined);
-  const plateCount = ids.length && ids.every(id => typeof id === 'number' && Number.isSafeInteger(id) && id > 0)
-    ? new Set(ids).size : undefined;
-  const warnings = plates.map(plate => record(plate) && typeof plate.warning_message === 'string' ? clean(plate.warning_message) : '')
-    .filter(Boolean);
-  // Anything but Studio's success code fails closed, a missing one included.
-  const failed = result.return_code !== 0;
-  const error = typeof result.error_string === 'string' ? clean(result.error_string) : '';
-  const words = [...new Set([...(failed && error ? [error] : []), ...warnings])].join('\n').slice(0, MAX_MESSAGE);
-  if (failed) return {failed, message: words || `Bambu Studio could not slice this model (return code ${String(result.return_code)}).`};
-  return {failed, ...(words ? {message: words} : {}), ...(plateCount ? {plateCount} : {})};
+  // String keys: services/companion/tests/mcp-contract.test.mjs holds every MCP name the app reads to the contract doc.
+  const report = record(structuredContent) ? structuredContent['slicer_report'] : undefined;
+  if (!record(report) || typeof report.failed !== 'boolean') return undefined;
+  const message = typeof report.message === 'string' && report.message.trim() ? report.message.slice(0, 2000) : undefined;
+  const plates = report['plate_count'];
+  return {failed: report.failed, ...(message ? {message} : {}),
+    ...(typeof plates === 'number' && Number.isSafeInteger(plates) && plates > 0 ? {plateCount: plates} : {})};
+}
+
+/** A slicing result from an MCP that passes the slicer's result.json but not yet its verdict: Update. */
+export function lacksSlicerReport(structuredContent: unknown): boolean {
+  return record(structuredContent) && structuredContent['slicer_result'] !== undefined && structuredContent['slicer_report'] === undefined;
 }

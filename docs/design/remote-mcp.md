@@ -18,7 +18,7 @@ There is no new listener, port, auth system or MCP process.
 
 New:
 - a stateless Streamable HTTP route;
-- five scopes and the class table;
+- five scopes and the classes the MCPs declare;
 - an argument policy;
 - remote attribution on questions;
 - a `pair-mcp` command;
@@ -102,36 +102,19 @@ Transport:
 | `mcp:print` | `print` tools: start a print, upload a file, delete printer files |
 | `mcp:raw` | `raw` tools: arbitrary RPC, G-code or code, and tools with no annotations. Off unless chosen at pairing |
 
-Classes rank `read < design < control < print < raw`. A tool's class is worked out in this order:
+Classes rank `read < design < control < print < raw`. Each printer MCP declares every tool's class in its
+`_meta["counterpart/remote"]` (bambu-printer-mcp 1.1.64+, mcp-3d-printer-server 1.2.42+; PRD §8.0 item 5), so a new tool
+or argument needs no Counterpart release:
+- `scope` is the tool's class. A tool without a declaration (an older MCP) is `raw`. Counterpart reads no tool names
+  or annotations.
+- `raisedBy` names boolean arguments that raise one call's class: `fusion_mcp_status` with `launch: true` and
+  `blender_mcp_status` with `connect: true` start a program, so those calls count as `design`. A call is never lowered.
 
-1. **Override.** Counterpart's own call sites (`printer-handoff/src`, `companion/src`) set the class for these tools:
-   - read: `get_printer_status`, `get_printer_filaments`, `inspect_print_file`, `counterpart_printer_info`,
-     `counterpart_print_progress`, `camera_snapshot`, `get_stl_info`, `confirm_temperatures`, `blender_mcp_status`,
-     `fusion_mcp_status`;
-   - design: `slice_stl`, `lay_flat`, `counterpart_make_3mf`;
-   - control: `pause_print`, `resume_print`, `cancel_print`, `clear_hms_errors`, `counterpart_print_route` (it can
-     change the route);
-   - print: `print_3mf`;
-   - raw: `save_template`, which copies into the MCP's global template registry, outside any folder a device may write.
-2. **Annotations**, for all other tools:
-   - neither `readOnlyHint` nor `destructiveHint` set → `raw`;
-   - `readOnlyHint: true` → `read`;
-   - `destructiveHint: false` and `openWorldHint: false` → `design`;
-   - `destructiveHint: false` → `control`;
-   - otherwise → `print`.
-3. **Name floors.** These raise the class from steps 1–2 and never lower it:
-   - `raw`: `*_call`, `*_rpc`, `*gcode*`, `*native_control*`, `blender_mcp_edit_model`;
-   - at least `print`: `upload_*`, `start_*`, `print_*`, `delete_*`, `process_and_print_*`;
-   - at least `control`: `set_*`, `clear_*`, `pause_*`, `resume_*`, `cancel_*`, `skip_*`, `reread_*`.
-
-4. **Per call.** `fusion_mcp_status` with `launch: true` and `blender_mcp_status` with `connect: true` start a program,
-   so those calls count as at least `design`.
+The declarations equal the class table Counterpart kept by hand before (overrides, then annotations, then name floors)
+on every tool both MCPs list. The name floors now live in the MCPs' own tests (`tests/tool-annotations.test.mjs`).
 
 `tools/list` shows only the tools the device's scopes allow. Any other `tools/call` gets "tool not available", whether
 or not the tool exists.
-
-Until the annotation PRs land, a device sees the overrides plus the few tools that are already annotated. **The
-annotation threads need this table.** Local, non-destructive design tools need `openWorldHint: false`.
 
 Granting `mcp:print` means **unattended printing**. David decided there is no ordinary "needs a yes before printing"
 prompt ("Decisions already made"). A print asks only when the MCP itself asks, for example when the deployment sets
@@ -143,45 +126,31 @@ remote prints should always ask.
 This applies to `tools/call` and `prompts/get` arguments, at any depth. A refusal is an MCP tool error naming the
 argument, and nothing reaches the MCP.
 
-1. **Refused keys.** The destination's `.env` chooses printer, account, hardware and programs, so these keys are
-   refused:
-   - `host`, `port`, `dev_ip`, `dev_id`, `bambu_serial`, `bambu_token`, `api_key`, `password`, `username`,
-     `user_info`, `country_code`;
-   - `connection_type`, `connection_mode`, `route` (except `counterpart_print_route`, which is `control`);
-   - `bambu_network_method`, `use_ssl_for_mqtt`, `use_ssl_for_ftp`, `allow_mutating_method`;
-   - `bambu_model`, `nozzle_diameter`, `nozzle_diameters`, `bridge_command`;
-   - `slicer_path`, `slicer_type`, `extra_options`, `ffmpeg_path`, `plugin_dir`, `runtime_dir`, `template_dir`,
-     `*config_dir`, `config_filename`;
-   - `type` at the top level.
+1. **Refused keys.** The destination's `.env` chooses the printer, account, hardware and programs. The MCP declares
+   those arguments `config` (refused at any depth) or `config-top` (refused as a top-level argument: the printer
+   `type`), and they are left out of the schema a device sees. A tool that forwards an open object (an RPC payload,
+   another server's tool arguments) declares every configuration name.
 
    **Injected.** When a tool's schema takes `bambu_model` or `nozzle_diameter`, the route fills them from the
    destination's `selection` after the check, because bambu-printer-mcp requires `bambu_model` on `slice_stl`,
-   `inspect_print_file` and `print_3mf`. For mcp-3D-printer-server it also fills `host`, `type` and `port`, as
-   Counterpart's own calls do (`counterpart.ts` `printerTarget`), so a remote call reaches the same printer. The caller
-   cannot set any of them.
-2. **Path keys.** A key is a path key if it ends in `path`, `dir`, `directory` or `_file`, or is one of
-   `filament_profile`, `slicer_profile` or `load_filaments`. Its value is split on `;`, and every part must meet all of
-   these:
+   `inspect_print_file` and `print_3mf`. It also fills the printer target Counterpart's own calls send
+   (`counterpart.ts` `routeArgs`), so a remote call reaches the same printer. The caller cannot set any of them.
+2. **Path keys.** The MCP declares the arguments that are files it reads (`path`) or writes (`output`). A path value is
+   split on `;`, and every part must meet all of these:
    - be absolute, with no `~` and no `..` segment;
    - have its parent directory's `realpath` plus basename land inside the allowed root;
    - not be a symlink, if it already exists.
 3. **Allowed roots:**
-   - **writes:** output keys (`output_*`, `out_path`, `save_path`) and every path argument of a non-`read` tool go only to
+   - **writes:** `output` arguments and every path argument of a non-`read` tool go only to
      `<bundle store>/remote/<deviceId>/`, created with mode 0700 on first use. Nothing a remote device writes can
      replace a bundle or manifest that the phone or ObjectService prints;
-   - **reads:** non-output path arguments of `read` tools may also point anywhere in the bundle store.
+   - **reads:** `path` arguments of `read` tools may also point anywhere in the bundle store.
 4. **Path-like text elsewhere is refused.** This covers any other string value containing `/` or `\`, starting with
    `~`, or containing `..`, such as `"boolean_union:/outside/model.stl"`.
 5. **Resources:** `resources/read` accepts only URIs from the upstream's `resources/list`. Templates aren't passed
    through, because `printer://{host}/…` would let a caller choose the host.
 
-**Schema walk.** A test walks every input-schema key in both upstream `origin/main:src/index.ts` files and fails on any
-key that isn't refused, a path, injected, or on a known-plain list.
-- **Where it runs:** it runs where the sibling repos are checked out (the Mac), and is skipped visibly where they aren't
-  (the Linux CI boxes).
-- **What it catches:** a new upstream key fails it until someone classes the key.
-- **What it misses:** implicit writes that aren't in any argument, such as `save_template`'s registry. Those are handled
-  by class (raw).
+**Prompts** carry no declarations: their arguments get rule 4 only.
 
 ## Confirmations
 
@@ -245,12 +214,12 @@ remote-auth-cli.js pair-mcp <directory> [login] <scope>...
 ## Tests (`services/companion/tests/remote-mcp.test.mjs`)
 
 The tests use the SDK's `StreamableHTTPClientTransport` against `startCompanionServer` on loopback, with a fake stdio
-MCP. The fake has annotated, unannotated, raw-named and eliciting tools, a prompt and a resource. They cover:
+MCP. The fake has declared, undeclared, raw and eliciting tools, a prompt and a resource. They cover:
 
 - **Authentication:** no token, wrong login, a revoked token and a missing `mcp:read` scope are refused. A token revoked
   while its call is queued doesn't dispatch.
-- **Scopes:** `tools/list` is filtered, and calls outside scope are refused. An unannotated tool and a raw-named tool
-  are off without `mcp:raw`. A name floor overrides a mild annotation.
+- **Scopes:** `tools/list` is filtered, and calls outside scope are refused. An undeclared tool and a raw tool are off
+  without `mcp:raw`. An annotation never sets a class; the declaration does.
 - **Arguments:** refused keys are refused (`host`, `route`, `bridge_command`), along with relative paths, `..`, a `;`
   list escape, an embedded path in text, a symlinked final component, and a `design` write outside the device folder.
 - **Confirmations:** a question is tagged with the device, the asking device can't answer it, and a phone's answer
@@ -271,6 +240,4 @@ MCP. The fake has annotated, unannotated, raw-named and eliciting tools, a promp
    exists, remote questions are cancelled at once.
 3. **Should remote prints always ask on the phone,** even though Counterpart's own prints don't? That would be a new
    rule, so it isn't added.
-4. **The class table** should go to the annotation threads, especially the name floors and `openWorldHint: false` →
-   design.
-5. **Getting a model into a device's folder** from a cloud session (an upload route) isn't built.
+4. **Getting a model into a device's folder** from a cloud session (an upload route) isn't built.

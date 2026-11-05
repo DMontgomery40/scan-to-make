@@ -6,6 +6,29 @@ import {CallToolRequestSchema, GetPromptRequestSchema, ListToolsRequestSchema} f
 import {appendFileSync, readFileSync, writeFileSync, mkdtempSync, rmSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
 import {tmpdir} from 'node:os';
+import {unzipSync, strFromU8} from 'fflate';
+
+// What both MCPs say about a slice (bambu-printer-mcp 1.1.63 / mcp-3d-printer-server 1.2.36), as a stand-in:
+// the slicer's verdict, and inspect_print_file's `sliced` plate count and estimate of the file.
+function verdict(result) {
+  const plates = Array.isArray(result.sliced_plates) ? result.sliced_plates : [];
+  const warnings = plates.map(plate => typeof plate.warning_message === 'string' ? plate.warning_message.replace(/\r\n?/g, '\n').replace(/[\x00-\x09\x0b-\x1f\x7f]/g, ' ').trim() : '').filter(Boolean);
+  const failed = result.return_code !== 0;
+  const words = [...new Set([...(failed && result.error_string ? [result.error_string] : []), ...warnings])].join('\n');
+  const ids = new Set(plates.map(plate => plate.id).filter(id => Number.isSafeInteger(id) && id > 0));
+  return {failed, ...(words ? {message: words} : failed ? {message: `The slicer could not slice this model (return code ${result.return_code}).`} : {}), ...(!failed && ids.size ? {plate_count: ids.size} : {})};
+}
+function facts(bytes, plateIndex) {
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return {plate_count: 1, settings: {}};
+  let files = {};
+  try { files = unzipSync(bytes); } catch { return {settings: {}}; }
+  const plates = Object.keys(files).filter(name => /^Metadata\/plate_[1-9]\d*\.gcode$/.test(name)).length;
+  const info = files['Metadata/slice_info.config'] ? strFromU8(files['Metadata/slice_info.config']) : '';
+  const plate = (info.match(/<plate>[\s\S]*?<\/plate>/g) ?? []).find(block => block.includes(`key="index" value="${plateIndex + 1}"`));
+  const value = key => { const found = plate?.match(new RegExp(`key="${key}" value="([\\d.]+)"`))?.[1]; return found ? Number(found) : undefined; };
+  const seconds = value('prediction'), grams = value('weight');
+  return {...(plates ? {plate_count: plates} : {}), ...(seconds || grams ? {estimate: {...(seconds ? {seconds} : {}), ...(grams ? {grams} : {})}} : {}), settings: {}};
+}
 
 const ephemeral = process.env.HANDOFF_FIXTURE_EPHEMERAL === '1' ? mkdtempSync(join(tmpdir(), 'fixture-printer-output-')) : undefined;
 if (ephemeral) {
@@ -143,12 +166,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   if (name === 'slice_stl') {
     // A real Bambu Studio result.json, returned as bambu-printer-mcp's slicer_result (verbatim).
     const slicerResult = process.env.HANDOFF_FIXTURE_SLICER_RESULT ? JSON.parse(readFileSync(process.env.HANDOFF_FIXTURE_SLICER_RESULT, 'utf8')) : undefined;
-    if (slicerResult && slicerResult.return_code !== 0) return {isError: true, structuredContent: {slicer_result: slicerResult},
+    // slicer_report, the verdict both MCPs give beside it since 1.1.63 / 1.2.36 (HANDOFF_FIXTURE_NO_SLICER_REPORT: an older MCP).
+    const report = slicerResult && process.env.HANDOFF_FIXTURE_NO_SLICER_REPORT !== '1' ? {slicer_report: verdict(slicerResult)} : {};
+    if (slicerResult && slicerResult.return_code !== 0) return {isError: true, structuredContent: {slicer_result: slicerResult, ...report},
       content: [{type: 'text', text: `Slicer failed: the slicer exited with code 156 (${slicerResult.error_string} [${slicerResult.return_code}]). Command failed: /Applications/BambuStudio.app/Contents/MacOS/BambuStudio --slice 0`}]};
     const path = join(directory, mode === 'generic-gcode' ? 'sliced.gcode' : 'sliced.3mf');
     writeFileSync(path, process.env.HANDOFF_FIXTURE_SLICED_FILE ? readFileSync(process.env.HANDOFF_FIXTURE_SLICED_FILE)
       : path.endsWith('.3mf') ? `fixture 3mf ${Date.now()}-${Math.random()}` : `; fixture gcode ${Date.now()}-${Math.random()}\n`);
-    return slicerResult ? {...text(path), structuredContent: {path, slicer_result: slicerResult}} : text(path);
+    return slicerResult ? {...text(path), structuredContent: {path, slicer_result: slicerResult, ...report}} : text(path);
   }
   if (name === 'inspect_print_file') {
     // As bambu-printer-mcp 1.1.60 / mcp-3d-printer-server 1.2.34: the exact file's hash, and its G-code preview when asked.
@@ -158,7 +183,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const preview = args.include_preview === true && process.env.HANDOFF_FIXTURE_PREVIEW !== 'none' ? {artifact_sha256: sha256, plate_index: args.plate_index ?? 0, mm_per_pixel: 0.125,
       views: [{name: 'top', label: 'Top, as it sits on the bed', png_base64: png, width: 1, height: 1}, {name: 'bed_side', label: 'Bed side, turned over toward you', png_base64: png, width: 1, height: 1}]} : undefined;
     return text({receipt_version: '1', dispatchAuthorized: false, artifact: {sha256}, selection: {bambu_model: args.bambu_model, plate_index: args.plate_index ?? 0},
-      inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}, ...(preview ? {preview} : {})});
+      inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}, ...(process.env.HANDOFF_FIXTURE_NO_SLICED_FACTS === '1' ? {} : {sliced: facts(readFileSync(args.file_path), args.plate_index ?? 0)}), ...(preview ? {preview} : {})});
   }
   if (name === 'confirm_temperatures') return text({compatible: true, peakNozzleTempC: 220});
   if (name === 'counterpart_print_route') {

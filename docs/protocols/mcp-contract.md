@@ -36,12 +36,16 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `timeout_ms` `max_bytes` `max_width` `min_change` `changed_only` `idle_timeout_ms` `since_seq` `wait_ms` `fps` | camera |
 | `angle_x` `angle_y` `angle_z` `scale_x` `scale_y` `scale_z` | rotate and scale |
 | `include_preview` `bed_side` | `inspect_print_file`'s preview of the exact sliced file: asked for with `include_preview`; the `top` and `bed_side` views are shown as they are. The app checks its `artifact_sha256` against the file and the PNG signature, never the G-code |
+| `slicer_report` `plate_count` `layer_height_mm` `sparse_infill_percent` `wall_loops` `layer_count` `slicer_result` | what the app reads about a slice, all from the MCP (bambu-printer-mcp 1.1.64+, mcp-3d-printer-server 1.2.42+; §8.0 #8, #9): a slicing result's `slicer_report` (`failed`, `message`, `plate_count`; a result with `slicer_result` and no `slicer_report` is an MCP to update) and `inspect_print_file`'s `sliced` (`plate_count`, `estimate` `seconds`/`grams`, `settings`). The app keeps no slice cache: the MCPs reuse identical slices |
 | `source_path` `raw_key_count` | `get_slice_settings`'s argument and the result field compared, with `summary`, between a designer's 3MF and a copy's edit of it: the app checks the two reports match, never what's in them |
 | `tool_name` `user_prompt` `arguments` `code` | `blender_mcp_call` |
 | `launch` | `fusion_mcp_status` |
 | `document_id` `source_f3d` `bind_document` `close_document` `document_binding` | Fusion document binding |
 | `addon_version` `after_install` `blender_version` `protocol_version` `expected_protocol_version` `up_to_date` | Blender add-on install and repair, **§8.0 #11** |
-| `allow_mutating_method` `api_key` `bambu_network_method` `bambu_serial` `bambu_token` `bridge_command` `config_filename` `connection_mode` `connection_type` `country_code` `dev_id` `dev_ip` `extra_options` `ffmpeg_path` `plugin_dir` `runtime_dir` `save_template` `slicer_path` `template_dir` `use_ssl_for_ftp` `use_ssl_for_mqtt` `user_info` | arguments the remote-MCP scope table inspects, **§8.0 #5** |
+
+## Remote devices (`/v1/mcp`)
+
+Which tools a paired device may call, and which of their arguments it may set, come from each tool's `_meta["counterpart/remote"]` (bambu-printer-mcp 1.1.64+, mcp-3d-printer-server 1.2.42+): `scope` (`read` < `design` < `control` < `print` < `raw`), `raisedBy` (a true argument that needs a higher scope) and `arguments` (`config` and `config-top`: the destination's configuration chooses it; `path`, `output`: a file read or written). `services/printer-handoff/src/remote-mcp.ts` keeps no tool or argument names: a tool without a declaration is `raw`. Prompt arguments get the generic check only (no path-looking values outside path arguments).
 
 ## File metadata the app parses
 
