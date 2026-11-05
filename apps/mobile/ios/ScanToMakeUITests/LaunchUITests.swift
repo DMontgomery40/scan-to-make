@@ -61,7 +61,9 @@ final class ProjectScreensUITests: XCTestCase {
         field.tap()
         field.typeText("Cable")
         XCTAssertTrue(summary.waitForExistence(timeout: 5))
-        app.swipeUp()
+        // The iPad list occupies the sidebar; swipe the list itself, not the empty detail pane.
+        let list = app.collectionViews.firstMatch.exists ? app.collectionViews.firstMatch : app.scrollViews.firstMatch
+        list.swipeUp()
         XCTAssertTrue(field.isHittable, "scrolling cannot hide the active search")
         app.buttons["show-all-projects"].tap()
     }
