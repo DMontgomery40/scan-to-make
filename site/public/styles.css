@@ -446,3 +446,15 @@ mark { background: var(--orange-wash); color: inherit; border-radius: 2px; paddi
   .wwp { grid-template-columns: 1fr; }
   .wwp figure.tall { max-width: 15rem; }
 }
+
+/* Start with these: the starter catalog's two designer projects */
+.starters { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+.starters li { max-width: none; overflow: hidden; padding: 0; display: flex; flex-direction: column; }
+.starters img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #e9e9ec; }
+.starters li div { padding: 1.3rem 1.5rem 1.6rem; }
+.starters h3 { font-size: 1.5rem; margin-bottom: .2rem; }
+.starters .by { margin: 0 0 .7rem; font-weight: 600; color: var(--ink-soft); font-size: .95rem; }
+.starters p { margin: 0; color: var(--ink-soft); }
+.brands-line { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .6rem; }
+.brands-line li { max-width: none; padding: .55rem 1.1rem; border-radius: 999px; font-weight: 600; background: var(--glass-strong); border: 1px solid var(--glass-rim); box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow); }
+@media (max-width: 640px) { .starters { grid-template-columns: 1fr; } }

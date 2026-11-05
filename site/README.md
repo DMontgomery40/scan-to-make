@@ -36,8 +36,8 @@ buttons, meets WCAG AA in both palettes.
 
 ## Keeping it true
 
-- **Real screens vs mockups.** Every image from `docs/design/overhaul/screens` is a design mockup and is labelled
-  "Mockup" on the page. Real captures, from `~/scan-to-make-work/` on the Mac:
+- **Screens.** A few UI-only images (pairing, printers, settings) come from `docs/design/overhaul/screens`. The rest are
+  real captures, from `~/scan-to-make-work/` on the Mac:
   - `mac-what-will-print.jpg`: `mac-202611050844/print-sheet-what-will-print.png` (installed Mac app, Nov 5).
   - `linux-what-will-print.jpg`: `android-linux-20261105/linux-caliper-preview-enabled.png`, Xvfb margin cropped
     (agents-136 engineering check with a P1S, `linux-receipt.txt`). Never use `linux-add-printer.png`: it shows the
@@ -53,8 +53,12 @@ buttons, meets WCAG AA in both palettes.
   Mockups that show sample objects (cable clip, crochet potato, sample mic mount) are not used; only UI-only mockups
   (pairing, printers, settings) remain. Replace a real screen with a newer real one when the app changes; say on the
   page what it is.
-- **Status words follow PRD §0.** Every "tested" or "not yet tested" line on the pages matches the PRD's status table and
-  the receipts above. Change them in the same PR that changes the PRD.
+- **Written for people who print things.** Plain, confident product copy: no test-status notes, no "real screen" or
+  "mockup" captions, no tool names, code, versions, paths or internals tables. Beta status is one line in Downloads.
+  Claims still have to be true of what's on main (PRD §0).
+- **Start with these** shows the starter catalog's designer projects
+  (`packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/catalog.json`): the scan platform's picture loads from
+  the same address the apps use; `made/vernier-caliper.png` is the catalog's `vernier.png`.
 - **Icons** are made from `apps/mobile/ios/ScanToMake/Images.xcassets/AppIcon.appiconset/AppIcon-1024.png` (also
   `docs/brand/counterpart-icon-1024.png`). Remake them if the app icon changes.
 - **Only describe what's on main.** Features in open pull requests go in when they merge.
