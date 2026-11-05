@@ -255,6 +255,16 @@ struct SocketObjects: ObjectsCompanion {
     /// In sidebar order.
     var ordered: [Project] { groups.flatMap(\.objects) }
 
+    /// The sidebar with a search applied, and how many projects the search leaves out. The sidebar says that number
+    /// out loud: on Nov 5 a search left in the field showed 1 of 10 projects and nothing said the rest were hidden.
+    func groups(matching query: String) -> (groups: [(group: ProjectGroup, objects: [Project])], hidden: Int) {
+        let shown = groups.compactMap { entry -> (group: ProjectGroup, objects: [Project])? in
+            let matches = entry.objects.filter { $0.matchesSearch(query, additional: [printer(for: $0)?.name ?? ""]) }
+            return matches.isEmpty ? nil : (entry.group, matches)
+        }
+        return (shown, objects.count - shown.reduce(0) { $0 + $1.objects.count })
+    }
+
     /// The phone people know, for the footer: the most recently seen paired device, one row per name.
     /// The phone heard from most recently; a pairing from before stable identity is never the one shown.
     var latestDevice: ControlDevice? { devices.filter { $0.legacy != true }.max { $0.seenAt < $1.seenAt } }

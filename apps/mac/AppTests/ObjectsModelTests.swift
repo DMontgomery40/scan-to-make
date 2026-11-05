@@ -507,6 +507,32 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.selection, "w", "the first row in the sidebar is shown first")
     }
 
+    /// Nov 5: "caliper card" left in the search showed 1 of 10 projects and nothing said the rest were hidden.
+    func testASearchSaysHowManyProjectsItHides() async {
+        let companion = FakeObjects()
+        await companion.set([item("c", "confirmed", ["title": "Caliper card logo", "outcome": "works"]),
+                             item("v", "confirmed", ["title": "Vernier caliper print", "outcome": "works"]),
+                             item("s", "ready", ["title": "Stove gap filler"]), item("a", "printed", ["title": "Old pick"])])
+        await companion.setCapabilities(.init(objectsCreate: true, projectSettings: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let archived = await model.setArchived(true, for: "a")
+        XCTAssertTrue(archived)
+        XCTAssertEqual(model.groups.last?.group, .archived)
+        let narrowed = model.groups(matching: "caliper card")
+        XCTAssertEqual(narrowed.groups.flatMap { $0.objects.map(\.id) }, ["c"])
+        XCTAssertEqual(narrowed.hidden, 3, "every project the search leaves out is counted, archived ones too")
+        XCTAssertEqual(model.groups(matching: "caliper").hidden, 2)
+        let none = model.groups(matching: "zzz")
+        XCTAssertTrue(none.groups.isEmpty)
+        XCTAssertEqual(none.hidden, 4)
+        for query in ["", "  "] {
+            let all = model.groups(matching: query)
+            XCTAssertEqual(all.hidden, 0, "no search hides nothing")
+            XCTAssertEqual(all.groups.map(\.group), model.groups.map(\.group))
+        }
+    }
+
     func testANewProjectWaitsForACompanionThatCanStartOne() async {
         let model = ObjectsModel(companion:FakeObjects())
         await model.refresh()
