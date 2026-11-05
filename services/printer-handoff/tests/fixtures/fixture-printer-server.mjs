@@ -78,7 +78,7 @@ const tools = [
   // HANDOFF_FIXTURE_OWN_PROCESS: get_slice_settings' own_process (true, false), none of it (absent) or a tool error;
   // HANDOFF_FIXTURE_OWN_PROCESS_ARGS=old: an MCP that takes only source_path, template_name, slicer_type and bambu_model.
   ...(process.env.HANDOFF_FIXTURE_OWN_PROCESS ? [{name: 'get_slice_settings', inputSchema: {type: 'object', additionalProperties: false,
-    properties: {source_path: string, template_name: string, slicer_type: string, bambu_model: string,
+    properties: {source_path: string, template_name: string, slicer_type: string, bambu_model: string, nozzle_diameter: string,
       ...(process.env.HANDOFF_FIXTURE_OWN_PROCESS_ARGS === 'old' ? {} : {slicer_profile: string, template_3mf_path: string, layer_height: number,
         wall_loops: integer, sparse_infill_density: string, quality: string, strength: string, enable_support: bool, support_type: string})}}}] : []),
   ...(mode === 'bambu' ? [

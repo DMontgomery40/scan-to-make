@@ -836,14 +836,14 @@ test("a designer's 3MF prints with its own process only when the MCP says so, as
   };
   const yes = await ask('true');
   assert.equal(yes.own, true);
-  assert.deepEqual(yes.calls[0].arguments, {source_path: yes.calls[0].arguments.source_path, bambu_model: 'p1s'}, 'the bambu_model a slice sends');
+  assert.deepEqual(yes.calls[0].arguments, {source_path: yes.calls[0].arguments.source_path, bambu_model: 'p1s', nozzle_diameter: '0.4'}, 'the bambu_model and nozzle a slice sends');
   assert.equal((await ask('false')).own, false);
   assert.equal((await ask('error')).own, false, 'settings the MCP cannot read: slicing uses the preset');
   assert.equal((await ask('absent')).own, undefined, 'an MCP that does not say: unknown, never guessed');
   // This printer's own slice arguments go to the MCP as slice_stl takes them; the MCP decides, the app passes them on.
   const named = await ask('true', {profile: '/p/mine.json', templateName: 'house', layerHeightMm: 0.2, wallLoops: 3, sparseInfillDensity: '20%', quality: 'fine', strength: 'strong'});
   assert.equal(named.own, false);
-  assert.deepEqual(named.calls[0].arguments, {source_path: named.calls[0].arguments.source_path, bambu_model: 'p1s', slicer_profile: '/p/mine.json', template_name: 'house',
+  assert.deepEqual(named.calls[0].arguments, {source_path: named.calls[0].arguments.source_path, bambu_model: 'p1s', nozzle_diameter: '0.4', slicer_profile: '/p/mine.json', template_name: 'house',
     layer_height: 0.2, wall_loops: 3, sparse_infill_density: '20%', quality: 'fine', strength: 'strong'});
   for (const slicer of [{profile: '/p/mine.json'}, {layerHeightMm: 0.2}, {strength: 'strong'}])
     assert.equal((await ask('true', slicer)).own, false, `the MCP says this printer's ${Object.keys(slicer)[0]} changes the file's process`);
@@ -852,7 +852,7 @@ test("a designer's 3MF prints with its own process only when the MCP says so, as
   const supported = await setup(t, {ownProcess: 'true'});
   assert.equal(await supported.runner.ownProcess({modelPath: supported.stlPath, slicer: {enableSupport: true, supportType: 'tree(auto)'}}), false);
   assert.deepEqual((await supported.calls()).find(call => call.tool === 'get_slice_settings').arguments,
-    {source_path: supported.stlPath, bambu_model: 'p1s', enable_support: true, support_type: 'tree(auto)'});
+    {source_path: supported.stlPath, bambu_model: 'p1s', nozzle_diameter: '0.4', enable_support: true, support_type: 'tree(auto)'});
   // An MCP that can't take one of this printer's arguments would answer for another slice: unknown.
   const old = await setup(t, {ownProcess: 'true', ownProcessArgs: 'old', slicer: {layerHeightMm: 0.2}});
   assert.equal(await old.runner.ownProcess({modelPath: old.stlPath}), undefined);

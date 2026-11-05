@@ -227,6 +227,7 @@ export class PrinterHandoffRunner {
     const selection: PrinterSelection = {...this.#config.selection, ...input.selection};
     // The config's own values, under the names slice_stl takes (as sliceArgs in run), passed through as they are.
     const sliceArgs: Record<string, unknown> = Object.fromEntries(Object.entries({slicer_type: slicer.type, bambu_model: selection.model,
+      nozzle_diameter: selection.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
       slicer_profile: slicer.profile, template_name: slicer.templateName, layer_height: slicer.layerHeightMm, wall_loops: slicer.wallLoops,
       sparse_infill_density: slicer.sparseInfillDensity, quality: slicer.quality, strength: slicer.strength,
       enable_support: slicer.enableSupport, support_type: slicer.supportType}).filter(([, value]) => value !== undefined));
@@ -236,7 +237,7 @@ export class PrinterHandoffRunner {
       if (!session.hasTool('get_slice_settings')) return undefined;
       // An MCP that can't take one of them would answer for another slice than Print's.
       const properties = session.getTool('get_slice_settings').inputSchema.properties ?? {};
-      if (Object.keys(sliceArgs).some(key => key !== 'slicer_type' && key !== 'bambu_model' && !Object.hasOwn(properties, key))) return undefined;
+      if (Object.keys(sliceArgs).some(key => !['slicer_type', 'bambu_model', 'nozzle_diameter'].includes(key) && !Object.hasOwn(properties, key))) return undefined;
       let reply: unknown;
       try {
         reply = resultValue(await call(session, 'get_slice_settings', {source_path: input.modelPath, ...sliceArgs}, options));
