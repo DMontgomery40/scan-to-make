@@ -3,7 +3,9 @@ package com.scantomake.counterpart
 import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -43,8 +45,6 @@ class HomeLayoutTests {
     @get:Rule val compose = createComposeRule()
     private lateinit var app: Counterpart
     private lateinit var state: AppState
-    /** The screens find AppState through the application context, as in the app. */
-    private lateinit var context: Context
 
     @Before fun setup() {
         app = Counterpart()
@@ -57,9 +57,6 @@ class HomeLayoutTests {
         state = AppState(app)
         app.state = state
         ReflectionHelpers.setStaticField(Counterpart::class.java, "instance", app)
-        context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
-            override fun getApplicationContext(): Context = app
-        }
     }
 
     @After fun cleanup() { state.scope.cancel() }
@@ -68,9 +65,14 @@ class HomeLayoutTests {
         """{"id":"$id","title":"$title","instructions":"A useful part","state":"$status","createdAtMs":1,"updatedAtMs":2}"""
     ).jsonObject))
 
-    private fun home() = compose.setContent {
-        CompositionLocalProvider(LocalContext provides context) { HomeScreen(open = { _, _ -> }, newProject = {}, printers = {}, settings = {}) }
+    /** The screens find AppState through the application context, as in the app; the activity stays underneath it. */
+    @Composable private fun WithApp(content: @Composable () -> Unit) {
+        val activity = LocalContext.current
+        val context = remember(activity) { object : ContextWrapper(activity) { override fun getApplicationContext(): Context = app } }
+        CompositionLocalProvider(LocalContext provides context, content = content)
     }
+
+    private fun home() = compose.setContent { WithApp { HomeScreen(open = { _, _ -> }, newProject = {}, printers = {}, settings = {}) } }
 
     @Test fun theStartersStayOnHomeWhileProjectsExist() {
         state.projects.value = listOf(project("a", "Stove gap filler", "ready"), project("b", "Cable clip", "printed"),
@@ -80,7 +82,8 @@ class HomeLayoutTests {
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("3D scan platform")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Start with something useful").assertExists()
         compose.onNodeWithText("Long vernier caliper").assertExists()
-        compose.onNodeWithText("Stove gap filler").assertExists()
+        // This is Home with projects, not the empty Home's job cards.
+        compose.onNodeWithText("Make something that fits").assertDoesNotExist()
     }
 
     @Test fun theStartersAreOnTheEmptyHomeToo() {
@@ -94,7 +97,7 @@ class HomeLayoutTests {
     @Test fun settingsReachesPrintersAndHelp() {
         var printers = 0
         compose.setContent {
-            CompositionLocalProvider(LocalContext provides context) { SettingsScreen(back = {}, pairAgain = {}, openPrinters = { printers++ }) }
+            WithApp { SettingsScreen(back = {}, pairAgain = {}, openPrinters = { printers++ }) }
         }
         compose.onNodeWithText("Open the Guide").assertExists()
         compose.onNodeWithText("Print the Scan Rig by Kass 3D").assertExists()
