@@ -420,10 +420,10 @@ mark { background: var(--orange-wash); color: inherit; border-radius: 2px; paddi
 @media print { .masthead, .help-side, .zoom { display: none; } body::before { display: none; } }
 .faq code, .downloads code { word-break: break-all; }
 
-/* Made with Counterpart: the app's own renders of real, printed projects. Renders sit on #3a3a3a. */
-.made { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.25rem; }
+/* Parts gallery */
+.made { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; }
 .made li { max-width: none; overflow: hidden; display: flex; flex-direction: column; padding: 0; }
-.made img, .way-img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #3a3a3a; }
+.made img, .way-img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--sheet); }
 .made li div { padding: 1.1rem 1.25rem 1.3rem; }
 .made h3 { font-size: 1.15rem; }
 .made p { margin: 0; color: var(--ink-soft); font-size: .95rem; }
@@ -458,3 +458,6 @@ mark { background: var(--orange-wash); color: inherit; border-radius: 2px; paddi
 .brands-line { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .6rem; }
 .brands-line li { max-width: none; padding: .55rem 1.1rem; border-radius: 999px; font-weight: 600; background: var(--glass-strong); border: 1px solid var(--glass-rim); box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow); }
 @media (max-width: 640px) { .starters { grid-template-columns: 1fr; } }
+
+.hero-photo { margin: 0; min-width: 0; }
+.hero-photo img { width: 100%; border-radius: 28px; box-shadow: var(--shadow); }
