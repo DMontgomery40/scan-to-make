@@ -123,10 +123,12 @@ test('a multi-colour run slices with one profile and colour per filament and pri
   const properties = Object.fromEntries(['stl_path', 'slice_plate', 'orient', 'arrange', 'ensure_on_bed', 'load_filaments', 'filament_colours',
     'bambu_model', 'plate_index', 'three_mf_path', 'use_ams', 'ams_slots', 'ams_mapping', 'auto_match_ams'].map(x => [x, {}]));
   const session = {
-    hold: () => () => {}, connect: async () => ({tools: []}),
-    hasTool: name => ['slice_stl', 'print_3mf'].includes(name),
+    hold: () => () => {}, connect: async () => ({tools: []}), config: {backend: 'bambu-printer-mcp'},
+    hasTool: name => ['slice_stl', 'print_3mf', 'counterpart_printer_info'].includes(name),
     getTool: name => ({name, inputSchema: {type: 'object', properties}}),
     call: async (name, args, opts) => {
+      if (name === 'counterpart_printer_info') return {content: [{type: 'text', text: JSON.stringify({contract: 'counterpart/1', server: {name: 'x', version: '1'},
+        printer: {kind: 'bambu', host: 'h'}, capabilities: {progress: true, layers: true, camera: 'none', filaments: 'ams', pause: true, resume: true, cancel: true, print3mf: true, gcode: true}})}]};
       calls.push({name, args});
       if (name === 'slice_stl') return {content: [{type: 'text', text: sliced}]};
       if (name === 'print_3mf') { await opts?.beforeDispatch?.(); return {structuredContent: {jobName: 'pick'}, content: []}; }

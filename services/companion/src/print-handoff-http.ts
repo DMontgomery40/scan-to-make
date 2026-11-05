@@ -85,7 +85,7 @@ function send(response: ServerResponse, bytes: Buffer | string): Promise<void> {
 export interface PrintHandoffServices {
   store: HandoffBundleStore;
   relay: ElicitationRelay;
-  runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'> & Partial<Pick<PrinterHandoffRunner, 'filaments' | 'status' | 'session' | 'run' | 'estimate'>>;
+  runner: Pick<PrinterHandoffRunner, 'runBundle' | 'backend'> & Partial<Pick<PrinterHandoffRunner, 'filaments' | 'session' | 'run' | 'estimate'>>;
   selection?: PrinterHandoffConfig['selection'];
   /** PRD §8.10: holds the printer for a print, so its MCP isn't updated under it; throws while it updates. */
   admit?: () => () => void;

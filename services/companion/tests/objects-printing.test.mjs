@@ -28,7 +28,7 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  * A P1S behind a fake MCP session, a fake print runner, and a monitor clock the
  * test steps by hand: every printer report and every wait is scripted.
  */
-async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route, backend = 'bambu-printer-mcp', info, slots, controlEnds = false} = {}) {
+async function setup(t, {tools = ['counterpart_printer_info', 'counterpart_print_progress', 'camera_snapshot', 'get_printer_filaments', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route, backend = 'bambu-printer-mcp', info, slots, controlEnds = false} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
   let service;
   t.after(async () => { await service?.close(); await rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}); });
@@ -37,9 +37,10 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
   const queue = [...reports];
   const relay = new InMemoryElicitationRelay({timeoutMs: 5000});
   // Copies come from the MCP's own capabilities.slicing (bambu-printer-mcp 1.1.58+), as the real servers report it.
-  if (copies && !info) info = {contract: 'counterpart/1', server: {name: 'bambu-printer-mcp', version: '1.1.58'}, printer: {kind: 'bambu', host: '192.0.2.1'},
+  // Every capability comes from counterpart_printer_info (PRD §8.0 item 4): this is what bambu-printer-mcp answers for a P1S with an AMS.
+  info ??= {contract: 'counterpart/1', server: {name: 'bambu-printer-mcp', version: '1.1.58'}, printer: {kind: 'bambu', host: '192.0.2.1'},
     capabilities: {progress: true, layers: true, camera: 'bambu-tcp', filaments: 'ams', pause: true, resume: true, cancel: true, print3mf: true, gcode: true,
-      slicing: {supports: true, copies: true, orient: true}}};
+      ...(copies ? {slicing: {supports: true, copies: true, orient: true}} : {})}};
   const catalogTools = [...tools, ...(route ? ['counterpart_print_route'] : []), ...(info && !tools.includes('counterpart_printer_info') ? ['counterpart_printer_info'] : [])].map(name => name === 'slice_stl' && (sliceArgs || copies)
     ? tool(name, {...(sliceArgs ? {quality: {}, strength: {}, layer_height: {}, wall_loops: {}, sparse_infill_density: {}} : {}), ...(copies ? {repetitions: {}} : {})}) : tool(name, controlsRoute && ['cancel_print', 'pause_print', 'resume_print'].includes(name) ? {connection_mode: {}, connection_type: {}} : {}));
   const factory = () => ({
@@ -49,10 +50,11 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
     getTool(name) { return catalogTools.find(item => item.name === name); },
     async callTool(name, args, options = {}) {
       calls.push({name, args, context: options.elicitationContext, timeoutMs: options.timeoutMs});
-      if (name === 'get_printer_status') {
+      if (name === 'counterpart_print_progress') {
         const next = queue.length > 1 ? queue.shift() : queue[0];
         if (!next) throw Object.assign(new Error('down'), {code: 'tool-failed'});
-        return {content: [{type: 'text', text: JSON.stringify(next)}]};
+        const report = {contract: 'counterpart/1', observedAt: new Date().toISOString(), ...next};
+        return {content: [{type: 'text', text: JSON.stringify(report)}], structuredContent: report};
       }
       if (name === 'camera_snapshot') return {content: [{type: 'text', text: JSON.stringify({format: 'jpeg', base64: JPEG.toString('base64')})}]};
       if (name === 'counterpart_printer_info' && info) return {content: [{type: 'text', text: JSON.stringify(info)}], structuredContent: info};
@@ -134,8 +136,13 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
   };
   return {service, store, object, calls, events, runs, relay, session, directory, queue, tick, clock, approve, deps, settings, root, slots, endControl: () => endControl?.()};
 }
-const status = (state, progress, extra = {}) => ({connected: true, print: {filename: JOB, progress, timeRemaining: Math.max(0, 40 - progress), currentLayer: progress, totalLayers: 100},
-  raw: {gcode_state: state, subtask_name: JOB, task_id: '0', ...extra}});
+// The printer's report as counterpart_print_progress gives it (the MCP maps Bambu's gcode_state, minutes and HMS codes).
+const STATES = {IDLE: 'idle', PREPARE: 'preparing', RUNNING: 'printing', PAUSE: 'paused', FINISH: 'finished', FAILED: 'failed'};
+const status = (state, progress, {name = JOB, problems = []} = {}) => ({state: STATES[state],
+  job: {name, id: '0', progress, ...(['PREPARE', 'RUNNING', 'PAUSE'].includes(state) ? {remainingSec: Math.max(0, 40 - progress) * 60} : {}), layer: progress, totalLayers: 100},
+  problems});
+/** HMS 0300_0D00_0002_0001 (attr 0x03000D00, code 0x00020001), with no words of its own. */
+const HMS = {code: '0300_0D00_0002_0001', severity: 'error', message: 'The printer reported problem 0300_0D00_0002_0001.'};
 const reset = f => f.store.update(f.object.id, o => ({...o, state: 'ready', print: undefined}));
 
 test('a design in several colours prints its multi-part 3MF, not a one-spool STL', async t => {
@@ -376,6 +383,9 @@ test('an estimate for another printer reads that printer’s spools, not the sav
     estimate: async input => { f.runs.push({estimate: input, other: true}); return {estimate: {seconds: 60, grams: 1}, settings: {layers: 10}}; }};
   f.deps.print.destinations.set('other', {...base, runner: otherRunner});
   f.deps.printerCatalog.canonical = id => ['current', 'other'].includes(id) ? id : undefined;
+  // The other printer's MCP reports an AMS too (counterpart_printer_info), as the saved one's does.
+  const capabilities = f.directory.capabilities.bind(f.directory);
+  f.directory.capabilities = id => capabilities(id === 'other' ? 'current' : id);
   const {modelVersion} = await f.service.colourMapping(f.object.id);
   // Automatic matching uses the requested printer's inventory.
   await f.service.estimate(f.object.id, {destinationId: 'other'});
@@ -410,7 +420,7 @@ test('the mapping and per-colour spools cross both transports (Mac socket and ph
 });
 
 test('"printed" means printed: Print leaves the project printing until the printer reports this job done', async t => {
-  const f = await setup(t, {reports: [status('FINISH', 100, {subtask_name: 'old job'}), status('PREPARE', 0), status('RUNNING', 3), status('RUNNING', 51), status('FINISH', 100)]});
+  const f = await setup(t, {reports: [status('FINISH', 100, {name: 'old job'}), status('PREPARE', 0), status('RUNNING', 3), status('RUNNING', 51), status('FINISH', 100)]});
   const started = await f.service.print(f.object.id);
   assert.match(started.print.printId, /^[0-9a-f-]{36}$/);
   await f.approve();
@@ -579,7 +589,7 @@ test('the camera route serves one frame per 3 s to every viewer, and 404s a prin
   assert.deepEqual(await settings.json(), {settings: {milestones: '25-50-75', notifications: {mac: {}, devices: {}}, general: {}}});
   assert.deepEqual(await (await fetch(`${base}/settings`)).json(), {settings: {milestones: '25-50-75', notifications: {mac: {}, devices: {}}, general: {}}});
   assert.equal((await fetch(`${base}/settings`, {method: 'PATCH', headers: {'content-type': 'application/json'}, body: JSON.stringify({milestones: '33'})})).status, 400);
-  const blind = await setup(t, {tools: ['get_printer_status']});
+  const blind = await setup(t, {tools: ['counterpart_printer_info', 'counterpart_print_progress']});
   await assert.rejects(blind.service.camera(blind.object.id), error => error.reason === 'no-camera');
 });
 
@@ -595,8 +605,8 @@ test('a print whose job the printer can\'t identify is "sent", never "printed"; 
   assert.equal(f.events.at(-1).type, 'print.sent');
   await assert.rejects(f.service.print(f.object.id), InvalidStateError);
 
-  const named = await setup(t, {reports: [status('IDLE', 0, {subtask_name: 'old'}), {...status('RUNNING', 2), print: {filename: 'checked-77-sliced', progress: 2}, raw: {gcode_state: 'RUNNING', subtask_name: 'checked-77-sliced'}},
-    {connected: true, print: {filename: 'checked-77-sliced', progress: 100}, raw: {gcode_state: 'FINISH', subtask_name: 'checked-77-sliced'}}]});
+  const named = await setup(t, {reports: [status('IDLE', 0, {name: 'old'}), {state: 'printing', job: {name: 'checked-77-sliced', progress: 2}, problems: []},
+    {state: 'finished', job: {name: 'checked-77-sliced', progress: 100}, problems: []}]});
   named.deps.print.services.runner.runBundle = async (store, id) => { await store.setStatus(id, 'printed'); return {manifest: await store.read(id), result: {dispatch: {fileBase: 'sliced'}}}; };
   await named.service.print(named.object.id);
   const watching = await named.service.settled(named.object.id);
@@ -606,7 +616,7 @@ test('a print whose job the printer can\'t identify is "sent", never "printed"; 
   const done = await until(async () => { const o = await named.service.get(named.object.id); return o.state === 'printed' ? o : undefined; });
   assert.equal(done.print.jobName, 'checked-77-sliced');
 
-  const never = await setup(t, {reports: [status('IDLE', 0, {subtask_name: 'old'})]});
+  const never = await setup(t, {reports: [status('IDLE', 0, {name: 'old'})]});
   never.deps.print.services.runner.runBundle = async (store, id) => { await store.setStatus(id, 'printed'); return {manifest: await store.read(id), result: {dispatch: {fileBase: 'sliced'}}}; };
   await never.service.print(never.object.id);
   await never.service.settled(never.object.id);
@@ -801,7 +811,7 @@ test('an MCP that reports AMS trays in the counterpart/1 slots shape (mcp-3D-pri
   const info = {contract: 'counterpart/1', server: {name: 'mcp-3d-printer-server', version: '1.2.26'}, printer: {kind: 'bambu', host: '192.0.2.1', model: 'P1S'},
     capabilities: {progress: true, layers: true, camera: 'none', filaments: 'ams', pause: true, resume: true, cancel: true, print3mf: true, gcode: true}};
   const profile = '/Applications/BambuStudio.app/Contents/Resources/profiles/BBL/filament/Bambu PLA Basic @BBL P1S 0.4 nozzle.json';
-  const f = await setup(t, {backend: 'mcp-3d-printer-server', info, tools: ['get_printer_status', 'get_printer_filaments', 'counterpart_printer_info', 'slice_stl'], slots: [
+  const f = await setup(t, {backend: 'mcp-3d-printer-server', info, tools: ['counterpart_print_progress', 'get_printer_filaments', 'counterpart_printer_info', 'slice_stl'], slots: [
     {id: '0', material: 'PLA', color: '#000000', name: 'PLA Basic PLA #000000', source: 'printer', profile},
     {id: '1', material: 'PLA', color: '#FEC600', name: 'PLA Basic PLA #fec600', source: 'printer', profile},
     {id: '9', material: 'PLA', color: 'yellow', source: 'printer', profile},
@@ -822,7 +832,7 @@ test('a control is sent only while the printer is still printing this project\'s
   await f.service.settled(f.object.id);
   await until(() => f.events.some(e => e.type === 'print.started'));
   f.queue.length = 0;
-  f.queue.push({connected: true, print: {filename: 'someone else', progress: 3}, raw: {gcode_state: 'RUNNING', subtask_name: 'someone else'}});
+  f.queue.push({state: 'printing', job: {name: 'someone else', progress: 3}, problems: []});
   await assert.rejects(f.service.control(f.object.id, 'cancel'), /isn't printing A mic mount for the stand any more, so nothing was sent/);
   assert.equal(f.calls.filter(c => c.name === 'cancel_print').length, 0);
 });
@@ -948,10 +958,9 @@ test('one copy named is sent as repetitions 1, so it overrides a printer profile
 });
 
 test('the stove gap filler, end to end: "Getting ready" while it levels, then the printer stops it; failed in its own words, and prints again', async t => {
-  // HMS 0300_0D00_0002_0001 at layer 0 of 52, 3 %, then the job is gone (the real abort of 2026-11-02, as get_printer_status reports it).
-  const hms = {attr: 0x03000D00, code: 0x00020001};
-  const levelling = {connected: true, print: {filename: JOB, progress: 3, timeRemaining: 175, currentLayer: 0, totalLayers: 52}, raw: {gcode_state: 'RUNNING', subtask_name: JOB, task_id: '0', hms: [hms]}};
-  const f = await setup(t, {reports: [status('PREPARE', 0), levelling, levelling, {connected: true, print: {}, raw: {gcode_state: 'IDLE', hms: [hms]}}]});
+  // HMS 0300_0D00_0002_0001 at layer 0 of 52, 3 %, then the job is gone (the real abort of 2026-11-02, as counterpart_print_progress reports it).
+  const levelling = {state: 'printing', job: {name: JOB, id: '0', progress: 3, remainingSec: 175 * 60, layer: 0, totalLayers: 52}, problems: [HMS]};
+  const f = await setup(t, {reports: [status('PREPARE', 0), levelling, levelling, {state: 'idle', problems: [HMS]}]});
   const {objectStatus, eventWords} = await import('../dist/events/words.js');
   await f.service.print(f.object.id);
   await f.approve();
@@ -976,8 +985,7 @@ test('the stove gap filler, end to end: "Getting ready" while it levels, then th
 });
 
 test('the failure sentence and code come from the report that ended the print (Codex repro: preparing, then idle with the code)', async t => {
-  const hms = {attr: 0x03000D00, code: 0x00020001};
-  const f = await setup(t, {reports: [status('PREPARE', 0), {connected: true, print: {}, raw: {gcode_state: 'IDLE', hms: [hms]}}]});
+  const f = await setup(t, {reports: [status('PREPARE', 0), {state: 'idle', problems: [HMS]}]});
   await f.service.print(f.object.id);
   await f.approve();
   await f.service.settled(f.object.id);

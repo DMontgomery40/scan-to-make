@@ -15,7 +15,7 @@ const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\n
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean'}}, required: ['confirmed']};
 const until = async check => { for (let i = 0; i < 100; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
 
-async function fixture(t) {
+async function fixture(t, {printers} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'object-printers-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const current = {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/ssh', args: ['retained-route'], env: {TOKEN: 'private-current-token'}}};
@@ -40,7 +40,7 @@ async function fixture(t) {
       }})});
   }
   const store = new ObjectStore(join(root, 'objects'));
-  const service = showing(new ObjectService({store, handoff: current, printerCatalog: catalog, claudePath: '/unused',
+  const service = showing(new ObjectService({store, handoff: current, printerCatalog: catalog, claudePath: '/unused', ...(printers ? {printers} : {}),
     runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined,
     print: {services: routes.get('current'), destinations: routes}}));
   t.after(() => service.close());
@@ -167,9 +167,11 @@ test('the phone and local control expose the same destination ids without MCP co
 });
 
 test('a print recorded against a destination that became a duplicate still reads its printer through the winner', async t => {
-  const {service, store, object, catalog, routes} = await fixture(t);
+  // Each printer's last counterpart_print_progress report, as the printer directory keeps it.
+  const printers = {lastReport: id => ({observedAt: new Date().toISOString(), state: 'printing', job: {name: `job on ${id}`, progress: 10}, problems: [], source: 'counterpart'}),
+    capabilities: () => undefined, session: () => undefined, record() {}, refresh: async () => {}, printing: async () => false, list: () => ({destinations: []})};
+  const {service, store, object, catalog} = await fixture(t, {printers});
   catalog.canonical = id => id === 'old-duplicate' ? 'second' : ['current', 'second'].includes(id) ? id : undefined;
-  for (const [id, route] of routes) route.runner.status = async () => ({connected: true, raw: {gcode_state: 'RUNNING'}, print: {filename: `job on ${id}`, progress: 10}});
   await store.update(object.id, o => ({...o, state: 'printing', print: {bundleId: '00000000-0000-4000-8000-000000000001', destination: {id: 'old-duplicate', name: 'Old'}}}));
   const loaded = await service.get(object.id);
   assert.equal(loaded.print.printerStatus.job, 'job on second');

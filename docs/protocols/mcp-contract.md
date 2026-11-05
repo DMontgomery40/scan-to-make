@@ -9,7 +9,7 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | Names | Used for |
 |---|---|
 | `counterpart_printer_info` `counterpart_print_progress` `counterpart_print_route` `counterpart_make_3mf` | the `counterpart/1` contract (PRD §8.4) |
-| `get_printer_status` `get_printer_filaments` | status and spools; `get_printer_status` is the pre-contract fallback, **§8.0 #4** |
+| `get_printer_status` `get_printer_filaments` | spools, and Add Printer's connection check (`printing/setup.ts`, `printer-check.ts`); printer reports come only from `counterpart_print_progress`, never `get_printer_status` |
 | `slice_stl` `inspect_print_file` `get_slice_settings` `lay_flat` `get_stl_info` `rotate_stl` `scale_stl` | slicing and model files |
 | `print_3mf` `print_3mf_bambu_network` `process_and_print_stl` `upload_gcode` `upload_file` `start_print` `start_print_job` `confirm_temperatures` `delete_printer_file` | dispatch |
 | `pause_print` `resume_print` `cancel_print` `clear_hms_errors` `skip_objects` `set_fan_speed` `set_light` `set_print_speed` `set_printer_temperature` `set_temperature` | printer controls |

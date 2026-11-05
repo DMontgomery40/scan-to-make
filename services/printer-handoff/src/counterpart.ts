@@ -7,8 +7,9 @@ import type {PrinterSession, SessionCallOptions} from './session.js';
 
 /**
  * The consumer side of the `counterpart/1` tool contract (PRD §8.4) that both
- * printer MCPs add, plus the fallback for installs that don't have it yet.
- * Results are validated here; unknown extra fields from a newer MCP are dropped.
+ * printer MCPs add. The contract is required (PRD §8.0): an install without it
+ * says "Update <MCP>". Results are validated here; unknown extra fields from a
+ * newer MCP are dropped.
  */
 
 const printerKinds = ['bambu', 'octoprint', 'klipper', 'prusa', 'duet', 'repetier', 'creality'] as const;
@@ -54,124 +55,8 @@ export const counterpartPrintProgressSchema = z.object({
 });
 export type CounterpartPrintProgress = z.infer<typeof counterpartPrintProgressSchema>;
 
-/**
- * A normalized printer report; `source` says which tool it came from.
- * `stateKnown: false` marks a firmware state that says nothing about printing
- * (Moonraker's Klippy "ready" holds while it prints).
- */
-export type PrintReport = Omit<CounterpartPrintProgress, 'contract'> & {source: 'counterpart' | 'status-fallback'; stateKnown?: false};
-
-const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const finite = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-const textOf = (value: unknown, max = 256): string | undefined => typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : undefined;
-
-/** Bambu `gcode_state` → counterpart state (PRD §8.4 table). */
-export function bambuState(gcodeState: unknown): PrintState {
-  switch (String(gcodeState ?? '').toUpperCase()) {
-    case 'IDLE': return 'idle';
-    case 'PREPARE': case 'SLICING': return 'preparing';
-    case 'RUNNING': return 'printing';
-    case 'PAUSE': return 'paused';
-    case 'FINISH': return 'finished';
-    case 'FAILED': return 'failed';
-    default: return 'busy';
-  }
-}
-
-/** Bambu print_error 0300_400C: "The task was canceled." */
-export const BAMBU_CANCELLED = 0x0300400c;
-const hex4 = (value: number) => value.toString(16).toUpperCase().padStart(4, '0');
-/** `hms[]` entry → `AAAA_BBBB_CCCC_DDDD`, with Bambu's severity in the code's high half. */
-export function hmsProblem(entry: unknown): CounterpartPrintProgress['problems'][number] | undefined {
-  if (!record(entry)) return undefined;
-  const attr = finite(entry.attr), code = finite(entry.code);
-  if (attr === undefined || code === undefined || attr < 0 || code < 0 || attr > 0xffffffff || code > 0xffffffff) return undefined;
-  const id = [attr >>> 16, attr & 0xffff, code >>> 16, code & 0xffff].map(hex4).join('_');
-  const level = code >>> 16;
-  const severity = level === 1 ? 'fatal' : level === 2 ? 'error' : level === 4 ? 'info' : 'warning';
-  return {code: id, severity, message: `The printer reported problem ${id}.`};
-}
-
-/** Maps bambu-printer-mcp's `get_printer_status` result (older installs, PRD §8.4 "Older MCP installs"). */
-export function bambuStatusReport(value: unknown, observedAt: Date): PrintReport {
-  const at = observedAt.toISOString();
-  if (!record(value) || value.connected === false) return {source: 'status-fallback', observedAt: at, state: 'offline', problems: []};
-  const raw = record(value.raw) ? value.raw : {};
-  const print = record(value.print) ? value.print : {};
-  const printError = finite(raw.print_error);
-  // A job stopped from the printer or an app reports FAILED with "the task was canceled".
-  const state = bambuState(raw.gcode_state ?? value.status) === 'failed' && printError === BAMBU_CANCELLED ? 'cancelled' : bambuState(raw.gcode_state ?? value.status);
-  const name = textOf(raw.subtask_name) ?? (textOf(print.filename) !== 'None' ? textOf(print.filename) : undefined);
-  const progress = finite(print.progress ?? raw.mc_percent);
-  const remainingMin = finite(print.timeRemaining ?? raw.mc_remaining_time);
-  const layer = finite(print.currentLayer ?? raw.layer_num), totalLayers = finite(print.totalLayers ?? raw.total_layer_num);
-  const taskId = raw.task_id === undefined ? undefined : textOf(String(raw.task_id), 128);
-  const problems: CounterpartPrintProgress['problems'] = [];
-  if (printError && printError !== BAMBU_CANCELLED) {
-    const code = printError.toString(16).toUpperCase().padStart(8, '0');
-    problems.push({code, severity: 'error', message: `The printer reported error ${code}.`});
-  }
-  if (Array.isArray(raw.hms)) for (const entry of raw.hms.slice(0, 31)) { const problem = hmsProblem(entry); if (problem) problems.push(problem); }
-  const temps = record(value.temperatures) ? value.temperatures : {};
-  const pair = (item: unknown) => record(item) && finite(item.actual) !== undefined && finite(item.target) !== undefined
-    ? {actual: finite(item.actual)!, target: finite(item.target)!} : undefined;
-  const nozzle = pair(temps.nozzle), bed = pair(temps.bed), chamber = finite(temps.chamber);
-  const active = state === 'preparing' || state === 'printing' || state === 'paused';
-  return {
-    source: 'status-fallback', observedAt: at, state,
-    ...(name ? {job: {name,
-      ...(taskId ? {id: taskId} : {}),
-      ...(progress !== undefined && progress >= 0 && progress <= 100 ? {progress} : {}),
-      ...(active && remainingMin !== undefined && remainingMin >= 0 ? {remainingSec: Math.round(remainingMin * 60)} : {}),
-      ...(layer !== undefined && layer >= 0 ? {layer: Math.trunc(layer)} : {}),
-      ...(totalLayers !== undefined && totalLayers > 0 ? {totalLayers: Math.trunc(totalLayers)} : {}),
-    }} : {}),
-    ...(nozzle || bed || chamber !== undefined ? {temps: {...(nozzle ? {nozzle} : {}), ...(bed ? {bed} : {}), ...(chamber !== undefined ? {chamber} : {})}} : {}),
-    problems,
-  };
-}
-
-/**
- * mcp-3D-printer-server's `get_printer_status` returns the firmware's own
- * printer endpoint, which has no job progress: only a state is read.
- */
-export function genericStatusReport(input: unknown, observedAt: Date): PrintReport {
-  let value: unknown = input;
-  const at = observedAt.toISOString();
-  const base = {source: 'status-fallback' as const, observedAt: at, problems: []};
-  if (!record(value)) return {...base, state: 'offline'};
-  // Moonraker /printer/info answers {result: {state}} with Klippy's own state, which stays
-  // "ready" while it prints: only its error states say anything.
-  if (record(value.result) && typeof value.result.state === 'string') {
-    const klippy = value.result.state.toLowerCase();
-    return {...base, state: klippy === 'shutdown' || klippy === 'error' ? 'busy' : 'idle', stateKnown: false};
-  }
-  // Duet /machine/status: {state: {status}}.
-  if (record(value.state) && typeof value.state.status === 'string') {
-    const duet = value.state.status.toLowerCase();
-    const state = duet === 'processing' || duet === 'simulating' ? 'printing' : duet === 'paused' || duet === 'pausing' || duet === 'resuming' ? 'paused'
-      : duet === 'idle' ? 'idle' : duet === 'off' ? 'offline' : 'busy';
-    return {...base, state};
-  }
-  // PrusaLink {printer: {state}}.
-  if (record(value) && record(value.printer) && typeof value.printer.state === 'string') value = {state: value.printer.state};
-  if (!record(value)) return {...base, state: 'offline'};
-  const state = record(value.state) ? value.state : undefined;
-  const flags = state && record(state.flags) ? state.flags : undefined;
-  if (flags) { // OctoPrint /api/printer
-    if (flags.printing === true) return {...base, state: 'printing'};
-    if (flags.paused === true || flags.pausing === true) return {...base, state: 'paused'};
-    if (flags.error === true || flags.closedOrError === true) return {...base, state: 'busy'};
-    if (flags.ready === true || flags.operational === true) return {...base, state: 'idle'};
-    return {...base, state: 'busy'};
-  }
-  const text = typeof value.state === 'string' ? value.state.toLowerCase() : typeof value.status === 'string' ? value.status.toLowerCase() : undefined;
-  if (text === 'ready' || text === 'idle' || text === 'operational' || text === 'standby' || text === 'finished' || text === 'stopped') return {...base, state: 'idle'};
-  if (text === 'printing') return {...base, state: 'printing'};
-  if (text === 'paused' || text === 'attention') return {...base, state: 'paused'};
-  if (text === 'offline' || text === 'disconnected') return {...base, state: 'offline'};
-  return {...base, state: 'busy'};
-}
+/** A printer report: `counterpart_print_progress` without its contract tag. */
+export type PrintReport = Omit<CounterpartPrintProgress, 'contract'> & {source: 'counterpart'};
 
 function argsFor(tool: Tool, args: Record<string, unknown>): Record<string, unknown> {
   const properties = (tool.inputSchema as {properties?: unknown}).properties;
@@ -184,23 +69,16 @@ export function routeArgs(config: PrinterHandoffConfig, selection: PrinterSelect
   return config.backend === 'bambu-printer-mcp' ? {} : {host: selection?.host, type: selection?.printerType, port: selection?.port};
 }
 
-/** One printer report through the destination's session: `counterpart_print_progress`, else `get_printer_status`. */
-export async function readPrintReport(session: PrinterSession, options: SessionCallOptions & {now?: () => Date} = {}): Promise<PrintReport> {
-  const now = options.now ?? (() => new Date());
+/** One printer report through the destination's session (`counterpart_print_progress`); an MCP without it must be updated. */
+export async function readPrintReport(session: PrinterSession, options: SessionCallOptions = {}): Promise<PrintReport> {
   await session.connect({...(options.signal ? {signal: options.signal} : {}), ...(options.failFast ? {failFast: true} : {})});
-  const config = session.config;
   const call = {...(options.signal ? {signal: options.signal} : {}), ...(options.failFast ? {failFast: true} : {}), timeoutMs: options.timeoutMs ?? 15000};
-  if (session.hasTool('counterpart_print_progress')) {
-    const result = await session.call('counterpart_print_progress', argsFor(session.getTool('counterpart_print_progress'), routeArgs(config)), call);
-    const parsed = counterpartPrintProgressSchema.safeParse(toolResultJson(result));
-    if (!parsed.success) throw new PrinterMcpError('invalid-progress');
-    const {contract: _contract, ...report} = parsed.data;
-    return {...report, source: 'counterpart'};
-  }
-  if (!session.hasTool('get_printer_status')) throw new PrinterMcpError('progress-unavailable');
-  const result = await session.call('get_printer_status', argsFor(session.getTool('get_printer_status'), routeArgs(config)), call);
-  const value = toolResultJson(result);
-  return config.backend === 'bambu-printer-mcp' ? bambuStatusReport(value, now()) : genericStatusReport(value, now());
+  if (!session.hasTool('counterpart_print_progress')) throw new PrinterMcpError('progress-unavailable', undefined, `Update ${packageLabel(session.backend)} in Settings → Printers to see its prints.`);
+  const result = await session.call('counterpart_print_progress', argsFor(session.getTool('counterpart_print_progress'), routeArgs(session.config)), call);
+  const parsed = counterpartPrintProgressSchema.safeParse(toolResultJson(result));
+  if (!parsed.success) throw new PrinterMcpError('invalid-progress');
+  const {contract: _contract, ...report} = parsed.data;
+  return {...report, source: 'counterpart'};
 }
 
 /** `counterpart_printer_info`, when the install has it; undefined otherwise or when its result is invalid. */
@@ -266,7 +144,8 @@ export interface PrinterCapabilities {
 }
 
 const PACKAGE_NAMES: Record<PrinterBackend, string> = {'bambu-printer-mcp': 'bambu-printer-mcp', 'mcp-3d-printer-server': 'mcp-3D-printer-server'};
-const RTSP_MODELS = /^(x1|x1c|x1e|p2s|h2d|h2s|h2c|h2dpro|x2d)$/i;
+/** The MCP's package name as people see it on npm, for "Update <MCP> in Settings → Printers". */
+export function packageLabel(backend: PrinterBackend): string { return PACKAGE_NAMES[backend]; }
 
 function hasArgs(catalog: PrinterToolCatalog, tool: string, names: string[]): boolean {
   const properties = (catalog.tools.find(item => item.name === tool)?.inputSchema as {properties?: Record<string, unknown>} | undefined)?.properties;
@@ -289,38 +168,38 @@ function sentence(items: string[]): string {
   return items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
 }
 
-/** Capabilities from the server's `initialize` reply and tool list, refined by `counterpart_printer_info` (PRD §8.2). */
+/**
+ * Capabilities from the server's `initialize` reply and tool list, and its `counterpart_printer_info` (PRD §8.2).
+ * What the printer can do comes only from `counterpart_printer_info`: without it (an MCP older than the contract,
+ * or before its first answer) nothing lights up and Printers says to update the MCP.
+ */
 export function detectCapabilities(config: PrinterHandoffConfig, catalog: PrinterToolCatalog, info?: CounterpartPrinterInfo, at = new Date()): PrinterCapabilities {
   const has = (tool: string) => catalog.tools.some(item => item.name === tool);
-  const bambu = config.backend === 'bambu-printer-mcp';
-  const model = info?.printer.model ?? config.selection?.model;
-  const progressTool = has('counterpart_print_progress');
-  const progress = progressTool ? (info?.capabilities.progress ?? true) : bambu && has('get_printer_status');
-  const camera = has('camera_snapshot')
-    ? info?.capabilities.camera ?? (bambu ? (model && RTSP_MODELS.test(model) ? 'rtsp' : 'bambu-tcp') : 'http-snapshot')
-    : 'none';
-  const filaments = has('get_printer_filaments') ? info?.capabilities.filaments ?? (bambu ? 'ams' : 'single') : 'none';
-  const pause = has('pause_print') && (info?.capabilities.pause ?? true);
-  const resume = has('resume_print') && (info?.capabilities.resume ?? true);
-  const cancel = has('cancel_print') && (info?.capabilities.cancel ?? true);
+  const contract = has('counterpart_printer_info');
+  const progress = has('counterpart_print_progress') && info?.capabilities.progress === true;
+  const camera = has('camera_snapshot') ? info?.capabilities.camera ?? 'none' : 'none';
+  const filaments = has('get_printer_filaments') ? info?.capabilities.filaments ?? 'none' : 'none';
+  const pause = has('pause_print') && info?.capabilities.pause === true;
+  const resume = has('resume_print') && info?.capabilities.resume === true;
+  const cancel = has('cancel_print') && info?.capabilities.cancel === true;
   // The MCP turns quality and strength into its slicer's numbers (PRD §8.0); older versions say Update.
   const quality = hasArgs(catalog, 'slice_stl', ['quality']);
   const strength = hasArgs(catalog, 'slice_stl', ['strength']);
   const multiColour = has('counterpart_make_3mf');
-  // Copies only where the slice really makes them: mcp-3D-printer-server forwards repetitions on its Bambu-compatible route only.
   // Copies only where the MCP says its slice makes them (capabilities.slicing, PRD §8.0); older versions say Update.
   const copies = hasArgs(catalog, 'slice_stl', ['repetitions']) && info?.capabilities.slicing?.copies === true;
   const layerPauses = hasArgs(catalog, 'slice_stl', ['pause_at_layers']);
   // Missing means this version lacks the tool, not that the printer lacks the hardware.
   const missing: CapabilityFeature[] = [];
-  if (!progressTool && !progress) missing.push('progress');
+  if (!contract || !has('counterpart_print_progress')) missing.push('progress');
   if (!has('camera_snapshot')) missing.push('camera');
   if (!has('get_printer_filaments')) missing.push('filaments');
   if (!has('pause_print')) missing.push('pause');
   if (!has('resume_print')) missing.push('resume');
   if (!quality) missing.push('quality');
   if (!strength) missing.push('strength');
-  if (bambu && !multiColour) missing.push('multi-colour');
+  // Colours per part are missing only where the MCP says the printer has an AMS to print them with.
+  if (info?.capabilities.filaments === 'ams' && !multiColour) missing.push('multi-colour');
   const see = missing.filter(item => ['progress', 'camera', 'filaments'].includes(item)).map(item => item === 'filaments' ? 'the loaded filament' : item);
   const control = missing.filter(item => item === 'pause' || item === 'resume');
   const choose = missing.filter(item => ['quality', 'strength', 'multi-colour'].includes(item)).map(item => item === 'multi-colour' ? 'colours per part' : item);
@@ -333,7 +212,7 @@ export function detectCapabilities(config: PrinterHandoffConfig, catalog: Printe
   return {
     server: {name: catalog.server.name.slice(0, 128), version: catalog.server.version.slice(0, 64)},
     ...(info ? {contract: 'counterpart/1' as const} : {}),
-    progress, layers: progress && (info?.capabilities.layers ?? bambu),
+    progress, layers: progress && info?.capabilities.layers === true,
     camera, filaments, pause, resume, cancel, quality, strength, multiColour, copies, layerPauses,
     // Every printer can be told what's loaded: the companion slices it with the profile of a spool the printer
     // reports for it (mcp-3D-printer-server: the profile its filament report gives), or refuses with what to do.
@@ -345,8 +224,8 @@ export function detectCapabilities(config: PrinterHandoffConfig, catalog: Printe
 }
 
 /** Destination readiness for the print sheet's printer cards. */
-export function readiness(report: Pick<PrintReport, 'state' | 'stateKnown'> | undefined): 'ready' | 'busy' | 'offline' | 'unknown' {
-  if (!report || (report.stateKnown === false && report.state === 'idle')) return 'unknown';
+export function readiness(report: Pick<PrintReport, 'state'> | undefined): 'ready' | 'busy' | 'offline' | 'unknown' {
+  if (!report) return 'unknown';
   switch (report.state) {
     case 'idle': case 'finished': case 'failed': case 'cancelled': return 'ready';
     case 'offline': return 'offline';

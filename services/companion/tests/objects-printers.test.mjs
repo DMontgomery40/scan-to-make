@@ -109,10 +109,15 @@ test('discovered Bambu destinations satisfy required MCP model schemas through t
     import {appendFileSync, writeFileSync} from 'node:fs';
     const names = {slice_stl: 'stl_path', inspect_print_file: 'file_path', print_3mf: 'three_mf_path'};
     const server = new Server({name: 'isolated-model-schema', version: '0.0.0'}, {capabilities: {tools: {}}});
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({tools: Object.entries(names).map(([name, field]) => ({name,
+    // counterpart/1, as both MCPs answer it for a Bambu printer: what it prints with comes from here, not the package name.
+    const info = {contract: 'counterpart/1', server: {name: 'isolated-model-schema', version: '0.0.0'}, printer: {kind: 'bambu', host: '192.0.2.90'},
+      capabilities: {progress: true, layers: true, camera: 'none', filaments: 'single', pause: true, resume: true, cancel: true, print3mf: true, gcode: true}};
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({tools: [...Object.entries(names).map(([name, field]) => ({name,
       inputSchema: {type: 'object', additionalProperties: false, required: [field, 'bambu_model'],
-        properties: {[field]: {type: 'string'}, bambu_model: {type: 'string', enum: ['a1']}}}}))}));
+        properties: {[field]: {type: 'string'}, bambu_model: {type: 'string', enum: ['a1']}}}})),
+      {name: 'counterpart_printer_info', inputSchema: {type: 'object', properties: {}}}]}));
     server.setRequestHandler(CallToolRequestSchema, async request => {
+      if (request.params.name === 'counterpart_printer_info') return {content: [{type: 'text', text: JSON.stringify(info)}]};
       appendFileSync(process.env.TEST_LOG, JSON.stringify(request.params) + '\\n');
       if (request.params.name === 'slice_stl') writeFileSync(process.env.TEST_OUTPUT, 'isolated sliced artifact');
       return {content: [{type: 'text', text: request.params.name === 'slice_stl' ? process.env.TEST_OUTPUT : '{}'}]};

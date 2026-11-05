@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {zipSync, strToU8} from 'fflate';
-import {sliceSettings, dispatchIdentity, bambuStatusReport} from '../dist/index.js';
+import {sliceSettings, dispatchIdentity} from '../dist/index.js';
 
 test('a sliced Bambu 3MF says its layer height, infill, walls and layer count', async () => {
   const project = JSON.stringify({layer_height: '0.12', sparse_infill_density: '25%', wall_loops: '4', other: 'x'});
@@ -25,10 +25,4 @@ test('the dispatched job is recognised by task id, subtask name, uploaded path o
   // Nothing to go on but the file: a job named after it may be adopted (PRD §8.6 sent).
   assert.deepEqual(dispatchIdentity('ok', '/b/part_flat_sliced.gcode.3mf'), {fileBase: 'part_flat_sliced'});
   assert.deepEqual(dispatchIdentity({printerJobName: 'checked-x-part'}, '/b/sliced.3mf'), {jobName: 'checked-x-part', fileBase: 'sliced'}, 'bambu_network / bambu_native');
-});
-
-test('a Bambu job stopped from the printer reads as cancelled, not failed', () => {
-  const report = bambuStatusReport({connected: true, raw: {gcode_state: 'FAILED', print_error: 0x0300400c, subtask_name: 'x'}}, new Date());
-  assert.equal(report.state, 'cancelled');
-  assert.deepEqual(report.problems, []);
 });

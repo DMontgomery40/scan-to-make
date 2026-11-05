@@ -32,10 +32,10 @@ async function fixture(t) {
   const calls = [];
   let route = 'lan', liveBusy = false, routeBarrier, reloadBarrier;
   const sessions = new Map(catalog.entries().map(entry => [entry.id, new PrinterSession(entry.id, entry.config, {clientFactory: () => ({
-    connect: async () => ({server: {name: entry.config.backend, version: '1.0.0'}, tools: ['counterpart_print_route', 'get_printer_status'].map(name => ({name, inputSchema: {type: 'object'}}))}),
+    connect: async () => ({server: {name: entry.config.backend, version: '1.0.0'}, tools: ['counterpart_print_route', 'counterpart_print_progress'].map(name => ({name, inputSchema: {type: 'object'}}))}),
     callTool: async (name, args) => {
       calls.push({name, args});
-      if (name === 'get_printer_status') return {content: [{type: 'text', text: JSON.stringify({connected: true, status: liveBusy ? 'printing' : 'idle'})}]};
+      if (name === 'counterpart_print_progress') return {content: [{type: 'text', text: JSON.stringify({contract: 'counterpart/1', observedAt: new Date().toISOString(), state: liveBusy ? 'printing' : 'idle', problems: []})}]};
       if (args?.route && routeBarrier) {
         const barrier = routeBarrier; routeBarrier = undefined;
         barrier.started.resolve(); await barrier.finished.promise;

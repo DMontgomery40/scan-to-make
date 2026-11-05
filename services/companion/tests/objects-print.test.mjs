@@ -36,7 +36,6 @@ async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs
   const runner = {
     backend: 'bambu-printer-mcp',
     filaments: async () => inventory,
-    ...(printerReport ? {status:async()=>printerReport} : {}),
     runBundle: async (bundleStore, id, options = {}) => {
       runs.push({id, options});
       for (const update of progressUpdates ?? []) await options.onProgress?.(update);
@@ -53,9 +52,15 @@ async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs
     },
   };
   showingRunner(runner);
+  // One printer, 'default', whose MCP reports an AMS (counterpart_printer_info) and its last counterpart_print_progress.
+  const services = {store: bundles, relay, runner};
+  const printers = {capabilities: () => ({filaments: 'ams'}), lastReport: () => printerReport, session: () => undefined,
+    record() {}, refresh: async () => {}, printing: async () => false, list: () => ({defaultDestinationId: 'default', destinations: []})};
   const service = showing(new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
-    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
-    print: {services: {store: bundles, relay, runner}}}));
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, printers,
+    printerCatalog: {defaultDestinationId: 'default', canonical: id => id, destinations: [{id: 'default', name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', source: 'current', origin: 'printer-handoff'}],
+      resolve: id => id === 'default' ? {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}} : undefined},
+    print: {services, destinations: new Map([['default', services]])}}));
   const made = [];
   for (let i = 0; i < objects; i++) {
     const object = await store.create('A hook.');
@@ -310,9 +315,9 @@ test('an existing failed attempt exposes its retained slice estimate without rew
 
 
 test('live printer status identifies its own job and omits stale progress for a failed job', async () => {
-  const report={connected:true,status:'FAILED',raw:{gcode_state:'FAILED'},print:{filename:'Previous caliper',progress:23,remaining:66}};
+  const report={observedAt:new Date().toISOString(),state:'failed',job:{name:'Previous caliper',progress:23,remainingSec:66*60},problems:[],source:'counterpart'};
   const {service,store,object}=await setup({printerReport:report});
-  await store.update(object.id,o=>({...o,print:{bundleId:'00000000-0000-4000-8000-000000000001'}}));
+  await store.update(object.id,o=>({...o,print:{bundleId:'00000000-0000-4000-8000-000000000001',destination:{id:'default',name:'P1S'}}}));
   const loaded=await service.get(object.id);
   assert.equal(loaded.print.printerStatus.state,'FAILED');
   assert.equal(loaded.print.printerStatus.job,'Previous caliper');
@@ -321,10 +326,10 @@ test('live printer status identifies its own job and omits stale progress for a 
 });
 
 
-test('Bambu live timeRemaining is shown for its running printer job', async () => {
- const report={connected:true,status:'RUNNING',raw:{gcode_state:'RUNNING'},print:{filename:'Checked mount',progress:3,timeRemaining:42}};
+test('the printer\'s time left is shown for its running job', async () => {
+ const report={observedAt:new Date().toISOString(),state:'printing',job:{name:'Checked mount',progress:3,remainingSec:42*60},problems:[],source:'counterpart'};
  const {service,store,object}=await setup({printerReport:report});
- await store.update(object.id,o=>({...o,print:{bundleId:'00000000-0000-4000-8000-000000000001'}}));
+ await store.update(object.id,o=>({...o,print:{bundleId:'00000000-0000-4000-8000-000000000001',destination:{id:'default',name:'P1S'}}}));
  const loaded=await service.get(object.id);
  assert.equal(loaded.print.printerStatus.percent,3);
  assert.equal(loaded.print.printerStatus.remainingMinutes,42);

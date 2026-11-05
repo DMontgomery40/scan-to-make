@@ -6,10 +6,12 @@ import {tmpdir} from 'node:os';
 import {zipSync,strToU8} from 'fflate';
 import {HandoffBundleStore,PrinterHandoffRunner,inspectModelFile,readModelFile} from '../dist/index.js';
 const model=(sliced=false)=>Buffer.from(zipSync({'[Content_Types].xml':strToU8('<Types/>'),'3D/3dmodel.model':strToU8('<model><metadata name="Title">Original</metadata><metadata name="Designer">Designer</metadata><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),'Metadata/model_settings.config':strToU8('<config><plate><metadata key="plater_id" value="2"/><metadata key="plater_name" value="Selected"/></plate></config>'),...(sliced?{'Metadata/plate_2.gcode':strToU8('; estimated printing time (normal mode) = 1m\nG1 X1')}:{})}));
+const INFO={contract:'counterpart/1',server:{name:'x',version:'1'},printer:{kind:'bambu',host:'h'},capabilities:{progress:true,layers:true,camera:'none',filaments:'ams',pause:true,resume:true,cancel:true,print3mf:true,gcode:true}};
 async function fixture(t,sliced=false,{backend='bambu-printer-mcp',badReceipt=false}={}){
  const root=await mkdtemp(join(tmpdir(),'published-handoff-'));t.after(()=>rm(root,{recursive:true,force:true}));const bytes=model(sliced),path=join(root,'original.3mf');await writeFile(path,bytes);const output=join(root,'derived.3mf');await writeFile(output,model(true));const calls=[];
  const properties=Object.fromEntries(['stl_path','slice_plate','orient','arrange','ensure_on_bed','load_filaments','filament_colours','filament_profile','layer_height','wall_loops','sparse_infill_density','file_path','bambu_model','plate_index','nozzle_diameters','bed_type','three_mf_path'].map(x=>[x,{}]));
- const session={hold:()=>()=>{},connect:async()=>({tools:[]}),hasTool:name=>['lay_flat','slice_stl','inspect_print_file','print_3mf'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties}}),call:async(name,args,opts)=>{
+ const session={hold:()=>()=>{},connect:async()=>({tools:[]}),config:{backend},hasTool:name=>['lay_flat','slice_stl','inspect_print_file','print_3mf','counterpart_printer_info'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties}}),call:async(name,args,opts)=>{
+  if(name==='counterpart_printer_info')return{content:[{type:'text',text:JSON.stringify(INFO)}]};
   calls.push({name,args});if(name==='lay_flat')throw Error('original 3MF was oriented');
   if(name==='slice_stl'){assert.deepEqual(await readFile(args.stl_path),bytes);return{content:[{type:'text',text:output}]};}
   if(name==='inspect_print_file')return{content:[{type:'text',text:JSON.stringify({artifact:{sha256:badReceipt?'0'.repeat(64):inspectModelFile(await readFile(args.file_path),'3mf').sha256},selection:{plate_index:1,bambu_model:'p1s'}})}]};

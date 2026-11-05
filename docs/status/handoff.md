@@ -21,7 +21,7 @@ Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 
 
 ## Open, in order
 
-1. **Moving backend code to the MCPs (PRD §8.0).** Items 1–3 are done (quality/strength #313, refusal codes #314, slicing capability #316). Next is item 4: delete the counterpart/1 fallback and the `backend === 'bambu-printer-mcp'` special cases. Then items 5–12 in order, one at a time; each extends both MCPs, publishes, installs through the app's Update, and only then deletes the app code.
+1. **Moving backend code to the MCPs (PRD §8.0).** Items 1–4 are done (quality/strength #313, refusal codes #314, slicing capability #316, counterpart/1 required). Next is item 5. Then items 6–12 in order, one at a time; each extends both MCPs, publishes, installs through the app's Update, and only then deletes the app code.
 2. **What will print** (David, Nov 5): Print sends exactly the sliced file whose MCP-drawn pictures the sheet showed. Built and installed everywhere (#321, #324; bambu-printer-mcp 1.1.61, mcp-3D 1.2.34). Seen in the Mac app on the caliper card (PRD §0). Open: a print from the sheet, the iPhone sheet on device. Android and Linux MCP pictures were seen Nov 5 (item 6). mcp-3D's changelog correction (branch `docs/changelog-m620`) goes out with its next release.
 3. Bambu Cloud print route: the fix is in the installed 1.1.59. **David** prints with Connection = Bambu Cloud.
 4. FULU through mcp-3D crashes on its config-dir mount (item 12 moves the FULU launcher into bambu-printer-mcp).
