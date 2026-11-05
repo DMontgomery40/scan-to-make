@@ -8,6 +8,12 @@ const failures = [];
 // Outside links and images: fonts, the printer MCP servers' docs sites (Counterpart's printing backend), their npm and
 // GitHub pages, and the scan rig.
 const PUBLIC = /^https:\/\/(fonts\.(googleapis|gstatic)\.com(\/|$)|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|www\.npmjs\.com\/package\/(bambu-printer-mcp|mcp-3d-printer-server)$|github\.com\/DMontgomery40\/(bambu-printer-mcp|mcp-3D-printer-server)$|makerworld\.com\/en\/models\/1531561$)/;
+const RELEASE_LINKS = new Set([
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-android.apk',
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-amd64.deb',
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-x86_64.AppImage',
+  'https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.5-android-linux',
+]);
 const fail = message => failures.push(message);
 const pages = readdirSync(root).filter(name => name.endsWith('.html'));
 const ids = Object.fromEntries(pages.map(page => [page, new Set([...readFileSync(join(root, page), 'utf8').matchAll(/\sid="([^"]+)"/g)].map(m => m[1]))]));
@@ -26,7 +32,7 @@ for (const page of pages) {
   if (/Scan to Make/.test(html)) fail(`${page}: still says Scan to Make`);
   for (const [, href] of html.matchAll(/href="([^"]+)"/g)) {
     if (/^(https?:|mailto:)/.test(href)) {
-      if (!/^https:\/\/(testflight\.apple\.com\/join\/S4tExVzp$|github\.com\/DMontgomery40\/scan-to-make\/(blob\/fbd1a69b\/deploy\/companion\/README\.md|releases\/download\/v2\.0-beta\.4\/ScanToMake-202611040930\.zip)|fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href) && !PUBLIC.test(href)) fail(`${page}: outside link not on the public list: ${href}`);
+      if (!/^https:\/\/(testflight\.apple\.com\/join\/S4tExVzp$|github\.com\/DMontgomery40\/scan-to-make\/(blob\/fbd1a69b\/deploy\/companion\/README\.md|releases\/download\/v2\.0-beta\.4\/ScanToMake-202611040930\.zip)|fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href) && !PUBLIC.test(href) && !RELEASE_LINKS.has(href)) fail(`${page}: outside link not on the public list: ${href}`);
       continue;
     }
     const [file, hash] = href.replace(/^\//, '').split('#');

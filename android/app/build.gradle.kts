@@ -14,7 +14,29 @@ val starterAssets = tasks.register<Sync>("prepareStarterAssets") {
     into(layout.buildDirectory.dir("generated/starter-assets"))
 }
 
+// Release credentials stay in user Gradle properties or the build process environment.
+fun releaseSetting(name: String) = providers.gradleProperty(name)
+    .orElse(providers.environmentVariable(name)).orNull
+val releaseStore = releaseSetting("COUNTERPART_ANDROID_KEYSTORE")
+val releaseStorePassword = releaseSetting("COUNTERPART_ANDROID_STORE_PASSWORD")
+val releaseKeyAlias = releaseSetting("COUNTERPART_ANDROID_KEY_ALIAS")
+val releaseKeyPassword = releaseSetting("COUNTERPART_ANDROID_KEY_PASSWORD")
+val releaseCredentials = listOf(releaseStore, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+require(releaseCredentials.all { it == null } || releaseCredentials.all { !it.isNullOrBlank() }) {
+    "Provide all four COUNTERPART_ANDROID signing settings, or none for an unsigned build."
+}
+
 android {
+    signingConfigs {
+        if (releaseStore != null) {
+            create("counterpartRelease") {
+                storeFile = file(releaseStore)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
     namespace = "com.scantomake.counterpart"
     sourceSets["main"].assets.srcDir(starterAssets.map { it.destinationDir })
     compileSdk = 35
@@ -25,12 +47,13 @@ android {
         applicationId = "com.scantomake"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = releaseSetting("COUNTERPART_ANDROID_VERSION_CODE")?.toInt() ?: 1
         versionName = "0.1.0"
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("counterpartRelease")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

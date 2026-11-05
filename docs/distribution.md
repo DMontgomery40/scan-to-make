@@ -241,3 +241,85 @@ feed `https://counterpart.dtmont.com/appcast.xml`. The signed feed is published 
 
 Apple’s [common notarization issues](https://developer.apple.com/documentation/security/resolving-common-notarization-issues)
 documents `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` for a custom distribution build.
+
+## Android signing and recovery
+
+The permanent Android update identity was created Nov 5, 2026. **Never regenerate
+or replace it for an update.** The app ID is `com.scantomake`; key alias
+`counterpart`, RSA 4096, JKS. On David's Mac:
+
+- Keystore: `~/Library/Application Support/Counterpart-release/android-release.jks`
+  (directory mode 700, file mode 600).
+- Login Keychain service: `Counterpart Android release`; accounts
+  `store-password`, `key-password`, and `backup-passphrase`.
+- The same three values have synchronizable data-protection Keychain copies for
+  iCloud Keychain recovery, access group `X7F5F9LR24.com.counterpart.release-key`.
+  Synchronizable items require a provisioned, signed helper in the logged-in GUI
+  session. The local login copies require Keychain access approval; an SSH
+  `security find-generic-password` attempt was denied (exit 36). Use the signed
+  GUI helper for unattended signing; never treat an empty password as success.
+- Encrypted backup:
+  `~/Library/Mobile Documents/com~apple~CloudDocs/Counterpart-release/android-release.jks.enc`.
+  Encryption: OpenSSL AES-256-CBC, salted, PBKDF2, 600000 iterations. Local
+  decrypt-and-compare passed. Upload to iCloud and recovery on a second Mac have
+  not been independently verified. A later iCloud read returned “Resource deadlock
+  avoided” while the Mac disk was full, and replacing the cloud file was refused.
+  A second encrypted copy is `android-release-new.jks.enc` in the same cloud folder;
+  its local source is `android-release.jks.enc` beside the keystore and passed
+  recovery again. Ensure iCloud Drive and iCloud Keychain sync finish and verify
+  recovery on another Mac before relying on this as an off-machine backup.
+
+Recovery on a replacement Mac: sign in to the same iCloud account and enable
+Drive and Keychain. Download the encrypted backup. Retrieve `backup-passphrase`
+from the synchronizable item using a helper signed by team `X7F5F9LR24` with
+that access group authorized by its provisioning profile; do not create new
+passwords if an item is missing. The current helper uses the existing Counterpart
+Mac development profile, in a separate `ReleaseKey.app` under the release folder.
+Its source is `release-key.swift` beside the keystore; a source and entitlement
+copy are also beside the encrypted backup in iCloud Drive. The helper only reads
+existing secrets. Run `ReleaseKey.app/Contents/MacOS/release-key recover
+<encrypted-backup> <new-staging-file>` in a `gui/501` LaunchAgent on the current
+Mac. On a replacement Mac, compile that source, embed a current Counterpart Mac
+provisioning profile, and sign the helper with that profile’s team and authorized
+access group. Recovered certificate SHA-256 must be
+`15e9d0b6004a834e58129a4b615ee29e5a96c2c3225768cbe1a97aa56862c649`.
+With the recovered passphrase in `COUNTERPART_BACKUP_PASSWORD` (never in a command
+argument or log), decrypt to a new private staging file:
+
+```sh
+umask 077
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+  -in android-release.jks.enc -out recovered-android-release.jks \
+  -pass env:COUNTERPART_BACKUP_PASSWORD
+```
+
+Recover the store/key passwords from their synchronizable items into the login
+Keychain. Check the recovered key's certificate fingerprint against the published
+APK (`apksigner verify --print-certs`) before moving it into the permanent path.
+Keep the encrypted backup and its Keychain passphrase together in the recovery
+inventory, never in Git. Lost credentials mean recovery, not a new identity.
+
+Gradle accepts the following names as user Gradle properties or environment
+variables: `COUNTERPART_ANDROID_KEYSTORE` (absolute path),
+`COUNTERPART_ANDROID_STORE_PASSWORD`, `COUNTERPART_ANDROID_KEY_ALIAS`, and
+`COUNTERPART_ANDROID_KEY_PASSWORD`. Supply all four or none; none deliberately
+produces an unsigned release for subsequent `apksigner sign`. Never put these in
+repository properties or shell tracing. Increment `COUNTERPART_ANDROID_VERSION_CODE`
+for each update (the first public APK is code 1). From a clean commit on
+`origin/main`, run `./gradlew --no-daemon assembleRelease` in `android/`, then
+`apksigner verify --verbose --print-certs` on the final APK. The signed GUI helper
+also supports `sign-apk <apksigner.jar> <unsigned.apk> <signed.apk>`, supplying
+Keychain passwords directly to the signing subprocess environment. Android requires
+Android 8 / API 26 and a Counterpart Mac or Linux companion; phone pairing,
+capture and printing still need device acceptance.
+
+## Linux prerelease packages
+
+Build on Ubuntu 26.04 x86_64 (agents-136), from clean `origin/main`, using
+`apps/linux/scripts/bundle.sh`. Use a separate checkout from concurrent Android
+builds: temporary Linux payload files correctly trip Android's clean-tree guard.
+Publish the verified `.deb` and `.AppImage` with SHA-256 checksums and exact source
+revision. Linux runs its own companion; it does not pair to the Mac desktop.
+It needs a printer MCP and a slicer (Bambu Studio), configured through
+Settings → Printers. Engineering build/package checks are not end-to-end device
+or printer acceptance.
