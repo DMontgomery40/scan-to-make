@@ -14,7 +14,7 @@ One screen, updated in place. No dated copies or prompt files; git history keeps
 | TestFlight | 2.0 (3) uploaded Nov 4; 2.0 (2) last seen Waiting for Review in Counterpart Public Beta | `4a894769` |
 | bambu-printer-mcp | npm 1.1.61, installed through Settings → Printers → Update on the Mac (Nov 5 08:56Z) and Linux: draws "What will print" (`include_preview`) | npm |
 | mcp-3D-printer-server | your git checkout `~/mcp-3D-printer-server` on `feat/bambu-complete` (dist from `56d8fb9`). npm has 1.2.33. No printer uses it, so the Mac offers no Update or Download for it: "installed through the app" is pending for the Mac's mcp-3D only. npm has 1.2.34, installed through Update on Linux. | git |
-| Android | debug APK from main `27295626` (with #324, what will print), never run on a device or emulator | `~/scan-to-make-work/main-builds-20261105/` on the Mac |
+| Android | debug APK built from clean main `1b66d937` Nov 5; not installed. T3 emulator launch and its diagnostic retry failed: this process cannot use `/dev/kvm` | `~/scan-to-make-work/android-linux-20261105/` on the Mac |
 | Linux agents-136 (Xvfb :93, XFCE) | `.deb` from main `27295626` (#321, #324), with reconstruction 1.2.0, installed Nov 5 08:51Z. The companion runs it (`g27295626afdd…`). bambu-printer-mcp 1.1.61 and mcp-3d-printer-server 1.2.34 were installed through Settings → Printers → Update; no printer is added there. | same folder; AppImage too |
 
 Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 yellow PLA, A3 PETG. FULU runs in Colima profile `bambu-fulu`; never restart it.
@@ -26,7 +26,7 @@ Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 
 3. Bambu Cloud print route: the fix is in the installed 1.1.59. **David** prints with Connection = Bambu Cloud.
 4. FULU through mcp-3D crashes on its config-dir mount (item 12 moves the FULU launcher into bambu-printer-mcp).
 5. A change request stalls silently in `completion-intent.ts`: fixed and gated on `fix/completion-check-visible`, waiting behind the migration.
-6. Android on a real device or emulator; Linux pairing and printing.
+6. Android/Linux engineering check Nov 5: Android `assembleDebug` passed on clean main `1b66d937`, but T3 emulator `Counterpart_API35_Test` and the prescribed diagnostic retry failed with `/dev/kvm` permission denied; no Android UI or pairing checked. Linux agents-136 (`27295626`, Xvfb :93): opened existing local caliper `1b7a26a2` and its Print sheet through AT-SPI, inspected screenshot: “What will print” → “Nothing to show yet”, no configured printer, Print disabled. No print pressed. This is not Mac project `1f1c5515`: Linux has no Mac-pairing client; it uses its own companion’s local Unix socket. Mac pairing and MCP-picture verification remain open. Screenshot and APK: `~/scan-to-make-work/android-linux-20261105/` on Mac. Restored Linux to Settings → Printers, its initial screen. No app changes or reinstall.
 7. **A search must never hide projects silently** (Nov 5: the Mac sidebar showed 1 of 10 with "caliper card" in the toolbar search). Mac fixed and seen live in 202611051513 (#326). Other clients were only read in code: Android's search field is a `LazyColumn` item that scrolls away while the list stays filtered; iPhone/iPad `.searchable` placement was never looked at in the app; Linux showed no search in `useWorkspace.ts`. Also correct the `MainWindow.swift` search comment: nobody saw the toolbar field shrink to an icon.
 8. The rest of the PRD's not-accepted list (§0).
 
