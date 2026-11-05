@@ -70,11 +70,12 @@ export interface McpPackageView {
   description: string;
   /** Some copy of it is on this Mac (a printer runs it, the app's own copy, or a folder of its own): no Download. */
   installed: boolean;
-  /** The newest version among the copies found. */
+  /** The on-disk version of the copy Check and Add use; not a newer discovered checkout or an npx pin. */
   version?: string;
   latestVersion?: string;
   /** The id Download's mcp.update.* events carry (the app's own copy). */
   appMcpId: string;
+  /** The selected runnable copy first, so its displayed location and version describe the same install. */
   installs: PackageInstall[];
 }
 
@@ -207,8 +208,6 @@ export class PrinterSetupError extends Error {
   constructor(readonly code: 'not-found' | 'unavailable' | 'invalid' | 'conflict', message: string) { super(message); this.name = 'PrinterSetupError'; }
 }
 
-const newest = (versions: string[]) => versions.sort((a, b) => b.localeCompare(a, undefined, {numeric: true}))[0];
-
 /**
  * The entry point of a copy Counterpart can start itself. An npx profile has none (npx fetches it when that client
  * starts it), so a package known only through npx is not "installed" here: Download gets a copy Check and Add can run.
@@ -259,10 +258,21 @@ export class PrinterSetup {
     }
     return {packages: MCP_PACKAGES.map(item => {
       const found = [...installs.get(item.package)!.values()];
-      const version = newest(found.map(install => install.version).filter((value): value is string => !!value));
+      // Match #entry: the managed copy wins, then the first other runnable copy. A development
+      // checkout's future version must not label the installed package that Download/Update manages.
+      const own = appInstall(item.package, env);
+      if (env.exists(own.entry!) && !found.some(install => install.kind === 'app' && install.path === own.prefix)) {
+        // #entry can start this copy even when its manifest is missing or its parent can't be listed.
+        // Keep an unknown version unknown instead of borrowing another copy's version.
+        const version = installedVersion(own, env);
+        found.unshift({kind: 'app', path: own.prefix, ...(version ? {version} : {})});
+      }
+      const selected = found.find(install => install.kind === 'app' && install.path === own.prefix && localEntry(item.package, install, env))
+        ?? found.find(install => localEntry(item.package, install, env));
+      const version = selected?.version;
       const latestVersion = this.deps.latestVersion?.(item.package, {view: true});
-      return {...item, installed: found.some(install => !!localEntry(item.package, install, env)), ...(version ? {version} : {}), ...(latestVersion ? {latestVersion} : {}),
-        appMcpId: appMcpId(item.package, env), installs: found};
+      return {...item, installed: !!selected, ...(version ? {version} : {}), ...(latestVersion ? {latestVersion} : {}),
+        appMcpId: appMcpId(item.package, env), installs: selected ? [selected, ...found.filter(install => install !== selected)] : found};
     }), options: setupOptions()};
   }
 

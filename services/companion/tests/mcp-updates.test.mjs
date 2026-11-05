@@ -743,9 +743,49 @@ test('Settings → Printers lists both MCPs; any copy this Mac has (a printer\'s
   assert.equal(folder.packages[1].installed, true);
   const npx = await setup([{id: 'x', config: {backend: 'mcp-3d-printer-server', process: {command: '/opt/homebrew/bin/npx', args: ['-y', 'mcp-3d-printer-server@1.2.10']}}}]).mcps();
   assert.deepEqual(npx.packages[1].installs, [{kind: 'npx', path: 'mcp-3d-printer-server@1.2.10', version: '1.2.10'}]);
-  assert.equal(npx.packages[1].version, '1.2.10');
+  assert.equal(npx.packages[1].version, undefined, 'a requested npx pin is not an installed version');
   assert.equal(npx.packages[1].installed, false, 'listed, but Download is offered: Check and Add need a copy Counterpart can start');
   void node;
+});
+
+test('Settings reports the installed app package version rather than a newer discovered worktree', async () => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const prefix = `${APP}/printers/bambu`;
+  const checkout = `${HOME}/wt/bambu-unreleased`;
+  const env = mac({
+    [`${prefix}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.61'),
+    [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '',
+    [`${checkout}/package.json`]: pkgJson('1.1.64'),
+    [`${checkout}/dist/index.js`]: '',
+  });
+  const setup = new PrinterSetup({env, configs: () => [],
+    list: path => path === env.appPrinters ? ['bambu'] : [],
+    folders: async () => [{dir: checkout, package: 'bambu-printer-mcp', version: '1.1.64', hasEnv: false}],
+    latestVersion: () => '1.1.63',
+  });
+  const card = (await setup.mcps()).packages.find(item => item.package === 'bambu-printer-mcp');
+  assert.equal(card.installed, true);
+  assert.equal(card.version, '1.1.61');
+  assert.equal(card.latestVersion, '1.1.63');
+});
+
+test('Settings never borrows a worktree version when the selected app copy has no package manifest', async () => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  for (const [pkg, folder] of [['bambu-printer-mcp', 'bambu'], ['mcp-3d-printer-server', 'generic']]) {
+    const prefix = `${APP}/printers/${folder}`, checkout = `${HOME}/wt/${pkg}`;
+    const files = {[`${prefix}/lib/node_modules/${pkg}/dist/index.js`]: '',
+      [`${checkout}/package.json`]: pkgJson('9.0.0', pkg), [`${checkout}/dist/index.js`]: ''};
+    const env = mac(files);
+    const setup = new PrinterSetup({env, configs: () => [], list: () => [folder],
+      folders: async () => [{dir: checkout, package: pkg, version: '9.0.0', hasEnv: false}]});
+    const card = (await setup.mcps()).packages.find(item => item.package === pkg);
+    assert.equal(card.installed, true);
+    assert.equal(card.version, undefined, `${pkg}: unknown on disk must stay unknown`);
+    assert.equal(card.installs[0].path, prefix, 'the displayed location belongs to the selected copy');
+    files[`${prefix}/lib/node_modules/${pkg}/package.json`] = pkgJson('1.0.0', pkg);
+    assert.equal((await setup.mcps()).packages.find(item => item.package === pkg).version, '1.0.0',
+      'the next Settings refresh reads the version now on disk, without restarting the companion');
+  }
 });
 
 test('findMcpFolders finds a built copy of either MCP two levels into the home folder, and skips protected and hidden folders', async t => {
