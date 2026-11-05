@@ -270,8 +270,8 @@ private struct Sidebar: View {
                 }
             }
         }
-        // In the sidebar, above the projects it filters: in the window toolbar it shrank to an icon in a narrow
-        // window and its text was out of sight.
+        // In the sidebar, above the projects it filters; previously the field sat in the window toolbar,
+        // outside the sidebar.
         .searchable(text: $query, placement: .sidebar, prompt: "Projects, printers, notes")
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 240, ideal: 260)

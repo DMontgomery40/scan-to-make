@@ -75,7 +75,7 @@ struct HomeView: View {
                                 .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                         }
                         .accessibilityIdentifier("show-archived")
-                        if showArchived {
+                        if showArchived || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             VStack(spacing: 8) { ForEach(archived) { ArchivedRow(store: store, project: $0) { path.append($0.id) } } }
                         }
                     }
@@ -95,8 +95,9 @@ struct HomeView: View {
         .refreshable { await store.load(); await store.loadPrinters() }
         .navigationTitle("Projects")
         .navigationSubtitle(subtitle)
-        .searchable(text: $query, prompt: "Projects, printers, notes")
-        .searchFocused($searching)
+         .safeAreaInset(edge: .top, spacing: 0) {
+            ProjectSearchBar(query: $query, searching: $searching, matched: searched.count, total: store.projects.count)
+        }
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -109,8 +110,6 @@ struct HomeView: View {
                 Button(action: openSettings) { Image(systemName: "person.crop.circle") }
                     .accessibilityLabel("Settings")
             }
-            DefaultToolbarItem(kind: .search, placement: .bottomBar)
-            ToolbarSpacer(.fixed, placement: .bottomBar)
             ToolbarItem(placement: .bottomBar) {
                 Button { newProject(nil) } label: {
                     Label("New", systemImage: "plus").labelStyle(.titleAndIcon).fontWeight(.semibold).padding(.horizontal, 6)
@@ -599,5 +598,40 @@ struct JobHeroCard: View {
         .clipShape(.rect(cornerRadius: 28))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Kept above the scrolling list on both compact Home and the regular-width sidebar.
+struct ProjectSearchBar: View {
+    @Binding var query: String
+    var searching: FocusState<Bool>.Binding
+    let matched: Int
+    let total: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Projects, printers, notes", text: $query)
+                    .focused(searching)
+                    .submitLabel(.search)
+                    .accessibilityIdentifier("project-search")
+                if !query.isEmpty {
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(12)
+            .glassEffect(in: .rect(cornerRadius: 12))
+            if matched < total {
+                Text("\(matched) of \(total) projects match “\(query)”")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("project-search-summary")
+                Button("Show All") { query = "" }
+                    .font(.caption).accessibilityIdentifier("show-all-projects")
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(Color.black)
     }
 }

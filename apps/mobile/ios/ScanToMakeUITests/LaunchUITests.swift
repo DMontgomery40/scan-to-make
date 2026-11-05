@@ -45,6 +45,27 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Mac mini connected · Bambu Lab P1S printing"].exists)
     }
 
+    func testSearchExplainsHiddenProjectsAndShowAllRestoresThem() {
+        let app = launch()
+        let field = app.textFields["project-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        field.tap()
+        field.typeText("no-project-matches-this")
+        let summary = app.staticTexts["project-search-summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        XCTAssertTrue(summary.label.hasPrefix("0 of "))
+        XCTAssertTrue(field.isHittable, "search stays above the list it filters")
+        app.buttons["show-all-projects"].tap()
+        XCTAssertFalse(summary.exists)
+        XCTAssertTrue(app.staticTexts["Cable clip"].exists)
+        field.tap()
+        field.typeText("Cable")
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        app.swipeUp()
+        XCTAssertTrue(field.isHittable, "scrolling cannot hide the active search")
+        app.buttons["show-all-projects"].tap()
+    }
+
     func testEmptyHomeOffersTheFirstProject() {
         let app = launch(set: "empty")
         XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))

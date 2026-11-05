@@ -82,12 +82,12 @@ export function App() {
     workspace.apply(p);
     setSelected(p.id);
   };
-  const visible = workspace.projects.filter(
+  const eligible = workspace.projects.filter(
     (p) =>
       (filter === "archived" ? p.archived : !p.archived) &&
-      (filter !== "working" || ["touching-up", "printing"].includes(p.state)) &&
-      searchProject(p, search),
+      (filter !== "working" || ["touching-up", "printing"].includes(p.state)),
   );
+  const visible = eligible.filter((p) => searchProject(p, search));
   return (
     <div className="app">
       <aside className="sidebar">
@@ -320,6 +320,12 @@ export function App() {
                   onChange={(e) => setSearch(e.target.value)}
                 />
                 <Action run={workspace.refresh}>Refresh</Action>
+                {visible.length < eligible.length && (
+                  <div role="status" className="search-summary">
+                    <span>{visible.length} of {eligible.length} projects match “{search}”</span>
+                    <button onClick={() => setSearch("")}>Show All</button>
+                  </div>
+                )}
               </div>
               {workspace.error && (
                 <p role="alert" className="notice">
