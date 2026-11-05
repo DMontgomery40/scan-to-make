@@ -691,6 +691,31 @@ test('Download installs only that package into the app\'s own copy (staged, then
   assert.ok(broken.moves.some(move => move[0] === 'rm' && /\.counterpart-update-/.test(move[1])), 'the staging folder is removed');
 });
 
+test('Update of the app\'s own copy before any printer uses it (Linux, no printer added) asks npm now, then updates that copy like Download', async t => {
+  const {appMcpId} = await import('../dist/printing/mcp-install.js');
+  const prefix = `${APP}/printers/bambu`;
+  const files = {[`${prefix}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46'), [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: ''};
+  const id = appMcpId('bambu-printer-mcp', {appPrinters: `${APP}/printers`});
+  const f = await updater(t, {profiles: [], files});
+  // Nov 5: Settings showed "Installed 1.1.55 · Latest 1.1.59" and Update answered "No printer uses that MCP."
+  const started = await f.updates.update(id);
+  assert.deepEqual(started, {mcpId: id, state: 'started', fromVersion: '1.1.46', toVersion: '1.1.50'});
+  await f.done();
+  assert.equal(f.commands[0], '/opt/homebrew/bin/npm view bambu-printer-mcp version');
+  assert.match(f.commands[1], / install --global --prefix .+\/\.counterpart-update-[0-9a-f-]+ .+ bambu-printer-mcp@1\.1\.50$/);
+  assert.ok(!f.commands.some(line => line.includes('mcp-3d-printer-server')), 'never the other MCP');
+  assert.deepEqual(f.moves.filter(move => move[0] === 'rename').at(-1)?.[2], `${prefix}/lib/node_modules/bambu-printer-mcp`);
+  assert.deepEqual(f.events.map(event => [event.type, event.data.mcpId]), [['mcp.update.started', id], ['mcp.update.done', id]]);
+  assert.equal(f.restarts.length, 0, 'no printer session to restart');
+  // Already the latest: says so and installs nothing; a minute-old answer isn't reused for Update.
+  const current = await updater(t, {profiles: [], files, latest: '1.1.46'});
+  assert.deepEqual(await current.updates.update(id), {mcpId: id, state: 'current', fromVersion: '1.1.46', toVersion: '1.1.46'});
+  assert.equal(current.commands.filter(line => line.includes(' install ')).length, 0);
+  // Another install's id with no printers is still refused, and the other package's app copy is its own id.
+  await assert.rejects(f.updates.update('mcp-0000000000000000'), /No printer uses that MCP/);
+  assert.notEqual(appMcpId('mcp-3d-printer-server', {appPrinters: `${APP}/printers`}), id);
+});
+
 test('Settings → Printers lists both MCPs; any copy this Mac has (a printer\'s, the app\'s, an earlier app copy, a folder) counts as installed', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const node = '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node';

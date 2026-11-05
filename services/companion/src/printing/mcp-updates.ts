@@ -2,10 +2,10 @@ import {execFile} from 'node:child_process';
 import {mkdir, readFile, rename, rm as fsRm, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {dirname, join} from 'node:path';
-import type {PrinterHandoffConfig, PrinterSession} from '@scan-to-make/printer-handoff';
+import {printerBackendSchema, type PrinterHandoffConfig, type PrinterSession} from '@scan-to-make/printer-handoff';
 import {newerVersion} from './directory.js';
 import type {PrintGate} from './print-gate.js';
-import {appInstall, findNpm, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type McpInstall, type ResolvedMcpInstall} from './mcp-install.js';
+import {appInstall, appMcpId, findNpm, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type McpInstall, type ResolvedMcpInstall} from './mcp-install.js';
 
 export const MCP_UPDATE_TIMEOUT_MS = 10 * 60_000;
 /** PRD §8.10: the latest version is checked once a day, and when Settings opens (a list read after an hour). */
@@ -229,6 +229,10 @@ export class McpUpdater {
 
   /** `printers.updateMcp` / `POST /v1/printers/mcp/<mcpId>/update`. */
   update(mcpId: string, options: {fresh?: boolean} = {}): Promise<McpUpdate> {
+    // The app's own copy before any printer uses it (Linux with no printer added, Nov 5): Settings shows it with
+    // Update, so Update replaces it the way Download installed it, after asking npm now.
+    const unused = printerBackendSchema.options.find(pkg => appMcpId(pkg, this.#deps.env) === mcpId);
+    if (unused && !this.#members(mcpId).length) return this.download(unused, {update: true});
     const running = this.#active.get(mcpId);
     if (running) return Promise.resolve({...running});
     // Reserved before the first await: two requests at once share one update.
@@ -473,7 +477,7 @@ export class McpUpdater {
    * with the same staged npm install and swap as Update, and the same mcp.update.* events (keyed by the app copy's id).
    * The caller checks the package isn't installed anywhere first; this never touches another install.
    */
-  download(pkg: PrinterHandoffConfig['backend']): Promise<McpUpdate> {
+  download(pkg: PrinterHandoffConfig['backend'], options: {update?: boolean} = {}): Promise<McpUpdate> {
     const install = this.#freshInstall({backend: pkg, process: {command: this.#deps.node}} as PrinterHandoffConfig);
     const mcpId = mcpIdFor(install, {backend: pkg, process: {command: this.#deps.node}} as PrinterHandoffConfig);
     const running = this.#active.get(mcpId);
@@ -482,15 +486,17 @@ export class McpUpdater {
     if (starting) return starting.then(update => ({...update}));
     const work = (async (): Promise<McpUpdate> => {
       const cached = this.#latest.get(pkg);
-      const looking = cached?.version && this.#now() - cached.atMs < LATEST_ON_VIEW_MS ? Promise.resolve(cached.version) : this.checkLatest(pkg).catch(() => undefined);
+      const looking = !options.update && cached?.version && this.#now() - cached.atMs < LATEST_ON_VIEW_MS ? Promise.resolve(cached.version) : this.checkLatest(pkg).catch(() => undefined);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const latest = await Promise.race([looking, new Promise<'slow'>(resolve => { timer = setTimeout(() => resolve('slow'), this.#deps.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS); })])
         .finally(() => clearTimeout(timer));
-      if (latest === 'slow') throw new McpUpdateError('unavailable', `npm is slow to answer for ${pkg}. Try Download again in a moment.`);
+      if (latest === 'slow') throw new McpUpdateError('unavailable', `npm is slow to answer for ${pkg}. Try ${options.update ? 'Update' : 'Download'} again in a moment.`);
       if (!latest) throw new McpUpdateError('unavailable', `Counterpart couldn't ask npm for the latest ${pkg}. Check this Mac's internet connection.`);
+      const fromVersion = options.update ? installedVersion(install, this.#deps.env) : undefined;
+      if (fromVersion && !newer(latest, fromVersion)) return {mcpId, state: 'current', fromVersion, toVersion: latest};
       // A fresh copy or update of the same files is running: this waits for the next tap.
       if (this.#changing.has(mcpId)) throw new McpUpdateError('unavailable', `${pkg} is being installed already. Try again when it finishes.`);
-      const update: McpUpdate = {mcpId, state: 'started', toVersion: latest};
+      const update: McpUpdate = {mcpId, state: 'started', ...(fromVersion ? {fromVersion} : {}), toVersion: latest};
       this.#active.set(mcpId, update);
       this.#changing.set(mcpId, mcpId);
       void this.#performDownload(install, update, latest);
