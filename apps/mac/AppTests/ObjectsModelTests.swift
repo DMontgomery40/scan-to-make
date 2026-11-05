@@ -131,6 +131,23 @@ private func project(_ item: [String: Any]) throws -> Project {
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
+    func testPrinterProjectsUseRecordedDestinationAndRefreshWhenItChanges() async {
+        let companion = FakeObjects()
+        await companion.set([
+            item("printed-here", "printed", ["printerDestinationId": "other", "print": ["bundleId": "b", "destination": ["id": "here", "name": "Here"]]]),
+            item("printed-elsewhere", "printed", ["printerDestinationId": "here", "print": ["bundleId": "c", "destination": ["id": "other", "name": "Other"]]]),
+            item("never-printed", "ready", ["printerDestinationId": "here"])
+        ])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertEqual(model.projects(forPrinter: "here").map(\.id), ["printed-here"])
+        XCTAssertEqual(model.projects(forPrinter: "other").map(\.id), ["printed-elsewhere"])
+        XCTAssertTrue(model.projects(forPrinter: "removed").isEmpty)
+        await companion.set([])
+        await model.refresh()
+        XCTAssertTrue(model.projects(forPrinter: "here").isEmpty)
+    }
+
     func testDiscoveryDoesNotClaimEmptyPhonesOrPrintersBeforeSuccessfulReads() async {
         let failed = ObjectsModel(companion: FakeObjects())
         XCTAssertEqual(failed.missingPhoneText, "Checking paired phones…")

@@ -306,9 +306,8 @@ private struct PrintTab: View {
                 Text(model.missingPrinterText).font(.callout).foregroundStyle(.secondary)
             }
             if let estimate = object.print?.estimate, estimate.seconds != nil || estimate.grams != nil {
-                SectionHeading("Profile")
+                SectionHeading("Last print estimate")
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Your printer MCP’s preset")
                     Text([estimate.seconds.map { ObjectWords.formatMinutes($0 / 60) }, Format.grams(estimate.grams)]
                         .compactMap { $0 }.joined(separator: " · "))
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)

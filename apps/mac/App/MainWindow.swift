@@ -196,6 +196,7 @@ private struct Sidebar: View {
     @ObservedObject var model: ObjectsModel
     @Binding var deleting: Project?
     @Binding var stopping: Project?
+    @State private var shownPrinter: PrinterDestination?
     @State private var showArchived = false
     @State private var query = ""
 
@@ -257,14 +258,14 @@ private struct Sidebar: View {
             if let printers = model.printerCatalog?.destinations, !printers.isEmpty {
                 Section("Printers") {
                     ForEach(printers) { printer in
-                        Button { SettingsTab.open(.printers) } label: {
+                        Button { shownPrinter = printer } label: {
                             Label {
                                 HStack { Text(printer.name); Spacer(); ReadyDot(state: printer.state) }
                             } icon: { Image(systemName: printer.mcpName == "bambu-printer-mcp" ? "printer.fill" : "printer").foregroundStyle(.blue) }
                         }
                         .buttonStyle(.plain)
                         .selectionDisabled()
-                        .help("Open printer settings for \(printer.name)")
+                        .help("Open \(printer.name)")
                     }
                 }
             }
@@ -276,6 +277,12 @@ private struct Sidebar: View {
         .navigationSplitViewColumnWidth(min: 240, ideal: 260)
         .onDeleteCommand { deleting = model.selected }
         .safeAreaInset(edge: .bottom) { footer }
+        .sheet(item: $shownPrinter) { printer in
+            SidebarPrinter(opened: printer, model: model) { project in
+                model.selection = project.id
+                shownPrinter = nil
+            }
+        }
     }
 
     /// "David's iPhone connected · Claude": who is paired and what does the work (PRD §7.2). Connected only on
@@ -489,5 +496,52 @@ private struct StopPrintDialog: ViewModifier {
                 .disabled(model.working.contains(object.id))
             Button("Keep Printing", role: .cancel) {}
         }
+    }
+}
+
+/// The selected printer's status and projects, using only the companion's structured catalog.
+private struct SidebarPrinter: View {
+    @Environment(\.dismiss) private var dismiss
+    let opened: PrinterDestination
+    @ObservedObject var model: ObjectsModel
+    let openProject: (Project) -> Void
+    private var printer: PrinterDestination? { model.printerCatalog?.destinations.first { $0.id == opened.id } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Label(printer?.name ?? opened.name, systemImage: "printer").font(.title2.bold())
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            if let printer {
+                HStack { ReadyDot(state: printer.state); Text(PrintersSettings.readiness(printer.state)) }
+                if let name = printer.model { LabeledContent("Model", value: name) }
+                if let address = printer.address { LabeledContent("Address", value: address) }
+                let projects = model.projects(forPrinter: printer.id)
+                if projects.isEmpty {
+                    Text("No projects have printed on this printer yet.").foregroundStyle(.secondary)
+                } else {
+                    Text("Projects").font(.headline)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(projects) { project in
+                                Button { openProject(project) } label: {
+                                    HStack {
+                                        Text(project.words.title)
+                                        Spacer()
+                                        Text(project.words.status).foregroundStyle(.secondary)
+                                        Image(systemName: "chevron.right")
+                                    }
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("This printer is no longer available.").foregroundStyle(.secondary)
+            }
+        }
+        .padding(24).frame(width: 520, height: 420)
     }
 }
