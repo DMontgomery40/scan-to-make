@@ -231,16 +231,27 @@ private struct Sidebar: View {
     }
 
     var body: some View {
+        let search = model.groups(matching: query)
         List(selection: $model.selection) {
-            ForEach(model.groups, id: \.group) { entry in
-                let matches = entry.objects.filter { $0.matchesSearch(query, additional: [model.printer(for: $0)?.name ?? ""]) }
-                if !matches.isEmpty {
-                    if entry.group == .archived {
-                        // Search opens matching archived projects without changing their saved visibility.
-                        Section(isExpanded: Binding(get: { showArchived || !query.isEmpty }, set: { showArchived = $0 })) { rows(matches) } header: { Text(entry.group.title) }
-                    } else {
-                        Section(entry.group.title) { rows(matches) }
+            // A search never hides projects silently: the sidebar says how many it leaves out, with the way back.
+            if search.hidden > 0 {
+                Section {
+                    HStack(spacing: 6) {
+                        Text(search.groups.isEmpty ? "No projects match “\(query)”"
+                             : "\(model.objects.count - search.hidden) of \(model.objects.count) projects match “\(query)”")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        Spacer(minLength: 4)
+                        Button("Show All") { query = "" }.buttonStyle(.link).font(.caption)
                     }
+                    .selectionDisabled()
+                }
+            }
+            ForEach(search.groups, id: \.group) { entry in
+                if entry.group == .archived {
+                    // Search opens matching archived projects without changing their saved visibility.
+                    Section(isExpanded: Binding(get: { showArchived || !query.isEmpty }, set: { showArchived = $0 })) { rows(entry.objects) } header: { Text(entry.group.title) }
+                } else {
+                    Section(entry.group.title) { rows(entry.objects) }
                 }
             }
             if let printers = model.printerCatalog?.destinations, !printers.isEmpty {
@@ -258,7 +269,9 @@ private struct Sidebar: View {
                 }
             }
         }
-        .searchable(text: $query, prompt: "Projects, printers, notes")
+        // In the sidebar, above the projects it filters: in the window toolbar it shrank to an icon in a narrow
+        // window and its text was out of sight.
+        .searchable(text: $query, placement: .sidebar, prompt: "Projects, printers, notes")
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 240, ideal: 260)
         .onDeleteCommand { deleting = model.selected }
