@@ -216,30 +216,35 @@ export class PrinterHandoffRunner {
 
   /**
    * Whether this 3MF prints with the process it carries (a designer's project), as the MCP says: get_slice_settings'
-   * `own_process`, asked with the slicer_type and bambu_model a slice sends. False when this printer's config names a
-   * process of its own (slicer profile or template) or its own layer height, walls or infill, which replace the file's,
-   * and when the MCP can't read the file's settings at all. Undefined when the MCP doesn't say (older than
-   * bambu-printer-mcp 1.1.62 / mcp-3d-printer-server 1.2.35) or couldn't be reached.
+   * `own_process`, asked with this printer config's own slice arguments, passed as slice_stl gets them (PRD §8.0: the
+   * MCP decides which of them replace or change the file's process). False when the MCP can't read the file's settings
+   * at all. Undefined when the MCP doesn't say, can't take one of those arguments (an older MCP), or couldn't
+   * be reached.
    */
   async ownProcess(input: {modelPath: string; selection?: PrinterSelection; signal?: AbortSignal}): Promise<boolean | undefined> {
     const slicer: PrinterSlicer = {...this.#config.slicer};
     const selection: PrinterSelection = {...this.#config.selection, ...input.selection};
-    const replaced = slicer.profile !== undefined || slicer.templateName !== undefined || slicer.layerHeightMm !== undefined
-      || slicer.wallLoops !== undefined || slicer.sparseInfillDensity !== undefined;
+    // The config's own values, under the names slice_stl takes (as sliceArgs in run), passed through as they are.
+    const sliceArgs: Record<string, unknown> = Object.fromEntries(Object.entries({slicer_type: slicer.type, bambu_model: selection.model,
+      slicer_profile: slicer.profile, template_name: slicer.templateName, layer_height: slicer.layerHeightMm, wall_loops: slicer.wallLoops,
+      sparse_infill_density: slicer.sparseInfillDensity, quality: slicer.quality, strength: slicer.strength}).filter(([, value]) => value !== undefined));
     return this.#use(async (session, shared) => {
       const options = {...(input.signal ? {signal: input.signal} : {}), failFast: shared};
       await session.connect(options);
       if (!session.hasTool('get_slice_settings')) return undefined;
+      // An MCP that can't take one of them would answer for another slice than Print's.
+      const properties = session.getTool('get_slice_settings').inputSchema.properties ?? {};
+      if (Object.keys(sliceArgs).some(key => key !== 'slicer_type' && key !== 'bambu_model' && !Object.hasOwn(properties, key))) return undefined;
       let reply: unknown;
       try {
-        reply = resultValue(await call(session, 'get_slice_settings', {source_path: input.modelPath, slicer_type: slicer.type, bambu_model: selection.model}, options));
+        reply = resultValue(await call(session, 'get_slice_settings', {source_path: input.modelPath, ...sliceArgs}, options));
       } catch (error) {
         // The MCP answered that it can't read this file's settings: slicing it uses the preset.
         if (error instanceof PrinterMcpError && error.code === 'tool-failed') return false;
         throw error;
       }
       const own = reply && typeof reply === 'object' ? (reply as {own_process?: unknown}).own_process : undefined;
-      return typeof own === 'boolean' ? own && !replaced : undefined;
+      return typeof own === 'boolean' ? own : undefined;
     });
   }
 

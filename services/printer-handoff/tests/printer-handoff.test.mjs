@@ -28,7 +28,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, noSlicedFacts = false, laidFlat, slicedBytes, slicing, ownProcess} = {}) {
+async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, noSlicedFacts = false, laidFlat, slicedBytes, slicing, ownProcess, ownProcessArgs} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -39,7 +39,7 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(noSlicedFacts ? {HANDOFF_FIXTURE_NO_SLICED_FACTS: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {}), ...(ownProcess ? {HANDOFF_FIXTURE_OWN_PROCESS: ownProcess} : {})}},
+      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(noSlicedFacts ? {HANDOFF_FIXTURE_NO_SLICED_FACTS: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {}), ...(ownProcess ? {HANDOFF_FIXTURE_OWN_PROCESS: ownProcess} : {}), ...(ownProcessArgs ? {HANDOFF_FIXTURE_OWN_PROCESS_ARGS: ownProcessArgs} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -826,7 +826,7 @@ test('Print refuses, sending nothing, when the file about to be sent is not the 
   assert.equal((await f.calls()).some(call => call.tool === 'print_3mf'), false, 'nothing was sent');
 });
 
-test("a designer's 3MF prints with its own process only when the MCP says so and this printer names none of its own", async t => {
+test("a designer's 3MF prints with its own process only when the MCP says so, asked with this printer's own slice arguments", async t => {
   // Nov 5: the print sheet carried the last print's quality and strength over to a copy of a designer's 3MF. Whether
   // the file has its own settings is the MCP's to say (get_slice_settings own_process); the app never reads the 3MF.
   const ask = async (options, slicer) => {
@@ -840,8 +840,17 @@ test("a designer's 3MF prints with its own process only when the MCP says so and
   assert.equal((await ask('false')).own, false);
   assert.equal((await ask('error')).own, false, 'settings the MCP cannot read: slicing uses the preset');
   assert.equal((await ask('absent')).own, undefined, 'an MCP that does not say: unknown, never guessed');
-  for (const slicer of [{profile: 'mine.json'}, {templateName: 'house'}, {layerHeightMm: 0.2}, {wallLoops: 3}, {sparseInfillDensity: '20%'}])
-    assert.equal((await ask('true', slicer)).own, false, `this printer's ${Object.keys(slicer)[0]} replaces the file's`);
+  // This printer's own slice arguments go to the MCP as slice_stl takes them; the MCP decides, the app passes them on.
+  const named = await ask('true', {profile: '/p/mine.json', templateName: 'house', layerHeightMm: 0.2, wallLoops: 3, sparseInfillDensity: '20%', quality: 'fine', strength: 'strong'});
+  assert.equal(named.own, false);
+  assert.deepEqual(named.calls[0].arguments, {source_path: named.calls[0].arguments.source_path, bambu_model: 'p1s', slicer_profile: '/p/mine.json', template_name: 'house',
+    layer_height: 0.2, wall_loops: 3, sparse_infill_density: '20%', quality: 'fine', strength: 'strong'});
+  for (const slicer of [{profile: '/p/mine.json'}, {layerHeightMm: 0.2}, {strength: 'strong'}])
+    assert.equal((await ask('true', slicer)).own, false, `the MCP says this printer's ${Object.keys(slicer)[0]} changes the file's process`);
+  assert.equal((await ask('true', {quality: 'standard'})).own, true, 'standard changes nothing');
+  // An MCP that can't take one of this printer's arguments would answer for another slice: unknown.
+  const old = await setup(t, {ownProcess: 'true', ownProcessArgs: 'old', slicer: {layerHeightMm: 0.2}});
+  assert.equal(await old.runner.ownProcess({modelPath: old.stlPath}), undefined);
   const none = await setup(t, {});
   assert.equal(await none.runner.ownProcess({modelPath: none.stlPath}), undefined, 'no get_slice_settings at all');
 });
