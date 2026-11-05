@@ -32,7 +32,7 @@ Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 
 
 **Waiting on David:** every physical print; he starts them ("do not reprint anything on your own EVER"). Next: redo the caliper card (`1f1c5515`) in the app and print it (copy of a designer's 3MF, fixed and installed Nov 5, PRD §0), and the Bambu Cloud print (item 3). The phone's "Connected" in Settings was seen on device Nov 4 (old item 4.3, done).
 
-**Infrastructure:** the Jev boundary check runs through OpenRouter because TypeSafe direct has no credits (HTTP 402). Adding TypeSafe credits is the only open infrastructure item, and nothing waits on it. One existing test, `capture-response-drain`, fails intermittently (once on Node 22, once on Node 24).
+**Infrastructure:** the Jev boundary check runs through OpenRouter because TypeSafe direct has no credits (HTTP 402). Adding TypeSafe credits is the only open infrastructure item, and nothing waits on it. Two existing tests fail intermittently under load: `capture-response-drain` (Node 22 and 24) and `local-control.test.mjs` 'incomplete frame' (Node 24, Nov 5, during 7 parallel agents' gates; 6 of 6 passes alone at `5b1a34e6`).
 
 ## Pointers
 
