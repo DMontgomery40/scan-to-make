@@ -252,10 +252,14 @@ function recipeKey(destinationId: string, recipe: {selected?: PrinterSelection; 
   return createHash('sha256').update(JSON.stringify(canonical({destinationId, selection: recipe.selected ?? null, slicer: recipe.sliced}))).digest('hex');
 }
 
-/** The request as Print applies it: saved defaults fill gaps; a 3MF owns its colours; saved pauses never apply. */
+/**
+ * The request as Print applies it: saved defaults fill gaps; a 3MF owns its colours; saved pauses never apply; a
+ * file that prints with its own settings (a designer's 3MF) gets no quality or strength the request didn't name.
+ */
 function printOptions(object: StmObject, options: PrintOptions): PrintOptions {
   const {pauseBeforeLayers: _savedPauses, ...defaults} = {...object.preferences?.printDefaults};
   if (isMultipart(object)) delete defaults.colour;
+  if (object.current?.ownSettings) { delete defaults.quality; delete defaults.strength; }
   return {...defaults, ...options, ...(options.filament ? {colour: undefined} : {})};
 }
 
@@ -571,7 +575,45 @@ export class ObjectService {
     // Projects from before titles get one, once and in the background, the first time they're listed.
     // (A new project gets its title at its first pass, from the request as it is then.)
     for (const object of objects) if (object.state !== 'new') this.#title(object, {backfill: true});
+    // Whether each 3MF prints with its own settings, asked once per file and in the background.
+    for (const object of objects) void this.#askOwnSettings(object);
     return objects;
+  }
+
+  readonly #ownSettingsAsked = new Set<string>();
+  /**
+   * Asks the project's printer MCP whether its current 3MF prints with the settings it carries (a designer's
+   * project) and keeps the answer on `current.ownSettings`. Once per file per run; an MCP that doesn't say leaves
+   * it absent, so the sheet behaves as before. Never throws.
+   */
+  async #askOwnSettings(object: StmObject): Promise<void> {
+    const current = object.current;
+    if (!current || current.ownSettings !== undefined || !isMultipart(object) || object.publishedSelection?.sliced) return;
+    const destinationId = this.#destinationId(object);
+    const modelPath = join(this.#deps.store.dir(object.id), current.model);
+    // The file itself, not its name: a new pass writes a new current/model.3mf.
+    const file = await stat(modelPath).catch(() => undefined);
+    if (!file) return;
+    const key = JSON.stringify([object.id, current.model, file.mtimeMs, file.size, destinationId ?? null]);
+    if (this.#ownSettingsAsked.has(key)) return;
+    this.#ownSettingsAsked.add(key);
+    const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
+    const ask = services?.runner.ownProcess;
+    if (!ask) return;
+    try {
+      const own = await ask.call(services.runner, {modelPath, ...(services.selection ? {selection: services.selection} : {}),
+        signal: AbortSignal.timeout(60_000)});
+      if (own === undefined) return;
+      let changed = false;
+      const updated = await this.#deps.store.update(object.id, o => {
+        if (!o.current || o.current.model !== current.model || o.current.ownSettings !== undefined || this.#destinationId(o) !== destinationId) return o;
+        changed = true;
+        return {...o, current: {...o.current, ownSettings: own}};
+      });
+      if (!changed) return;
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: object.id, data: {keys: ['current']}});
+      this.#changed(updated);
+    } catch { this.#ownSettingsAsked.delete(key); }
   }
   async get(id: string): Promise<StmObject> {
     let object = await this.#deps.store.get(id);
@@ -1759,6 +1801,7 @@ export class ObjectService {
     const {destinationId: requested, ...choices} = request;
     const options = printOptions(object, choices);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
+    void this.#askOwnSettings(object);
     this.#publishedSettings(object, options);
     if (options.filament && options.colour) throw new InvalidStateError('Choose one colour.');
     const catalog = this.#deps.printerCatalog;

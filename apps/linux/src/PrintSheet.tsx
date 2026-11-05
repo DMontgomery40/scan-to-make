@@ -10,6 +10,8 @@ import {
   parseLayers,
   printRequest,
   shownSlice,
+  startingChoices,
+  designerSettingsWords,
 } from "./domain";
 import { Action, Modal } from "./ui";
 import type { Estimate, Filament, Printer, Project } from "./types";
@@ -26,8 +28,7 @@ export function PrintSheet({
 }) {
   const frozen = useRef(freezePlate(project)).current;
   const frozenModel = useRef(project.current?.model).current;
-  const initial =
-    project.settings?.printDefaults ?? project.preferences?.printDefaults ?? {};
+  const initial = startingChoices(project);
   const [destination, setDestination] = useState(
     project.printerDestinationId ?? "",
   );
@@ -279,6 +280,9 @@ export function PrintSheet({
               </select>
             </label>
           </div>
+          {designerSettingsWords(project, quality, strength) && (
+            <p className="hint">{designerSettingsWords(project, quality, strength)}</p>
+          )}
           <label className="field">
             Copies
             <input

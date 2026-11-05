@@ -17,6 +17,8 @@ struct PrintSheet: View {
     @State private var spool: Int?
     @State private var quality = PrintQuality.standard
     @State private var strength = PrintStrength.standard
+    /// You chose Quality or Strength in this sheet; until then a designer's file starts at its own settings.
+    @State private var settingsPicked = false
     /// How many on the plate, where `offersCopies`; nil until you choose (the printer profile's count).
     @State private var copies: Int?
     /// "Before layer N" pauses (the slicer's Add pause, for magnets or nuts), where `offersPauses`. Empty: none.
@@ -119,6 +121,10 @@ struct PrintSheet: View {
             #endif
         }
         .task(id: estimateKey) { await refreshEstimate() }
+        // The printer's MCP can say while the sheet is open that this file prints with its own settings (Nov 5).
+        .onChange(of: project?.printsWithOwnSettings == true) { _, own in
+            if own && !settingsPicked { quality = .standard; strength = .standard }
+        }
         // The spool rows belong to this printer, plate and model version; any of them changing reloads them,
         // so a mapping made for another printer, plate or model is never reused.
         .task(id: mappingLoadKey) { await loadMapping() }
@@ -392,15 +398,20 @@ struct PrintSheet: View {
             if offersQuality || offersStrength {
                 if offersQuality {
                     Text("Quality").font(.headline)
-                    Picker("Quality", selection: $quality) { ForEach(PrintQuality.allCases, id: \.self) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+                    Picker("Quality", selection: Binding(get: { quality }, set: { quality = $0; settingsPicked = true })) { ForEach(PrintQuality.allCases, id: \.self) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 }
                 if offersStrength {
                     Text("Strength").font(.headline)
-                    Picker("Strength", selection: $strength) { ForEach(PrintStrength.allCases, id: \.self) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+                    Picker("Strength", selection: Binding(get: { strength }, set: { strength = $0; settingsPicked = true })) { ForEach(PrintStrength.allCases, id: \.self) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 }
             } else {
                 HStack { Text("Quality").font(.headline); Spacer(); Text("Standard").foregroundStyle(.secondary) }
                 Text(presetOnlyWords).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if project?.printsWithOwnSettings == true, offersQuality || offersStrength {
+                Text(quality == .standard && strength == .standard ? "Prints with the designer’s settings saved in this file." : "Changes the designer’s settings saved in this file.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("designer-settings")
             }
             if !profileLine.isEmpty { Text(profileLine).font(.caption).foregroundStyle(.secondary) }
             if offersCopies {

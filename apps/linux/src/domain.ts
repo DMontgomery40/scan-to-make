@@ -2,6 +2,7 @@ import type {
   Estimate,
   Field,
   Filament,
+  PrintOptions,
   Project,
   Question,
   RawQuestion,
@@ -397,4 +398,23 @@ export function mcpMoveNotice(reply: {update: {state: string; found?: string}}):
   if (update.state === "waiting") return "Moves to Counterpart’s updated copy after the current print.";
   if (update.state === "current") return "Already using the current copy.";
   return "Moving to Counterpart’s updated copy…";
+}
+
+/**
+ * The print sheet's starting choices: the saved defaults, except that a file that prints with its own settings (a
+ * designer's 3MF, as its printer's MCP says) starts at Standard quality and strength, which send nothing (Nov 5).
+ */
+export function startingChoices(project: Pick<Project, "settings" | "preferences" | "current">): PrintOptions {
+  const saved = project.settings?.printDefaults ?? project.preferences?.printDefaults ?? {};
+  if (!project.current?.ownSettings) return saved;
+  const { quality: _quality, strength: _strength, ...rest } = saved;
+  return rest;
+}
+
+/** What the sheet says under Quality and Strength for a designer's file; nothing for any other. */
+export function designerSettingsWords(project: Pick<Project, "current">, quality: string, strength: string): string | undefined {
+  if (!project.current?.ownSettings) return undefined;
+  return quality === "standard" && strength === "standard"
+    ? "Prints with the designer’s settings saved in this file."
+    : "Changes the designer’s settings saved in this file.";
 }

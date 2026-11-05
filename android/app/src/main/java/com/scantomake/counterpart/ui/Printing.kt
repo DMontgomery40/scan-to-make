@@ -176,6 +176,10 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                 SectionTitle("Strength")
                 Segmented(PrintStrength.entries.map { it.title }, PrintStrength.entries.indexOf(strength), enabled = !working) { strength = PrintStrength.entries[it] }
             }
+            // A designer's file (its printer's MCP says it carries its own settings): Standard sends nothing (Nov 5).
+            if ((offersQuality || offersStrength) && project.current?.ownSettings == true) Text(
+                if (quality == PrintQuality.Standard && strength == PrintStrength.Standard) "Prints with the designer’s settings saved in this file."
+                else "Changes the designer’s settings saved in this file.", color = Palette.secondary, fontSize = 13.sp)
             if (offersQuality || offersStrength) estimate?.let { e ->
                 // The slice's own settings, as the printer MCP reported them.
                 val parts = listOfNotNull(e.layerHeightMm?.let { String.format(java.util.Locale.US, "%.2f mm layers", it) },

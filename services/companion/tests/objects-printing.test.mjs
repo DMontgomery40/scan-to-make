@@ -525,6 +525,45 @@ test('an estimate slices exactly as Print would, is shared by identical requests
   assert.equal((await dispatch('objects.estimate', {id: f.object.id, quality: 'fine'})).grams, 19.2);
 });
 
+test("a designer's 3MF prints with its own settings: the last print's quality and strength never carry over (Nov 5)", async t => {
+  // Nov 5, caliper card 1f1c5515: "It shouldn't have changed a single thing about the physical print, just a cosmetic
+  // bit of logo". Whether the file carries its own settings is the printer MCP's to say (get_slice_settings own_process).
+  const f = await setup(t, {sliceArgs: true});
+  const runner = f.deps.print.services.runner, asked = [];
+  let own = true;
+  runner.ownProcess = async input => { asked.push(input.modelPath); return own; };
+  await multipart(f, {bytes: twoPart3mf({layer_height: '0.16', sparse_infill_density: '100%', wall_loops: '2'}), kind: 'copy'});
+  // The last print (or a saved default) asked for Draft and Strong.
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
+  assert.equal((await f.service.get(f.object.id)).current.ownSettings, undefined, 'not asked yet');
+  await f.service.list();
+  const listed = await until(async () => (await f.service.get(f.object.id)).current.ownSettings === true ? f.service.get(f.object.id) : undefined);
+  assert.equal(listed.current.ownSettings, true);
+  assert.deepEqual(asked, [join(f.store.dir(f.object.id), 'current', 'model.3mf')], 'the project file itself, asked once');
+  assert.ok(f.events.some(e => e.type === 'project.updated' && e.projectId === f.object.id && e.data.keys.includes('current')), 'the sheets hear it');
+  await f.service.list();
+  assert.equal(asked.length, 1, 'once per file');
+  // A sheet that names nothing slices the file's own settings: no layer height, wall or infill override.
+  const estimate = await f.service.estimate(f.object.id, {});
+  assert.equal(estimate.quality, 'standard');
+  assert.equal(estimate.strength, 'standard');
+  const sliced = f.runs.find(run => run.estimate).estimate.slicer ?? {};
+  for (const key of ['quality', 'strength', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity']) assert.equal(sliced[key], undefined, key);
+  // A choice the person makes still applies.
+  await f.service.estimate(f.object.id, {quality: 'fine'});
+  assert.equal(f.runs.filter(run => run.estimate).at(-1).estimate.slicer.quality, 'fine');
+  // A new file is asked again; an MCP that doesn't say leaves it unknown and the saved defaults apply as before.
+  own = undefined;
+  await writeFile(join(f.store.dir(f.object.id), 'current', 'model.3mf'), twoPart3mf());
+  await f.store.update(f.object.id, o => ({...o, current: {model: 'current/model.3mf', renders: []}}));
+  await f.service.list();
+  await until(() => asked.length === 2);
+  assert.equal((await f.service.get(f.object.id)).current.ownSettings, undefined);
+  await f.service.estimate(f.object.id, {});
+  const {quality, strength} = f.runs.filter(run => run.estimate).at(-1).estimate.slicer;
+  assert.deepEqual({quality, strength}, {quality: 'draft', strength: 'strong'}, "an MCP that doesn't say: today's behaviour");
+});
+
 test('pause, resume and stop go through the printer\'s mutex and relay its own confirmation to the project', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
   await f.service.print(f.object.id);

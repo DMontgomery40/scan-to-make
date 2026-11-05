@@ -24,6 +24,8 @@ struct PrintSheet: View {
     @State private var mappingState = Loading.idle
     @State private var quality = PrintSettings.Quality.standard
     @State private var strength = PrintSettings.Strength.standard
+    /// The person chose Quality or Strength in this sheet; until then a designer's file starts at its own settings.
+    @State private var settingsPicked = false
     @State private var copies = 1
     /// The person changed Copies; until then the printer profile's own count applies.
     @State private var copiesPicked = false
@@ -78,24 +80,23 @@ struct PrintSheet: View {
                     if published { multiColours } else { colours }
                     if slicedOriginal { Text("Uses the quality, strength and copies saved in this sliced file. Share an editable 3MF to change them.").font(.callout) } else {
                     Text("Quality").font(.headline)
-                    Picker("Quality", selection: $quality) {
+                    Picker("Quality", selection: Binding(get: { quality }, set: { quality = $0; settingsPicked = true })) {
                         Text("Draft").tag(PrintSettings.Quality.draft)
                         Text("Standard").tag(PrintSettings.Quality.standard)
                         Text("Fine").tag(PrintSettings.Quality.fine)
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersQuality)
                     Text("Strength").font(.headline)
-                    Picker("Strength", selection: $strength) {
+                    Picker("Strength", selection: Binding(get: { strength }, set: { strength = $0; settingsPicked = true })) {
                         Text("Standard").tag(PrintSettings.Strength.standard)
                         Text("Strong").tag(PrintSettings.Strength.strong)
                         Text("Max").tag(PrintSettings.Strength.max)
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersStrength)
-                    if offersCopies {
-                        Stepper(value: Binding(get: { copies }, set: { copies = $0; copiesPicked = true }), in: 1...64) {
-                            Text(copiesPicked ? "Copies: \(copies)" : "Copies: as the printer profile says").font(.headline)
-                        }
+                    if let words = Self.designerSettingsWords(own: object.printsWithOwnSettings, quality: quality, strength: strength) {
+                        Text(words).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
+                    if offersCopies { copiesRow }
                     if !offersCopies, object.settings?.printDefaults?.copies != nil { Text("This printer uses one copy.").font(.caption).foregroundStyle(.secondary) }
                     }
                     if offersPauses { pauseRows }
@@ -103,6 +104,9 @@ struct PrintSheet: View {
                 }
             }
             if uncertain {
+                // Why Print waits (Nov 2–3 review: the toggle blocked Print and nothing said why).
+                Label { Text(Self.uncertainWords(object)).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: "exclamationmark.triangle.fill") }
+                    .font(.callout).foregroundStyle(.orange)
                 Toggle("I checked the printer: it isn’t already printing this.", isOn: $checked)
             }
             // Bambu Studio's own warning on this slice, word for word (KAN-224). Print stays on: the run asks
@@ -128,6 +132,10 @@ struct PrintSheet: View {
         .frame(width: 720)
         .tint(.filament)
         .task(id: "\(printer?.id ?? "")|\(object.current?.model ?? "")|\(modelVersion)") { await loadFilaments() }
+        // The MCP's answer can arrive while the sheet is open: a designer's file then starts at its own settings.
+        .onChange(of: object.printsWithOwnSettings) { _, own in
+            if own && !settingsPicked { quality = .standard; strength = .standard }
+        }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
         // must not hold Print for the new one. The chosen spools too: they change what the estimate slices.
         .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)|\(mappingSignature)|\(String(describing: colour))|\(offersPauses ? Array(Set(pauses)).sorted() : [])") { await loadEstimate() }
@@ -362,6 +370,39 @@ struct PrintSheet: View {
            let update = printer.capabilities?.update {
             Text(update.message).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// Copies: the printer profile's count until the person chooses one, then a stepper that reads what it sends.
+    @ViewBuilder private var copiesRow: some View {
+        if copiesPicked {
+            HStack {
+                Stepper(value: $copies, in: 1...64) { Text("Copies: \(copies)").font(.headline) }
+                    .accessibilityValue("\(copies)")
+                Button("Use the profile’s count") { copiesPicked = false; copies = 1 }.buttonStyle(.link)
+            }
+        } else {
+            HStack {
+                Text("Copies: as the printer profile says").font(.headline)
+                Button("Choose") { copies = 1; copiesPicked = true }.buttonStyle(.link)
+            }
+        }
+    }
+
+    /// Under Quality and Strength for a designer's file (its MCP says it prints with its own settings, Nov 5).
+    static func designerSettingsWords(own: Bool, quality: PrintSettings.Quality, strength: PrintSettings.Strength) -> String? {
+        guard own else { return nil }
+        return quality == .standard && strength == .standard
+            ? "Prints with the designer’s settings saved in this file."
+            : "Changes the designer’s settings saved in this file."
+    }
+
+    /// Why Print waits for the switch: the last print of this project may have reached the printer.
+    static func uncertainWords(_ project: Project) -> String {
+        let printer = project.print?.destination?.name ?? "the printer"
+        if let status = project.print?.printerStatus, let job = status.job, !job.isEmpty {
+            return "Counterpart couldn’t tell whether the last print reached \(printer). It last reported “\(job)”. Check the printer before printing this again."
+        }
+        return "Counterpart couldn’t tell whether the last print reached \(printer). Check the printer before printing this again."
     }
 
     /// "1 h 12 min · 22 g · 0.20 mm · 15% infill".

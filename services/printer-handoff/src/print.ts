@@ -214,6 +214,35 @@ export class PrinterHandoffRunner {
       sliced: {bytes: sliced, extension, sha256, ...(slicerWarning ? {slicerWarning} : {})}, ...(preview ? {preview} : {}), previewSupported};
   }
 
+  /**
+   * Whether this 3MF prints with the process it carries (a designer's project), as the MCP says: get_slice_settings'
+   * `own_process`, asked with the slicer_type and bambu_model a slice sends. False when this printer's config names a
+   * process of its own (slicer profile or template) or its own layer height, walls or infill, which replace the file's,
+   * and when the MCP can't read the file's settings at all. Undefined when the MCP doesn't say (older than
+   * bambu-printer-mcp 1.1.62 / mcp-3d-printer-server 1.2.35) or couldn't be reached.
+   */
+  async ownProcess(input: {modelPath: string; selection?: PrinterSelection; signal?: AbortSignal}): Promise<boolean | undefined> {
+    const slicer: PrinterSlicer = {...this.#config.slicer};
+    const selection: PrinterSelection = {...this.#config.selection, ...input.selection};
+    const replaced = slicer.profile !== undefined || slicer.templateName !== undefined || slicer.layerHeightMm !== undefined
+      || slicer.wallLoops !== undefined || slicer.sparseInfillDensity !== undefined;
+    return this.#use(async (session, shared) => {
+      const options = {...(input.signal ? {signal: input.signal} : {}), failFast: shared};
+      await session.connect(options);
+      if (!session.hasTool('get_slice_settings')) return undefined;
+      let reply: unknown;
+      try {
+        reply = resultValue(await call(session, 'get_slice_settings', {source_path: input.modelPath, slicer_type: slicer.type, bambu_model: selection.model}, options));
+      } catch (error) {
+        // The MCP answered that it can't read this file's settings: slicing it uses the preset.
+        if (error instanceof PrinterMcpError && error.code === 'tool-failed') return false;
+        throw error;
+      }
+      const own = reply && typeof reply === 'object' ? (reply as {own_process?: unknown}).own_process : undefined;
+      return typeof own === 'boolean' ? own && !replaced : undefined;
+    });
+  }
+
   /** Connects and lists the server's tools without calling one (a one-shot session then disconnects). */
   async discover(signal?: AbortSignal): Promise<PrinterToolCatalog> {
     return this.#use(session => session.connect(signal ? {signal} : {}));

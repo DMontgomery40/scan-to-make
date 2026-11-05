@@ -23,14 +23,22 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         current?.model.lowercased().hasSuffix(".3mf") == true
     }
 
+    /// The model prints with the settings its file carries (a designer's 3MF), as its printer's MCP says.
+    public var printsWithOwnSettings: Bool { current?.ownSettings == true }
+
     /// Saved defaults replace print history as a whole: an absent colour means use the printer profile.
     /// Legacy quality/strength/copies can follow the model, but a historical tray belongs to one printer.
+    /// A file that prints with its own settings starts at Standard quality and strength, which send nothing: its layer
+    /// height, walls and infill print as the designer set them, never as the last print's choice (Nov 5).
     public func resolvedPrintDefaults(destinationId: String?) -> PrintSettings {
-        if let saved = settings?.printDefaults { return saved }
-        var previous = print?.settings ?? PrintSettings()
-        let previousPrinter = print?.destinationId ?? print?.destination?.id
-        if destinationId == nil || previousPrinter != destinationId { previous.colour = nil }
-        return previous
+        var resolved: PrintSettings
+        if let saved = settings?.printDefaults { resolved = saved } else {
+            resolved = print?.settings ?? PrintSettings()
+            let previousPrinter = print?.destinationId ?? print?.destination?.id
+            if destinationId == nil || previousPrinter != destinationId { resolved.colour = nil }
+        }
+        if printsWithOwnSettings { resolved.quality = nil; resolved.strength = nil }
+        return resolved
     }
 
     public var id: String
@@ -333,10 +341,13 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var changes: [Change]?
         /// blender or fusion
         public var engine: String?
-        public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil) {
-            self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes
+        /// This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. Nil until asked,
+        /// or when the MCP doesn't say.
+        public var ownSettings: Bool?
+        public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil, ownSettings: Bool? = nil) {
+            self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes; self.ownSettings = ownSettings
         }
-        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine }
+        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings }
         /// A malformed optional (say, `changes`) is left out; the model and renders still show.
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -346,6 +357,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? nil
             changes = (try? c.decodeIfPresent([Change].self, forKey: .changes)) ?? nil
             engine = (try? c.decodeIfPresent(String.self, forKey: .engine)) ?? nil
+            ownSettings = (try? c.decodeIfPresent(Bool.self, forKey: .ownSettings)) ?? nil
         }
     }
 

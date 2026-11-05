@@ -75,6 +75,9 @@ const tools = [
   {name: 'counterpart_printer_info', inputSchema: {type: 'object', properties: {}}},
   {name: 'lay_flat', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: {stl_path: string}}},
   {name: 'slice_stl', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: sliceProps}},
+  // HANDOFF_FIXTURE_OWN_PROCESS: get_slice_settings' own_process (true, false), none of it (absent) or a tool error.
+  ...(process.env.HANDOFF_FIXTURE_OWN_PROCESS ? [{name: 'get_slice_settings', inputSchema: {type: 'object', additionalProperties: false,
+    properties: {source_path: string, template_name: string, slicer_type: string, bambu_model: string}}}] : []),
   ...(mode === 'bambu' ? [
     // HANDOFF_FIXTURE_ROUTE: the MCP's own route, as counterpart_print_route reports it.
     ...(process.env.HANDOFF_FIXTURE_ROUTE ? [{name:'counterpart_print_route',inputSchema:{type:'object',properties:{route:string}}}] : []),
@@ -153,6 +156,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   if ((name === 'slice_stl' || name === 'print_3mf') && !args.bambu_model) args = await elicitModel(args);
   // The read-only capability query is not part of a print's sequence; tests assert what the print sends.
   if (name !== 'counterpart_printer_info') record({tool: name, arguments: args});
+  if (name === 'get_slice_settings') {
+    const own = process.env.HANDOFF_FIXTURE_OWN_PROCESS;
+    if (own === 'error') return {isError: true, content: [{type: 'text', text: 'No slicer settings config found'}]};
+    return text({source_path: args.source_path, source_type: '3mf', summary: {layer_height: 0.16}, ...(own === 'absent' ? {} : {own_process: own === 'true'})});
+  }
   const directory = ephemeral ?? dirname(args.stl_path ?? args.three_mf_path ?? args.gcode_path ?? process.cwd());
   if (name === 'lay_flat') {
     if (process.env.HANDOFF_FIXTURE_LAID_FLAT === 'false') return {

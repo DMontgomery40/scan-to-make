@@ -120,7 +120,9 @@ data class Project(
         val estimate: Estimate? = null, val engine: String? = null,
     ) { val currentStage: Stage? get() = stages?.lastOrNull { it.endedAtMs == null } }
     @Serializable data class Result(val model: String, val renders: List<String> = emptyList(), val sizeMm: List<Double>? = null,
-                                    val summary: String? = null, val changes: List<Change>? = null, val engine: String? = null)
+                                    val summary: String? = null, val changes: List<Change>? = null, val engine: String? = null,
+                                    /** This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. */
+                                    val ownSettings: Boolean? = null)
     @Serializable data class Question(val closeup: String? = null)
     @Serializable data class Region(val x: Double, val y: Double, val width: Double, val height: Double)
     @Serializable data class Ask(

@@ -154,6 +154,8 @@ export interface Project {
     sizeMm?: number[];
     summary?: string;
     changes?: { tag: string; text: string }[];
+    /** This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. */
+    ownSettings?: boolean;
   };
   files?: { original: string[] };
   plates?: Plate[];
