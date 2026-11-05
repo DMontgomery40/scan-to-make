@@ -256,11 +256,20 @@ function recipeKey(destinationId: string, recipe: {selected?: PrinterSelection; 
  * The request as Print applies it: saved defaults fill gaps; a 3MF owns its colours; saved pauses never apply; a
  * file that prints with its own settings (a designer's 3MF) gets no quality or strength the request didn't name.
  */
-function printOptions(object: StmObject, options: PrintOptions): PrintOptions {
+function printOptions(object: StmObject, options: PrintOptions, destinationId: string | undefined): PrintOptions {
   const {pauseBeforeLayers: _savedPauses, ...defaults} = {...object.preferences?.printDefaults};
   if (isMultipart(object)) delete defaults.colour;
-  if (object.current?.ownSettings) { delete defaults.quality; delete defaults.strength; }
+  if (ownSettingsOn(object, destinationId)) { delete defaults.quality; delete defaults.strength; }
   return {...defaults, ...options, ...(options.filament ? {colour: undefined} : {})};
+}
+
+/** The printer MCP said this file prints with its own settings on this destination (`current.ownSettings`). */
+function ownSettingsOn(object: Pick<StmObject, 'current'>, destinationId: string | undefined): boolean {
+  return object.current?.ownSettings === true && object.current.ownSettingsFor === (destinationId ?? 'current');
+}
+/** The same project on another printer: whether its file prints with its own settings is asked again there. */
+function forgetOwnSettings(object: StmObject): Pick<StmObject, 'current'> {
+  return object.current ? {current: {...object.current, ownSettings: undefined, ownSettingsFor: undefined}} : {};
 }
 
 /** A 3MF model owns its parts and their filaments: a published file, or a design in several colours. */
@@ -410,8 +419,9 @@ export class ObjectService {
         }
         if (patch.designEngine !== undefined) preferences.designEngine = patch.designEngine;
         if (patch.notifications !== undefined) preferences.notifications = patch.notifications;
+        const moved = patch.printerDestinationId !== undefined && (destination ?? this.#deps.printerCatalog?.defaultDestinationId) !== this.#destinationId(o);
         return {...o, ...(patch.title !== undefined ? {title: patch.title} : {}),
-          ...(patch.printerDestinationId !== undefined ? {printerDestinationId: destination ?? undefined} : {}), preferences};
+          ...(patch.printerDestinationId !== undefined ? {printerDestinationId: destination ?? undefined} : {}), preferences, ...(moved ? forgetOwnSettings(o) : {})};
       });
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys}});
       return this.#changed(updated);
@@ -580,7 +590,8 @@ export class ObjectService {
     return objects;
   }
 
-  readonly #ownSettingsAsked = new Set<string>();
+  /** Answers per file and destination this run (undefined while asking), so a plate switch back restores one. */
+  readonly #ownSettingsAsked = new Map<string, boolean | undefined>();
   /**
    * Asks the project's printer MCP whether its current 3MF prints with the settings it carries (a designer's
    * project) and keeps the answer on `current.ownSettings`. Once per file per run; an MCP that doesn't say leaves
@@ -588,27 +599,33 @@ export class ObjectService {
    */
   async #askOwnSettings(object: StmObject): Promise<void> {
     const current = object.current;
-    if (!current || current.ownSettings !== undefined || !isMultipart(object) || object.publishedSelection?.sliced) return;
     const destinationId = this.#destinationId(object);
+    if (!current || !isMultipart(object) || object.publishedSelection?.sliced) return;
+    if (current.ownSettings !== undefined && current.ownSettingsFor === (destinationId ?? 'current')) return;
     const modelPath = join(this.#deps.store.dir(object.id), current.model);
     // The file itself, not its name: a new pass writes a new current/model.3mf.
     const file = await stat(modelPath).catch(() => undefined);
     if (!file) return;
     const key = JSON.stringify([object.id, current.model, file.mtimeMs, file.size, destinationId ?? null]);
-    if (this.#ownSettingsAsked.has(key)) return;
-    this.#ownSettingsAsked.add(key);
+    if (this.#ownSettingsAsked.has(key) && this.#ownSettingsAsked.get(key) === undefined) return;
     const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
     const ask = services?.runner.ownProcess;
     if (!ask) return;
     try {
-      const own = await ask.call(services.runner, {modelPath, ...(services.selection ? {selection: services.selection} : {}),
-        signal: AbortSignal.timeout(60_000)});
-      if (own === undefined) return;
+      let own = this.#ownSettingsAsked.get(key);
+      if (own === undefined) {
+        this.#ownSettingsAsked.set(key, undefined);
+        own = await ask.call(services.runner, {modelPath, ...(services.selection ? {selection: services.selection} : {}),
+          signal: AbortSignal.timeout(60_000)});
+        if (own === undefined) return;
+        this.#ownSettingsAsked.set(key, own);
+      }
       let changed = false;
       const updated = await this.#deps.store.update(object.id, o => {
-        if (!o.current || o.current.model !== current.model || o.current.ownSettings !== undefined || this.#destinationId(o) !== destinationId) return o;
+        if (!o.current || o.current.model !== current.model || this.#destinationId(o) !== destinationId
+            || (o.current.ownSettings === own && o.current.ownSettingsFor === (destinationId ?? 'current'))) return o;
         changed = true;
-        return {...o, current: {...o.current, ownSettings: own}};
+        return {...o, current: {...o.current, ownSettings: own, ownSettingsFor: destinationId ?? 'current'}};
       });
       if (!changed) return;
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: object.id, data: {keys: ['current']}});
@@ -911,7 +928,7 @@ export class ObjectService {
       return this.#changed(await this.#deps.store.update(id, o => {
         const {colour: _colour, ...defaults} = o.preferences?.printDefaults ?? {};
         return {...o, printerDestinationId: chosen, ...(this.#destinationId(o) !== chosen && o.preferences?.printDefaults
-          ? {preferences: {...o.preferences, printDefaults: defaults}} : {})};
+          ? {preferences: {...o.preferences, printDefaults: defaults}} : {}), ...(this.#destinationId(o) !== chosen ? forgetOwnSettings(o) : {})};
       }));
     });
   }
@@ -1246,7 +1263,7 @@ export class ObjectService {
     // A 3MF owns its filament assignments; the sheets do not offer a single-spool override.
     // Keep the saved preference for other models, but do not silently apply it here.
     // Layer pauses come only from this request (the sheet shows them): a saved default never adds a hidden stop.
-    options = printOptions(object, options);
+    options = printOptions(object, options, this.#destinationId(object));
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     if (object.ask?.status === 'open' && object.ask.type === 'choice') throw new InvalidStateError('Choose the model’s file and plate before printing.');
     this.#publishedSettings(object, options);
@@ -1799,7 +1816,7 @@ export class ObjectService {
     const object = await this.get(id);
     // The estimate slices exactly what Print would (`#sliceRecipe`): its file is the one Print sends.
     const {destinationId: requested, ...choices} = request;
-    const options = printOptions(object, choices);
+    const options = printOptions(object, choices, requested ? this.#deps.printerCatalog?.canonical(requested) ?? requested : this.#destinationId(object));
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     void this.#askOwnSettings(object);
     this.#publishedSettings(object, options);

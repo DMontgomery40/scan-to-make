@@ -121,7 +121,9 @@ export interface StmObject {
      * (get_slice_settings own_process): the print sheet starts at the file's own settings and sends no quality or
      * strength the person didn't choose. Absent until the MCP has been asked, or when it doesn't say.
      */
-    ownSettings?: boolean};
+    ownSettings?: boolean;
+    /** The destination `ownSettings` was answered for: its MCP and config decide it, so another printer asks again. */
+    ownSettingsFor?: string};
   question?: {closeup: string};
   /** The printer MCP's original question. Only an explicit answer to this ID can approve it. */
   printConfirmation?: ObjectPrintConfirmation;

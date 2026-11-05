@@ -564,6 +564,38 @@ test("a designer's 3MF prints with its own settings: the last print's quality an
   assert.deepEqual({quality, strength}, {quality: 'draft', strength: 'strong'}, "an MCP that doesn't say: today's behaviour");
 });
 
+test("the own-settings answer belongs to its printer, and another plate of the same file keeps it", async t => {
+  const f = await setup(t, {sliceArgs: true});
+  const runner = f.deps.print.services.runner, asked = [];
+  runner.ownProcess = async input => { asked.push(input.modelPath); return true; };
+  await multipart(f, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
+  await f.service.list();
+  await until(async () => (await f.service.get(f.object.id)).current.ownSettings === true);
+  assert.equal((await f.service.get(f.object.id)).current.ownSettingsFor, 'current');
+  // An answer recorded for another printer is not this printer's: its saved defaults apply and it is asked again.
+  await f.store.update(f.object.id, o => ({...o, current: {...o.current, ownSettingsFor: 'garage'}}));
+  await f.service.estimate(f.object.id, {});
+  const {quality} = f.runs.filter(run => run.estimate).at(-1).estimate.slicer;
+  assert.equal(quality, 'draft', 'another printer\'s answer never strips this printer\'s defaults');
+  await until(async () => (await f.service.get(f.object.id)).current.ownSettingsFor === 'current');
+  assert.equal(asked.length, 1, 'the answer for this file and printer is remembered, not asked again');
+});
+
+test('another plate of the same file keeps its own-settings answer; another file clears it', async () => {
+  const {selectingPlate} = await import('../dist/objects/plates.js');
+  const receipt = (sha256, path) => ({sha256, path, name: path, plates: [{index: 0, name: 'A', sliced: false}, {index: 1, name: 'B', sliced: false}]});
+  const object = {id: 'p', kind: 'published', state: 'ready', photos: [], passes: [], files: {original: [], receipts: [receipt('a', 'original/a.3mf'), receipt('b', 'original/b.3mf')]},
+    publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: false},
+    current: {model: 'original/a.3mf', renders: [], ownSettings: true, ownSettingsFor: 'current'}};
+  const samefile = selectingPlate(object, 0, 1);
+  assert.equal(samefile.current.ownSettings, true);
+  assert.equal(samefile.current.ownSettingsFor, 'current');
+  const other = selectingPlate(object, 1, 0);
+  assert.equal(other.current.ownSettings, undefined);
+  assert.equal(other.current.ownSettingsFor, undefined);
+});
+
 test('pause, resume and stop go through the printer\'s mutex and relay its own confirmation to the project', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
   await f.service.print(f.object.id);

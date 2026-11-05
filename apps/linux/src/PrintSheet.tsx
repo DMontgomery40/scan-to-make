@@ -34,6 +34,16 @@ export function PrintSheet({
   );
   const [quality, setQuality] = useState(initial.quality ?? "standard");
   const [strength, setStrength] = useState(initial.strength ?? "standard");
+  // Chosen in this sheet; until then a designer's file starts at its own settings, even when the MCP's answer
+  // arrives after the sheet opened (as on the Mac and iPhone).
+  const [settingsPicked, setSettingsPicked] = useState(false);
+  const ownSettings = project.current?.ownSettings === true;
+  useEffect(() => {
+    if (ownSettings && !settingsPicked) {
+      setQuality("standard");
+      setStrength("standard");
+    }
+  }, [ownSettings, settingsPicked]);
   const [copies, setCopies] = useState(initial.copies ?? 1);
   const [pauses, setPauses] = useState(
     initial.pauseBeforeLayers?.join(", ") ?? "",
@@ -260,7 +270,10 @@ export function PrintSheet({
               <select
                 disabled={caps?.quality !== true}
                 value={quality}
-                onChange={(e) => setQuality(e.target.value)}
+                onChange={(e) => {
+                  setQuality(e.target.value);
+                  setSettingsPicked(true);
+                }}
               >
                 <option value="draft">Draft</option>
                 <option value="standard">Standard</option>
@@ -272,7 +285,10 @@ export function PrintSheet({
               <select
                 disabled={caps?.strength !== true}
                 value={strength}
-                onChange={(e) => setStrength(e.target.value)}
+                onChange={(e) => {
+                  setStrength(e.target.value);
+                  setSettingsPicked(true);
+                }}
               >
                 <option value="standard">Standard</option>
                 <option value="strong">Strong</option>
