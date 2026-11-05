@@ -8,8 +8,9 @@ One screen, updated in place. No dated copies or prompt files; git history keeps
 
 | Where | Build | Source |
 |---|---|---|
-| Mac `/Applications/Counterpart.app` | 202611051513 (Nov 5 15:17Z) | main `6a6d4dde`, with #321 (what will print) and #326 (a sidebar search says how many projects it hides, and sits in the sidebar). Rollback: 202611050844 at `~/scan-to-make-work/mac-202611051513/Counterpart.previous`. |
+| Mac `/Applications/Counterpart.app` | 202611052315 (Nov 5 23:26Z) | main `a13cef78` (#348: the sidebar lists the starters while a project is open; starters in New Project). AX on the installed app: "Start with These" with its starter rows while a project is open (`~/scan-to-make-work/parity-20261105/mac-202611052315-sidebar-starters-ax.txt`). Rollback: 202611051513 at `~/scan-to-make-work/mac-202611052315/Counterpart.previous`. |
 | iPhone Davica3 `00008150-001A488C3642401C` | 2.0 (202611050845), Release, development signing, installed Nov 5 | `0c967a58` (#321) |
+| iPad Air `00008103-0011550134A0011E` | 202611052315, Release, development signing, installed Nov 5 23:2xZ | main `a13cef78` (#348). devicectl install and launch succeeded; the screen was off, so it is not yet seen on screen. Receipts: `~/scan-to-make-work/ipad-202611052315/` |
 | Public Mac beta (Sparkle, notarized) | v2.0-beta.4 · 202611040930 | `fbd1a69b` |
 | TestFlight | 2.0 (3) uploaded Nov 4; 2.0 (2) last seen Waiting for Review in Counterpart Public Beta | `4a894769` |
 | bambu-printer-mcp | npm 1.1.64 (Nov 5): remote scopes in `_meta["counterpart/remote"]`, slice reuse, `inspect_print_file` `sliced`, `slicer_report`. Installed through Settings → Printers → Update on the Mac (22:44Z, "Updated to 1.1.64"). Linux still runs 1.1.61 | npm |

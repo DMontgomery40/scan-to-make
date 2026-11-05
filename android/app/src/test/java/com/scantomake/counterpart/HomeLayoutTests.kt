@@ -81,7 +81,7 @@ class HomeLayoutTests {
         home()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("3D scan platform")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Start with something useful").assertExists()
-        compose.onNodeWithText("Long vernier caliper").assertExists()
+        compose.onNodeWithText("Vernier caliper with depth gauge").assertExists()
         // This is Home with projects, not the empty Home's job cards.
         compose.onNodeWithText("Make something that fits").assertDoesNotExist()
     }
@@ -90,7 +90,7 @@ class HomeLayoutTests {
         state.loaded.value = true
         home()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("3D scan platform")).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("Long vernier caliper").assertExists()
+        compose.onNodeWithText("Vernier caliper with depth gauge").assertExists()
     }
 
     /** Settings has Help and Printers, as on iPhone, Mac and Linux; the print sheet sends people to Settings → Printers. */

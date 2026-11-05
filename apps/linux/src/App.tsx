@@ -384,7 +384,7 @@ export function App() {
                     {catalog.map((starter) => (
                       <article className="starter" key={starter.id}>
                         {starter.id === "long-vernier-caliper" ? (
-                          <img src={vernierImage} alt="Long vernier caliper" />
+                          <img src={vernierImage} alt="Vernier caliper with depth gauge" />
                         ) : (
                           <div className="starter-symbol" aria-hidden>
                             ◎
