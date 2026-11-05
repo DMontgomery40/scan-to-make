@@ -66,8 +66,10 @@ struct ProjectsRoot: View {
         }
     }
 
+    /// Opens a project. On iPad the detail's pushed pages belong to the previous project, so they go too:
+    /// otherwise a starter added from the sidebar landed on the old project's Printing screen.
     private func open(_ id: String) {
-        if width == .regular { selected = id } else { path = [id] }
+        if width == .regular { selected = id; detailPath = [] } else { path = [id] }
     }
 
     private var stack: some View {
