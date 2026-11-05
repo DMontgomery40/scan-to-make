@@ -1,0 +1,47 @@
+{
+  "projects": [
+    {
+      "id": "0",
+      "title": "Caliper card",
+      "instructions": "A useful part",
+      "state": "ready",
+      "createdAtMs": 1,
+      "updatedAtMs": 2
+    },
+    {
+      "id": "1",
+      "title": "Cable clip",
+      "instructions": "A useful part",
+      "state": "ready",
+      "createdAtMs": 1,
+      "updatedAtMs": 2
+    }
+  ],
+  "printerName": "Workshop",
+  "cases": [
+    {
+      "query": "caliper",
+      "expectedCount": 1
+    },
+    {
+      "query": "missing",
+      "expectedCount": 0
+    },
+    {
+      "query": "  ",
+      "expectedCount": 2
+    },
+    {
+      "query": "",
+      "expectedCount": 2
+    },
+    {
+      "query": "USEFUL",
+      "expectedCount": 2
+    },
+    {
+      "query": "Workshop",
+      "expectedCount": 2
+    }
+  ]
+}

@@ -227,16 +227,24 @@ class CompanionClientTests {
         assertEquals(sha, choice.copy(sliceSha256 = sha).body["sliceSha256"].str)
         assertNull(choice.body["sliceSha256"])
         assertNull(PrintChoice(PrintColour.Auto).estimateBody(null)["destinationId"])
-        val png = java.util.Base64.getEncoder().encodeToString(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
-        val views = listOf(mapOf("name" to "top", "label" to "From above", "png" to png, "width" to 400, "height" to 400),
-            mapOf("name" to "bed_side", "label" to "From the side", "png" to png, "width" to 400, "height" to 200))
-        val fake = FakeTransport { _, _ -> json(200, mapOf("destinationId" to "p1s", "quality" to "fine", "strength" to "strong", "seconds" to 3600, "layers" to 120,
-            "slicedAt" to "2026-11-05T08:00:00Z", "sliceSha256" to sha, "preview" to mapOf("sha256" to sha, "views" to views, "mmPerPixel" to 0.5))) }
+        val response = contractFixture("print-estimate-preview.json").readBytes()
+        val fake = FakeTransport { _, _ -> HttpReply(200, response) }
         val estimate = client(fake).estimate(id, "p1s", choice)
         assertEquals("/v1/objects/$id/estimate", java.net.URI(fake.calls.single().request.url).path)
         assertEquals(asked, parseObject(fake.calls.single().request.body!!))
         assertEquals(sha, estimate.shownSlice)
         assertEquals(listOf("From above", "From the side"), estimate.preview!!.views.map { it.label })
+        assertEquals(listOf("top", "bed_side"), estimate.preview!!.views.map { it.name })
+        // Decode the whole PNG, not just its signature: these shared images must be usable by the UI.
+        // JVM ImageIO validates the fixture here; actual Android BitmapFactory rendering is a device check.
+        // ImageIO is available to the JVM test runner, but absent from Android's compile-time API stubs.
+        val readPng = Class.forName("javax.imageio.ImageIO").getMethod("read", java.io.InputStream::class.java)
+        for (view in estimate.preview!!.views) {
+            val bytes = java.util.Base64.getDecoder().decode(view.png)
+            val image = requireNotNull(readPng.invoke(null, bytes.inputStream())) { "${view.name} is not a decodable PNG" }
+            assertEquals(view.width, image.javaClass.getMethod("getWidth").invoke(image))
+            assertEquals(view.height, image.javaClass.getMethod("getHeight").invoke(image))
+        }
         // Only an estimate whose pictures are of its own sliced file can be printed.
         assertNull(estimate.copy(preview = null).shownSlice) // an MCP that draws nothing
         assertNull(estimate.copy(preview = estimate.preview!!.copy(sha256 = "b".repeat(64))).shownSlice) // pictures of another file
