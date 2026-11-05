@@ -17,11 +17,17 @@ function replyJson(reply: {content?: Array<{type: string; text?: string}>; struc
   try { return JSON.parse(text); } catch { return undefined; }
 }
 
-/** What the MCP reports about a file's settings, without the file's own paths. */
-function settingsOf(value: unknown): string | undefined {
+/**
+ * What the MCP reports about a file's settings, without the file's own paths; undefined when the reply isn't a
+ * reading of them (an error, other JSON, or no summary). `none` is a successful reading that found no settings.
+ */
+function settingsOf(reply: {isError?: boolean; content?: Array<{type: string; text?: string}>; structuredContent?: unknown}): {key: string; none: boolean} | undefined {
+  if (reply.isError) return undefined;
+  const value = replyJson(reply);
   if (!value || typeof value !== 'object') return undefined;
   const {summary, raw_key_count: count} = value as {summary?: unknown; raw_key_count?: unknown};
-  return summary === undefined ? undefined : JSON.stringify({summary, count});
+  if (summary === undefined || typeof count !== 'number') return undefined;
+  return {key: JSON.stringify({summary, count}), none: count === 0};
 }
 
 /**
@@ -36,14 +42,13 @@ export async function designerEditProblem(handoff: PrinterHandoffConfig, origina
   try {
     await client.connect(signal);
     if (!client.hasTool('get_slice_settings')) return DESIGNER_FILE_UNCHECKED;
-    const read = async (path: string) => {
-      const reply = await client.callTool('get_slice_settings', {source_path: path}, {signal, timeoutMs: 60_000});
-      return reply.isError ? undefined : settingsOf(replyJson(reply));
-    };
+    const read = async (path: string) => settingsOf(await client.callTool('get_slice_settings', {source_path: path}, {signal, timeoutMs: 60_000}));
     const designer = await read(original);
-    // A designer's file with no settings the MCP can read has none to lose.
-    if (designer === undefined) return undefined;
-    return await read(edited) === designer ? undefined : DESIGNER_FILE_REBUILT;
+    // Only a reading of the designer's file can approve an edit: one that couldn't be read proves nothing.
+    if (!designer) return DESIGNER_FILE_UNCHECKED;
+    // A designer's file the MCP read and found no settings in has none to lose.
+    if (designer.none) return undefined;
+    return (await read(edited))?.key === designer.key ? undefined : DESIGNER_FILE_REBUILT;
   } catch {
     return DESIGNER_FILE_UNCHECKED;
   } finally {

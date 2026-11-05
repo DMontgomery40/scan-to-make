@@ -14,7 +14,7 @@ import {CameraFrames} from '../dist/printing/camera.js';
 import {CompanionSettingsStore} from '../dist/settings.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
-import {showing, showingRunner} from './support/shown-print.mjs';
+import {showing, showingRunner, shownSlice} from './support/shown-print.mjs';
 import {createHash} from 'node:crypto';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
@@ -1380,6 +1380,45 @@ test('Print sends exactly the file the sheet previewed; without that preview, or
   const dispatched = f.runs.find(run => run.id);
   assert.equal(dispatched.options.expectedSha256, shown.sliceSha256, 'the printer gets the previewed file, checked by its hash');
   assert.equal(createHash('sha256').update(dispatched.options.presliced.bytes).digest('hex'), shown.sliceSha256);
+});
+
+test('two print recipes that slice to the same file each keep their own preview; Print sends it for either (#321)', async t => {
+  // Codex on #321: an already-sliced file estimated for two recipes is the same bytes, and the second recipe's record
+  // replaced the first's, so switching back showed the first estimate but Print refused it.
+  const f = await setup(t, {reports: [status('RUNNING', 10)], sliceArgs: true});
+  const same = shownSlice('already sliced');
+  f.deps.print.services.runner.estimate = async () => ({...same, previewSupported: true, estimate: {seconds: 60, grams: 1}, settings: {}});
+  const standard = await f.service.estimate(f.object.id);
+  const fine = await f.service.estimate(f.object.id, {quality: 'fine'});
+  assert.equal(standard.sliceSha256, fine.sliceSha256, 'the same sliced bytes');
+  await f.service.printUnshown(f.object.id, {sliceSha256: standard.sliceSha256});
+  await f.approve();
+  await f.service.settled(f.object.id);
+  await reset(f);
+  await f.service.printUnshown(f.object.id, {quality: 'fine', sliceSha256: fine.sliceSha256});
+  await f.approve();
+  await f.service.settled(f.object.id);
+  const dispatched = f.runs.filter(run => run.id);
+  assert.equal(dispatched.length, 2, 'both recipes print the file their sheet showed');
+  for (const run of dispatched) assert.equal(createHash('sha256').update(run.options.presliced.bytes).digest('hex'), same.sliced.sha256);
+  // Only the recipe that was shown: one the sheet never estimated still asks for a preview.
+  await reset(f);
+  await assert.rejects(f.service.printUnshown(f.object.id, {quality: 'draft', sliceSha256: same.sliced.sha256}), /changed since the preview/);
+});
+
+test('a preview from before the model changed never prints: Print with its hash is refused after a correction (#321)', async t => {
+  // Codex on #321: the shown-slice check didn't include the model, so a delayed Print sent the old geometry.
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  const shown = await f.service.estimate(f.object.id);
+  await writeFile(join(f.store.dir(f.object.id), 'current', 'model.stl'), Buffer.concat([STL, Buffer.from(' corrected')]));
+  await assert.rejects(f.service.printUnshown(f.object.id, {sliceSha256: shown.sliceSha256}), /model or its print settings changed since the preview/);
+  assert.equal(f.runs.filter(run => run.id).length, 0, 'nothing sent');
+  const fresh = await f.service.estimate(f.object.id);
+  assert.notEqual(fresh.sliceSha256, shown.sliceSha256, 'the corrected model is sliced again');
+  await f.service.printUnshown(f.object.id, {sliceSha256: fresh.sliceSha256});
+  await f.approve();
+  await f.service.settled(f.object.id);
+  assert.equal(f.runs.find(run => run.id).options.expectedSha256, fresh.sliceSha256);
 });
 
 test('an MCP that cannot draw what will print is asked to update; nothing is sent', async t => {

@@ -246,3 +246,76 @@ test("a designer copy whose last edit already lost the designer's settings start
   assert.match(prompt, /Designer's 3MF project to edit: .*scan\.3mf\n/, "the designer's own file is the one to edit");
   assert.doesNotMatch(prompt, /model\.3mf/, 'the rebuilt file is not offered');
 });
+
+/** A printer MCP whose get_slice_settings answers `reply(path)` for each file it is asked about. */
+const settingsClient = reply => () => ({connect: async () => {}, close: async () => {}, hasTool: name => name === 'get_slice_settings',
+  callTool: async (_name, args) => reply(args.source_path)});
+const settingsReply = value => ({content: [{type: 'text', text: JSON.stringify(value)}]});
+const designerSettings = settingsReply({summary: {layer_height: 0.16, infill: '100%'}, raw_key_count: 412});
+
+/** Runs a designer-copy pass whose worker ends with `ending` and writes a model and touched.3mf. */
+async function designerPass(client, ending = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'touchup-designer-check-'));
+  const designer = join(root, 'scan.3mf');
+  await writeFile(designer, 'PK designer');
+  const deps = {...recorder([]), client, run: async (inv, pass) => {
+    const result = done(pass); await writeFile(result.model, 'solid x');
+    const parts = join(pass.outDir, 'touched.3mf'); await writeFile(parts, 'PK edited');
+    return {...result, parts, ...ending};
+  }};
+  return runTouchup(await input({scan: [designer], designerCopy: true, note: 'Swap the logo'}), deps);
+}
+
+test("a designer copy is refused when the designer's file can't be inspected: an error, other JSON or no summary never approves", async () => {
+  // Codex on #318: a failed read of the original came back as "no settings", which approved any edit.
+  const failures = {
+    'an error': {isError: true, content: [{type: 'text', text: 'Failed to parse 3MF file'}]},
+    'text that is not JSON': {content: [{type: 'text', text: 'not json'}]},
+    'JSON without a summary': settingsReply({source_path: 'x'}),
+    'a summary without a key count': settingsReply({summary: {layer_height: 0.16}}),
+  };
+  for (const [what, reply] of Object.entries(failures)) {
+    const result = await designerPass(settingsClient(path => path.endsWith('/scan.3mf') ? reply : designerSettings));
+    assert.equal(result.status, 'failed', what);
+    assert.match(result.reason, /can't check that the designer's settings were kept/, what);
+    assert.equal(result.model, undefined, what);
+    assert.equal(result.parts, undefined, what);
+  }
+  const thrown = await designerPass(() => ({connect: async () => { throw new Error('spawn failed'); }, close: async () => {}, hasTool: () => true}));
+  assert.match(thrown.reason, /can't check/, 'an MCP that does not start checks nothing');
+  const noTool = await designerPass(() => ({connect: async () => {}, close: async () => {}, hasTool: () => false}));
+  assert.match(noTool.reason, /can't check/, 'an MCP without get_slice_settings checks nothing');
+});
+
+test("a designer's 3MF the MCP read and found no settings in has none to lose", async () => {
+  const result = await designerPass(settingsClient(path => path.endsWith('/scan.3mf')
+    ? settingsReply({summary: {layer_height: null}, raw_key_count: 0}) : designerSettings));
+  assert.equal(result.status, 'done');
+  assert.ok(result.parts.endsWith('touched.3mf'));
+});
+
+test("every designer-copy result that can become the model is checked, whatever the pass's status", async () => {
+  // Codex on #318: a worker that saved a rebuilt model and then hit a limit, failed or asked for a close-up skipped the
+  // check, and the project kept that model as "the last saved version".
+  const rebuilt = settingsClient(path => path.endsWith('/scan.3mf') ? designerSettings : settingsReply({summary: {layer_height: 0.2}, raw_key_count: 40}));
+  const capped = await designerPass(rebuilt, {status: 'capped', reason: 'time limit'});
+  assert.equal(capped.status, 'failed');
+  assert.match(capped.reason, /rebuilt the designer's file/);
+  assert.equal(capped.model, undefined);
+  const failed = await designerPass(rebuilt, {status: 'failed', reason: 'The worker stopped.'});
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.reason, 'The worker stopped.', 'a failed pass keeps its own reason');
+  assert.equal(failed.model, undefined);
+  assert.equal(failed.parts, undefined);
+  const closeup = await designerPass(rebuilt, {status: 'needs_closeup', closeup: 'the hinge'});
+  assert.equal(closeup.status, 'needs_closeup', 'a close-up request is still asked');
+  assert.equal(closeup.model, undefined);
+  // A bare STL checkpoint, with no 3MF at all, is a rebuild too.
+  const stlOnly = await designerPass(settingsClient(() => designerSettings), {status: 'capped', reason: 'step limit', parts: undefined});
+  assert.equal(stlOnly.status, 'failed');
+  assert.equal(stlOnly.model, undefined);
+  // A capped pass that kept the designer's settings keeps its saved model.
+  const kept = await designerPass(settingsClient(() => designerSettings), {status: 'capped', reason: 'time limit'});
+  assert.equal(kept.status, 'capped');
+  assert.ok(kept.model);
+});

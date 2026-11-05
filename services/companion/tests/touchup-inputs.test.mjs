@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, readdir, writeFile, copyFile} from 'node:fs/promises';
+import {mkdtemp, readdir, readFile, writeFile, copyFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -110,4 +110,17 @@ test('numbered overview includes every supplied photo across bounded pages witho
   assert.deepEqual(report.sizes, [[1536,1896],[384,316]]);
   assert.ok(Math.abs(report.lastFirstPage[0] - 230) < 5, 'photo 24 occupies the final cell on page 1');
   assert.ok(Math.abs(report.lastPage[0] - 240) < 5, 'photo 25 is present on page 2');
+});
+
+test('inputs that share a name each keep their own copy (the working current/model.3mf and a designer\'s model.3mf)', async () => {
+  // Codex on #318: both were copied to scan/model.3mf, so the designer's original overwrote the working copy.
+  const root = await temp('touchup-root-'), current = await temp('touchup-current-'), original = await temp('touchup-scan-');
+  await writeFile(join(current, 'model.3mf'), 'PK working');
+  await writeFile(join(original, 'model.3mf'), 'PK designer');
+  await writeFile(join(original, 'model-2.3mf'), 'PK third');
+  const pass = await prepareTouchupPass({root, objectId: 'obj-1', scan: [join(current, 'model.3mf'), join(original, 'model.3mf'), join(original, 'model-2.3mf')],
+    photos: [], requirePhotos: false});
+  assert.equal(new Set(pass.scanPaths).size, 3);
+  assert.deepEqual(await Promise.all(pass.scanPaths.map(path => readFile(path, 'utf8'))), ['PK working', 'PK designer', 'PK third']);
+  assert.equal(pass.scanPaths[0], join(pass.scanDir, 'model.3mf'), 'the first keeps its name');
 });

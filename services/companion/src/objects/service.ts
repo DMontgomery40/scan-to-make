@@ -254,12 +254,12 @@ interface ShownSliceShape {recipe: string; previewed: boolean; previewSupported:
 /** The MCP takes previews but drew nothing for this file. */
 const NOTHING_TO_PREVIEW = "Counterpart couldn't draw what this file would print, so it won't send it. Nothing was sent to the printer.";
 
-/** One string for a print's destination, selection and slicer arguments: equal only when the slice would be. */
-function recipeKey(destinationId: string, recipe: {selected?: PrinterSelection; sliced: PrinterSlicer}): string {
+/** One string for a print's model, destination, selection and slicer arguments: equal only when the slice would be. */
+function recipeKey(destinationId: string, recipe: {selected?: PrinterSelection; sliced: PrinterSlicer}, model: Buffer): string {
   const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
     : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, canonical(v)]))
     : value;
-  return createHash('sha256').update(JSON.stringify(canonical({destinationId, selection: recipe.selected ?? null, slicer: recipe.sliced}))).digest('hex');
+  return createHash('sha256').update(JSON.stringify(canonical({model: createHash('sha256').update(model).digest('hex'), destinationId, selection: recipe.selected ?? null, slicer: recipe.sliced}))).digest('hex');
 }
 
 /**
@@ -1374,12 +1374,13 @@ export class ObjectService {
       ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {}),
       ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})};
     // What prints is what the sheet showed (Nov 5): the estimate's own sliced file, never a fresh slice nobody saw.
-    const shown = options.sliceSha256 ? await this.#shownSlice(id, options.sliceSha256) : undefined;
-    if (!shown) throw new InvalidStateError('Open Print to see what will print, then print it from there.');
-    if (!shown.shape.previewed) throw new InvalidStateError(shown.shape.previewSupported ? NOTHING_TO_PREVIEW : previewUnavailable(runner.backend));
-    if (recipeKey(destinationId ?? 'current', recipe) !== shown.shape.recipe)
-      throw new InvalidStateError('The print settings changed since the preview. Open Print again to see what will print.');
+    // The shown file for this model and these settings: a correction or a changed setting since the sheet finds none.
     const stl = await this.#modelBytes(object);
+    const shown = options.sliceSha256 ? await this.#shownSlice(id, options.sliceSha256, recipeKey(destinationId ?? 'current', recipe, stl)) : undefined;
+    if (!shown) throw new InvalidStateError(options.sliceSha256 && await this.#shownSlice(id, options.sliceSha256)
+      ? 'The model or its print settings changed since the preview. Open Print again to see what will print.'
+      : 'Open Print to see what will print, then print it from there.');
+    if (!shown.shape.previewed) throw new InvalidStateError(shown.shape.previewSupported ? NOTHING_TO_PREVIEW : previewUnavailable(runner.backend));
     const ask = await this.#legacyColourDesign(object) ? LEGACY_COLOUR_ASK : undefined;
     const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
@@ -1853,29 +1854,35 @@ export class ObjectService {
 
   /**
    * The sliced file a print sheet showed (its estimate and preview), kept so Print sends exactly it
-   * (`<project>/slices/shown/<sha256>`). `shape` is what the sheet chose; Print must choose the same.
+   * (`<project>/slices/shown/<sha256>`), with one record per recipe (`<sha256>.<recipe>.json`): two recipes can slice
+   * to the same bytes, such as an already-sliced 3MF for two printers. `shape` is what the sheet chose.
    */
   async #keepShownSlice(id: string, file: {bytes: Buffer; extension: string; sha256: string; slicerWarning?: string}, shape: ShownSliceShape): Promise<string> {
     const directory = join(this.#deps.store.dir(id), 'slices', 'shown');
     await mkdir(directory, {recursive: true});
     const extension = /^\.(3mf|gcode)$/i.test(file.extension) ? file.extension.toLowerCase() : '.3mf';
+    // The record first, so a concurrent sweep never takes the bytes it names.
+    await writeFile(join(directory, `${file.sha256}.${shape.recipe}.json`), JSON.stringify({extension, shape, ...(file.slicerWarning ? {slicerWarning: file.slicerWarning} : {})}), {mode: 0o600});
     await writeFile(join(directory, `${file.sha256}${extension}`), file.bytes, {mode: 0o600});
-    await writeFile(join(directory, `${file.sha256}.json`), JSON.stringify({extension, shape, ...(file.slicerWarning ? {slicerWarning: file.slicerWarning} : {})}), {mode: 0o600});
-    // Keep the last few sheets' files only.
+    // Keep the last few sheets' records only, and the files they name.
     const entries = (await readdir(directory).catch(() => [] as string[])).filter(name => name.endsWith('.json'));
     if (entries.length > 8) {
-      const dated = await Promise.all(entries.map(async name => ({name, at: (await stat(join(directory, name))).mtimeMs})));
-      for (const {name} of dated.sort((a, b) => a.at - b.at).slice(0, entries.length - 8)) {
-        const sha = name.slice(0, -5);
-        for (const other of await readdir(directory)) if (other.startsWith(sha)) await rm(join(directory, other), {force: true});
-      }
+      const dated = await Promise.all(entries.map(async name => ({name, at: (await stat(join(directory, name)).catch(() => undefined))?.mtimeMs ?? 0})));
+      for (const {name} of dated.sort((a, b) => a.at - b.at).slice(0, entries.length - 8)) await rm(join(directory, name), {force: true});
+      const left = await readdir(directory).catch(() => [] as string[]);
+      const named = new Set(left.filter(name => name.endsWith('.json')).map(name => name.slice(0, 64)));
+      for (const other of left) if (!named.has(other.slice(0, 64))) await rm(join(directory, other), {force: true});
     }
     return file.sha256;
   }
-  async #shownSlice(id: string, sha256: string): Promise<{bytes: Buffer; extension: string; shape: ShownSliceShape; slicerWarning?: string} | undefined> {
-    if (!/^[0-9a-f]{64}$/.test(sha256)) return undefined;
+  /** The shown file and its record for `recipe`; without a recipe, any record of that file. */
+  async #shownSlice(id: string, sha256: string, recipe?: string): Promise<{bytes: Buffer; extension: string; shape: ShownSliceShape; slicerWarning?: string} | undefined> {
+    if (!/^[0-9a-f]{64}$/.test(sha256) || (recipe !== undefined && !/^[0-9a-f]{64}$/.test(recipe))) return undefined;
     const directory = join(this.#deps.store.dir(id), 'slices', 'shown');
-    const record = await readFile(join(directory, `${sha256}.json`), 'utf8').then(text => JSON.parse(text) as {extension: string; shape: ShownSliceShape; slicerWarning?: string}, () => undefined);
+    const name = recipe ? `${sha256}.${recipe}.json`
+      : (await readdir(directory).catch(() => [] as string[])).find(entry => entry.startsWith(`${sha256}.`) && entry.endsWith('.json'));
+    if (!name) return undefined;
+    const record = await readFile(join(directory, name), 'utf8').then(text => JSON.parse(text) as {extension: string; shape: ShownSliceShape; slicerWarning?: string}, () => undefined);
     if (!record || !/^\.(3mf|gcode)$/.test(record.extension)) return undefined;
     const bytes = await readFile(join(directory, `${sha256}${record.extension}`)).catch(() => undefined);
     if (!bytes || createHash('sha256').update(bytes).digest('hex') !== sha256) return undefined;
@@ -1909,7 +1916,7 @@ export class ObjectService {
         || (copies && !capabilities.copies) || (overrides.pauseAtLayers?.length && !capabilities.layerPauses)))
       throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {}), ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})}));
     const model = await this.#modelBytes(object);
-    const recipeId = recipeKey(destinationId ?? 'current', recipe);
+    const recipeId = recipeKey(destinationId ?? 'current', recipe, model);
     // The installed MCP's version too: an update can change what it slices and whether it draws previews.
     const server = destinationId ? this.#deps.printers?.capabilities(destinationId)?.server?.version ?? null : null;
     const key = JSON.stringify([id, createHash('sha256').update(model).digest('hex'), recipeId, server]);
@@ -1917,7 +1924,7 @@ export class ObjectService {
     // A kept estimate whose sliced file is gone (only the last few are kept) is sliced again.
     if (running) {
       const kept = await running.catch(() => undefined);
-      if (kept?.sliceSha256 && !await this.#shownSlice(id, kept.sliceSha256)) { this.#estimates2.delete(key); running = undefined; }
+      if (kept?.sliceSha256 && !await this.#shownSlice(id, kept.sliceSha256, recipeId)) { this.#estimates2.delete(key); running = undefined; }
     }
     if (!running) {
       const runner = services.runner;
