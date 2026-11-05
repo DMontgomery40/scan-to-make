@@ -255,7 +255,9 @@ or replace it for an update.** The app ID is `com.scantomake`; key alias
 - The same three values have synchronizable data-protection Keychain copies for
   iCloud Keychain recovery, access group `X7F5F9LR24.com.counterpart.release-key`.
   Synchronizable items require a provisioned, signed helper in the logged-in GUI
-  session; `security find-generic-password` reads the local login copies.
+  session. The local login copies require Keychain access approval; an SSH
+  `security find-generic-password` attempt was denied (exit 36). Use the signed
+  GUI helper for unattended signing; never treat an empty password as success.
 - Encrypted backup:
   `~/Library/Mobile Documents/com~apple~CloudDocs/Counterpart-release/android-release.jks.enc`.
   Encryption: OpenSSL AES-256-CBC, salted, PBKDF2, 600000 iterations. Local
@@ -269,6 +271,14 @@ from the synchronizable item using a helper signed by team `X7F5F9LR24` with
 that access group authorized by its provisioning profile; do not create new
 passwords if an item is missing. The current helper uses the existing Counterpart
 Mac development profile, in a separate `ReleaseKey.app` under the release folder.
+Its source is `release-key.swift` beside the keystore; a source and entitlement
+copy are also beside the encrypted backup in iCloud Drive. The helper only reads
+existing secrets. Run `ReleaseKey.app/Contents/MacOS/release-key recover
+<encrypted-backup> <new-staging-file>` in a `gui/501` LaunchAgent on the current
+Mac. On a replacement Mac, compile that source, embed a current Counterpart Mac
+provisioning profile, and sign the helper with that profile’s team and authorized
+access group. Recovered certificate SHA-256 must be
+`15e9d0b6004a834e58129a4b615ee29e5a96c2c3225768cbe1a97aa56862c649`.
 With the recovered passphrase in `COUNTERPART_BACKUP_PASSWORD` (never in a command
 argument or log), decrypt to a new private staging file:
 
@@ -293,7 +303,9 @@ produces an unsigned release for subsequent `apksigner sign`. Never put these in
 repository properties or shell tracing. Increment `COUNTERPART_ANDROID_VERSION_CODE`
 for each update (the first public APK is code 1). From a clean commit on
 `origin/main`, run `./gradlew --no-daemon assembleRelease` in `android/`, then
-`apksigner verify --verbose --print-certs` on the final APK. Android requires
+`apksigner verify --verbose --print-certs` on the final APK. The signed GUI helper
+also supports `sign-apk <apksigner.jar> <unsigned.apk> <signed.apk>`, supplying
+Keychain passwords directly to the signing subprocess environment. Android requires
 Android 8 / API 26 and a Counterpart Mac or Linux companion; phone pairing,
 capture and printing still need device acceptance.
 
