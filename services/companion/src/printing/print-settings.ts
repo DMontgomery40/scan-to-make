@@ -29,3 +29,8 @@ export function settingsUnsupported(backend: keyof typeof PACKAGE_NAMES, setting
 export function previewUnavailable(backend: keyof typeof PACKAGE_NAMES): string {
   return `Update ${PACKAGE_NAMES[backend]} in Settings → Printers so Counterpart can show you what will print. Nothing was sent to the printer.`;
 }
+
+/** The sheet's line when the installed MCP can't say whether a 3MF prints with its own settings (own_process). */
+export function ownSettingsUnavailable(backend: keyof typeof PACKAGE_NAMES): string {
+  return `Update ${PACKAGE_NAMES[backend]} in Settings → Printers so Counterpart can keep a designer's settings for this file.`;
+}

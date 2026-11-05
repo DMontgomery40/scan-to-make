@@ -180,6 +180,7 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
             if ((offersQuality || offersStrength) && project.current?.ownSettings == true) Text(
                 if (quality == PrintQuality.Standard && strength == PrintStrength.Standard) "Prints with the designer’s settings saved in this file."
                 else "Changes the designer’s settings saved in this file.", color = Palette.secondary, fontSize = 13.sp)
+            estimate?.ownSettingsUpdate?.let { Text(it, color = Palette.secondary, fontSize = 13.sp) }
             if (offersQuality || offersStrength) estimate?.let { e ->
                 // The slice's own settings, as the printer MCP reported them.
                 val parts = listOfNotNull(e.layerHeightMm?.let { String.format(java.util.Locale.US, "%.2f mm layers", it) },

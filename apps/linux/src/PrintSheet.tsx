@@ -36,14 +36,13 @@ export function PrintSheet({
   const [strength, setStrength] = useState(initial.strength ?? "standard");
   // Chosen in this sheet; until then a designer's file starts at its own settings, even when the MCP's answer
   // arrives after the sheet opened (as on the Mac and iPhone).
-  const [settingsPicked, setSettingsPicked] = useState(false);
+  const [qualityPicked, setQualityPicked] = useState(false);
+  const [strengthPicked, setStrengthPicked] = useState(false);
   const ownSettings = project.current?.ownSettings === true;
   useEffect(() => {
-    if (ownSettings && !settingsPicked) {
-      setQuality("standard");
-      setStrength("standard");
-    }
-  }, [ownSettings, settingsPicked]);
+    if (ownSettings && !qualityPicked) setQuality("standard");
+    if (ownSettings && !strengthPicked) setStrength("standard");
+  }, [ownSettings, qualityPicked, strengthPicked]);
   const [copies, setCopies] = useState(initial.copies ?? 1);
   const [pauses, setPauses] = useState(
     initial.pauseBeforeLayers?.join(", ") ?? "",
@@ -272,7 +271,7 @@ export function PrintSheet({
                 value={quality}
                 onChange={(e) => {
                   setQuality(e.target.value);
-                  setSettingsPicked(true);
+                  setQualityPicked(true);
                 }}
               >
                 <option value="draft">Draft</option>
@@ -287,7 +286,7 @@ export function PrintSheet({
                 value={strength}
                 onChange={(e) => {
                   setStrength(e.target.value);
-                  setSettingsPicked(true);
+                  setStrengthPicked(true);
                 }}
               >
                 <option value="standard">Standard</option>
@@ -299,6 +298,7 @@ export function PrintSheet({
           {designerSettingsWords(project, quality, strength) && (
             <p className="hint">{designerSettingsWords(project, quality, strength)}</p>
           )}
+          {estimate?.ownSettingsUpdate && <p className="hint">{estimate.ownSettingsUpdate}</p>}
           <label className="field">
             Copies
             <input

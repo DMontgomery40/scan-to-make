@@ -248,6 +248,8 @@ export interface Estimate {
     }[];
     mmPerPixel?: number;
   };
+  /** The installed printer MCP can't say whether this 3MF prints with its own settings: update it. */
+  ownSettingsUpdate?: string;
 }
 export interface HostStatus {
   configured: boolean;

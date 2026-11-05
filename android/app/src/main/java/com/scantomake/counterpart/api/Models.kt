@@ -318,7 +318,9 @@ data class SliceEstimate(val destinationId: String = "", val quality: String = "
                          // What the printer MCP actually sliced with: the app never guesses slicer numbers (PRD §8.0).
                          val layerHeightMm: Double? = null, val wallLoops: Int? = null, val infillPercent: Double? = null,
                          // The sliced file this estimate made, and the printer MCP's pictures of that exact file (Nov 5).
-                         val sliceSha256: String? = null, val preview: SlicePreview? = null) {
+                         val sliceSha256: String? = null, val preview: SlicePreview? = null,
+                         // The installed printer MCP can't say whether this 3MF prints with its own settings: update it.
+                         val ownSettingsUpdate: String? = null) {
     /** The slice Print may send: only one whose pictures are of that exact file. */
     val shownSlice: String? get() = sliceSha256?.takeIf { sha -> preview?.sha256 == sha && preview.views.isNotEmpty() }
 }

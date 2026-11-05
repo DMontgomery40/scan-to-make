@@ -732,6 +732,8 @@ public struct SliceEstimate: Codable, Equatable, Sendable {
     public var sliceSha256: String?
     /// The printer MCP's pictures of that file's G-code: what will print. Absent when the MCP can't draw them.
     public var preview: PrintPreviewImages?
+    /// The installed printer MCP can't say whether this 3MF prints with its own settings: the companion's words to update it.
+    public var ownSettingsUpdate: String?
 }
 
 /// What will print, drawn by the printer MCP from the exact sliced G-code (never a thumbnail or a design render).

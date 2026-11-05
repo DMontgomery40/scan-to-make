@@ -11,6 +11,7 @@ import {
   InMemoryElicitationRelay,
   PrinterHandoffRunner,
   PrinterMcpClient,
+  PrinterMcpError,
   PrinterSession,
   printerSelectionSchema,
   readPrinterHandoffConfig,
@@ -838,8 +839,12 @@ test("a designer's 3MF prints with its own process only when the MCP says so, as
   assert.equal(yes.own, true);
   assert.deepEqual(yes.calls[0].arguments, {source_path: yes.calls[0].arguments.source_path, bambu_model: 'p1s', nozzle_diameter: '0.4'}, 'the bambu_model and nozzle a slice sends');
   assert.equal((await ask('false')).own, false);
-  assert.equal((await ask('error')).own, false, 'settings the MCP cannot read: slicing uses the preset');
-  assert.equal((await ask('absent')).own, undefined, 'an MCP that does not say: unknown, never guessed');
+  {
+    // A failed call is the MCP's to explain; the app reads nothing into it and decides nothing.
+    const f = await setup(t, {ownProcess: 'error'});
+    await assert.rejects(f.runner.ownProcess({modelPath: f.stlPath}), error => error instanceof PrinterMcpError);
+  }
+  assert.equal((await ask('absent')).own, 'unsupported', 'an MCP that does not say: update it, never guessed');
   // This printer's own slice arguments go to the MCP as slice_stl takes them; the MCP decides, the app passes them on.
   const named = await ask('true', {profile: '/p/mine.json', templateName: 'house', layerHeightMm: 0.2, wallLoops: 3, sparseInfillDensity: '20%', quality: 'fine', strength: 'strong'});
   assert.equal(named.own, false);
@@ -855,7 +860,15 @@ test("a designer's 3MF prints with its own process only when the MCP says so, as
     {source_path: supported.stlPath, bambu_model: 'p1s', nozzle_diameter: '0.4', enable_support: true, support_type: 'tree(auto)'});
   // An MCP that can't take one of this printer's arguments would answer for another slice: unknown.
   const old = await setup(t, {ownProcess: 'true', ownProcessArgs: 'old', slicer: {layerHeightMm: 0.2}});
-  assert.equal(await old.runner.ownProcess({modelPath: old.stlPath}), undefined);
+  assert.equal(await old.runner.ownProcess({modelPath: old.stlPath}), 'unsupported');
   const none = await setup(t, {});
-  assert.equal(await none.runner.ownProcess({modelPath: none.stlPath}), undefined, 'no get_slice_settings at all');
+  assert.equal(await none.runner.ownProcess({modelPath: none.stlPath}), 'unsupported', 'no get_slice_settings at all');
+  // A 3MF's slice never gets the config's template, quality, strength or process values (runSlicer), so neither does
+  // the question: only the profile and slicer that its slice does get.
+  const threeMf = await setup(t, {ownProcess: 'true', slicer: {profile: '/p/mine.json', templateName: 'house', layerHeightMm: 0.2, quality: 'fine', strength: 'strong'}});
+  const designer = join(threeMf.root, 'designer.3mf');
+  await writeFile(designer, Buffer.from('not read by the fixture'));
+  await threeMf.runner.ownProcess({modelPath: designer});
+  assert.deepEqual((await threeMf.calls()).find(call => call.tool === 'get_slice_settings').arguments,
+    {source_path: designer, bambu_model: 'p1s', nozzle_diameter: '0.4', slicer_profile: '/p/mine.json'});
 });

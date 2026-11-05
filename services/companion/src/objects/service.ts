@@ -13,7 +13,7 @@ import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type Monit
 import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {defaultRunPublished, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
-import {previewUnavailable, sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
+import {ownSettingsUnavailable, previewUnavailable, sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {RuntimeSettings} from '../runtime-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
@@ -590,48 +590,75 @@ export class ObjectService {
     return objects;
   }
 
-  /** Answers per file and destination this run (undefined while asking), so a plate switch back restores one. */
-  readonly #ownSettingsAsked = new Map<string, boolean | undefined>();
+  /**
+   * Answers per file and destination this run, so a plate switch back restores one: the MCP's own_process, or
+   * `unsupported` when that MCP can't answer (the sheet then says to update it). `#ownSettingsAsking` shares a question
+   * in flight, so an estimate waits for the same one.
+   */
+  readonly #ownSettingsAsked = new Map<string, boolean | 'unsupported'>();
+  readonly #ownSettingsAsking = new Map<string, Promise<void>>();
+  /** The model file's identity for these answers: a new pass writes a new current/model.3mf under the same name. */
+  async #ownSettingsKey(object: StmObject): Promise<{key: string; modelPath: string; destinationId: string | undefined} | undefined> {
+    const current = object.current;
+    if (!current || !isMultipart(object) || object.publishedSelection?.sliced) return undefined;
+    const destinationId = this.#destinationId(object);
+    const modelPath = join(this.#deps.store.dir(object.id), current.model);
+    const file = await stat(modelPath).catch(() => undefined);
+    if (!file) return undefined;
+    return {key: JSON.stringify([object.id, current.model, file.mtimeMs, file.size, destinationId ?? null]), modelPath, destinationId};
+  }
+  /** This project's printer MCP can't say whether its 3MF prints with its own settings: an older MCP to update. */
+  async #ownSettingsUnsupported(object: StmObject): Promise<boolean> {
+    const asked = await this.#ownSettingsKey(object);
+    return !!asked && this.#ownSettingsAsked.get(asked.key) === 'unsupported';
+  }
   /**
    * Asks the project's printer MCP whether its current 3MF prints with the settings it carries (a designer's
-   * project) and keeps the answer on `current.ownSettings`. Once per file per run; an MCP that doesn't say leaves
-   * it absent, so the sheet behaves as before. Never throws.
+   * project) and keeps the answer on `current.ownSettings`, for that file and printer only. Once per file per run; a
+   * failed call is asked again later, and an MCP that can't answer leaves it absent. Never throws.
    */
-  async #askOwnSettings(object: StmObject): Promise<void> {
+  #askOwnSettings(object: StmObject): Promise<void> {
     const current = object.current;
-    const destinationId = this.#destinationId(object);
-    if (!current || !isMultipart(object) || object.publishedSelection?.sliced) return;
-    if (current.ownSettings !== undefined && current.ownSettingsFor === (destinationId ?? 'current')) return;
-    const modelPath = join(this.#deps.store.dir(object.id), current.model);
-    // The file itself, not its name: a new pass writes a new current/model.3mf.
-    const file = await stat(modelPath).catch(() => undefined);
-    if (!file) return;
-    const key = JSON.stringify([object.id, current.model, file.mtimeMs, file.size, destinationId ?? null]);
-    if (this.#ownSettingsAsked.has(key) && this.#ownSettingsAsked.get(key) === undefined) return;
+    if (current?.ownSettings !== undefined && current.ownSettingsFor === (this.#destinationId(object) ?? 'current')) return Promise.resolve();
+    return (async () => {
+      const asked = await this.#ownSettingsKey(object);
+      if (!asked) return;
+      const {key, modelPath, destinationId} = asked;
+      const pending = this.#ownSettingsAsking.get(key);
+      if (pending) return pending;
+      const asking = this.#ownSettingsAnswer(object, key, modelPath, destinationId).finally(() => this.#ownSettingsAsking.delete(key));
+      this.#ownSettingsAsking.set(key, asking);
+      return asking;
+    })();
+  }
+  async #ownSettingsAnswer(object: StmObject, key: string, modelPath: string, destinationId: string | undefined): Promise<void> {
     const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
     const ask = services?.runner.ownProcess;
     if (!ask) return;
     try {
       let own = this.#ownSettingsAsked.get(key);
       if (own === undefined) {
-        this.#ownSettingsAsked.set(key, undefined);
         // The design's own supports, as Print's slice sends them (`#sliceRecipe`).
         own = await ask.call(services.runner, {modelPath, ...(services.selection ? {selection: services.selection} : {}),
           ...(Object.keys(designedSupports(object)).length ? {slicer: designedSupports(object)} : {}), signal: AbortSignal.timeout(60_000)});
-        if (own === undefined) return;
         this.#ownSettingsAsked.set(key, own);
       }
+      if (own === 'unsupported') return;
+      // The answer is for the file that was asked about: a pass that replaced it since gets its own question.
+      const now = await this.#ownSettingsKey(await this.#deps.store.get(object.id));
+      if (now?.key !== key) return;
       let changed = false;
+      const answer = own;
       const updated = await this.#deps.store.update(object.id, o => {
-        if (!o.current || o.current.model !== current.model || this.#destinationId(o) !== destinationId
-            || (o.current.ownSettings === own && o.current.ownSettingsFor === (destinationId ?? 'current'))) return o;
+        if (!o.current || o.current.model !== object.current!.model || this.#destinationId(o) !== destinationId
+            || (o.current.ownSettings === answer && o.current.ownSettingsFor === (destinationId ?? 'current'))) return o;
         changed = true;
-        return {...o, current: {...o.current, ownSettings: own, ownSettingsFor: destinationId ?? 'current'}};
+        return {...o, current: {...o.current, ownSettings: answer, ownSettingsFor: destinationId ?? 'current'}};
       });
       if (!changed) return;
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: object.id, data: {keys: ['current']}});
       this.#changed(updated);
-    } catch { this.#ownSettingsAsked.delete(key); }
+    } catch { /* a failed call leaves it unknown; the next list or estimate asks again */ }
   }
   async get(id: string): Promise<StmObject> {
     let object = await this.#deps.store.get(id);
@@ -1814,12 +1841,14 @@ export class ObjectService {
   }
   /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
   async estimate(id: string, request: PrintOptions & {destinationId?: string} = {}): Promise<PrintEstimate> {
+    // Whether the file prints with its own settings is settled first, so this slice's defaults are the ones Print
+    // uses (`printOptions`): an answer arriving after the slice would change Print's recipe and refuse the shown file.
+    await this.#askOwnSettings(await this.get(id));
     const object = await this.get(id);
     // The estimate slices exactly what Print would (`#sliceRecipe`): its file is the one Print sends.
     const {destinationId: requested, ...choices} = request;
     const options = printOptions(object, choices, requested ? this.#deps.printerCatalog?.canonical(requested) ?? requested : this.#destinationId(object));
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
-    void this.#askOwnSettings(object);
     this.#publishedSettings(object, options);
     if (options.filament && options.colour) throw new InvalidStateError('Choose one colour.');
     const catalog = this.#deps.printerCatalog;
@@ -1872,7 +1901,9 @@ export class ObjectService {
       running.catch(() => { if (this.#estimates2.get(key) === running) this.#estimates2.delete(key); });
       if (this.#estimates2.size > 64) this.#estimates2.delete(this.#estimates2.keys().next().value!);
     }
-    try { return structuredClone(await running); }
+    // An MCP that can't say whether this file prints with its own settings: the person updates it (AGENTS.md).
+    const update = await this.#ownSettingsUnsupported(object) ? {ownSettingsUpdate: ownSettingsUnavailable(services.runner.backend)} : {};
+    try { return {...structuredClone(await running), ...update}; }
     catch (error) {
       if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, supports: designedSupports(object).enableSupport !== undefined}));
       // Bambu Studio refused the slice: its own words, exactly what a Print of the same model fails with.

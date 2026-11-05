@@ -24,8 +24,9 @@ struct PrintSheet: View {
     @State private var mappingState = Loading.idle
     @State private var quality = PrintSettings.Quality.standard
     @State private var strength = PrintSettings.Strength.standard
-    /// The person chose Quality or Strength in this sheet; until then a designer's file starts at its own settings.
-    @State private var settingsPicked = false
+    /// The person chose Quality / Strength in this sheet; until then each starts at a designer's file's own settings.
+    @State private var qualityPicked = false
+    @State private var strengthPicked = false
     @State private var copies = 1
     /// The person changed Copies; until then the printer profile's own count applies.
     @State private var copiesPicked = false
@@ -80,14 +81,14 @@ struct PrintSheet: View {
                     if published { multiColours } else { colours }
                     if slicedOriginal { Text("Uses the quality, strength and copies saved in this sliced file. Share an editable 3MF to change them.").font(.callout) } else {
                     Text("Quality").font(.headline)
-                    Picker("Quality", selection: Binding(get: { quality }, set: { quality = $0; settingsPicked = true })) {
+                    Picker("Quality", selection: Binding(get: { quality }, set: { quality = $0; qualityPicked = true })) {
                         Text("Draft").tag(PrintSettings.Quality.draft)
                         Text("Standard").tag(PrintSettings.Quality.standard)
                         Text("Fine").tag(PrintSettings.Quality.fine)
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersQuality)
                     Text("Strength").font(.headline)
-                    Picker("Strength", selection: Binding(get: { strength }, set: { strength = $0; settingsPicked = true })) {
+                    Picker("Strength", selection: Binding(get: { strength }, set: { strength = $0; strengthPicked = true })) {
                         Text("Standard").tag(PrintSettings.Strength.standard)
                         Text("Strong").tag(PrintSettings.Strength.strong)
                         Text("Max").tag(PrintSettings.Strength.max)
@@ -95,6 +96,9 @@ struct PrintSheet: View {
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersStrength)
                     if let words = object.designerSettingsWords(quality: quality.rawValue, strength: strength.rawValue) {
                         Text(words).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if estimateState == .done, let update = estimate?.ownSettingsUpdate {
+                        Text(update).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     if offersCopies { copiesRow }
                     if !offersCopies, object.settings?.printDefaults?.copies != nil { Text("This printer uses one copy.").font(.caption).foregroundStyle(.secondary) }
@@ -134,7 +138,8 @@ struct PrintSheet: View {
         .task(id: "\(printer?.id ?? "")|\(object.current?.model ?? "")|\(modelVersion)") { await loadFilaments() }
         // The MCP's answer can arrive while the sheet is open: a designer's file then starts at its own settings.
         .onChange(of: object.printsWithOwnSettings) { _, own in
-            if own && !settingsPicked { quality = .standard; strength = .standard }
+            if own && !qualityPicked { quality = .standard }
+            if own && !strengthPicked { strength = .standard }
         }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
         // must not hold Print for the new one. The chosen spools too: they change what the estimate slices.

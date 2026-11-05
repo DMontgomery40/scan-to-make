@@ -573,13 +573,58 @@ test("the own-settings answer belongs to its printer, and another plate of the s
   await f.service.list();
   await until(async () => (await f.service.get(f.object.id)).current.ownSettings === true);
   assert.equal((await f.service.get(f.object.id)).current.ownSettingsFor, 'current');
-  // An answer recorded for another printer is not this printer's: its saved defaults apply and it is asked again.
+  // An answer recorded for another printer is not this printer's: the estimate settles this printer's first (from
+  // what it already knows about this file, without asking again), and slices with it.
   await f.store.update(f.object.id, o => ({...o, current: {...o.current, ownSettingsFor: 'garage'}}));
   await f.service.estimate(f.object.id, {});
+  assert.equal((await f.service.get(f.object.id)).current.ownSettingsFor, 'current');
   const {quality} = f.runs.filter(run => run.estimate).at(-1).estimate.slicer;
-  assert.equal(quality, 'draft', 'another printer\'s answer never strips this printer\'s defaults');
-  await until(async () => (await f.service.get(f.object.id)).current.ownSettingsFor === 'current');
+  assert.equal(quality, undefined, 'this printer\'s answer, settled before the slice, keeps the designer\'s settings');
   assert.equal(asked.length, 1, 'the answer for this file and printer is remembered, not asked again');
+});
+
+test("the first estimate waits for the own-settings answer; an MCP that can't answer says to update it; a failure or a replaced file is asked again", async t => {
+  // Codex on #336: a slice made before the answer used saved Draft/Strong, then Print (with the answer) refused it.
+  const f = await setup(t, {sliceArgs: true});
+  const runner = f.deps.print.services.runner;
+  let answer = () => true, asks = 0;
+  runner.ownProcess = async () => { asks++; await new Promise(resolve => setTimeout(resolve, 30)); return answer(); };
+  await multipart(f, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
+  const first = await f.service.estimate(f.object.id, {});
+  const {quality, strength} = f.runs.filter(run => run.estimate).at(-1).estimate.slicer;
+  assert.deepEqual({quality, strength}, {quality: undefined, strength: undefined}, 'the first slice already keeps the designer\'s settings');
+  assert.equal(first.ownSettingsUpdate, undefined);
+  // An MCP that can't answer: today's behaviour, plus the sheet's line to update it; nothing is recorded.
+  const g = await setup(t, {sliceArgs: true});
+  g.deps.print.services.runner.ownProcess = async () => 'unsupported';
+  await multipart(g, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  const old = await g.service.estimate(g.object.id, {});
+  assert.equal(old.ownSettingsUpdate, "Update bambu-printer-mcp in Settings → Printers so Counterpart can keep a designer's settings for this file.");
+  assert.equal((await g.service.get(g.object.id)).current.ownSettings, undefined);
+  // A failed call is asked again, never recorded as an answer.
+  const h = await setup(t, {sliceArgs: true});
+  let fail = true, calls = 0;
+  h.deps.print.services.runner.ownProcess = async () => { calls++; if (fail) throw new Error('printer service unreachable'); return true; };
+  await multipart(h, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await h.service.estimate(h.object.id, {});
+  assert.equal((await h.service.get(h.object.id)).current.ownSettings, undefined);
+  fail = false;
+  await h.service.estimate(h.object.id, {});
+  assert.equal(calls, 2);
+  assert.equal((await h.service.get(h.object.id)).current.ownSettings, true);
+  // A pass that replaces the file while the question is out: the old file's answer is not written onto the new one.
+  const k = await setup(t, {sliceArgs: true});
+  let release;
+  k.deps.print.services.runner.ownProcess = () => new Promise(resolve => { release = resolve; });
+  await multipart(k, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await k.service.list();
+  await until(() => release);
+  await writeFile(join(k.store.dir(k.object.id), 'current', 'model.3mf'), Buffer.concat([twoPart3mf(), Buffer.from(' ')]));
+  release(true);
+  await flush();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal((await k.service.get(k.object.id)).current.ownSettings, undefined, 'the replaced file is asked about itself');
 });
 
 test('another plate of the same file keeps its own-settings answer; another file clears it', async () => {
