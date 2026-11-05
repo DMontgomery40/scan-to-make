@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
+import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -569,7 +569,6 @@ export class ObjectService {
     for (const object of objects) if (object.state !== 'new') this.#title(object, {backfill: true});
     return objects;
   }
-  readonly #estimates = new Map<string, {seconds?: number; grams?: number}>();
   async get(id: string): Promise<StmObject> {
     let object = await this.#deps.store.get(id);
     if (object.state === 'touching-up') object = await this.#freshEstimate(object);
@@ -592,17 +591,8 @@ export class ObjectService {
     // a project read never asks the printer itself.
     const report = destinationId ? this.#deps.printers?.lastReport(destinationId) : undefined;
     if (report) object = {...object, print: {...object.print!, printerStatus: statusOf(report)}};
-    if (object.print!.estimate) return object;
-    const bundleId = object.print!.bundleId;
-    let estimate = this.#estimates.get(bundleId);
-    if (!estimate) {
-      if (services) try {
-        const manifest = await services.store.read(bundleId);
-        if (manifest.artifacts.sliced) estimate = await sliceEstimate(await readFile(join(services.store.directory(bundleId), manifest.artifacts.sliced.file)), manifest.selection?.plateIndex ?? 0);
-        if (estimate) this.#estimates.set(bundleId, estimate);
-      } catch { /* Missing historical artifacts do not hide the project. */ }
-    }
-    return estimate ? {...object, print:{...object.print!, sliced:true, estimate}} : object;
+    // The estimate a print shows is the one the MCP read from its sliced file at print time (saved with the print).
+    return object;
   }
   dir(id: string) { return this.#deps.store.dir(id); }
 
@@ -1290,8 +1280,8 @@ export class ObjectService {
       if (update.phase !== 'accepted') await this.#emit({id: randomUUID(), type: 'print.preparing', ...eventBase, data: {stage: message.replace(/…$/, '')}});
     };
     if (recheckTrays) this.#dispatchRechecks.set(id, recheckTrays);
-    // Print Again prints the slice it made last time when nothing that shapes it changed (slice-cache.ts).
-    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')},
+    // Print Again slices again; the printer MCP reuses its own identical slice (PRD §8.0 item 8).
+    const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress,
       presliced: {bytes: shown.bytes, extension: shown.extension, ...(shown.slicerWarning ? {slicerWarning: shown.slicerWarning} : {})}, expectedSha256: options.sliceSha256!,
       ...(recheckTrays ? {beforePrint: recheckTrays} : {}), ...(Object.keys(sliced).length ? {slicer: sliced} : {}), ...(ask ? {ask} : {})})
       .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch),
@@ -1800,7 +1790,7 @@ export class ObjectService {
           await writeFile(stlPath, model);
           const {estimate, settings, slicerWarning, sliced: slicedFile, preview, previewSupported} = await runner.estimate!({stlPath,
             ...(recipe.selected ? {selection: recipe.selected} : {}), ...(Object.keys(recipe.sliced).length ? {slicer: recipe.sliced} : {}),
-            signal: AbortSignal.timeout(150_000), sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')}});
+            signal: AbortSignal.timeout(150_000)});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
             ...(settings.layers !== undefined ? {layers: settings.layers} : {}), ...(settings.layerHeightMm !== undefined ? {layerHeightMm: settings.layerHeightMm} : {}),

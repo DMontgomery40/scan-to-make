@@ -28,7 +28,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, laidFlat, slicedBytes, slicing} = {}) {
+async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, laidFlat, slicedBytes, slicing} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -39,7 +39,7 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -727,201 +727,19 @@ test("an estimate reports Bambu Studio's warning without asking anything", async
   assert.equal(f.seen.length, 0);
 });
 
-test('slicer reports fail closed and keep Studio\'s words', async () => {
-  const {slicerReport} = await import('../dist/index.js');
+test("the slicer's verdict is read from the MCP's slicer_report, and an MCP that passes only result.json must be updated", async t => {
+  const {slicerReport, lacksSlicerReport} = await import('../dist/index.js');
   assert.equal(slicerReport(undefined), undefined);
-  assert.equal(slicerReport({path: '/x.3mf'}), undefined, 'an MCP without slicer_result: unchanged');
-  assert.deepEqual(slicerReport({slicer_result: {return_code: 0, error_string: 'Success.', sliced_plates: [{warning_message: ''}]}}), {failed: false});
-  assert.deepEqual(slicerReport({slicer_result: {error_string: 'Success.'}}), {failed: true, message: 'Success.'}, 'no return code is not success');
-  assert.deepEqual(slicerReport({slicer_result: {return_code: -52}}), {failed: true, message: 'Bambu Studio could not slice this model (return code -52).'});
-  assert.deepEqual(slicerReport({slicer_result: {return_code: 0, sliced_plates: [{warning_message: 'A.\r\nB.\u0007'}, {warning_message: 'A.\r\nB.\u0007'}]}}),
-    {failed: false, message: 'A.\nB.'}, 'line breaks kept, other control characters dropped, one copy per message');
-});
-
-test('Print Again prints the slice it made: no slice_stl, but the same inspection, printer checks and print_3mf', async t => {
-  const f = await setup(t);
-  const sliceCache = {directory: join(f.root, 'slices')};
-  const first = await f.runner.run({stlPath: f.stlPath, sliceCache});
-  const firstBytes = await readFile(first.slicedPath);
-  const again = await f.runner.run({stlPath: f.stlPath, sliceCache});
-  assert.deepEqual(again.steps, ['discover', 'inspect', 'print']);
-  const calls = (await f.calls()).filter(entry => entry.tool).map(entry => entry.tool);
-  assert.deepEqual(calls, ['slice_stl', 'inspect_print_file', 'print_3mf', 'inspect_print_file', 'print_3mf']);
-  const printed = (await f.calls()).filter(entry => entry.tool === 'print_3mf').at(-1).arguments;
-  assert.equal(printed.three_mf_path, again.slicedPath);
-  assert.ok(again.slicedPath.endsWith('clean_sliced.3mf'));
-  assert.deepEqual(await readFile(again.slicedPath), firstBytes);
-  assert.equal(again.print.dispatch, 'started');
-});
-
-test('anything that shapes the slice slices again: quality, strength, copies, filament, nozzle, bed, model, the MCP and its .env', async t => {
-  const f = await setup(t, {settings: true, remote: true});
-  const sliceCache = {directory: join(f.root, 'slices')};
-  const slices = async () => (await f.calls()).filter(call => call.tool === 'slice_stl').length;
-  const slice = input => f.runner.run({stlPath: f.stlPath, print: false, sliceCache, ...input});
-  await slice({});
-  await slice({});
-  assert.equal(await slices(), 1, 'nothing changed: kept');
-  const preset = join(f.root, 'petg.json');
-  await writeFile(preset, JSON.stringify({filament_type: ['PETG']}));
-  const changes = [{slicer: {layerHeightMm: 0.12}}, {slicer: {wallLoops: 4}}, {slicer: {repetitions: 2}}, {slicer: {filamentProfile: preset}},
-    {selection: {nozzleType: 'stainless_steel'}}, {selection: {bedType: 'cool_plate'}}];
-  for (const [index, change] of changes.entries()) {
-    await slice(change);
-    assert.equal(await slices(), 2 + index, JSON.stringify(change));
-    await slice(change);
-    assert.equal(await slices(), 2 + index, `${JSON.stringify(change)} again: kept`);
-  }
-  let count = await slices();
-  await writeFile(f.stlPath, Buffer.concat([stl, Buffer.from('\n')]));
-  await slice({});
-  assert.equal(await slices(), ++count, 'new model bytes');
-  await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=stainless_steel\n');
-  await slice({});
-  assert.equal(await slices(), ++count, "the MCP's .env changed");
-  // Another MCP (its own process) never prints this one's slice.
-  const other = new PrinterHandoffRunner({...f.config, process: {...f.config.process, args: [...f.config.process.args, 'other']}}, {relay: f.relay});
-  await other.run({stlPath: f.stlPath, print: false, sliceCache}).catch(() => undefined);
-  assert.equal(await slices(), ++count, 'another MCP');
-});
-
-test('an MCP inheriting the working directory invalidates its slice when that directory’s .env changes', async t => {
-  const f = await setup(t);
-  const {cwd: _cwd, ...inheritedProcess} = f.config.process;
-  const runner = new PrinterHandoffRunner({...f.config, process: inheritedProcess}, {relay: f.relay});
-  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}};
-  const previousCwd = process.cwd();
-  process.chdir(f.root);
-  try {
-    await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=hardened_steel\n');
-    await runner.run(input);
-    await runner.run(input);
-    assert.equal((await f.calls()).filter(call => call.tool === 'slice_stl').length, 1);
-    await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=stainless_steel\n');
-    await runner.run(input);
-    assert.equal((await f.calls()).filter(call => call.tool === 'slice_stl').length, 2);
-  } finally {
-    process.chdir(previousCwd);
-  }
-});
-
-test('a wrapped MCP launch bypasses the cache because its effective slicing environment is unknown', async t => {
-  const f = await setup(t);
-  const wrapper = join(f.root, 'launch.sh');
-  await writeFile(wrapper, 'exec "$@"\n');
-  const runner = new PrinterHandoffRunner({...f.config, process: {...f.config.process,
-    command: '/bin/sh', args: [wrapper, f.config.process.command, ...f.config.process.args]}}, {relay: f.relay});
-  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}};
-  await runner.run(input);
-  await runner.run(input);
-  assert.equal((await f.calls()).filter(call => call.tool === 'slice_stl').length, 2);
-});
-
-test("a kept slice with Bambu Studio's warning asks it again before printing", async t => {
-  const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
-  const f = await setup(t, {slicerResult: 'lay-flat-floating-cantilever'});
-  const sliceCache = {directory: join(f.root, 'slices')};
-  await f.runner.run({stlPath: f.stlPath, sliceCache});
-  const asked = f.seen.length;
-  const again = await f.runner.run({stlPath: f.stlPath, sliceCache});
-  assert.equal(again.slicerWarning, words);
-  assert.equal(f.seen[asked].message, words, "Studio's question again, in its own words");
-  assert.equal((await f.calls()).filter(call => call.tool === 'slice_stl').length, 1);
-});
-
-test('Estimate, then Print of the same model and settings slices once', async t => {
-  const f = await setup(t);
-  const sliceCache = {directory: join(f.root, 'slices')};
-  await f.runner.estimate({stlPath: f.stlPath, sliceCache}).catch(() => undefined);
-  await f.runner.run({stlPath: f.stlPath, sliceCache});
-  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['slice_stl', 'inspect_print_file', 'inspect_print_file', 'print_3mf']);
-});
-
-// The supports choice shapes the slice: a kept slice is reused only for the same choice, never across a change.
-test('a kept slice is reused only for the same supports choice', async t => {
-  const f = await setup(t, {supports: true});
-  const sliceCache = {directory: join(f.root, 'slices')};
-  const slices = async () => (await f.calls()).filter(entry => entry.tool === 'slice_stl').map(entry => entry.arguments.enable_support);
-  await f.runner.run({stlPath: f.stlPath, sliceCache, print: false});
-  await f.runner.run({stlPath: f.stlPath, sliceCache, print: false, slicer: {enableSupport: false}});
-  await f.runner.run({stlPath: f.stlPath, sliceCache, print: false, slicer: {enableSupport: true, supportType: 'tree(auto)'}});
-  await f.runner.run({stlPath: f.stlPath, sliceCache, print: false, slicer: {enableSupport: true, supportType: 'normal(auto)'}});
-  assert.deepEqual(await slices(), [undefined, false, true, true], 'profile default, off, tree and normal each slice');
-  // The same choice again prints the kept slice.
-  await f.runner.run({stlPath: f.stlPath, sliceCache, slicer: {enableSupport: true, supportType: 'tree(auto)'}});
-  assert.equal((await slices()).length, 4);
-});
-
-test('cached generic G-code still confirms temperatures and uploads G-code after Estimate and on Print Again', async t => {
-  const f = await setup(t, {mode: 'generic-gcode', backend: 'mcp-3d-printer-server'});
-  const input = {stlPath: f.stlPath, sliceCache: {directory: join(f.root, 'slices')}};
-  const estimate = await f.runner.run({...input, print: false});
-  const bytes = await readFile(estimate.slicedPath);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const printed = await f.runner.run(input);
-    assert.ok(printed.slicedPath.endsWith('.gcode'));
-    assert.deepEqual(await readFile(printed.slicedPath), bytes);
-  }
-  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool),
-    ['slice_stl', 'confirm_temperatures', 'confirm_temperatures', 'upload_gcode', 'confirm_temperatures', 'upload_gcode']);
-});
-
-test('a running MCP keeps the .env it started with: its slices are keyed by that one until it restarts', async t => {
-  const f = await setup(t);
-  const session = new PrinterSession('p1s', f.config, {relay: f.relay});
-  t.after(() => session.close());
-  const runner = new PrinterHandoffRunner(f.config, {relay: f.relay, session});
-  const slices = async () => (await f.calls()).filter(call => call.tool === 'slice_stl').length;
-  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}};
-  await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=hardened_steel\n');
-  await runner.run(input);
-  await writeFile(join(f.root, '.env'), 'BAMBU_NOZZLE_TYPE=stainless_steel\n');
-  await runner.run(input);
-  assert.equal(await slices(), 1, 'the running MCP still slices with the .env it read at start, so its slice still fits');
-  await session.restart();
-  await runner.run(input);
-  assert.equal(await slices(), 2, 'restarted, it reads the edited .env, and nothing sliced before matches it');
-});
-
-test('editing a preset the MCP reads from its .env or environment invalidates its slice', async t => {
-  const f = await setup(t);
-  const slices = async () => (await f.calls()).filter(call => call.tool === 'slice_stl').length;
-  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}};
-  await writeFile(join(f.root, 'machine.json'), JSON.stringify({layer_height: 0.2}));
-  await writeFile(join(f.root, '.env'), 'BAMBU_SLICER_PROFILE=machine.json\n');
-  await f.runner.run(input);
-  await f.runner.run(input);
-  assert.equal(await slices(), 1, 'unchanged .env preset can be reused');
-  await writeFile(join(f.root, 'machine.json'), JSON.stringify({layer_height: 0.28}));
-  await f.runner.run(input);
-  assert.equal(await slices(), 2, 'an edited .env preset at the same path needs a new slice');
-  const filament = join(f.root, 'filament.json');
-  await writeFile(filament, JSON.stringify({nozzle_temperature: [220]}));
-  const runner = new PrinterHandoffRunner({...f.config, process: {...f.config.process, env: {...f.config.process.env, FILAMENT_PROFILE: filament}}}, {relay: f.relay});
-  await runner.run(input);
-  await runner.run(input);
-  assert.equal(await slices(), 3);
-  await writeFile(filament, JSON.stringify({nozzle_temperature: [240]}));
-  await runner.run(input);
-  assert.equal(await slices(), 4, 'an edited environment preset needs a new slice');
-});
-
-test('editing a selected filament preset at the same path invalidates its slice; unreadable presets are never reused', async t => {
-  const f = await setup(t);
-  const preset = join(f.root, 'custom-filament.json');
-  const input = {stlPath: f.stlPath, print: false, sliceCache: {directory: join(f.root, 'slices')}, slicer: {loadFilaments: 'custom-filament.json'}};
-  const slices = async () => (await f.calls()).filter(call => call.tool === 'slice_stl').length;
-  await writeFile(preset, JSON.stringify({nozzle_temperature: [220]}));
-  await f.runner.run(input);
-  await f.runner.run(input);
-  assert.equal(await slices(), 1, 'unchanged file can be reused');
-  await writeFile(preset, JSON.stringify({nozzle_temperature: [240]}));
-  await f.runner.run(input);
-  assert.equal(await slices(), 2, 'changed contents at the same relative path need a new slice');
-  await rm(preset);
-  await f.runner.run(input);
-  await f.runner.run(input);
-  assert.equal(await slices(), 4, 'an unreadable dependency cannot prove reuse is valid');
+  assert.equal(slicerReport({path: '/x.3mf'}), undefined);
+  assert.deepEqual(slicerReport({slicer_report: {failed: false, plate_count: 2}}), {failed: false, plateCount: 2});
+  assert.deepEqual(slicerReport({slicer_report: {failed: true, message: 'Failed slicing the model.'}}), {failed: true, message: 'Failed slicing the model.'});
+  assert.equal(slicerReport({slicer_report: {message: 'no verdict'}}), undefined, 'a report without its verdict is none');
+  // Counterpart never reads result.json itself (PRD §8.0 item 9): an MCP from before slicer_report is refused, never trusted.
+  assert.equal(lacksSlicerReport({path: '/x.3mf', slicer_result: {return_code: 0}}), true);
+  assert.equal(lacksSlicerReport({path: '/x.3mf'}), false, 'a slicer without a result.json');
+  const f = await setup(t, {slicerResult: 'lay-flat-floating-cantilever', noSlicerReport: true});
+  await assert.rejects(f.runner.run({stlPath: f.stlPath}), error => error.code === 'slicer-report-unavailable' && /^Update bambu-printer-mcp in Settings → Printers/.test(error.detail));
+  assert.ok(!(await f.calls()).some(call => call.tool === 'print_3mf'), 'a slice whose warning the app can\'t see is never printed');
 });
 
 test('the printer MCP\'s design guidance is read as an MCP prompt, and an MCP without prompts gives none', async t => {

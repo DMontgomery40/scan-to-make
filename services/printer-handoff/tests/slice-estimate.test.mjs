@@ -1,24 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {zipSync, strToU8} from 'fflate';
-import {sliceEstimate, slicePlateCount} from '../dist/slice-estimate.js';
+import {slicedFacts} from '../dist/slice-estimate.js';
 
-test('counts only printable plates in the exact archive, including older path-only MCP output', () => {
-  const files = {'Metadata/plate_1.gcode': strToU8('; one'), 'Metadata/plate_2.gcode': strToU8('; two'),
-    'Metadata/plate_3.png': strToU8('preview'), 'Metadata/plate_0.gcode': strToU8('invalid index')};
-  assert.equal(slicePlateCount(Buffer.from(zipSync(files))), 2);
-  assert.equal(slicePlateCount(Buffer.from('not a 3mf')), undefined);
+// The estimate, settings and plates of a sliced file come from the MCP's inspect_print_file `sliced`
+// (bambu-printer-mcp 1.1.63+, mcp-3d-printer-server 1.2.36+); Counterpart never reads slicer files (PRD §8.0 item 9).
+test('reads the plate estimate, slice settings and plate count the MCP reports for the exact file', () => {
+  assert.deepEqual(slicedFacts({sliced: {plate_count: 2, estimate: {seconds: 3420, grams: 19.2},
+    settings: {layer_height_mm: 0.12, sparse_infill_percent: 25, wall_loops: 4, layer_count: 183, future: 1}}}),
+  {plateCount: 2, estimate: {seconds: 3420, grams: 19.2}, settings: {layerHeightMm: 0.12, infillPercent: 25, wallLoops: 4, layers: 183}});
+  assert.deepEqual(slicedFacts({sliced: {estimate: {grams: 1}, settings: {}}}), {estimate: {grams: 1}, settings: {}});
 });
 
-test('reads the selected plate time and filament weight from a sliced Bambu 3MF', async () => {
-  const files = {};
-  files['Metadata/slice_info.config'] = strToU8('<config><plate><metadata key="index" value="1"/><metadata key="prediction" value="2575"/><metadata key="weight" value="16.74"/></plate><plate><metadata key="index" value="2"/><metadata key="prediction" value="300"/><metadata key="weight" value="3"/></plate></config>');
-  const bytes = Buffer.from(zipSync(files));
-  assert.deepEqual(await sliceEstimate(bytes, 0), {seconds:2575, grams:16.74});
-  assert.deepEqual(await sliceEstimate(bytes, 1), {seconds:300, grams:3});
-});
-
-test('does not invent an estimate when the selected plate has none', async () => {
-  const files = {}; files['Metadata/slice_info.config'] = strToU8('<config><plate><metadata key="index" value="1"/></plate></config>');
-  assert.equal(await sliceEstimate(Buffer.from(zipSync(files)), 0), undefined);
+test('an MCP without them, or with values that are not amounts, gives no estimate rather than a guess', () => {
+  assert.deepEqual(slicedFacts(undefined), {settings: {}});
+  assert.deepEqual(slicedFacts({artifact: {sha256: 'x'}}), {settings: {}}, 'an MCP from before `sliced`');
+  assert.deepEqual(slicedFacts({sliced: {plate_count: 1.5, estimate: {seconds: -1, grams: 'lots'}, settings: {wall_loops: 2.5, layer_height_mm: Infinity}}}), {settings: {}});
 });

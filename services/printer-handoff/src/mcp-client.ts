@@ -2,12 +2,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {ElicitRequestSchema, ErrorCode, McpError, type CallToolResult, type GetPromptResult, type ListPromptsResult, type ListResourcesResult, type ReadResourceResult, type ServerCapabilities, type Tool} from '@modelcontextprotocol/sdk/types.js';
 import {Ajv, type ValidateFunction} from 'ajv';
-import {createHash} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
-import {join} from 'node:path';
-import {parseEnv} from 'node:util';
 import {appOwnedPrinterProcess} from './node-runtime.js';
-import {ENV_PRESETS} from './slice-cache.js';
 import {timeoutsFor, type PrinterHandoffConfig} from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {slicerReport} from './slicer-report.js';
@@ -46,7 +41,6 @@ export interface PrinterToolCatalog {
   tools: Tool[];
   /** The working directory's `.env` as this process started with it (the MCP reads it once, at start):
    * its digest and the preset paths it names, for the slice cache. Never its other values. */
-  startedWith?: {envSha256?: string; presets: Record<string, string | undefined>};
   /** What the server declared at initialize (prompts, resources, …); absent from catalogs made before it was kept. */
   capabilities?: ServerCapabilities;
 }
@@ -142,9 +136,6 @@ export class PrinterMcpClient {
     if (signal?.aborted) fail('cancelled');
     const timeouts = timeoutsFor(this.#config);
     const processConfig = await appOwnedPrinterProcess(this.#config.process);
-    const dotEnv = await readFile(join(this.#config.process.cwd ?? process.cwd(), '.env'), 'utf8').catch(() => undefined);
-    const started = {...(dotEnv === undefined ? {} : {envSha256: createHash('sha256').update(dotEnv).digest('hex')}),
-      presets: Object.fromEntries(Object.entries(dotEnv ? parseEnv(dotEnv) : {}).filter(([name]) => ENV_PRESETS.includes(name)))};
     const transport = new StdioClientTransport({
       command: processConfig.command,
       args: [...(processConfig.args ?? [])],
@@ -200,7 +191,7 @@ export class PrinterMcpClient {
         if (page === MAX_PAGES - 1) fail('catalog-limit');
       }
       const capabilities = client.getServerCapabilities();
-      this.#catalog = freeze({server: {name: server.name, version: server.version}, tools, startedWith: started,
+      this.#catalog = freeze({server: {name: server.name, version: server.version}, tools,
         ...(capabilities ? {capabilities: structuredClone(capabilities)} : {})});
       // A process that exits later ends this session; the owner reconnects on its next call.
       client.onclose = () => {
@@ -311,7 +302,7 @@ export class PrinterMcpClient {
     // must be reconciled at the printer before another print is attempted.
     if (options.dispatchSensitive && this.#declinedElicitations === declinedBefore
       && (result.isError || Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES)) fail('dispatch-uncertain', undefined, failureDetail(result, this.#config));
-    // Bambu Studio's own refusal, word for word, when the MCP passes the slicer's result.json (slicer_result).
+    // The slicer's own refusal, word for word, from the MCP's verdict on it (slicer_report).
     const refused = result.isError && name === 'slice_stl' ? slicerReport(result.structuredContent) : undefined;
     if (refused?.failed) fail('slicer-error', undefined, refused.message);
     if (result.isError) fail('tool-failed', undefined, failureDetail(result, this.#config));

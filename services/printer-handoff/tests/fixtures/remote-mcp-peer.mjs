@@ -16,17 +16,23 @@ const open = {type: 'object', properties: {
   bambu_model: {type: 'string'}, nozzle_diameter: {type: 'string'}, launch: {type: 'boolean'}, type: {type: 'string'}, port: {type: 'string'}, source_f3d: {type: 'string'},
 }};
 const required = {...open, required: ['stl_path', 'bambu_model']};
+// The argument kinds and scopes the printer MCPs declare (_meta["counterpart/remote"], bambu-printer-mcp 1.1.63+).
+const ARGUMENTS = {stl_path: 'path', output_path: 'output', save_path: 'output', three_mf_path: 'path', slicer_profile: 'path', source_f3d: 'path',
+  host: 'config', port: 'config', bridge_command: 'config', bambu_model: 'config', nozzle_diameter: 'config', type: 'config-top'};
+const declare = (scope, extra = {}) => ({_meta: {'counterpart/remote': {scope, arguments: ARGUMENTS, ...extra}}});
 const tools = [
-  {name: 'slice_stl', inputSchema: required},
-  {name: 'get_printer_status', inputSchema: open},
-  {name: 'peek', inputSchema: open, annotations: {readOnlyHint: true}},
-  {name: 'shape', inputSchema: open, annotations: {readOnlyHint: false, destructiveHint: false, openWorldHint: false}},
-  {name: 'set_light', inputSchema: open, annotations: {readOnlyHint: true}},
-  {name: 'print_3mf', inputSchema: open},
+  {name: 'slice_stl', inputSchema: required, ...declare('design')},
+  {name: 'get_printer_status', inputSchema: open, ...declare('read')},
+  {name: 'peek', inputSchema: open, annotations: {readOnlyHint: true}, ...declare('read')},
+  {name: 'shape', inputSchema: open, annotations: {readOnlyHint: false, destructiveHint: false, openWorldHint: false}, ...declare('design')},
+  // Annotations are hints for other clients; the declared scope is what Counterpart offers it at.
+  {name: 'set_light', inputSchema: open, annotations: {readOnlyHint: true}, ...declare('control')},
+  {name: 'print_3mf', inputSchema: open, ...declare('print')},
+  // An MCP from before the declarations: no scope, so only a raw device sees it.
   {name: 'mystery', inputSchema: open},
-  {name: 'bambu_network_call', inputSchema: open, annotations: {readOnlyHint: true}},
-  {name: 'ask', inputSchema: open, annotations: {readOnlyHint: true}},
-  {name: 'fusion_mcp_status', inputSchema: open},
+  {name: 'bambu_network_call', inputSchema: open, annotations: {readOnlyHint: true}, ...declare('raw')},
+  {name: 'ask', inputSchema: open, annotations: {readOnlyHint: true}, ...declare('read')},
+  {name: 'fusion_mcp_status', inputSchema: open, ...declare('read', {raisedBy: {launch: 'design'}})},
 ];
 const server = new Server({name: 'remote-mcp-peer', version: '1.0.0'},
   {capabilities: {tools: {}, prompts: {}, resources: {}}});

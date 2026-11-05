@@ -1,7 +1,8 @@
 import {createRequire} from 'node:module';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {existsSync} from 'node:fs';
+import {mkdtemp, mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createServer} from 'node:http';
@@ -1070,15 +1071,17 @@ test('a print the printer service refuses reaches the phone as an event (review 
   assert.deepEqual(f.events.filter(item => item.type === 'project.updated').map(item => [item.projectId, item.data]), [[f.object.id, {keys: ['print']}]]);
 });
 
-test('Print and Estimate keep their slices in the project\'s own folder, so Print Again prints the one already made', async t => {
+test('Print and Estimate leave reusing a slice to the printer MCP: Counterpart keeps no slice cache of its own', async t => {
   const f = await setup(t, {reports: [status('IDLE', 0)]});
-  const slices = join(f.store.dir(f.object.id), 'slices');
   await f.service.estimate(f.object.id).catch(() => undefined);
-  assert.deepEqual(f.runs.find(run => run.estimate)?.estimate.sliceCache, {directory: slices});
+  assert.equal('sliceCache' in (f.runs.find(run => run.estimate)?.estimate ?? {}), false);
   await f.service.print(f.object.id);
   await f.approve();
   await f.service.settled(f.object.id);
-  assert.deepEqual(f.runs.find(run => run.options)?.options.sliceCache, {directory: slices});
+  assert.equal('sliceCache' in (f.runs.find(run => run.options)?.options ?? {}), false);
+  // Only the slice the sheet showed is kept (slices/shown, what will print); no cache entries beside it.
+  const kept = existsSync(join(f.store.dir(f.object.id), 'slices')) ? await readdir(join(f.store.dir(f.object.id), 'slices')) : [];
+  assert.deepEqual(kept.filter(name => name !== 'shown'), []);
 });
 
 // A design pass from before Counterpart kept colour parts (#293): its out/ holds the merged touched.stl and a 3MF.

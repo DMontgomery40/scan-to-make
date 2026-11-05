@@ -299,18 +299,20 @@ test('print phases and estimates are visible before confirmation and survive a f
 });
 
 
-test('an existing failed attempt exposes its retained slice estimate without rewriting its history', async () => {
+test('an existing failed attempt shows the estimate saved with its print, and the app never reads its sliced file for one', async () => {
   const {service,store,object,bundles}=await setup();
   const bundle=await bundles.create({stl:STL,prompt:'',backend:'bambu-printer-mcp'});
-  await bundles.recordArtifact(bundle.id,'sliced','sliced.3mf',Buffer.from('UEsDBBQAAAAIAGdlYV0FODnfWQAAAJAAAAAaAAAATWV0YWRhdGEvc2xpY2VfaW5mby5jb25maWezSc7PS8tMt7MpyEksSbWzyU0tSUxJLElUyE6ttFXKzEtJrVBSKEvMKU21VTJU0kdXUFCUmpKZXJKZnwdXZWRqboqpsDw1Mz2jBGGUmZ65CUiVPtRefag7AFBLAQIUAxQAAAAIAGdlYV0FODnfWQAAAJAAAAAaAAAAAAAAAAAAAACAAQAAAABNZXRhZGF0YS9zbGljZV9pbmZvLmNvbmZpZ1BLBQYAAAAAAQABAEgAAACRAAAAAAA=','base64'));
+  await bundles.recordArtifact(bundle.id,'sliced','sliced.3mf',Buffer.from('PK\x03\x04 a sliced file the MCP read when it was printed'));
   await bundles.setStatus(bundle.id,'uncertain','dispatch-uncertain');
+  // From before the MCP read it (PRD §8.0 item 9): no estimate rather than Counterpart parsing slice_info.config.
   await store.update(object.id,o=>({...o,state:'failed',failure:'old saved warning',print:{bundleId:bundle.id,uncertain:true}}));
-  const loaded=await service.get(object.id);
+  let loaded=await service.get(object.id);
+  assert.equal(loaded.print.estimate,undefined);
+  assert.equal(loaded.failure,'old saved warning');
+  await store.update(object.id,o=>({...o,print:{...o.print,sliced:true,estimate:{seconds:2575,grams:16.74}}}));
+  loaded=await service.get(object.id);
   assert.deepEqual(loaded.print.estimate,{seconds:2575,grams:16.74});
   assert.equal(loaded.print.sliced,true);
-  assert.equal(loaded.failure,'old saved warning');
-  assert.equal((await store.get(object.id)).print.estimate,undefined);
-  assert.deepEqual((await service.list())[0].print.estimate,loaded.print.estimate);
 });
 
 
