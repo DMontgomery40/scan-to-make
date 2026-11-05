@@ -694,6 +694,27 @@ public struct SliceEstimate: Codable, Equatable, Sendable {
     public var infillPercent: Double?
     public var wallLoops: Int?
     public var slicedAt: String?
+    /// The SHA-256 of this estimate's sliced file: Print sends it (`PrintChoice.sliceSha256`) and the Mac prints exactly that file.
+    public var sliceSha256: String?
+    /// The printer MCP's pictures of that file's G-code: what will print. Absent when the MCP can't draw them.
+    public var preview: PrintPreviewImages?
+}
+
+/// What will print, drawn by the printer MCP from the exact sliced G-code (never a thumbnail or a design render).
+public struct PrintPreviewImages: Codable, Equatable, Sendable {
+    public struct View: Codable, Equatable, Sendable, Identifiable {
+        /// `top` (as it sits on the bed) or `bed_side` (the face on the bed, turned over toward you).
+        public var name: String
+        public var label: String
+        /// PNG, base64.
+        public var png: String
+        public var width: Int
+        public var height: Int
+        public var id: String { name }
+        public var pngData: Data? { Data(base64Encoded: png) }
+    }
+    public var sha256: String
+    public var views: [View]
 }
 
 /// ISO 8601 dates with or without fractional seconds.

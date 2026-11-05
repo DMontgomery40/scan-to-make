@@ -10,6 +10,7 @@ import {createControlDispatcher} from '../dist/local-control-services.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
 import {createServer} from 'node:http';
 import {PrintEstimateSchema} from '@scan-to-make/contracts/counterpart';
+import {showing, showingRunner} from './support/shown-print.mjs';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 // The advertised Bambu hardware-confirmation schema (including its unchecked default).
@@ -51,9 +52,10 @@ async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs
       return {bundleId: id};
     },
   };
-  const service = new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
+  showingRunner(runner);
+  const service = showing(new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
-    print: {services: {store: bundles, relay, runner}}});
+    print: {services: {store: bundles, relay, runner}}}));
   const made = [];
   for (let i = 0; i < objects; i++) {
     const object = await store.create('A hook.');
@@ -363,23 +365,22 @@ test("Bambu Studio's words reach the project: its error is the failure, its warn
       selection: {model: 'p1s', nozzleDiameterMm: 0.4, nozzleType: 'hardened_steel', bedType: 'textured_plate', material: 'PLA', plateIndex: 0},
       timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 10000}}, join(root, 'bundles'));
     const store = new ObjectStore(join(root, 'objects'));
-    const service = new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
-      handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, print: {services}});
+    const service = showing(new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
+      handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, print: {services}}));
     const object = await store.create('A stove gap filler.');
     await mkdir(join(store.dir(object.id), 'current'), {recursive: true});
     await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
     await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
-    await service.print(object.id);
+    // Print as the sheet does: its estimate slices and previews, then Print sends that file.
+    const printing = await service.print(object.id).then(() => undefined, error => error);
     const tools = async () => (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(entry => entry.tool).map(entry => entry.tool);
-    return {service, id: object.id, tools};
+    return {service, id: object.id, tools, printing};
   };
-  // The empty-layer error: the project fails with Studio's words and nothing is asked or sent.
+  // The empty-layer error: the sheet shows Studio's words, and nothing is asked or sent.
   const failing = await studio('orient-empty-layers');
   const refused = await run('orient-empty-layers');
-  const failed = await refused.service.settled(refused.id);
-  assert.equal(failed.state, 'failed');
-  assert.equal(failed.failure, `${failing.error_string}\n${failing.sliced_plates[0].warning_message}`);
-  assert.equal(failed.printConfirmation, undefined);
+  assert.equal(refused.printing?.message, `${failing.error_string}\n${failing.sliced_plates[0].warning_message}`);
+  assert.equal((await refused.service.get(refused.id)).printConfirmation, undefined);
   assert.deepEqual(await refused.tools(), ['slice_stl']);
   // The floating cantilever: Studio's words as a native question with one "Print anyway" switch, then the printer's own.
   const words = (await studio('lay-flat-floating-cantilever')).sliced_plates[0].warning_message;
@@ -394,7 +395,8 @@ test("Bambu Studio's words reach the project: its error is the failure, its warn
   assert.match(printer.message, /^Fixture bed-clearance confirmation/);
   await warned.service.answerPrintConfirmation(warned.id, printer.id, {action: 'accept', content: {confirmed: true}});
   await warned.service.settled(warned.id);
-  assert.deepEqual(await warned.tools(), ['slice_stl', 'inspect_print_file', 'print_3mf']);
+  // Sliced once, for the sheet: its preview, then the same file checked again just before it is sent.
+  assert.deepEqual(await warned.tools(), ['slice_stl', 'inspect_print_file', 'inspect_print_file', 'print_3mf']);
 });
 
 // KAN-224: the print sheet's estimate says what Print would, in Bambu Studio's words, through the same real runner.

@@ -13,6 +13,8 @@ import {CameraFrames} from '../dist/printing/camera.js';
 import {CompanionSettingsStore} from '../dist/settings.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
+import {showing, showingRunner} from './support/shown-print.mjs';
+import {createHash} from 'node:crypto';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(32, 7)]);
@@ -107,6 +109,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
       return {manifest: await store.read(id), result: {dispatch: {jobName: JOB}}};
     },
   };
+  showingRunner(runner);
   const services = {store: bundles, relay, runner, selection: config.selection};
   const store = new ObjectStore(join(root, 'objects'));
   const pending = [];
@@ -120,7 +123,7 @@ async function setup(t, {tools = ['get_printer_status', 'camera_snapshot', 'paus
   const deps = {store, handoff: config, printerCatalog: catalog, printers: directory, claudePath: '/unused', runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined,
     print: {services, destinations: new Map([['current', services]])}, settings, camera: new CameraFrames(),
     events: {emit: async draft => { events.push(draft); }}, monitorClock: clock};
-  service = new ObjectService(deps);
+  service = showing(new ObjectService(deps));
   const object = await store.create('A mic mount for the stand');
   await mkdir(join(store.dir(object.id), 'current'));
   await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
@@ -318,7 +321,8 @@ test('a spool swapped while slicing stops the dispatch before anything is sent',
   f.deps.print.services.runner.filaments = async () => {
     const inventory = await real();
     reads++;
-    if (reads < 2) return inventory;
+    // The print sheet's estimate reads the spools once and Print once more; the swap comes after both.
+    if (reads < 3) return inventory;
     return {trays: inventory.trays.map(tray => tray.slot === 1 ? {...tray, tray_color: 'FF0000FF'} : tray)};
   };
   await f.service.print(f.object.id);
@@ -1128,4 +1132,32 @@ test('no colour question for a one-colour assembly, or once a later redesign mad
   await redesigned.approve();
   await redesigned.service.settled(redesigned.object.id);
   assert.equal(redesigned.runs[0].options.ask, undefined, 'only the pass that made the current model counts');
+});
+
+test('Print sends exactly the file the sheet previewed; without that preview, or with changed settings, nothing is sent (Nov 5)', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)], sliceArgs: true});
+  await assert.rejects(f.service.printUnshown(f.object.id), /Open Print to see what will print/);
+  assert.equal(f.runs.filter(run => run.id).length, 0, 'nothing dispatched without a preview');
+  const shown = await f.service.estimate(f.object.id);
+  assert.match(shown.sliceSha256, /^[0-9a-f]{64}$/);
+  assert.equal(shown.preview.sha256, shown.sliceSha256);
+  assert.deepEqual(shown.preview.views.map(view => view.name), ['top', 'bed_side']);
+  await assert.rejects(f.service.printUnshown(f.object.id, {quality: 'fine', sliceSha256: shown.sliceSha256}), /settings changed since the preview/);
+  await assert.rejects(f.service.printUnshown(f.object.id, {sliceSha256: 'f'.repeat(64)}), /Open Print to see what will print/);
+  assert.equal(f.runs.filter(run => run.id).length, 0);
+  await f.service.printUnshown(f.object.id, {sliceSha256: shown.sliceSha256});
+  await f.approve();
+  await f.service.settled(f.object.id);
+  const dispatched = f.runs.find(run => run.id);
+  assert.equal(dispatched.options.expectedSha256, shown.sliceSha256, 'the printer gets the previewed file, checked by its hash');
+  assert.equal(createHash('sha256').update(dispatched.options.presliced.bytes).digest('hex'), shown.sliceSha256);
+});
+
+test('an MCP that cannot draw what will print is asked to update; nothing is sent', async t => {
+  const f = await setup(t);
+  showingRunner(f.deps.print.services.runner, {preview: false});
+  const shown = await f.service.estimate(f.object.id);
+  assert.equal(shown.preview, undefined);
+  await assert.rejects(f.service.printUnshown(f.object.id, {sliceSha256: shown.sliceSha256}), /Update bambu-printer-mcp in Settings → Printers so Counterpart can show you what will print/);
+  assert.equal(f.runs.filter(run => run.id).length, 0);
 });

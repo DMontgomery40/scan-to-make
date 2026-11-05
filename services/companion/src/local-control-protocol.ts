@@ -82,7 +82,8 @@ export const parameters = {
     slot:z.number().int().min(0).max(4095), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
     name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
   })).min(1).max(64).optional(), filamentsModelVersion: z.string().min(1).max(128).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(), colour: PrintColourSchema.optional(),
-    copies: z.number().int().min(1).max(64).optional(), pauseBeforeLayers: PrintSettingsSchema.shape.pauseBeforeLayers}),
+    copies: z.number().int().min(1).max(64).optional(), pauseBeforeLayers: PrintSettingsSchema.shape.pauseBeforeLayers,
+    sliceSha256: z.string().regex(/^[0-9a-f]{64}$/).optional()}),
   'objects.estimate': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(),
     copies: z.number().int().min(1).max(64).optional(), filaments: z.array(z.strictObject({
       slot:z.number().int().min(0).max(4095), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
