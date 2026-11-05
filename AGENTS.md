@@ -30,6 +30,13 @@ David, 2026-11-04: "agents are CONSTANTLY blurring the boundary and adding backe
 - In app code: no branching on MCP package or slicer, no printer-model tables, no matching on MCP or printer error codes or wording, no slicer setting keys or presets, no fallbacks for MCPs without the contract. A missing capability means "Update <MCP> in Settings → Printers".
 - Moving code out of the app: extend `counterpart/1` in both MCPs, publish, install through the app's Update, and only then delete the app code. The list and order are in PRD §8.0.
 
+## Every layout
+
+David, 2026-11-05, after the starters went missing on the Mac and iPad: "how do make sure thing like that don't happen again?"
+
+- A user-facing feature lands on every layout in the same PR: iPhone (compact), iPad/regular width, Mac, Android and Linux. If a layout can't have it, PRD §6.1 names the exception with David's quote.
+- Its reachability test runs with projects present on each client: `LayoutParityUITests` (the mobile gate runs it on an iPhone and an iPad), Mac `ObjectsModelTests`, Android `HomeLayoutTests`, Linux `domain.test.ts`. Update the §6.1 table in the same PR.
+
 ## Read bambu-printer-mcp before you build
 
 

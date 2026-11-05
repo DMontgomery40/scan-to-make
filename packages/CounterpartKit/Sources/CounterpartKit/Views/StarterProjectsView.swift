@@ -45,15 +45,39 @@ public struct StarterProjectsView: View {
     }
 }
 
+/// One starter as a sidebar row (iPad and Mac): its picture, title and designer. The sidebars list the starters
+/// in a "Start with these" section, so they stay one click away while projects exist (PRD §5.11, "Every layout").
 @available(iOS 26.0, macOS 26.0, *)
-private struct StarterDetail: View {
+public struct StarterRow: View {
+    let project: StarterProject
+    public init(_ project: StarterProject) { self.project = project }
+    public var body: some View {
+        HStack(spacing: 10) {
+            StarterArtwork(project: project).frame(width: 36, height: 36).clipped()
+                .background(Color.secondary.opacity(0.12), in: .rect(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(project.title).font(.body.weight(.medium)).lineLimit(1)
+                Text("\(project.detail) · by \(project.designer)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A starter's credits, instructions and its one action, as a sheet. `StarterProjectsView` and the sidebars'
+/// starter rows open the same sheet.
+@available(iOS 26.0, macOS 26.0, *)
+public struct StarterDetail: View {
     @Environment(\.dismiss) private var dismiss
     let project: StarterProject
     let actionTitle: String
     let start: (StarterProject) async throws -> Void
+    public init(project: StarterProject, actionTitle: String = "Add to Projects", start: @escaping (StarterProject) async throws -> Void) {
+        self.project = project; self.actionTitle = actionTitle; self.start = start
+    }
     @State private var busy = false
     @State private var problem: String?
-    var body: some View {
+    public var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {

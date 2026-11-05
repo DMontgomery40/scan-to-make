@@ -10,6 +10,7 @@ import {
   guardPlate,
   parseLayers,
   searchProject,
+  startersShown,
   normalizeQuestion,
   validateAnswer,
 } from "../src/domain.ts";
@@ -270,4 +271,14 @@ test("the print sheet sends only the choices the printer's MCP offers, so its es
       pauseBeforeLayers: [],
     },
   );
+});
+
+// David, Nov 5: "where did the 'start with these things' thing go". The starters follow the view, not how many
+// projects there are: the Projects view lists them with or without projects.
+test("Home lists the starters in the Projects view whatever projects exist", () => {
+  assert.equal(startersShown({ search: "", filter: "all" }), true);
+  assert.equal(startersShown({ search: "   ", filter: "all" }), true);
+  assert.equal(startersShown({ search: "caliper", filter: "all" }), false);
+  assert.equal(startersShown({ search: "", filter: "working" }), false);
+  assert.equal(startersShown({ search: "", filter: "archived" }), false);
 });

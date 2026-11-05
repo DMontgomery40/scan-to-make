@@ -38,6 +38,15 @@ export function guardPlate(project: Project, frozen: string | undefined) {
   if (project.kind === "published" && !frozen)
     throw new Error("Choose a plate before printing.");
 }
+/**
+ * Whether Home lists the starters (PRD §5.11). They follow the view, never the project count: on the Mac and iPad
+ * they once showed only with no projects or nothing selected, and David asked where they went (Nov 5). The Projects
+ * view lists them under the grid; a search or the In progress and Archive views show only projects.
+ */
+export function startersShown(view: { search: string; filter: string }) {
+  return view.search.trim() === "" && view.filter === "all";
+}
+
 export function searchProject(p: Project, query: string) {
   return [
     p.title,

@@ -514,3 +514,99 @@ final class SettingsAndFirstRunUITests: XCTestCase {
     }
 }
 
+
+/// Every layout reaches the same things (PRD §6.1, "Every layout"). The mobile gate runs this class on an iPhone
+/// and again on an iPad, so a feature that lands on one width and not the other fails here. David, Nov 5:
+/// "where did the 'start with these things' thing go, to print the 3d scan rig and the calipers?"
+final class LayoutParityUITests: XCTestCase {
+    override func setUp() {
+        continueAfterFailure = false
+        // The iPad's sidebar is always on screen in landscape, as on David's iPad.
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
+    }
+
+    private var regular: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+
+    private func launch(set: String = "all", largeText: Bool = false) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", set]
+        // Larger text makes any list longer than the screen, as David's ten projects are.
+        if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"] }
+        app.launch()
+        return app
+    }
+
+    /// The project list: the iPad sidebar, or iPhone Home.
+    private func projectList(_ app: XCUIApplication) -> XCUIElement {
+        regular ? app.collectionViews.firstMatch : app.scrollViews.firstMatch
+    }
+
+    private func reveal(_ element: XCUIElement, in list: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        for _ in 0..<12 where !(element.exists && element.isHittable) { list.swipeUp() }
+        XCTAssertTrue(element.isHittable, "\(element) is reachable", file: file, line: line)
+    }
+
+    private func opensStarter(_ button: XCUIElement, _ app: XCUIApplication) {
+        button.tap()
+        XCTAssertTrue(app.buttons["starter-add"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["A steady orbit around your object"].exists, "the scan rig's own sheet")
+        app.buttons["Close"].tap()
+        XCTAssertTrue(app.buttons["starter-add"].waitForNonExistence(timeout: 5))
+    }
+
+    func testStartersStayReachableWithProjects() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))
+        if regular {
+            // Nothing selected: the detail offers the starters and the two jobs, never just "Choose a project".
+            let card = app.buttons["starter-scan-platform"]
+            XCTAssertTrue(card.waitForExistence(timeout: 10), "the iPad start pane lists the starters")
+            opensStarter(card, app)
+            // A project open: the sidebar still lists them.
+            let project = projectList(app).descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Mic mount")).firstMatch
+            XCTAssertTrue(project.waitForExistence(timeout: 5))
+            project.tap()
+            XCTAssertTrue(app.buttons["starter-scan-platform"].waitForNonExistence(timeout: 10), "the project replaced the start pane")
+            let row = app.buttons["sidebar-starter-scan-platform"]
+            reveal(row, in: projectList(app))
+            XCTAssertTrue(app.buttons["sidebar-starter-long-vernier-caliper"].exists)
+            opensStarter(row, app)
+        } else {
+            let card = app.buttons["starter-scan-platform"]
+            reveal(card, in: projectList(app))
+            XCTAssertTrue(app.buttons["starter-long-vernier-caliper"].exists)
+            opensStarter(card, app)
+        }
+    }
+
+    func testEmptyProjectsOfferStartersAndBothJobs() {
+        let app = launch(set: "empty")
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["starter-scan-platform"].waitForExistence(timeout: 10))
+        for job in ["Make something that fits", "Copy something"] {
+            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", job)).firstMatch.exists, job)
+        }
+    }
+
+    /// iPad build 202611052142 (Nov 5): the round New button sat on top of a sidebar row. The list is longer than
+    /// the screen (larger text), so some row always reaches the bottom edge, at rest and scrolled to the end.
+    func testNewNeverCoversARow() {
+        let app = launch(largeText: true)
+        let new = app.buttons["new-project"]
+        XCTAssertTrue(new.waitForExistence(timeout: 20))
+        let list = projectList(app)
+        if regular {
+            // The sidebar list ends where New's bar begins, so no row can be under it.
+            XCTAssertLessThanOrEqual(list.frame.maxY, new.frame.minY + 1, "New \(new.frame) over the list \(list.frame)")
+            for _ in 0..<12 { list.swipeUp() }
+            XCTAssertLessThanOrEqual(list.frame.maxY, new.frame.minY + 1)
+            XCTAssertTrue(new.isHittable)
+        } else {
+            // iPhone Home's New floats over the scroll view (PRD §5.1); the end of Home scrolls clear of it.
+            for _ in 0..<12 { list.swipeUp() }
+            let last = app.buttons["starter-scan-platform"]
+            XCTAssertTrue(last.exists)
+            XCTAssertFalse(last.frame.intersects(new.frame), "New \(new.frame) covers the last card \(last.frame)")
+        }
+    }
+}

@@ -68,6 +68,10 @@ struct NewProjectPane: View {
                             .buttonStyle(.glassProminent).controlSize(.extraLarge).keyboardShortcut(.defaultAction)
                             .disabled(!available || starting || empty)
                     }
+                    // Or start from a starter: New Project is where a Mac with projects goes to start something
+                    // (PRD §5.11). Adding one opens it, which closes this pane.
+                    Divider().padding(.vertical, 6)
+                    StarterProjectsView { try await model.addStarter($0) }
                 }
                 .frame(maxWidth: 640)
                 .padding(32)
