@@ -143,10 +143,12 @@ private func project(_ item: [String: Any]) throws -> Project {
                           lastSeenAt: seen)
         }
         await companion.setDevices([device((now.timeIntervalSince1970 - 900) * 1000)])
-        let model = ObjectsModel(companion: companion)
+        var clock = now
+        let model = ObjectsModel(companion: companion, now: { clock })
         await model.refresh()
         XCTAssertEqual(model.latestDevice?.connectedNow(at: now), false)
         await companion.setDevices([device((now.timeIntervalSince1970 - 1) * 1000)])
+        clock = clock.addingTimeInterval(ObjectsModel.extrasDelay)
         await model.refresh()
         XCTAssertEqual(model.latestDevice?.connectedNow(at: now), true)
     }
