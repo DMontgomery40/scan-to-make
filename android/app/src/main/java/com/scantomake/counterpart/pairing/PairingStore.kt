@@ -117,18 +117,18 @@ object PairingWords {
         PairingException.Code.Unauthorized -> "Your computer turned this phone down, or the code was already used. Show a new code on your computer and scan it."
         PairingException.Code.Forbidden -> "Your computer turned this phone down. Show a new code and scan it."
         PairingException.Code.RateLimited -> "Too many tries. Wait a minute, then scan a new code from your computer."
-        PairingException.Code.CertificateChanged -> "This computer looks different from last time. Pair again to be safe."
+        PairingException.Code.CertificateChanged -> "This computer looks different from last time. Connect again to be safe."
         PairingException.Code.Certificate -> "Your phone couldn’t check that this is your computer. Show a new code on your computer and scan it."
         PairingException.Code.WrongHost -> "That code sent your phone somewhere else, so nothing was shared. Scan the code on your computer again."
         PairingException.Code.Network, PairingException.Code.Timeout -> unreachable
         PairingException.Code.Unavailable -> "Your computer is busy right now. Try again in a moment."
-        PairingException.Code.SecureStorage -> "This phone couldn’t store the pairing. Unlock it and try again."
-        PairingException.Code.PairingRequired -> "Pair this phone with your computer again."
+        PairingException.Code.SecureStorage -> "This phone couldn’t save the connection. Unlock it and try again."
+        PairingException.Code.PairingRequired -> "Connect this phone to your computer again."
         PairingException.Code.PairingChanged -> "Your computer changed while this was running. Try again."
-        PairingException.Code.InvalidResponse -> "Your computer answered in a way this app doesn’t understand. Update Counterpart on both, then pair again."
+        PairingException.Code.InvalidResponse -> "Your computer answered in a way this app doesn’t understand. Update Counterpart on both, then connect again."
         PairingException.Code.InvalidDeviceName -> "Give this phone a name between 1 and 80 characters."
         PairingException.Code.NearbyDenied -> "Your computer said no to this phone. If that was a mistake, try again and click Allow on your computer."
-        PairingException.Code.NearbyExpired -> "That took too long, so nothing was paired. Try again, then click Allow on your computer."
+        PairingException.Code.NearbyExpired -> "That took too long, so nothing connected. Try again, then click Allow on your computer."
         PairingException.Code.LocalNetwork -> "Counterpart can’t look on your Wi-Fi. Check that Wi-Fi is on and this phone is on the same network as your computer."
         PairingException.Code.Cancelled -> "Cancelled. Nothing changed."
         PairingException.Code.Busy -> "Still working on the last request. Try again in a moment."
@@ -138,7 +138,7 @@ object PairingWords {
         val code = when (error) {
             is PairingException -> error.code
             is PairingLinkException -> PairingException.of(error.error).code
-            else -> return "Pairing didn’t finish. Show a new code on your computer and scan it."
+            else -> return "Connecting didn’t finish. Show a new code on your computer and scan it."
         }
         if (code == PairingException.Code.Network || code == PairingException.Code.Timeout) {
             return "$unreachable If you use a VPN or Private DNS, turn it off and try again."

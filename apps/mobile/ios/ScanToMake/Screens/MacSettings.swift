@@ -278,7 +278,7 @@ struct MacSettingsSections: View {
             Section {
                 ForEach(older) { device in Text(device.deviceName ?? "An older pairing").foregroundStyle(.secondary) }
                 Button("Remove All", role: .destructive) { confirmRemoveAll = true }.disabled(model.working != nil)
-            } header: { Text("Older pairings") } footer: { Text("Remove these only if you no longer use those devices. They'll need to pair again.") }
+            } header: { Text("Older connections") } footer: { Text("Remove these only if you no longer use those devices. They'll need to connect again.") }
             .confirmationDialog("Remove \(older.count) older pairings?", isPresented: $confirmRemoveAll, titleVisibility: .visible) {
                 Button("Remove All", role: .destructive) { Task { await model.remove(older.map(\.deviceId)) } }
             }

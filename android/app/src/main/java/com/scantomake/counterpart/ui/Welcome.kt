@@ -54,6 +54,8 @@ fun WelcomeScreen(next: () -> Unit) {
             Spacer(Modifier.height(14.dp))
             JobCard(CIcons.Cube, "Copy something", "Scan it. Your computer fixes what the scanner missed and makes it printable.",
                 listOf(CIcons.Cube to "Scan", CIcons.Wand to "Fix"))
+            Text("Your computer does the designing, cleanup and printing. The next step connects this phone to it.", color = Palette.secondary,
+                fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 22.dp, start = 16.dp, end = 16.dp))
             Text("Either way, you'll get a notification when it's ready, and another when the print is done.", color = Palette.secondary,
                 fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 22.dp, start = 16.dp, end = 16.dp))
             Spacer(Modifier.height(28.dp))

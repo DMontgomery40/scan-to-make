@@ -254,3 +254,21 @@ final class PairingStoreTests: XCTestCase {
         XCTAssertThrowsError(try damaged.installationKey())
     }
 }
+
+final class PairingWordsTests: XCTestCase {
+    /// The connect screens say "connect", never "pair" (docs/design/messaging.md): a first-time user
+    /// has never been told what pairing is, so every failure message must read without it.
+    func testNoConnectMessageSaysPair() {
+        let codes: [PairingError.Code] = [.invalidInvitation, .expiredInvitation, .unsupportedInvitation,
+            .unauthorized, .forbidden, .rateLimited, .certificateChanged, .certificate, .wrongHost,
+            .network, .timeout, .unavailable, .secureStorage, .pairingRequired, .pairingChanged,
+            .invalidResponse, .invalidDeviceName, .nearbyDenied, .nearbyExpired, .localNetwork,
+            .cancelled, .busy]
+        for code in codes {
+            XCTAssertFalse(PairingWords.message(code).lowercased().contains("pair"), "\(code): \(PairingWords.message(code))")
+        }
+        XCTAssertFalse(PairingWords.expired.lowercased().contains("pair"))
+        XCTAssertFalse(PairingWords.unreachable.lowercased().contains("pair"))
+        XCTAssertFalse(PairingWords.failure(NSError(domain: "test", code: 1)).lowercased().contains("pair"))
+    }
+}

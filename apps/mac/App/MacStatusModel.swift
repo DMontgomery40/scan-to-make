@@ -129,7 +129,7 @@ struct DeviceGroup: Identifiable, Equatable {
         primary.connectedNow(at: now)
     }
 
-    /// "iPhone · connected now · paired Oct 30", "iPad · last seen yesterday · paired Oct 31".
+    /// "iPhone · connected now · added Oct 30", "iPad · last seen yesterday · added Oct 31".
     func detail(at now: Date, calendar: Calendar = .current) -> String {
         let paired = Date(timeIntervalSince1970: primary.pairedAt / 1000).formatted(.dateTime.month(.abbreviated).day())
         let seen: String
@@ -143,6 +143,6 @@ struct DeviceGroup: Identifiable, Equatable {
             else if calendar.isDate(day, inSameDayAs: calendar.date(byAdding: .day, value: -1, to: now) ?? now) { seen = "last seen yesterday" }
             else { seen = "last seen \(day.formatted(.dateTime.month(.abbreviated).day()))" }
         }
-        return "\(kind) · \(seen) · paired \(paired)"
+        return "\(kind) · \(seen) · added \(paired)"
     }
 }

@@ -42,6 +42,10 @@ struct WelcomeView: View {
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, 30)
+                        Text("Your Mac does the designing, cleanup and printing. The next step connects this iPhone to it.")
+                            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 36).padding(.top, 22)
                         Text("Either way, you'll get a notification when it's ready, and another when the print is done.")
                             .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)

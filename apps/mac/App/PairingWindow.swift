@@ -79,7 +79,7 @@ struct PairingView: View {
         ZStack {
             if let qr = model.qr {
                 Image(nsImage:qr).interpolation(.none).resizable().scaledToFit()
-                    .accessibilityLabel("Pairing QR code")
+                    .accessibilityLabel("Code to connect your phone")
             } else if let message = failureMessage {
                 VStack(spacing:14) {
                     Text(message).font(.system(size:13)).foregroundStyle(.secondary)
@@ -145,7 +145,7 @@ extension NSImage {
             return true
         }
         image.isTemplate = true
-        image.accessibilityDescription = dot ? "Counterpart, a phone is waiting to pair" : "Counterpart"
+        image.accessibilityDescription = dot ? "Counterpart, a phone is waiting to connect" : "Counterpart"
         return image
     }
 }

@@ -395,6 +395,16 @@ class WordsTests {
         assertEquals("42%", Format.percent(42.9))
     }
 
+    // The connect screens say "connect", never "pair" (docs/design/messaging.md).
+    @Test fun noConnectMessageSaysPair() {
+        for (code in com.scantomake.counterpart.pairing.PairingException.Code.entries) {
+            val words = com.scantomake.counterpart.pairing.PairingWords.message(code)
+            assertTrue("$code: $words", !words.contains("pair", ignoreCase = true))
+        }
+        val fallback = com.scantomake.counterpart.pairing.PairingWords.failure(RuntimeException("x"))
+        assertTrue(fallback, !fallback.contains("pair", ignoreCase = true))
+    }
+
     @Test fun phasesAndActions() {
         assertEquals(ProjectPhase.Draft, ProjectWords(project(""""state":"new"""")).phase)
         assertEquals(ProjectPhase.Sending, ProjectWords(project(""""state":"new""""), sending = true).phase)
