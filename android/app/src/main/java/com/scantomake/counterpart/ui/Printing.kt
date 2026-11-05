@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -110,6 +111,12 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     val selectedStrength = if (offersStrength) strength else PrintStrength.Standard
     val selectedCopies = if (project.slicedOriginal) 1 else if (offersCopies && copiesPicked) copies else null
     val pauseLayers = if (offersPauses) PrintPauses.parse(pauseText, estimate?.layers) else emptyList()
+    // Every choice Print makes: the estimate slices exactly these, and Print sends that file (Nov 5). Pauses are
+    // checked against the layer count only at Print, so a new count never re-slices.
+    val estimatePauses = if (offersPauses) PrintPauses.parse(pauseText, null) else emptyList()
+    val estimateChoice = PrintChoice(colour, selectedQuality, selectedStrength, copies = selectedCopies, pauseBeforeLayers = estimatePauses ?: emptyList())
+    val readyToSlice = destinationId != null && !selectingPrinter && printerProblem == null && filaments != null && estimatePauses != null
+    val shownSlice = estimate?.shownSlice?.takeIf { !estimating }
 
     LaunchedEffect(Unit) { if (catalog == null) state.loadPrinters() }
     LaunchedEffect(destinationId) {
@@ -127,13 +134,17 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (_: Exception) { filaments = emptyList() }
     }
-    LaunchedEffect(destinationId, selectedQuality, selectedStrength, selectedCopies, project.mediaVersion, project.selectedPlate?.id) {
-        estimate = null; estimating = true; sliceRefusal = null
-        try { estimate = app.companion.estimate(id, destinationId, selectedQuality, selectedStrength, selectedCopies) }
+    LaunchedEffect(estimateChoice.estimateBody(destinationId).toString(), readyToSlice, project.mediaVersion, project.selectedPlate?.id) {
+        estimate = null; sliceRefusal = null; estimating = readyToSlice
+        if (!readyToSlice) return@LaunchedEffect
+        try {
+            delay(600) // typing pause layers slices once, after the last keystroke
+            estimate = app.companion.estimate(id, destinationId, estimateChoice)
+        }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
         // HTTPS exposes slicer refusals as invalid-state; retain the companion's own words.
-        catch (e: CompanionException) { if (e.code in setOf("invalid-state", "slicer-refused", "slicer-error")) sliceRefusal = e.message }
-        catch (_: Exception) { /* A missing estimate alone does not prevent printing. */ }
+        catch (e: CompanionException) { sliceRefusal = e.message }
+        catch (_: Exception) { sliceRefusal = CompanionException.unreachable.message }
         finally { estimating = false }
     }
 
@@ -206,8 +217,10 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                 }
             }
 
+            SectionTitle("What will print")
+            WhatWillPrint(estimate, estimating, destination?.backend)
             GlassCard(Modifier.fillMaxWidth()) {
-                if (estimating) Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), color = Palette.filament, strokeWidth = 2.dp); Text("  Slicing for an estimate…", color = Palette.secondary) }
+                if (estimating) Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), color = Palette.filament, strokeWidth = 2.dp); Text("  Slicing to show you…", color = Palette.secondary) }
                 else estimate?.let { e ->
                     Column {
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -227,15 +240,48 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
         }
         PrimaryButton(if (working) "Sending to the printer…" else "Print", Modifier.fillMaxWidth().padding(16.dp),
             enabled = !working && !selectingPrinter && printerProblem == null && destination != null && !plateChanged &&
-                pauseLayers != null && sliceRefusal == null && (!uncertain || checked), icon = CIcons.Printer) {
+                pauseLayers != null && sliceRefusal == null && shownSlice != null && (!uncertain || checked), icon = CIcons.Printer) {
             working = true; problem = null
             scope.launch {
                 try {
                     state.show(app.companion.print(id, PrintChoice(colour, selectedQuality, selectedStrength, checked, selectedCopies,
-                        pauseBeforeLayers = pauseLayers ?: emptyList()), expectedPlate))
+                        pauseBeforeLayers = pauseLayers ?: emptyList(), sliceSha256 = shownSlice), expectedPlate))
                     printing()
                 } catch (e: CompanionException) { problem = e.message } catch (e: Exception) { problem = CompanionException.unreachable.message } finally { working = false }
             }
+        }
+    }
+}
+
+/**
+ * The printer MCP's pictures of the exact sliced file Print sends (Nov 5), never a design render or a thumbnail the
+ * file carried along. While it slices, or when the installed MCP can't draw them, the reason.
+ */
+@Composable
+private fun WhatWillPrint(estimate: SliceEstimate?, estimating: Boolean, mcp: String?) {
+    val preview = estimate?.preview?.takeIf { estimate.shownSlice != null && !estimating }
+    val pictures = remember(preview?.sha256) {
+        preview?.views?.map { view ->
+            view to runCatching { android.util.Base64.decode(view.png, android.util.Base64.DEFAULT) }.getOrNull()
+                ?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
+        }.orEmpty()
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        when {
+            preview != null -> {
+                pictures.forEach { (view, image) ->
+                    image?.let {
+                        Image(it, view.label, Modifier.fillMaxWidth().aspectRatio(view.width.toFloat() / view.height.coerceAtLeast(1))
+                            .clip(RoundedCornerShape(14.dp)).background(Color.White), contentScale = ContentScale.Fit)
+                    }
+                    Text(view.label, color = Palette.secondary, fontSize = 12.sp)
+                }
+                Text("Drawn from the sliced file Print sends.", color = Palette.secondary, fontSize = 11.sp)
+            }
+            estimating -> Text("Slicing it to show you…", color = Palette.secondary)
+            estimate != null -> Text("Update ${mcp?.takeIf { it.isNotBlank() } ?: "your printer service"} in Settings → Printers so Counterpart can show you what will print.",
+                color = Palette.needsYou)
+            else -> Text("Nothing to show yet.", color = Palette.secondary)
         }
     }
 }

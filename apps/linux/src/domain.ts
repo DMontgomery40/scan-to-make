@@ -1,5 +1,7 @@
 import type {
+  Estimate,
   Field,
+  Filament,
   Project,
   Question,
   RawQuestion,
@@ -288,4 +290,54 @@ export function newerProject(existing: Project | undefined, incoming: Project) {
   return existing && existing.updatedAtMs > incoming.updatedAtMs
     ? existing
     : incoming;
+}
+
+/** The print sheet's choices: its estimate slices exactly these, and Print sends exactly that slice. */
+export interface PrintChoices {
+  destinationId: string;
+  quality: string;
+  strength: string;
+  copies: number;
+  filament?: Filament;
+  material?: string;
+  pauseBeforeLayers: number[];
+}
+/** `objects.estimate`: every choice Print makes, so the file it slices is the one Print sends. */
+export function estimateRequest(id: string, c: PrintChoices) {
+  return {
+    id,
+    destinationId: c.destinationId,
+    quality: c.quality,
+    strength: c.strength,
+    copies: c.copies,
+    ...(c.filament
+      ? { filament: c.filament }
+      : c.material
+        ? { colour: { material: c.material } }
+        : {}),
+    ...(c.pauseBeforeLayers.length
+      ? { pauseBeforeLayers: c.pauseBeforeLayers }
+      : {}),
+  };
+}
+/** `objects.print`: the same choices, the plate it was opened on, and the slice whose pictures were shown. */
+export function printRequest(
+  id: string,
+  c: PrintChoices,
+  sliceSha256: string,
+  expectedPlate?: string,
+) {
+  const { destinationId: _destination, ...choices } = estimateRequest(id, c);
+  return {
+    ...choices,
+    ...(expectedPlate ? { expectedPlate } : {}),
+    sliceSha256,
+  };
+}
+/** The slice Print may send: only one whose pictures are of that exact file. */
+export function shownSlice(estimate: Estimate | undefined) {
+  const sha = estimate?.sliceSha256;
+  return sha && estimate.preview?.sha256 === sha && estimate.preview.views.length
+    ? sha
+    : undefined;
 }

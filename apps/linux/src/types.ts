@@ -232,6 +232,14 @@ export interface Estimate {
   layers?: number;
   warnings?: string[];
   copies?: number;
+  /** The sliced file this estimate made; Print sends it as `sliceSha256` (packages/contracts PrintEstimateSchema). */
+  sliceSha256?: string;
+  /** The printer MCP's pictures of that exact file's G-code. Absent when the installed MCP can't draw them. */
+  preview?: {
+    sha256: string;
+    views: { name: string; label: string; png: string; width: number; height: number }[];
+    mmPerPixel?: number;
+  };
 }
 export interface HostStatus {
   configured: boolean;

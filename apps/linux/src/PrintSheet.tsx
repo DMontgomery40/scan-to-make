@@ -3,11 +3,14 @@ import { call } from "./bridge";
 import {
   activePrint,
   duration,
+  estimateRequest,
   freezePlate,
   guardPlate,
   parseLayers,
+  printRequest,
+  shownSlice,
+  type PrintChoices,
 } from "./domain";
-import { Picture } from "./Stage";
 import { Action, Modal } from "./ui";
 import type { Estimate, Filament, Printer, Project } from "./types";
 export function PrintSheet({
@@ -38,6 +41,7 @@ export function PrintSheet({
   const [slot, setSlot] = useState("");
   const [material, setMaterial] = useState("");
   const [estimate, setEstimate] = useState<Estimate>();
+  const [estimating, setEstimating] = useState(false);
   const [error, setError] = useState("");
   const [changing, setChanging] = useState(false);
   const sequence = useRef(0);
@@ -89,14 +93,27 @@ export function PrintSheet({
       setChanging(false);
     }
   };
-  const options = { destinationId: destination, quality, strength, copies };
-  const key = JSON.stringify(options);
+  // Every choice Print makes: the estimate slices exactly these (Nov 5), so changing one slices again.
+  let pausesProblem = "";
+  let pauseBeforeLayers: number[] = [];
+  try {
+    pauseBeforeLayers = parseLayers(pauses);
+  } catch (e) {
+    pausesProblem = e instanceof Error ? e.message : String(e);
+  }
+  const choices: PrintChoices = {
+    destinationId: destination,
+    quality,
+    strength,
+    copies,
+    filament: filaments.find((f) => String(f.slot) === slot),
+    material: material || undefined,
+    pauseBeforeLayers,
+  };
+  const key = JSON.stringify(choices);
   const currentKey = useRef(key);
   currentKey.current = key;
-  useEffect(() => {
-    setEstimate(undefined);
-    sequence.current++;
-  }, [key]);
+  const shown = shownSlice(estimate);
   const ensureCurrent = async () => {
     const { object } = await call<{ object: Project }>("objects.get", {
       id: project.id,
@@ -112,6 +129,49 @@ export function PrintSheet({
       throw new Error("The printer changed on another device. Reopen Print.");
     return object;
   };
+  const runEstimate = async () => {
+    setError("");
+    const ticket = ++sequence.current;
+    const submittedKey = key;
+    setEstimating(true);
+    try {
+      await ensureCurrent();
+      const value = await call<Estimate>(
+        "objects.estimate",
+        estimateRequest(project.id, choices),
+      );
+      await ensureCurrent();
+      if (
+        ticket === sequence.current &&
+        currentKey.current === submittedKey
+      )
+        setEstimate(value);
+    } finally {
+      if (ticket === sequence.current) setEstimating(false);
+    }
+  };
+  const ready =
+    !!destination &&
+    !changing &&
+    !stale &&
+    !pausesProblem &&
+    Number.isInteger(copies) &&
+    copies >= 1 &&
+    copies <= 64;
+  useEffect(() => {
+    setEstimate(undefined);
+    setEstimating(false);
+    sequence.current++;
+    if (!ready) return;
+    const timer = setTimeout(
+      () =>
+        void runEstimate().catch((e) =>
+          setError(e instanceof Error ? e.message : String(e)),
+        ),
+      600,
+    );
+    return () => clearTimeout(timer);
+  }, [key, ready]);
   return (
     <Modal
       title={plate?.status === "printed" ? "Print this plate again" : "Print"}
@@ -120,13 +180,38 @@ export function PrintSheet({
     >
       <div className="print-layout">
         <div>
-          <Picture
-            id={project.id}
-            path={plate?.thumbnail ?? project.current?.renders[0]}
-            alt={plate?.name ?? project.title}
-            className="print-preview"
-          />
-          <h3>{plate?.name ?? project.title}</h3>
+          {/* What will print (Nov 5): the printer MCP's pictures of the exact sliced file Print sends, never a
+              design render or a thumbnail the file carried along. */}
+          <section className="what-will-print" aria-label="What will print">
+            <h3>What will print</h3>
+            {shown && estimate?.preview ? (
+              <>
+                {estimate.preview.views.map((view) => (
+                  <figure key={view.name}>
+                    <img
+                      className="print-preview"
+                      src={`data:image/png;base64,${view.png}`}
+                      alt={view.label}
+                      width={view.width}
+                      height={view.height}
+                    />
+                    <figcaption>{view.label}</figcaption>
+                  </figure>
+                ))}
+                <small>Drawn from the sliced file Print sends.</small>
+              </>
+            ) : estimating ? (
+              <p>Slicing it to show you…</p>
+            ) : estimate ? (
+              <p>
+                Update {printer?.backend || "your printer service"} in Settings
+                → Printers so Counterpart can show you what will print.
+              </p>
+            ) : (
+              <p>Nothing to show yet.</p>
+            )}
+          </section>
+          <h4>{plate?.name ?? project.title}</h4>
           {plate && (
             <small>
               {plate.fileName} · {plate.status}
@@ -135,7 +220,9 @@ export function PrintSheet({
           <p>
             {estimate
               ? `${duration(estimate.seconds)} · ${estimate.grams === undefined ? "Weight unavailable" : `${estimate.grams.toFixed(1)} g`}${estimate.layers ? ` · ${estimate.layers} layers` : ""}`
-              : "Estimate this plate with the settings you choose."}
+              : estimating
+                ? "Slicing with the settings you chose…"
+                : "Choose a printer and settings to slice this plate."}
           </p>
           {estimate?.warnings?.map((w) => (
             <p className="notice" key={w}>
@@ -242,6 +329,7 @@ export function PrintSheet({
               disabled={caps?.layerPauses !== true || plate?.sliced}
               onChange={(e) => setPauses(e.target.value)}
             />
+            {pausesProblem && <small className="error">{pausesProblem}</small>}
             <small>
               {plate?.sliced
                 ? "The original sliced plate keeps its own pauses."
@@ -250,27 +338,8 @@ export function PrintSheet({
                   : "This printer MCP has not reported layer-pause support."}
             </small>
           </label>
-          <Action
-            disabled={!destination || changing || stale}
-            run={async () => {
-              setError("");
-              const ticket = ++sequence.current;
-              const submittedKey = key;
-              await ensureCurrent();
-              const value = await call<Estimate>("objects.estimate", {
-                id: project.id,
-                ...options,
-              });
-              await ensureCurrent();
-              if (
-                ticket === sequence.current &&
-                currentKey.current === submittedKey
-              )
-                setEstimate(value);
-            }}
-            onError={setError}
-          >
-            Estimate time & material
+          <Action disabled={!ready || estimating} run={runEstimate} onError={setError}>
+            Slice again
           </Action>
         </div>
       </div>
@@ -289,27 +358,21 @@ export function PrintSheet({
         <button onClick={onClose}>Cancel</button>
         <Action
           className="primary"
-          disabled={!destination || changing || stale || activePrint(project)}
+          disabled={
+            !ready || estimating || !shown || activePrint(project)
+          }
           onError={setError}
           run={async () => {
             await ensureCurrent();
             if (!Number.isInteger(copies) || copies < 1 || copies > 64)
               throw new Error("Choose 1 to 64 copies.");
-            const pauseBeforeLayers = parseLayers(pauses, estimate?.layers);
-            const filament = filaments.find((f) => String(f.slot) === slot);
-            const result = await call<{ object: Project }>("objects.print", {
-              id: project.id,
-              ...(frozen ? { expectedPlate: frozen } : {}),
-              quality,
-              strength,
-              copies,
-              ...(filament
-                ? { filament }
-                : material
-                  ? { colour: { material } }
-                  : {}),
-              ...(pauseBeforeLayers.length ? { pauseBeforeLayers } : {}),
-            });
+            parseLayers(pauses, estimate?.layers);
+            if (!shown || currentKey.current !== key)
+              throw new Error("Open Print to see what will print.");
+            const result = await call<{ object: Project }>(
+              "objects.print",
+              printRequest(project.id, choices, shown, frozen),
+            );
             apply(result.object);
             onClose();
           }}

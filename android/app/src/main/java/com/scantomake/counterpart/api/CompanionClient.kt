@@ -309,15 +309,12 @@ class CompanionClient(
     suspend fun filaments(id: String): List<PrinterFilament> = request("GET", "/v1/objects/$id/filaments").opt<List<PrinterFilament>>("filaments") ?: emptyList()
     suspend fun selectPrinter(id: String, destinationId: String) = one(request("POST", "/v1/objects/$id/printer", jsonOf("destinationId" to destinationId)))
 
-    /** The slice estimate for these settings: time, grams and layers. Can take up to 150 s. */
-    suspend fun estimate(id: String, destinationId: String?, quality: PrintQuality, strength: PrintStrength, copies: Int? = null): SliceEstimate {
-        val json = LinkedHashMap<String, Any?>()
-        destinationId?.let { json["destinationId"] = it }
-        if (quality != PrintQuality.Standard) json["quality"] = quality.wire
-        if (strength != PrintStrength.Standard) json["strength"] = strength.wire
-        copies?.let { json["copies"] = maxOf(1, it) }
-        return WireJson.decodeFromJsonElement(request("POST", "/v1/objects/$id/estimate", com.scantomake.counterpart.core.toJson(json) as JsonObject, timeoutMs = 170_000))
-    }
+    /**
+     * Slices exactly what Print would send with these choices: time, grams, layers, and the printer MCP's pictures
+     * of that file. Print then sends its `sliceSha256`. Can take up to 150 s.
+     */
+    suspend fun estimate(id: String, destinationId: String?, choice: PrintChoice): SliceEstimate =
+        WireJson.decodeFromJsonElement(request("POST", "/v1/objects/$id/estimate", choice.estimateBody(destinationId), timeoutMs = 170_000))
 
     /** Starts preparing the print. The printer MCP still asks its own confirmation. */
     suspend fun print(id: String, choice: PrintChoice, expectedPlate: String? = null): Project {

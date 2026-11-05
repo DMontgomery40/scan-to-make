@@ -216,6 +216,33 @@ class CompanionClientTests {
         assertEquals("Ext", PrinterFilament(254, "#FFFFFF", "PETG", "Generic PETG #FFFFFF", "", "x").slotLabel)
     }
 
+    @Test fun theEstimateSlicesExactlyWhatPrintSendsAndPrintSendsOnlyTheSliceWhosePicturesWereShown() = runBlocking {
+        val filament = PrinterFilament(2, "#FFD200", "PLA", "Bambu PLA Basic", "GFA00", "p1s")
+        val choice = PrintChoice(PrintColour.Tray(filament), PrintQuality.Fine, PrintStrength.Strong, checked = true, copies = 2, pauseBeforeLayers = listOf(20, 3))
+        val sha = "a".repeat(64)
+        // Every choice Print makes, and nothing the estimate's strict schema refuses (`checked`, a slice not yet made).
+        val asked = choice.estimateBody("p1s")
+        assertEquals(setOf("filament", "quality", "strength", "copies", "pauseBeforeLayers", "destinationId"), asked.keys)
+        assertEquals(choice.body - "checked", asked - "destinationId")
+        assertEquals(sha, choice.copy(sliceSha256 = sha).body["sliceSha256"].str)
+        assertNull(choice.body["sliceSha256"])
+        assertNull(PrintChoice(PrintColour.Auto).estimateBody(null)["destinationId"])
+        val png = java.util.Base64.getEncoder().encodeToString(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
+        val views = listOf(mapOf("name" to "top", "label" to "From above", "png" to png, "width" to 400, "height" to 400),
+            mapOf("name" to "bed_side", "label" to "From the side", "png" to png, "width" to 400, "height" to 200))
+        val fake = FakeTransport { _, _ -> json(200, mapOf("destinationId" to "p1s", "quality" to "fine", "strength" to "strong", "seconds" to 3600, "layers" to 120,
+            "slicedAt" to "2026-11-05T08:00:00Z", "sliceSha256" to sha, "preview" to mapOf("sha256" to sha, "views" to views, "mmPerPixel" to 0.5))) }
+        val estimate = client(fake).estimate(id, "p1s", choice)
+        assertEquals("/v1/objects/$id/estimate", java.net.URI(fake.calls.single().request.url).path)
+        assertEquals(asked, parseObject(fake.calls.single().request.body!!))
+        assertEquals(sha, estimate.shownSlice)
+        assertEquals(listOf("From above", "From the side"), estimate.preview!!.views.map { it.label })
+        // Only an estimate whose pictures are of its own sliced file can be printed.
+        assertNull(estimate.copy(preview = null).shownSlice) // an MCP that draws nothing
+        assertNull(estimate.copy(preview = estimate.preview!!.copy(sha256 = "b".repeat(64))).shownSlice) // pictures of another file
+        assertNull(estimate.copy(sliceSha256 = null).shownSlice) // an older companion
+    }
+
     @Test fun printerSettingsUseTheCompanionsAuthorizedScopes() {
         assertEquals("printer-handoff:use", CompanionClient.scope("GET", "/v1/objects/printers/current/route"))
         assertEquals("printer-handoff:use", CompanionClient.scope("POST", "/v1/objects/printers/current/route"))
