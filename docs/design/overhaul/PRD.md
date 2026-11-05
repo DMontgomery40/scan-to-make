@@ -470,13 +470,15 @@ Screenshots: `screens/phone-welcome.jpg`, `screens/phone-pair.jpg` and `screens/
 
 Every layout lists the starters while projects exist (§6.1): iPhone Home, the iPad start pane and sidebar, the Mac sidebar and New Project, Android Home and Linux Home, plus the welcome flow before pairing. They offer two starters from one shared catalog (`packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/catalog.json`, also used by Android and Linux):
 - the **scan platform** by Kass 3D;
-- the **long vernier caliper with depth gauge** by 3D Print Masters Hub.
+- the **vernier caliper with depth gauge** by 3D Print Masters Hub, 150 mm (the 220 mm version only if the depth gauge isn't offered for 150 mm).
 
 Every starter is a real designer's model. Removed Nov 5: a bundled "Counterpart caliper card" whose files an agent generated with `tools/caliper` (588afd4c). Nobody designed or print-tested it, yet it was offered as something to print right now (David, Nov 5: "It just completely made up that one on its own"). The generator went with it.
 
-MakerWorld starters carry credits and instructions and import the designer's original files; Counterpart never redistributes their geometry (§15). Several original files can be imported into one project. `POST /v1/objects {"starterId": …}` creates the project on the companion. No personal project history is copied.
+**Ready to go.** David, Nov 5: "READY TO GO. not ready to be downloaded from maker world... fully ready to go". Tapping a starter (`POST /v1/objects {"starterId": …}`, the same call on every client) creates the project and at once runs the published-model pass a pasted link runs (§8.11). The worker gets the designer's own files from MakerWorld with the person's own sign-in in Chrome, and the catalog entry's request names which files: the rig's full-kit profile with all six plates; the caliper's 150 mm colour profile and its 150 mm depth-gauge profile. The project keeps every file and plate together (no "which plate?" question; the plate picker prints each one) and lands at **Ready to print**, credited to the designer.
+- If the files can't be downloaded (MakerWorld wants a sign-in, the site refuses, a file won't open), the project is Failed with one sentence, for example "Counterpart couldn't download the designer's files from MakerWorld. Sign in to MakerWorld in Chrome on this computer, then try again.", and every client's **Try Again** runs the pass again.
+- Counterpart never bundles or re-hosts the files: both are under the MakerWorld Standard Digital File License (§15). No personal project history is copied.
 
-**Status:** Built. Not accepted: importing the rig original, and printing a starter.
+**Status:** Built. Not accepted: a starter printed.
 
 ## 6. iPad and iPhone Duo
 

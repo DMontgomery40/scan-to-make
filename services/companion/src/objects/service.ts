@@ -540,12 +540,10 @@ export class ObjectService {
       try {
         const credit = {url: starter.url, designer: starter.designer, site: starter.site, title: starter.title, licence: starter.licence};
         await store.update(created.id, o => ({...o, starterId, title: starter.title, credit}));
-        // The designer's original files are imported into this person's project, not re-hosted in the app.
-        const ask = {id: randomUUID(), type: 'file' as const,
-          question: `Download the original ${starter.title.toLowerCase()} files from ${starter.site}, then add them here.`,
-          url: starter.url, modelName: starter.title, site: starter.site, accepts: ['3mf' as const, 'stl' as const],
-          answers: ['file' as const], status: 'open' as const, askedAtMs: Date.now()};
-        return this.#changed(await store.update(created.id, o => ({...o, state: 'needs-closeup', ask})));
+        // Ready to go (David, Nov 5: "READY TO GO. not ready to be downloaded from maker world"): the same
+        // published-model pass a pasted link runs (PRD §8.11) gets the designer's own files with the person's own
+        // MakerWorld sign-in. Never bundled: the MakerWorld Standard Digital File License doesn't allow re-hosting.
+        return await this.start(created.id);
       } catch (error) { await store.remove(created.id); throw error; }
     });
     this.#starterAdding = next;
@@ -2040,6 +2038,14 @@ export class ObjectService {
     }
     if (result.status === 'needs_file') {
       const object = await store.get(id);
+      if (object.starterId) {
+        // A starter has nothing for the person to choose or download by hand: one sentence and Try Again.
+        const site = object.credit?.site ?? 'MakerWorld';
+        const message = `Counterpart couldn’t download the designer’s files from ${site}. Sign in to ${site} in Chrome on this computer, then try again.`;
+        const updated = await store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined, ask: undefined, passes: endPass(o, 'failed', message)}));
+        await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: message}});
+        return this.#changed(updated);
+      }
       const site = result.model?.site ?? object.credit?.site ?? publishedLink(object.instructions)?.site;
       const url = result.model?.url ?? object.credit?.url ?? publishedLink(object.instructions)?.url;
       const modelName = result.model?.title ?? object.credit?.title;
@@ -2097,7 +2103,9 @@ export class ObjectService {
     const current = {model: first.path, renders: firstPlate?.thumbnail ? [firstPlate.thumbnail] : [], ...(summary ? {summary} : {})};
     const published = {original: originals, current: current.model, receipts};
     const credit = {...(first.credit ?? info.credit), ...(first.designer ? {designer: first.designer} : {}), ...(first.licence ? {licence: first.licence} : {})};
-    const ask = options.length > 1 ? {id: randomUUID(), type: 'choice' as const, question: 'Which file and plate would you like to print?', options,
+    // A starter keeps all its files and plates (the rig's six plates; the caliper and its depth gauge), each printed
+    // from the plate picker, so it is ready without a question. Any other published model asks which to print.
+    const ask = options.length > 1 && !object.starterId ? {id: randomUUID(), type: 'choice' as const, question: 'Which file and plate would you like to print?', options,
       multiple: false, answers: ['choice' as const], status: 'open' as const, askedAtMs: now} : undefined;
     const updated = await store.update(id, o => ({...o, ...(o.print ? {plateProgress: retainedPlateProgress(o)} : {}), print: undefined, printConfirmation: undefined, state: ask ? 'needs-closeup' : 'ready', progress: undefined, failure: undefined, kind: 'published', current, files: published,
       publishedSelection: {fileIndex: 0, plateIndex: firstPlate?.index ?? 0, sliced: firstPlate?.sliced ?? false},
