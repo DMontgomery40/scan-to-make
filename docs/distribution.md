@@ -262,8 +262,12 @@ or replace it for an update.** The app ID is `com.scantomake`; key alias
   `~/Library/Mobile Documents/com~apple~CloudDocs/Counterpart-release/android-release.jks.enc`.
   Encryption: OpenSSL AES-256-CBC, salted, PBKDF2, 600000 iterations. Local
   decrypt-and-compare passed. Upload to iCloud and recovery on a second Mac have
-  not been independently verified; ensure iCloud Drive and iCloud Keychain sync
-  finish before relying on this as an off-machine backup.
+  not been independently verified. A later iCloud read returned “Resource deadlock
+  avoided” while the Mac disk was full, and replacing the cloud file was refused.
+  A second encrypted copy is `android-release-new.jks.enc` in the same cloud folder;
+  its local source is `android-release.jks.enc` beside the keystore and passed
+  recovery again. Ensure iCloud Drive and iCloud Keychain sync finish and verify
+  recovery on another Mac before relying on this as an off-machine backup.
 
 Recovery on a replacement Mac: sign in to the same iCloud account and enable
 Drive and Keychain. Download the encrypted backup. Retrieve `backup-passphrase`
