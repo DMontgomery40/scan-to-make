@@ -63,11 +63,13 @@ const SYSTEM_RULES_TEMPLATE = `You are making a useful 3D object for a person. U
 - Use measured or published dimensions when available. Distinguish measurements from estimates. Make reasonable choices for noncritical details; ask for a close-up or measurement when a missing interface dimension prevents a useful fit.
 - Plan how it will be printed as part of the design, following the printer MCP's manufacturing guidance when it is given below, for captured objects and new designs alike. For a captured object, that plan works with the captured shape: change it where printing it well calls for that, and keep the real surface detail the photos confirm.
 - PRINTER_FACTS
-- Export the model in the orientation the object is used in. The print step sends it to the slicer as it is: Bambu Studio's own auto-orient chooses how it sits on the bed (it keeps overhang area low; it does not check cantilevers), and the slicer generates supports only as your answer's supports says, off included. Set supports for every model you export: enabled, with a type, when the part needs them to print well; not enabled when it prints cleanly without them. To check that choice, slice a checkpoint the way the print is sliced: slice_stl with orient true and enable_support set as your answer will set it. A check slice with supports turned on doesn't put supports in the print; only your answer's supports does. Don't promise the person a particular orientation on the bed: the slicer chooses it.
+- Export the model in the orientation the object is used in (a designer's 3MF keeps the designer's layout instead). The print step sends it to the slicer as it is: Bambu Studio's own auto-orient chooses how it sits on the bed (it keeps overhang area low; it does not check cantilevers), and the slicer generates supports only as your answer's supports says, off included. Set supports for every model you export: enabled, with a type, when the part needs them to print well; not enabled when it prints cleanly without them. To check that choice, slice a checkpoint the way the print is sliced: slice_stl with orient true and enable_support set as your answer will set it. A check slice with supports turned on doesn't put supports in the print; only your answer's supports does. Don't promise the person a particular orientation on the bed: the slicer chooses it.
 - Scans from the phone are in metres. A current-model STL supplied for revision is already in millimetres. Build new designs in millimetres and export every STL in millimetres, the unit printers use.
 - After each fix, export the whole model as an STL to the checkpoints folder (01.stl, 02.stl, …).
 - Render and inspect the candidate from all six sides against the request and reference photos. For a captured object, compare the rear and underside explicitly with the supplied photos, accounting for the object being turned over between photographs. A smooth, closed scan surface can still be a reconstruction defect. Before calling any region unseen, check all supplied views and identify which views support that conclusion; do not infer missing photographic coverage from missing mesh detail. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the attachment interfaces, assembly path and dimensions; revise defects you can see. Successful export alone does not establish that the design works.
-- A request in more than one colour or material: model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour in the order the request names them (part 1 on filament 1, and so on). Build the parts lying the way the object should print: a 3MF keeps its placement exactly as made (Counterpart never re-orients a 3MF), so the orientation you model is the orientation that prints, supports included. Report every part under "parts" in your answer, in that same order, with its name and the colour the person asked for as #RRGGBB (and its material when they named one): the 3MF itself carries no colours, so this list is how Counterpart knows which spool each part belongs on. Still export the whole model to out/touched.stl. Counterpart prints the 3MF and puts each part on a spool; never tell the person how to slice, which filament slot to use or which layer height to pick.
+- A request in more than one colour or material, except a copy of a designer's 3MF (the next rule): model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour in the order the request names them (part 1 on filament 1, and so on). Build the parts lying the way the object should print: a 3MF keeps its placement exactly as made (Counterpart never re-orients a 3MF), so the orientation you model is the orientation that prints, supports included. Report every part under "parts" in your answer, in that same order, with its name and the colour the person asked for as #RRGGBB (and its material when they named one): the 3MF itself carries no colours, so this list is how Counterpart knows which spool each part belongs on. Still export the whole model to out/touched.stl. Counterpart prints the 3MF and puts each part on a spool; never tell the person how to slice, which filament slot to use or which layer height to pick.
+- A copy of a designer's 3MF (the files list names a designer's 3MF project): that project is the thing being copied, and it prints with the designer's own parts, plate placement, painted colours and print settings. Change only what the person asked for, inside that project: edit its object models in place (for example re-paint or add faces with the same colour attributes the designer used, or change one object's mesh) and write the whole project, every other file unchanged, to out/touched.3mf. Never rebuild it from the merged mesh or with counterpart_make_3mf, never turn painted markings into separate parts, and never move, re-orient or rescale what the designer laid out. Export the merged mesh to out/touched.stl as well, for the renders. To check it, slice out/touched.3mf as it is (orient and arrange false) and a copy of the designer's own file the same way, and compare their slicer_result: every filament and feature the designer's file prints must still print. Counterpart refuses a copy whose print settings differ from the designer's file.
+- When the person asks you to copy, change or print an existing model and you can't get its file (a login, a missing download), set status to failed and say which file to add. Never design a substitute for a model the person named.
 - Export the final model to out/touched.stl and clear PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png). Explain what the part does and any remaining fit assumptions in the final summary.
 - If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.
 - If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.`;
@@ -115,15 +117,19 @@ export function isolatedClaudeEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
   return env;
 }
 
-function prompt(pass: TouchupPass, instructions?: string, note?: string, summary?: string, currentModel = false): string {
+function prompt(pass: TouchupPass, instructions?: string, note?: string, summary?: string, currentModel = false, designerCopy = false): string {
   const opening = note !== undefined
-    ? [...(currentModel ? [`This is the current model. ${summary ?? ''}`.trimEnd()] : ['Continue this project using the original inputs and the additional request below. No completed model is available yet.']),
+    ? [...(currentModel ? [`This is the current model. ${summary ?? ''}`.trimEnd()]
+      : designerCopy ? [`This continues a copy of a designer's 3MF. ${summary ?? ''}`.trimEnd()]
+      : ['Continue this project using the original inputs and the additional request below. No completed model is available yet.']),
        ...(instructions?.trim() ? [`Original request: ${instructions.trim()}`] : []),
        `Change requested: ${note}`,
        ...(currentModel ? ['The current model is an STL already in millimetres: import and export it at scale 1.'] : [])].join('\n\n')
     : instructions?.trim() || TOUCHUP_INSTRUCTION;
   const files = [
-    ...(pass.scanPaths.length ? [`- Scan: ${pass.scanPaths.join(', ')}${!currentModel && pass.scanPaths.some(path => /\.(stl|3mf)$/i.test(path))
+    ...(designerCopy ? [`- Designer's 3MF project to edit: ${pass.scanPaths[0]}${pass.scanPaths.length > 1 ? ' (it already has the earlier changes)' : ''}`,
+      ...(pass.scanPaths.length > 1 ? [`- The designer's original 3MF, to compare against: ${pass.scanPaths.at(-1)}`] : [])]
+    : pass.scanPaths.length ? [`- Scan: ${pass.scanPaths.join(', ')}${!currentModel && pass.scanPaths.some(path => /\.(stl|3mf)$/i.test(path))
       ? ' (a model file the person added on their Mac, usually in millimetres: check its size with get_stl_info before editing)' : ''}`] : []),
     ...(pass.photoOverviewPaths ?? []).map(path => `- Photo overview (read first): ${path}`),
     ...pass.photoPaths.map((path, index) => `- Photo ${index + 1}: ${path}`),
@@ -145,7 +151,7 @@ export function systemRules(engine: DesignEngine = 'blender', guidance?: string)
 /** The Blender rules, as every copy and every Blender design pass gets them. */
 export const TOUCHUP_SYSTEM_RULES = systemRules('blender');
 
-export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; sourceEnv?: NodeJS.ProcessEnv;
+export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; designerCopy?: boolean; sourceEnv?: NodeJS.ProcessEnv;
   engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: {f3d: string; parameters?: string}; guidance?: string}): TouchupInvocation {
   const {pass} = input;
   let printer = printerServer(input.printer);
@@ -174,7 +180,7 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--json-schema', JSON.stringify(TOUCHUP_RESULT_SCHEMA),
     '--output-format', 'stream-json',
     '--verbose',
-    prompt(pass, input.instructions, input.note, input.summary, input.currentModel) + (input.engine === 'fusion' && input.design
+    prompt(pass, input.instructions, input.note, input.summary, input.currentModel, input.designerCopy) + (input.engine === 'fusion' && input.design
       ? `\n\nThe current design is a parametric Fusion design: ${input.design.f3d}${input.design.parameters ? ` (its parameters: ${input.design.parameters})` : ''}. A separate copy is already imported into this pass's bound document. Change its parameters rather than opening the archive again or editing the mesh.` : ''),
   ];
   return {command: input.claudePath, args, env: isolatedClaudeEnv(input.sourceEnv ?? process.env), cwd: pass.dir, mcpConfigPath, mcpConfig, redactionEnv: {...input.printer.env}};

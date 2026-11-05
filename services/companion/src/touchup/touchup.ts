@@ -9,6 +9,7 @@ import {prepareTouchupPass, type TouchupPass} from './inputs.js';
 import {buildTouchupInvocation, type DesignEngine, type TouchupInvocation} from './invocation.js';
 import {toolErrorText} from './blender.js';
 import {runTouchupWorker, type TouchupProgress, type TouchupResult} from './runner.js';
+import {DESIGNER_FILE_REBUILT, designerEditProblem} from './designer-file.js';
 
 export interface TouchupInput {
   worker?: import('./runner.js').ProjectWorker;
@@ -26,6 +27,11 @@ export interface TouchupInput {
   summary?: string;
   /** The supplied scan is the previously generated STL, already in millimetres. */
   currentModel?: boolean;
+  /**
+   * A copy of a designer's 3MF: `scan` is the working 3MF and then, when it differs, the designer's own file.
+   * The pass edits the working 3MF in place; one that rebuilds it is refused (see designerEditProblem).
+   */
+  designerCopy?: boolean;
   onProgress?: (progress: TouchupProgress) => void;
   signal?: AbortSignal;
   /** "fit" (make something that fits) may design in Fusion; "copy" always uses Blender (PRD §8.9). */
@@ -228,12 +234,18 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   }
   const pass = await (deps.prepare ?? prepareTouchupPass)({root: input.root, objectId: input.objectId, scan: input.scan, photos: input.photos,
     requirePhotos: !(input.instructions?.trim() || input.note?.trim())});
+  // A designer copy whose last edit already lost the designer's settings (one made before they were checked,
+  // like the Nov 4 caliper card) starts again from the designer's own file rather than building on it.
+  if (input.designerCopy && pass.scanPaths.length > 1
+      && await designerEditProblem(input.handoff, pass.scanPaths.at(-1)!, pass.scanPaths[0], {...(deps.client ? {client: deps.client} : {}), ...(input.signal ? {signal: input.signal} : {})}) === DESIGNER_FILE_REBUILT)
+    pass.scanPaths = [pass.scanPaths.at(-1)!];
   // Older CLI callers use a note plus a single STL for a revision. The object
   // service supplies the explicit flag, including false for failed first passes.
   const currentModel = input.currentModel ?? (input.note !== undefined && input.scan.length === 1 && input.scan[0]!.toLowerCase().endsWith('.stl'));
   const guidance = await (deps.guidance ?? printerDesignGuidance)(input.handoff, input.signal);
   input.onStage?.('working', choice.engine);
   const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
+    ...(input.designerCopy ? {designerCopy: true} : {}),
     ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}), ...(guidance ? {guidance} : {}),
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});
@@ -244,6 +256,15 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
     ...(input.onProgress ? {onProgress: input.onProgress} : {}),
     ...(input.signal ? {signal: input.signal} : {}),
   });
+  if (input.designerCopy && (result.status === 'done' || result.status === 'unchanged')) {
+    const problem = await designerEditProblem(input.handoff, pass.scanPaths.at(-1)!, result.parts,
+      {...(deps.client ? {client: deps.client} : {}), ...(input.signal ? {signal: input.signal} : {})});
+    if (problem) {
+      // Nothing from this pass becomes the model: a failed result with a model would be kept as "the last saved version".
+      const {parts: _rebuilt, partColours: _colours, model: _mesh, ...rest} = result;
+      return {...rest, status: 'failed', reason: problem, passDir: pass.dir};
+    }
+  }
   return {...result, passDir: pass.dir};
 }
 

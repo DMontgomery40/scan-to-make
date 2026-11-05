@@ -222,6 +222,14 @@ export function spreadPick<T>(items: T[], count: number): T[] {
 }
 
 /** The object lifecycle: inputs arrive, the touch-up runs by itself, and the result is ready to print. */
+/**
+ * A copy whose source is a 3MF the person added (a designer's project): its path in the project, else undefined.
+ * Such a copy edits that file in place, so every pass starts from it rather than from the merged mesh.
+ */
+export function designerFile(object: Pick<StmObject, 'scan'>, kind: PassKind, scanName = object.scan): string | undefined {
+  return kind === 'copy' && scanName?.toLowerCase().endsWith('.3mf') ? join('scan', scanName) : undefined;
+}
+
 /** A 3MF model owns its parts and their filaments: a published file, or a design in several colours. */
 function isMultipart(object: Pick<StmObject, 'current'>): boolean {
   return object.current?.model.toLowerCase().endsWith('.3mf') === true;
@@ -1923,10 +1931,16 @@ export class ObjectService {
     const work = (async () => {
       let scanName = object.scan;
       if (build) scanName = await this.#build(object.id, dir, controller.signal);
+      // A copy of a designer's 3MF works on that 3MF every pass: the latest edit of it, then the designer's own
+      // file to compare against. Its merged mesh has lost the designer's parts, colours and print settings.
+      const designer = designerFile(object, kind, scanName);
       // A multi-colour design is revised from its merged mesh; Fusion passes also get the parametric design.
       const currentMesh = object.current && isMultipart(object) && object.kind !== 'published' ? join('current', 'model.stl') : object.current?.model;
-      const scan = fromCurrent ? [join(dir, currentMesh!)] : scanName ? [join(dir, 'scan', scanName)] : [];
-      const input: TouchupInput = {worker, root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
+      const scan = designer
+        ? [...new Set([fromCurrent && isMultipart(object) ? object.current!.model : designer, designer])].map(path => join(dir, path))
+        : fromCurrent ? [join(dir, currentMesh!)] : scanName ? [join(dir, 'scan', scanName)] : [];
+      const input: TouchupInput = {worker, root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent && !designer, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
+        ...(designer ? {designerCopy: true} : {}),
         kind, ...(object.preferences?.designEngine && object.preferences.designEngine !== 'auto' ? {preferredEngine: object.preferences.designEngine} : {}), onStage: (id, chosen) => stage(id, chosen),
         ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
           ? {design: {f3d: join(dir, object.current.design.f3d), ...(object.current.design.parameters ? {parameters: join(dir, object.current.design.parameters)} : {})}} : {}),
