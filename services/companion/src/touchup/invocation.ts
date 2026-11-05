@@ -62,8 +62,7 @@ const SYSTEM_RULES_TEMPLATE = `You are making a useful 3D object for a person. U
 - For a captured object, fix defects supported by the photos with targeted edits: raise features that are missing or too faint, and flatten or smooth surfaces the photos show are flat or smooth. Keep real surface detail the photos confirm, including texture, stitches and edges. Use Blender's existing sculpt and modifier tools for that cleanup.
 - Use measured or published dimensions when available. Distinguish measurements from estimates. Make reasonable choices for noncritical details; ask for a close-up or measurement when a missing interface dimension prevents a useful fit.
 - Plan how it will be printed as part of the design, following the printer MCP's manufacturing guidance when it is given below, for captured objects and new designs alike. For a captured object, that plan works with the captured shape: change it where printing it well calls for that, and keep the real surface detail the photos confirm.
-- PRINTER_FACTS
-- Export the model in the orientation the object is used in. The print step sends it to the slicer as it is: Bambu Studio's own auto-orient chooses how it sits on the bed (it keeps overhang area low; it does not check cantilevers), and the slicer generates supports only as your answer's supports says, off included. Set supports for every model you export: enabled, with a type, when the part needs them to print well; not enabled when it prints cleanly without them. To check that choice, slice a checkpoint the way the print is sliced: slice_stl with orient true and enable_support set as your answer will set it. A check slice with supports turned on doesn't put supports in the print; only your answer's supports does. Don't promise the person a particular orientation on the bed: the slicer chooses it.
+- Export the model in the orientation the object is used in. The print step sends it to the slicer as it is, with your answer's supports, off included. Set supports for every model you export: enabled, with a type, when the part needs them to print well; not enabled when it prints cleanly without them. How the slicer orients the model and generates supports, and how to check that choice with a checkpoint slice, is the printer MCP's to say: follow its slicing guidance below.
 - Scans from the phone are in metres. A current-model STL supplied for revision is already in millimetres. Build new designs in millimetres and export every STL in millimetres, the unit printers use.
 - After each fix, export the whole model as an STL to the checkpoints folder (01.stl, 02.stl, …).
 - Render and inspect the candidate from all six sides against the request and reference photos. For a captured object, compare the rear and underside explicitly with the supplied photos, accounting for the object being turned over between photographs. A smooth, closed scan surface can still be a reconstruction defect. Before calling any region unseen, check all supplied views and identify which views support that conclusion; do not infer missing photographic coverage from missing mesh detail. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the attachment interfaces, assembly path and dimensions; revise defects you can see. Successful export alone does not establish that the design works.
@@ -74,7 +73,6 @@ const SYSTEM_RULES_TEMPLATE = `You are making a useful 3D object for a person. U
 - If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.
 - If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.`;
 
-const PRINTER_FACTS = "The printer MCP is connected. When they could change a decision, read the printer's live filaments with get_printer_filaments and its slicing settings with get_slice_settings. To check a consequential choice, slice a checkpoint with slice_stl and read its structured slicer_result (return code, error and each plate's warning), not only the file path. That slice is your check: the print step slices the exported model again.";
 
 /** Only what Claude Code needs to find the user's own login. Never printer tokens or provider keys. */
 const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHELL', 'CLAUDE_CONFIG_DIR'] as const;
@@ -141,18 +139,24 @@ function prompt(pass: TouchupPass, instructions?: string, note?: string, summary
 
 /** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
 export const BLENDER_RULES = "- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).";
+/**
+ * The printer MCP's own guidance for a pass: how to design for its printers (`fdm_design`) and how its slicer
+ * orients, supports and checks a slice (`fdm_slicing`). The app holds no slicer knowledge (PRD §8.0 item 10).
+ */
+export interface DesignGuidance {design?: string; slicing?: string}
+
 /** The system rules for an engine. */
-export function systemRules(engine: DesignEngine = 'blender', guidance?: string): string {
+export function systemRules(engine: DesignEngine = 'blender', guidance: DesignGuidance = {}): string {
   return SYSTEM_RULES_TEMPLATE.replace('- ENGINE_RULES', engine === 'fusion' ? FUSION_RULES : BLENDER_RULES)
     .replace('ENGINE_NAME', engine === 'fusion' ? 'in Fusion through the printer MCP (only its fusion_mcp_* tools)' : 'using Blender through MCP')
-    .replace('PRINTER_FACTS', () => PRINTER_FACTS)
-    + (guidance?.trim() ? `\n\nManufacturing guidance from the printer MCP (its fdm_design prompt):\n${guidance.trim()}` : '');
+    + (guidance.design?.trim() ? `\n\nManufacturing guidance from the printer MCP (its fdm_design prompt):\n${guidance.design.trim()}` : '')
+    + (guidance.slicing?.trim() ? `\n\nHow the printer MCP slices (its fdm_slicing prompt):\n${guidance.slicing.trim()}` : '');
 }
 /** The Blender rules, as every copy and every Blender design pass gets them. */
 export const TOUCHUP_SYSTEM_RULES = systemRules('blender');
 
 export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; designerCopy?: boolean; sourceEnv?: NodeJS.ProcessEnv;
-  engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: {f3d: string; parameters?: string}; guidance?: string}): TouchupInvocation {
+  engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: {f3d: string; parameters?: string}; guidance?: DesignGuidance}): TouchupInvocation {
   const {pass} = input;
   let printer = printerServer(input.printer);
   if (input.engine === 'fusion') {

@@ -106,13 +106,15 @@ const tools = [
   ]),
 ];
 const text = value => ({content: [{type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value)}]});
-// HANDOFF_FIXTURE_PROMPTS=1 serves the MCPs' fdm_design prompt, as bambu-printer-mcp and mcp-3D-printer-server do.
+// HANDOFF_FIXTURE_PROMPTS=1 serves the MCPs' fdm_design and fdm_slicing prompts, as bambu-printer-mcp and mcp-3D-printer-server do.
 const prompts = process.env.HANDOFF_FIXTURE_PROMPTS === '1';
 const server = new Server({name: `fixture-${mode}`, version: '0.0.0'}, {capabilities: {tools: {}, ...(prompts ? {prompts: {}} : {})}});
 server.setRequestHandler(ListToolsRequestSchema, async () => ({tools}));
 if (prompts) server.setRequestHandler(GetPromptRequestSchema, async request => {
-  if (request.params.name !== 'fdm_design') throw new Error(`Unknown prompt: ${request.params.name}`);
-  return {messages: [{role: 'user', content: {type: 'text', text: 'Design the finished object the user wants, with the manufacturing plan as part of the design.'}}]};
+  const texts = {fdm_design: 'Design the finished object the user wants, with the manufacturing plan as part of the design.',
+    fdm_slicing: 'How this printer MCP slices. Its slicer is the fixture slicer.'};
+  if (!(request.params.name in texts)) throw new Error(`Unknown prompt: ${request.params.name}`);
+  return {messages: [{role: 'user', content: {type: 'text', text: texts[request.params.name]}}]};
 });
 
 async function confirmPrint() {

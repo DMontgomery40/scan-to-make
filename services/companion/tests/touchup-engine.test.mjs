@@ -5,7 +5,7 @@ import {mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
-import {runTouchup, chooseEngine} from '../dist/touchup/touchup.js';
+import {runTouchup, chooseEngine, printerDesignGuidance} from '../dist/touchup/touchup.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {systemRules, TOUCHUP_SYSTEM_RULES, TOUCHUP_RESULT_SCHEMA, buildTouchupInvocation} from '../dist/touchup/invocation.js';
 import {runTouchupWorker} from '../dist/touchup/runner.js';
@@ -26,6 +26,17 @@ function bridge(results, tools = ['blender_mcp_status', 'blender_mcp_call', 'fus
     async callTool(name, args) { calls.push({name, args}); return (typeof results[name] === 'function' ? results[name](args) : results[name]) ?? text(name === "fusion_mcp_new_design" ? {document_binding: 1, document_id: "owned-token"} : {}); },
   })};
 }
+
+test('a pass reads both of the printer MCP\'s prompts, fdm_design and fdm_slicing, and an MCP without prompts gives none', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'touchup-guidance-'));
+  const fixture = fileURLToPath(new URL('../../printer-handoff/tests/fixtures/fixture-printer-server.mjs', import.meta.url));
+  const config = env => ({backend: 'bambu-printer-mcp', process: {command: process.execPath, args: [fixture, 'bambu', join(root, 'calls.jsonl')], cwd: root, env},
+    timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 5000}});
+  assert.deepEqual(await printerDesignGuidance(config({HANDOFF_FIXTURE_PROMPTS: '1'})), {
+    design: 'Design the finished object the user wants, with the manufacturing plan as part of the design.',
+    slicing: 'How this printer MCP slices. Its slicer is the fixture slicer.'});
+  assert.deepEqual(await printerDesignGuidance(config({})), {});
+});
 
 test('copies always use Blender; a design uses Fusion only when it is connected and a new design opens', async () => {
   const copy = bridge({});
@@ -67,9 +78,9 @@ test('a Fusion pass never touches Blender: no lock, no launch, no scene reset', 
     resetScene: async () => { log.push('resetScene'); },
     client: fusion.client,
     prepare: async args => { log.push('prepare'); return prepareTouchupPass(args); },
-    guidance: async config => { log.push('guidance'); assert.equal(config, handoff, 'the guidance comes from the configured printer MCP'); return 'Plan the print as part of the design.'; },
+    guidance: async config => { log.push('guidance'); assert.equal(config, handoff, 'the guidance comes from the configured printer MCP'); return {design: 'Plan the print as part of the design.', slicing: 'Its slicer orients it.'}; },
     run: async (inv, pass) => { log.push('run'); assert.match(inv.args.join(' '), /fusion_mcp_export/);
-      assert.match(inv.args[inv.args.indexOf('--append-system-prompt') + 1], /its fdm_design prompt\):\nPlan the print as part of the design\.$/); return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
+      assert.match(inv.args[inv.args.indexOf('--append-system-prompt') + 1], /its fdm_design prompt\):\nPlan the print as part of the design\.\n\nHow the printer MCP slices \(its fdm_slicing prompt\):\nIts slicer orients it\.$/); return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
   });
   assert.deepEqual(log, ['prepare', 'guidance', 'run']);
   assert.equal(result.engine, 'fusion');

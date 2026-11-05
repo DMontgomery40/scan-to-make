@@ -6,7 +6,7 @@ import {dirname, join} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlender} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
-import {buildTouchupInvocation, type DesignEngine, type TouchupInvocation} from './invocation.js';
+import {buildTouchupInvocation, type DesignEngine, type DesignGuidance, type TouchupInvocation} from './invocation.js';
 import {toolErrorText} from './blender.js';
 import {runTouchupWorker, type TouchupProgress, type TouchupResult} from './runner.js';
 import {DESIGNER_FILE_REBUILT, designerEditProblem} from './designer-file.js';
@@ -51,8 +51,8 @@ export interface TouchupDeps {
   stopBlender?: typeof stopOwnedBlender;
   client?: (handoff: PrinterHandoffConfig) => Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool' | 'getTool'>;
   prepare?: typeof prepareTouchupPass;
-  /** The printer MCP's own design guidance for this pass (its `fdm_design` prompt), if it serves one. */
-  guidance?: (handoff: PrinterHandoffConfig, signal?: AbortSignal) => Promise<string | undefined>;
+  /** The printer MCP's own design and slicing guidance for this pass (its `fdm_design` and `fdm_slicing` prompts), if it serves them. */
+  guidance?: (handoff: PrinterHandoffConfig, signal?: AbortSignal) => Promise<DesignGuidance | undefined>;
   run?: (inv: TouchupInvocation, pass: TouchupPass, opts: Parameters<typeof runTouchupWorker>[2]) => Promise<TouchupResult>;
   lockPath?: string;
   fusionLockPath?: string;
@@ -106,12 +106,15 @@ export async function acquireBlenderLock(lockPath = BLENDER_LOCK_PATH, opts: {po
   }
 }
 
-/** The printer MCP owns the manufacturing guidance; an MCP without it just gives the pass none. */
-export async function printerDesignGuidance(handoff: PrinterHandoffConfig, signal?: AbortSignal): Promise<string | undefined> {
+/** The printer MCP owns the manufacturing and slicing guidance; an MCP without a prompt just gives the pass none of it. */
+export async function printerDesignGuidance(handoff: PrinterHandoffConfig, signal?: AbortSignal): Promise<DesignGuidance | undefined> {
   const client = new PrinterMcpClient(handoff);
   try {
     await client.connect(signal);
-    return await client.prompt('fdm_design', signal ? {signal} : {});
+    const options = signal ? {signal} : {};
+    const design = await client.prompt('fdm_design', options);
+    const slicing = await client.prompt('fdm_slicing', options);
+    return {...(design ? {design} : {}), ...(slicing ? {slicing} : {})};
   } catch (error) {
     if (signal?.aborted) throw error;
     return undefined;

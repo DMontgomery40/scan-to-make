@@ -116,26 +116,28 @@ test('the rules ask for the fixes the photos show, not just caution', () => {
   assert.equal(/never smooth captured surface/.test(TOUCHUP_SYSTEM_RULES), false, 'a lumpy surface the photos show flat must be fixable');
 });
 
-test('every pass plans how it prints, with the printer MCP\'s own fdm_design guidance, for copies and new designs alike', async () => {
-  const guidance = 'Design the finished object the user wants, with the manufacturing plan as part of the design.';
+test('every pass plans how it prints, with the printer MCP\'s own fdm_design and fdm_slicing guidance, for copies and new designs alike', async () => {
+  const design = 'Design the finished object the user wants, with the manufacturing plan as part of the design.';
+  const slicing = 'How this printer MCP slices. Its slicer is Some Slicer.';
   for (const engine of ['blender', 'fusion']) {
-    const rules = systemRules(engine, guidance);
-    assert.ok(rules.endsWith(`Manufacturing guidance from the printer MCP (its fdm_design prompt):\n${guidance}`), engine);
+    const rules = systemRules(engine, {design, slicing});
+    assert.ok(rules.endsWith(`Manufacturing guidance from the printer MCP (its fdm_design prompt):\n${design}\n\nHow the printer MCP slices (its fdm_slicing prompt):\n${slicing}`), engine);
     assert.doesNotMatch(rules, /Don't do print preparation/, 'supports and orientation are design choices now');
     assert.match(rules, /captured objects and new designs alike/);
     assert.doesNotMatch(rules, /PRINTER_FACTS|ENGINE_RULES|ENGINE_NAME/, 'no placeholder survives');
     assert.doesNotMatch(rules, /lay_flat/, 'Counterpart no longer re-orients the model');
-    assert.match(rules, /Bambu Studio's own auto-orient chooses how it sits on the bed/, 'the worker knows the slicer orients it');
-    assert.match(rules, /only as your answer's supports says, off included/, 'and that its supports choice is what the print gets');
-    assert.match(rules, /slice_stl with orient true and enable_support set as your answer will set it/, 'its check slice matches the print');
-    // A Fusion pass's proxy passes the printer's read-only tools through, so both engines read the same facts.
-    assert.match(rules, /get_printer_filaments/);
-    assert.match(rules, /slicer_result/);
-    assert.doesNotMatch(systemRules(engine), /Manufacturing guidance from the printer MCP/, 'an MCP without the prompt adds nothing');
+    assert.match(rules, /with your answer's supports, off included/, 'its supports choice is what the print gets');
+    assert.match(rules, /follow its slicing guidance below/);
+    // PRD §8.0 item 10: how a slicer orients, supports and checks a slice comes from the MCP, never the app.
+    const own = systemRules(engine);
+    for (const slicerFact of [/Bambu Studio/, /auto-orient/, /cantilever/, /orient true/, /enable_support/, /slice_stl/, /slicer_result/, /get_printer_filaments/, /get_slice_settings/, /OrcaSlicer|PrusaSlicer|Cura/])
+      assert.doesNotMatch(own, slicerFact, `the app's own rules name no slicer detail: ${slicerFact}`);
+    assert.doesNotMatch(own, /Manufacturing guidance from the printer MCP|How the printer MCP slices/, 'an MCP without the prompts adds nothing');
+    assert.ok(systemRules(engine, {slicing}).endsWith(`How the printer MCP slices (its fdm_slicing prompt):\n${slicing}`), 'either prompt alone');
   }
   // Every provider reads the same rules from --append-system-prompt (project-worker.ts).
-  const inv = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv, guidance});
-  assert.ok(valueOf(inv.args, '--append-system-prompt').endsWith(guidance));
+  const inv = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv, guidance: {design, slicing}});
+  assert.ok(valueOf(inv.args, '--append-system-prompt').endsWith(slicing));
   assert.equal(valueOf(buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv}).args, '--append-system-prompt'), TOUCHUP_SYSTEM_RULES);
 });
 
