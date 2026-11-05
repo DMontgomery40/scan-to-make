@@ -4,13 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Counterpart Help</title>
-<meta name="description" content="How to set up Counterpart, start a project, print it, and fix common problems, with pictures of every step.">
-<meta name="theme-color" content="#f2622a">
+<meta name="description" content="How to set up Counterpart on a Mac or Linux computer, pair an iPhone, iPad or Android phone, start a project, print it, and fix common problems.">
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c0c0e" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600&family=Barlow:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <script src="site.js" defer></script>
 </head>
@@ -18,27 +16,29 @@
 <a class="skip" href="#help-body">Skip to the guide</a>
 <header class="masthead">
   <div class="wrap">
-    <a class="brand" href="./"><img src="icon-256.png" alt="" width="36" height="36"><span>Counterpart</span></a>
+    <a class="brand" href="./"><img src="icon-256.png" alt="" width="30" height="30"><span>Counterpart</span></a>
     <nav aria-label="Site">
-      <a href="./#how">How it works</a>
-      <a href="./#devices">iPhone, Mac, iPad</a>
+      <a href="./#start">Start</a>
+      <a href="./#platforms">Platforms</a>
       <a href="./#printers">Printers</a>
-      <a href="help.html" aria-current="page">Help</a>
+      <a class="keep" href="help.html" aria-current="page">Help</a>
+      <a class="nav-cta" href="./#downloads">Download</a>
     </nav>
   </div>
 </header>
 
 <div class="wrap help">
-  <aside class="help-side" aria-label="Guide contents">
+  <aside class="help-side glass" aria-label="Guide contents">
     <label for="help-search" class="visually-hidden">Search the guide</label>
-    <input id="help-search" class="search" type="search" placeholder="Search the guide (press /)" autocomplete="off">
+    <input id="help-search" class="search" type="search" placeholder="Search (press /)" autocomplete="off">
     <ol class="toc">
       <li><a href="#setup">Set up</a></li>
+      <li><a href="#pair">Pair a phone</a></li>
       <li><a href="#start">Start a project</a></li>
       <li><a href="#scan">Scanning and sizes</a></li>
-      <li><a href="#working">While your Mac works</a></li>
+      <li><a href="#working">While it works</a></li>
       <li><a href="#print">Printing</a></li>
-      <li><a href="#printers">Printers and the backend</a></li>
+      <li><a href="#printers">Printers and MCPs</a></li>
       <li><a href="#after">After it prints</a></li>
       <li><a href="#settings">Settings and updates</a></li>
       <li><a href="#notifications">Notifications</a></li>
@@ -50,109 +50,132 @@
 
   <main class="help-body" id="help-body">
     <h1>Counterpart Help</h1>
-    <p class="lede">Counterpart makes a part that fits something you have, or a copy of it, or prints a model someone published. Your iPhone sends and asks. Your Mac does the work with the AI provider you choose and prints on your own printer.</p>
+    <p class="lede">Counterpart makes a part that fits something you have, copies an object you scan, or prints a model someone published. One computer, a Mac or a Linux PC, does the work and talks to your printer's MCP. Your iPhone, iPad or Android phone sends, asks and follows along.</p>
     <p class="nomatch" hidden>Nothing in the guide mentions <q></q>. Try a shorter word, or press Escape to see everything.</p>
 
     <section id="setup" aria-labelledby="setup-h">
       <h2 id="setup-h">Set up</h2>
-      <p><a href="beta.html">Download the Mac beta and follow the setup checklist.</a></p>
-      <ol>
-        <li><strong>On your Mac,</strong> open Counterpart. It lives in the menu bar, with a main window for your projects.</li>
-        <li><strong>Optional for design and editing:</strong> choose Claude Code, Codex, or an OpenAI-compatible API in <span class="path">Settings › AI</span>. OpenRouter and local model endpoints work through the API option. Printing an existing model or a reprint does not need an AI connection.</li>
-        <li><strong>Blender is optional.</strong> Install it for scan cleanup, design or model changes. Printing existing models and reprints works without it.</li>
-        <li><strong>Autodesk Fusion is optional too.</strong> Use your own installation for parametric designs and changes, connected through <span class="path">Settings › AI › Design with Fusion</span>. Printing existing models and reprints needs neither Blender nor Fusion.</li>
-        <li>Have your printer's <strong>MCP server</strong>, Counterpart's printing backend: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> for Bambu Lab printers (<a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/setup">setup guide</a>), or <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a> for OctoPrint, Klipper, Duet, Repetier, PrusaLink, Creality and Bambu Lab (<a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/setup">setup guide</a>). If you already print from Claude or Codex with one, Counterpart finds it.</li>
-        <li><strong>On your iPhone,</strong> open Counterpart and pair with your Mac: click the Counterpart icon in the Mac's menu bar and scan the code it shows.</li>
-      </ol>
+      <p>Everything is in beta. Downloads for every platform are on the <a href="./#downloads">home page</a>, and the <a href="beta.html">beta setup page</a> has the extra steps for each build.</p>
+      <h3>1. Your computer</h3>
+      <p>Choose one computer to run the companion. It keeps your projects, does design and cleanup, and talks to your printer.</p>
+      <ul>
+        <li><strong>Mac:</strong> an Apple silicon Mac with macOS 27. Move Counterpart to Applications and open it. It lives in the menu bar, with a window for your projects. Allow Local Network access when macOS asks, so it can reach your phone and printer.</li>
+        <li><strong>Linux:</strong> Ubuntu 26.04 on x86_64. Install the <code>.deb</code>, or make the AppImage executable and open it. It runs its own companion as a background user service. Linux has no iCloud and no Fusion, and its projects are separate from any Mac's.</li>
+      </ul>
+      <h3>2. Your printer's MCP</h3>
+      <p>In <span class="path">Settings › Printers</span>, add your printer through its MCP server: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> for Bambu Lab (<a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/setup">setup guide</a>), or <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a> for Prusa, Klipper and Moonraker, OctoPrint, Duet, Repetier, Creality and Bambu Lab (<a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/setup">setup guide</a>). Counterpart can download or update either one for you. Install the slicer the MCP uses, such as Bambu Studio. If you already print from Claude or Codex with one, Counterpart finds it.</p>
+      <h3>3. Optional tools</h3>
+      <ul>
+        <li><strong>AI, for design and changes:</strong> choose Claude Code, Codex, an API key, or an OpenAI-compatible endpoint (OpenRouter or a local model server) in Settings. Printing a published model or a reprint doesn't need one.</li>
+        <li><strong>Blender,</strong> for scan cleanup, design and model changes. On the Mac beta, scan cleanup also needs the separately installed cleanup tools; see <a href="beta.html#cleanup">beta setup</a>.</li>
+        <li><strong>Autodesk Fusion,</strong> Mac only, for parametric designs, with your own installation.</li>
+      </ul>
+      <h3>4. Your phone</h3>
+      <p>Install Counterpart on your iPhone or iPad (TestFlight) or Android phone (APK), then <a href="#pair">pair it</a>. iPhone and iPad pair with a Mac; Android pairs with a Mac or Linux computer.</p>
       <div class="shots">
-        <figure><a class="shot" href="screens/phone-welcome.jpg"><img src="screens/phone-welcome.jpg" width="644" height="1400" loading="lazy" alt="Welcome screen on iPhone"></a><figcaption>Welcome on your iPhone.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-pair.jpg"><img src="screens/phone-pair.jpg" width="644" height="1400" loading="lazy" alt="Find your Mac: scan the code"></a><figcaption>Point the camera at the code your Mac shows.</figcaption></figure>
-        <figure class="mac"><a class="shot mac" href="screens/mac-popover.jpg"><img src="screens/mac-popover.jpg" width="360" height="318" loading="lazy" alt="The Counterpart menu, with the pairing code button"></a><figcaption>The menu bar icon: the code button is beside Open Counterpart.</figcaption></figure>
+        <figure class="mac"><a class="shot mac" href="screens/mac-settings-printers.jpg"><img src="screens/mac-settings-printers.jpg" width="620" height="678" loading="lazy" alt="Design mockup: Settings › Printers on the Mac"></a><figcaption>Settings › Printers on the Mac. <span class="mock">Mockup</span></figcaption></figure>
+        <figure><a class="shot" href="screens/phone-new.jpg"><img src="screens/phone-new.jpg" width="644" height="1400" loading="lazy" alt="Design mockup: New project on iPhone"></a><figcaption>New project on iPhone. <span class="mock">Mockup</span></figcaption></figure>
+      </div>
+    </section>
+
+    <section id="pair" aria-labelledby="pair-h">
+      <h2 id="pair-h">Pair a phone</h2>
+      <ul>
+        <li><strong>Same Apple Account</strong> (iPhone or iPad with a Mac): open Counterpart on the phone. It finds the Mac through your own private iCloud and connects by itself. <span class="tag">Beta</span> First-time setup this way is still being tested; if it doesn't connect, use a code.</li>
+        <li><strong>QR code:</strong> on the Mac, click the Counterpart menu bar icon and choose Add a Phone; on Linux, open <span class="path">Settings</span> and show the pairing code. On the phone, choose to scan the code and point the camera at it.</li>
+        <li><strong>Nearby code:</strong> on the same Wi-Fi, choose to look on this Wi-Fi on the phone. Both screens show the same six-digit code; check it matches, then allow the phone on the computer.</li>
+      </ul>
+      <p><strong>Away from home:</strong> with a Mac, your iPhone keeps showing projects and getting updates through iCloud. To reach your computer directly from anywhere, put the phone and the computer on the same Tailscale network.</p>
+      <p>Tested so far: iPhone with a Mac (QR and nearby code, in daily use), and Android with a Mac on an emulator. Pairing a phone with a Linux computer hasn't been tested yet.</p>
+      <p>You can remove a paired phone in Settings on either the phone or the computer.</p>
+      <div class="shots">
+        <figure><a class="shot" href="screens/phone-pair.jpg"><img src="screens/phone-pair.jpg" width="644" height="1400" loading="lazy" alt="Design mockup: Find your Mac, scan the code"></a><figcaption>Point the camera at the code. <span class="mock">Mockup</span></figcaption></figure>
+        <figure><a class="shot" href="screens/android-home.jpg"><img src="screens/android-home.jpg" width="720" height="1600" loading="lazy" alt="Counterpart on Android, paired: Mac mini connected, 1 printer"></a><figcaption>Android, paired with a Mac. Real screen, emulator.</figcaption></figure>
       </div>
     </section>
 
     <section id="start" aria-labelledby="start-h">
       <h2 id="start-h">Start a project</h2>
-      <p>Tap <strong>+</strong> on your iPhone, or <strong>New</strong> on your Mac. Choose <strong>Make something that fits</strong> or <strong>Copy something</strong>, then add as much or as little as you like:</p>
+      <p>Tap <strong>New</strong> on your phone, or <strong>New Project</strong> on the computer. Choose <strong>Make something that fits</strong> or <strong>Copy something</strong>, then add as much or as little as you like:</p>
       <ul>
         <li><strong>Describe it.</strong> “A hook for a 25 mm tube that holds a mug.” If it's a known product, name it: Counterpart looks up its published sizes.</li>
         <li><strong>Photograph it.</strong> One or two photos and a sentence. A ruler or caliper in the picture helps with sizes.</li>
-        <li><strong>Scan it</strong> with a LiDAR iPhone or iPad. See <a href="#scan">Scanning and sizes</a>.</li>
-        <li><strong>Paste a link</strong> to a published model, for example on MakerWorld or Printables. Counterpart prints the designer's own file, credits the designer, and changes only what you ask. If the site needs you signed in, it downloads through your own browser, or picks up the file from your Downloads folder.</li>
+        <li><strong>Scan it.</strong> See <a href="#scan">Scanning and sizes</a>.</li>
+        <li><strong>Paste a link</strong> to a published model on MakerWorld, Printables or Thingiverse. Counterpart prints the designer's own file, credits the designer, and changes only what you ask. If the site needs you signed in, it downloads through your own browser.</li>
       </ul>
-      <p>On the Mac you can also drop photos, STL, 3MF or USDZ files into a new project. Counterpart names each project for you: tap the name to change it.</p>
+      <p>On the computer you can also drop photos, STL, 3MF or USDZ files into a new project. Counterpart names each project for you; rename it any time. Every platform offers starter projects with designer credits, such as Kass 3D’s scan platform and a long vernier caliper.</p>
       <div class="shots">
-        <figure><a class="shot" href="screens/phone-home-empty.jpg"><img src="screens/phone-home-empty.jpg" width="644" height="1400" loading="lazy" alt="Home with no projects yet"></a><figcaption>Your first project.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-new.jpg"><img src="screens/phone-new.jpg" width="644" height="1400" loading="lazy" alt="New project on iPhone"></a><figcaption>Say what you need, then show it.</figcaption></figure>
-        <figure class="mac"><a class="shot mac" href="screens/mac-new.jpg"><img src="screens/mac-new.jpg" width="1320" height="872" loading="lazy" alt="New project on the Mac"></a><figcaption>On the Mac, drop files in.</figcaption></figure>
+        <figure><a class="shot" href="screens/phone-new.jpg"><img src="screens/phone-new.jpg" width="644" height="1400" loading="lazy" alt="Design mockup: New project on iPhone"></a><figcaption>Say what you need, then show it. <span class="mock">Mockup</span></figcaption></figure>
+        <figure class="mac"><a class="shot wide" href="made/mic-mount.jpg"><img src="made/mic-mount.jpg" width="960" height="720" loading="lazy" alt="Render of a mic mount made from two photos and one sentence"></a><figcaption>“Something that attaches this microphone to my monitor, both pictured here.” The finished mic mount.</figcaption></figure>
       </div>
     </section>
 
     <section id="scan" aria-labelledby="scan-h">
       <h2 id="scan-h">Scanning and sizes</h2>
-      <h3>Walk around it</h3>
-      <p>Put the object on a table with space around it, in good, even light. Walk slowly around it following the guide on screen, then flip it over if you need the bottom. Matte objects scan best; shiny, clear or very dark ones are hard for any scanner.</p>
+      <h3>iPhone and iPad: walk around it</h3>
+      <p>Scanning needs an iPhone or iPad Pro with LiDAR. Put the object on a table with space around it, in good, even light. Walk slowly around it following the guide on screen, then flip it over if you need the bottom. Matte objects scan best; shiny, clear or very dark ones are hard for any scanner.</p>
+      <h3>Android: a walk-around photo set</h3>
+      <p>Android phones have no LiDAR, so Counterpart records a set of photos as you walk around the object, using ARCore depth where the phone has it. Your computer rebuilds the model from them. <span class="tag">Beta</span> Not yet tested on a real phone.</p>
       <h3>With a scan rig</h3>
-      <p>For small objects a turntable rig gives steadier scans, and Counterpart guides each ring. It recommends <a href="https://makerworld.com/en/models/1531561">Kass 3D's scan rig on MakerWorld</a>, which you can print yourself. Its designer describes it as a rig for casual scanning and photography, not professional equipment.</p>
+      <p>For small objects a turntable rig gives steadier scans, and Counterpart guides each ring. It recommends <a href="https://makerworld.com/en/models/1531561">Kass 3D's scan rig on MakerWorld</a>, which you can print yourself; it's one of the starter projects. Its designer describes it as a rig for casual scanning and photography, not professional equipment.</p>
       <h3>Scan in hand <span class="tag">Being fixed</span></h3>
-      <p>Holding the object and turning it in front of the camera doesn't work yet. Use the walk-around scan, a rig, or photos for now.</p>
+      <p>Holding the object and turning it in front of the camera doesn't work well yet. Use the walk-around scan, a rig, or photos for now.</p>
+      <h3>Cleanup</h3>
+      <p>Your computer fixes what the scanner missed, checks the result against your photos and makes it printable. A real iPhone scan became a cleaned model on a Mac on Nov 4; scan accuracy and print fit are still being tested.</p>
       <h3>Getting the size right</h3>
       <p>Phone scans are good to a few millimetres. For a part that has to fit exactly, measure the size that matters with a caliper and say it in plain words, or put the caliper in a photo. After it's made, What changed says where each size came from, and which ones were estimated.</p>
       <div class="shots">
-        <figure><a class="shot" href="screens/phone-rig.jpg"><img src="screens/phone-rig.jpg" width="644" height="1400" loading="lazy" alt="Scanning on a rig, ring 1 of 3"></a><figcaption>On a rig: one ring at a time.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-inputs.jpg"><img src="screens/phone-inputs.jpg" width="644" height="1400" loading="lazy" alt="What you sent: request, photos and scans"></a><figcaption>What you sent: the request, photos and scans.</figcaption></figure>
+        <figure class="mac"><a class="shot wide" href="made/leatherman-scan.jpg"><img src="made/leatherman-scan.jpg" width="1120" height="700" loading="lazy" alt="Render of a Leatherman Wave+ rebuilt from an iPhone LiDAR scan"></a><figcaption>A Leatherman Wave+ from a real iPhone LiDAR scan, cleaned on a Mac.</figcaption></figure>
       </div>
     </section>
 
     <section id="working" aria-labelledby="working-h">
-      <h2 id="working-h">While your Mac works</h2>
+      <h2 id="working-h">While it works</h2>
       <ul>
         <li>Each project shows what it's doing and roughly how long is left. You can put your phone down: it tells you when it's ready.</li>
-        <li>If your Mac can't see part of the object well enough, it asks: <strong>Camera</strong> to take a close-up, <strong>Photos</strong> to pick one, or <strong>Best guess</strong> to carry on without one.</li>
-        <li>When it's ready, check the pictures and the size in millimetres, and turn it in 3D or AR. Ask for changes in plain words, like “make it 2 mm wider” or “the clip is too tight”.</li>
-        <li>On the Mac, <strong>Activity</strong> lists every step it took.</li>
+        <li>If your computer can't see part of the object well enough, it asks: <strong>Camera</strong> to take a close-up, <strong>Photos</strong> to pick one, or <strong>Best guess</strong> to carry on without one.</li>
+        <li>When it's ready, check the pictures and the size in millimetres, and turn it in 3D. Ask for changes in plain words, like “make it 2 mm wider” or “the clip is too tight”.</li>
+        <li>On the computer, <strong>Activity</strong> lists every step it took.</li>
       </ul>
       <div class="shots">
-        <figure><a class="shot" href="screens/phone-working.jpg"><img src="screens/phone-working.jpg" width="644" height="1400" loading="lazy" alt="Your Mac is working on it, about 4 minutes left"></a><figcaption>Working, with the time left.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-ask.jpg"><img src="screens/phone-ask.jpg" width="644" height="1400" loading="lazy" alt="Your Mac has a question"></a><figcaption>A question: Camera, Photos or Best guess.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-ready.jpg"><img src="screens/phone-ready.jpg" width="644" height="1400" loading="lazy" alt="Ready to print"></a><figcaption>Ready, with its size.</figcaption></figure>
-        <figure class="mac"><a class="shot mac" href="screens/mac-inspector-activity.jpg"><img src="screens/mac-inspector-activity.jpg" width="1320" height="872" loading="lazy" alt="Activity on the Mac"></a><figcaption>Activity on the Mac.</figcaption></figure>
+        <figure class="mac"><a class="shot wide" href="made/airpods-max-hanger.jpg"><img src="made/airpods-max-hanger.jpg" width="980" height="700" loading="lazy" alt="Render of the AirPods Max desk hanger under a desk top"></a><figcaption>Ready: the AirPods Max desk hanger, as the app renders it.</figcaption></figure>
       </div>
     </section>
 
     <section id="print" aria-labelledby="print-h">
       <h2 id="print-h">Printing</h2>
       <ol>
-        <li>Tap <strong>Print</strong>. Choose the printer, then quality, strength and the number of copies.</li>
-        <li>Choose filament from what's loaded on the printer. For multi-colour Bambu prints, each colour goes to the AMS slot that holds it. On a printer that can't report its filament, say what's loaded.</li>
-        <li>Counterpart slices it and shows the time and grams before anything starts.</li>
-        <li>If your printer's MCP server needs an answer before it prints, Counterpart shows its question exactly as it asks it.</li>
+        <li>Tap <strong>Print</strong>. Choose the printer, then quality, strength and, if the MCP supports it, the number of copies.</li>
+        <li>Choose filament from what's loaded. For a multi-colour model, each part gets a loaded spool; “Closest colour loaded” says when the match is loose. On a printer that can't report its filament, say what's loaded.</li>
+        <li>Counterpart slices it with your printer's MCP. <strong>What will print</strong> shows the MCP's own pictures of that sliced file: the top as it sits on the bed, and the bed side turned toward you, with the time and grams. Print turns on once they load, and sends exactly that file.</li>
+        <li>To drop in magnets or nuts, add a <strong>pause before a layer</strong>. The printer stops there and waits; resume it when they're in.</li>
+        <li>If your printer's MCP needs an answer before it prints, Counterpart shows its question.</li>
       </ol>
+      <p>What will print needs bambu-printer-mcp 1.1.60 or later, or mcp-3d-printer-server 1.2.34 or later, and a Counterpart build that has it: the Android and Linux beta 5 do; the Mac beta 4 and the current TestFlight build don't yet.</p>
       <p>Counterpart doesn't check the build plate for you; the printer does its own checks. Clear the plate before you print, as you normally would.</p>
       <p>While it prints, the project shows progress, the layer, the time left and the printer's camera, with <strong>Pause</strong> and <strong>Stop</strong>.</p>
       <div class="shots">
-        <figure><a class="shot" href="screens/phone-print.jpg"><img src="screens/phone-print.jpg" width="644" height="1400" loading="lazy" alt="Print sheet with AMS colours"></a><figcaption>Colours from the AMS.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-print-one.jpg"><img src="screens/phone-print-one.jpg" width="644" height="1400" loading="lazy" alt="Print sheet with one colour"></a><figcaption>One colour.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-print-loaded.jpg"><img src="screens/phone-print-loaded.jpg" width="644" height="1400" loading="lazy" alt="What's loaded? Pick the material"></a><figcaption>What's loaded?</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-printing.jpg"><img src="screens/phone-printing.jpg" width="644" height="1400" loading="lazy" alt="Printing at 42% with the printer's camera"></a><figcaption>Printing, with Pause and Stop.</figcaption></figure>
-        <figure class="mac"><a class="shot mac" href="screens/mac-print.jpg"><img src="screens/mac-print.jpg" width="1320" height="872" loading="lazy" alt="Print sheet on the Mac"></a><figcaption>The Print sheet on the Mac.</figcaption></figure>
+        <figure class="mac"><a class="shot mac" href="screens/mac-what-will-print.jpg"><img src="screens/mac-what-will-print.jpg" width="1320" height="820" loading="lazy" alt="Mac Print sheet: What will print, colours per part, quality and strength"></a><figcaption>Mac: What will print. Real screen.</figcaption></figure>
+        <figure class="mac"><a class="shot mac" href="screens/linux-what-will-print.jpg"><img src="screens/linux-what-will-print.jpg" width="1328" height="892" loading="lazy" alt="Linux Print sheet: What will print, printer, quality, strength, copies, filament and pauses"></a><figcaption>Linux: the same sheet. Real screen.</figcaption></figure>
+        <figure><a class="shot" href="screens/iphone-print.jpg"><img src="screens/iphone-print.jpg" width="660" height="1434" loading="lazy" alt="iPhone Print sheet with colour, quality, strength, copies and pauses"></a><figcaption>iPhone: colour, quality and pauses. Real screen, sample data.</figcaption></figure>
+        <figure><a class="shot" href="screens/android-what-will-print.jpg"><img src="screens/android-what-will-print.jpg" width="720" height="1600" loading="lazy" alt="Android Print sheet: what will print, and Print"></a><figcaption>Android: What will print. Real screen.</figcaption></figure>
       </div>
     </section>
 
     <section id="printers" aria-labelledby="printers-h">
-      <h2 id="printers-h">Printers and the backend</h2>
-      <p>Your printer's MCP server is Counterpart's printing backend. Counterpart has no slicer or printer code of its own: slicing, AMS colours, the print, progress, the camera, Pause and Stop are all tools in <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> or <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a>, the same servers Claude and Codex use. Counterpart finds your printers in the servers you've already set up, and prints through them as they are. It never copies a printer's settings.</p>
-      <p>Their docs cover everything the server does: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/slicing">slicing</a>, <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/ams">AMS colours</a>, <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/fulu">FULU and Bambu Cloud</a>, and the <a href="https://dmontgomery40.github.io/bambu-printer-mcp/reference/printer-tools">printer tools</a> for Bambu Lab; <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/setup">printer setup</a>, <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/slicing">slicing</a> and the <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/reference/printer-tools">printer tools</a> for everything else.</p>
+      <h2 id="printers-h">Printers and MCPs</h2>
+      <p>Your printer's MCP server is Counterpart's printing backend. Counterpart has no slicer or printer code of its own: slicing, the pictures of what will print, colours, the print, progress, the camera, Pause and Stop are all tools in <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> or <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a>, the same servers Claude and Codex use. Counterpart prints through them as they're set up and never copies a printer's settings.</p>
+      <p>Their docs cover everything the server does: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/slicing">slicing</a>, <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/ams">AMS colours</a>, <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/fulu">FULU and Bambu Cloud</a> and the <a href="https://dmontgomery40.github.io/bambu-printer-mcp/reference/printer-tools">printer tools</a> for Bambu Lab; <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/setup">printer setup</a>, <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/guide/slicing">slicing</a> and the <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/reference/printer-tools">printer tools</a> for everything else.</p>
       <ul>
-        <li><span class="path">Settings › Printers</span> on the Mac lists each printer, the MCP server and version that reaches it, and <strong>Update</strong> when a newer version is out. Updates wait until the printer isn't printing.</li>
-        <li>For a Bambu printer on bambu-printer-mcp, <strong>Connection</strong> chooses how it reaches the printer: <strong>Local network</strong>, or <strong>Bambu Cloud</strong>. The MCP server keeps the choice; its <a href="https://dmontgomery40.github.io/bambu-printer-mcp/guide/fulu">FULU guide</a> explains the routes.</li>
-        <li>On iPhone, <strong>Printers</strong> shows each printer, what's loaded and its camera. Choosing a printer's connection is on the Mac for now.</li>
+        <li><span class="path">Settings › Printers</span> on the computer lists each printer, the MCP and version that reaches it, and <strong>Update</strong> when a newer version is out. Updates wait until the printer isn't printing.</li>
+        <li>When a printer is set up in both MCPs, choose which one prints to it.</li>
+        <li><strong>Connection</strong> chooses how the MCP reaches the printer, for example <strong>Local network</strong> or <strong>Bambu Cloud</strong>. The choices and their wording come from the MCP. Change them when the printer isn't printing.</li>
+        <li>On a phone, <strong>Printers</strong> shows each printer, what's loaded and its camera.</li>
       </ul>
+      <p>Tested so far: printing through bambu-printer-mcp on a Bambu Lab P1S. Printers on mcp-3D-printer-server haven't been tested with Counterpart yet.</p>
       <div class="shots">
-        <figure><a class="shot" href="screens/phone-printers.jpg"><img src="screens/phone-printers.jpg" width="644" height="1400" loading="lazy" alt="Printers on iPhone"></a><figcaption>Printers on iPhone.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-printer.jpg"><img src="screens/phone-printer.jpg" width="644" height="1400" loading="lazy" alt="One printer: camera, print and filament"></a><figcaption>One printer.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-printer-update.jpg"><img src="screens/phone-printer-update.jpg" width="644" height="1400" loading="lazy" alt="An MCP server that needs an update"></a><figcaption>When its MCP server needs an update.</figcaption></figure>
-        <figure class="mac"><a class="shot mac" href="screens/mac-settings-printers.jpg"><img src="screens/mac-settings-printers.jpg" width="620" height="678" loading="lazy" alt="Settings › Printers on the Mac"></a><figcaption>Settings › Printers on the Mac.</figcaption></figure>
+        <figure><a class="shot" href="screens/phone-printers.jpg"><img src="screens/phone-printers.jpg" width="644" height="1400" loading="lazy" alt="Design mockup: Printers on iPhone"></a><figcaption>Printers on iPhone. <span class="mock">Mockup</span></figcaption></figure>
+        <figure><a class="shot" href="screens/phone-printer-update.jpg"><img src="screens/phone-printer-update.jpg" width="644" height="1400" loading="lazy" alt="Design mockup: an MCP server that needs an update"></a><figcaption>When its MCP needs an update. <span class="mock">Mockup</span></figcaption></figure>
       </div>
     </section>
 
@@ -160,51 +183,61 @@
       <h2 id="after-h">After it prints</h2>
       <ul>
         <li>Counterpart asks <strong>Did it fit?</strong> <strong>It works</strong> marks the project Done. <strong>Needs changes</strong> opens Ask for changes, so you can say what's wrong.</li>
-        <li>Set a project's status yourself any time: open the project, then <span class="path">… › Status</span>.</li>
-        <li>Done projects stay printable: <strong>Print another</strong> prints it again.</li>
-        <li><strong>Hide from Home</strong> tidies a project away without deleting it. It's still in your projects, and still Done.</li>
+        <li>Set a project's status yourself any time from the project's menu.</li>
+        <li>Done projects stay printable: <strong>Print another</strong> prints it again. A 3MF with several plates remembers which plates have printed.</li>
+        <li><strong>Hide from Home</strong> tidies a project away without deleting it.</li>
       </ul>
     </section>
 
     <section id="settings" aria-labelledby="settings-h">
       <h2 id="settings-h">Settings and updates</h2>
-      <p>Most settings are on both devices: notifications, AI, paired devices and general options. Changing one on either device changes it on the Mac. Printer setup and connections are on the Mac.</p>
-      <p>Your iPhone shows a feature only when the Counterpart on your Mac supports it. If a button in this guide is missing, update Counterpart on the Mac.</p>
+      <p>Most settings are on the phone and the computer alike: notifications, AI, paired devices and general options. Changing one on either changes it on the computer. Printer setup lives on the computer.</p>
+      <p>Your phone shows a feature only when the Counterpart on your computer supports it. If a button in this guide is missing, update Counterpart on the computer. The Mac app updates itself; on Linux, install the newer package.</p>
       <div class="shots">
-        <figure><a class="shot" href="screens/phone-settings.jpg"><img src="screens/phone-settings.jpg" width="644" height="1400" loading="lazy" alt="Settings on iPhone"></a><figcaption>Settings on iPhone.</figcaption></figure>
-        <figure><a class="shot" href="screens/phone-about.jpg"><img src="screens/phone-about.jpg" width="644" height="1400" loading="lazy" alt="About Counterpart"></a><figcaption>About, with licences.</figcaption></figure>
-        <figure class="mac"><a class="shot mac" href="screens/mac-settings-ai.jpg"><img src="screens/mac-settings-ai.jpg" width="620" height="588" loading="lazy" alt="Settings › AI on the Mac"></a><figcaption>Settings › AI.</figcaption></figure>
-        <figure class="mac"><a class="shot mac" href="screens/mac-devices.jpg"><img src="screens/mac-devices.jpg" width="620" height="388" loading="lazy" alt="Settings › Phones and iPads"></a><figcaption>Settings › Phones and iPads.</figcaption></figure>
+        <figure><a class="shot" href="screens/phone-settings.jpg"><img src="screens/phone-settings.jpg" width="644" height="1400" loading="lazy" alt="Design mockup: Settings on iPhone"></a><figcaption>Settings on iPhone. <span class="mock">Mockup</span></figcaption></figure>
+        <figure class="mac"><a class="shot mac" href="screens/mac-settings-ai.jpg"><img src="screens/mac-settings-ai.jpg" width="620" height="588" loading="lazy" alt="Design mockup: Settings › AI on the Mac"></a><figcaption>Settings › AI. <span class="mock">Mockup</span></figcaption></figure>
       </div>
     </section>
 
     <section id="notifications" aria-labelledby="notifications-h">
       <h2 id="notifications-h">Notifications</h2>
-      <p>Counterpart tells you when a project is ready, when your Mac has a question, when a print is halfway (with a frame from the printer's camera), when it finishes, and when something goes wrong. Switch each one off in <span class="path">Settings › Notifications</span>, on either device.</p>
+      <p>Counterpart tells you when a project is ready, when your computer has a question, when a print is halfway, when it finishes, and when something goes wrong. Switch each one off in <span class="path">Settings › Notifications</span>.</p>
+      <ul>
+        <li><strong>iPhone and iPad:</strong> notifications, a Live Activity on the Lock Screen while it prints, and widgets. With a Mac, they arrive through your own iCloud when you're away.</li>
+        <li><strong>Android:</strong> the app checks your computer in the background and posts “Ready to print” and “Did it fit?”. There's no push service in between.</li>
+        <li><strong>Mac:</strong> notifications on the Mac too. <strong>Linux:</strong> desktop notifications where your desktop supports them.</li>
+      </ul>
+      <p>All of these are built; delivery of each kind is still being tested.</p>
       <div class="shots">
-        <figure><a class="shot" href="screens/phone-settings-notifications.jpg"><img src="screens/phone-settings-notifications.jpg" width="644" height="1400" loading="lazy" alt="Notification settings"></a><figcaption>Choose which ones you get.</figcaption></figure>
-        <figure class="mac"><a class="shot mac" href="screens/mac-settings-general.jpg"><img src="screens/mac-settings-general.jpg" width="620" height="708" loading="lazy" alt="Notifications on the Mac"></a><figcaption>On the Mac, in General.</figcaption></figure>
+        <figure><a class="shot" href="screens/phone-settings-notifications.jpg"><img src="screens/phone-settings-notifications.jpg" width="644" height="1400" loading="lazy" alt="Design mockup: notification settings"></a><figcaption>Choose which ones you get. <span class="mock">Mockup</span></figcaption></figure>
       </div>
     </section>
 
     <section id="trouble" aria-labelledby="trouble-h">
       <h2 id="trouble-h">Troubleshooting</h2>
-      <div class="faq">
-        <details><summary>My iPhone can't find my Mac</summary><p>Check that Counterpart is running on your Mac (its icon is in the menu bar). On the same Wi-Fi, check iPhone Settings › Counterpart › Local Network is on. In Counterpart on your iPhone, Settings › Your Mac › Check Connection tries again. If it still can't, quit and reopen Counterpart on the Mac, or pair again with the code from its menu bar.</p></details>
-        <details><summary>Making it stopped with an error</summary><p>The project says what went wrong. Check the selected provider in Settings → AI and its connection test. Fix the reported issue, then open the project and tap Try Again.</p></details>
-        <details><summary>The print didn't start</summary><p>Open the project: it shows what the printer or its MCP server said. If the printer shows an error on its own screen, clear it there, then print again. The MCP server's docs list what each printer supports: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/reference/limitations">bambu-printer-mcp</a>, <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/reference/limitations">mcp-3D-printer-server</a>. If the message says Bambu Cloud refused it (code -3120 or 403), switch the printer's Connection to Local network in Settings › Printers on the Mac.</p></details>
+      <div class="faq glass">
+        <details><summary>My phone can't find my computer</summary><p>Check that Counterpart is running on the computer. On the same Wi-Fi, check the phone lets Counterpart use the local network (on iPhone: Settings › Counterpart › Local Network). Turn off a VPN or Private DNS that might block it. Then pair again with the QR code: Add a Phone on the Mac, or Settings on Linux.</p></details>
+        <details><summary>Making it stopped with an error</summary><p>The project says what went wrong. Check the selected AI provider in Settings and its connection test. Fix the reported issue, then open the project and choose Try Again.</p></details>
+        <details><summary>The print didn't start</summary><p>Open the project: it shows what the printer or its MCP said. If the printer shows an error on its own screen, clear it there, then print again. The MCP's docs list what each printer supports: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/reference/limitations">bambu-printer-mcp</a>, <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/reference/limitations">mcp-3D-printer-server</a>. If it says Bambu Cloud refused the print, switch the printer's Connection to Local network in Settings › Printers.</p></details>
+        <details><summary>What will print says “Nothing to show yet”</summary><p>Choose a printer, and update its MCP in Settings › Printers to bambu-printer-mcp 1.1.60 or later, or mcp-3d-printer-server 1.2.34 or later. The slicer the MCP uses, such as Bambu Studio, must be installed on the computer.</p></details>
         <details><summary>The size is a little off</summary><p>Measure the size that matters with a caliper and say it in Ask for changes, like “the tube is 25.4 mm across”. It redoes that part only.</p></details>
+        <details><summary>Android won't install the APK</summary><p>Allow your browser, or the app you opened the file from, to install unknown apps when Android asks.</p></details>
         <details><summary>My iPhone camera went black after scanning</summary><p>An earlier test version could leave the camera unusable after Scan in hand. Restart your iPhone to fix it. Current versions don't do this.</p></details>
-        <details><summary>I don't see a button this page mentions</summary><p>Your iPhone app shows a feature only when the Counterpart on your Mac supports it. Update Counterpart on the Mac, then reopen the app on your iPhone.</p></details>
-      </div>
-      <div class="shots">
-        <figure><a class="shot" href="screens/phone-failed.jpg"><img src="screens/phone-failed.jpg" width="644" height="1400" loading="lazy" alt="Your Mac couldn't finish, with Try Again"></a><figcaption>A failure says why, with Try Again.</figcaption></figure>
+        <details><summary>I don't see a button this page mentions</summary><p>Your phone shows a feature only when the Counterpart on your computer supports it. Update Counterpart on the computer, then reopen the app on your phone.</p></details>
       </div>
     </section>
 
     <section id="privacy" aria-labelledby="privacy-h">
       <h2 id="privacy-h">Privacy</h2>
-      <p>Counterpart has no accounts. Your Mac stores your scans, photos and projects. Your iPhone reaches it on your Wi-Fi, or reads project summaries, thumbnails and updates in your own private iCloud when you're away. Counterpart's Live Activity relay receives the project's name, the printer's name, print progress and the phone's activity push token to deliver updates through Apple. Model creation, edits and AI-assisted cleanup use the provider selected in Settings › AI when the job starts. Information supplied for that work, including rendered model views and close-ups, goes to that provider under your own account or API configuration. Choosing a local model endpoint routes those requests to that endpoint. Changing the selection affects subsequent jobs; selecting Off disables AI jobs. Independent cleanup tools run on your computer.</p>
+      <p>Counterpart has no accounts. Your Mac or Linux computer stores your scans, photos and projects. Phones reach it directly, on your network or over Tailscale, pinned to the computer's own key.</p>
+      <ul>
+        <li><strong>With a Mac,</strong> your iPhone or iPad also reads project summaries, thumbnails and updates from your own private iCloud database when you're away. Linux and Android don't use iCloud.</li>
+        <li><strong>Lock Screen updates:</strong> Counterpart's Live Activity relay at counterpart.dtmont.com receives the project's name, the printer's name, print progress and the phone's activity push token, to deliver updates through Apple. You turn the relay on in the Mac's Settings.</li>
+        <li><strong>AI:</strong> model creation, edits and AI-assisted cleanup use the provider selected in Settings when the job starts. Information supplied for that work, including rendered model views and close-ups, goes to that provider under your own account or API configuration. Choosing a local model endpoint routes those requests to that endpoint. Changing the selection affects later jobs; selecting Off turns AI jobs off.</li>
+        <li><strong>Printing:</strong> your printer is reached by its MCP on your computer, with the connection you chose in it.</li>
+        <li><strong>On Linux,</strong> API keys are kept in your desktop's secret store. <strong>On Android,</strong> the pairing is kept in encrypted storage on the phone.</li>
+        <li>Independent cleanup tools run on your computer.</li>
+      </ul>
     </section>
 
     <section id="credits" aria-labelledby="credits-h">
@@ -213,7 +246,7 @@
         <li>Scan rig: <a href="https://makerworld.com/en/models/1531561">Kass 3D on MakerWorld</a>.</li>
         <li>Published models you print are credited to their designers on the project, with a link back to the original.</li>
         <li>Printing: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> and <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a>.</li>
-        <li>Optional 3D tools: Blender for scan cleanup and modeling; Autodesk Fusion for parametric design. Open-source licences are listed in the app under <span class="path">Settings › About</span>.</li>
+        <li>Optional 3D tools: Blender for scan cleanup and modeling; Autodesk Fusion for parametric design on the Mac. Open-source licences are listed in the app under <span class="path">Settings › About</span>.</li>
       </ul>
     </section>
   </main>
@@ -221,8 +254,8 @@
 
 <footer class="foot">
   <div class="wrap">
-    <p>Counterpart runs on your own Mac and printer, with your chosen AI provider.</p>
-    <p class="foot-links"><a href="./">Home</a> <a href="#privacy">Privacy</a> <a href="#credits">Credits</a></p>
+    <p>Counterpart runs on your own computer and printer, with the AI provider you choose.</p>
+    <p class="foot-links"><a href="./">Home</a> <a href="beta.html">Beta setup</a> <a href="#privacy">Privacy</a> <a href="#credits">Credits</a></p>
   </div>
 </footer>
 

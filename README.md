@@ -2,12 +2,13 @@
 
 # Counterpart
 
-**Make the part that fits.** Describe it, photograph it, scan it, or paste a link. Counterpart makes the part on your
-Mac, shows it to you on your iPhone, and prints it on your own printer. Docs and Help: https://counterpart.dtmont.com/
+**Make the part that fits.** Scan it, describe it, or paste a link. Counterpart makes the part on your own Mac or Linux
+computer, shows it to you on your iPhone, iPad or Android phone, and prints it through your printer's own MCP. Docs and
+Help: https://counterpart.dtmont.com/
 
 <p align="center">
-  <img src="site/public/screens/phone-home.jpg" alt="Counterpart on iPhone" width="220">
-  <img src="site/public/screens/mac-main.jpg" alt="Counterpart on the Mac" width="520">
+  <img src="site/public/screens/iphone-print.jpg" alt="Counterpart on iPhone: the Print sheet" width="220">
+  <img src="site/public/screens/mac-what-will-print.jpg" alt="Counterpart on the Mac: the Print sheet with What will print" width="520">
 </p>
 
 The app was called Scan to Make; internal identifiers (bundle ids, folders such as `~/Library/Application Support/Scan to

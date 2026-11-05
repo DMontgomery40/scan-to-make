@@ -36,7 +36,7 @@ for (const page of pages) {
       continue;
     }
     const [file, hash] = href.replace(/^\//, '').split('#');
-    const target = file === '' || file === './' ? (file === '' ? page : 'index.html') : file;
+    const target = file === '' || file === './' ? (file === '' && !href.startsWith('/') ? page : 'index.html') : file;
     if (!existsSync(join(root, target))) { fail(`${page}: missing file ${href}`); continue; }
     if (hash && !ids[target]?.has(hash)) fail(`${page}: missing anchor ${href}`);
   }
