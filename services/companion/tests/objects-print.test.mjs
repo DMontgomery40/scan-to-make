@@ -85,10 +85,15 @@ test('printing with no model is refused', async () => {
 
 test('chosen live filament sets slicing profile and AMS slot; a changed spool is refused', async () => {
   const tray = {slot:1, loaded:true, tray_color:'FEC600FF', tray_type:'PLA', tray_info_idx:'GFA00',
-    display_name:'Yellow PLA', resolved_profile_path:'/profiles/yellow-pla.json'};
+    display_name:'PLA Basic PLA #FEC600', spool_name:'Sunflower Yellow PLA Basic', label:'A2', resolved_profile_path:'/profiles/yellow-pla.json'};
   const {service, object, runs, bundles} = await setup({inventory:{trays:[tray]}});
   const [choice] = await service.filaments(object.id);
-  assert.deepEqual(choice, {slot:1, colour:'#FEC600', material:'PLA', name:'Yellow PLA', filamentId:'GFA00', destinationId:'default', suggested:true});
+  // The spool in the MCP's words (spool_name, label), never its raw display string (Nov 2–3 review: "A1 · PLA PLA Basic PLA #000000").
+  assert.deepEqual(choice, {slot:1, colour:'#FEC600', material:'PLA', name:'Sunflower Yellow PLA Basic', label:'A2', filamentId:'GFA00', destinationId:'default', suggested:true});
+  delete tray.spool_name; delete tray.label;
+  const [older] = await service.filaments(object.id);
+  assert.equal(older.name, 'PLA', 'an MCP without spool names shows the material, not its display string');
+  tray.spool_name = 'Sunflower Yellow PLA Basic'; tray.label = 'A2';
   await assert.rejects(service.print(object.id, {filament:{...choice, destinationId:'other-printer'}}), /filament changed/);
   tray.tray_color = '000000FF';
   await assert.rejects(service.print(object.id, {filament:choice}), /filament changed/);

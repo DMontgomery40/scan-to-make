@@ -25,6 +25,11 @@ export function settingsUnsupported(backend: keyof typeof PACKAGE_NAMES, setting
   return `Update ${PACKAGE_NAMES[backend]} to choose ${what} from Counterpart. Standard prints with your printer's own preset.`;
 }
 
+/** The sentence when the installed MCP can't propose each colour's spool (counterpart_propose_filaments). */
+export function filamentProposalUnavailable(backend: keyof typeof PACKAGE_NAMES): string {
+  return `Update ${PACKAGE_NAMES[backend]} in Settings → Printers so Counterpart can match each colour to a loaded spool. Nothing was sent to the printer.`;
+}
+
 /** Print's refusal when the installed MCP can't draw what will print (inspect_print_file `include_preview`). */
 export function previewUnavailable(backend: keyof typeof PACKAGE_NAMES): string {
   return `Update ${PACKAGE_NAMES[backend]} in Settings → Printers so Counterpart can show you what will print. Nothing was sent to the printer.`;

@@ -1,6 +1,7 @@
 // Print sends the sliced file the print sheet showed (Nov 5): an estimate's `sliceSha256`, drawn by the MCP's
 // inspect_print_file preview. These helpers let tests about other things print the way the sheet does.
 import {createHash} from 'node:crypto';
+import {proposingRunner} from './mcp-filaments.mjs';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mNgYGAAAAAEAAHI6uv5AAAAAElFTkSuQmCC', 'base64');
 
@@ -17,6 +18,8 @@ let sheetOnly = 0;
 
 /** A runner whose estimate also returns a sliced file and its preview (adding an estimate when it has none). */
 export function showingRunner(runner, {preview = true} = {}) {
+  // A runner that fakes the printer's spools also answers the MCP's spool proposal from them.
+  proposingRunner(runner);
   const estimate = runner.estimate;
   let n = 0;
   return Object.assign(runner, {estimate: async input => {

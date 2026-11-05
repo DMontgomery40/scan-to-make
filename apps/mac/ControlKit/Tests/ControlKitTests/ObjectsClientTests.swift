@@ -137,9 +137,25 @@ final class ObjectsClientTests: XCTestCase {
         XCTAssertEqual(mapping.spools(slots: mapping.suggestedSlots)?.map(\.slot), [0, 1])
         XCTAssertNil(mapping.spools(slots: [1: 0]), "a part without a spool keeps Print off")
         XCTAssertEqual(mapping.spools(slots: [1: 1, 2: 0])?.map(\.slot), [1, 0], "the person's swap, not the suggestion")
-        XCTAssertTrue(ColourMapping.mixesFeedSources(slots: [1: 0, 2: 254]), "AMS and the external spool can't feed one print")
-        XCTAssertFalse(ColourMapping.mixesFeedSources(slots: [1: 0, 2: 1]))
         XCTAssertNil(ColourMapping(filaments: [], trays: trays).spools(slots: [:]), "a one-colour model has no per-part rows")
+    }
+
+    /// PRD §8.0 item 7: the printer MCP proposes each colour's spool and names it; the sheet shows its words.
+    func testTheSheetShowsTheMCPsSpoolNamesFeedsAndNotes() throws {
+        let tray = { (slot: Int, label: String, name: String, feed: String) in try JSONDecoder().decode(PrinterFilament.self, from: JSONSerialization.data(withJSONObject:
+            ["slot":slot, "colour":"#FFFFFF", "material":"PLA", "name":name, "filamentId":"GFA00", "destinationId":"p1s", "label":label, "feed":feed])) }
+        let trays = [try tray(0, "A1", "Black PLA Basic", "ams"), try tray(1, "A2", "Sunflower Yellow PLA Basic", "ams"), try tray(254, "External", "Jade White PLA Basic", "external")]
+        XCTAssertEqual(trays[1].title, "A2 · Sunflower Yellow PLA Basic", "the MCP's label and name, never \"A2 · PLA PLA Basic PLA #FEC600\"")
+        let mapping = ColourMapping(filaments: [ModelColourFilament(index: 1, name: "body", colour: "#000000", slot: 0, verdict: "same-colour"),
+                                                ModelColourFilament(index: 2, name: "markings", colour: "#FFFFFF", slot: 1, verdict: "closest",
+                                                                    note: "White is loaded on External, but one print feeds from one source. Closest here: A2 Sunflower Yellow PLA Basic.")],
+                                    trays: trays)
+        XCTAssertEqual(mapping.note(mapping.filaments[1], slots: [1: 0, 2: 1]), mapping.filaments[1].note, "the MCP's note while its proposal stands")
+        XCTAssertNil(mapping.note(mapping.filaments[1], slots: [1: 0, 2: 254]), "the person's own choice is no longer the MCP's proposal")
+        XCTAssertTrue(mapping.mixesFeeds(slots: [1: 0, 2: 254]), "the MCP's feeds, not slot numbers")
+        XCTAssertFalse(mapping.mixesFeeds(slots: [1: 0, 2: 1]))
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(trays[1])) as! [String: Any]
+        XCTAssertEqual(Set(encoded.keys), ["slot", "colour", "material", "name", "filamentId", "destinationId"], "Print sends back only the identity the companion checks")
     }
     private func confirmation(_ overrides: [String: Any] = [:]) throws -> Project.PrintConfirmation {
         let fields: [String: Any] = ["id":"q1", "message":"Check the actual printer.\nKeep all checks.", "expiresAtMs":2000,

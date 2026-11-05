@@ -521,7 +521,16 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertNil(PrintChoice(colour: .material("PETG")).body["filament"], "filament or colour, never both")
         XCTAssertEqual(Set(PrintChoice(colour: nil).body.keys), ["checked"])
         XCTAssertEqual(filament.displayName, "Bambu PLA Basic")
-        XCTAssertEqual(PrinterFilament(slot: 254, colour: "#FFFFFF", material: "PETG", name: "Generic PETG #FFFFFF", filamentId: "", destinationId: "x").slotLabel, "Ext")
+        XCTAssertEqual(PrinterFilament(slot: 254, colour: "#FFFFFF", material: "PETG", name: "Generic PETG #FFFFFF", filamentId: "", destinationId: "x").slotLabel, "PETG", "no MCP label: the material, never a slot formula")
+        // The printer MCP's words (PRD §8.0 item 7; Nov 2–3 review: "A1 · PLA PLA Basic PLA #000000").
+        let named = PrinterFilament(slot: 1, colour: "#FEC600", material: "PLA", name: "Sunflower Yellow PLA Basic", filamentId: "GFA00", destinationId: "x", label: "A2", feed: "ams")
+        XCTAssertEqual(named.title, "A2 · Sunflower Yellow PLA Basic")
+        XCTAssertEqual(named.spoolName, "Sunflower Yellow PLA Basic", "the MCP's name already says its material")
+        let mapping = ColourMapping(filaments: [ModelColourFilament(index: 1, colour: "#FFFFFF", slot: 1, verdict: "closest", note: "White isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic.")],
+                                    trays: [named, PrinterFilament(slot: 254, colour: "#FFFFFF", material: "PLA", name: "White PLA", filamentId: "", destinationId: "x", label: "External", feed: "external")])
+        XCTAssertEqual(mapping.note(mapping.filaments[0], slots: [1: 1]), "White isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic.")
+        XCTAssertNil(mapping.note(mapping.filaments[0], slots: [1: 254]))
+        XCTAssertFalse(mapping.mixesFeeds(slots: [1: 254]))
     }
 
     func testPausesAreSentOnlyWhenChosenSortedAndWithinTheCompanionsLimit() throws {

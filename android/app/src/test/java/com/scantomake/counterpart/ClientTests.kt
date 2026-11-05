@@ -213,7 +213,11 @@ class CompanionClientTests {
         assertEquals("""{"material":"PETG"}""", PrintChoice(PrintColour.Material("PETG")).body["colour"].toString())
         assertEquals(setOf("checked"), PrintChoice(null).body.keys)
         assertEquals("Bambu PLA Basic", filament.displayName)
-        assertEquals("Ext", PrinterFilament(254, "#FFFFFF", "PETG", "Generic PETG #FFFFFF", "", "x").slotLabel)
+        assertEquals("PETG", PrinterFilament(254, "#FFFFFF", "PETG", "Generic PETG #FFFFFF", "", "x").slotLabel)
+        // The printer MCP's words (PRD §8.0 item 7; Nov 2–3 review: "A1 · PLA PLA Basic PLA #000000").
+        val named = PrinterFilament(1, "#FEC600", "PLA", "Sunflower Yellow PLA Basic", "GFA00", "x", label = "A2")
+        assertEquals("A2", named.slotLabel)
+        assertEquals("Sunflower Yellow PLA Basic", named.spoolName)
     }
 
     @Test fun theEstimateSlicesExactlyWhatPrintSendsAndPrintSendsOnlyTheSliceWhosePicturesWereShown() = runBlocking {

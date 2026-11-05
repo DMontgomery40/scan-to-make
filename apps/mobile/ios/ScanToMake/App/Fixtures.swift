@@ -277,10 +277,11 @@ enum Fixtures {
     }
 
     static let filaments: [[String: Any]] = [
-        ["slot": 0, "colour": "#141414", "material": "PLA", "name": "Black", "filamentId": "GFA00", "destinationId": "current", "suggested": true],
-        ["slot": 1, "colour": "#FAC71A", "material": "PLA", "name": "Yellow", "filamentId": "GFA00", "destinationId": "current"],
-        ["slot": 2, "colour": "#BFEBDB", "material": "PETG", "name": "Translucent", "filamentId": "GFG00", "destinationId": "current"],
-        ["slot": 3, "colour": "#6B7385", "material": "PLA", "name": "Blue Grey", "filamentId": "GFA00", "destinationId": "current"],
+        // The printer MCP's words for each spool (label, name) and its feeds, as bambu-printer-mcp 1.1.63 reports them.
+        ["slot": 0, "colour": "#141414", "material": "PLA", "name": "Black PLA Basic", "filamentId": "GFA00", "destinationId": "current", "suggested": true, "label": "A1", "feed": "ams"],
+        ["slot": 1, "colour": "#FAC71A", "material": "PLA", "name": "Sunflower Yellow PLA Basic", "filamentId": "GFA00", "destinationId": "current", "label": "A2", "feed": "ams"],
+        ["slot": 2, "colour": "#BFEBDB", "material": "PETG", "name": "Translucent Teal PETG Translucent", "filamentId": "GFG00", "destinationId": "current", "label": "A3", "feed": "ams"],
+        ["slot": 3, "colour": "#6B7385", "material": "PLA", "name": "Blue Gray PLA Basic", "filamentId": "GFA00", "destinationId": "current", "label": "A4", "feed": "ams"],
     ]
 
     /// The file a fixture path serves, from the assets folder.
@@ -361,9 +362,10 @@ struct FixtureTransport: HTTPTransport {
             }
             if parts[3] == "filaments" { return json(["filaments": Fixtures.filaments(for: id == Fixtures.ids.mic ? Fixtures.printer : "current")]) }
             if parts[3] == "colour-mapping" {
-                // A two-colour pick: body matches the black tray closely, letters the yellow one loosely.
-                return json(["filaments": [["index": 1, "name": "body", "colour": "#111111", "material": "PLA", "slot": 0, "distance": 0.04],
-                                           ["index": 2, "name": "letters", "colour": "#FFD200", "material": "PLA", "slot": 1, "distance": 0.12]],
+                // A two-colour pick, as the printer MCP proposes it: body on the black spool, letters on the closest yellow.
+                return json(["filaments": [["index": 1, "name": "body", "colour": "#111111", "material": "PLA", "slot": 0, "distance": 0.04, "verdict": "same-colour"],
+                                           ["index": 2, "name": "letters", "colour": "#FFD200", "material": "PLA", "slot": 1, "distance": 0.12, "verdict": "closest",
+                                            "note": "#FFD200 isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic."]],
                              "trays": Fixtures.filaments, "modelVersion": "fixture-3mf-v1"])
             }
             if parts[3] == "printer", method == "POST",

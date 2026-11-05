@@ -10,6 +10,7 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 |---|---|
 | `counterpart_printer_info` `counterpart_print_progress` `counterpart_print_route` `counterpart_make_3mf` | the `counterpart/1` contract (PRD §8.4) |
 | `get_printer_status` `get_printer_filaments` | spools, and Add Printer's connection check (`printing/setup.ts`, `printer-check.ts`); printer reports come only from `counterpart_print_progress`, never `get_printer_status` |
+| `counterpart_propose_filaments` | which loaded spool prints each of a model's colours, before slicing, in the MCP's words (each spool's `label` and `name`, each part's `verdict` and `note`); with the person's `chosen` spools, the MCP checks them against what is loaded now and returns the full `mapping`. The app renders it and turns `mapping` into `ams_mapping`, `load_filaments` and `filament_colours`; it keeps no colour matching (**§8.0 #7**, moved) |
 | `slice_stl` `inspect_print_file` `get_slice_settings` `lay_flat` `get_stl_info` `rotate_stl` `scale_stl` | slicing and model files |
 | `print_3mf` `print_3mf_bambu_network` `process_and_print_stl` `upload_gcode` `upload_file` `start_print` `start_print_job` `confirm_temperatures` `delete_printer_file` | dispatch |
 | `pause_print` `resume_print` `cancel_print` `clear_hms_errors` `skip_objects` `set_fan_speed` `set_light` `set_print_speed` `set_printer_temperature` `set_temperature` | printer controls |

@@ -223,6 +223,8 @@ export interface Filament {
   name: string;
   filamentId: string;
   destinationId: string;
+  /** Where the spool sits, in the printer MCP's own words. */
+  label?: string;
   suggested?: boolean;
 }
 export interface Estimate {

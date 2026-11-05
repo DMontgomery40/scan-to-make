@@ -77,10 +77,10 @@ export const parameters = {
   'objects.answerReconstruction': z.strictObject({id: z.uuid(), reviewId: z.uuid(), answer: ReconstructionAnswerSchema}),
   'objects.print': z.strictObject({id: z.uuid(), expectedPlate: z.string().regex(/^[0-9a-f]{64}:[0-9]+$/).optional(), checked: z.boolean().optional(), filament: z.strictObject({
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
-    name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
+    name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), label:z.string().max(64).optional(), feed:z.string().max(32).optional(), suggested:z.boolean().optional(),
   }).optional(), filaments: z.array(z.strictObject({
-    slot:z.number().int().min(0).max(4095), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
-    name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
+    slot:z.number().int().min(0).max(4095), colour:z.string().regex(/^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/), material:z.string().min(1).max(128),
+    name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), label:z.string().max(64).optional(), feed:z.string().max(32).optional(), suggested:z.boolean().optional(),
   })).min(1).max(64).optional(), filamentsModelVersion: z.string().min(1).max(128).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(), colour: PrintColourSchema.optional(),
     copies: z.number().int().min(1).max(64).optional(), pauseBeforeLayers: PrintSettingsSchema.shape.pauseBeforeLayers,
     sliceSha256: z.string().regex(/^[0-9a-f]{64}$/).optional()}),
@@ -88,11 +88,11 @@ export const parameters = {
   'objects.estimate': z.strictObject({id: z.uuid(), destinationId: z.string().min(1).max(256).optional(), quality: PrintQualitySchema.optional(), strength: PrintStrengthSchema.optional(),
     colour: PrintColourSchema.optional(), pauseBeforeLayers: PrintSettingsSchema.shape.pauseBeforeLayers, filament: z.strictObject({
       slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
-      name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
+      name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), label:z.string().max(64).optional(), feed:z.string().max(32).optional(), suggested:z.boolean().optional(),
     }).optional(),
     copies: z.number().int().min(1).max(64).optional(), filaments: z.array(z.strictObject({
-      slot:z.number().int().min(0).max(4095), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),
-      name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), suggested:z.boolean().optional(),
+      slot:z.number().int().min(0).max(4095), colour:z.string().regex(/^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/), material:z.string().min(1).max(128),
+      name:z.string().max(256), filamentId:z.string().max(128), destinationId:z.string().min(1).max(256), label:z.string().max(64).optional(), feed:z.string().max(32).optional(), suggested:z.boolean().optional(),
     })).min(1).max(64).optional(), filamentsModelVersion: z.string().min(1).max(128).optional()}),
   'objects.pausePrint': z.strictObject({id: z.uuid()}),
   'objects.resumePrint': z.strictObject({id: z.uuid()}),

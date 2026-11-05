@@ -209,14 +209,8 @@ struct PrintSheet: View {
         }
     }
 
-    static func name(_ filament: PrinterFilament) -> String {
-        // AMS units are lettered A–D, four trays each (slot 4 is B1); AMS-HT units report from 128.
-        let place = filament.slot == 255 ? "External 2"
-            : filament.external ? "External"
-            : filament.slot >= 128 ? "AMS-HT \(String(UnicodeScalar(65 + min(filament.slot - 128, 25))!))"
-            : "\(String(UnicodeScalar(65 + min(filament.slot / 4, 25))!))\(filament.slot % 4 + 1)"
-        return "\(place) · \(filament.material) \(filament.name)"
-    }
+    /// "A2 · Sunflower Yellow PLA Basic", in the printer MCP's words.
+    static func name(_ filament: PrinterFilament) -> String { filament.title }
 
     // MARK: Pauses
 
@@ -265,8 +259,8 @@ struct PrintSheet: View {
     /// The mapping choices as a task key, so editing a spool re-slices the estimate with it.
     private var mappingSignature: String { mappingSlots.keys.sorted().map { "\($0):\(mappingSlots[$0] ?? -1)" }.joined(separator: ",") }
 
-    /// AMS trays and the external spool can't feed one print together (the companion refuses the mix).
-    private var mixedFeedSources: Bool { ColourMapping.mixesFeedSources(slots: mappingSlots) }
+    /// The chosen spools come from more than one of the MCP's feeds (it refuses the mix).
+    private var mixedFeedSources: Bool { mapping?.mixesFeeds(slots: mappingSlots) ?? false }
 
     /// The chosen spools in filament order, when every colour has one: what Print sends.
     private var chosenSpoolPerColour: [PrinterFilament]? { mapping?.spools(slots: mappingSlots) }
@@ -335,11 +329,10 @@ struct PrintSheet: View {
                 && $0.colour != nil && $0.colour?.caseInsensitiveCompare(filament.colour ?? "") != .orderedSame }) {
             return "Shares this spool with \(other.name ?? "Part \(other.index)") — both parts print this colour."
         }
+        // The printer MCP's own words while its proposal stands; the person's other choice in another material, said plainly.
+        if let note = mapping?.note(filament, slots: mappingSlots) { return note }
         if let material = filament.material, tray.material.caseInsensitiveCompare(material) != .orderedSame {
-            return "Closest colour loaded; prints in \(tray.material), not \(material)."
-        }
-        if mappingSlots[filament.index] == filament.slot, let distance = filament.distance, distance > 0.08 {
-            return "Closest colour loaded."
+            return "Prints in \(tray.material), not \(material)."
         }
         return nil
     }

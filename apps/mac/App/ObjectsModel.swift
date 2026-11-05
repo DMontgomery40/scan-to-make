@@ -578,7 +578,7 @@ struct SocketObjects: ObjectsCompanion {
         var filamentProblem: String?
         do {
             colours = try await companion.filaments(id).map { spool in
-                .init(id: String(spool.slot), name: "\(spool.external ? "External" : "A\(spool.slot + 1)") · \(spool.material) \(spool.name)",
+                .init(id: String(spool.slot), name: spool.title,
                       value: .object(spool.external ? ["external": .bool(true)] : ["amsSlot": .number(Double(spool.slot))]))
             }
             if !colours.isEmpty { colours.insert(.init(id: "auto", name: "Suggested spool", value: .object(["auto": .bool(true)])), at: 0) }

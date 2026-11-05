@@ -84,7 +84,7 @@ enum PrinterWords {
         switch printer.state {
         case "ready":
             let spools = store.spools[printer.id] ?? []
-            if spools.count == 1, let loaded = spools.first { return "Ready · \(loaded.material) \(loaded.displayName) loaded" }
+            if spools.count == 1, let loaded = spools.first { return "Ready · \(loaded.spoolName) loaded" }
             return "Ready"
         case "busy": return store.printing(on: printer.id).map { "Printing " + ProjectWords.title($0) } ?? "Busy"
         case "offline": return "Offline"
@@ -272,7 +272,9 @@ struct PrinterDetailView: View {
 
     @ViewBuilder private func filamentCard(_ printer: PrinterDestination) -> some View {
         let spools = store.spools[printer.id] ?? []
+        // The progress report names the spool in use by its slot index ("1") or its label ("A1"); show it by the MCP's own label.
         let inUse = job?.print?.live?.activeFilament?.slot
+        let inUseSpool = spools.first { inUse == String($0.slot) || (inUse != nil && inUse == $0.label) }
         if printer.capabilities?.filaments == "none" {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "questionmark.circle").font(.title3).foregroundStyle(.secondary)
@@ -285,20 +287,20 @@ struct PrinterDetailView: View {
             HStack(spacing: 0) {
                 ForEach(spools.filter { !$0.isExternal }) { spool in
                     VStack(spacing: 6) {
-                        SpoolDot(color: spool.color, size: 40, selected: spool.slotLabel == inUse)
+                        SpoolDot(color: spool.color, size: 40, selected: spool.slot == inUseSpool?.slot)
                         Text(spool.slotLabel).font(.caption.weight(.semibold))
-                        Text("\(spool.material) \(spool.displayName)").font(.caption2).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.center)
+                        Text(spool.spoolName).font(.caption2).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                 }
             }
             .padding(.vertical, 16).padding(.horizontal, 8)
             .glassEffect(.regular, in: .rect(cornerRadius: 24))
-            .overlay(alignment: .topTrailing) { if let inUse { Text("\(inUse) in use").font(.caption2.weight(.bold)).foregroundStyle(Color.filament).padding(10) } }
+            .overlay(alignment: .topTrailing) { if let inUseSpool { Text("\(inUseSpool.slotLabel) in use").font(.caption2.weight(.bold)).foregroundStyle(Color.filament).padding(10) } }
         } else if let loaded = spools.first {
             HStack(spacing: 12) {
                 SpoolDot(color: loaded.color, size: 36)
-                Text("\(loaded.material) \(loaded.displayName)").font(.body.weight(.medium))
+                Text(loaded.spoolName).font(.body.weight(.medium))
                 Spacer()
             }
             .padding(16).glassEffect(.regular, in: .rect(cornerRadius: 24))

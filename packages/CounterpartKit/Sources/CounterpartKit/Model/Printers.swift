@@ -165,16 +165,25 @@ public struct PrinterFilament: Codable, Identifiable, Equatable, Hashable, Senda
     public var destinationId: String
     /// The one tray the Mac preselects (PR 2).
     public var suggested: Bool?
+    /// Where the spool sits, in the printer MCP's own words; nil from an older Mac.
+    public var label: String?
+    /// Which spools can feed one print together (`ams`, `external`), as the printer MCP groups them.
+    public var feed: String?
     public var id: Int { slot }
 
-    public init(slot: Int, colour: String, material: String, name: String, filamentId: String, destinationId: String, suggested: Bool? = nil) {
+    public init(slot: Int, colour: String, material: String, name: String, filamentId: String, destinationId: String, suggested: Bool? = nil,
+                label: String? = nil, feed: String? = nil) {
         self.slot = slot; self.colour = colour; self.material = material; self.name = name; self.filamentId = filamentId
-        self.destinationId = destinationId; self.suggested = suggested
+        self.destinationId = destinationId; self.suggested = suggested; self.label = label; self.feed = feed
     }
 
     public var isExternal: Bool { slot >= 254 }
-    /// "A1", "A2" … for AMS slots, "Ext" for the external spool.
-    public var slotLabel: String { isExternal ? "Ext" : "A\(slot + 1)" }
+    /// The printer MCP's label for the spool; its material from an older Mac that doesn't send one.
+    public var slotLabel: String { label ?? material }
+    /// The spool as a person reads it: the printer MCP's name ("Sunflower Yellow PLA Basic"), which already says its material.
+    public var spoolName: String { label != nil ? name : "\(material) \(displayName)" }
+    /// "<label> · <name>", both the printer MCP's.
+    public var title: String { label.map { "\($0) · \(name)" } ?? spoolName }
 
     /// The spool's name without its colour code or a repeated material ("Bambu PLA Basic #FFFFFF" → "Bambu PLA Basic").
     public var displayName: String {
@@ -215,11 +224,15 @@ public struct ModelColourFilament: Codable, Identifiable, Equatable, Hashable, S
     public var materialMismatch: Bool?
     /// No colour was known: the suggestion is only a starting point.
     public var guessed: Bool?
+    /// The printer MCP's verdict on its proposal (`same-colour`, `closest`, `no-colour`, `none`) and what the person should know.
+    public var verdict: String?
+    public var note: String?
     public var id: Int { index }
     public init(index: Int, name: String? = nil, colour: String? = nil, material: String? = nil, slot: Int? = nil,
-                distance: Double? = nil, materialMismatch: Bool? = nil, guessed: Bool? = nil) {
+                distance: Double? = nil, materialMismatch: Bool? = nil, guessed: Bool? = nil, verdict: String? = nil, note: String? = nil) {
         self.index = index; self.name = name; self.colour = colour; self.material = material
         self.slot = slot; self.distance = distance; self.materialMismatch = materialMismatch; self.guessed = guessed
+        self.verdict = verdict; self.note = note
     }
 }
 
@@ -241,6 +254,14 @@ public struct ColourMapping: Codable, Equatable, Sendable {
         guard !filaments.isEmpty else { return nil }
         let choices = filaments.compactMap { filament in trays.first { $0.slot == slots[filament.index] } }
         return choices.count == filaments.count ? choices : nil
+    }
+    /// The chosen spools come from more than one feed (the printer MCP's `feed`): one print feeds from one.
+    public func mixesFeeds(slots: [Int: Int]) -> Bool {
+        Set(slots.values.compactMap { slot in trays.first { $0.slot == slot }?.feed }).count > 1
+    }
+    /// The MCP's note for a row while the person keeps its proposed spool.
+    public func note(_ filament: ModelColourFilament, slots: [Int: Int]) -> String? {
+        slots[filament.index] == filament.slot ? filament.note : nil
     }
 }
 

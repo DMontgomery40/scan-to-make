@@ -195,6 +195,43 @@ test('a multi-colour design prints each part from the nearest loaded spool', asy
   assert.equal(f.runs[0].options.slicer.filamentColours, '#000000;#FEC600');
 });
 
+test('the sheet shows the MCP’s proposal in its words: a white part with no white on the AMS says where white is (caliper card, Nov 4)', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{name: 'body', colour: '#000000', material: 'PLA'}, {name: 'letters', colour: '#FFFFFF', material: 'PLA'}]});
+  const mapping = await f.service.colourMapping(f.object.id);
+  assert.deepEqual(mapping.filaments.map(x => [x.name, x.slot, x.verdict]), [['body', 0, 'same-colour'], ['letters', 1, 'closest']]);
+  assert.equal(mapping.filaments[1].note, '#FFFFFF is loaded on External, but one print feeds from one source. Closest here: A2 PLA.',
+    'never a quiet yellow: the MCP says white is on the external spool');
+  assert.deepEqual(mapping.trays.map(tray => [tray.slot, tray.label, tray.feed]), [[0, 'A1', 'ams'], [1, 'A2', 'ams'], [254, 'External', 'external']],
+    'each tray carries the MCP\'s feed, so the sheet can say when two choices can\'t print together (Codex, PR #341)');
+  // The person's override goes to the MCP, which checks it against what is loaded now.
+  const calls = [];
+  const proposed = f.deps.print.services.runner.proposeFilaments;
+  f.deps.print.services.runner.proposeFilaments = async function (input) { calls.push(input); return proposed.call(this, input); };
+  const external = mapping.trays.find(tray => tray.slot === 254);
+  await f.service.estimate(f.object.id, {filaments: [external, external], filamentsModelVersion: mapping.modelVersion});
+  assert.deepEqual(calls.at(-1).chosen, [{index: 1, slot: 254, colour: '#FFFFFF', material: 'PLA', filamentId: 'GFA00'}, {index: 2, slot: 254, colour: '#FFFFFF', material: 'PLA', filamentId: 'GFA00'}]);
+  assert.equal(f.runs.at(-1).estimate.slicer.loadFilaments, '/p/ext.json;/p/ext.json');
+});
+
+test('an MCP without the spool proposal asks for its update; its refusals reach the person in its words', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
+  const {modelVersion, trays} = await f.service.colourMapping(f.object.id);
+  const runner = f.deps.print.services.runner;
+  runner.proposeFilaments = async () => { throw new PrinterMcpError('filament-proposal-unavailable'); };
+  await assert.rejects(f.service.colourMapping(f.object.id), /Update bambu-printer-mcp in Settings → Printers so Counterpart can match each colour/);
+  delete runner.proposeFilaments;
+  await assert.rejects(f.service.colourMapping(f.object.id), /Update bambu-printer-mcp in Settings → Printers/);
+  // With no spools chosen (Android, Linux, a print from elsewhere) the colours are never silently dropped either (Codex, #341).
+  await assert.rejects(f.service.estimate(f.object.id, {}), /Update bambu-printer-mcp in Settings → Printers so Counterpart can match each colour/);
+  await assert.rejects(f.service.print(f.object.id), /Update bambu-printer-mcp in Settings → Printers so Counterpart can match each colour/);
+  runner.proposeFilaments = async () => ({contract: 'counterpart/1', trays: [], proposal: [], problems: [{code: 'mixed-feeds', message: 'One print feeds from one source (in the MCP’s words).'}]});
+  await assert.rejects(f.service.estimate(f.object.id, {filaments: [trays[0], trays[1]], filamentsModelVersion: modelVersion}), /in the MCP’s words/);
+  runner.proposeFilaments = async () => ({not: 'a proposal'});
+  await assert.rejects(f.service.estimate(f.object.id, {filaments: [trays[0], trays[1]], filamentsModelVersion: modelVersion}), /Update bambu-printer-mcp/);
+});
+
 test('the sheet’s spools override the suggestion, and a spool that changed since is refused', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
   await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#111111'}, {colour: '#FFD200'}]});
@@ -982,6 +1019,29 @@ test('an MCP that reports AMS trays in the counterpart/1 slots shape (mcp-3D-pri
   const choices = await f.service.filaments(f.object.id);
   assert.deepEqual(choices.map(choice => [choice.slot, choice.colour, choice.material, !!choice.suggested]), [[0, '#000000', 'PLA', true], [1, '#FEC600', 'PLA', false]],
     'well-formed trays only: a colour name or a relative profile is dropped');
+});
+
+test('a spool the MCP names with an eight-digit colour round-trips as the same spool; nothing loaded refuses in the MCP\'s words (Codex, #341)', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes: twoPart3mf(), filaments: [{colour: '#000000'}, {colour: '#FEC600'}]});
+  const runner = f.deps.print.services.runner;
+  runner.filaments = async () => ({slots: [
+    {id: '0', material: 'PLA', color: '#000000FF', name: 'Black PLA Basic', label: 'A1', source: 'printer', profile: '/p/pla.json'},
+    {id: '1', material: 'PLA', color: '#FEC600FF', name: 'Sunflower Yellow PLA Basic', label: 'A2', source: 'printer', profile: '/p/pla.json'}]});
+  const mapping = await f.service.colourMapping(f.object.id);
+  assert.deepEqual(mapping.trays.map(tray => tray.colour), ['#000000FF', '#FEC600FF'], 'the MCP\'s colour, unchanged, is the spool\'s identity');
+  await f.service.estimate(f.object.id, {filaments: [mapping.trays[0], mapping.trays[1]], filamentsModelVersion: mapping.modelVersion});
+  assert.equal(f.runs.at(-1).estimate.slicer.filamentColours, '#000000;#FEC600', 'the slicer still gets #RRGGBB');
+  // The same spools through the requests the clients send (control socket and phone HTTP share these schemas).
+  const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: f.service});
+  // The request schema refuses invalid parameters with `invalid-request` before the service sees them.
+  const viaSocket = await dispatch('objects.estimate', {id: f.object.id, filaments: [mapping.trays[0], mapping.trays[1]], filamentsModelVersion: mapping.modelVersion});
+  assert.equal(viaSocket.seconds, 3420, 'an eight-digit spool is a valid choice through the request schema');
+  await assert.rejects(dispatch('objects.estimate', {id: f.object.id, filaments: [{...mapping.trays[0], colour: 'black'}, mapping.trays[1]], filamentsModelVersion: mapping.modelVersion}),
+    /Invalid local control request/, 'only a colour in the MCP\'s hex format');
+  // The MCP's refusal is never read by its code to fall back: it reaches the person as the MCP says it.
+  runner.filaments = async () => ({slots: []});
+  await assert.rejects(f.service.estimate(f.object.id, {}), /No filament is loaded/);
 });
 
 test('a control is sent only while the printer is still printing this project\'s job', async t => {
