@@ -5,11 +5,11 @@ import {
   duration,
   estimateRequest,
   freezePlate,
+  offeredChoices,
   guardPlate,
   parseLayers,
   printRequest,
   shownSlice,
-  type PrintChoices,
 } from "./domain";
 import { Action, Modal } from "./ui";
 import type { Estimate, Filament, Printer, Project } from "./types";
@@ -101,15 +101,23 @@ export function PrintSheet({
   } catch (e) {
     pausesProblem = e instanceof Error ? e.message : String(e);
   }
-  const choices: PrintChoices = {
-    destinationId: destination,
-    quality,
-    strength,
-    copies,
-    filament: filaments.find((f) => String(f.slot) === slot),
-    material: material || undefined,
-    pauseBeforeLayers,
-  };
+  const offers = (choice: string) => !plate?.sliced && caps?.[choice] === true;
+  const choices = offeredChoices(
+    {
+      destinationId: destination,
+      quality,
+      strength,
+      copies,
+      filament: filaments.find((f) => String(f.slot) === slot),
+      material: material || undefined,
+      pauseBeforeLayers,
+    },
+    {
+      capabilities: caps,
+      sliced: !!plate?.sliced,
+      savedCopies: initial.copies !== undefined,
+    },
+  );
   const key = JSON.stringify(choices);
   const currentKey = useRef(key);
   currentKey.current = key;
@@ -141,10 +149,7 @@ export function PrintSheet({
         estimateRequest(project.id, choices),
       );
       await ensureCurrent();
-      if (
-        ticket === sequence.current &&
-        currentKey.current === submittedKey
-      )
+      if (ticket === sequence.current && currentKey.current === submittedKey)
         setEstimate(value);
     } finally {
       if (ticket === sequence.current) setEstimating(false);
@@ -154,10 +159,9 @@ export function PrintSheet({
     !!destination &&
     !changing &&
     !stale &&
-    !pausesProblem &&
-    Number.isInteger(copies) &&
-    copies >= 1 &&
-    copies <= 64;
+    !(offers("layerPauses") && pausesProblem) &&
+    (!offers("copies") ||
+      (Number.isInteger(copies) && copies >= 1 && copies <= 64));
   useEffect(() => {
     setEstimate(undefined);
     setEstimating(false);
@@ -338,7 +342,11 @@ export function PrintSheet({
                   : "This printer MCP has not reported layer-pause support."}
             </small>
           </label>
-          <Action disabled={!ready || estimating} run={runEstimate} onError={setError}>
+          <Action
+            disabled={!ready || estimating}
+            run={runEstimate}
+            onError={setError}
+          >
             Slice again
           </Action>
         </div>
@@ -358,15 +366,11 @@ export function PrintSheet({
         <button onClick={onClose}>Cancel</button>
         <Action
           className="primary"
-          disabled={
-            !ready || estimating || !shown || activePrint(project)
-          }
+          disabled={!ready || estimating || !shown || activePrint(project)}
           onError={setError}
           run={async () => {
             await ensureCurrent();
-            if (!Number.isInteger(copies) || copies < 1 || copies > 64)
-              throw new Error("Choose 1 to 64 copies.");
-            parseLayers(pauses, estimate?.layers);
+            if (offers("layerPauses")) parseLayers(pauses, estimate?.layers);
             if (!shown || currentKey.current !== key)
               throw new Error("Open Print to see what will print.");
             const result = await call<{ object: Project }>(
