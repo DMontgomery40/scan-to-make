@@ -8,21 +8,21 @@ One screen, updated in place. No dated copies or prompt files; git history keeps
 
 | Where | Build | Source |
 |---|---|---|
-| Mac `/Applications/Counterpart.app` | 202611050554 (Nov 5 05:57Z) | main `f74c2220`, with #313, #314, #316 and #318 (designer-3MF copies). Rollback: 202611042157 at `~/scan-to-make-work/mac-202611050554/Counterpart.previous`. |
-| iPhone Davica3 `00008150-001A488C3642401C` | 2.0 (202611041132), Release, development signing | `38003639` |
+| Mac `/Applications/Counterpart.app` | 202611050844 (Nov 5 08:47Z) | main `0c967a58`, with #318, #320 and #321 (what will print). Rollback: 202611050554 at `~/scan-to-make-work/mac-202611050844/Counterpart.previous`. |
+| iPhone Davica3 `00008150-001A488C3642401C` | 2.0 (202611050845), Release, development signing, installed Nov 5 | `0c967a58` (#321) |
 | Public Mac beta (Sparkle, notarized) | v2.0-beta.4 · 202611040930 | `fbd1a69b` |
 | TestFlight | 2.0 (3) uploaded Nov 4; 2.0 (2) last seen Waiting for Review in Counterpart Public Beta | `4a894769` |
-| bambu-printer-mcp | npm 1.1.59, installed through Settings → Printers → Update (Nov 5 05:58Z): slices a 3MF with its own process, strength is a floor | npm |
-| mcp-3D-printer-server | your git checkout `~/mcp-3D-printer-server` on `feat/bambu-complete` (dist from `56d8fb9`). npm has 1.2.33. No printer uses it, so the app offers no Update or Download for it: "installed through the app" is pending for mcp-3D only. | git |
-| Android | debug APK from main `0f49c0f9` (with #318), never run on a device or emulator | `~/scan-to-make-work/main-builds-20261105/` on the Mac |
-| Linux agents-136 (Xvfb :93, XFCE) | `.deb` from main `0305b891` (#318, #320), with reconstruction 1.2.0, installed Nov 5 08:18Z. The companion runs it (`g0305b891e5cb…`). bambu-printer-mcp 1.1.59 was installed through Settings → Printers → Update; no printer is added there. | same folder; AppImage too |
+| bambu-printer-mcp | npm 1.1.61, installed through Settings → Printers → Update on the Mac (Nov 5 08:56Z) and Linux: draws "What will print" (`include_preview`) | npm |
+| mcp-3D-printer-server | your git checkout `~/mcp-3D-printer-server` on `feat/bambu-complete` (dist from `56d8fb9`). npm has 1.2.33. No printer uses it, so the Mac offers no Update or Download for it: "installed through the app" is pending for the Mac's mcp-3D only. npm has 1.2.34, installed through Update on Linux. | git |
+| Android | debug APK from main `27295626` (with #324, what will print), never run on a device or emulator | `~/scan-to-make-work/main-builds-20261105/` on the Mac |
+| Linux agents-136 (Xvfb :93, XFCE) | `.deb` from main `27295626` (#321, #324), with reconstruction 1.2.0, installed Nov 5 08:51Z. The companion runs it (`g27295626afdd…`). bambu-printer-mcp 1.1.61 and mcp-3d-printer-server 1.2.34 were installed through Settings → Printers → Update; no printer is added there. | same folder; AppImage too |
 
 Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 yellow PLA, A3 PETG. FULU runs in Colima profile `bambu-fulu`; never restart it.
 
 ## Open, in order
 
 1. **Moving backend code to the MCPs (PRD §8.0).** Items 1–3 are done (quality/strength #313, refusal codes #314, slicing capability #316). Next is item 4: delete the counterpart/1 fallback and the `backend === 'bambu-printer-mcp'` special cases. Then items 5–12 in order, one at a time; each extends both MCPs, publishes, installs through the app's Update, and only then deletes the app code.
-2. **What will print** (David, Nov 5): Print sends exactly the sliced file whose MCP-drawn pictures the sheet showed. The MCPs are bambu-printer-mcp #107 (1.1.60) and mcp-3D #61 (1.2.34). The Mac and iPhone sheets are in #321 (the lead's). The Android and Linux sheets are in #322, stacked on #321. Once the MCPs publish: install 1.1.60 through Update, merge #321, then build the Mac and iPhone apps from main, then #322 and Linux.
+2. **What will print** (David, Nov 5): Print sends exactly the sliced file whose MCP-drawn pictures the sheet showed. Built and installed everywhere (#321, #324; bambu-printer-mcp 1.1.61, mcp-3D 1.2.34). Seen in the Mac app on the caliper card (PRD §0). Open: a print from the sheet, the iPhone sheet on device, Android and Linux in an app. mcp-3D's changelog correction (branch `docs/changelog-m620`) goes out with its next release.
 3. Bambu Cloud print route: the fix is in the installed 1.1.59. **David** prints with Connection = Bambu Cloud.
 4. FULU through mcp-3D crashes on its config-dir mount (item 12 moves the FULU launcher into bambu-printer-mcp).
 5. A change request stalls silently in `completion-intent.ts`: fixed and gated on `fix/completion-check-visible`, waiting behind the migration.

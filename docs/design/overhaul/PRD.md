@@ -23,8 +23,8 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 
 | Area | Status | Still open |
 |---|---|---|
-| One native iPhone/iPad app, no React Native (§3) | Built; installed 2.0 (202611041132) | — |
-| Mac app (§7) | Built; installed 202611041137 | full mockup parity; background memory budget fails (348 MB idle, §9.6) |
+| One native iPhone/iPad app, no React Native (§3) | Built; installed 2.0 (202611050845, main `0c967a58`) | — |
+| Mac app (§7) | Built; installed 202611050844 (main `0c967a58`) | full mockup parity; background memory budget fails (348 MB idle, §9.6) |
 | Pairing: QR, nearby code (§5.10) | Built; in daily use on Davica3 | — |
 | Automatic iCloud pairing (§5.10) | Built | Not accepted: fresh same-account enrolment |
 | Home, search, title, grid, no fake controls (§5.1) | Built; checked on device Nov 2–3 | stays connected for an hour (never "Mac isn't answering") |
@@ -34,6 +34,7 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | Conversation bubbles; "DONE" marks Done without a pass (§5.4.1) | Built | Not accepted |
 | Change request reliability | Built | **open bug**: `objects/completion-intent.ts` turns errors and timeouts into `unknown` with nothing logged, so a change request can stall silently |
 | Print sheet: printer, estimate, quality, strength (§5.5) | Built; prints from the Mac app's Print button Nov 3 | — · slice estimate parsing: *In the app today; moves to the MCPs (§8.0).* |
+| What will print: the sheet shows the printer MCP's pictures of the exact sliced file, and Print sends only that file (§5.5; David, Nov 5) | Built on Mac and iPhone (#321), Android and Linux (#324); drawn by bambu-printer-mcp 1.1.60+ / mcp-3d-printer-server 1.2.34 (`inspect_print_file` `include_preview`). **Seen in the Mac app Nov 5** (202611050844, caliper card `1f1c5515`): "What will print" shows *Top, as it sits on the bed* and *Bed side, turned over toward you*, and **Print on Bambu Lab P1S** is enabled once they load (not pressed). Screenshot: `~/scan-to-make-work/mac-202611050844/print-sheet-what-will-print.png` | Not accepted: a print from the sheet; the iPhone sheet on device; Android and Linux in an app (Linux on agents-136 has no printer) |
 | Per-part AMS colours for a multi-colour 3MF (§5.5, §8.5) | Built on Mac (#293) and iPhone (`5864c56`) | **Accepted on device Nov 4** (iPhone + P1S, David: "Yes, both colours are correct") · nearest-spool matching: *In the app today; moves to the MCPs (§8.0).* |
 | A colour design from before colour parts asks before printing in one colour (§5.5) | Built (#306) | Not accepted |
 | Copies, pause before a layer (§5.5) | Built; P1S paused itself before layer 3 on Nov 3 (Mac, pre-release MCP build) | Not accepted on the published MCPs; mcp-3D-printer-server parity not on npm · per-slicer rules for copies and supports: *In the app today; moves to the MCPs (§8.0).* |
@@ -47,7 +48,7 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | Live Activity (§9.4) | Built; Sandbox relay test start/update/end seen on the Lock Screen | Not accepted: real print, Watch, production push |
 | Printer camera (§8.6.1) | Built; 12 reads in 23 s, ≤ 8.4 KB, 0 errors | sustained acceptance |
 | Settings on both, the same (§5.9) | Built; keep-awake toggled from the phone changed the Mac. **Seen on device Nov 4** (David, iPhone build 202611041132): Settings shows Connected while the Mac is reachable. The brief "Checking…" state before the first answer (`b845a545`) is covered by the engineering test, not a device check | — |
-| Update both MCPs from either app (§8.10) | Built; bambu-printer-mcp 1.1.54 installed through Settings → Update Nov 4 | from the phone; mcp-3D-printer-server is still a hand-built dist |
+| Update both MCPs from either app (§8.10) | Built; bambu-printer-mcp 1.1.61 installed through Settings → Update on the Mac and on Linux Nov 5; on Linux, mcp-3d-printer-server 1.2.34 too (Update of the app's own copy with no printer, #320) | from the phone; the Mac's mcp-3D is still a hand-built checkout |
 | AI provider routing (§7.5) | Built: Claude Code, Codex CLI, Anthropic/OpenAI API, OpenAI-compatible endpoint, Off | real Claude cleanup observed Nov 4; OpenCode not supported yet |
 | Design passes plan how the object prints (FDM prompt pack, `docs/design/fdm-prompt-pack`) | Published in bambu-printer-mcp 1.1.52 / mcp-3D-printer-server 1.2.26 (#99, #52) | Not accepted |
 | One app named Counterpart, one icon (§10) | Built; `/Applications/Counterpart.app` is the only registration for `com.scantomake.mac` | — |
