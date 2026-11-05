@@ -2,7 +2,7 @@
 
 One screen, updated in place. No dated copies or prompt files; git history keeps the rest. What is built and accepted lives in the [working PRD](../design/overhaul/PRD.md) (§0, §8.0 and each section's status line).
 
-**Owner:** the single Counterpart agent thread started 2026-11-04, which owns main, releases, installs, docs and cleanup. One trunk: `main` (AGENTS.md). The app staples onto the MCPs (AGENTS.md, PRD §8.0).
+**Owner:** one Counterpart agent thread owns main, releases, installs, docs and cleanup. The owner thread started 2026-11-04 answered `thread_not_found` on Nov 5; since then the "Audit Changes and Prevent Regressions" thread owns it. One trunk: `main` (AGENTS.md). The app staples onto the MCPs (AGENTS.md, PRD §8.0).
 
 ## Installed builds
 
@@ -27,7 +27,8 @@ Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 
 4. FULU through mcp-3D crashes on its config-dir mount (item 12 moves the FULU launcher into bambu-printer-mcp).
 5. A change request stalls silently in `completion-intent.ts`: fixed and gated on `fix/completion-check-visible`, waiting behind the migration.
 6. Android on a real device or emulator; Linux pairing and printing.
-7. The rest of the PRD's not-accepted list (§0).
+7. **A search must never hide projects silently** (Nov 5: the Mac sidebar showed 1 of 10 with "caliper card" in the toolbar search). Mac fixed and seen live in 202611051513 (#326). Other clients were only read in code: Android's search field is a `LazyColumn` item that scrolls away while the list stays filtered; iPhone/iPad `.searchable` placement was never looked at in the app; Linux showed no search in `useWorkspace.ts`. Also correct the `MainWindow.swift` search comment: nobody saw the toolbar field shrink to an icon.
+8. The rest of the PRD's not-accepted list (§0).
 
 **Waiting on David:** every physical print; he starts them ("do not reprint anything on your own EVER"). Next: redo the caliper card (`1f1c5515`) in the app and print it (copy of a designer's 3MF, fixed and installed Nov 5, PRD §0), and the Bambu Cloud print (item 3). The phone's "Connected" in Settings was seen on device Nov 4 (old item 4.3, done).
 
