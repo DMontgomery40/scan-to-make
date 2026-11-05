@@ -40,4 +40,4 @@ buttons, meets WCAG AA in both palettes.
   `docs/brand/counterpart-icon-1024.png`). Remake them if the app icon changes.
 - **Only describe what's on main.** Features in open pull requests (adding printers in Settings, printer connection
   choices on iPhone) go in when they merge.
-- The app isn't downloadable yet; the page says so. Add the App Store link and price when they exist.
+- Downloads appear on the landing page and beta setup page. Keep OS requirements, release links and checksums current. TestFlight upload is not external approval; refer readers to TestFlight for current availability.
