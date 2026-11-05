@@ -146,6 +146,8 @@ struct SidebarList: View {
     private var archived: [Project] { store.projects.filter { $0.isArchived && matches($0) } }
 
     var body: some View {
+        VStack(spacing: 0) {
+            ProjectSearchBar(query: $query, searching: $searching, matched: store.projects.filter { matches($0) }.count, total: store.projects.count)
         List(selection: $selection) {
             section("Now", group([.printing, .preparing, .working, .sending]))
             section("Needs you", group([.needsYou]))
@@ -154,7 +156,7 @@ struct SidebarList: View {
             section("Printed", group([.printed, .sent]))
             section("Other", group([.draft, .failed, .unknown]))
             if !archived.isEmpty {
-                Section(isExpanded: $showArchived) {
+                Section(isExpanded: Binding(get: { showArchived || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }, set: { showArchived = $0 })) {
                     ForEach(archived) { project in
                         SidebarRow(store: store, project: project)
                             .tag(project.id)
@@ -169,10 +171,10 @@ struct SidebarList: View {
                 } header: { Text("Archived · \(archived.count)") }
             }
         }
+        }
         .navigationTitle("Projects")
         .navigationSubtitle(store.reachable == false ? "\(store.macName ?? "Your Mac") isn't answering" : store.reachable == true ? "\(store.macName ?? "Your Mac") connected" : store.macName ?? "Your Mac")
-        .searchable(text: $query, prompt: "Projects, printers, notes")
-        .searchFocused($searching)
+
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .refreshable { await store.load() }
         .toolbar {

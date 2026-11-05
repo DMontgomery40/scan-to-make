@@ -27,6 +27,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -71,9 +72,7 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
     var searching by remember { mutableStateOf(false) }
     var showArchived by remember { mutableStateOf(false) }
 
-    val searched = projects.filter { p ->
-        query.isBlank() || listOfNotNull(p.title, p.instructions, state.printerName(p)).any { it.contains(query.trim(), ignoreCase = true) }
-    }
+    val searched = searchProjects(projects, query, state::printerName)
     val visible = searched.filter { !it.isArchived }
     val archived = searched.filter { it.isArchived }.sortedByDescending { it.updatedAtMs }
     fun phase(p: Project) = state.words(p).phase
@@ -99,11 +98,18 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
         ExtendedFloatingActionButton(onClick = { newProject(null) }, containerColor = Palette.filament, contentColor = Color.Black,
             icon = { Icon(CIcons.Add, null) }, text = { Text("New", fontWeight = FontWeight.SemiBold) })
     }) { padding ->
-        PullToRefreshBox(refreshing, onRefresh = { scope.launch { refreshing = true; state.load(); state.loadPrinters(); refreshing = false } }, Modifier.padding(padding)) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (searching) item {
+        Column(Modifier.padding(padding)) {
+            if (searching || query.isNotBlank()) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), placeholder = { Text("Projects, printers, notes") }, singleLine = true)
+                    if (searched.size < projects.size) {
+                        Text("${searched.size} of ${projects.size} projects match “$query”", color = Palette.secondary)
+                        TextButton(onClick = { query = "" }) { Text("Show All") }
+                    }
                 }
+            }
+        PullToRefreshBox(refreshing, onRefresh = { scope.launch { refreshing = true; state.load(); state.loadPrinters(); refreshing = false } }, Modifier.weight(1f)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 error?.let { e -> item { ConnectionBanner(e.message, e.needsPairing) } }
                 if (query.isBlank()) item { StarterProjects { open(it, false) } }
                 if (loaded && projects.isEmpty() && error == null) {
@@ -125,7 +131,7 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
                 if (archived.isNotEmpty()) {
                     item { Text((if (showArchived) "▾ " else "▸ ") + "Archived · ${archived.size}", color = Palette.secondary, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.clickable { showArchived = !showArchived }.padding(vertical = 6.dp)) }
-                    if (showArchived) items(archived, key = { "arch-" + it.id }) { p ->
+                    if (showArchived || query.isNotBlank()) items(archived, key = { "arch-" + it.id }) { p ->
                         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).clickable { open(p.id, false) }.padding(14.dp)) {
                             Text(state.words(p).title, Modifier.weight(1f)); Text(Format.`when`(p.updatedAtMs.toLong()), color = Palette.secondary, fontSize = 13.sp)
                         }
@@ -134,6 +140,7 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
                 if (!loaded && error == null) item { Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Palette.filament) } }
             }
         }
+    }
     }
 }
 

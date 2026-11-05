@@ -27,7 +27,7 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | Mac app (§7) | Built; installed 202611050844 (main `0c967a58`) | full mockup parity; background memory budget fails (348 MB idle, §9.6) |
 | Pairing: QR, nearby code (§5.10) | Built; in daily use on Davica3 | — |
 | Automatic iCloud pairing (§5.10) | Built | Not accepted: fresh same-account enrolment |
-| Home, search, title, grid, no fake controls (§5.1) | Built; checked on device Nov 2–3 | stays connected for an hour (never "Mac isn't answering") |
+| Home, search, title, grid, no fake controls (§5.1) | Built; Home checked on device Nov 2–3. Search stays above its filtered list and says how many projects match with Show All on Mac (#326), Android, iPhone/iPad and Linux (#329) | New search behavior: installed-app verification pending; stays connected for an hour (never "Mac isn't answering") |
 | Starter projects (§5.11) | Built on iPhone, Mac, Android, Linux | Not accepted; rig original import and physical prints |
 | Scanning: walk-around, in hand, rig (§5.3, §11) | Built; a physical iPhone scan → Mac cleanup → model observed Nov 4 (Leatherman Wave+) | Not accepted: geometry, dimensions, print fitness; in-hand recorder defects (§11) |
 | Project page, rename, Project Settings, Done/Works (§5.4) | Built; Done/Works checked on both Nov 2–3 | rename and settings acceptance partial; Compare versions not built (§18) |
