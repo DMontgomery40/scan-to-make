@@ -237,12 +237,13 @@ class CompanionClientTests {
         assertEquals(listOf("top", "bed_side"), estimate.preview!!.views.map { it.name })
         // Decode the whole PNG, not just its signature: these shared images must be usable by the UI.
         // JVM ImageIO validates the fixture here; actual Android BitmapFactory rendering is a device check.
+        // ImageIO is available to the JVM test runner, but absent from Android's compile-time API stubs.
+        val readPng = Class.forName("javax.imageio.ImageIO").getMethod("read", java.io.InputStream::class.java)
         for (view in estimate.preview!!.views) {
             val bytes = java.util.Base64.getDecoder().decode(view.png)
-            val image = javax.imageio.ImageIO.read(bytes.inputStream())
-            assertNotNull("${view.name} is a decodable PNG", image)
-            assertEquals(view.width, image.width)
-            assertEquals(view.height, image.height)
+            val image = requireNotNull(readPng.invoke(null, bytes.inputStream())) { "${view.name} is not a decodable PNG" }
+            assertEquals(view.width, image.javaClass.getMethod("getWidth").invoke(image))
+            assertEquals(view.height, image.javaClass.getMethod("getHeight").invoke(image))
         }
         // Only an estimate whose pictures are of its own sliced file can be printed.
         assertNull(estimate.copy(preview = null).shownSlice) // an MCP that draws nothing
