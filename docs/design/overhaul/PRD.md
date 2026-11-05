@@ -63,19 +63,23 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | TestFlight and Mac beta (§14) | 2.0 (3) uploaded; Mac v2.0-beta.4 notarized and published | external review approval; production push delivery |
 | Widgets (§9.5) | Built | Control Center, App Intents/Siri, Spotlight, Share extension and Watch are not built |
 
-**Known issues from the Nov 2–3 hands-on review that nobody has re-checked since.** The review's two-colour items (one-colour print, the AI telling the person to slice, a preview that isn't the model) are fixed by per-part colours. Failures now reach the phone (#295), and the MCP's "needs a yes before printing" prompt is gone. Still to re-check on device:
-- thickness rounded up ("27 × 31 × 1 mm" for a 0.6 mm pick); "0 g" for a 0.49 g estimate;
-- stage names for the wrong job ("Fixing the scan" with no scan); milestones out of order on short prints;
-- a project's start date taken from an old phone draft; a stray "Your project" draft;
-- spool names as developer strings ("A1 · PLA PLA Basic PLA #000000");
-- "Copies: as the printer profile says" next to a stepper showing 1; "Your printer MCP's preset" as the profile name;
-- phone presence flipping between "seen 15 minutes ago" and "connected";
-- a finished print still offering Pause and Stop, "You'll get a notification when it's done" and a stale camera (Android and the companion now hide these; the iPhone needs checking); Speed shows "–";
-- the Mac print sheet's Cancel ignores an accessibility press; text set through accessibility leaves Create Project disabled;
-- the sidebar printer row opens Settings → Printers instead of the printer;
-- a title capsule in the toolbar that is really a rename button (David: "this needs to go");
-- "I checked the printer: it isn't already printing this" blocking Print with no visible reason;
-- "Getting the print ready" for ~6 minutes after the printer started; "Busy" after a finished print.
+**Known issues from the Nov 2–3 hands-on review — re-checked Nov 5, 2026.** Code baseline `1b66d937`; installed Mac 202611051513 (`6a6d4dde`). These are engineering findings, not device acceptance. No physical print was started.
+
+| Item | Re-check and disposition |
+|---|---|
+| Thickness rounded up; “0 g” | **Already gone in shared formatting:** `Format.size` retains tenths and `Format.grams(0.49)` is `0.5 g` (`SmallMeasurementTests`). Installed Mac accessibility shows `102.6 × 36 × 20.6 mm` in the model stage. The sidebar still rounds dimensions separately; see below. |
+| Wrong-job stage names; milestones out of order | **Already gone in code:** `stageWords` chooses Designing it / Fixing the scan / Getting the designer's file by pass kind. `PrintMonitor` sorts crossed milestones, emits only the highest, and does not back-fill missed milestones after a long sleep. Existing `print-monitor.test.mjs` covers jumps and restart. **Still open:** short-print notification delivery acceptance; no print run in this audit. |
+| Old phone draft date; stray “Your project” | **Still open:** `NewProjectView` intentionally resumes its saved unsent draft; Inspector labels `createdAtMs` as “Project started”, so an older creation date remains possible. Installed Mac sidebar had ten named projects, no stray draft; that observation does not prove draft lifecycle fixed. |
+| Developer spool strings | **Still open / assigned to mig-discovery:** labels must come from MCP structured fields. |
+| Copies/profile wording | **Fixed in this change:** Inspector labels saved time/weight “Last print estimate”, removing the invented profile name. **Still open / assigned to print-truth:** copies/profile contradiction in the print sheet. |
+| Phone presence flipping | **Still open:** installed Mac read “iPhone (13CE) · seen 13 hours ago”; no flip observed. Sidebar uses `seenAt` (max of refresh and request), while Settings requires `lastSeenAt`. Needs a live phone refresh/reconnect trace before claiming a cause or a fix. |
+| Finished print Pause/Stop, notification promise, stale camera, Speed “–” | **Already gone in iPhone code** (`b845a545`): `PrintingView.printEnded` hides controls and future notification text, stops camera polling, and labels a retained frame “Last camera photo”. Speed tile is absent. **Still open:** real iPhone finished-print acceptance. |
+| Cancel AXPress; Create Project after AX text set | **Still open / assigned to print-truth:** print-sheet Cancel. Direct AXValue is not evidence of a SwiftUI binding update; operations instructions use focus plus System Events keystrokes. Create Project's direct AXValue path was not re-tested. |
+| Sidebar printer opens Settings | **Fixed in this change:** opens that printer's live catalog status, model/address and recorded projects; selecting a project opens it. The project list matches its recorded print destination, not the next-print preference. Regression in `ObjectsModelTests`. |
+| Toolbar rename capsule | **Fixed in this change:** removed the principal rename button; Rename Project remains in More. Before-change installed AX tree exposed “Rename Leatherman Wave+ replica”. Native window title remains. |
+| Unexplained “I checked the printer” block | **Still open / assigned to print-truth:** toggle remains gated by uncertain prior dispatch; needs the reason visible alongside it. |
+| Six minutes “Getting the print ready”; Busy after completion | **Still open for acceptance:** installed sidebar reported P1S Ready, not Busy, with all projects ready/done/printed. Current monitor correlates the job and terminal state; this idle observation cannot verify the dispatch-to-print transition. No autonomous reprint. |
+
 
 ## 1. The product
 
@@ -1275,7 +1279,7 @@ Screenshots: `screens/phone-widgets.jpg` and `screens/phone-widgets-lock.jpg` (a
 
 ### 9.6 Performance budgets
 
-**Status:** Not accepted: the installed Mac app measured 348 MB with its window open and 349 MB closed, peaking at 591 MB (build 1355, Nov 3). That is over budget.
+**Status:** Background budget still not accepted. Re-measured Nov 5, 2026, 20:04–20:10 UTC on installed Release 202611051513 with `footprint -p <pid> --noCategories` over `ssh mac`: UI PID 52075 **260 MB window open**, **543 MB lifetime peak**; companion server PID 52878 **85 MB**, agent node PID 52167 **14 MB**, companion launcher PID 52072 **3520 KB**. Open-window UI is below 350 MB; companion server is below 120 MB. Immediately hiding the app gave 262 MB; immediately closing its project window gave 263 MB (both above 150 MB), then the original window was reopened. These immediate samples are not a settled menu-bar-only measurement. `vmmap -summary 52075` while hidden showed about 134 MB swapped owned graphics, but no allocation history establishing a fixable cause. No memory fix claimed. Earlier build 1355 measured 348 MB open / 349 MB closed, peak 591 MB on Nov 3.
 
 Counterpart runs all day in the menu bar and on the phone, so it has to be cheap when nothing is happening.
 
