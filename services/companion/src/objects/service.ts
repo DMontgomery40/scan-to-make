@@ -37,6 +37,13 @@ import type {PrinterDirectory, PublicDestination} from '../printing/directory.js
 /** How early before its deadline the relay's own expiry may report an unanswered question as cancelled. */
 const CONFIRMATION_EXPIRY_SLACK_MS = 1000;
 
+/** The completion check's failure in a few plain words: a timeout says so, anything else keeps its first line. */
+function completionCheckReason(message: string): string {
+  if (/timed? ?out|ETIMEDOUT|SIGTERM/i.test(message)) return 'it took too long';
+  const line = message.split('\n')[0]!.trim();
+  return line.length > 160 ? `${line.slice(0, 157)}…` : line || 'no answer';
+}
+
 const STAGE_DEFAULTS = (kind: PassKind) => ({...STAGE_DEFAULT_SEC[kind]});
 
 /** Copies an Ask's picture as JPEG: PNG through macOS's sips; where there is no sips, the bytes as they are. */
@@ -1116,11 +1123,19 @@ export class ObjectService {
     const message = object.messages!.find(item => item.id === object.pendingMessageId)!;
     // Photos can document a successful print too. They must not force a mesh-changing pass.
     if (object.current && !object.question && object.ask?.status !== 'open' && this.#deps.reportsCompletion) {
-      const intent = await this.#deps.reportsCompletion(note).catch(() => 'unknown' as const);
+      // A check that couldn't run is not an answer: companion.log and the person both hear why.
+      let unavailable: string | undefined;
+      const intent = await this.#deps.reportsCompletion(note).catch((error: unknown) => {
+        unavailable = error instanceof Error ? error.message : String(error);
+        console.error(`completion check for ${id} could not run: ${unavailable}`);
+        return 'unknown' as const;
+      });
       if (intent === 'unknown') {
         this.#changed(object);
         await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['pendingFollowup']}});
-        throw new InvalidStateError("Your message is saved, but I couldn't tell whether it marks Done or asks for changes. Try sending it again, or set Status to Done.");
+        throw new InvalidStateError(unavailable === undefined
+          ? "Your message is saved, but I couldn't tell whether it marks Done or asks for changes. Try sending it again, or set Status to Done."
+          : `Your message is saved, but the AI couldn't check whether it marks Done or asks for changes (${completionCheckReason(unavailable)}). Try sending it again, or set Status to Done.`);
       }
       if (intent === 'works') {
         const previousStatus = projectStatus(object);

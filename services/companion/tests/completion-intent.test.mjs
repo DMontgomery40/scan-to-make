@@ -22,5 +22,14 @@ test('classification distinguishes changes, success and uncertainty without trun
     assert.equal(await reportsCompletion('DONE. mounted and working. thanks!!', await worker(t, reply)), expected);
   }
   assert.equal(await reportsCompletion('It works. ' + ' '.repeat(4000) + 'But widen the hole', await worker(t, {structured_output: {intent: 'works'}})), 'unknown');
-  assert.equal(await reportsCompletion('It works, but widen the hole', '/does/not/exist'), 'unknown');
+  // A model that can't be asked is not an uncertain answer: the caller logs it and says why.
+  await assert.rejects(reportsCompletion('It works, but widen the hole', '/does/not/exist'), /ENOENT|does\/not\/exist/);
+});
+
+ test('selected worker failures are unavailable, while genuine uncertainty stays unknown', async () => {
+  for (const result of [{exitCode: 1}, {exitCode: 0, resultEvent: {is_error: true}}, {exitCode: 0}]) {
+    await assert.rejects(reportsCompletion('Widen it', '', async () => result), /no answer/);
+  }
+  await assert.rejects(reportsCompletion('Widen it', '', async () => { throw new Error('AI is off'); }), /AI is off/);
+  assert.equal(await reportsCompletion('Widen it', '', async () => ({exitCode: 0, resultEvent: {structured_output: {intent: 'unknown'}}})), 'unknown');
 });
