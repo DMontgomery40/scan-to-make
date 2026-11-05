@@ -3,6 +3,22 @@ import Foundation
 @testable import ControlKit
 
 final class PrinterSetupTests: XCTestCase {
+    func testCatalogResolvesRecordedAliasesFromTheWireAndKeepsOtherPrintersSeparate() throws {
+        let catalog = try JSONDecoder().decode(PrinterCatalog.self, from: Data("""
+        {"defaultDestinationId":"winner","destinations":[
+          {"id":"winner","name":"Printer","backend":"test","aliases":["old-duplicate","previous-mcp"]},
+          {"id":"other","name":"Printer","backend":"test"}
+        ]}
+        """.utf8))
+        XCTAssertEqual(catalog.destination(for: "old-duplicate")?.id, "winner")
+        XCTAssertEqual(catalog.destination(for: "previous-mcp")?.id, "winner")
+        XCTAssertEqual(catalog.destination(for: "winner")?.id, "winner")
+        XCTAssertEqual(catalog.destination(for: "other")?.id, "other")
+        XCTAssertNil(catalog.destination(for: "other")?.aliases)
+        XCTAssertNil(catalog.destination(for: "unknown"))
+        XCTAssertNil(catalog.destination(for: "Printer"), "A matching display name is not identity evidence")
+    }
+
     func testFormSendsOnlyTheFieldsItsBrandUses() throws {
         var bambu = PrinterForm()
         bambu.host = " 192.168.1.40 "; bambu.serial = "01P00A123456789"; bambu.model = "p1s"; bambu.secret = "12345678"

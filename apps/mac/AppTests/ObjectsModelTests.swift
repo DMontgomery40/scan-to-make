@@ -14,9 +14,11 @@ private actor FakeObjects: ObjectsCompanion {
     func beforeDuplicateReturns(_ action: @escaping @Sendable () async -> Void) { beforeDuplicateReply = action }
     private var discoveryAvailable = false
     func enableDiscovery() { discoveryAvailable = true }
+    private var listedPrinters: [PrinterDestination] = []
+    func setPrinters(_ value: [PrinterDestination]) { listedPrinters = value }
     func printers() async throws -> PrinterCatalog {
         guard discoveryAvailable else { throw ControlClientError.unavailable }
-        return .init(destinations: [], defaultDestinationId: "current")
+        return .init(destinations: listedPrinters, defaultDestinationId: "current")
     }
     private var listedDevices: [ControlDevice] = []
     func setDevices(_ value: [ControlDevice]) { listedDevices = value }
@@ -151,6 +153,30 @@ private func project(_ item: [String: Any]) throws -> Project {
         clock = clock.addingTimeInterval(ObjectsModel.extrasDelay)
         await model.refresh()
         XCTAssertEqual(model.latestDevice?.connectedNow(at: now), true)
+    }
+
+    func testPrinterHistoryFollowsCompanionAliasesWithoutRewritingHistory() async throws {
+        let companion = FakeObjects()
+        await companion.enableDiscovery()
+        let winner = try JSONDecoder().decode(PrinterDestination.self, from: Data(#"{"id":"winner","name":"Printer","backend":"test","aliases":["old-duplicate","other-mcp"]}"#.utf8))
+        await companion.setPrinters([winner])
+        await companion.set([
+            item("same-backend", "printed", ["print": ["bundleId": "a", "destination": ["id": "old-duplicate", "name": "Old"]]]),
+            item("switched-mcp", "printed", ["print": ["bundleId": "b", "destination": ["id": "other-mcp", "name": "Old"]]]),
+            item("unrelated", "printed", ["printerDestinationId": "winner", "print": ["bundleId": "c", "destination": ["id": "elsewhere", "name": "Other"]]])
+        ])
+        var clock = Date()
+        let model = ObjectsModel(companion: companion, now: { clock })
+        await model.refresh()
+        XCTAssertEqual(Set(model.projects(forPrinter: "winner").map(\.id)), ["same-backend", "switched-mcp"])
+        XCTAssertEqual(model.objects.first { $0.id == "same-backend" }?.print?.destination?.id, "old-duplicate")
+        await companion.setPrinters([.init(id: "new-winner", name: "Printer", backend: "test", aliases: ["old-duplicate", "other-mcp", "winner"])])
+        clock = clock.addingTimeInterval(ObjectsModel.extrasDelay)
+        await model.refresh()
+        XCTAssertEqual(model.projects(forPrinter: "new-winner").count, 2)
+        XCTAssertEqual(model.projects(forPrinter: "winner").count, 2)
+        XCTAssertEqual(model.printerCatalog?.destination(for: "winner")?.id, "new-winner")
+        XCTAssertTrue(model.projects(forPrinter: "unknown").isEmpty)
     }
 
     func testPrinterProjectsUseRecordedDestinationAndRefreshWhenItChanges() async {

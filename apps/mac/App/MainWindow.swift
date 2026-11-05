@@ -508,7 +508,7 @@ private struct SidebarPrinter: View {
     let opened: PrinterDestination
     @ObservedObject var model: ObjectsModel
     let openProject: (Project) -> Void
-    private var printer: PrinterDestination? { model.printerCatalog?.destinations.first { $0.id == opened.id } }
+    private var printer: PrinterDestination? { model.printerCatalog?.destination(for: opened.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {

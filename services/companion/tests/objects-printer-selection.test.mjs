@@ -142,6 +142,7 @@ test('changing printer after an uncertain print preserves the original printer w
 
 test('the phone and local control expose the same destination ids without MCP configuration or credentials', async t => {
   const {service, object, catalog} = await fixture(t);
+  catalog.destinations.find(d => d.id === 'second').aliases = ['old-duplicate'];
   const dispatch = createControlDispatcher({auth: {}, companionVersion: 'test', objects: service});
   assert.deepEqual(await dispatch('objects.printers', {}), {destinations: catalog.destinations, defaultDestinationId: 'current'});
   assert.equal((await dispatch('objects.selectPrinter', {id: object.id, destinationId: 'second'})).object.printerDestinationId, 'second');

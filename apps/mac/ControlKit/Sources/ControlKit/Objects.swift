@@ -462,6 +462,8 @@ public extension ControlClient {
 
 public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
     public let id: String
+    /// Other catalog IDs the companion resolves to this printer, including recorded print destinations.
+    public let aliases: [String]?
     public let name: String
     public let backend: String
     public let model: String?
@@ -497,17 +499,19 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
         default: return "mcp-3D-printer-server"
         }
     }
-    private enum CodingKeys: String, CodingKey { case id, name, backend, model, address, source, state, origin, capabilities, mcpId, mcps, folder, incomplete }
+    private enum CodingKeys: String, CodingKey { case id, aliases, name, backend, model, address, source, state, origin, capabilities, mcpId, mcps, folder, incomplete }
     public init(id: String, name: String, backend: String, model: String? = nil, address: String? = nil, source: String = "mcp-profile",
                 state: String? = nil, origin: String? = nil, capabilities: PrinterCapabilities? = nil, mcpId: String? = nil,
-                mcps: [McpChoice]? = nil, folder: String? = nil, incomplete: Incomplete? = nil) {
+                mcps: [McpChoice]? = nil, folder: String? = nil, incomplete: Incomplete? = nil, aliases: [String]? = nil) {
         self.id = id; self.name = name; self.backend = backend; self.model = model; self.address = address; self.source = source
         self.state = state; self.origin = origin; self.capabilities = capabilities; self.mcpId = mcpId; self.mcps = mcps; self.folder = folder
         self.incomplete = incomplete
+        self.aliases = aliases
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
+        aliases = try values.decodeIfPresent([String].self, forKey: .aliases)
         name = try values.decode(String.self, forKey: .name)
         backend = try values.decode(String.self, forKey: .backend)
         model = try values.decodeIfPresent(String.self, forKey: .model)
@@ -570,6 +574,10 @@ public struct PrinterCatalog: Decodable, Sendable, Equatable {
     public let defaultDestinationId: String
     public init(destinations: [PrinterDestination], defaultDestinationId: String) {
         self.destinations = destinations; self.defaultDestinationId = defaultDestinationId
+    }
+    /// Resolve only identities supplied by the companion; names and models do not establish identity.
+    public func destination(for id: String) -> PrinterDestination? {
+        destinations.first { $0.id == id } ?? destinations.first { $0.aliases?.contains(id) == true }
     }
 }
 
