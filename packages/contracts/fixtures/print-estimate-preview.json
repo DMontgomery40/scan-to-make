@@ -1,0 +1,29 @@
+{
+  "destinationId": "p1s",
+  "quality": "fine",
+  "strength": "strong",
+  "seconds": 3600,
+  "layers": 120,
+  "slicedAt": "2026-11-05T08:00:00Z",
+  "sliceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "preview": {
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "views": [
+      {
+        "name": "top",
+        "label": "From above",
+        "png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGPQ6LkDRAwQCgAo/gZBrqkBxAAAAABJRU5ErkJggg==",
+        "width": 2,
+        "height": 2
+      },
+      {
+        "name": "bed_side",
+        "label": "From the side",
+        "png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGO406MBRAAMXwMh7kZejwAAAABJRU5ErkJggg==",
+        "width": 2,
+        "height": 1
+      }
+    ],
+    "mmPerPixel": 0.5
+  }
+}
