@@ -147,3 +147,9 @@ struct PrinterMCP: Identifiable, Equatable {
         }
     }
 }
+
+extension PrinterMcpPackage {
+    /// Installed, and a newer version is published: a package no printer uses then offers Update, which installs
+    /// the latest as Counterpart's own copy (`printers.updateMcp` with `appMcpId`, #320's path).
+    var offersUpdate: Bool { installed && McpUpdateStatus.newer(installed: version, latest: latestVersion) }
+}

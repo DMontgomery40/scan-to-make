@@ -57,11 +57,17 @@ import ControlKit
     }
 }
 
-/// One printer MCP that no printer uses yet: Installed (where, which version) or **Download**.
+/// One printer MCP that no printer uses yet: Installed (where, which version) or **Download**. When a newer version
+/// is published, **Update** installs it as Counterpart's own copy (`printers.updateMcp` with `appMcpId`, #320's path),
+/// so a copy someone built by hand is never the only one Counterpart can update. That copy stays as it is.
 struct McpPackageRow: View {
     let package: PrinterMcpPackage
     let status: McpUpdateStatus?
     let download: () -> Void
+    var update: (() -> Void)? = nil
+
+    /// Installed, a newer version is published, and this view can update it.
+    var offersUpdate: Bool { update != nil && package.offersUpdate }
 
     private var busy: Bool { status?.busy == true }
     private var place: String? {
@@ -85,6 +91,9 @@ struct McpPackageRow: View {
                 if let status { statusLine(status) }
                 else if package.installed {
                     Text(["Installed", place].compactMap { $0 }.joined(separator:" · ") + ". No printer uses it yet.").font(.caption).foregroundStyle(.secondary)
+                    if offersUpdate, let latest = package.latestVersion {
+                        Text("\(latest) is available.").font(.caption.weight(.medium)).foregroundStyle(Color.filament)
+                    }
                 }
             }
             Spacer()
@@ -93,6 +102,11 @@ struct McpPackageRow: View {
                 Button(failed ? "Try Again" : "Download", action:download)
                     .buttonStyle(.glassProminent).disabled(busy || installedNow)
                     .help("Installs the latest \(package.label) for Counterpart only. Nothing else changes.")
+            } else if offersUpdate, let update {
+                // Only while busy: a finished install earlier in this session must not block the next version.
+                Button(failed ? "Try Again" : "Update", action:update)
+                    .buttonStyle(.glassProminent).disabled(busy)
+                    .help("Installs \(package.latestVersion ?? "the latest version") as Counterpart’s own copy. Other copies on this Mac are left as they are.")
             }
         }
     }
