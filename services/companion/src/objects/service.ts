@@ -615,8 +615,9 @@ export class ObjectService {
       let own = this.#ownSettingsAsked.get(key);
       if (own === undefined) {
         this.#ownSettingsAsked.set(key, undefined);
+        // The design's own supports, as Print's slice sends them (`#sliceRecipe`).
         own = await ask.call(services.runner, {modelPath, ...(services.selection ? {selection: services.selection} : {}),
-          signal: AbortSignal.timeout(60_000)});
+          ...(Object.keys(designedSupports(object)).length ? {slicer: designedSupports(object)} : {}), signal: AbortSignal.timeout(60_000)});
         if (own === undefined) return;
         this.#ownSettingsAsked.set(key, own);
       }

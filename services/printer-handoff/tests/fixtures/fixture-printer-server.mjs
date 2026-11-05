@@ -80,7 +80,7 @@ const tools = [
   ...(process.env.HANDOFF_FIXTURE_OWN_PROCESS ? [{name: 'get_slice_settings', inputSchema: {type: 'object', additionalProperties: false,
     properties: {source_path: string, template_name: string, slicer_type: string, bambu_model: string,
       ...(process.env.HANDOFF_FIXTURE_OWN_PROCESS_ARGS === 'old' ? {} : {slicer_profile: string, template_3mf_path: string, layer_height: number,
-        wall_loops: integer, sparse_infill_density: string, quality: string, strength: string})}}}] : []),
+        wall_loops: integer, sparse_infill_density: string, quality: string, strength: string, enable_support: bool, support_type: string})}}}] : []),
   ...(mode === 'bambu' ? [
     // HANDOFF_FIXTURE_ROUTE: the MCP's own route, as counterpart_print_route reports it.
     ...(process.env.HANDOFF_FIXTURE_ROUTE ? [{name:'counterpart_print_route',inputSchema:{type:'object',properties:{route:string}}}] : []),
@@ -164,7 +164,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     if (own === 'error') return {isError: true, content: [{type: 'text', text: 'No slicer settings config found'}]};
     // As the MCPs decide it: a named profile or template replaces the file's process; an explicit value or a
     // quality or strength other than standard changes it.
-    const changed = ['slicer_profile', 'template_name', 'template_3mf_path', 'layer_height', 'wall_loops', 'sparse_infill_density'].some(key => args[key] !== undefined)
+    const changed = ['slicer_profile', 'template_name', 'template_3mf_path', 'layer_height', 'wall_loops', 'sparse_infill_density', 'enable_support', 'support_type'].some(key => args[key] !== undefined)
       || (args.quality ?? 'standard') !== 'standard' || (args.strength ?? 'standard') !== 'standard';
     return text({source_path: args.source_path, source_type: '3mf', summary: {layer_height: 0.16}, ...(own === 'absent' ? {} : {own_process: own === 'true' && !changed})});
   }

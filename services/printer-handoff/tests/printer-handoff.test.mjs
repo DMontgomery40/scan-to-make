@@ -848,6 +848,11 @@ test("a designer's 3MF prints with its own process only when the MCP says so, as
   for (const slicer of [{profile: '/p/mine.json'}, {layerHeightMm: 0.2}, {strength: 'strong'}])
     assert.equal((await ask('true', slicer)).own, false, `the MCP says this printer's ${Object.keys(slicer)[0]} changes the file's process`);
   assert.equal((await ask('true', {quality: 'standard'})).own, true, 'standard changes nothing');
+  // The design's own supports go too, as Print sends them.
+  const supported = await setup(t, {ownProcess: 'true'});
+  assert.equal(await supported.runner.ownProcess({modelPath: supported.stlPath, slicer: {enableSupport: true, supportType: 'tree(auto)'}}), false);
+  assert.deepEqual((await supported.calls()).find(call => call.tool === 'get_slice_settings').arguments,
+    {source_path: supported.stlPath, bambu_model: 'p1s', enable_support: true, support_type: 'tree(auto)'});
   // An MCP that can't take one of this printer's arguments would answer for another slice: unknown.
   const old = await setup(t, {ownProcess: 'true', ownProcessArgs: 'old', slicer: {layerHeightMm: 0.2}});
   assert.equal(await old.runner.ownProcess({modelPath: old.stlPath}), undefined);

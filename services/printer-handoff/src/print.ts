@@ -221,13 +221,15 @@ export class PrinterHandoffRunner {
    * at all. Undefined when the MCP doesn't say, can't take one of those arguments (an older MCP), or couldn't
    * be reached.
    */
-  async ownProcess(input: {modelPath: string; selection?: PrinterSelection; signal?: AbortSignal}): Promise<boolean | undefined> {
-    const slicer: PrinterSlicer = {...this.#config.slicer};
+  async ownProcess(input: {modelPath: string; selection?: PrinterSelection; slicer?: Pick<PrinterSlicer, 'enableSupport' | 'supportType'>; signal?: AbortSignal}): Promise<boolean | undefined> {
+    // The config's slicer, with the design's own supports as Print sends them (`input.slicer`).
+    const slicer: PrinterSlicer = {...this.#config.slicer, ...input.slicer};
     const selection: PrinterSelection = {...this.#config.selection, ...input.selection};
     // The config's own values, under the names slice_stl takes (as sliceArgs in run), passed through as they are.
     const sliceArgs: Record<string, unknown> = Object.fromEntries(Object.entries({slicer_type: slicer.type, bambu_model: selection.model,
       slicer_profile: slicer.profile, template_name: slicer.templateName, layer_height: slicer.layerHeightMm, wall_loops: slicer.wallLoops,
-      sparse_infill_density: slicer.sparseInfillDensity, quality: slicer.quality, strength: slicer.strength}).filter(([, value]) => value !== undefined));
+      sparse_infill_density: slicer.sparseInfillDensity, quality: slicer.quality, strength: slicer.strength,
+      enable_support: slicer.enableSupport, support_type: slicer.supportType}).filter(([, value]) => value !== undefined));
     return this.#use(async (session, shared) => {
       const options = {...(input.signal ? {signal: input.signal} : {}), failFast: shared};
       await session.connect(options);
