@@ -56,7 +56,7 @@ class HomeLayoutTests {
         app.companion = CompanionClient(app.pairing, transport, null, null, app.cacheDir)
         state = AppState(app)
         app.state = state
-        Counterpart.instance = app
+        ReflectionHelpers.setStaticField(Counterpart::class.java, "instance", app)
         context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {
             override fun getApplicationContext(): Context = app
         }
