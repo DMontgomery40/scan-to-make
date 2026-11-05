@@ -169,7 +169,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   if (name === 'counterpart_printer_info') return text({contract: 'counterpart/1', server: {name: 'fixture', version: '0'},
     printer: {kind: mode === 'bambu' ? 'bambu' : 'octoprint', host: '127.0.0.1'},
     capabilities: {progress: true, layers: true, camera: 'none', filaments: mode === 'bambu' ? 'ams' : 'single', pause: true, resume: true, cancel: true,
-      print3mf: mode === 'bambu', gcode: true, ...(slicing ? {slicing} : {})}});
+      // A route whose slice is a 3MF (Bambu, or mcp-3D's Bambu route) prints it with print_3mf.
+      print3mf: mode !== 'generic-gcode', gcode: true, ...(slicing ? {slicing} : {})}});
   if (name === 'get_printer_status') return text({raw:{hms:[{attr:0x05000500,code:0x00010007}]}});
   if (name === 'clear_hms_errors') {await confirmPrint();return text({status:'success'});}
   if (name === 'camera_snapshot') return text({format: 'jpeg', base64: 'ZmFrZQ==', savedTo: join(directory, 'snapshot.jpg')});

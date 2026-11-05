@@ -8,9 +8,6 @@ export const MONITOR = {
   startWindowMs: 180_000,
   startPollMs: 3_000,
   watchPollMs: 10_000,
-  /** bambu-printer-mcp's get_printer_status makes the printer send its whole report each time. */
-  fallbackStartPollMs: 10_000,
-  fallbackWatchPollMs: 30_000,
   unreachablePollMs: 30_000,
   unreachableAfterFailures: 3,
   offlineUnreachableMs: 60_000,
@@ -86,8 +83,6 @@ export interface MonitorDeps {
   emit(draft: EventDraft): Promise<void>;
   /** The milestone percentages currently chosen (companion setting). */
   milestones(): readonly number[];
-  /** Reads come from get_printer_status (older MCP): poll more slowly. */
-  fallback?: boolean;
   /** Tests only: the frame wait cap (PRD: 10 s). */
   frameCapMs?: number;
   /** A print dispatched without an identity was recognised by its file name: persist the job name. */
@@ -239,8 +234,7 @@ export class PrintMonitorRunner {
 
   #interval(): number {
     if (this.#state.unreachableSince) return MONITOR.unreachablePollMs;
-    if (this.#state.phase === 'starting') return this.#deps.fallback ? MONITOR.fallbackStartPollMs : MONITOR.startPollMs;
-    return this.#deps.fallback ? MONITOR.fallbackWatchPollMs : MONITOR.watchPollMs;
+    return this.#state.phase === 'starting' ? MONITOR.startPollMs : MONITOR.watchPollMs;
   }
 
   /** Runs until the print ends or `signal` aborts (shutdown); resolves with the end state, if any. */

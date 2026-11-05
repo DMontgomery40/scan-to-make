@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PrinterSession, bambuStatusReport, genericStatusReport, detectCapabilities, readPrintReport, readPrinterInfo, readiness, updateCommand,
+  PrinterSession, detectCapabilities, readPrintReport, readPrinterInfo, readiness, updateCommand,
 } from '../dist/index.js';
 
 const at = new Date('2026-11-01T18:00:00.000Z');
@@ -10,69 +10,45 @@ const generic = {backend: 'mcp-3d-printer-server', process: {command: '/usr/loca
 const tool = (name, properties = {}) => ({name, inputSchema: {type: 'object', properties}});
 const catalog = (...tools) => ({server: {name: 'srv', version: '1.2.3'}, tools});
 
-test('the older Bambu status maps to a report: minutes become seconds, HMS entries become codes', () => {
-  const report = bambuStatusReport({connected: true, status: 'RUNNING',
-    temperatures: {nozzle: {actual: 219.6, target: 220}, bed: {actual: 55, target: 55}, chamber: 31},
-    print: {filename: 'checked-1b2c-Mic mount', progress: 42, timeRemaining: 25, currentLayer: 31, totalLayers: 74},
-    raw: {gcode_state: 'RUNNING', subtask_name: 'checked-1b2c-Mic mount', task_id: '0', print_error: 0,
-      hms: [{attr: 0x07002000, code: 0x00020001}, {attr: 0x0300, code: 0x00010007}, {bogus: true}]}}, at);
-  assert.deepEqual(report, {source: 'status-fallback', observedAt: at.toISOString(), state: 'printing',
-    job: {name: 'checked-1b2c-Mic mount', id: '0', progress: 42, remainingSec: 1500, layer: 31, totalLayers: 74},
-    temps: {nozzle: {actual: 219.6, target: 220}, bed: {actual: 55, target: 55}, chamber: 31},
-    problems: [{code: '0700_2000_0002_0001', severity: 'error', message: 'The printer reported problem 0700_2000_0002_0001.'},
-      {code: '0000_0300_0001_0007', severity: 'fatal', message: 'The printer reported problem 0000_0300_0001_0007.'}]});
-  for (const [gcode, state] of [['IDLE', 'idle'], ['PREPARE', 'preparing'], ['SLICING', 'preparing'], ['PAUSE', 'paused'], ['FINISH', 'finished'], ['FAILED', 'failed'], ['UNKNOWN', 'busy']])
-    assert.equal(bambuStatusReport({connected: true, raw: {gcode_state: gcode}}, at).state, state);
-  assert.equal(bambuStatusReport({status: 'error', connected: false}, at).state, 'offline');
-  // A finished job's leftover time is not "time left".
-  assert.equal(bambuStatusReport({connected: true, print: {filename: 'x', timeRemaining: 9}, raw: {gcode_state: 'FINISH'}}, at).job.remainingSec, undefined);
-  assert.equal(bambuStatusReport({connected: true, raw: {gcode_state: 'FAILED', print_error: 0x0500400e}}, at).problems[0].code, '0500400E');
-});
-
-test("mcp-3D-printer-server's raw printer endpoint gives only a state", () => {
-  assert.equal(genericStatusReport({state: {text: 'Printing', flags: {printing: true, operational: true}}}, at).state, 'printing');
-  assert.equal(genericStatusReport({state: {flags: {paused: true}}}, at).state, 'paused');
-  assert.equal(genericStatusReport({state: {flags: {ready: true, operational: true}}}, at).state, 'idle');
-  assert.equal(genericStatusReport({state: 'ready', state_message: 'Printer is ready'}, at).state, 'idle');
-  // Moonraker's /printer/info and PrusaLink's /api/v1/status wrap their state.
-  // Klippy's "ready" holds while printing: it is not a print state.
-  const klippy = genericStatusReport({result: {state: 'ready', state_message: 'Printer is ready', hostname: 'voron'}}, at);
-  assert.equal(readiness(klippy), 'unknown');
-  assert.equal(genericStatusReport({result: {state: 'shutdown'}}, at).state, 'busy');
-  assert.equal(genericStatusReport({state: {status: 'idle'}}, at).state, 'idle');
-  assert.equal(genericStatusReport({state: {status: 'processing'}}, at).state, 'printing');
-  assert.equal(genericStatusReport({state: {status: 'pausing'}}, at).state, 'paused');
-  assert.equal(genericStatusReport({printer: {state: 'PRINTING'}}, at).state, 'printing');
-  assert.equal(genericStatusReport({printer: {state: 'ATTENTION'}}, at).state, 'paused');
-  assert.equal(genericStatusReport('nope', at).state, 'offline');
-  assert.equal(genericStatusReport({state: 'ready'}, at).job, undefined);
-});
-
-test('capabilities light up from the tool list, and say exactly which update unlocks the rest', () => {
-  const old = detectCapabilities(bambu, catalog(tool('get_printer_status'), tool('camera_snapshot'), tool('get_printer_filaments'),
-    tool('pause_print'), tool('resume_print'), tool('cancel_print'), tool('slice_stl', {stl_path: {}})), undefined, at);
-  assert.equal(old.progress, true);
-  assert.equal(old.camera, 'bambu-tcp');
-  assert.equal(old.filaments, 'ams');
-  assert.deepEqual(old.missing, ['quality', 'strength', 'multi-colour']);
-  assert.deepEqual(old.update, {message: 'Update bambu-printer-mcp to choose quality, strength and colours per part.', package: 'bambu-printer-mcp',
-    command: ['npm', 'install', '-g', 'bambu-printer-mcp@latest']});
+test('capabilities come only from counterpart_printer_info; an MCP without the contract lights up nothing and says Update', () => {
+  // An install from before counterpart/1 (get_printer_status only): no package-based guesses (PRD §8.0 item 4).
+  const tools = [tool('get_printer_status'), tool('camera_snapshot'), tool('get_printer_filaments'),
+    tool('pause_print'), tool('resume_print'), tool('cancel_print'), tool('slice_stl', {stl_path: {}})];
+  for (const config of [bambu, {...bambu, selection: {model: 'x1c'}}, generic]) {
+    const old = detectCapabilities(config, catalog(...tools), undefined, at);
+    assert.equal(old.progress, false);
+    assert.equal(old.camera, 'none', 'no camera kind is assumed from the package or the model');
+    assert.equal(old.filaments, 'none', 'no AMS is assumed from the package');
+    assert.equal(old.pause, false);
+    assert.equal(old.cancel, false);
+    assert.deepEqual(old.missing, ['progress', 'quality', 'strength']);
+    assert.match(old.update.message, /^Update (bambu-printer-mcp|mcp-3D-printer-server) to see progress and choose quality and strength\.$/);
+  }
+  assert.deepEqual(detectCapabilities(bambu, catalog(...tools), undefined, at).update.command, ['npm', 'install', '-g', 'bambu-printer-mcp@latest']);
   const oldGeneric = detectCapabilities(generic, catalog(tool('get_printer_status'), tool('cancel_print'), tool('slice_stl')), undefined, at);
-  assert.equal(oldGeneric.progress, false);
   assert.deepEqual(oldGeneric.missing, ['progress', 'camera', 'filaments', 'pause', 'resume', 'quality', 'strength']);
   assert.equal(oldGeneric.update.message, 'Update mcp-3D-printer-server to see progress, camera and the loaded filament, pause and resume prints and choose quality and strength.');
   assert.equal(oldGeneric.update.command, undefined, 'npx fetches the latest itself');
   const info = {contract: 'counterpart/1', server: {name: 'mcp-3d-printer-server', version: '1.3.0'},
     printer: {kind: 'prusa', host: 'prusa.local'},
     capabilities: {progress: true, layers: false, camera: 'none', filaments: 'single', pause: true, resume: true, cancel: true, print3mf: false, gcode: true}};
-  const updated = detectCapabilities(generic, catalog(tool('counterpart_printer_info'), tool('counterpart_print_progress'), tool('camera_snapshot'),
-    tool('get_printer_filaments'), tool('pause_print'), tool('resume_print'), tool('cancel_print'),
-    tool('slice_stl', {quality: {}, strength: {}})), info, at);
+  const contractTools = [tool('counterpart_printer_info'), tool('counterpart_print_progress'), tool('camera_snapshot'),
+    tool('get_printer_filaments'), tool('pause_print'), tool('resume_print'), tool('cancel_print'), tool('slice_stl', {quality: {}, strength: {}})];
+  const updated = detectCapabilities(generic, catalog(...contractTools), info, at);
   assert.equal(updated.contract, 'counterpart/1');
+  assert.equal(updated.progress, true);
   assert.equal(updated.camera, 'none', 'the firmware has no camera: not something an update unlocks');
   assert.deepEqual(updated.missing, []);
   assert.equal(updated.update, undefined);
-  assert.equal(detectCapabilities({...bambu, selection: {model: 'x1c'}}, catalog(tool('camera_snapshot')), undefined, at).camera, 'rtsp');
+  // Whatever the package, what lights up is what the MCP said.
+  const bambuInfo = {...info, printer: {kind: 'bambu', host: 'p1s.local', model: 'x1c'}, capabilities: {...info.capabilities, layers: true, camera: 'rtsp', filaments: 'ams'}};
+  const fromBambu = detectCapabilities(generic, catalog(...contractTools), bambuInfo, at);
+  assert.deepEqual([fromBambu.camera, fromBambu.filaments, fromBambu.layers], ['rtsp', 'ams', true]);
+  assert.deepEqual(fromBambu.missing, ['multi-colour'], 'an AMS printer without counterpart_make_3mf: Update');
+  // The contract tool is there but has not answered yet: nothing is assumed meanwhile, and nothing is called missing.
+  const pending = detectCapabilities(bambu, catalog(...contractTools), undefined, at);
+  assert.deepEqual([pending.progress, pending.camera, pending.filaments, pending.pause], [false, 'none', 'none', false]);
+  assert.deepEqual(pending.missing, []);
 });
 
 test('update commands follow how the MCP is installed', () => {
@@ -109,9 +85,11 @@ test('reports come from counterpart_print_progress when present and are validate
   await assert.rejects(readPrintReport(bad.session), {code: 'invalid-progress'});
   const none = sessionWith([tool('slice_stl')], {});
   await assert.rejects(readPrintReport(none.session), {code: 'progress-unavailable'});
-  const fallback = sessionWith([tool('get_printer_status')], {get_printer_status: json({state: {flags: {printing: true}}})});
-  assert.equal((await readPrintReport(fallback.session)).state, 'printing');
-  assert.equal(await readPrinterInfo(fallback.session), undefined);
+  // An MCP from before counterpart/1: its raw get_printer_status is never read in its place (PRD §8.0 item 4).
+  const old = sessionWith([tool('get_printer_status')], {get_printer_status: json({state: {flags: {printing: true}}})});
+  await assert.rejects(readPrintReport(old.session), error => error.code === 'progress-unavailable' && /^Update mcp-3D-printer-server in Settings → Printers/.test(error.detail));
+  assert.deepEqual(old.calls, []);
+  assert.equal(await readPrinterInfo(old.session), undefined);
 });
 
 test('readiness groups printer states for the printer cards', () => {

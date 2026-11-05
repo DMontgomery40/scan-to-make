@@ -5,7 +5,12 @@ import {PrinterDirectory, READINESS_REFRESH_MS} from '../dist/printing/directory
 
 const tool = (name, properties = {}) => ({name, inputSchema: {type: 'object', properties}});
 const until = async check => { for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
-function destination({tools, status, failing = () => false}) {
+// What bambu-printer-mcp answers for a P1S (counterpart/1): its capabilities, and its reports as counterpart_print_progress.
+const INFO = {contract: 'counterpart/1', server: {name: 'bambu-printer-mcp', version: '1.1.61'}, printer: {kind: 'bambu', host: '192.0.2.1', model: 'p1s'},
+  capabilities: {progress: true, layers: true, camera: 'bambu-tcp', filaments: 'ams', pause: true, resume: false, cancel: true, print3mf: true, gcode: true}};
+const CONTRACT = [tool('counterpart_printer_info'), tool('counterpart_print_progress')];
+const progress = state => ({contract: 'counterpart/1', observedAt: new Date().toISOString(), state, problems: []});
+function destination({tools, status, failing = () => false, info = INFO, infoFails = 0}) {
   let directory;
   const reads = [];
   const factory = () => ({
@@ -13,7 +18,13 @@ function destination({tools, status, failing = () => false}) {
     async connect() { if (failing()) throw Object.assign(new Error('down'), {code: 'connection-failed'}); this.catalog = {server: {name: 'bambu-printer-mcp', version: '1.1.44'}, tools}; return this.catalog; },
     hasTool(name) { return tools.some(item => item.name === name); },
     getTool(name) { return tools.find(item => item.name === name); },
-    async callTool(name) { reads.push(name); return {content: [{type: 'text', text: JSON.stringify(status())}]}; },
+    async callTool(name) {
+      if (name === 'counterpart_printer_info') {
+        if (infoFails-- > 0) throw Object.assign(new Error('MCP error -32001: Request timed out'), {code: 'tool-failed'});
+        return {content: [{type: 'text', text: JSON.stringify(info)}]};
+      }
+      reads.push(name); return {content: [{type: 'text', text: JSON.stringify(status())}]};
+    },
     async close() {},
   });
   const session = new PrinterSession('current', {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}, selection: {model: 'p1s'}},
@@ -25,7 +36,7 @@ const catalog = {defaultDestinationId: 'current', destinations: [{id: 'current',
 
 test('a printer list answers at once, then fills in state and capabilities from the session without waiting on it', async () => {
   let now = 1_000_000;
-  const d = destination({tools: [tool('get_printer_status'), tool('camera_snapshot'), tool('pause_print')], status: () => ({connected: true, raw: {gcode_state: 'RUNNING'}})});
+  const d = destination({tools: [...CONTRACT, tool('camera_snapshot'), tool('pause_print')], status: () => progress('printing')});
   const directory = new PrinterDirectory(catalog, id => id === 'current' ? d.session : undefined, {now: () => now});
   d.set(directory);
   const first = directory.list();
@@ -33,6 +44,7 @@ test('a printer list answers at once, then fills in state and capabilities from 
   assert.equal(first.destinations[0].state, 'unknown');
   assert.equal(first.destinations[0].capabilities, undefined);
   await directory.refresh('current');
+  await until(() => directory.capabilities('current')?.contract);
   const second = directory.list().destinations[0];
   assert.equal(second.state, 'busy');
   assert.equal(second.stateCheckedAt, new Date(now).toISOString());
@@ -48,8 +60,28 @@ test('a printer list answers at once, then fills in state and capabilities from 
   assert.equal(d.reads.length, 2);
 });
 
+test('a printer info read that fails is tried again at the next refresh, so a timeout never leaves the printer without its capabilities', async () => {
+  let now = 1_000_000;
+  const d = destination({tools: [...CONTRACT, tool('camera_snapshot'), tool('pause_print')], status: () => progress('idle'), infoFails: 1});
+  const directory = new PrinterDirectory(catalog, id => id === 'current' ? d.session : undefined, {now: () => now});
+  d.set(directory);
+  await directory.refresh('current');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(directory.capabilities('current').contract, undefined, 'the first read timed out');
+  assert.deepEqual([directory.capabilities('current').camera, directory.capabilities('current').pause], ['none', false]);
+  now += READINESS_REFRESH_MS;
+  await directory.refresh('current');
+  assert.equal(directory.capabilities('current').contract, 'counterpart/1');
+  assert.deepEqual([directory.capabilities('current').camera, directory.capabilities('current').pause], ['bambu-tcp', true]);
+  // Once it has answered, a refresh reads only the printer's progress.
+  const reads = d.reads.length;
+  now += READINESS_REFRESH_MS;
+  await directory.refresh('current');
+  assert.deepEqual(d.reads.slice(reads), ['counterpart_print_progress']);
+});
+
 test('a printer whose MCP can\'t be reached reads as offline', async () => {
-  const d = destination({tools: [tool('get_printer_status')], status: () => ({}), failing: () => true});
+  const d = destination({tools: CONTRACT, status: () => ({}), failing: () => true});
   const directory = new PrinterDirectory(catalog, () => d.session);
   d.set(directory);
   await directory.refresh('current');
@@ -120,19 +152,19 @@ test('a view shares recent camera frames and event snapshots without overlapping
 });
 
 test('PRD §8.10: printing() asks the printer now, so a print with no project (the phone handoff) still counts', async () => {
-  let state = 'RUNNING', now = 1_000_000;
-  const d = destination({tools: [tool('get_printer_status')], status: () => ({connected: true, raw: {gcode_state: state}})});
+  let state = 'printing', now = 1_000_000;
+  const d = destination({tools: CONTRACT, status: () => progress(state)});
   const directory = new PrinterDirectory(catalog, id => id === 'current' ? d.session : undefined, {now: () => now});
   d.set(directory);
   assert.equal(await directory.printing('current'), true);
   assert.equal(await directory.printing('old-duplicate'), true, 'a duplicate id is the same printer');
-  state = 'FINISH';
+  state = 'finished';
   // Not from the 30 s cache: the second read sees the print end at once.
   assert.equal(await directory.printing('current'), false);
   assert.equal(d.reads.length, 3);
   assert.equal(await directory.printing('nowhere'), false);
   // A printer that can't be read isn't printing.
-  const down = destination({tools: [tool('get_printer_status')], status: () => ({}), failing: () => true});
+  const down = destination({tools: CONTRACT, status: () => ({}), failing: () => true});
   const offline = new PrinterDirectory(catalog, id => id === 'current' ? down.session : undefined, {now: () => now});
   down.set(offline);
   assert.equal(await offline.printing('current'), false);

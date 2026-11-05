@@ -121,7 +121,9 @@ for (const action of ['estimate','print']) test(`pre-sliced original ${action} k
  const root=await mkdtemp(join(tmpdir(),'published-sliced-copy-')),store=new ObjectStore(join(root,'objects')),calls=[];
  const {unzipSync}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
  const entries=unzipSync(model());entries['Metadata/plate_1.gcode']=strToU8('; estimated printing time (normal mode) = 1m\nG1 X1');const bytes=Buffer.from(zipSync(entries));
- const session={hold:()=>()=>{},connect:async()=>({tools:[]}),hasTool:name=>['inspect_print_file','print_3mf'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties:Object.fromEntries(['file_path','bambu_model','plate_index','three_mf_path','include_preview'].map(x=>[x,{}]))}}),call:async(name,args,opts)=>{
+ const session={hold:()=>()=>{},connect:async()=>({tools:[]}),config:{backend:'bambu-printer-mcp'},hasTool:name=>['inspect_print_file','print_3mf','counterpart_printer_info'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties:Object.fromEntries(['file_path','bambu_model','plate_index','three_mf_path','include_preview'].map(x=>[x,{}]))}}),call:async(name,args,opts)=>{
+  // What bambu-printer-mcp answers for a P1S (counterpart/1).
+  if(name==='counterpart_printer_info')return{content:[{type:'text',text:JSON.stringify({contract:'counterpart/1',server:{name:'bambu-printer-mcp',version:'1.1.61'},printer:{kind:'bambu',host:'h'},capabilities:{progress:true,layers:true,camera:'none',filaments:'ams',pause:true,resume:true,cancel:true,print3mf:true,gcode:true}})}]};
   calls.push({name,args});
   if(name==='inspect_print_file'){const sha256=inspectModelFile(bytes,'3mf').sha256;const view=v=>({name:v,label:v,png_base64:shownSlice().preview.views[0].png,width:1,height:1});
    return{content:[{type:'text',text:JSON.stringify({artifact:{sha256},selection:{plate_index:0,bambu_model:'p1s'},...(args.include_preview?{preview:{artifact_sha256:sha256,views:[view('top'),view('bed_side')]}}:{})})}]};}

@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
+import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, sliceEstimate, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -569,46 +569,29 @@ export class ObjectService {
     for (const object of objects) if (object.state !== 'new') this.#title(object, {backfill: true});
     return objects;
   }
-  readonly #printerReports = new Map<string, {atMs: number; value: Promise<{state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number} | undefined>}>();
   readonly #estimates = new Map<string, {seconds?: number; grams?: number}>();
   async get(id: string): Promise<StmObject> {
     let object = await this.#deps.store.get(id);
     if (object.state === 'touching-up') object = await this.#freshEstimate(object);
     if (!object.print) return object;
     // A watched print reads its monitor's last report instead of asking the printer again.
-    if (object.print.live) {
-      const live = object.print.live, active = ['preparing', 'printing', 'paused'].includes(live.state);
-      object = {...object, print: {...object.print, printerStatus: {state: BAMBU_TO_STATUS[live.state] ?? 'UNKNOWN',
-        ...(live.job?.name ? {job: live.job.name.slice(0, 160)} : {}), checkedAtMs: Date.parse(live.observedAt) || Date.now(),
-        ...(active && live.job?.progress !== undefined ? {percent: live.job.progress} : {}),
-        ...(active && live.job?.remainingSec !== undefined ? {remainingMinutes: Math.round(live.job.remainingSec / 60)} : {})}}};
-      return object;
-    }
+    const statusOf = (report: Pick<PrintReport, 'state' | 'job' | 'observedAt'>) => {
+      const active = ['preparing', 'printing', 'paused'].includes(report.state);
+      return {state: BAMBU_TO_STATUS[report.state] ?? 'UNKNOWN',
+        ...(report.job?.name ? {job: report.job.name.slice(0, 160)} : {}), checkedAtMs: Date.parse(report.observedAt) || Date.now(),
+        ...(active && report.job?.progress !== undefined ? {percent: report.job.progress} : {}),
+        ...(active && report.job?.remainingSec !== undefined ? {remainingMinutes: Math.round(report.job.remainingSec / 60)} : {})};
+    };
+    if (object.print.live) return {...object, print: {...object.print, printerStatus: statusOf(object.print.live)}};
     const printing = this.#deps.print;
     // A print recorded against a destination that has since become a duplicate reads through its winner.
     const recorded = object.print.destination?.id;
     const destinationId = recorded === undefined ? undefined : this.#deps.printerCatalog?.canonical(recorded) ?? recorded;
     const services = destinationId ? printing?.destinations?.get(destinationId) : printing?.services;
-    if (services?.runner.status) {
-      const key = destinationId ?? "default";
-      let report = this.#printerReports.get(key);
-      if (!report || Date.now() - report.atMs > 15000) {
-        report = {atMs:Date.now(), value:services.runner.status(AbortSignal.timeout(5000)).then(value => {
-          if (!record(value)) return undefined;
-          const raw = record(value.raw) ? value.raw : {};
-          const state = value.connected === false ? "OFFLINE" : String(raw.gcode_state ?? value.status ?? "UNKNOWN");
-          const job = record(value.print) ? value.print.filename : raw.subtask_name;
-          const active = ['RUNNING','PREPARE','PAUSE','SLICING'].includes(state.toUpperCase());
-          const percent = record(value.print) ? value.print.progress : undefined;
-          const remaining = record(value.print) ? (value.print.timeRemaining ?? value.print.remaining) : undefined;
-          return {...(active && typeof percent === 'number' && percent >= 0 && percent <= 100 ? {percent} : {}),
-            ...(active && typeof remaining === 'number' && remaining >= 0 ? {remainingMinutes:remaining} : {}), state:state.slice(0,40), ...(typeof job === "string" && job ? {job:job.slice(0,160)} : {}), checkedAtMs:Date.now()};
-        }).catch(() => undefined)};
-        this.#printerReports.set(key, report);
-      }
-      const printerStatus = await report.value;
-      if (printerStatus) object = {...object, print:{...object.print!, printerStatus}};
-    }
+    // The printer's last counterpart_print_progress report, as the printer list and the monitor read it:
+    // a project read never asks the printer itself.
+    const report = destinationId ? this.#deps.printers?.lastReport(destinationId) : undefined;
+    if (report) object = {...object, print: {...object.print!, printerStatus: statusOf(report)}};
     if (object.print!.estimate) return object;
     const bundleId = object.print!.bundleId;
     let estimate = this.#estimates.get(bundleId);
@@ -681,7 +664,7 @@ export class ObjectService {
     const destinationId = override ? override.destinationId : this.#destinationId(object);
     const services = destinationId ? configured?.destinations?.get(destinationId) : configured?.services;
     // Trays come from any MCP that reports them (counterpart_printer_info `filaments: "ams"`), not from one package.
-    const ams = services?.runner.backend === 'bambu-printer-mcp' || (!!destinationId && this.#deps.printers?.capabilities(destinationId)?.filaments === 'ams');
+    const ams = !!destinationId && this.#deps.printers?.capabilities(destinationId)?.filaments === 'ams';
     if (!services || !ams || !services.runner.filaments) throw new InvalidStateError('Filament choices are unavailable for this printer. Open the model in your slicer to choose a material.');
     let inventory: unknown;
     try { inventory = await services.runner.filaments(); }
@@ -770,8 +753,7 @@ export class ObjectService {
   #amsAvailable(object: StmObject): boolean {
     const destinationId = this.#destinationId(object);
     const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
-    return !!services?.runner.filaments
-      && (services.runner.backend === 'bambu-printer-mcp' || (!!destinationId && this.#deps.printers?.capabilities(destinationId)?.filaments === 'ams'));
+    return !!services?.runner.filaments && !!destinationId && this.#deps.printers?.capabilities(destinationId)?.filaments === 'ams';
   }
 
   /** The print sheet's colour rows for a multi-part model: its filaments, the loaded spools, and the nearest spool for each. */
@@ -1386,12 +1368,15 @@ export class ObjectService {
     }
     const colour = options.colour;
     if (!colour) return {...(selection ? {selection} : {})};
-    if ('auto' in colour) return backend === 'bambu-printer-mcp'
+    // Trays are the MCP's to report (counterpart_printer_info `filaments: "ams"`), not one package's.
+    const destinationId = destination ? destination.destinationId : this.#destinationId(object);
+    const ams = !!destinationId && this.#deps.printers?.capabilities(destinationId)?.filaments === 'ams';
+    if ('auto' in colour) return ams
       ? {selection: {...selection, useAms: true, autoMatchAms: true, amsSlots: undefined, amsMapping: undefined}} : {...(selection ? {selection} : {})};
     if ('material' in colour) {
       // "What's loaded?" (PRD §8.4–8.5): the person says which material is in the printer.
       const material = colour.material.trim();
-      if (backend === 'bambu-printer-mcp') {
+      if (ams) {
         const live = await this.liveFilaments(id, destination).catch(() => [] as LiveFilament[]);
         const match = live.find(item => item.profile && item.material.toLowerCase() === material.toLowerCase());
         // A loaded spool of that material: print from it with its own profile.
@@ -1401,13 +1386,13 @@ export class ObjectService {
         // slice it with, and slicing with the preset's filament would print the wrong material's settings.
         throw new InvalidStateError(`The printer doesn't report a ${material} spool. Set the external spool to ${material} on the printer, or load ${material} in the AMS, then try again.`);
       }
-      // mcp-3D-printer-server: sliced with the profile its filament report gives for that material. Without one,
+      // A single-spool printer: sliced with the profile its filament report gives for that material. Without one,
       // only the configured material (what the MCP's own preset is for) can be declared without a profile.
       const profile = await this.#genericProfile(id, material);
       if (profile) return {selection: {...selection, material}, slicer: {loadFilaments: profile}};
       const configured = selection?.material?.trim();
       if (configured && configured.toLowerCase() === material.toLowerCase()) return {selection: {...selection, material: configured}};
-      throw new InvalidStateError(`mcp-3D-printer-server doesn't give a slicing profile for ${material} on this printer, so Counterpart can't slice for it. ${configured ? `Choose ${configured}, the configured material, or update` : 'Update'} mcp-3D-printer-server.`);
+      throw new InvalidStateError(`${packageLabel(backend)} doesn't give a slicing profile for ${material} on this printer, so Counterpart can't slice for it. ${configured ? `Choose ${configured}, the configured material, or update` : 'Update'} ${packageLabel(backend)}.`);
     }
     const live = await this.liveFilaments(id, destination);
     if ('external' in colour) {
@@ -1432,7 +1417,7 @@ export class ObjectService {
     const session = destinationId ? this.#deps.printers?.session(destinationId) : undefined;
     // The route is the MCP's own setting; it says whether this print went to Bambu Connect.
     const route = session ? await readPrintRoute(session).catch(() => undefined) : undefined;
-    const reports = !!session && (session.hasTool('counterpart_print_progress') || (session.backend === 'bambu-printer-mcp' && session.hasTool('get_printer_status')));
+    const reports = !!session && session.hasTool('counterpart_print_progress');
     const identified = !!(dispatch?.jobName || dispatch?.taskId);
     // Bambu Connect only opens the job on the Mac: the person presses Print there.
     const bambuConnect = route?.mode === 'bambu_connect';
@@ -1472,7 +1457,6 @@ export class ObjectService {
     const release = session.hold();
     const runner = new PrintMonitorRunner(target, {
       ...(this.#deps.monitorClock ? {clock: this.#deps.monitorClock} : {}),
-      fallback: !session.hasTool('counterpart_print_progress'),
       read: async signal => {
         try {
           const report = await readPrintReport(session, {signal, failFast: true});
@@ -1659,7 +1643,7 @@ export class ObjectService {
     const tool = {pause: 'pause_print', resume: 'resume_print', cancel: 'cancel_print'}[action];
     if (!session || !services) throw new InvalidStateError('That printer is no longer available.');
     await session.connect({failFast: true}).catch(() => undefined);
-    if (!session.hasTool(tool)) throw new InvalidStateError(`Update ${session.backend === 'bambu-printer-mcp' ? 'bambu-printer-mcp' : 'mcp-3D-printer-server'} to ${action === 'cancel' ? 'stop' : action} prints from Counterpart.`);
+    if (!session.hasTool(tool)) throw new InvalidStateError(`Update ${packageLabel(session.backend)} in Settings → Printers to ${action === 'cancel' ? 'stop' : action} prints from Counterpart.`);
     // The printer MCP's own confirmation, if it asks, is relayed like Print's.
     const printing = {...this.#deps.print!, services};
     const unsubscribe = services.relay.subscribe(pending => {

@@ -616,7 +616,7 @@ Deleting app code before the published MCP has the replacement would regress ins
 | 1 | ~~quality → layer height, strength → walls/infill, nozzle scaling~~ **Moved** 2026-11-04: bambu-printer-mcp 1.1.56 / mcp-3d-printer-server 1.2.30 take `quality`/`strength`; 1.1.56 installed through the app's Update; app copies deleted in #313 | the MCPs' `slice_stl` |
 | 2 | ~~the `HMS 0500-0500-0001-0007` and "not safely idle" text matches on `print_3mf` errors~~ **Moved** 2026-11-04: bambu-printer-mcp 1.1.57 / mcp-3d-printer-server 1.2.31 return `printer-command-rejected`/`printer-not-ready` as `structuredContent.code`; 1.1.57 installed through the app's Update; the app reads the code (#314) | the MCPs' structured refusal |
 | 3 | ~~`isBambuSlicing`, which slicers accept supports and repetitions, `bambu_model` only for Bambu slicing~~ **Moved** 2026-11-05: bambu-printer-mcp 1.1.58 / mcp-3d-printer-server 1.2.32 report `capabilities.slicing` (supports, copies, orient) and refuse copies they can't make; installed through the app's Update; the app follows the capability (#316) | the MCPs' `counterpart_printer_info` |
-| 4 | `services/printer-handoff/src/counterpart.ts`: the `get_printer_status` fallback for MCPs without `counterpart/1`. `services/companion/src/objects/service.ts`: `backend === 'bambu-printer-mcp'` at 632, 722, 1332, 1337, 1378 and 1605 | deleted; the capability is required |
+| 4 | ~~`services/printer-handoff/src/counterpart.ts`: the `get_printer_status` fallback for MCPs without `counterpart/1`. `services/companion/src/objects/service.ts`: `backend === 'bambu-printer-mcp'` at 632, 722, 1332, 1337, 1378 and 1605~~ **Moved** 2026-11-05: app-only; capabilities, reports, AMS trays and the print tool (`print3mf`/`gcode`) come only from `counterpart_printer_info` and `counterpart_print_progress`; an MCP without them says "Update *MCP* in Settings → Printers". Add Printer's connection check still reads `get_printer_status` (`setup.ts`, `printer-check.ts`, item 6) | deleted; the capability is required |
 | 5 | `services/printer-handoff/src/remote-mcp.ts`: the hard-coded per-tool scope table | scopes derived from the MCPs' tool annotations |
 | 6 | `services/companion/src/printing/discovery.ts` (SSDP, `BAMBU_SERIAL_MODELS` copied from the MCP's `SERIAL_MODELS`); `profiles.ts` and `setup.ts`; the Mac's Add Printer brand list (`PrinterSetupViews.swift`) | a discovery tool, each brand's MCP doing its own, and the MCP declaring its setup fields |
 | 7 | `services/companion/src/objects/colour-match.ts` (OKLab nearest spool before slicing), copied into ControlKit `Objects.swift`, CounterpartKit `Printers.swift`/`Project.swift`, the iPhone `PrintSheet.swift` and `apps/linux/src/types.ts` | the MCP proposes the per-part mapping (bambu has only post-slice `resolve_3mf_ams_slots`; mcp-3D has none); clients render it and send overrides |
@@ -772,10 +772,7 @@ Both MCPs gain the same small set of tools with the same arguments and results. 
 
 Each change follows the MCP repo's own AGENTS.md and release process.
 
-**Older MCP installs.** If `counterpart_print_progress` is missing, the monitor falls back to `get_printer_status`:
-- **Bambu.** Read `print.progress`, `print.timeRemaining` (in **minutes**), `print.currentLayer`, `print.totalLayers`, `raw.gcode_state`, `raw.hms` and `raw.print_error`.
-  - **Fix:** `objects/service.ts:154` reads `print.remaining`, which bambu-printer-mcp never returns. That's why "time left" is always empty today.
-- **mcp-3D-printer-server.** Its `get_printer_status` returns the firmware's raw printer endpoint (OctoPrint `/api/printer`, Moonraker `/printer/info`), which has no job progress. On those installs, the app shows only the state and asks the user to update the MCP.
+**Older MCP installs.** An MCP without `counterpart_printer_info` and `counterpart_print_progress` gets no progress, camera, spools or controls; Printers says "Update *MCP* in Settings → Printers" (§8.0 item 4). The app never reads `get_printer_status` in their place.
 
 ### 8.5 Printing a project (dispatch)
 

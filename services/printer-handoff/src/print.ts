@@ -16,7 +16,7 @@ import {createHash} from 'node:crypto';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type McpProgress, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
-import {readPrinterInfo} from './counterpart.js';
+import {packageLabel, readPrinterInfo} from './counterpart.js';
 
 export type PrintStep = 'discover' | 'lay_flat' | 'slice_stl' | 'inspect' | 'print';
 export type PrintPhase = 'connecting' | 'orienting' | 'slicing' | 'inspecting' | 'slice-ready' | 'checking-printer' | 'requesting-print' | 'accepted';
@@ -222,18 +222,6 @@ export class PrinterHandoffRunner {
     return this.#use(session => session.connect(signal ? {signal} : {}));
   }
 
-  /** Display-only printer status, using the configured route and the standard MCP tool. */
-  async status(signal?: AbortSignal): Promise<unknown> {
-    return this.#use(async (session, shared) => {
-      await session.connect({...(signal ? {signal} : {}), failFast: shared});
-      if (!session.hasTool('get_printer_status')) return undefined;
-      const selection = this.#config.selection;
-      return resultValue(await call(session, 'get_printer_status', {
-        host: selection?.host, type: selection?.printerType, port: selection?.port,
-      }, {...(signal ? {signal} : {}), failFast: shared}));
-    });
-  }
-
   /** Read the printer's live material inventory without starting or uploading a print. */
   async filaments(signal?: AbortSignal): Promise<unknown> {
     return this.#use(async (session, shared) => {
@@ -379,7 +367,8 @@ export class PrinterHandoffRunner {
     }
     // What this MCP's slice can apply (supports, copies, orient): the MCP says, the app never knows slicers (PRD §8.0).
     // An MCP without it (older than bambu-printer-mcp 1.1.58 / mcp-3d-printer-server 1.2.32) gets none of them.
-    const slicing = (await readPrinterInfo(session, {...(signal ? {signal} : {})}).catch(() => undefined))?.capabilities.slicing;
+    const info = await readPrinterInfo(session, {...(signal ? {signal} : {})}).catch(() => undefined);
+    const slicing = info?.capabilities.slicing;
     // A chosen quality or strength the MCP can't apply is refused, never silently printed at preset values.
     {
       const sliceProperties = session.getTool('slice_stl').inputSchema.properties ?? {};
@@ -504,8 +493,10 @@ export class PrinterHandoffRunner {
     // The printer MCP owns its route and the printer's errors: Print never clears one itself.
     await progress('requesting-print');
     let printed: unknown;
-    if (this.#config.backend === 'bambu-printer-mcp' || slicedPath.toLowerCase().endsWith('.3mf') || selection.printerType === 'bambu') {
-      if (!slicedPath.toLowerCase().endsWith('.3mf')) fail('expected-sliced-3mf');
+    // How a sliced file is sent is the MCP's to say (counterpart_printer_info print3mf / gcode), never the package's.
+    if (!info) throw new PrinterMcpError('print-unavailable', undefined, `Update ${packageLabel(this.#config.backend)} in Settings → Printers to print from Counterpart.`);
+    if (slicedPath.toLowerCase().endsWith('.3mf')) {
+      if (!info.capabilities.print3mf) fail('expected-sliced-gcode');
       const result = await call(session, 'print_3mf', {
         three_mf_path: slicedPath,
         bambu_model: selection.model,
@@ -526,6 +517,7 @@ export class PrinterHandoffRunner {
       }, {signal, beforeDispatch: input.beforePrint, elicitationContext: printContext, onProgress: mcpProgress('requesting-print')});
       printed = resultValue(result);
     } else {
+      if (!info.capabilities.gcode) fail('expected-sliced-3mf');
       const result = await call(session, 'upload_gcode', {
         gcode_path: slicedPath,
         print: true,

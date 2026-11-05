@@ -5,7 +5,7 @@ import {PrintMonitorRunner, MONITOR, matchJob, milestonesFor} from '../dist/prin
 const T0 = Date.parse('2026-11-01T18:00:00.000Z');
 const JOB = 'checked-1b2c-Mic mount';
 /** A scripted printer and a fake clock: every test is deterministic and instant. */
-function harness({reports = [], milestones = '50', state, fallback = false, taskId, frame = async id => `prints/p/frames/${id}.jpg`, frameCapMs} = {}) {
+function harness({reports = [], milestones = '50', state, taskId, frame = async id => `prints/p/frames/${id}.jpg`, frameCapMs} = {}) {
   const clock = {t: T0, sleeps: [], now() { return this.t; }, async sleep(ms) { this.sleeps.push(ms); this.t += ms; }};
   const events = [], saves = [], ends = [];
   let queue = [...reports];
@@ -17,7 +17,7 @@ function harness({reports = [], milestones = '50', state, fallback = false, task
   };
   const target = {projectId: '3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b', printId: '8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d', destinationId: 'current',
     printerName: 'Bambu Lab P1S', jobName: JOB, ...(taskId ? {taskId} : {}), dispatchedAtMs: T0, estimate: {seconds: 2575, grams: 16.7}};
-  const monitor = new PrintMonitorRunner(target, {clock, read, frame, fallback, frameCapMs, milestones: () => milestonesFor(milestones),
+  const monitor = new PrintMonitorRunner(target, {clock, read, frame, frameCapMs, milestones: () => milestonesFor(milestones),
     save: async (m, live) => { saves.push({m, live}); },
     end: async (end, report, m) => { ends.push({end, state: report?.state, m}); },
     emit: async draft => { events.push(draft); }}, state);
@@ -193,10 +193,11 @@ test('our job is matched by the printer task id when there is a real one, else b
   assert.equal(matchJob({fileBase: 'part_flat_sliced'}, report('0', 'another job')), 'none');
 });
 
-test('older MCP installs are read more slowly: every 10 s while starting, every 30 s while watching', async () => {
-  const h = harness({fallback: true, reports: [{state: 'idle'}, printing(1, 1), printing(2, 2), {state: 'finished', job: {name: JOB, progress: 100}}]});
+test('counterpart_print_progress is read every 3 s while the print starts and every 10 s while it runs; there is no slower pre-contract pace', async () => {
+  const h = harness({reports: [{state: 'idle'}, printing(1, 1), printing(2, 2), {state: 'finished', job: {name: JOB, progress: 100}}]});
   await h.monitor.run(h.signal);
-  assert.deepEqual(h.clock.sleeps, [MONITOR.fallbackStartPollMs, MONITOR.fallbackWatchPollMs, MONITOR.fallbackWatchPollMs]);
+  assert.deepEqual(h.clock.sleeps, [MONITOR.startPollMs, MONITOR.watchPollMs, MONITOR.watchPollMs]);
+  assert.equal('fallbackWatchPollMs' in MONITOR, false);
 });
 
 test('a job named after our file is adopted only while it runs; an earlier finished one with that name is not ours', async () => {
