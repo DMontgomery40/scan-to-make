@@ -970,3 +970,27 @@ test("another choice, a decline or a timeout on Counterpart's question stops bef
   await estimate.runner.run({stlPath: estimate.stlPath, print: false, ask: LEGACY_ASK});
   assert.equal(estimate.seen.length, 0, 'an estimate slices without asking');
 });
+
+test("an estimate returns its exact sliced file and the MCP's preview of it; Print sends that file, never a fresh slice (Nov 5)", async t => {
+  const {createHash} = await import('node:crypto');
+  const slicedBytes = zipSync({'Metadata/plate_1.gcode': strToU8('; the previewed slice')});
+  const f = await setup(t, {settings: true, slicedBytes});
+  const shown = await f.runner.estimate({stlPath: f.stlPath});
+  assert.equal(shown.sliced.sha256, createHash('sha256').update(shown.sliced.bytes).digest('hex'));
+  assert.equal(shown.preview.sha256, shown.sliced.sha256, 'the preview is of exactly that file');
+  assert.deepEqual(shown.preview.views.map(view => view.name), ['top', 'bed_side']);
+  const inspected = (await f.calls()).filter(call => call.tool === 'inspect_print_file');
+  assert.equal(inspected.at(-1).arguments.include_preview, true);
+  const slicesBefore = (await f.calls()).filter(call => call.tool === 'slice_stl').length;
+  await f.runner.run({stlPath: f.stlPath, presliced: {bytes: shown.sliced.bytes, extension: shown.sliced.extension}, expectedSha256: shown.sliced.sha256});
+  const calls = (await f.calls()).filter(call => call.tool);
+  assert.equal(calls.filter(call => call.tool === 'slice_stl').length, slicesBefore, 'not sliced again');
+  assert.ok(calls.some(call => call.tool === 'print_3mf'), 'the shown file printed');
+});
+
+test('Print refuses, sending nothing, when the file about to be sent is not the one previewed', async t => {
+  const f = await setup(t, {settings: true});
+  await assert.rejects(f.runner.run({stlPath: f.stlPath, presliced: {bytes: Buffer.from('PK another file'), extension: '.3mf'}, expectedSha256: 'a'.repeat(64)}),
+    {code: 'preview-mismatch'});
+  assert.equal((await f.calls()).some(call => call.tool === 'print_3mf'), false, 'nothing was sent');
+});

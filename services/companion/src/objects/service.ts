@@ -13,7 +13,7 @@ import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type Monit
 import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {defaultRunPublished, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
-import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
+import {previewUnavailable, sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {RuntimeSettings} from '../runtime-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
@@ -179,6 +179,8 @@ export interface ObjectServiceDeps {
 
 /** What the print sheet sends with Print (PRD §8.5). */
 export interface PrintOptions extends PrintSettings {expectedPlate?: string; checked?: boolean; filament?: FilamentChoice;
+  /** The print sheet's estimate (`sliceSha256`): Print sends exactly that sliced file, the one its preview showed. */
+  sliceSha256?: string;
   /** A multi-part 3MF: the spool chosen for each of the model's filaments, in filament order. */
   filaments?: FilamentChoice[];
   /** The model version those choices were made against (`colourMapping`'s), so a redesign can't inherit them. */
@@ -229,6 +231,9 @@ export function spreadPick<T>(items: T[], count: number): T[] {
 export function designerFile(object: Pick<StmObject, 'scan'>, kind: PassKind, scanName = object.scan): string | undefined {
   return kind === 'copy' && scanName?.toLowerCase().endsWith('.3mf') ? join('scan', scanName) : undefined;
 }
+
+/** What a print sheet chose when it sliced the file it showed; Print must choose the same to send that file. */
+interface ShownSliceShape {destinationId: string; quality: string; strength: string; copies: number | null; plateIndex: number; amsMapping: number[] | Record<string, number> | null; previewed: boolean}
 
 /** A 3MF model owns its parts and their filaments: a published file, or a design in several colours. */
 function isMultipart(object: Pick<StmObject, 'current'>): boolean {
@@ -1222,6 +1227,14 @@ export class ObjectService {
       ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {}),
       ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})};
     const sliced = {...slicer, ...overrides, ...designedSupports(object)};
+    // What prints is what the sheet showed (Nov 5): the estimate's own sliced file, never a fresh slice nobody saw.
+    const shown = options.sliceSha256 ? await this.#shownSlice(id, options.sliceSha256) : undefined;
+    if (!shown) throw new InvalidStateError('Open Print to see what will print, then print it from there.');
+    if (!shown.shape.previewed) throw new InvalidStateError(previewUnavailable(runner.backend));
+    const chosen: ShownSliceShape = {destinationId: destinationId ?? 'current', quality: options.quality ?? 'standard', strength: options.strength ?? 'standard',
+      copies: options.copies ?? null, plateIndex: selected?.plateIndex ?? 0, amsMapping: isMultipart(object) ? colourSelection?.amsMapping ?? null : null, previewed: true};
+    if (JSON.stringify(chosen) !== JSON.stringify(shown.shape))
+      throw new InvalidStateError('The print settings changed since the preview. Open Print again to see what will print.');
     const stl = await this.#modelBytes(object);
     const ask = await this.#legacyColourDesign(object) ? LEGACY_COLOUR_ASK : undefined;
     const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
@@ -1258,6 +1271,7 @@ export class ObjectService {
     if (recheckTrays) this.#dispatchRechecks.set(id, recheckTrays);
     // Print Again prints the slice it made last time when nothing that shapes it changed (slice-cache.ts).
     const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')},
+      presliced: {bytes: shown.bytes, extension: shown.extension, ...(shown.slicerWarning ? {slicerWarning: shown.slicerWarning} : {})}, expectedSha256: options.sliceSha256!,
       ...(recheckTrays ? {beforePrint: recheckTrays} : {}), ...(Object.keys(sliced).length ? {slicer: sliced} : {}), ...(ask ? {ask} : {})})
       .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch),
         async error => {
@@ -1690,6 +1704,37 @@ export class ObjectService {
   }
 
   readonly #estimates2 = new Map<string, Promise<PrintEstimate>>();
+
+  /**
+   * The sliced file a print sheet showed (its estimate and preview), kept so Print sends exactly it
+   * (`<project>/slices/shown/<sha256>`). `shape` is what the sheet chose; Print must choose the same.
+   */
+  async #keepShownSlice(id: string, file: {bytes: Buffer; extension: string; sha256: string; slicerWarning?: string}, shape: ShownSliceShape): Promise<string> {
+    const directory = join(this.#deps.store.dir(id), 'slices', 'shown');
+    await mkdir(directory, {recursive: true});
+    const extension = /^\.(3mf|gcode)$/i.test(file.extension) ? file.extension.toLowerCase() : '.3mf';
+    await writeFile(join(directory, `${file.sha256}${extension}`), file.bytes, {mode: 0o600});
+    await writeFile(join(directory, `${file.sha256}.json`), JSON.stringify({extension, shape, ...(file.slicerWarning ? {slicerWarning: file.slicerWarning} : {})}), {mode: 0o600});
+    // Keep the last few sheets' files only.
+    const entries = (await readdir(directory).catch(() => [] as string[])).filter(name => name.endsWith('.json'));
+    if (entries.length > 8) {
+      const dated = await Promise.all(entries.map(async name => ({name, at: (await stat(join(directory, name))).mtimeMs})));
+      for (const {name} of dated.sort((a, b) => a.at - b.at).slice(0, entries.length - 8)) {
+        const sha = name.slice(0, -5);
+        for (const other of await readdir(directory)) if (other.startsWith(sha)) await rm(join(directory, other), {force: true});
+      }
+    }
+    return file.sha256;
+  }
+  async #shownSlice(id: string, sha256: string): Promise<{bytes: Buffer; extension: string; shape: ShownSliceShape; slicerWarning?: string} | undefined> {
+    if (!/^[0-9a-f]{64}$/.test(sha256)) return undefined;
+    const directory = join(this.#deps.store.dir(id), 'slices', 'shown');
+    const record = await readFile(join(directory, `${sha256}.json`), 'utf8').then(text => JSON.parse(text) as {extension: string; shape: ShownSliceShape; slicerWarning?: string}, () => undefined);
+    if (!record || !/^\.(3mf|gcode)$/.test(record.extension)) return undefined;
+    const bytes = await readFile(join(directory, `${sha256}${record.extension}`)).catch(() => undefined);
+    if (!bytes || createHash('sha256').update(bytes).digest('hex') !== sha256) return undefined;
+    return {bytes, extension: record.extension, shape: record.shape, ...(record.slicerWarning ? {slicerWarning: record.slicerWarning} : {})};
+  }
   /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
   async estimate(id: string, request: {destinationId?: string; quality?: PrintSettings['quality']; strength?: PrintSettings['strength']; copies?: number; filaments?: FilamentChoice[]; filamentsModelVersion?: string} = {}): Promise<PrintEstimate> {
     const object = await this.get(id);
@@ -1724,7 +1769,7 @@ export class ObjectService {
     const slicer = {...overrides, ...(multipart?.slicer ?? {})};
     const model = await this.#modelBytes(object);
     const supports = designedSupports(object);
-    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0, supports, multipart?.selection?.amsMapping ?? null, multipart?.slicer?.loadFilaments ?? null, multipart?.slicer?.filamentColours ?? null]);
+    const key = JSON.stringify([id, createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0, supports, multipart?.selection?.amsMapping ?? null, multipart?.slicer?.loadFilaments ?? null, multipart?.slicer?.filamentColours ?? null]);
     let running = this.#estimates2.get(key);
     if (!running) {
       const runner = services.runner;
@@ -1733,7 +1778,7 @@ export class ObjectService {
         try {
           const stlPath = join(work, object.current!.model.toLowerCase().endsWith('.3mf') ? 'model.3mf' : 'model.stl');
           await writeFile(stlPath, model);
-          const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys({...slicer, ...supports}).length ? {slicer: {...slicer, ...supports}} : {}),
+          const {estimate, settings, slicerWarning, sliced: slicedFile, preview} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys({...slicer, ...supports}).length ? {slicer: {...slicer, ...supports}} : {}),
             signal: AbortSignal.timeout(150_000), sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')}});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
@@ -1741,6 +1786,10 @@ export class ObjectService {
             ...(settings.infillPercent !== undefined ? {infillPercent: settings.infillPercent} : {}), ...(settings.wallLoops !== undefined ? {wallLoops: settings.wallLoops} : {}),
             // Bambu Studio's own warning on this slice, word for word (KAN-223). Print asks "Print anyway" with the same words.
             ...(slicerWarning ? {slicerWarning} : {}),
+            ...(slicedFile ? {sliceSha256: await this.#keepShownSlice(id, slicedFile, {destinationId: destinationId ?? 'current', quality, strength,
+              copies: request.copies ?? null, plateIndex: object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0,
+              amsMapping: isMultipart(object) ? multipart?.selection?.amsMapping ?? null : null, previewed: !!preview})} : {}),
+            ...(preview ? {preview} : {}),
             slicedAt: new Date().toISOString()};
         } finally { await rm(work, {recursive: true, force: true}).catch(() => undefined); }
       })();

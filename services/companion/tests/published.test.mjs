@@ -14,6 +14,7 @@ import {publicObject} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {buildPublishedInvocation,runPublishedWorker,findNamed} from '../dist/published/published.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
+import {showing, showingRunner, shownSlice} from './support/shown-print.mjs';
 const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
 const LINK='https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths';
 const model=(title='Caliper',plates=1)=>Buffer.from(zipSync({'[Content_Types].xml':strToU8('<Types/>'),
@@ -87,8 +88,8 @@ for (const extension of ['3mf','3MF']) test(`published ${extension} preserves mu
  const runs=[];
  const f=await setup(t);
  const bundles=new HandoffBundleStore(join(f.root,'bundles')),relay=new InMemoryElicitationRelay({timeoutMs:1000});
- const service=new ObjectService({store:f.store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/usr/bin/true'}},
-  print:{services:{store:bundles,relay,selection:{model:'p1s'},runner:{backend:'bambu-printer-mcp',filaments:async()=>{throw Error('hidden material lookup');},runBundle:async(store,id,options)=>{runs.push({id,options});return{bundleId:id};}}}}});
+ const service=showing(new ObjectService({store:f.store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/usr/bin/true'}},
+  print:{services:{store:bundles,relay,selection:{model:'p1s'},runner:showingRunner({backend:'bambu-printer-mcp',filaments:async()=>{throw Error('hidden material lookup');},runBundle:async(store,id,options)=>{runs.push({id,options});return{bundleId:id};}})}}}));
  t.after(()=>service.close());
  const {unzipSync}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
  const entries=unzipSync(model());entries['Metadata/project_settings.config']=strToU8(JSON.stringify({filament_colour:['#FF0000','#0000FF'],filament_type:['PLA','PETG']}));const bytes=Buffer.from(zipSync(entries));
@@ -120,19 +121,21 @@ for (const action of ['estimate','print']) test(`pre-sliced original ${action} k
  const root=await mkdtemp(join(tmpdir(),'published-sliced-copy-')),store=new ObjectStore(join(root,'objects')),calls=[];
  const {unzipSync}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
  const entries=unzipSync(model());entries['Metadata/plate_1.gcode']=strToU8('; estimated printing time (normal mode) = 1m\nG1 X1');const bytes=Buffer.from(zipSync(entries));
- const session={hold:()=>()=>{},connect:async()=>({tools:[]}),hasTool:name=>['inspect_print_file','print_3mf'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties:Object.fromEntries(['file_path','bambu_model','plate_index','three_mf_path'].map(x=>[x,{}]))}}),call:async(name,args,opts)=>{
+ const session={hold:()=>()=>{},connect:async()=>({tools:[]}),hasTool:name=>['inspect_print_file','print_3mf'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties:Object.fromEntries(['file_path','bambu_model','plate_index','three_mf_path','include_preview'].map(x=>[x,{}]))}}),call:async(name,args,opts)=>{
   calls.push({name,args});
-  if(name==='inspect_print_file')return{content:[{type:'text',text:JSON.stringify({artifact:{sha256:inspectModelFile(bytes,'3mf').sha256},selection:{plate_index:0,bambu_model:'p1s'}})}]};
+  if(name==='inspect_print_file'){const sha256=inspectModelFile(bytes,'3mf').sha256;const view=v=>({name:v,label:v,png_base64:shownSlice().preview.views[0].png,width:1,height:1});
+   return{content:[{type:'text',text:JSON.stringify({artifact:{sha256},selection:{plate_index:0,bambu_model:'p1s'},...(args.include_preview?{preview:{artifact_sha256:sha256,views:[view('top'),view('bed_side')]}}:{})})}]};}
   if(name==='print_3mf'){await opts?.beforeDispatch?.();return{structuredContent:{jobName:'original'},content:[]};}
   throw Error('Unexpected tool '+name);
  }};
  const runner=new PrinterHandoffRunner({backend:'bambu-printer-mcp',process:{command:'/unused'},selection:{model:'p1s'},slicer:{repetitions:3}},{session});
- const service=new ObjectService({store,claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},print:{services:{runner,store:new HandoffBundleStore(join(root,'bundles')),relay:new InMemoryElicitationRelay({timeoutMs:1000})}}});
+ const service=showing(new ObjectService({store,claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},print:{services:{runner,store:new HandoffBundleStore(join(root,'bundles')),relay:new InMemoryElicitationRelay({timeoutMs:1000})}}}));
  t.after(async()=>{await service.close();await rm(root,{recursive:true,force:true});});
  const object=await service.create('Print this','published',LINK);await service.addModelFile(object.id,'original.3mf',bytes);
  if(action==='estimate')await service.estimate(object.id,{copies:1});
  else {await service.print(object.id,{copies:1});const settled=await service.settled(object.id);assert.notEqual(settled.state,'failed',settled.failure);}
- assert.deepEqual(calls.map(x=>x.name),action==='estimate'?['inspect_print_file']:['inspect_print_file','print_3mf']);
+ // Print goes through the sheet: its preview's inspection, then the same file checked just before it is sent.
+ assert.deepEqual(calls.map(x=>x.name),action==='estimate'?['inspect_print_file']:['inspect_print_file','inspect_print_file','print_3mf']);
  assert.deepEqual(await readFile(join(service.dir(object.id),(await service.get(object.id)).current.model)),bytes);
 });
 

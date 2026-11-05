@@ -11,6 +11,8 @@ import {sliceEstimate, sliceSettings, slicePlateCount, type SliceEstimate, type 
 import {inspectModelFile} from './model-file.js';
 import {slicerReport} from './slicer-report.js';
 import {keepSlice, readSlice, sliceCacheKey, presetDigests} from './slice-cache.js';
+import {slicePreview, type SlicePreview} from './slice-preview.js';
+import {createHash} from 'node:crypto';
 import type {HandoffBundleStore} from './bundle.js';
 import {PrinterMcpError, toolResultJson, toolResultText, type McpProgress, type PrinterToolCatalog} from './mcp-client.js';
 import {PrinterSession} from './session.js';
@@ -37,6 +39,15 @@ export interface PrintRunInput {
   bundleId?: string;
   /** Keep each slice here and print a kept one again when nothing that shapes it changed (slice-cache.ts). */
   sliceCache?: {directory: string};
+  /**
+   * The sliced file the person was shown (an estimate's `sliced`): printed as it is, never sliced again.
+   * With `expectedSha256`, the MCP's inspection of what is about to be sent must report that same hash.
+   */
+  presliced?: {bytes: Buffer; extension: string; slicerWarning?: string; plateCount?: number};
+  /** The SHA-256 of the file the person saw previewed. Printing refuses (`preview-mismatch`) unless the inspected file has it. */
+  expectedSha256?: string;
+  /** Ask the MCP's inspect_print_file for its G-code preview of the sliced file. */
+  preview?: boolean;
   /**
    * A question Counterpart asks before slicing, through the relay that carries the printer's own questions.
    * The print goes on only when the person picks `proceed`; any other choice, a decline or a timeout stops
@@ -184,16 +195,23 @@ export class PrinterHandoffRunner {
    * Slices the model exactly as a print would, then reads the
    * time, grams and settings from the sliced file. Never prints.
    */
-  async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal; sliceCache?: PrintRunInput['sliceCache']}): Promise<{estimate?: SliceEstimate; settings: SliceSettings; slicerWarning?: string}> {
-    let sliced: Buffer | undefined;
+  async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal; sliceCache?: PrintRunInput['sliceCache']}): Promise<{estimate?: SliceEstimate; settings: SliceSettings; slicerWarning?: string;
+    /** The exact sliced file this estimate describes, to be printed as it is (`PrintRunInput.presliced`). */
+    sliced: {bytes: Buffer; extension: string; sha256: string; slicerWarning?: string};
+    /** The MCP's picture of that file's G-code (inspect_print_file `preview`), when it draws one. */
+    preview?: SlicePreview}> {
+    let sliced: Buffer | undefined, extension = '.3mf';
     const plate = {...this.#config.selection, ...input.selection}.plateIndex ?? 0;
-    const {slicerWarning} = await this.run({stlPath: input.stlPath, print: false, ...(input.selection ? {selection: input.selection} : {}), ...(input.slicer ? {slicer: input.slicer} : {}),
+    const {slicerWarning, inspection} = await this.run({stlPath: input.stlPath, print: false, preview: true, ...(input.selection ? {selection: input.selection} : {}), ...(input.slicer ? {slicer: input.slicer} : {}),
       ...(input.signal ? {signal: input.signal} : {}), ...(input.sliceCache ? {sliceCache: input.sliceCache} : {}),
       // Read the output while the MCP is alive: a one-shot backend may delete it when it closes.
-      persistOutput: async output => { sliced = await readFile(output.slicedPath); return output; }});
+      persistOutput: async output => { sliced = await readFile(output.slicedPath); extension = extname(output.slicedPath) || '.3mf'; return output; }});
     if (!sliced) fail('invalid-output-path');
+    const sha256 = createHash('sha256').update(sliced).digest('hex');
+    const preview = slicePreview(inspection?.result, sha256);
     const estimate = await sliceEstimate(sliced, plate);
-    return {...(estimate ? {estimate} : {}), settings: await sliceSettings(sliced, plate), ...(slicerWarning ? {slicerWarning} : {})};
+    return {...(estimate ? {estimate} : {}), settings: await sliceSettings(sliced, plate), ...(slicerWarning ? {slicerWarning} : {}),
+      sliced: {bytes: sliced, extension, sha256, ...(slicerWarning ? {slicerWarning} : {})}, ...(preview ? {preview} : {})};
   }
 
   /** Connects and lists the server's tools without calling one (a one-shot session then disconnects). */
@@ -226,9 +244,11 @@ export class PrinterHandoffRunner {
     });
   }
 
-  private async inspect(session: PrinterSession, slicedPath: string, selection: PrinterSelection, options: CallOptions) {
+  private async inspect(session: PrinterSession, slicedPath: string, selection: PrinterSelection, options: CallOptions, preview = false) {
     if (session.hasTool('inspect_print_file')) {
+      const takesPreview = preview && Object.hasOwn(session.getTool('inspect_print_file').inputSchema.properties ?? {}, 'include_preview');
       const result = await call(session, 'inspect_print_file', {
+        ...(takesPreview ? {include_preview: true} : {}),
         file_path: slicedPath,
         bambu_model: selection.model,
         plate_index: selection.plateIndex ?? 0,
@@ -416,7 +436,9 @@ export class PrinterHandoffRunner {
     const cacheKey = input.sliceCache && !alreadySliced && presets ? sliceCacheKey({model: await readFile(input.stlPath), backend: this.#config.backend, presets,
       server: catalog.server, config: this.#config.process, env: started?.envSha256,
       args: sliceArgs}) : undefined;
-    const reused = cacheKey ? await readSlice(input.sliceCache!.directory, cacheKey) : undefined;
+    // The file the person was shown is printed as it is: it is never sliced again (see expectedSha256 below).
+    const reused = input.presliced && !alreadySliced ? input.presliced
+      : cacheKey ? await readSlice(input.sliceCache!.directory, cacheKey) : undefined;
     // Counterpart is a bridge: the model goes to the slicer as it is, and the slicer orients it.
     let orientedStlPath = input.stlPath;
     if (threeMf && !alreadySliced && !Object.hasOwn(session.getTool('slice_stl').inputSchema.properties ?? {}, 'slice_plate'))
@@ -449,7 +471,13 @@ export class PrinterHandoffRunner {
     }
     const estimate = await sliceEstimate(slicedBytes, selection.plateIndex ?? 0);
     await progress('inspecting', estimate);
-    const inspection = await this.inspect(session, slicedPath, selection, local);
+    const inspection = await this.inspect(session, slicedPath, selection, local, input.preview === true);
+    if (input.expectedSha256 !== undefined) {
+      // What was previewed is what prints: the MCP's own hash of the exact file about to be sent.
+      const sent = (inspection?.result as {artifact?: {sha256?: string}} | undefined)?.artifact?.sha256;
+      if (inspection?.tool !== 'inspect_print_file' || sent !== input.expectedSha256)
+        throw new PrinterMcpError('preview-mismatch', undefined, 'What would print is not the file you were shown. Open Print again to see it before printing.');
+    }
     if (alreadySliced) {
       const receipt = inspection?.result as {artifact?: {sha256?: string}; selection?: {plate_index?: number; bambu_model?: string}; inspection?: unknown} | undefined;
       if (inspection?.tool !== 'inspect_print_file' || receipt?.artifact?.sha256 !== model!.sha256 || receipt.selection?.plate_index !== (selection.plateIndex ?? 0) || receipt.selection?.bambu_model !== selection.model)
@@ -512,7 +540,8 @@ export class PrinterHandoffRunner {
    * Runs a stored handoff bundle and records the sliced output back into it.
    * The bundle backend must match this runner's configured backend.
    */
-  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']; sliceCache?: PrintRunInput['sliceCache']; beforePrint?: PrintRunInput['beforePrint']; ask?: PrintAsk} = {}) {
+  async runBundle(store: HandoffBundleStore, id: string, options: {print?: boolean; signal?: AbortSignal; slicer?: PrinterSlicer; onProgress?: PrintRunInput['onProgress']; sliceCache?: PrintRunInput['sliceCache']; beforePrint?: PrintRunInput['beforePrint']; ask?: PrintAsk;
+    presliced?: PrintRunInput['presliced']; expectedSha256?: string} = {}) {
     const manifest = await store.read(id);
     if (manifest.backend !== this.#config.backend) fail('backend-mismatch');
     if (manifest.status === 'uncertain') fail('dispatch-uncertain');
@@ -527,6 +556,7 @@ export class PrinterHandoffRunner {
       await copyFile(store.stlPath(manifest), inputStl);
       const result = await this.run({stlPath: inputStl, selection: manifest.selection, slicer: options.slicer, print: options.print, signal: options.signal, bundleId: id, onProgress: options.onProgress,
         ...(options.sliceCache ? {sliceCache: options.sliceCache} : {}), ...(options.ask ? {ask: options.ask} : {}),
+        ...(options.presliced ? {presliced: options.presliced} : {}), ...(options.expectedSha256 !== undefined ? {expectedSha256: options.expectedSha256} : {}),
         persistOutput: async output => {
           // MCP backends may delete scratch files on close. Save both artifacts
           // before dispatch, and give the printer the durable bundle path.

@@ -61,7 +61,7 @@ const tools = [
     ] : []),
     {name: 'inspect_print_file', inputSchema: {type: 'object', additionalProperties: false, required: ['file_path'], properties: {
       file_path: string, bambu_model: string, plate_index: integer,
-      nozzle_diameters: {type: 'array', items: number}, bed_type: string}}},
+      nozzle_diameters: {type: 'array', items: number}, bed_type: string, include_preview: {type: 'boolean'}}}},
     {name: 'camera_snapshot', inputSchema: {type: 'object', additionalProperties: false, properties: {bambu_model: string, timeout_ms: integer}}},
     {name: 'print_3mf', inputSchema: {type: 'object', additionalProperties: false, required: ['three_mf_path'], properties: bambuPrintProps}},
   ] : [
@@ -151,7 +151,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     return slicerResult ? {...text(path), structuredContent: {path, slicer_result: slicerResult}} : text(path);
   }
   if (name === 'inspect_print_file') {
-    return text({dispatchAuthorized: false, inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}});
+    // As bambu-printer-mcp 1.1.60 / mcp-3d-printer-server 1.2.34: the exact file's hash, and its G-code preview when asked.
+    const {createHash} = await import('node:crypto');
+    const sha256 = createHash('sha256').update(readFileSync(args.file_path)).digest('hex');
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mNgYGAAAAAEAAHI6uv5AAAAAElFTkSuQmCC';
+    const preview = args.include_preview === true && process.env.HANDOFF_FIXTURE_PREVIEW !== 'none' ? {artifact_sha256: sha256, plate_index: args.plate_index ?? 0, mm_per_pixel: 0.125,
+      views: [{name: 'top', label: 'Top, as it sits on the bed', png_base64: png, width: 1, height: 1}, {name: 'bed_side', label: 'Bed side, turned over toward you', png_base64: png, width: 1, height: 1}]} : undefined;
+    return text({receipt_version: '1', dispatchAuthorized: false, artifact: {sha256}, selection: {bambu_model: args.bambu_model, plate_index: args.plate_index ?? 0},
+      inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}, ...(preview ? {preview} : {})});
   }
   if (name === 'confirm_temperatures') return text({compatible: true, peakNozzleTempC: 220});
   if (name === 'counterpart_print_route') {

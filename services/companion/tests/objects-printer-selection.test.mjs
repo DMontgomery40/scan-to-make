@@ -9,6 +9,7 @@ import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
+import {showing, showingRunner} from './support/shown-print.mjs';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean'}}, required: ['confirmed']};
@@ -29,19 +30,19 @@ async function fixture(t) {
   for (const destination of destinations) {
     const config = catalog.resolve(destination.id), relay = new InMemoryElicitationRelay({timeoutMs: 2000});
     routes.set(destination.id, {store: new HandoffBundleStore(join(root, 'bundles')), relay, selection: config.selection,
-      runner: {backend: config.backend, runBundle: async (bundles, id, options = {}) => {
+      runner: showingRunner({backend: config.backend, runBundle: async (bundles, id, options = {}) => {
         const bundle = await bundles.read(id);
         calls.push({destination: destination.id, backend: bundle.backend, selection: bundle.selection, ...(options.slicer ? {slicer: options.slicer} : {})});
         const answer = await relay.request({method: 'elicitation/create', params: {mode: 'form', message: 'Check the selected printer.', requestedSchema: CONFIRM}}, {bundleId: id});
         answers.push({destination: destination.id, answer});
         if (answer.action !== 'accept') throw new Error('declined');
         return {bundleId: id};
-      }}});
+      }})});
   }
   const store = new ObjectStore(join(root, 'objects'));
-  const service = new ObjectService({store, handoff: current, printerCatalog: catalog, claudePath: '/unused',
+  const service = showing(new ObjectService({store, handoff: current, printerCatalog: catalog, claudePath: '/unused',
     runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined,
-    print: {services: routes.get('current'), destinations: routes}});
+    print: {services: routes.get('current'), destinations: routes}}));
   t.after(() => service.close());
   const object = await service.create('A hook.');
   await mkdir(join(store.dir(object.id), 'current'));
