@@ -182,3 +182,20 @@ test('photo evidence lists overview pages first and every real filename, includi
   assert.ok(prompt.indexOf(p.photoOverviewPaths[0]) < prompt.indexOf(p.photoPaths[0]));
   assert.equal(prompt.includes('…'), false, 'the worker can locate each actual extension rather than guessing a range');
 });
+
+test("a copy of a designer's 3MF is told to edit that project in place and compare with the designer's file", async () => {
+  const root = await mkdtemp(join(tmpdir(), 'touchup-inv-designer-'));
+  const {writeFile} = await import('node:fs/promises');
+  const working = join(root, 'model.3mf'), designer = join(root, 'scan.3mf');
+  await writeFile(working, 'PK'); await writeFile(designer, 'PK');
+  const p = await prepareTouchupPass({root, objectId: 'obj', scan: [working, designer], photos: [], requirePhotos: false});
+  const inv = buildTouchupInvocation({pass: p, printer, claudePath: '/c', sourceEnv, instructions: 'use this caliper card exactly but add the counterpart logo', note: 'Move it up', summary: 'Logo swapped.', currentModel: false, designerCopy: true});
+  const prompt = inv.args.at(-1);
+  assert.match(prompt, /Designer's 3MF project to edit: .*model\.3mf \(it already has the earlier changes\)/);
+  assert.match(prompt, /The designer's original 3MF, to compare against: .*scan\.3mf/);
+  assert.doesNotMatch(prompt, /an STL already in millimetres/);
+  const rules = valueOf(inv.args, '--append-system-prompt');
+  assert.match(rules, /except a copy of a designer's 3MF/, 'the multi-colour rebuild rule does not apply to a designer\'s file');
+  assert.match(rules, /Never rebuild it from the merged mesh or with counterpart_make_3mf, never turn painted markings into separate parts/);
+  assert.match(rules, /Never design a substitute for a model the person named/);
+});

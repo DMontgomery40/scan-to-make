@@ -180,3 +180,69 @@ test('shutdown holds the same Blender lock as the pass', async () => {
   await runTouchup(await input(), deps);
   assert.equal(stopped, true);
 });
+
+test("a copy of a designer's 3MF is refused when the pass rebuilt it: no 3MF, or print settings that differ (the Nov 4 caliper card)", async () => {
+  const root = await mkdtemp(join(tmpdir(), 'touchup-designer-'));
+  const designer = join(root, 'scan.3mf'), working = join(root, 'model.3mf');
+  await writeFile(designer, 'PK designer'); await writeFile(working, 'PK working');
+  const settings = {[designer]: {summary: {layer_height: 0.16, infill: '100%'}, raw_key_count: 412}};
+  const calls = [];
+  const client = () => ({
+    connect: async () => {}, close: async () => {}, hasTool: name => name === 'get_slice_settings',
+    callTool: async (name, args) => {
+      calls.push([name, args.source_path]);
+      // The pass works on its own copies: the designer's file is found by name, the pass's output by path.
+      const found = args.source_path.endsWith('/scan.3mf') ? settings[designer] : settings[args.source_path];
+      return found ? {content: [{type: 'text', text: JSON.stringify({source_path: args.source_path, ...found})}]} : {isError: true, content: [{type: 'text', text: 'No slicer settings config found'}]};
+    },
+  });
+  const run = async (writeParts, editedSettings) => {
+    const log = [];
+    const deps = {...recorder(log), client, run: async (inv, pass) => {
+      const result = done(pass);
+      await writeFile(result.model, 'solid x');
+      if (!writeParts) return result;
+      const parts = join(pass.outDir, 'touched.3mf');
+      await writeFile(parts, 'PK edited');
+      if (editedSettings) settings[parts] = editedSettings; else delete settings[parts];
+      return {...result, parts};
+    }};
+    return runTouchup(await input({scan: [working, designer], designerCopy: true, note: 'Swap the logo'}), deps);
+  };
+  const noFile = await run(false);
+  assert.equal(noFile.status, 'failed');
+  assert.match(noFile.reason, /rebuilt the designer's file/);
+  assert.equal(noFile.model, undefined, 'nothing from a refused pass becomes the model');
+  const kept = await run(true, settings[designer]);
+  assert.equal(kept.status, 'done', 'an edit inside the designer\'s project keeps its settings');
+  assert.ok(kept.parts.endsWith('touched.3mf'));
+  assert.deepEqual(calls.slice(-2).map(([name]) => name), ['get_slice_settings', 'get_slice_settings']);
+  assert.ok(calls.at(-2)[1].endsWith(join('scan', 'scan.3mf')), 'compared with the designer\'s own file, copied into the pass');
+  const rebuilt = await run(true, {summary: {layer_height: 0.2, infill: '15%'}, raw_key_count: 40});
+  assert.equal(rebuilt.status, 'failed');
+  assert.equal(rebuilt.parts, undefined);
+  assert.equal(rebuilt.model, undefined);
+  const bare = await run(true, undefined);
+  assert.equal(bare.status, 'failed', 'a bare 3MF has lost the designer\'s settings');
+});
+
+test("a designer copy whose last edit already lost the designer's settings starts again from the designer's file", async () => {
+  const root = await mkdtemp(join(tmpdir(), 'touchup-designer-restart-'));
+  const designer = join(root, 'scan.3mf'), working = join(root, 'model.3mf');
+  await writeFile(designer, 'PK designer'); await writeFile(working, 'PK rebuilt');
+  const client = () => ({connect: async () => {}, close: async () => {}, hasTool: () => true,
+    callTool: async (_name, args) => args.source_path.endsWith('/scan.3mf') || args.source_path.endsWith('touched.3mf')
+      ? {content: [{type: 'text', text: JSON.stringify({summary: {layer_height: 0.16}, raw_key_count: 9})}]}
+      : {content: [{type: 'text', text: JSON.stringify({summary: {layer_height: null}, raw_key_count: 0})}]}});
+  let prompt;
+  const deps = {...recorder([]), client, run: async (inv, pass) => {
+    prompt = inv.args.at(-1);
+    const result = done(pass); await writeFile(result.model, 'solid x');
+    const parts = join(pass.outDir, 'touched.3mf'); await writeFile(parts, 'PK edited');
+    return {...result, parts};
+  }};
+  const result = await runTouchup(await input({scan: [working, designer], designerCopy: true, note: 'redo design'}), deps);
+  assert.equal(result.status, 'done');
+  assert.match(prompt, /Designer's 3MF project to edit: .*scan\.3mf\n/, "the designer's own file is the one to edit");
+  assert.doesNotMatch(prompt, /model\.3mf/, 'the rebuilt file is not offered');
+});

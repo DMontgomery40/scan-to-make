@@ -35,6 +35,7 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `hardened_steel` `stainless_steel` `tungsten_carbide` | nozzle materials known to the app, **§8.0 #6** |
 | `timeout_ms` `max_bytes` `max_width` `min_change` `changed_only` `idle_timeout_ms` `since_seq` `wait_ms` `fps` | camera |
 | `angle_x` `angle_y` `angle_z` `scale_x` `scale_y` `scale_z` | rotate and scale |
+| `source_path` `raw_key_count` | `get_slice_settings`'s argument and the result field compared, with `summary`, between a designer's 3MF and a copy's edit of it: the app checks the two reports match, never what's in them |
 | `tool_name` `user_prompt` `arguments` `code` | `blender_mcp_call` |
 | `launch` | `fusion_mcp_status` |
 | `document_id` `source_f3d` `bind_document` `close_document` `document_binding` | Fusion document binding |

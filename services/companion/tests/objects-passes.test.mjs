@@ -68,6 +68,28 @@ test('a design in several colours keeps its multi-part 3MF as the model, and is 
   await assert.rejects(readFile(join(dir, 'current', 'model.3mf')), {code: 'ENOENT'}, 'a one-colour revision leaves no stale parts file');
 });
 
+test("a copy of a designer's 3MF works on that 3MF every pass, never its merged mesh (the Nov 4 caliper card)", async t => {
+  // Pass 3 of the caliper card was given the merged STL, rebuilt a bare 3MF from it and lost the designer's
+  // print settings and painted markings; the printed card no longer folded.
+  const f = await setup(t, [{parts: true, result: {summary: 'Logo swapped.'}}, {parts: true, result: {summary: 'Logo moved.'}}]);
+  const object = await f.service.create('use this caliper card exactly but add the counterpart logo to it', 'copy');
+  const {zipSync, strToU8} = (await import('node:module')).createRequire(new URL('../../printer-handoff/package.json', import.meta.url))('fflate');
+  const designer = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>')}));
+  await f.service.addScan(object.id, 'scan.3mf', designer);
+  await f.service.start(object.id);
+  await f.service.settled(object.id);
+  assert.deepEqual(f.inputs[0].scan.map(path => basename(path)), ['scan.3mf'], 'the first pass edits the designer\'s file');
+  assert.equal(f.inputs[0].designerCopy, true);
+  await f.service.correct(object.id, 'Move the logo up a little');
+  await f.service.settled(object.id);
+  const dir = f.store.dir(object.id);
+  assert.deepEqual(f.inputs[1].scan, [join(dir, 'current', 'model.3mf'), join(dir, 'scan', 'scan.3mf')],
+    'a later pass edits the last 3MF and compares with the designer\'s own file');
+  assert.equal(f.inputs[1].designerCopy, true);
+  assert.equal(f.inputs[1].currentModel, false, 'it is not told it has a millimetre STL to import');
+});
+
 test('a copy started with nothing scanned designs its request, and stays a design after the first pass', async t => {
   const f = await setup(t, [{}, {}]);
   const object = await f.service.create('A guitar pick that says Vivi', 'copy');

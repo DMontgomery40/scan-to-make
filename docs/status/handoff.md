@@ -22,13 +22,14 @@ Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 
 ## Open, in order
 
 1. **Moving backend code to the MCPs (PRD §8.0).** Items 1 (quality/strength, #313) and 2 (refusal codes, #314) are done. Next is item 3, the slicer branching (`isBambuSlicing`, which slicers take supports and copies). Then items 4–12 in order, one at a time; each extends both MCPs, publishes, installs through the app's Update, and only then deletes the app code.
-2. Bambu Cloud print route: the fix is in the installed 1.1.57. **David** prints with Connection = Bambu Cloud.
-3. FULU through mcp-3D crashes on its config-dir mount (item 12 moves the FULU launcher into bambu-printer-mcp).
-4. A change request stalls silently in `completion-intent.ts`: fixed and gated on `fix/completion-check-visible`, waiting behind the migration.
-5. Android on a real device or emulator; Linux pairing and printing.
-6. The rest of the PRD's not-accepted list (§0).
+2. **Copy of a designer's 3MF (caliper card, PRD §0).** Owned by the lead thread (David, Nov 5: "please own this fix"): `fix/copy-keeps-designer-file` here and `fix/3mf-keeps-own-process` in both MCPs. Don't edit `touchup/**`, the pass input in `objects/service.ts`, or the MCPs' slice-settings code until it lands.
+3. Bambu Cloud print route: the fix is in the installed 1.1.57. **David** prints with Connection = Bambu Cloud.
+4. FULU through mcp-3D crashes on its config-dir mount (item 12 moves the FULU launcher into bambu-printer-mcp).
+5. A change request stalls silently in `completion-intent.ts`: fixed and gated on `fix/completion-check-visible`, waiting behind the migration.
+6. Android on a real device or emulator; Linux pairing and printing.
+7. The rest of the PRD's not-accepted list (§0).
 
-**Waiting on David:** every physical print; he starts them ("do not reprint anything on your own EVER"). Next is the Bambu Cloud print (item 2). The phone's "Connected" in Settings was seen on device Nov 4 (old item 4.3, done).
+**Waiting on David:** every physical print; he starts them ("do not reprint anything on your own EVER"). Next is the Bambu Cloud print (item 3). The phone's "Connected" in Settings was seen on device Nov 4 (old item 4.3, done).
 
 **Infrastructure:** the Jev boundary check runs through OpenRouter because TypeSafe direct has no credits (HTTP 402). Adding TypeSafe credits is the only open infrastructure item, and nothing waits on it. One existing test, `capture-response-drain`, fails intermittently (Node 22, once).
 
