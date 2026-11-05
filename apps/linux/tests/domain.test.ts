@@ -4,6 +4,7 @@ import {
   ReadOrder,
   estimateRequest,
   freezePlate,
+  offeredChoices,
   printRequest,
   shownSlice,
   guardPlate,
@@ -195,4 +196,78 @@ test("the print sheet's estimate slices exactly what Print sends, and Print send
   assert.equal(shownSlice({ ...base, sliceSha256: sha, preview: { sha256: "b".repeat(64), views } }), undefined, "pictures of another file");
   assert.equal(shownSlice({ ...base, preview: { sha256: sha, views } }), undefined, "an older companion");
   assert.equal(shownSlice(undefined), undefined);
+});
+
+test("the print sheet sends only the choices the printer's MCP offers, so its estimate (and Print) aren't refused", () => {
+  const chosen = {
+    destinationId: "p1s",
+    quality: "fine",
+    strength: "max",
+    copies: 3,
+    pauseBeforeLayers: [5],
+  };
+  const all = {
+    quality: true,
+    strength: true,
+    copies: true,
+    layerPauses: true,
+  };
+  assert.deepEqual(
+    offeredChoices(chosen, {
+      capabilities: all,
+      sliced: false,
+      savedCopies: false,
+    }),
+    chosen,
+  );
+  // An MCP without those choices: its own preset, and no copies unless some were saved (then exactly one).
+  assert.deepEqual(
+    offeredChoices(chosen, {
+      capabilities: {},
+      sliced: false,
+      savedCopies: false,
+    }),
+    {
+      destinationId: "p1s",
+      quality: "standard",
+      strength: "standard",
+      copies: undefined,
+      pauseBeforeLayers: [],
+    },
+  );
+  assert.equal(
+    offeredChoices(chosen, {
+      capabilities: {},
+      sliced: false,
+      savedCopies: true,
+    }).copies,
+    1,
+  );
+  assert.equal(
+    "copies" in
+      estimateRequest(
+        "o1",
+        offeredChoices(chosen, {
+          capabilities: {},
+          sliced: false,
+          savedCopies: false,
+        }),
+      ),
+    false,
+  );
+  // A sliced plate keeps its own settings.
+  assert.deepEqual(
+    offeredChoices(chosen, {
+      capabilities: all,
+      sliced: true,
+      savedCopies: false,
+    }),
+    {
+      destinationId: "p1s",
+      quality: "standard",
+      strength: "standard",
+      copies: 1,
+      pauseBeforeLayers: [],
+    },
+  );
 });

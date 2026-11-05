@@ -297,10 +297,39 @@ export interface PrintChoices {
   destinationId: string;
   quality: string;
   strength: string;
-  copies: number;
+  /** Absent when the printer's MCP doesn't offer copies and none were saved: the MCP's own setting. */
+  copies?: number;
   filament?: Filament;
   material?: string;
   pauseBeforeLayers: number[];
+}
+/**
+ * Only what this printer's MCP offers is sent, as the Mac sheet does: a saved "fine" on a printer without the quality
+ * choice is refused, and with it the preview Print needs. A sliced plate keeps its own settings (one copy, no pauses).
+ */
+export function offeredChoices(
+  c: PrintChoices,
+  printer: {
+    capabilities?: Record<string, unknown>;
+    sliced: boolean;
+    savedCopies: boolean;
+  },
+): PrintChoices {
+  const offers = (choice: string) =>
+    !printer.sliced && printer.capabilities?.[choice] === true;
+  return {
+    ...c,
+    quality: offers("quality") ? c.quality : "standard",
+    strength: offers("strength") ? c.strength : "standard",
+    copies: printer.sliced
+      ? 1
+      : offers("copies")
+        ? c.copies
+        : printer.savedCopies
+          ? 1
+          : undefined,
+    pauseBeforeLayers: offers("layerPauses") ? c.pauseBeforeLayers : [],
+  };
 }
 /** `objects.estimate`: every choice Print makes, so the file it slices is the one Print sends. */
 export function estimateRequest(id: string, c: PrintChoices) {
@@ -309,7 +338,7 @@ export function estimateRequest(id: string, c: PrintChoices) {
     destinationId: c.destinationId,
     quality: c.quality,
     strength: c.strength,
-    copies: c.copies,
+    ...(c.copies !== undefined ? { copies: c.copies } : {}),
     ...(c.filament
       ? { filament: c.filament }
       : c.material
