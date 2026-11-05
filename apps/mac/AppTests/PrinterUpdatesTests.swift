@@ -8,6 +8,23 @@ import XCTest
         """#.utf8))
     }
 
+    /// Mac, Nov 5: mcp-3D was only a hand-built checkout no printer used, 1.2.25 with 1.2.35 published, and Settings
+    /// offered neither Update nor Download. Update now installs the latest as Counterpart's own copy (#320's path).
+    func testAnInstalledMcpNoPrinterUsesOffersUpdateWhenANewerVersionIsPublished() {
+        let checkout = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "mcp-3D-printer-server", description: "d", installed: true,
+                                         version: "1.2.25", latestVersion: "1.2.35", appMcpId: "app-generic")
+        XCTAssertTrue(checkout.offersUpdate)
+        let current = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "l", description: "d", installed: true,
+                                        version: "1.2.35", latestVersion: "1.2.35", appMcpId: "app-generic")
+        XCTAssertFalse(current.offersUpdate, "already the latest")
+        let unknown = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "l", description: "d", installed: true,
+                                        version: "1.2.25", appMcpId: "app-generic")
+        XCTAssertFalse(unknown.offersUpdate, "npm not asked yet")
+        let missing = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "l", description: "d", installed: false,
+                                        latestVersion: "1.2.35", appMcpId: "app-generic")
+        XCTAssertFalse(missing.offersUpdate, "not installed: Download, not Update")
+    }
+
     func testTheEventsCarryAnUpdateFromStartToItsResult() throws {
         let updates = PrinterUpdates()
         XCTAssertFalse(updates.apply(try event("mcp.update.started", #"{"mcpId":"bambu","fromVersion":"1.4.2","toVersion":"1.5.0"}"#)))

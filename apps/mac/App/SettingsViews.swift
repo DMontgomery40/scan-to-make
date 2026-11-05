@@ -399,7 +399,8 @@ struct PrintersSettings: View {
                 }
                 // Both MCPs, always: one no printer uses yet shows where it is, or Download.
                 ForEach(unusedPackages) { package in
-                    McpPackageRow(package:package, status:updates.status[package.appMcpId], download:{ setup.download(package) })
+                    McpPackageRow(package:package, status:updates.status[package.appMcpId], download:{ setup.download(package) },
+                                  update:objects.capabilities?.mcpUpdates == true ? { updateAppCopy(package) } : nil)
                 }
                 if PrinterMCP.list(printers).isEmpty && unusedPackages.isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
             } header: { Text("Printer MCPs") } footer: {
@@ -436,6 +437,11 @@ struct PrintersSettings: View {
 
     /// The companion updates it its own way (PRD §8.10) and the events carry the progress. Only offered by a
     /// companion with `printers.updateMcp` (`capabilities.mcpUpdates`): no button that can only fail.
+    /// Update for a package no printer uses: the companion installs the latest into Counterpart's own copy.
+    private func updateAppCopy(_ package: PrinterMcpPackage) {
+        Task { await updates.update(package.appMcpId, fresh:false, socket:ModelAccessModel.socketPath(for:Installation(bundle:.main))) }
+    }
+
     private func update(_ mcp: PrinterMCP, fresh: Bool) {
         guard objects.capabilities?.mcpUpdates == true, let mcpId = mcp.mcpId else { return }
         Task { await updates.update(mcpId, fresh:fresh, socket:ModelAccessModel.socketPath(for:Installation(bundle:.main))) }
