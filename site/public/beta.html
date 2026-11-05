@@ -4,63 +4,115 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Counterpart beta setup</title>
-<meta name="description" content="Download Counterpart for Mac, Android, Linux and iPhone, and set up your companion.">
+<meta name="description" content="Download the Counterpart beta for Mac, Linux, Android, iPhone and iPad, set up the companion and your printer's MCP, and pair your phone.">
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c0c0e" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to setup</a>
-<header class="masthead"><div class="wrap"><a class="brand" href="./"><img src="icon-256.png" alt="" width="36" height="36"><span>Counterpart</span></a><nav aria-label="Site"><a href="help.html">Help</a></nav></div></header>
-<main class="wrap help-body" id="main">
+<header class="masthead">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="icon-256.png" alt="" width="30" height="30"><span>Counterpart</span></a>
+    <nav aria-label="Site">
+      <a href="./#platforms">Platforms</a>
+      <a class="keep" href="help.html">Help</a>
+      <a class="nav-cta" href="#downloads">Download</a>
+    </nav>
+  </div>
+</header>
+<main class="wrap help-body page" id="main">
 <h1>Try Counterpart</h1>
-<p class="lede">Your phone and your computer work together. Install both apps, connect your printer tools, and start with something useful.</p>
+<p class="lede">One computer does the work and talks to your printer; your phone scans, sends and follows along. Install the computer app first, connect your printer's MCP, then pair your phone.</p>
+
 <section id="downloads" aria-labelledby="downloads-title">
 <h2 id="downloads-title">Download Counterpart</h2>
-<p class="intro">Choose a computer app, then pair your phone. These are beta builds; Android and Linux still need end-to-end device testing.</p>
-<div class="ways">
-<article><h3>Mac</h3><p>Apple silicon · macOS 27 or newer. Runs the companion. Connect your printer MCP and slicer in Settings → Printers.</p><p><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.4/ScanToMake-202611040930.zip">Download for Mac</a></p></article>
-<article><h3>Android</h3><p>Android 8 or newer. Needs Counterpart running on a Mac or Linux computer to pair with. Allow your browser to install this APK when Android asks.</p><p><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-android.apk">Download APK</a></p></article>
-<article><h3>Linux</h3><p>Ubuntu 26.04 · x86_64. Runs its own companion. Set up a printer MCP and Bambu Studio slicer in Settings → Printers.</p><p><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-amd64.deb">Download .deb</a></p><p><a href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-x86_64.AppImage">Download AppImage</a> · Make it executable before opening.</p></article>
-<article><h3>iPhone</h3><p>iOS 27 or newer. Needs the Mac companion; LiDAR capture needs a LiDAR-equipped iPhone.</p><p><a class="button" href="https://testflight.apple.com/join/S4tExVzp">Open TestFlight</a></p><p>Apple approval is required for external testing. Availability is shown on the TestFlight page.</p></article>
+<p class="intro">These are beta builds. Android and Linux still need testing on real devices and printers.</p>
+<div class="downloads">
+<article class="glass"><span class="pill beta">Beta 4</span><h3>Mac</h3><p class="spec">Apple silicon · macOS 27 or newer</p><p>Runs the companion. Connect your printer MCP and slicer in Settings › Printers.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.4/ScanToMake-202611040930.zip">Download for Mac</a></p></article>
+<article class="glass"><span class="pill beta">Beta 5</span><h3>Android</h3><p class="spec">Android 8 or newer</p><p>Needs Counterpart running on a Mac or Linux computer to pair with. Allow your browser to install this APK when Android asks.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-android.apk">Download APK</a></p></article>
+<article class="glass"><span class="pill beta">Beta 5</span><h3>Linux</h3><p class="spec">Ubuntu 26.04 · x86_64</p><p>Runs its own companion. Set up a printer MCP and the Bambu Studio slicer in Settings › Printers.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-amd64.deb">Download .deb</a></p><p class="alt"><a href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-x86_64.AppImage">Download AppImage</a>. Make it executable before opening.</p></article>
+<article class="glass"><span class="pill wait">TestFlight, not open yet</span><h3>iPhone and iPad</h3><p class="spec">iOS 27 or iPadOS 27 or newer</p><p>Needs the Mac companion. LiDAR capture needs a LiDAR-equipped iPhone or iPad Pro. TestFlight isn't accepting testers yet: the public link opens once Apple approves the beta build.</p><p class="get"><a class="button" href="https://testflight.apple.com/join/S4tExVzp">Open TestFlight</a></p></article>
 </div>
-<p><a href="https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.5-android-linux">Android and Linux release notes and SHA-256 checksums</a></p>
+<div class="after-downloads"><p><a href="https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.5-android-linux">Android and Linux release notes and SHA-256 checksums</a></p></div>
+<details class="faq glass" style="margin-top: 1.2rem"><summary>SHA-256 checksums</summary>
+<ul>
+<li><code>Counterpart-android.apk</code>: <code>91b45b1ed775a57863cdc17b917d8e4826c5f32f4d2b034b7cdc1a4eccd0820a</code></li>
+<li><code>Counterpart-linux-amd64.deb</code>: <code>873887105e0c0d5ac2d7068472bfc14794e359d757a65a166d7988e1b4ad0bcb</code></li>
+<li><code>Counterpart-linux-x86_64.AppImage</code>: <code>2836aab16a9d818c559f324a433e588f1338ad9d35eb0e6fc4f5003fb999651c</code></li>
+<li>Mac <code>ScanToMake-202611040930.zip</code>: <code>4447c3b7e3eede94b87a24dd53ce9511aad9d89b48d96a294693da47e2a8e627</code></li>
+<li>Android signing certificate: <code>15e9d0b6004a834e58129a4b615ee29e5a96c2c3225768cbe1a97aa56862c649</code></li>
+</ul>
+</details>
 </section>
-<section id="install">
-<h2>Set up the Mac and iPhone beta</h2>
-<p>Requires an Apple silicon Mac with macOS 27 and an iPhone with iOS 27. LiDAR capture needs a LiDAR-equipped iPhone. Android and Linux downloads are above. OpenCode integration is coming soon.</p>
-<p id="mac-release"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.4/ScanToMake-202611040930.zip">Download Counterpart for Mac</a></p>
-<p>Mac version 0.1.0, build 202611040930 · Apple silicon · signed, notarized and verified by Gatekeeper.</p>
-<p>This build updates printer setup and MCP downloads, adds editable AMS colour mapping and layer pauses, and passes the designer’s support settings to the slicer. STL models use the slicer’s automatic orientation; 3MF models keep their placement.</p>
-<p><a class="button" href="https://testflight.apple.com/join/S4tExVzp">Open the iPhone TestFlight beta</a></p>
-<p>iPhone build 2.0 (3) has been uploaded to Apple. External testing requires Apple approval; check the TestFlight page for current availability. No email invitation is needed.</p>
+
+<section id="install" aria-labelledby="install-title">
+<h2 id="install-title">Mac, with iPhone and iPad</h2>
+<p id="mac-release">Mac version 0.1.0, build 202611040930 · Apple silicon · signed, notarized and verified by Gatekeeper. This build updates printer setup and MCP downloads, adds editable AMS colour mapping and layer pauses, and passes the designer’s support settings to the slicer. STL models use the slicer’s automatic orientation; 3MF models keep their placement. It was made before What will print, which comes in the next Mac build.</p>
+<p>iPhone build 2.0 (3) has been uploaded to Apple. On Nov 5 the public link said the beta isn't accepting testers yet; it opens once Apple approves a build. No email invitation is needed.</p>
 <ol>
 <li>Move Counterpart to Applications and open it. Allow Local Network access so it can reach your phone and printer.</li>
-<li>Keep Counterpart running on the Mac. On your iPhone, open the TestFlight app and connect to the Mac. You can also use Add a Phone in Counterpart’s Mac menu to show a pairing code.</li>
-<li>In Settings → Printers, connect your existing bambu-printer-mcp or mcp-3D-printer-server. Install and configure the slicer and any networking bridge required by that backend.</li>
-<li>For design and editing, select Claude Code, Codex, or an OpenAI-compatible API in Settings → AI. The API option includes OpenRouter and local model endpoints. Run the connection test.</li>
+<li>In Settings › Printers, add your printer through bambu-printer-mcp or mcp-3D-printer-server; Counterpart can download or update either. Install the slicer and any network bridge that MCP needs.</li>
+<li>For design and editing, choose Claude Code, Codex, an API key, or an OpenAI-compatible endpoint (including OpenRouter and local model servers) in Settings › AI, and run the connection test.</li>
+<li>Keep Counterpart running. On your iPhone or iPad, install the TestFlight build and open it: with the same Apple Account it should find the Mac by itself (this first-time setup is still being tested). Otherwise use Add a Phone in the Mac's menu bar and scan the code.</li>
+<li>For Lock Screen updates from a TestFlight phone, turn on the relay in Mac Settings › Advanced with <code>https://counterpart.dtmont.com/relay/v1</code>.</li>
 </ol>
 </section>
-<section id="cleanup">
-<h2>Set up scan cleanup</h2>
-<p>Cleanup workers are installed separately from the signed app. You need Python 3.12 and Blender 5.0.1. Open Counterpart once, then follow the <a href="https://github.com/DMontgomery40/scan-to-make/blob/fbd1a69b/deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app">independent worker installation instructions</a> using source revision <code>fbd1a69b</code>. The installer checks the workers before saving their paths. Restart Counterpart when idle afterward.</p>
-<p>Printing existing models does not require the AI connection or cleanup workers. API-based cleanup retains the documented CLI requirements; custom endpoints need the Responses API.</p>
+
+<section id="linux" aria-labelledby="linux-title">
+<h2 id="linux-title">Linux</h2>
+<p>Ubuntu 26.04 on x86_64, with a graphical desktop session. Counterpart for Linux runs its own companion as a background user service. Its projects are its own; it doesn't pair with or sync from a Mac. There's no iCloud or Fusion on Linux.</p>
+<ol>
+<li>Install the <code>.deb</code> with <code>sudo apt install ./Counterpart-linux-amd64.deb</code>, or make the AppImage executable (<code>chmod +x Counterpart-linux-x86_64.AppImage</code>) and open it.</li>
+<li>Open Counterpart and let it finish its first setup.</li>
+<li>In Settings › Printers, download bambu-printer-mcp or mcp-3D-printer-server and add your printer. Install the slicer your MCP uses (Bambu Studio for Bambu Lab printers) and tell the MCP where it is, as the MCP's setup guide describes.</li>
+<li>For design and editing, choose an AI provider in Settings. API keys are kept in your desktop's secret store.</li>
+<li>To pair an Android phone, show the pairing code in Settings. Away from home, use Tailscale.</li>
+</ol>
+<p>Tested so far: an engineering check on Nov 5 added a Bambu Lab P1S and showed What will print for the caliper card. Not yet tested: pairing a phone, a print, an AI job, and rebuilding a photo scan.</p>
 </section>
-<section id="starters">
-<h2>Start with a useful print</h2>
+
+<section id="android" aria-labelledby="android-title">
+<h2 id="android-title">Android</h2>
+<p>Android 8 or newer. The APK is signed with Counterpart's permanent release key; its certificate SHA-256 is in the release notes.</p>
+<ol>
+<li>Download the APK on the phone and open it. Allow your browser, or the app you opened it from, to install unknown apps when Android asks.</li>
+<li>Make sure Counterpart is running on your Mac or Linux computer, on the same Wi-Fi as the phone (or both on Tailscale). Turn off a VPN or Private DNS if pairing can't reach the computer.</li>
+<li>Open Counterpart, choose Continue, and scan the code the computer shows, or choose Look on This Wi-Fi and check the six-digit code matches on both screens.</li>
+</ol>
+<p>Tested so far: paired with a Mac on an Android emulator on Nov 5, with projects and search working. Not yet tested: a real phone, a photo scan, and a print.</p>
+</section>
+
+<section id="cleanup" aria-labelledby="cleanup-title">
+<h2 id="cleanup-title">Set up scan cleanup on the Mac</h2>
+<p>On the Mac beta, cleanup workers are installed separately from the signed app. You need Python 3.12 and Blender 5.0.1. Open Counterpart once, then follow the <a href="https://github.com/DMontgomery40/scan-to-make/blob/fbd1a69b/deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app">independent worker installation instructions</a> using source revision <code>fbd1a69b</code>. The installer checks the workers before saving their paths. Restart Counterpart when idle afterward.</p>
+<p>Printing published models does not need the AI connection or cleanup workers. API-based cleanup keeps the documented CLI requirements; custom endpoints need the Responses API.</p>
+</section>
+
+<section id="starters" aria-labelledby="starters-title">
+<h2 id="starters-title">Start with a useful print</h2>
 <ul>
 <li><strong>Counterpart caliper card:</strong> model files and preview are included. Add it to create a fresh project, then choose your printer and print settings.</li>
-<li><strong>Kass 3D scan platform:</strong> open the credited designer page from its starter and import the original six-plate file. All plates remain in one project; select a plate to print or reprint it.</li>
+<li><strong>Kass 3D scan platform:</strong> open the credited designer page from its starter and import the original six-plate file. All plates stay in one project; select a plate to print or reprint it.</li>
 <li><strong>Long vernier caliper with depth gauge:</strong> open its designer page and import the original model files together into the starter project.</li>
 </ul>
-<p>Starter projects contain instructions and designer credits, without another user’s conversation or print history. Plate completion is tracked separately; sending a plate does not mark it finished.</p>
+<p>Starter projects contain instructions and designer credits, without anyone else's conversation or print history. Plate completion is tracked separately; sending a plate does not mark it finished. The same starters are on every platform.</p>
 </section>
-<section id="test">
-<h2>What to test</h2>
-<p>Try pairing, the starter card, plate selection, printing, and one design or cleanup job with your chosen provider. For LiDAR capture, inspect every side of the result and check the camera and Face ID afterward. Send feedback through TestFlight with your phone model, Mac build, printer model and MCP version.</p>
-<p>This beta still needs fresh-install and physical-device acceptance for capture quality, phone printer controls, real-print alerts and Watch delivery. Printer fixes are published in bambu-printer-mcp 1.1.54 and mcp-3d-printer-server 1.2.28. Use the app’s Download or Update MCP action to get the latest published package. Verification through the app with these releases is in progress.</p>
-<p>For TestFlight Live Activities, enable the relay in Mac Settings → Advanced with <code>https://counterpart.dtmont.com/relay/v1</code>. Production APNs authentication is verified; delivery to a TestFlight phone is still being tested.</p>
+
+<section id="test" aria-labelledby="test-title">
+<h2 id="test-title">What to test</h2>
+<p>Try pairing, the starter card, plate selection, What will print, printing, and one design or cleanup job with your chosen provider. For a LiDAR scan, inspect every side of the result and check the camera and Face ID afterward. Send feedback through TestFlight on iPhone, with your phone model, computer and build, printer model and MCP version.</p>
+<p>Still to be tested on real devices: fresh installs, scan quality, phone printer controls, real-print alerts, and Live Activity delivery to a TestFlight phone. Use the app's Download or Update action in Settings › Printers to get the latest published MCP; What will print needs bambu-printer-mcp 1.1.60 or later, or mcp-3d-printer-server 1.2.34 or later.</p>
 </section>
 <p><a href="help.html">Read the full guide</a> · <a href="help.html#privacy">Privacy and your AI provider</a></p>
 </main>
+<footer class="foot">
+  <div class="wrap">
+    <p>Counterpart runs on your own computer and printer, with the AI provider you choose.</p>
+    <p class="foot-links"><a href="./">Home</a> <a href="help.html">Help</a> <a href="help.html#privacy">Privacy</a></p>
+  </div>
+</footer>
 </body>
 </html>

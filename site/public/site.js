@@ -76,7 +76,7 @@
     const update = () => {
       const ticked = needs.flatMap((box, index) => box.checked ? [index] : []);
       try { localStorage.setItem('counterpart-needs', JSON.stringify(ticked)); } catch {}
-      if (done) done.textContent = needs.filter(box => !box.hasAttribute('data-optional')).every(box => box.checked) ? 'You have what you need to print existing models and reprints. Open Counterpart on your Mac, then on your iPhone.' : '';
+      if (done) done.textContent = needs.filter(box => !box.hasAttribute('data-optional')).every(box => box.checked) ? 'You have what you need to print published models and reprints. Open Counterpart on your computer, then pair your phone.' : '';
     };
     needs.forEach(box => box.addEventListener('change', update));
     update();
