@@ -362,7 +362,12 @@ struct SocketObjects: ObjectsCompanion {
 
     /// Match the recorded print destination, not a project's next-print preference or the default printer.
     func projects(forPrinter id: String) -> [Project] {
-        ordered.filter { $0.print?.destination?.id == id }
+        let printer = printerCatalog?.destination(for: id)
+        let recordedIDs = Set([printer?.id ?? id] + (printer?.aliases ?? []))
+        return ordered.filter { project in
+            guard let recorded = project.print?.destination?.id else { return false }
+            return recordedIDs.contains(recorded)
+        }
     }
 
     func printer(for object: Project) -> PrinterDestination? {

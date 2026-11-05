@@ -13,6 +13,8 @@ import {modelFromSerial} from '../printing/discovery.js';
 /** Configured destinations, not claims about live printer connectivity. */
 export interface PrinterDestination {
   id: string;
+  /** Other catalog IDs that currently resolve to this same printer. Historical print IDs stay unchanged. */
+  aliases?: string[];
   name: string;
   backend: PrinterBackend;
   model?: string;
@@ -386,6 +388,10 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
   const {chosen, groups} = winners(candidates, saved?.choices);
   const configs = new Map(candidates.map(candidate => [candidate.id, candidate.config] as const));
   const canonical = new Map(candidates.map(candidate => [candidate.id, chosen.get(candidate)!.id] as const));
+  const aliases = new Map<string, string[]>();
+  for (const [id, winner] of canonical) {
+    if (id !== winner) aliases.set(winner, [...(aliases.get(winner) ?? []), id]);
+  }
   const choiceKeys = new Map<string, string>();
   const alternatives = new Map<string, {backend: PrinterBackend; destinationId: string}[]>();
   for (const group of groups) {
@@ -412,6 +418,7 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
   const defaultDestinationId = (placeholder ? listed[0]?.id : undefined) ?? canonical.get('current')!;
   const destinations: PrinterDestination[] = [...listed.filter(item => item.id === defaultDestinationId), ...listed.filter(item => item.id !== defaultDestinationId)]
     .map(({id, name, backend, model, address, source, origin, folder, incomplete}) => ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin,
+      ...(aliases.has(id) ? {aliases: aliases.get(id)!} : {}),
       ...(alternatives.has(id) ? {mcps: alternatives.get(id)!} : {}), ...(origin === 'counterpart' && folder ? {folder} : {}), ...(incomplete ? {incomplete} : {})}));
   return {defaultDestinationId, destinations, configs, canonical, candidates, choiceKeys};
 }

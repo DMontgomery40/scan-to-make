@@ -20,7 +20,7 @@ function destination({tools, status, failing = () => false}) {
     {clientFactory: factory, onConnect: catalog => directory.connected('current', catalog)});
   return {session, reads, set: value => { directory = value; }};
 }
-const catalog = {defaultDestinationId: 'current', destinations: [{id: 'current', name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', source: 'current', origin: 'printer-handoff'}],
+const catalog = {defaultDestinationId: 'current', destinations: [{id: 'current', aliases: ['old-duplicate'], name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', source: 'current', origin: 'printer-handoff'}],
   resolve: () => undefined, canonical: id => id === 'current' || id === 'old-duplicate' ? 'current' : undefined};
 
 test('a printer list answers at once, then fills in state and capabilities from the session without waiting on it', async () => {
@@ -29,6 +29,7 @@ test('a printer list answers at once, then fills in state and capabilities from 
   const directory = new PrinterDirectory(catalog, id => id === 'current' ? d.session : undefined, {now: () => now});
   d.set(directory);
   const first = directory.list();
+  assert.deepEqual(JSON.parse(JSON.stringify(first)).destinations[0].aliases, ['old-duplicate']);
   assert.equal(first.destinations[0].state, 'unknown');
   assert.equal(first.destinations[0].capabilities, undefined);
   await directory.refresh('current');

@@ -400,12 +400,14 @@ test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a f
   busy.delete('current');
   assert.deepEqual(await setup.chooseMcp('current', 'mcp-3d-printer-server'), {destinationId: viaClone.id});
   assert.equal(catalog.canonical('current'), viaClone.id);
+  assert.ok(catalog.destinations.find(item => item.id === viaClone.id).aliases.includes('current'));
   assert.equal(catalog.defaultDestinationId, viaClone.id);
   const listed = catalog.destinations.find(item => item.id === viaClone.id);
   assert.deepEqual([listed.origin, listed.backend, listed.folder, listed.mcps.map(item => item.backend)], ['counterpart', 'mcp-3d-printer-server', clone, ['mcp-3d-printer-server', 'bambu-printer-mcp']]);
   assert.deepEqual(JSON.parse(await readFile(profilesPath, 'utf8')).choices, {'serial:01P00A123456789': 'mcp-3d-printer-server'});
   await setup.chooseMcp(viaClone.id, 'bambu-printer-mcp');
   assert.equal(catalog.canonical(viaClone.id), 'current');
+  assert.ok(catalog.destinations.find(item => item.id === 'current').aliases.includes(viaClone.id));
 
   // Add from the form: its own folder and .env (0600) with exactly the MCP's variables, running the app's copy.
   const octo = await setup.add(PrinterFormSchema.parse(form));
@@ -783,4 +785,19 @@ test('review fix (#295): a printer that only borrows a found checkout\'s code do
   configs.push({id: 'clone', config: {backend: 'mcp-3d-printer-server', process: {command: '/usr/local/bin/node', args: [entry], cwd: clone}}});
   assert.equal((await setup.discover()).found.filter(item => item.source === 'folder').length, 0);
   await assert.rejects(setup.add({folder: clone}), /one of your printers already/);
+});
+
+
+test('public aliases include every canonical duplicate, including two configurations of one MCP', async t => {
+  const f = await fixture(t);
+  const source = await f.put('aliases.json', {mcpServers: {
+    first: {command: 'node', args: ['/opt/bambu-printer-mcp/dist/index.js'], env: {PRINTER_HOST: '192.0.2.1'}},
+    second: {command: 'node', args: ['/opt/bambu-printer-mcp/dist/index.js'], env: {PRINTER_HOST: '192.0.2.1', MCP_TRANSPORT: 'stdio'}},
+    separate: {command: 'node', args: ['/opt/bambu-printer-mcp/dist/index.js'], env: {PRINTER_HOST: '192.0.2.88'}},
+  }});
+  const catalog = await loadPrinterCatalog(f.current, f.options([source]));
+  const aliases = catalog.entries().map(entry => entry.id).filter(id => id !== 'current' && catalog.canonical(id) === 'current');
+  assert.equal(aliases.length, 2);
+  assert.deepEqual(catalog.destinations.find(d => d.id === 'current').aliases, aliases);
+  assert.equal(catalog.destinations.find(d => d.address === '192.0.2.88').aliases, undefined);
 });

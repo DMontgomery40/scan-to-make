@@ -634,8 +634,8 @@ export class ObjectService {
     // Metadata reads also come from status/event refreshes with no camera on screen.
     if (this.#deps.printers) return this.#deps.printers.list();
     const catalog = this.#deps.printerCatalog;
-    return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, name, backend, model, address, source, origin, mcps, folder}) =>
-      ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, ...(origin ? {origin} : {}), ...(mcps ? {mcps} : {}), ...(folder ? {folder} : {})})) ?? []};
+    return {defaultDestinationId: catalog?.defaultDestinationId, destinations: catalog?.destinations.map(({id, aliases, name, backend, model, address, source, origin, mcps, folder}) =>
+      ({id, ...(aliases ? {aliases} : {}), name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, ...(origin ? {origin} : {}), ...(mcps ? {mcps} : {}), ...(folder ? {folder} : {})})) ?? []};
   }
 
   /** The listed destination an object's choice stands for now (a duplicate resolves to its winner). */
