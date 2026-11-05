@@ -365,8 +365,16 @@ struct FixtureTransport: HTTPTransport {
             if parts[3] == "estimate", method == "POST" {
                 let destination = id == Fixtures.ids.mic ? Fixtures.printer : "current"
                 let seconds: Double = destination == "mcp-garage" ? 3900 : destination == "mcp-ender" ? 6480 : 4320
+                // As the real companion answers since #321: the sliced file's SHA-256 and the MCP's two pictures of it,
+                // drawn from that same file. Print sends only a slice whose pictures the sheet showed.
+                let sha = "f1c7e5a0b2d4c6e8f0a1b3c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5"
+                let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
                 return json(["destinationId": destination, "quality": "standard", "strength": "standard", "seconds": seconds, "grams": 22, "layers": 212,
-                             "layerHeightMm": 0.2, "infillPercent": 15, "wallLoops": 2, "slicedAt": ISO8601DateFormatter().string(from: Date())])
+                             "layerHeightMm": 0.2, "infillPercent": 15, "wallLoops": 2, "slicedAt": ISO8601DateFormatter().string(from: Date()),
+                             "sliceSha256": sha,
+                             "preview": ["sha256": sha, "views": [
+                                ["name": "top", "label": "Top, as it sits on the bed", "png": png, "width": 1, "height": 1],
+                                ["name": "bed_side", "label": "Bed side, turned over toward you", "png": png, "width": 1, "height": 1]]]])
             }
             if parts[3] == "passes" {
                 return json(["activity": [
