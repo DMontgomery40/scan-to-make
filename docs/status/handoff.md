@@ -8,7 +8,7 @@ One screen, updated in place. No dated copies or prompt files; git history keeps
 
 | Where | Build | Source |
 |---|---|---|
-| Mac `/Applications/Counterpart.app` | 202611050844 (Nov 5 08:47Z) | main `0c967a58`, with #318, #320 and #321 (what will print). Rollback: 202611050554 at `~/scan-to-make-work/mac-202611050844/Counterpart.previous`. |
+| Mac `/Applications/Counterpart.app` | 202611051513 (Nov 5 15:17Z) | main `6a6d4dde`, with #321 (what will print) and #326 (a sidebar search says how many projects it hides, and sits in the sidebar). Rollback: 202611050844 at `~/scan-to-make-work/mac-202611051513/Counterpart.previous`. |
 | iPhone Davica3 `00008150-001A488C3642401C` | 2.0 (202611050845), Release, development signing, installed Nov 5 | `0c967a58` (#321) |
 | Public Mac beta (Sparkle, notarized) | v2.0-beta.4 · 202611040930 | `fbd1a69b` |
 | TestFlight | 2.0 (3) uploaded Nov 4; 2.0 (2) last seen Waiting for Review in Counterpart Public Beta | `4a894769` |
