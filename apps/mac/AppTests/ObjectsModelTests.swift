@@ -598,6 +598,25 @@ private func project(_ item: [String: Any]) throws -> Project {
         }
     }
 
+    /// David, Nov 5: "where did the 'start with these things' thing go, to print the 3d scan rig and the calipers?"
+    /// The Mac showed the starters only with no project selected, and it selects the first project on launch.
+    func testTheSidebarListsTheStartersWhileProjectsExist() async {
+        let companion = FakeObjects()
+        await companion.set([item("r", "ready"), item("p", "printed")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertNotNil(model.selection, "a project is open, so a no-selection screen can't be the only way in")
+        let sidebar = model.groups(matching: "")
+        XCTAssertEqual(sidebar.starters.map(\.id), StarterProject.all.map(\.id))
+        XCTAssertTrue(sidebar.starters.contains { $0.id == "scan-platform" }, "the scan rig")
+        XCTAssertTrue(sidebar.starters.contains { $0.id == "long-vernier-caliper" }, "the caliper")
+        XCTAssertTrue(model.groups(matching: "  ").starters.count == StarterProject.all.count)
+        XCTAssertTrue(model.groups(matching: "stove").starters.isEmpty, "a search shows only what it matches")
+        await companion.set([])
+        await model.refresh()
+        XCTAssertEqual(model.groups(matching: "").starters.count, StarterProject.all.count, "and with no projects")
+    }
+
     func testANewProjectWaitsForACompanionThatCanStartOne() async {
         let model = ObjectsModel(companion:FakeObjects())
         await model.refresh()

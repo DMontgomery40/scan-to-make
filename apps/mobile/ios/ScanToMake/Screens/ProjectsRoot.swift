@@ -81,7 +81,7 @@ struct ProjectsRoot: View {
     private var split: some View {
         NavigationSplitView {
             SidebarList(store: store, selection: Binding(get: { selected }, set: { selected = $0; detailPath = [] }), newProject: { newSheet = NewSheetRequest(job: nil) },
-                        openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
+                        addStarter: addStarter, openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
         } detail: {
             if let selected {
                 NavigationStack(path: $detailPath) {
@@ -89,13 +89,20 @@ struct ProjectsRoot: View {
                         .navigationDestination(for: String.self) { id in page(id) { detailPath.removeAll() } }
                 }
                 .id(selected)
-            } else if store.loaded && store.projects.isEmpty {
-                ScrollView { EmptyHome { newSheet = NewSheetRequest(job: $0) }.padding(24).frame(maxWidth: 640) }.background(Color.black)
             } else {
-                ContentUnavailableView("Choose a project", systemImage: "cube", description: Text("Its model, what you sent and what your Mac did show here."))
-                    .background(Color.black)
+                // Nothing selected: the starters and the two jobs, as iPhone Home has them, whether or not
+                // projects exist (PRD §5.11, §6.1). This is what the iPad shows when the app opens.
+                StartPane(hasProjects: !store.projects.isEmpty, newProject: { newSheet = NewSheetRequest(job: $0) }, addStarter: addStarter)
             }
         }
+    }
+
+    /// A starter becomes a project on the Mac, which then opens (PRD §5.11).
+    private func addStarter(_ starter: StarterProject) async throws {
+        let ticket = store.startRequest()
+        let project = try await store.mac.client.addStarter(starter)
+        store.replace(project, ticket: ticket)
+        open(project.id)
     }
 
     private func projectPage(_ id: String, close: @escaping () -> Void) -> some View {
@@ -118,16 +125,38 @@ enum Page {
 struct NewSheetRequest: Identifiable { let id = UUID(); let job: NewProjectJob? }
 struct IdentifiedProject: Identifiable { let id: String }
 
-/// The iPad and Duo sidebar: Now, Needs you, Ready, Printed, and the rest (PRD §6, screens/ipad-split.jpg).
+/// The iPad detail with no project selected: what to start with, never an empty "Choose a project".
+struct StartPane: View {
+    let hasProjects: Bool
+    let newProject: (NewProjectJob?) -> Void
+    let addStarter: (StarterProject) async throws -> Void
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                Text(hasProjects ? "Choose a project, or start something new" : "Your next project starts here")
+                    .font(.largeTitle.bold())
+                StarterProjectsView(start: addStarter)
+                EmptyHome(start: newProject)
+            }
+            .padding(24).frame(maxWidth: 680, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Color.black)
+    }
+}
+
+/// The iPad and Duo sidebar: Now, Needs you, Ready, Printed, the rest, and the starters (PRD §6, screens/ipad-split.jpg).
 struct SidebarList: View {
     @Bindable var store: ProjectsStore
     @Binding var selection: String?
     let newProject: () -> Void
+    let addStarter: (StarterProject) async throws -> Void
     let openPrinters: () -> Void
     let openSettings: () -> Void
     @State private var query = ""
     @FocusState private var searching: Bool
     @State private var showArchived = false
+    @State private var openedStarter: StarterProject?
 
     private func matches(_ project: Project) -> Bool {
         project.matchesSearch(query, additional: [store.printerName(project) ?? ""])
@@ -170,8 +199,27 @@ struct SidebarList: View {
                     }
                 } header: { Text("Archived · \(archived.count)") }
             }
+            // The starters stay one tap away while a project is open, as at the end of iPhone Home.
+            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Section("Start with these") {
+                    ForEach(StarterProject.all) { starter in
+                        Button { openedStarter = starter } label: { StarterRow(starter) }
+                            .accessibilityIdentifier("sidebar-starter-\(starter.id)")
+                    }
+                }
+            }
         }
+            // New has its own bar under the list, as search has above it. As a bottom-bar toolbar item it was a
+            // floating "+" over whichever row sat behind it (iPad build 202611052142, Nov 5).
+            Button(action: newProject) {
+                Label("New Project", systemImage: "plus").fontWeight(.semibold).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent).controlSize(.large)
+            .accessibilityIdentifier("new-project")
+            .keyboardShortcut("n", modifiers: .command)
+            .padding(.horizontal, 16).padding(.vertical, 10)
         }
+        .sheet(item: $openedStarter) { starter in StarterDetail(project: starter, start: addStarter) }
         .navigationTitle("Projects")
         .navigationSubtitle(store.reachable == false ? "\(store.macName ?? "Your Mac") isn't answering" : store.reachable == true ? "\(store.macName ?? "Your Mac") connected" : store.macName ?? "Your Mac")
 
@@ -180,11 +228,6 @@ struct SidebarList: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { Button(action: openPrinters) { Image(systemName: "printer.fill") }.accessibilityLabel("Printers") }
             ToolbarItem(placement: .topBarTrailing) { Button(action: openSettings) { Image(systemName: "person.crop.circle") }.accessibilityLabel("Settings") }
-            ToolbarItem(placement: .bottomBar) {
-                Button(action: newProject) { Label("New", systemImage: "plus").labelStyle(.titleAndIcon).fontWeight(.semibold) }
-                    .buttonStyle(.glassProminent)
-                    .keyboardShortcut("n", modifiers: .command)
-            }
         }
     }
 

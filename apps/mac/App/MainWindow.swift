@@ -197,6 +197,7 @@ private struct Sidebar: View {
     @Binding var deleting: Project?
     @Binding var stopping: Project?
     @State private var shownPrinter: PrinterDestination?
+    @State private var openedStarter: StarterProject?
     @State private var showArchived = false
     @State private var query = ""
 
@@ -255,6 +256,17 @@ private struct Sidebar: View {
                     Section(entry.group.title) { rows(entry.objects) }
                 }
             }
+            if !search.starters.isEmpty {
+                Section("Start with These") {
+                    ForEach(search.starters) { starter in
+                        Button { openedStarter = starter } label: { StarterRow(starter) }
+                            .buttonStyle(.plain)
+                            .selectionDisabled()
+                            .help("Open \(starter.title)")
+                            .accessibilityIdentifier("sidebar-starter-\(starter.id)")
+                    }
+                }
+            }
             if let printers = model.printerCatalog?.destinations, !printers.isEmpty {
                 Section("Printers") {
                     ForEach(printers) { printer in
@@ -277,6 +289,7 @@ private struct Sidebar: View {
         .navigationSplitViewColumnWidth(min: 240, ideal: 260)
         .onDeleteCommand { deleting = model.selected }
         .safeAreaInset(edge: .bottom) { footer }
+        .sheet(item: $openedStarter) { starter in StarterDetail(project: starter) { try await model.addStarter($0) } }
         .sheet(item: $shownPrinter) { printer in
             SidebarPrinter(opened: printer, model: model) { project in
                 model.selection = project.id

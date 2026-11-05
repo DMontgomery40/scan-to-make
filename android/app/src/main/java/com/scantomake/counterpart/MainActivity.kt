@@ -155,7 +155,7 @@ class MainActivity : ComponentActivity() {
                 ScanScreen(id, done = { nav.popBackStack() })
             }
             composable("printers") { PrintersScreen(back = { nav.popBackStack() }) }
-            composable("settings") { SettingsScreen(back = { nav.popBackStack() }, pairAgain = { nav.navigate("pair") }) }
+            composable("settings") { SettingsScreen(back = { nav.popBackStack() }, pairAgain = { nav.navigate("pair") }, openPrinters = { nav.navigate("printers") }) }
             composable("pair") { FindYourMacScreen(replace = true, onPaired = { nav.popBackStack(); state.startFollowing() }, cancel = { state.pendingLink.value = null; nav.popBackStack() }) }
         }
     }

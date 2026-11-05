@@ -2,6 +2,7 @@ package com.scantomake.counterpart.ui
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -88,9 +89,13 @@ fun PrintersScreen(back: () -> Unit) {
     }
 }
 
+/** The same pages the iPhone and Mac open (CounterpartKit `CounterpartIdentifiers.helpPage`, `.scanRig`). */
+const val HELP_PAGE = "https://counterpart.dtmont.com/help"
+const val SCAN_RIG_PAGE = "https://makerworld.com/en/models/1531561"
+
 /** Settings: this phone's name, the Mac it's paired with, notifications and milestones. */
 @Composable
-fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit) {
+fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> Unit) {
     val context = LocalContext.current
     val app = Counterpart.instance
     val state = AppState.of(context)
@@ -120,6 +125,9 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit) {
                 }
                 SecondaryButton("Forget This Computer", Modifier.fillMaxWidth(), color = Palette.failed) { forget = true }
             } }
+            // The print sheet sends people to "Settings → Printers" for an MCP update; on Android it was only the Home icon.
+            SectionTitle("Printers")
+            SecondaryButton("Printers and Their MCPs", Modifier.fillMaxWidth(), onClick = openPrinters)
             SectionTitle("This phone")
             OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name your computer shows") }, singleLine = true)
             SecondaryButton("Save Name", Modifier.fillMaxWidth(), enabled = isPlainText(name, 80)) { app.prefs.edit().putString(Counterpart.DEVICE_NAME_KEY, name.trim()).apply() }
@@ -140,6 +148,10 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit) {
             }
             Text("Notifications come from your computer over your Wi-Fi (or Tailscale). Away from both, they arrive when the phone can reach your computer again.",
                 color = Palette.secondary, fontSize = 12.sp)
+            // Help, as on iPhone, Mac and Linux (PRD §5.9): the guide and the scan rig.
+            SectionTitle("Help")
+            SecondaryButton("Open the Guide", Modifier.fillMaxWidth()) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(HELP_PAGE))) }
+            SecondaryButton("Print the Scan Rig by Kass 3D", Modifier.fillMaxWidth()) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SCAN_RIG_PAGE))) }
             SectionTitle("About")
             Text("Counterpart for Android 0.1.0 · open source · github.com/DMontgomery40/scan-to-make", color = Palette.secondary, fontSize = 13.sp)
         }

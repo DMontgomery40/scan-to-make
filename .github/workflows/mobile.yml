@@ -87,12 +87,19 @@ jobs:
           if not kind: sys.exit("::error::No iPhone simulator type for " + runtime["name"])
           preferred = [{"identifier": kind}]
           print("SIM_RUNTIME=" + runtime["identifier"]); print("SIM_TYPE=" + preferred[-1]["identifier"])
+          # Every layout (PRD §6.1): the same build's layout tests also run at regular width on an iPad.
+          ipads = {t["identifier"]: t["name"] for t in data["devicetypes"] if t.get("productFamily") == "iPad"}
+          supported = [t["identifier"] for t in runtime.get("supportedDeviceTypes", []) if t["identifier"] in ipads]
+          air = [t for t in supported if ipads[t].startswith("iPad Air 11")]
+          if not supported: sys.exit("::error::No iPad simulator type for " + runtime["name"])
+          print("IPAD_TYPE=" + (air or supported)[-1])
           PY
-      - name: Unit and UI tests on an iOS 27 simulator (iPhone 18 Pro when installed)
+      - name: Unit and UI tests on an iOS 27 simulator (iPhone 18 Pro when installed), then the layout tests on an iPad
         run: |
           set -euo pipefail
           SIM=$(xcrun simctl create "mobile-ci-${GITHUB_RUN_ID:-local}-$$" "$SIM_TYPE" "$SIM_RUNTIME")
-          trap 'xcrun simctl shutdown "$SIM" >/dev/null 2>&1 || true; xcrun simctl delete "$SIM" >/dev/null 2>&1 || true; rm -rf "${{ runner.temp }}/app-tests"' EXIT
+          IPAD=$(xcrun simctl create "mobile-ci-ipad-${GITHUB_RUN_ID:-local}-$$" "$IPAD_TYPE" "$SIM_RUNTIME")
+          trap 'for s in "$SIM" "$IPAD"; do xcrun simctl shutdown "$s" >/dev/null 2>&1 || true; xcrun simctl delete "$s" >/dev/null 2>&1 || true; done; rm -rf "${{ runner.temp }}/app-tests"' EXIT
           # Ad hoc signing gives the Simulator build its Keychain entitlement, as on a device.
           xcodebuild build-for-testing -project apps/mobile/ios/ScanToMake.xcodeproj -scheme ScanToMake \
             -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "${{ runner.temp }}/app-tests" \
@@ -102,6 +109,11 @@ jobs:
           python3 scripts/camera_safe_tests.py "${manifests[0]}"
           xcodebuild test-without-building -xctestrun "${manifests[0]}" \
             -destination "platform=iOS Simulator,id=$SIM" -parallel-testing-enabled NO -collect-test-diagnostics never
+          # Regular width: the starters, the New button and search on the iPad layout (PRD §6.1).
+          xcodebuild test-without-building -xctestrun "${manifests[0]}" \
+            -destination "platform=iOS Simulator,id=$IPAD" -parallel-testing-enabled NO -collect-test-diagnostics never \
+            -only-testing:ScanToMakeUITests/LayoutParityUITests \
+            -only-testing:ScanToMakeUITests/ProjectScreensUITests/testSearchExplainsHiddenProjectsAndShowAllRestoresThem
       - name: Unsigned iPhoneOS Release build has no React Native in it
         run: |
           set -euo pipefail

@@ -28,7 +28,7 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | Pairing: QR, nearby code (§5.10) | Built; in daily use on Davica3 | — |
 | Automatic iCloud pairing (§5.10) | Built | Not accepted: fresh same-account enrolment |
 | Home, search, title, grid, no fake controls (§5.1) | Built; Home checked on device Nov 2–3. Search stays above its filtered list and says how many projects match with Show All on Mac (#326), Android, iPhone/iPad and Linux (#329) | New search behavior: installed-app verification pending; stays connected for an hour (never "Mac isn't answering") |
-| Starter projects (§5.11) | Built on iPhone, Mac, Android, Linux | Not accepted; rig original import and physical prints |
+| Starter projects (§5.11) | Built on iPhone, iPad, Mac, Android, Linux; reachable with projects on every layout (§6.1) | Not accepted; rig original import and physical prints |
 | Scanning: walk-around, in hand, rig (§5.3, §11) | Built; a physical iPhone scan → Mac cleanup → model observed Nov 4 (Leatherman Wave+) | Not accepted: geometry, dimensions, print fitness; in-hand recorder defects (§11) |
 | Project page, rename, Project Settings, Done/Works (§5.4) | Built; Done/Works checked on both Nov 2–3 | rename and settings acceptance partial; Compare versions not built (§18) |
 | Conversation bubbles; "DONE" marks Done without a pass (§5.4.1) | Built | Not accepted |
@@ -468,7 +468,7 @@ Screenshots: `screens/phone-welcome.jpg`, `screens/phone-pair.jpg` and `screens/
 
 ### 5.11 Starter projects
 
-The empty Home, the welcome flow and the empty Mac workspace offer three starters from one shared catalog (`packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/catalog.json`, also used by Android and Linux):
+Every layout lists the starters while projects exist (§6.1): iPhone Home, the iPad start pane and sidebar, the Mac sidebar and New Project, Android Home and Linux Home, plus the welcome flow before pairing. They offer three starters from one shared catalog (`packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/catalog.json`, also used by Android and Linux):
 - the **scan platform**;
 - the **Counterpart caliper card**, which ships freshly generated model files, branding, QR and preview;
 - the **long vernier caliper with depth gauge**.
@@ -487,12 +487,42 @@ Screenshots, reflow: `screens/duo-home-empty.jpg` and `screens/ipad-welcome.jpg`
 - **iPad, and Duo unfolded.** A `NavigationSplitView`:
   - a sidebar grouped as Now / Needs you / Ready / Printed / Printers;
   - the project page in the detail pane, with the model hero larger;
-  - New in the sidebar's bottom bar;
+  - New Project in its own bar under the sidebar list (§6.1);
   - drag and drop photos from Files or Safari onto New or onto a project;
   - pointer and keyboard shortcuts: ⌘N new, ⌘P print, ⌘F search.
 - **Duo folded.** The iPhone layout. iOS 27 moves the toolbar to a vertical rail on the outer panel's landscape layout automatically, and the mockup confirms it. New stays at the bottom of the rail.
 - **Duo during capture.** Duo can't scan (no LiDAR). Its outer display can still show an "In progress" `CameraCaptureAccessory` for photo capture.
 - **iPhone apps are resizable in iOS 27.** Every screen must reflow from compact to regular width. Test with Xcode 27 previews' resize handles.
+
+### 6.1 Every layout
+
+**The parity rule.** David, Nov 5, after the starters went missing on the Mac and iPad: "how do make sure thing like that don't happen again?" A user-facing feature lands on every layout in the same PR: iPhone (compact), iPad and iPhone apps at regular width, Mac, Android and Linux. Where a layout can't have it, this table names the exception and quotes David's decision. Each client has a test that the feature is reachable on a layout with projects present: `LayoutParityUITests` runs on an iPhone and an iPad simulator in the mobile gate, `ObjectsModelTests` on the Mac, `HomeLayoutTests` on Android, `domain.test.ts` on Linux.
+
+What a person can see and reach, checked in code on `main` Nov 5 (after this PR: †):
+
+| Feature | iPhone (compact) | iPad, regular width | Mac | Android | Linux |
+|---|---|---|---|---|---|
+| Starters (§5.11) | Home, under the projects, whenever no search is typed; Welcome before pairing | † the start pane (nothing selected, which is how the app opens) and a sidebar "Start with these" section. **Before: never** | † a sidebar "Start with These" section, and New Project. **Before: only with no project selected, and the Mac selects the first project on launch** | Home, above the projects, whenever no search is typed | Home's Projects view, under the grid, whenever no search is typed |
+| New Project: fit, copy, scan, published link | New sheet: the five ways to show it, a published link in the text; fit/copy cards on an empty Home | the same sheet; fit/copy cards in the start pane † (before: only with no projects) | New Project pane: fit/copy, dropped files, a published link. No scan: the Mac has no LiDAR, scans come from the phone | New: ARCore scan, photos, a published link; fit/copy/published cards only on an empty Home | New dialog: fit, copy, published. No camera scan: Linux imports scans from files |
+| Search, "N of M match", Show All | a pinned field above Home (#329) | a pinned field above the sidebar (#329) | sidebar search (#326) | top-bar search (#329) | Home search; counts within the selected view (#329) |
+| Archived | "Archived · N" on Home | "Archived · N" sidebar section | Archived sidebar group | "Archived · N" on Home | Archive view in the sidebar |
+| Project page | yes | yes, in the detail | yes, with the inspector | yes | yes, with the side panel |
+| Print sheet, What will print | yes (#321) | yes, the same sheet | yes (#321) | yes (#324) | yes (#324) |
+| Printers | the toolbar's printer button | the sidebar's printer button | sidebar Printers section; Settings → Printers | Home's printer icon; † Settings → Printers (before: the print sheet said "Settings → Printers", which didn't exist on Android) | Settings → Printers |
+| Settings, pairing | Settings sheet; Connect a Different Mac | the same | Settings; Add a Phone | Settings; Connect a Different Computer | Settings; Add a phone |
+| Help | Settings → Help: guide, scanning, the scan rig | the same | Help menu: Counterpart Help, the scan rig | † Settings → Help: the guide and the scan rig. **Before: none** | Settings → About → Open guide |
+
+**Public site** (`site/public`): Help is in every page's nav. The scan rig is in help.html and index.html; the starters are listed only on beta.html.
+
+**How the starters went missing.** Nothing removed them; they never reached two layouts.
+- The starters landed in `588afd4c` (Nov 3) on three surfaces: iPhone Home, Welcome and the Mac's no-selection view. Its own spec asked only for "first launch", and its one UI test covered the empty iPhone Home.
+- The Mac has selected the first project on launch since #193 (`205a9757`, Nov 1), two days earlier. So with any project, its no-selection view (and the starters in it) was unreachable from the day it landed.
+- The iPad split view (#201, `a84720f0`, Nov 1) predates the starters, and `588afd4c` didn't touch `ProjectsRoot.swift`. With projects the iPad showed "Choose a project"; with none, only the two job cards.
+- The mobile gate ran UI tests only on an iPhone simulator, so nothing ran the regular-width layout.
+
+**The New button over the last iPad sidebar row** (build 202611052142): On iPadOS 27, New as a sidebar `.bottomBar` toolbar item draws as a borderless floating glass "+" (its "New" label collapses), over whichever row is behind it. Reproduced on an iPad Air 11-inch simulator, main `a745c1f6`, with a list longer than the screen: scrolled to the end, the last row clears it (the list inset works). Rows scroll under the floating button, so a list longer than the screen has a row behind it until it is scrolled to the end, which is what David's iPad showed; the simulator run checked only the scrolled-to-end case. This was not #329's search bar. † New is now a full-width **New Project** button in its own bar under the sidebar list, as search has its bar above it; `testNewNeverCoversARow` checks the list ends where the bar begins. Screenshots: `~/scan-to-make-work/parity-20261105/ipad-sim-main-new-overlap*.png` on the Mac.
+
+**Fixed by this rule:** a feature PR's UI test runs at both widths (`LayoutParityUITests`, in the iPhone and iPad steps of `mobile.yml`), and a reviewer rejects a user-facing change that skips a layout without a row here.
 
 ## 7. Mac
 

@@ -256,14 +256,18 @@ struct SocketObjects: ObjectsCompanion {
     /// In sidebar order.
     var ordered: [Project] { groups.flatMap(\.objects) }
 
-    /// The sidebar with a search applied, and how many projects the search leaves out. The sidebar says that number
-    /// out loud: on Nov 5 a search left in the field showed 1 of 10 projects and nothing said the rest were hidden.
-    func groups(matching query: String) -> (groups: [(group: ProjectGroup, objects: [Project])], hidden: Int) {
+    /// The sidebar with a search applied, how many projects the search leaves out, and the starters. The sidebar says
+    /// that number out loud: on Nov 5 a search left in the field showed 1 of 10 projects and nothing said the rest were
+    /// hidden. The starters are listed whenever no search is typed, projects or not: they once showed only with nothing
+    /// selected, which the first-project selection made unreachable (David, Nov 5: "where did the 'start with these
+    /// things' thing go").
+    func groups(matching query: String) -> (groups: [(group: ProjectGroup, objects: [Project])], hidden: Int, starters: [StarterProject]) {
         let shown = groups.compactMap { entry -> (group: ProjectGroup, objects: [Project])? in
             let matches = entry.objects.filter { $0.matchesSearch(query, additional: [printer(for: $0)?.name ?? ""]) }
             return matches.isEmpty ? nil : (entry.group, matches)
         }
-        return (shown, objects.count - shown.reduce(0) { $0 + $1.objects.count })
+        let starters = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? StarterProject.all : []
+        return (shown, objects.count - shown.reduce(0) { $0 + $1.objects.count }, starters)
     }
 
     /// The phone people know, for the footer: the most recently seen paired device, one row per name.
