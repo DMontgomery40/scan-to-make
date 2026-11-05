@@ -288,23 +288,26 @@ private struct Sidebar: View {
     /// "David's iPhone connected · Claude": who is paired and what does the work (PRD §7.2). Connected only on
     /// evidence of a recent request; otherwise when it was last heard from.
     private var footer: some View {
-        HStack(spacing: 8) {
-            let device = model.latestDevice
-            let recent = device.map { Date().timeIntervalSince1970 * 1000 - $0.seenAt < 5 * 60_000 } ?? false
-            Circle().fill(recent ? Color.okGreen : Color.gray).frame(width: 7).accessibilityHidden(true)
-            Group {
-                if let device {
-                    if recent { Text("\(device.deviceName) connected") }
-                    else { Text("\(device.deviceName) · seen \(Date(timeIntervalSince1970: device.seenAt / 1000), format: .relative(presentation: .named))") }
-                } else {
-                    Text(model.missingPhoneText)
+        TimelineView(.periodic(from: .now, by: 15)) { context in
+            HStack(spacing: 8) {
+                let device = model.latestDevice
+                let recent = device?.connectedNow(at: context.date) ?? false
+                Circle().fill(recent ? Color.okGreen : Color.gray).frame(width: 7).accessibilityHidden(true)
+                Group {
+                    if let device {
+                        if recent { Text("\(device.deviceName) connected") }
+                        else if device.lastSeenAt == nil { Text("\(device.deviceName) · not seen yet") }
+                        else { Text("\(device.deviceName) · seen \(Date(timeIntervalSince1970: (device.lastSeenAt ?? device.pairedAt) / 1000), format: .relative(presentation: .named))") }
+                    } else {
+                        Text(model.missingPhoneText)
+                    }
                 }
+                .font(.caption).lineLimit(1)
+                Spacer()
+                if let ai = model.aiProvider { Text(ai).font(.caption).foregroundStyle(.secondary) }
             }
-            .font(.caption).lineLimit(1)
-            Spacer()
-            if let ai = model.aiProvider { Text(ai).font(.caption).foregroundStyle(.secondary) }
+            .padding(10)
         }
-        .padding(10)
     }
 }
 

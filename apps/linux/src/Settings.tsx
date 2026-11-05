@@ -1,3 +1,4 @@
+import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { call, host, storeCredential, openLink } from "./bridge";
@@ -562,9 +563,9 @@ function Devices({ onPair }: { onPair: () => Promise<void> }) {
               {d.model} ·{" "}
               {d.legacy
                 ? "Older pairing"
-                : Date.now() - (d.lastSeenAt ?? d.lastRefreshedAt) < 60000
-                  ? "Seen recently"
-                  : `Last seen ${new Date(d.lastSeenAt ?? d.lastRefreshedAt).toLocaleString()}`}
+                : deviceConnected(d)
+                  ? "Connected"
+                  : d.lastSeenAt === undefined ? "Not seen yet" : `Last seen ${new Date(d.lastSeenAt).toLocaleString()}`}
             </small>
             <small>Paired {new Date(d.pairedAt).toLocaleDateString()}</small>
           </div>

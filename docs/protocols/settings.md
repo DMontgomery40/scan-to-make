@@ -120,3 +120,7 @@ OpenCode is not yet a supported choice. Its installed `run --help` and current n
 configuration were inspected. Remaining work is a sealed login/config adapter, stream and
 structured-result normalization, auth refresh/cancellation qualification, and matching
 Swift/protocol choices; no unqualified runner is advertised as working.
+
+## Paired-device presence
+
+`GET /v1/devices` (ISO timestamps) and local `devices.list` (milliseconds) expose the same `lastSeenAt`: the companion's most recent authenticated request from that device. Credential `lastRefreshedAt` is not presence. A non-legacy device is shown connected only when `0 <= now - lastSeenAt < 5 minutes`; missing, invalid or future evidence is not connected. Without request evidence, show “Not seen yet”, not the credential refresh time. Mac and iPhone use `DeviceConnection` in CounterpartKit; Linux uses the same rule in `device-presence.ts`. Android does not display other paired devices' presence. Its computer reachability check (like the iPhone's own connection state) is a separate live request.

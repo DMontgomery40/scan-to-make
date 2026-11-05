@@ -102,16 +102,18 @@ struct ProjectDetail: View {
         .navigationSubtitle(words.subtitle(request: object.instructions))
         .toolbar {
             ToolbarItem {
-                Menu {
-                    if model.capabilities?.projectRename == true {
-                        Button("Rename Project…", systemImage: "pencil") { projectName = words.title; renaming = true }
-                            .disabled(working)
-                    }
-                    if model.capabilities?.projectPreferences == true {
-                        Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
-                    }
-                } label: { Image(systemName: "ellipsis") }
-                .accessibilityLabel("More")
+                if model.capabilities?.projectRename == true || model.capabilities?.projectPreferences == true {
+                    Menu {
+                        if model.capabilities?.projectRename == true {
+                            Button("Rename Project…", systemImage: "pencil") { projectName = words.title; renaming = true }
+                                .disabled(working)
+                        }
+                        if model.capabilities?.projectPreferences == true {
+                            Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
+                        }
+                    } label: { Image(systemName: "ellipsis") }
+                    .accessibilityLabel("More")
+                }
             }
         }
         .sheet(isPresented: $showingSettings) {

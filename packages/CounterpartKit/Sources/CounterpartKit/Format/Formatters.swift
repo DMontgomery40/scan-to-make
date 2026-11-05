@@ -88,3 +88,12 @@ public enum Format {
         return seconds < 60 ? "\(seconds) s ago" : "\(seconds / 60) min ago"
     }
 }
+
+/// Phone presence comes only from authenticated requests, never credential refresh timestamps.
+public enum DeviceConnection {
+    public static func connected(lastSeenAt: Date?, legacy: Bool, now: Date = Date()) -> Bool {
+        guard !legacy, let lastSeenAt else { return false }
+        let age = now.timeIntervalSince(lastSeenAt)
+        return age.isFinite && age >= 0 && age < 300
+    }
+}

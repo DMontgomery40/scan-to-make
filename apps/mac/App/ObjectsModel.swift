@@ -229,6 +229,7 @@ struct SocketObjects: ObjectsCompanion {
     /// put back a state the project has left (a "Ready to print" shown through a whole pass).
     private var readsStarted = 0
     private var readApplied = 0
+    private let now: () -> Date
     private var extrasReadAt: Date?
     private var loadedOnce = false
     /// New Project is open in the window: nothing is selected on purpose.
@@ -236,8 +237,8 @@ struct SocketObjects: ObjectsCompanion {
     /// How often the footer's phone and AI, and the capability flags, are read again.
     static let extrasDelay: Double = 30
 
-    init(companion: any ObjectsCompanion, defaults: UserDefaults = .standard) {
-        self.companion = companion; self.defaults = defaults
+    init(companion: any ObjectsCompanion, defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init) {
+        self.companion = companion; self.defaults = defaults; self.now = now
         self.corrections = CorrectionQueue(saved: defaults.dictionary(forKey: "CounterpartQueuedNotes"))
     }
 
@@ -267,7 +268,7 @@ struct SocketObjects: ObjectsCompanion {
 
     /// The phone people know, for the footer: the most recently seen paired device, one row per name.
     /// The phone heard from most recently; a pairing from before stable identity is never the one shown.
-    var latestDevice: ControlDevice? { devices.filter { $0.legacy != true }.max { $0.seenAt < $1.seenAt } }
+    var latestDevice: ControlDevice? { devices.filter { $0.legacy != true }.max { ($0.lastSeenAt ?? $0.pairedAt) < ($1.lastSeenAt ?? $1.pairedAt) } }
     var isPolling: Bool { loop != nil }
 
     func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] {
@@ -440,11 +441,11 @@ struct SocketObjects: ObjectsCompanion {
     }
 
     private func readExtrasIfDue() async {
-        if let extrasReadAt, Date().timeIntervalSince(extrasReadAt) < Self.extrasDelay { return }
-        extrasReadAt = Date()
+        if let extrasReadAt, now().timeIntervalSince(extrasReadAt) < Self.extrasDelay { return }
+        extrasReadAt = now()
         if let status = try? await companion.status(), capabilities != status.capabilities { capabilities = status.capabilities }
         if let devices = try? await companion.devices() {
-            if devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) { self.devices = devices }
+            if devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) || devices.map(\.lastSeenAt) != self.devices.map(\.lastSeenAt) { self.devices = devices }
             phoneDiscovery = .ready
         } else { phoneDiscovery = .failed }
         aiProvider = await companion.aiProvider()

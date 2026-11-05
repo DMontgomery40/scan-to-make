@@ -153,6 +153,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     }
 
     public var createdAt: Date { Date(timeIntervalSince1970: createdAtMs / 1000) }
+    /// Earliest recorded work, including failed passes; an unsent draft has no work start.
+    public var workStartedAt: Date? {
+        passes.map(\.startedAtMs).filter { $0.isFinite && $0 >= 0 }.min().map { Date(timeIntervalSince1970: $0 / 1000) }
+    }
     public var updatedAt: Date { Date(timeIntervalSince1970: updatedAtMs / 1000) }
 
     /// A scan (walk-around or in hand) reached the Mac.

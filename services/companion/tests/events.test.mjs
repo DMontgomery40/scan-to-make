@@ -113,7 +113,7 @@ test('every event type has words within the limits, and the state line matches t
   assert.equal(eventWords('print.not-started', undefined, {...context, reason: 'x'.repeat(900)}).body.length, 500);
   assert.deepEqual(objectStatus({state: 'new', photos: []}), {phase: 'draft', text: 'Add photos or a scan', symbol: 'square.and.pencil', tint: 'secondary'});
   assert.equal(objectStatus({state: 'new', capture: ['0001.heic']}).text, 'Draft saved · finish sending to begin');
-  assert.equal(objectStatus({state: 'ready', current: {sizeMm: [60.2, 45.1, 21.7]}}).text, 'Ready to print · 60 × 45 × 22 mm');
+  assert.equal(objectStatus({state: 'ready', current: {sizeMm: [60.2, 45.1, 21.7]}}).text, 'Ready to print · 60.2 × 45.1 × 21.7 mm');
   assert.equal(objectStatus({state: 'printing', print: {destination: {name: 'Bambu Lab P1S'}}}).phase, 'preparing');
   const printing = objectStatus({state: 'printing', print: {destination: {name: 'Bambu Lab P1S'}, dispatchedAt: '2026-11-01T18:00:00Z',
     monitor: {phase: 'watching'}, live: {state: 'printing', job: {progress: 42.4, remainingSec: 1500}}}});
@@ -381,4 +381,35 @@ test('a print refused before it reached the printer is written to the log the ph
   assert.deepEqual(unclear.data, {keys: ['print']});
   const lines = (await readFile(path, 'utf8')).trim().split('\n').map(line => CounterpartEventSchema.parse(JSON.parse(line)));
   assert.deepEqual(lines.map(event => event.type), ['print.not-started', 'project.updated']);
+});
+
+
+test('ready status preserves thin dimensions across every client', () => {
+  for (const [sizeMm, words] of [
+    [[27, 31, 0.6], '27 × 31 × 0.6 mm'],
+    [[1.24, 2.26, 0.01], '1.2 × 2.3 × <0.1 mm'],
+    [[1, 2, 3], '1 × 2 × 3 mm'],
+  ]) assert.equal(objectStatus({state: 'ready', current: {sizeMm}}).text, `Ready to print · ${words}`);
+});
+
+test('local and HTTP device lists keep request presence separate from fresh credentials', async t => {
+  const f = await serve(t);
+  const other = await f.pair('Other phone');
+  const stale = Date.now() - 15 * 60_000;
+  const presencePath = join(f.root, 'auth', 'device-presence.json');
+  // Seed before the first read: the credential is new, but its last actual request is old.
+  await writeFile(presencePath, JSON.stringify({version: 2, since: stale, devices: {
+    [other.deviceId]: {lastSeenAt: stale, model: 'iPhone18,2'},
+  }}));
+  const local = (await f.dispatch('devices.list', {})).devices.find(d => d.deviceId === other.deviceId);
+  const remote = (await f.wire('/v1/devices')).json().devices.find(d => d.deviceId === other.deviceId);
+  assert.equal(local.lastSeenAt, stale);
+  assert.equal(Date.parse(remote.lastSeenAt), stale);
+  assert.ok(local.lastRefreshedAt > stale);
+  assert.ok(Date.parse(remote.lastRefreshedAt) > stale);
+  await f.presence.seen(other.deviceId);
+  const again = (await f.dispatch('devices.list', {})).devices.find(d => d.deviceId === other.deviceId);
+  assert.ok(again.lastSeenAt > stale, 'an actual request, not credential metadata, advances presence');
+  const never = await f.pair('Never requested');
+  assert.equal((await f.dispatch('devices.list', {})).devices.find(d => d.deviceId === never.deviceId).lastSeenAt, undefined);
 });

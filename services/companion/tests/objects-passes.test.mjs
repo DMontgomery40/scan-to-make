@@ -148,7 +148,7 @@ test('a design pass reports stages with an estimate, its title, what changed, an
   assert.equal(pass.engine, 'fusion');
   assert.equal(pass.estimate, undefined);
   assert.deepEqual(f.events.map(e => e.type), ['pass.started', 'pass.stage', 'pass.stage', 'pass.ready']);
-  assert.equal(f.events.at(-1).detail.size, '60 × 45 × 22 mm');
+  assert.equal(f.events.at(-1).detail.size, '60.2 × 45.1 × 21.7 mm');
   // A change starts from the parametric design.
   await f.service.correct(object.id, 'Make it 1 mm wider');
   await f.service.settled(object.id);

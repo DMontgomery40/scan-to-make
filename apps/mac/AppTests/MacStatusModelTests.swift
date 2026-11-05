@@ -136,6 +136,23 @@ private func phone(_ id: String, _ name: String, pairedAt: Double = 1_700_000_00
         XCTAssertEqual(decoded.map(\.legacy), [true, nil])
     }
 
+    func testRefreshCannotMakeSidebarAndSettingsDisagreeAboutPresence() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func phone(_ seen: Double?, legacy: Bool = false) -> ControlDevice {
+            ControlDevice(deviceId: "d", deviceName: "Phone", pairedAt: 1,
+                          lastRefreshedAt: now.timeIntervalSince1970 * 1000, expiresAt: 0,
+                          lastSeenAt: seen.map { (now.timeIntervalSince1970 - $0) * 1000 }, legacy: legacy)
+        }
+        for (age, expected) in [(nil, false), (Optional(0.0), true), (299.0, true), (300.0, false), (900.0, false), (-1.0, false)] {
+            let device = phone(age)
+            XCTAssertEqual(device.connectedNow(at: now), expected)
+            XCTAssertEqual(DeviceGroup(primary: device, ids: ["d"]).connectedNow(at: now), expected)
+        }
+        XCTAssertFalse(phone(0, legacy: true).connectedNow(at: now))
+        XCTAssertEqual(phone(900).lastSeenAt, (now.timeIntervalSince1970 - 900) * 1000,
+                       "a refresh must not rewrite last-seen display or ordering")
+    }
+
     func testARowSaysConnectedOnlyOnARecentRequest() throws {
         let now = Date(timeIntervalSince1970:1_800_000_000)
         func device(seen: Double?, model: String? = "iPhone18,2") -> DeviceGroup {
