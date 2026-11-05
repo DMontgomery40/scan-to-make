@@ -118,7 +118,7 @@ export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
 
 export function sizeText(sizeMm: readonly number[] | undefined): string | undefined {
   if (!sizeMm || sizeMm.length !== 3 || !sizeMm.every(value => Number.isFinite(value) && value > 0)) return undefined;
-  return `${sizeMm.map(value => Math.round(value)).join(' × ')} mm`;
+  return `${sizeMm.map(value => value < 0.05 ? '<0.1' : Number(value.toFixed(1))).join(' × ')} mm`;
 }
 
 function milestoneTitle(title: string, progress: number | undefined): string {

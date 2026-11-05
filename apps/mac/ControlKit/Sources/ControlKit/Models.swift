@@ -1,4 +1,5 @@
 import Foundation
+import CounterpartKit
 
 public enum JSONValue: Codable, Sendable, Equatable {
     case object([String: JSONValue]), array([JSONValue]), string(String), number(Double), bool(Bool), null
@@ -120,8 +121,11 @@ public struct ControlDevice: Decodable, Sendable, Identifiable {
         self.lastRefreshedAt = lastRefreshedAt; self.expiresAt = expiresAt; self.pairedVia = pairedVia; self.model = model; self.lastSeenAt = lastSeenAt
         self.legacy = legacy
     }
-    /// The best evidence of when it was last heard from.
+    /// Credential activity for grouping older pairings, not connection presence.
     public var seenAt: Double { max(lastSeenAt ?? 0, lastRefreshedAt) }
+    public func connectedNow(at now: Date) -> Bool {
+        DeviceConnection.connected(lastSeenAt: lastSeenAt.map { Date(timeIntervalSince1970: $0 / 1000) }, legacy: legacy == true, now: now)
+    }
 }
 public struct ControlInvitation: Decodable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     public let version: Int

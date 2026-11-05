@@ -18,9 +18,11 @@ private actor FakeObjects: ObjectsCompanion {
         guard discoveryAvailable else { throw ControlClientError.unavailable }
         return .init(destinations: [], defaultDestinationId: "current")
     }
+    private var listedDevices: [ControlDevice] = []
+    func setDevices(_ value: [ControlDevice]) { listedDevices = value }
     func devices() async throws -> [ControlDevice] {
         guard discoveryAvailable else { throw ControlClientError.unavailable }
-        return []
+        return listedDevices
     }
 
     private var controlWaiter: CheckedContinuation<Void, Never>?
@@ -131,6 +133,24 @@ private func project(_ item: [String: Any]) throws -> Project {
 }
 
 @MainActor final class ObjectsModelTests: XCTestCase {
+    func testPresenceRefreshIsNotMaskedByNewerCredentialTimestamp() async {
+        let companion = FakeObjects()
+        await companion.enableDiscovery()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func device(_ seen: Double) -> ControlDevice {
+            ControlDevice(deviceId: "phone", deviceName: "Phone", pairedAt: 1,
+                          lastRefreshedAt: now.timeIntervalSince1970 * 1000, expiresAt: 0,
+                          lastSeenAt: seen)
+        }
+        await companion.setDevices([device((now.timeIntervalSince1970 - 900) * 1000)])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertEqual(model.latestDevice?.connectedNow(at: now), false)
+        await companion.setDevices([device((now.timeIntervalSince1970 - 1) * 1000)])
+        await model.refresh()
+        XCTAssertEqual(model.latestDevice?.connectedNow(at: now), true)
+    }
+
     func testPrinterProjectsUseRecordedDestinationAndRefreshWhenItChanges() async {
         let companion = FakeObjects()
         await companion.set([

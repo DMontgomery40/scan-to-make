@@ -9,6 +9,14 @@ private func ready(_ more: [String: Any] = [:]) -> Project {
 /// The words every surface uses. Ported unchanged from the iPhone app's ObjectWordsTests, plus the PRD §4
 /// phases and the companion's own status line.
 final class ProjectWordsTests: XCTestCase {
+    func testWorkStartUsesEarliestPassNotAnOldPhoneDraft() {
+        let oldDraft = project(["createdAtMs": 1, "passes": [["startedAtMs": 900], ["startedAtMs": 500]]])
+        XCTAssertEqual(oldDraft.workStartedAt, Date(timeIntervalSince1970: 0.5))
+        XCTAssertNil(project(["createdAtMs": 1, "passes": []]).workStartedAt)
+        XCTAssertEqual(project(["createdAtMs": 1, "passes": [["startedAtMs": 10, "status": "failed"]]]).workStartedAt,
+                       Date(timeIntervalSince1970: 0.01), "a failed first pass still started work")
+    }
+
     func testTheAppsFollowTheCompanionsDecidedKind() {
         // The companion sends passKind as kind; scans or captures no longer make the app guess "copy".
         XCTAssertFalse(project(["kind": "fit", "scan": "reference.usdz", "capture": ["reference.heic"]]).usesCopyWorkflow)

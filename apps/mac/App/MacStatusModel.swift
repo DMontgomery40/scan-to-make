@@ -94,7 +94,7 @@ struct DeviceGroup: Identifiable, Equatable {
     /// When the older pairings were last used, for the row that offers to remove them.
     var olderSeenAt: Double = 0
 
-    static func == (a: DeviceGroup, b: DeviceGroup) -> Bool { a.ids == b.ids && a.primary.seenAt == b.primary.seenAt }
+    static func == (a: DeviceGroup, b: DeviceGroup) -> Bool { a.ids == b.ids && a.primary.seenAt == b.primary.seenAt && a.primary.lastSeenAt == b.primary.lastSeenAt }
 
     /// One row per phone. A pairing that hasn't been used since a newer one with the same name (and model) paired
     /// is shown under that row as an older pairing, never removed with it: Remove takes only the row's own
@@ -126,8 +126,7 @@ struct DeviceGroup: Identifiable, Equatable {
 
     /// Seen within five minutes on evidence of a request: connected now. Otherwise when it was last heard from.
     func connectedNow(at now: Date) -> Bool {
-        guard primary.legacy != true, let seen = primary.lastSeenAt else { return false }
-        return now.timeIntervalSince1970 * 1000 - seen < 5 * 60_000
+        primary.connectedNow(at: now)
     }
 
     /// "iPhone · connected now · paired Oct 30", "iPad · last seen yesterday · paired Oct 31".
@@ -136,8 +135,10 @@ struct DeviceGroup: Identifiable, Equatable {
         let seen: String
         if connectedNow(at: now) {
             seen = "connected now"
+        } else if primary.lastSeenAt == nil {
+            seen = "not seen yet"
         } else {
-            let day = Date(timeIntervalSince1970: primary.seenAt / 1000)
+            let day = Date(timeIntervalSince1970: (primary.lastSeenAt ?? primary.pairedAt) / 1000)
             if calendar.isDate(day, inSameDayAs: now) { seen = "last seen today" }
             else if calendar.isDate(day, inSameDayAs: calendar.date(byAdding: .day, value: -1, to: now) ?? now) { seen = "last seen yesterday" }
             else { seen = "last seen \(day.formatted(.dateTime.month(.abbreviated).day()))" }

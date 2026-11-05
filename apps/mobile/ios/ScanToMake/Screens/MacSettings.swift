@@ -262,8 +262,10 @@ struct MacSettingsSections: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(device.deviceName ?? device.model ?? "A phone").font(.body)
-                        Text(isCurrent(device) ? "This iPhone" : (device.lastSeenAt.flatMap(ISO.date).map { "Seen " + Format.whenInSentence($0) } ?? "Paired"))
-                            .font(.caption).foregroundStyle(.secondary)
+                        TimelineView(.periodic(from: .now, by: 15)) { context in
+                            Text(isCurrent(device) ? "This iPhone" : device.connectedNow(at: context.date) ? "Connected" : (device.lastSeenAt.flatMap(ISO.date).map { "Seen " + Format.whenInSentence($0, now: context.date) } ?? "Not seen yet"))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     Spacer()
                     if !isCurrent(device) {

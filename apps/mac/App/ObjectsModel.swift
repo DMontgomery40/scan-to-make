@@ -267,7 +267,7 @@ struct SocketObjects: ObjectsCompanion {
 
     /// The phone people know, for the footer: the most recently seen paired device, one row per name.
     /// The phone heard from most recently; a pairing from before stable identity is never the one shown.
-    var latestDevice: ControlDevice? { devices.filter { $0.legacy != true }.max { $0.seenAt < $1.seenAt } }
+    var latestDevice: ControlDevice? { devices.filter { $0.legacy != true }.max { ($0.lastSeenAt ?? $0.pairedAt) < ($1.lastSeenAt ?? $1.pairedAt) } }
     var isPolling: Bool { loop != nil }
 
     func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] {
@@ -444,7 +444,7 @@ struct SocketObjects: ObjectsCompanion {
         extrasReadAt = Date()
         if let status = try? await companion.status(), capabilities != status.capabilities { capabilities = status.capabilities }
         if let devices = try? await companion.devices() {
-            if devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) { self.devices = devices }
+            if devices.map(\.id) != self.devices.map(\.id) || devices.map(\.seenAt) != self.devices.map(\.seenAt) || devices.map(\.lastSeenAt) != self.devices.map(\.lastSeenAt) { self.devices = devices }
             phoneDiscovery = .ready
         } else { phoneDiscovery = .failed }
         aiProvider = await companion.aiProvider()

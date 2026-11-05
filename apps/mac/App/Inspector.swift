@@ -172,7 +172,7 @@ private struct ActivityTab: View {
                 }
                 Divider().padding(.vertical, 4)
             }
-            Label("Project started \(Date(timeIntervalSince1970: object.createdAtMs / 1000).formatted(.dateTime.month(.abbreviated).day().hour().minute()))",
+            Label("\(object.workStartedAt == nil ? "Draft created" : "Work started") \((object.workStartedAt ?? object.createdAt).formatted(.dateTime.month(.abbreviated).day().hour().minute()))",
                   systemImage: "plus.circle")
                 .font(.caption).foregroundStyle(.secondary)
             if object.passes.isEmpty { Text("Each round of work on your Mac shows here.").font(.callout).foregroundStyle(.secondary) }

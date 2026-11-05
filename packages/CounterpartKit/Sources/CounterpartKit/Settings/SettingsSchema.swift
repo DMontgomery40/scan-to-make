@@ -168,6 +168,9 @@ public struct CompanionDevice: Codable, Identifiable, Equatable, Sendable {
     /// The phone asking.
     public var current: Bool?
     public var id: String { deviceId }
+    public func connectedNow(at now: Date = Date()) -> Bool {
+        DeviceConnection.connected(lastSeenAt: lastSeenAt.flatMap(ISO.date), legacy: legacy == true, now: now)
+    }
 }
 
 /// `POST /v1/printers/mcp/<mcpId>/update` (PRD §8.10).
