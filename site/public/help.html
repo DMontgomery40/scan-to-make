@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Counterpart Help</title>
-<meta name="description" content="How to set up Counterpart on a Mac or Linux computer, pair an iPhone, iPad or Android phone, start a project, print it, and fix common problems.">
+<meta name="description" content="How to set up Counterpart on a Mac or Linux computer, connect an iPhone, iPad or Android phone, start a project, print it, and fix common problems.">
 <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0c0c0e" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="favicon.png" type="image/png">
@@ -32,7 +32,7 @@
     <input id="help-search" class="search" type="search" placeholder="Search (press /)" autocomplete="off">
     <ol class="toc">
       <li><a href="#setup">Set up</a></li>
-      <li><a href="#pair">Pair a phone</a></li>
+      <li><a href="#pair">Connect a phone</a></li>
       <li><a href="#start">Start a project</a></li>
       <li><a href="#scan">Scanning and sizes</a></li>
       <li><a href="#working">While it works</a></li>
@@ -49,19 +49,19 @@
 
   <main class="help-body" id="help-body">
     <h1>Counterpart Help</h1>
-    <p class="lede">Counterpart makes a part that fits something you have, copies an object you scan, or prints a model someone published. Your computer does the work and runs your printer. Your phone sends, asks and follows along.</p>
+    <p class="lede">Counterpart turns a scan, a description, or a link into the part you need, printed on your 3D printer. Your computer designs it or cleans up your scan and runs your printer; your phone scans, sends and checks. This guide goes in that order: set up the computer, connect a phone, make something.</p>
     <p class="nomatch" hidden>Nothing in the guide mentions <q></q>. Try a shorter word, or press Escape to see everything.</p>
 
     <section id="setup" aria-labelledby="setup-h">
       <h2 id="setup-h">Set up</h2>
-      <p>Downloads for every platform are on the <a href="./#downloads">home page</a>, with <a href="beta.html">setup steps</a> for each.</p>
+      <p>You need three things: Counterpart on a computer, a 3D printer, and a phone if you want to scan. Downloads for every platform are on the <a href="./#downloads">home page</a>, with <a href="beta.html">setup steps</a> for each.</p>
       <h3>1. Your computer</h3>
       <ul>
         <li><strong>Mac:</strong> an Apple silicon Mac with macOS 27. Move Counterpart to Applications and open it. It lives in the menu bar, with a window for your projects. Allow Local Network access when macOS asks.</li>
         <li><strong>Linux:</strong> Ubuntu 26.04 on an x86_64 PC. Install the .deb, or open the AppImage. Counterpart keeps running in the background.</li>
       </ul>
       <h3>2. Your printer</h3>
-      <p>Open <span class="path">Settings › Printers</span> and add your printer. Counterpart installs the free printer software it needs. Install the slicer that software uses, such as Bambu Studio. Already printing from Claude or Codex? Counterpart finds that setup and uses it as it is.</p>
+      <p>Open <span class="path">Settings › Printers</span> and add your printer. Counterpart installs the free printer software it needs. Install the slicer that software uses — the app that prepares files for the printer, such as Bambu Studio. Already printing from Claude or Codex? Counterpart finds that setup and uses it as it is.</p>
       <h3>3. Optional tools</h3>
       <ul>
         <li><strong>AI, for design and changes:</strong> choose Claude Code, Codex, an API key, or a local model in Settings. Printing a published model doesn't need it.</li>
@@ -69,24 +69,25 @@
         <li><strong>Autodesk Fusion,</strong> on the Mac, for parametric designs.</li>
       </ul>
       <h3>4. Your phone</h3>
-      <p>Install Counterpart on your iPhone, iPad or Android phone, then <a href="#pair">pair it</a>.</p>
+      <p>Install Counterpart on your iPhone, iPad or Android phone, then <a href="#pair">connect it</a>.</p>
       <div class="shots">
         <figure class="mac"><a class="shot mac" href="screens/mac-settings-printers.jpg"><img src="screens/mac-settings-printers.jpg" width="620" height="678" loading="lazy" alt="Mac Settings, Printers: each printer and the software that runs it"></a><figcaption>Settings › Printers on the Mac.</figcaption></figure>
       </div>
     </section>
 
     <section id="pair" aria-labelledby="pair-h">
-      <h2 id="pair-h">Pair a phone</h2>
+      <h2 id="pair-h">Connect a phone</h2>
+      <p>Your phone connects to your computer so it can send scans and descriptions, and follow the work and the print. You connect once; there's no account.</p>
       <ul>
         <li><strong>Same Apple Account</strong> (iPhone or iPad with a Mac): open Counterpart on the phone. It finds your Mac through iCloud and connects by itself.</li>
         <li><strong>QR code:</strong> on the Mac, click the Counterpart menu bar icon and choose Add a Phone; on Linux, open Settings. Point the phone's camera at the code.</li>
         <li><strong>Nearby code:</strong> on the same Wi-Fi, choose to look on this Wi-Fi. Both screens show the same six-digit code; check it matches, then allow the phone.</li>
       </ul>
       <p><strong>Away from home:</strong> with a Mac, your iPhone keeps showing projects and updates through iCloud. To reach your computer from anywhere, put the phone and the computer on the same Tailscale network.</p>
-      <p>Remove a paired phone in Settings on the phone or the computer.</p>
+      <p>Remove a connected phone in Settings on the phone or the computer.</p>
       <div class="shots">
-        <figure><a class="shot" href="screens/phone-pair.jpg"><img src="screens/phone-pair.jpg" width="644" height="1400" loading="lazy" alt="Find your Mac: scan the code, or pair nearby"></a><figcaption>Point the camera at the code.</figcaption></figure>
-        <figure><a class="shot" href="screens/android-home.jpg"><img src="screens/android-home.jpg" width="720" height="1600" loading="lazy" alt="Counterpart on Android, paired: Mac mini connected, 1 printer"></a><figcaption>Android, paired with a Mac.</figcaption></figure>
+        <figure><a class="shot" href="screens/phone-pair.jpg"><img src="screens/phone-pair.jpg" width="644" height="1400" loading="lazy" alt="Find your Mac: scan the code, or connect on this Wi-Fi"></a><figcaption>Point the camera at the code.</figcaption></figure>
+        <figure><a class="shot" href="screens/android-home.jpg"><img src="screens/android-home.jpg" width="720" height="1600" loading="lazy" alt="Counterpart on Android, connected: Mac mini connected, 1 printer"></a><figcaption>Android, connected to a Mac.</figcaption></figure>
       </div>
     </section>
 
@@ -141,7 +142,7 @@
       <ol>
         <li>Tap <strong>Print</strong>. Choose the printer, quality, strength and the number of copies.</li>
         <li>Choose filament from what's loaded. For a multi-colour model, each part gets a loaded spool, and it tells you when the match is only close.</li>
-        <li><strong>What will print</strong> shows the sliced print: the top as it sits on the bed, and the bed side turned toward you, with the time and grams. Print sends exactly that.</li>
+        <li><strong>What will print</strong> shows the print prepared for your printer (sliced): the top as it sits on the bed, and the bed side turned toward you, with the time and grams. Print sends exactly that.</li>
         <li>To drop in magnets or nuts, add a <strong>pause before a layer</strong>. Resume when they're in.</li>
         <li>If the printer needs an answer first, Counterpart asks you.</li>
       </ol>
@@ -179,7 +180,7 @@
 
     <section id="settings" aria-labelledby="settings-h">
       <h2 id="settings-h">Settings and updates</h2>
-      <p>Notifications, AI, paired devices and general options are on the phone and the computer alike. Printers are set up on the computer.</p>
+      <p>Notifications, AI, connected devices and general options are on the phone and the computer alike. Printers are set up on the computer.</p>
       <p>If a button in this guide is missing on your phone, update Counterpart on your computer. The Mac app updates itself; on Linux, install the newer package.</p>
       <div class="shots">
         <figure class="mac"><a class="shot mac" href="screens/mac-settings-ai.jpg"><img src="screens/mac-settings-ai.jpg" width="620" height="588" loading="lazy" alt="Mac Settings, AI: your AI provider and design tool"></a><figcaption>Settings › AI.</figcaption></figure>
@@ -202,7 +203,7 @@
     <section id="trouble" aria-labelledby="trouble-h">
       <h2 id="trouble-h">Troubleshooting</h2>
       <div class="faq glass">
-        <details><summary>My phone can't find my computer</summary><p>Make sure Counterpart is open on the computer and both are on the same Wi-Fi. On iPhone, check Settings › Counterpart › Local Network is on. Turn off a VPN that might block it. Then pair again with the QR code.</p></details>
+        <details><summary>My phone can't find my computer</summary><p>Make sure Counterpart is open on the computer and both are on the same Wi-Fi. On iPhone, check Settings › Counterpart › Local Network is on. Turn off a VPN that might block it. Then connect again with the QR code.</p></details>
         <details><summary>Making it stopped with an error</summary><p>The project says what went wrong. Check your AI connection in Settings, then open the project and choose Try Again.</p></details>
         <details><summary>The print didn't start</summary><p>Open the project: it shows what the printer said. If the printer shows an error on its own screen, clear it there, then print again. If Bambu Cloud refused the print, switch the printer's Connection to your local network in Settings › Printers.</p></details>
         <details><summary>I don't see What will print</summary><p>Update your printer software in Settings › Printers. On the Mac and iPhone, What will print arrives with the next Counterpart update.</p></details>
@@ -237,7 +238,7 @@
 
 <footer class="foot">
   <div class="wrap">
-    <p>Counterpart runs on your own computer and printer.</p>
+    <p>Scan it. Describe it. Paste a link. Print the part that fits.</p>
     <p class="foot-links"><a href="./">Home</a> <a href="beta.html">Setup</a> <a href="#privacy">Privacy</a> <a href="#credits">Credits</a></p>
   </div>
 </footer>
