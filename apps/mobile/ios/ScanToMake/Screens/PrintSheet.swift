@@ -155,16 +155,11 @@ struct PrintSheet: View {
     }
 
     private var preview: some View {
-        ZStack(alignment: .bottomLeading) {
-            Group {
-            if published, let project {
-                ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 600, contentMode: .fit)
-            } else {
-            ModelStage(url: modelURL, yaw: 0.9, pitch: -0.5, interactive: false, tint: UIColor(spoolColour))
-            }
-            }
-                .frame(height: 220)
-                .overlay(alignment: .bottom) { BedGrid().frame(height: 70).opacity(0.5).allowsHitTesting(false) }
+        VStack(alignment: .leading, spacing: 0) {
+            // What will print (Nov 5): the printer MCP's pictures of the exact sliced file Print sends, never a
+            // design render or a thumbnail the file carried along.
+            whatWillPrint
+                .frame(minHeight: 220)
                 .clipShape(.rect(cornerRadius: 24))
             HStack(spacing: 8) {
                 switch slice.shown(for: estimateKey, fallback: project?.print?.estimate) {
@@ -183,6 +178,52 @@ struct PrintSheet: View {
 
     /// The model's preview takes the chosen spool's colour; light grey when the printer doesn't say.
     private var spoolColour: Color { chosen?.color ?? Color(white: 0.72) }
+
+    /// The spool Print sends, and so the one the estimate slices with.
+    private var printColour: PrintColour? {
+        switch filamentKind {
+        // The tray as reported, so the Mac slices with its profile and routes it (AMS or external) as shown.
+        case "ams": chosen.map { .tray($0) }
+        case "single": filaments.first.map { .tray($0) }
+        // A printer that doesn't report its filament prints with its own profile's material.
+        default: (project?.settings?.printDefaults?.colour?.object?["material"]?.string).map(PrintColour.material)
+        }
+    }
+
+    /// The sliced file shown on this sheet, when its pictures are of it: the only file Print may send.
+    private var shownSlice: String? {
+        guard let estimate, let sha = estimate.sliceSha256, estimate.preview?.sha256 == sha else { return nil }
+        return sha
+    }
+
+    /// The two labelled pictures of the sliced file; while it slices, or when the MCP can't draw them, the reason.
+    @ViewBuilder private var whatWillPrint: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("What will print").font(.headline)
+            if shownSlice != nil, let views = estimate?.preview?.views {
+                ForEach(views) { view in
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let data = view.pngData, let image = UIImage(data: data) {
+                            Image(uiImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: .infinity, maxHeight: 220).background(.white, in: .rect(cornerRadius: 16))
+                                .accessibilityLabel(view.label)
+                        }
+                        Text(view.label).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("Drawn from the sliced file Print sends.").font(.caption2).foregroundStyle(.tertiary)
+            } else if case .pending = slice.shown(for: estimateKey, fallback: nil) {
+                Label("Slicing it to show you…", systemImage: "clock").font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 160)
+            } else if estimate != nil {
+                Text("Update \(printer?.via ?? "your printer service") on your Mac in Settings → Printers so Counterpart can show you what will print.")
+                    .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+            } else {
+                Text("Nothing to show yet.").font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: .rect(cornerRadius: 24))
+    }
 
     @ViewBuilder private var colourSection: some View {
         let name = printer?.name ?? "the printer"
@@ -542,6 +583,8 @@ struct PrintSheet: View {
 
     private var canPrint: Bool {
         guard busy == nil, printer != nil, printer?.isOffline != true else { return false }
+        // Only the file shown above prints.
+        if shownSlice == nil { return false }
         if uncertain && !checked { return false }
         if !mappingReady { return false }
         // An AMS printer prints the spool you can see chosen here, never whatever the Mac last had set.
@@ -649,7 +692,7 @@ struct PrintSheet: View {
 
     /// The model, printer and settings an estimate is for. Only an estimate for exactly these is shown.
     /// The chosen spools are part of it, so changing one drops the old estimate and slices again.
-    private var estimateKey: String { "\(project?.selectedPlate?.id ?? "")#\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)#\(offersCopies ? copies.map(String.init) ?? "profile" : "profile")#\(published ? mappingSignature : "")#\(published ? mapping?.modelVersion ?? "" : "")" }
+    private var estimateKey: String { "\(project?.selectedPlate?.id ?? "")#\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)#\(offersCopies ? copies.map(String.init) ?? "profile" : "profile")#\(published ? mappingSignature : "")#\(published ? mapping?.modelVersion ?? "" : "")#\(published ? "" : String(describing: printColour))#\(offersPauses ? pauses.map(String.init).joined(separator: ",") : "")" }
     /// The slice estimate on screen: always for these settings, or pending.
     private var estimate: SliceEstimate? { slice.estimate(for: estimateKey) }
 
@@ -664,7 +707,8 @@ struct PrintSheet: View {
                                                            strength: !slicedOriginal && printer?.offersStrength == true ? strength : .standard,
                                                            copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil), overrideDefaults: true,
                                                            filaments: published ? chosenSpoolPerColour ?? [] : [],
-                                                           filamentsModelVersion: published ? mapping?.modelVersion : nil)
+                                                           filamentsModelVersion: published ? mapping?.modelVersion : nil,
+                                                           colour: published ? nil : printColour, pauseBeforeLayers: offersPauses ? pauses : [])
             guard !Task.isCancelled else { return }
             slice.finish(key, next)
         } catch let failure as CompanionError {
@@ -677,13 +721,7 @@ struct PrintSheet: View {
         guard canPrint else { return }
         busy = "print"; problem = nil
         defer { busy = nil }
-        let colour: PrintColour? = switch filamentKind {
-        // The tray as reported, so the Mac slices with its profile and routes it (AMS or external) as shown.
-        case "ams": chosen.map { .tray($0) }
-        case "single": filaments.first.map { .tray($0) }
-        // A printer that doesn't report its filament prints with its own profile's material.
-        default: (project?.settings?.printDefaults?.colour?.object?["material"]?.string).map(PrintColour.material)
-        }
+        let colour = printColour
         // A multi-part model prints from the spool chosen for each colour, bound to the model version
         // those choices were made against; with no complete mapping the companion's own matching applies.
         let perColour = published ? chosenSpoolPerColour : nil
@@ -693,7 +731,8 @@ struct PrintSheet: View {
                                  checked: uncertain && checked, copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil),
                                  pauseBeforeLayers: offersPauses ? pauses : [],
                                  filaments: perColour ?? [],
-                                 filamentsModelVersion: perColour != nil ? mapping?.modelVersion : nil)
+                                 filamentsModelVersion: perColour != nil ? mapping?.modelVersion : nil,
+                                 sliceSha256: shownSlice)
         do {
             let ticket = store.startRequest()
             store.replace(try await store.mac.client.print(projectId, choice: choice, overrideDefaults: true, expectedPlate: project?.selectedPlate?.id), ticket: ticket)

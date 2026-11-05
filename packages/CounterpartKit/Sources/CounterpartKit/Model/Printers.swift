@@ -295,11 +295,13 @@ public struct PrintChoice: Equatable, Sendable {
     /// of `colour` (never both), with the model version those choices were made against.
     public var filaments: [PrinterFilament]
     public var filamentsModelVersion: String?
+    /// The sheet's estimate (`SliceEstimate.sliceSha256`): the Mac prints exactly that sliced file, the one its preview showed.
+    public var sliceSha256: String?
     public init(colour: PrintColour?, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil,
-                pauseBeforeLayers: [Int] = [], filaments: [PrinterFilament] = [], filamentsModelVersion: String? = nil) {
+                pauseBeforeLayers: [Int] = [], filaments: [PrinterFilament] = [], filamentsModelVersion: String? = nil, sliceSha256: String? = nil) {
         self.colour = colour; self.quality = quality; self.strength = strength; self.checked = checked; self.copies = copies.map { max(1, $0) }
         self.pauseBeforeLayers = Array(Array(Set(pauseBeforeLayers.filter { $0 >= 2 })).sorted().prefix(Self.maxPauses))
-        self.filaments = filaments; self.filamentsModelVersion = filamentsModelVersion
+        self.filaments = filaments; self.filamentsModelVersion = filamentsModelVersion; self.sliceSha256 = sliceSha256
     }
     public init(filament: PrinterFilament, quality: PrintQuality = .standard, strength: PrintStrength = .standard, checked: Bool = false, copies: Int? = nil) {
         self.init(colour: .tray(filament), quality: quality, strength: strength, checked: checked, copies: copies)
@@ -321,6 +323,7 @@ public struct PrintChoice: Equatable, Sendable {
         if let copies { json["copies"] = copies }
         let pauses = Array(Array(Set(pauseBeforeLayers.filter { $0 >= 2 })).sorted().prefix(Self.maxPauses))
         if !pauses.isEmpty { json["pauseBeforeLayers"] = pauses }
+        if let sliceSha256 { json["sliceSha256"] = sliceSha256 }
         return json
     }
 }

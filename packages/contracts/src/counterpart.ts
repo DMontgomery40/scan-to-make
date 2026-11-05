@@ -205,6 +205,20 @@ export const PrintEstimateSchema = z.strictObject({
   /** Bambu Studio's own warning on this slice, verbatim (KAN-223), e.g. a floating cantilever. Print asks before sending. */
   slicerWarning: text(2000).optional(),
   slicedAt: iso,
+  /** The SHA-256 of this estimate's sliced file. Print sends it as `sliceSha256` and prints exactly that file. */
+  sliceSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /**
+   * The printer MCP's pictures of that exact file's G-code: what will print, shown before Print. Absent when
+   * the installed MCP doesn't draw them (then Print is refused until it is updated).
+   */
+  preview: z.strictObject({
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    views: z.array(z.strictObject({
+      name: z.enum(['top', 'bed_side']), label: text(120),
+      png: z.string().max(6_000_000), width: z.number().int().positive(), height: z.number().int().positive(),
+    })).length(2),
+    mmPerPixel: z.number().positive().optional(),
+  }).optional(),
 });
 export type PrintEstimate = z.infer<typeof PrintEstimateSchema>;
 

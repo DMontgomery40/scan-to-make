@@ -36,7 +36,7 @@ protocol ObjectsCompanion: Sendable {
     func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String
     func correct(_ id: String, note: String, photos: [String]) async throws -> Project
     func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?, filaments: [PrinterFilament], modelVersion: String?) async throws -> PrintEstimate
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?, filaments: [PrinterFilament], modelVersion: String?, colour: PrintSettings.Colour?, pauseBeforeLayers: [Int]) async throws -> PrintEstimate
     func control(_ id: String, _ action: PrintControl) async throws -> Project
     /// PRD §8.11: the objects with what a published model adds (credit, files, the Ask's type).
     func objectsWithExtras() async throws -> (projects: [Project], extras: [String: PublishedExtras])
@@ -77,7 +77,7 @@ extension ObjectsCompanion {
         return try await correct(id, note: note)
     }
     func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project { throw ControlClientError.unavailable }
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?, filaments: [PrinterFilament], modelVersion: String?) async throws -> PrintEstimate {
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?, filaments: [PrinterFilament], modelVersion: String?, colour: PrintSettings.Colour?, pauseBeforeLayers: [Int]) async throws -> PrintEstimate {
         throw ControlClientError.unavailable
     }
     func control(_ id: String, _ action: PrintControl) async throws -> Project { throw ControlClientError.unavailable }
@@ -159,8 +159,8 @@ struct SocketObjects: ObjectsCompanion {
     func print(_ id: String, checked: Bool, settings: PrintSettings) async throws -> Project {
         try await ControlClient(socketPath:path, timeout:30).printObject(id, checked:checked, settings:settings, overrideDefaults:true)
     }
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?, filaments: [PrinterFilament], modelVersion: String?) async throws -> PrintEstimate {
-        try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:"objects.estimate")).estimate(id, destinationId:destinationId, quality:quality, strength:strength, copies:copies, filaments:filaments, modelVersion:modelVersion)
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?, filaments: [PrinterFilament], modelVersion: String?, colour: PrintSettings.Colour?, pauseBeforeLayers: [Int]) async throws -> PrintEstimate {
+        try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:"objects.estimate")).estimate(id, destinationId:destinationId, quality:quality, strength:strength, copies:copies, filaments:filaments, modelVersion:modelVersion, colour:colour, pauseBeforeLayers:pauseBeforeLayers)
     }
     func control(_ id: String, _ action: PrintControl) async throws -> Project {
         try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:action.method)).controlPrint(id, action)
@@ -326,8 +326,9 @@ struct SocketObjects: ObjectsCompanion {
     }
 
     /// The slice estimate for the sheet; nil when the companion can't give one (the sheet says so).
-    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?, filaments: [PrinterFilament] = [], modelVersion: String? = nil) async throws -> PrintEstimate {
-        try await companion.estimate(id, destinationId:destinationId, quality:quality, strength:strength, copies:copies, filaments:filaments, modelVersion:modelVersion)
+    func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int?, filaments: [PrinterFilament] = [], modelVersion: String? = nil,
+                  colour: PrintSettings.Colour? = nil, pauseBeforeLayers: [Int] = []) async throws -> PrintEstimate {
+        try await companion.estimate(id, destinationId:destinationId, quality:quality, strength:strength, copies:copies, filaments:filaments, modelVersion:modelVersion, colour:colour, pauseBeforeLayers:pauseBeforeLayers)
     }
 
     /// Pause, resume or stop a print (`capabilities.printControl`). The printer MCP may ask its own confirmation first.

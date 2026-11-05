@@ -70,17 +70,9 @@ struct PrintSheet: View {
             }
             printers
             HStack(alignment: .top, spacing: 16) {
-                if published {
-                    ZStack {
-                        StageBackground()
-                        if let poster = ProjectDetail.poster(object) { FileImage(url: poster, version: object.updatedAtMs, contentMode: .fit) }
-                    }.frame(width: 300, height: 220).clipShape(.rect(cornerRadius: 16))
-                } else if let url = object.modelURL {
-                    // The still only: the window's one live stage is the project's own.
-                    ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), yaw: 0.9, pitch: -0.5, interactive: false, fit: 0.2,
-                               poster: ProjectDetail.poster(object))
-                        .frame(width: 300, height: 220).clipShape(.rect(cornerRadius: 16))
-                }
+                // What will print (Nov 5): the printer MCP's pictures of the exact sliced file Print sends, never a
+                // design render or a thumbnail the file carried along.
+                whatWillPrint.frame(width: 300)
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Colors").font(.headline)
                     if published { multiColours } else { colours }
@@ -138,7 +130,7 @@ struct PrintSheet: View {
         .task(id: "\(printer?.id ?? "")|\(object.current?.model ?? "")|\(modelVersion)") { await loadFilaments() }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
         // must not hold Print for the new one. The chosen spools too: they change what the estimate slices.
-        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)|\(mappingSignature)") { await loadEstimate() }
+        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)|\(mappingSignature)|\(String(describing: colour))|\(offersPauses ? Array(Set(pauses)).sorted() : [])") { await loadEstimate() }
     }
 
     // MARK: Printers
@@ -379,6 +371,40 @@ struct PrintSheet: View {
             .compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// The two pictures of the sliced file, labelled; while it slices, or when the MCP can't draw them, the reason.
+    @ViewBuilder private var whatWillPrint: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("What will print").font(.headline)
+            if estimateState == .done, let preview = estimate?.preview, estimate?.sliceSha256 == preview.sha256 {
+                ForEach(preview.views) { view in
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let data = view.pngData, let image = NSImage(data: data) {
+                            Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: .infinity, maxHeight: 200).background(.white, in: .rect(cornerRadius: 12))
+                                .accessibilityLabel(view.label)
+                        }
+                        Text(view.label).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("Drawn from the sliced file this button sends.").font(.caption2).foregroundStyle(.tertiary)
+            } else if estimateState == .loading {
+                HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Slicing it to show you…") }.font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 200)
+            } else if estimateState == .done {
+                Text("Update \(printer?.mcpName ?? "your printer service") in Settings → Printers so Counterpart can show you what will print.")
+                    .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+            } else {
+                Text("Nothing to show yet.").font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
+            }
+        }
+    }
+
+    /// The sliced file shown above, when its pictures are of it: the only file Print may send.
+    private var shownSlice: String? {
+        guard estimateState == .done, let estimate, let sha = estimate.sliceSha256, estimate.preview?.sha256 == sha else { return nil }
+        return sha
+    }
+
     // MARK: Actions
 
     /// Bambu Studio refused this slice: printing it would fail the same way.
@@ -394,7 +420,7 @@ struct PrintSheet: View {
     }
 
     private var canPrint: Bool {
-        printer != nil && !model.working.contains(object.id) && (!uncertain || checked) && !refused && mappingReady
+        printer != nil && shownSlice != nil && !model.working.contains(object.id) && (!uncertain || checked) && !refused && mappingReady
             && (words.actions.contains(.print) || words.actions.contains(.printChecked))
             && (settingsServed || chosen != nil || (filamentState == .done && filaments.isEmpty))
             && !(offersPauses && (layerCount.map { count in pauses.contains { $0 > count } } ?? false))
@@ -412,7 +438,7 @@ struct PrintSheet: View {
     private func send() {
         let settings = PrintSettings(quality: offersQuality ? quality : .standard, strength: offersStrength ? strength : .standard, colour: colour,
                                      copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),
-                                     pauseBeforeLayers: offersPauses ? Array(Set(pauses)).sorted() : [])
+                                     pauseBeforeLayers: offersPauses ? Array(Set(pauses)).sorted() : [], sliceSha256: shownSlice)
         if published, let spools = chosenSpoolPerColour {
             Task { if await model.print(object.id, checked: uncertain && checked, settings: settings, filaments: spools, modelVersion: mapping?.modelVersion, expectedPlate: object.selectedPlate?.id) { dismiss() } }
             return
@@ -466,7 +492,8 @@ struct PrintSheet: View {
         do {
             let result = try await model.estimate(object.id, destinationId: printer?.id, quality: offersQuality ? quality : .standard,
                                                   strength: offersStrength ? strength : .standard, copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),
-                                                  filaments: published ? chosenSpoolPerColour ?? [] : [], modelVersion: mapping?.modelVersion)
+                                                  filaments: published ? chosenSpoolPerColour ?? [] : [], modelVersion: mapping?.modelVersion,
+                                                  colour: colour, pauseBeforeLayers: offersPauses ? Array(Set(pauses)).sorted() : [])
             guard !Task.isCancelled else { return }
             estimate = result
             estimateState = .done

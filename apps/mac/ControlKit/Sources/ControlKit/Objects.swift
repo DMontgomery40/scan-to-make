@@ -89,8 +89,11 @@ public struct PrintSettings: Sendable, Equatable {
     public var copies: Int?
     /// Pause before these 1-based layers, as the slicer preview numbers them: the printer stops there by itself.
     public var pauseBeforeLayers: [Int]
-    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int? = nil, pauseBeforeLayers: [Int] = []) {
+    /// The sheet's estimate (`PrintEstimate.sliceSha256`): Print sends exactly that sliced file, the one its preview showed.
+    public var sliceSha256: String?
+    public init(quality: Quality = .standard, strength: Strength = .standard, colour: Colour? = nil, copies: Int? = nil, pauseBeforeLayers: [Int] = [], sliceSha256: String? = nil) {
         self.quality = quality; self.strength = strength; self.colour = colour; self.copies = copies; self.pauseBeforeLayers = pauseBeforeLayers
+        self.sliceSha256 = sliceSha256
     }
     /// The `objects.print` fields: standard values are left out.
     public var params: [String: JSONValue] {
@@ -107,6 +110,7 @@ public struct PrintSettings: Sendable, Equatable {
         if let copies { params["copies"] = .number(Double(copies)) }
         let pauses = Array(Set(pauseBeforeLayers.filter { $0 >= 2 })).sorted()
         if !pauses.isEmpty { params["pauseBeforeLayers"] = .array(pauses.map { .number(Double($0)) }) }
+        if let sliceSha256 { params["sliceSha256"] = .string(sliceSha256) }
         return params
     }
 }
@@ -125,6 +129,35 @@ public struct PrintEstimate: Decodable, Sendable, Equatable {
     /// Bambu Studio's own warning on this slice, word for word (KAN-224), such as a floating cantilever. Print still
     /// goes ahead: the run asks "Print anyway" with the same words.
     public let slicerWarning: String?
+    /// The SHA-256 of this estimate's sliced file: Print sends it (`PrintSettings.sliceSha256`) and prints exactly that file.
+    public let sliceSha256: String?
+    /// The printer MCP's pictures of that file's G-code: what will print. Absent when the MCP can't draw them.
+    public let preview: PrintPreview?
+
+    public init(destinationId: String, quality: String, strength: String, seconds: Double? = nil, grams: Double? = nil, layers: Int? = nil,
+                layerHeightMm: Double? = nil, infillPercent: Double? = nil, wallLoops: Int? = nil, slicerWarning: String? = nil,
+                sliceSha256: String? = nil, preview: PrintPreview? = nil) {
+        self.destinationId = destinationId; self.quality = quality; self.strength = strength; self.seconds = seconds; self.grams = grams
+        self.layers = layers; self.layerHeightMm = layerHeightMm; self.infillPercent = infillPercent; self.wallLoops = wallLoops
+        self.slicerWarning = slicerWarning; self.sliceSha256 = sliceSha256; self.preview = preview
+    }
+}
+
+/// What will print, drawn by the printer MCP from the exact sliced G-code (never a thumbnail or a design render).
+public struct PrintPreview: Decodable, Sendable, Equatable {
+    public struct Picture: Decodable, Sendable, Equatable, Identifiable {
+        /// `top` (as it sits on the bed) or `bed_side` (the face on the bed, turned over toward you).
+        public let name: String
+        public let label: String
+        /// PNG, base64.
+        public let png: String
+        public let width: Int
+        public let height: Int
+        public var id: String { name }
+        public var pngData: Data? { Data(base64Encoded: png) }
+    }
+    public let sha256: String
+    public let views: [Picture]
 }
 
 /// What the print sheet shows under its settings for one estimate (PRD §5.5): the numbers, Studio's warning, or
@@ -300,9 +333,11 @@ public extension ControlClient {
         return result.object
     }
     /// Slices the current model as a Print with these settings would, without printing. Up to 180 s.
+    /// It takes every choice Print takes (the colour and layer pauses too): its sliced file is the one Print sends.
     func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int? = nil,
-                  filaments: [PrinterFilament] = [], modelVersion: String? = nil) async throws -> PrintEstimate {
-        var params: [String: JSONValue] = ["id": .string(id), "quality": .string(quality.rawValue), "strength": .string(strength.rawValue)]
+                  filaments: [PrinterFilament] = [], modelVersion: String? = nil, colour: PrintSettings.Colour? = nil, pauseBeforeLayers: [Int] = []) async throws -> PrintEstimate {
+        var params = PrintSettings(colour: colour, pauseBeforeLayers: pauseBeforeLayers).params
+        params["id"] = .string(id); params["quality"] = .string(quality.rawValue); params["strength"] = .string(strength.rawValue)
         if let destinationId { params["destinationId"] = .string(destinationId) }
         if let copies { params["copies"] = .number(Double(copies)) }
         if !filaments.isEmpty { params["filaments"] = .array(filaments.map(Self.value)) }

@@ -13,7 +13,7 @@ import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type Monit
 import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {defaultRunPublished, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
-import {sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
+import {previewUnavailable, sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {RuntimeSettings} from '../runtime-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
@@ -179,6 +179,8 @@ export interface ObjectServiceDeps {
 
 /** What the print sheet sends with Print (PRD §8.5). */
 export interface PrintOptions extends PrintSettings {expectedPlate?: string; checked?: boolean; filament?: FilamentChoice;
+  /** The print sheet's estimate (`sliceSha256`): Print sends exactly that sliced file, the one its preview showed. */
+  sliceSha256?: string;
   /** A multi-part 3MF: the spool chosen for each of the model's filaments, in filament order. */
   filaments?: FilamentChoice[];
   /** The model version those choices were made against (`colourMapping`'s), so a redesign can't inherit them. */
@@ -228,6 +230,26 @@ export function spreadPick<T>(items: T[], count: number): T[] {
  */
 export function designerFile(object: Pick<StmObject, 'scan'>, kind: PassKind, scanName = object.scan): string | undefined {
   return kind === 'copy' && scanName?.toLowerCase().endsWith('.3mf') ? join('scan', scanName) : undefined;
+}
+
+/** What a print sheet's slice was made with (`recipeKey`), and whether the MCP drew it. Print must match `recipe`. */
+interface ShownSliceShape {recipe: string; previewed: boolean; previewSupported: boolean}
+/** The MCP takes previews but drew nothing for this file. */
+const NOTHING_TO_PREVIEW = "Counterpart couldn't draw what this file would print, so it won't send it. Nothing was sent to the printer.";
+
+/** One string for a print's destination, selection and slicer arguments: equal only when the slice would be. */
+function recipeKey(destinationId: string, recipe: {selected?: PrinterSelection; sliced: PrinterSlicer}): string {
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, canonical(v)]))
+    : value;
+  return createHash('sha256').update(JSON.stringify(canonical({destinationId, selection: recipe.selected ?? null, slicer: recipe.sliced}))).digest('hex');
+}
+
+/** The request as Print applies it: saved defaults fill gaps; a 3MF owns its colours; saved pauses never apply. */
+function printOptions(object: StmObject, options: PrintOptions): PrintOptions {
+  const {pauseBeforeLayers: _savedPauses, ...defaults} = {...object.preferences?.printDefaults};
+  if (isMultipart(object)) delete defaults.colour;
+  return {...defaults, ...options, ...(options.filament ? {colour: undefined} : {})};
 }
 
 /** A 3MF model owns its parts and their filaments: a published file, or a design in several colours. */
@@ -422,6 +444,21 @@ export class ObjectService {
         return this.#changed(result);
       } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }
     });
+  }
+
+  /**
+   * How Print slices and routes this model with these choices (spools, colour mapping, quality, strength, copies,
+   * pauses, plate, supports). The print sheet's estimate slices exactly this, and Print sends that file only when
+   * its own recipe is the same (`recipeKey`).
+   */
+  async #sliceRecipe(id: string, object: StmObject, options: PrintOptions, selection: PrinterSelection | undefined, backend: PrinterHandoffConfig['backend'], destination?: {destinationId?: string}) {
+    const {selection: colourSelection, slicer, chosenTrays} = await this.#colour(id, options, selection, backend, destination);
+    const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
+    const overrides = object.publishedSelection?.sliced
+      ? {repetitions: 1, ...(options.pauseBeforeLayers?.length ? {pauseAtLayers: options.pauseBeforeLayers} : {})}
+      : sliceOverrides(options);
+    const sliced = {...slicer, ...overrides, ...designedSupports(object)};
+    return {selected, overrides, sliced, ...(chosenTrays ? {chosenTrays} : {})};
   }
 
   /** The printer this project would print on takes `copies` (slice_stl repetitions). */
@@ -1176,9 +1213,7 @@ export class ObjectService {
     // A 3MF owns its filament assignments; the sheets do not offer a single-spool override.
     // Keep the saved preference for other models, but do not silently apply it here.
     // Layer pauses come only from this request (the sheet shows them): a saved default never adds a hidden stop.
-    const {pauseBeforeLayers: _savedPauses, ...defaults} = {...object.preferences?.printDefaults};
-    if (isMultipart(object)) delete defaults.colour;
-    options = {...defaults, ...options, ...(options.filament ? {colour: undefined} : {})};
+    options = printOptions(object, options);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
     if (object.ask?.status === 'open' && object.ask.type === 'choice') throw new InvalidStateError('Choose the model’s file and plate before printing.');
     this.#publishedSettings(object, options);
@@ -1200,7 +1235,8 @@ export class ObjectService {
     const printing = {...configured, services};
     const printDestination = destination ? {id: destination.id, name: destination.name} : undefined;
     const {store: bundles, relay, runner} = printing.services;
-    const {selection: colourSelection, slicer, chosenTrays} = await this.#colour(id, options, services.selection, runner.backend);
+    const recipe = await this.#sliceRecipe(id, object, options, services.selection, runner.backend);
+    const {selected, overrides, sliced, chosenTrays} = recipe;
     // Slicing and confirmation can take minutes: re-read the spools at dispatch, so a spool
     // swapped in between can't silently take the mapping (the MCPs check material, not colour).
     const recheckTrays = chosenTrays?.length ? async () => {
@@ -1209,10 +1245,6 @@ export class ObjectService {
         && item.material === tray.material && item.filamentId === tray.filamentId && item.destinationId === tray.destinationId))
         throw new InvalidStateError('A chosen spool changed before printing started. Nothing was sent — open the print sheet and check the colours.');
     } : undefined;
-    const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
-    const overrides = object.publishedSelection?.sliced
-      ? {repetitions: 1, ...(options.pauseBeforeLayers?.length ? {pauseAtLayers: options.pauseBeforeLayers} : {})}
-      : sliceOverrides(options);
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
     if (capabilities && (('quality' in overrides && !capabilities.quality) || ('strength' in overrides && !capabilities.strength)
         || (overrides.repetitions !== undefined && overrides.repetitions > 1 && !capabilities.copies)
@@ -1221,7 +1253,12 @@ export class ObjectService {
     const settings: PrintSettings = {...(options.quality ? {quality: options.quality} : {}), ...(options.strength ? {strength: options.strength} : {}),
       ...(options.colour ? {colour: options.colour} : {}), ...(options.copies !== undefined ? {copies: options.copies} : {}),
       ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})};
-    const sliced = {...slicer, ...overrides, ...designedSupports(object)};
+    // What prints is what the sheet showed (Nov 5): the estimate's own sliced file, never a fresh slice nobody saw.
+    const shown = options.sliceSha256 ? await this.#shownSlice(id, options.sliceSha256) : undefined;
+    if (!shown) throw new InvalidStateError('Open Print to see what will print, then print it from there.');
+    if (!shown.shape.previewed) throw new InvalidStateError(shown.shape.previewSupported ? NOTHING_TO_PREVIEW : previewUnavailable(runner.backend));
+    if (recipeKey(destinationId ?? 'current', recipe) !== shown.shape.recipe)
+      throw new InvalidStateError('The print settings changed since the preview. Open Print again to see what will print.');
     const stl = await this.#modelBytes(object);
     const ask = await this.#legacyColourDesign(object) ? LEGACY_COLOUR_ASK : undefined;
     const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
@@ -1258,6 +1295,7 @@ export class ObjectService {
     if (recheckTrays) this.#dispatchRechecks.set(id, recheckTrays);
     // Print Again prints the slice it made last time when nothing that shapes it changed (slice-cache.ts).
     const work = runner.runBundle(bundles, manifest.id, {print: true, signal: controller.signal, onProgress, sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')},
+      presliced: {bytes: shown.bytes, extension: shown.extension, ...(shown.slicerWarning ? {slicerWarning: shown.slicerWarning} : {})}, expectedSha256: options.sliceSha256!,
       ...(recheckTrays ? {beforePrint: recheckTrays} : {}), ...(Object.keys(sliced).length ? {slicer: sliced} : {}), ...(ask ? {ask} : {})})
       .then(outcome => this.#dispatched(id, manifest.id, printDestination?.id ?? destinationId, (outcome as {result?: {dispatch?: {jobName?: string; taskId?: string; fileBase?: string}}} | undefined)?.result?.dispatch),
         async error => {
@@ -1311,7 +1349,7 @@ export class ObjectService {
   }
 
   /** The print sheet's colour, as the MCP's own selection and slicing options (PRD §8.5 colour v1). */
-  async #colour(id: string, options: PrintOptions, selection: PrinterSelection | undefined, backend: PrinterHandoffConfig['backend'])
+  async #colour(id: string, options: PrintOptions, selection: PrinterSelection | undefined, backend: PrinterHandoffConfig['backend'], destination?: {destinationId?: string})
     : Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]}> {
     const object = await this.get(id);
     // Per-colour choices for a model that is no longer a multi-part 3MF are stale, never ignored.
@@ -1319,12 +1357,12 @@ export class ObjectService {
       throw new InvalidStateError('The model changed since you chose its spools. Reopen the print sheet and check the colours.');
     if (isMultipart(object)) {
       // A 3MF owns its per-part filaments: map each to a spool, never one spool for the whole model.
-      const multipart = await this.#multipartColour(object, options, selection, backend);
+      const multipart = await this.#multipartColour(object, options, selection, backend, destination);
       if (multipart) return multipart;
     }
     if (options.filament) {
       const choice = options.filament;
-      const live = (await this.liveFilaments(id)).find(item => item.slot === choice.slot && item.colour === choice.colour
+      const live = (await this.liveFilaments(id, destination)).find(item => item.slot === choice.slot && item.colour === choice.colour
         && item.material === choice.material && item.filamentId === choice.filamentId && item.destinationId === choice.destinationId);
       if (!live) throw new InvalidStateError('The chosen filament changed. Choose a current spool and try again.');
       if (!live.profile) throw new InvalidStateError('That spool has no slicing profile on this Mac. Choose another spool.');
@@ -1339,7 +1377,7 @@ export class ObjectService {
       // "What's loaded?" (PRD §8.4–8.5): the person says which material is in the printer.
       const material = colour.material.trim();
       if (backend === 'bambu-printer-mcp') {
-        const live = await this.liveFilaments(id).catch(() => [] as LiveFilament[]);
+        const live = await this.liveFilaments(id, destination).catch(() => [] as LiveFilament[]);
         const match = live.find(item => item.profile && item.material.toLowerCase() === material.toLowerCase());
         // A loaded spool of that material: print from it with its own profile.
         if (match) return {selection: {...selection, material: match.material, useAms: match.slot !== 254 && match.slot !== 255,
@@ -1356,7 +1394,7 @@ export class ObjectService {
       if (configured && configured.toLowerCase() === material.toLowerCase()) return {selection: {...selection, material: configured}};
       throw new InvalidStateError(`mcp-3D-printer-server doesn't give a slicing profile for ${material} on this printer, so Counterpart can't slice for it. ${configured ? `Choose ${configured}, the configured material, or update` : 'Update'} mcp-3D-printer-server.`);
     }
-    const live = await this.liveFilaments(id);
+    const live = await this.liveFilaments(id, destination);
     if ('external' in colour) {
       const tray = live.find(item => item.slot === 254 || item.slot === 255);
       return {selection: {...selection, useAms: false, amsSlots: undefined, amsMapping: undefined, autoMatchAms: false, ...(tray ? {material: tray.material} : {})},
@@ -1690,42 +1728,70 @@ export class ObjectService {
   }
 
   readonly #estimates2 = new Map<string, Promise<PrintEstimate>>();
+
+  /**
+   * The sliced file a print sheet showed (its estimate and preview), kept so Print sends exactly it
+   * (`<project>/slices/shown/<sha256>`). `shape` is what the sheet chose; Print must choose the same.
+   */
+  async #keepShownSlice(id: string, file: {bytes: Buffer; extension: string; sha256: string; slicerWarning?: string}, shape: ShownSliceShape): Promise<string> {
+    const directory = join(this.#deps.store.dir(id), 'slices', 'shown');
+    await mkdir(directory, {recursive: true});
+    const extension = /^\.(3mf|gcode)$/i.test(file.extension) ? file.extension.toLowerCase() : '.3mf';
+    await writeFile(join(directory, `${file.sha256}${extension}`), file.bytes, {mode: 0o600});
+    await writeFile(join(directory, `${file.sha256}.json`), JSON.stringify({extension, shape, ...(file.slicerWarning ? {slicerWarning: file.slicerWarning} : {})}), {mode: 0o600});
+    // Keep the last few sheets' files only.
+    const entries = (await readdir(directory).catch(() => [] as string[])).filter(name => name.endsWith('.json'));
+    if (entries.length > 8) {
+      const dated = await Promise.all(entries.map(async name => ({name, at: (await stat(join(directory, name))).mtimeMs})));
+      for (const {name} of dated.sort((a, b) => a.at - b.at).slice(0, entries.length - 8)) {
+        const sha = name.slice(0, -5);
+        for (const other of await readdir(directory)) if (other.startsWith(sha)) await rm(join(directory, other), {force: true});
+      }
+    }
+    return file.sha256;
+  }
+  async #shownSlice(id: string, sha256: string): Promise<{bytes: Buffer; extension: string; shape: ShownSliceShape; slicerWarning?: string} | undefined> {
+    if (!/^[0-9a-f]{64}$/.test(sha256)) return undefined;
+    const directory = join(this.#deps.store.dir(id), 'slices', 'shown');
+    const record = await readFile(join(directory, `${sha256}.json`), 'utf8').then(text => JSON.parse(text) as {extension: string; shape: ShownSliceShape; slicerWarning?: string}, () => undefined);
+    if (!record || !/^\.(3mf|gcode)$/.test(record.extension)) return undefined;
+    const bytes = await readFile(join(directory, `${sha256}${record.extension}`)).catch(() => undefined);
+    if (!bytes || createHash('sha256').update(bytes).digest('hex') !== sha256) return undefined;
+    return {bytes, extension: record.extension, shape: record.shape, ...(record.slicerWarning ? {slicerWarning: record.slicerWarning} : {})};
+  }
   /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
-  async estimate(id: string, request: {destinationId?: string; quality?: PrintSettings['quality']; strength?: PrintSettings['strength']; copies?: number; filaments?: FilamentChoice[]; filamentsModelVersion?: string} = {}): Promise<PrintEstimate> {
+  async estimate(id: string, request: PrintOptions & {destinationId?: string} = {}): Promise<PrintEstimate> {
     const object = await this.get(id);
-    const defaults = object.preferences?.printDefaults;
-    request = {...(defaults?.quality ? {quality: defaults.quality} : {}), ...(defaults?.strength ? {strength: defaults.strength} : {}),
-      ...(defaults?.copies ? {copies: defaults.copies} : {}), ...request};
+    // The estimate slices exactly what Print would (`#sliceRecipe`): its file is the one Print sends.
+    const {destinationId: requested, ...choices} = request;
+    const options = printOptions(object, choices);
     if (!object.current) throw new InvalidStateError('There is no model to print yet.');
-    this.#publishedSettings(object, request);
+    this.#publishedSettings(object, options);
+    if (options.filament && options.colour) throw new InvalidStateError('Choose one colour.');
     const catalog = this.#deps.printerCatalog;
-    const destinationId = request.destinationId ? catalog?.canonical(request.destinationId) : this.#destinationId(object);
-    if (request.destinationId && !destinationId) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
+    const destinationId = requested ? catalog?.canonical(requested) : this.#destinationId(object);
+    if (requested && !destinationId) throw new InvalidStateError('That printer is no longer available. Choose another printer.');
     const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
     if (!services?.runner.estimate) throw new InvalidStateError('Estimates are unavailable for this printer.');
-    const quality = request.quality ?? 'standard', strength = request.strength ?? 'standard';
-    const copies = request.copies && request.copies > 1 ? request.copies : undefined;
-    // Exactly as Print: named copies (1 included) override the printer config's own repetitions.
-    const overrides = object.publishedSelection?.sliced ? {repetitions: 1} : sliceOverrides({quality, strength, ...(request.copies !== undefined ? {copies: request.copies} : {})});
+    const quality = options.quality ?? 'standard', strength = options.strength ?? 'standard';
+    const copies = options.copies && options.copies > 1 ? options.copies : undefined;
+    const recipe = await this.#sliceRecipe(id, object, options, services.selection, services.runner.backend, destinationId ? {destinationId} : undefined);
+    const {overrides} = recipe;
     const capabilities = destinationId ? this.#deps.printers?.capabilities(destinationId) : undefined;
     if (capabilities && (('quality' in overrides && !capabilities.quality) || ('strength' in overrides && !capabilities.strength)
-        || (copies && !capabilities.copies)))
-      throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {})}));
-    // A multi-colour model slices with its mapped spools' profiles, exactly as Print would:
-    // the sheet's chosen spools when it sends them (validated, errors visible), else the
-    // suggestions. Best effort for suggestions: an unreadable inventory leaves the
-    // estimate to the MCP's own defaults.
-    if (request.filaments?.length && !isMultipart(object))
-      throw new InvalidStateError('The model changed since you chose its spools. Reopen the print sheet and check the colours.');
-    const multipart = !isMultipart(object) ? undefined
-      : request.filaments
-        ? await this.#multipartColour(object, {filaments: request.filaments, ...(request.filamentsModelVersion ? {filamentsModelVersion: request.filamentsModelVersion} : {})}, services.selection, services.runner.backend, {destinationId})
-        : await this.#multipartColour(object, {}, services.selection, services.runner.backend, {destinationId}).catch(() => undefined);
-    const slicer = {...overrides, ...(multipart?.slicer ?? {})};
+        || (copies && !capabilities.copies) || (overrides.pauseAtLayers?.length && !capabilities.layerPauses)))
+      throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, ...(copies ? {copies} : {}), ...(options.pauseBeforeLayers?.length ? {pauseBeforeLayers: options.pauseBeforeLayers} : {})}));
     const model = await this.#modelBytes(object);
-    const supports = designedSupports(object);
-    const key = JSON.stringify([createHash('sha256').update(model).digest('hex'), destinationId ?? 'default', quality, strength, request.copies ?? 'configured', object.publishedSelection?.plateIndex ?? services.selection?.plateIndex ?? 0, supports, multipart?.selection?.amsMapping ?? null, multipart?.slicer?.loadFilaments ?? null, multipart?.slicer?.filamentColours ?? null]);
+    const recipeId = recipeKey(destinationId ?? 'current', recipe);
+    // The installed MCP's version too: an update can change what it slices and whether it draws previews.
+    const server = destinationId ? this.#deps.printers?.capabilities(destinationId)?.server?.version ?? null : null;
+    const key = JSON.stringify([id, createHash('sha256').update(model).digest('hex'), recipeId, server]);
     let running = this.#estimates2.get(key);
+    // A kept estimate whose sliced file is gone (only the last few are kept) is sliced again.
+    if (running) {
+      const kept = await running.catch(() => undefined);
+      if (kept?.sliceSha256 && !await this.#shownSlice(id, kept.sliceSha256)) { this.#estimates2.delete(key); running = undefined; }
+    }
     if (!running) {
       const runner = services.runner;
       running = (async () => {
@@ -1733,7 +1799,8 @@ export class ObjectService {
         try {
           const stlPath = join(work, object.current!.model.toLowerCase().endsWith('.3mf') ? 'model.3mf' : 'model.stl');
           await writeFile(stlPath, model);
-          const {estimate, settings, slicerWarning} = await runner.estimate!({stlPath, ...((services.selection || object.publishedSelection) ? {selection: {...services.selection, ...(object.publishedSelection ? {plateIndex: object.publishedSelection.plateIndex} : {})}} : {}), ...(Object.keys({...slicer, ...supports}).length ? {slicer: {...slicer, ...supports}} : {}),
+          const {estimate, settings, slicerWarning, sliced: slicedFile, preview, previewSupported} = await runner.estimate!({stlPath,
+            ...(recipe.selected ? {selection: recipe.selected} : {}), ...(Object.keys(recipe.sliced).length ? {slicer: recipe.sliced} : {}),
             signal: AbortSignal.timeout(150_000), sliceCache: {directory: join(this.#deps.store.dir(id), 'slices')}});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
@@ -1741,6 +1808,8 @@ export class ObjectService {
             ...(settings.infillPercent !== undefined ? {infillPercent: settings.infillPercent} : {}), ...(settings.wallLoops !== undefined ? {wallLoops: settings.wallLoops} : {}),
             // Bambu Studio's own warning on this slice, word for word (KAN-223). Print asks "Print anyway" with the same words.
             ...(slicerWarning ? {slicerWarning} : {}),
+            ...(slicedFile ? {sliceSha256: await this.#keepShownSlice(id, slicedFile, {recipe: recipeId, previewed: !!preview, previewSupported: previewSupported !== false})} : {}),
+            ...(preview ? {preview} : {}),
             slicedAt: new Date().toISOString()};
         } finally { await rm(work, {recursive: true, force: true}).catch(() => undefined); }
       })();
@@ -1751,7 +1820,7 @@ export class ObjectService {
     }
     try { return structuredClone(await running); }
     catch (error) {
-      if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, supports: supports.enableSupport !== undefined}));
+      if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, supports: designedSupports(object).enableSupport !== undefined}));
       // Bambu Studio refused the slice: its own words, exactly what a Print of the same model fails with.
       if (error instanceof PrinterMcpError && ['slicer-error', 'copies-multiple-plates'].includes(error.code) && error.detail) throw new SlicerRefusedError(error.detail);
       throw new InvalidStateError(error instanceof PrinterMcpError && error.detail ? `Couldn't slice it for an estimate: ${error.detail}` : "Couldn't slice it for an estimate. Check the printer service, then try again.");

@@ -10,3 +10,4 @@ export * from './counterpart.js';
 export * from './model-file.js';
 export * from './bound-fusion.js';
 export * from './remote-mcp.js';
+export * from './slice-preview.js';

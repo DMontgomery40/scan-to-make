@@ -24,3 +24,8 @@ export function settingsUnsupported(backend: keyof typeof PACKAGE_NAMES, setting
   if (what === 'this design’s supports') return `Update ${PACKAGE_NAMES[backend]} in Settings → Printers so Counterpart can send this design’s supports to the slicer. Nothing was sent to the printer.`;
   return `Update ${PACKAGE_NAMES[backend]} to choose ${what} from Counterpart. Standard prints with your printer's own preset.`;
 }
+
+/** Print's refusal when the installed MCP can't draw what will print (inspect_print_file `include_preview`). */
+export function previewUnavailable(backend: keyof typeof PACKAGE_NAMES): string {
+  return `Update ${PACKAGE_NAMES[backend]} in Settings → Printers so Counterpart can show you what will print. Nothing was sent to the printer.`;
+}
