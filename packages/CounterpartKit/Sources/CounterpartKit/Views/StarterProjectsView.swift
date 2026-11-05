@@ -86,9 +86,7 @@ public struct StarterDetail: View {
                     Text(project.summary)
                     Label(project.detail, systemImage: "square.stack.3d.up").font(.subheadline.weight(.medium))
                     Text(project.instructions).font(.callout).foregroundStyle(.secondary)
-                    if !project.bundled {
-                        Text("Add the designer’s original files from MakerWorld to print this project.").font(.callout)
-                    }
+                    Text("Add the designer’s original files from MakerWorld to print this project.").font(.callout)
                     Link("\(project.designer) · \(project.site)", destination: project.url)
                     Text(project.licence).font(.caption).foregroundStyle(.secondary)
                     if let credit = project.imageCredit { Text(credit).font(.caption2).foregroundStyle(.secondary) }

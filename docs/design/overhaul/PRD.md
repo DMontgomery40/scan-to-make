@@ -429,7 +429,7 @@ Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications
 - **Phones and iPads:** every paired device, including the Older pairings section, with **Remove** and **Remove All**.
 - **General:** open at login, show in Dock, and keep the Mac awake while working. Each one changes the Mac.
 - **How it works.** The companion exposes `GET /v1/settings` and `PATCH /v1/settings` with the same schema the control socket's `settings.get`/`settings.set` already uses, plus `GET /v1/devices` and `DELETE /v1/devices/<id>`. The schema and its labels live in `CounterpartKit` (`SettingsSchema`), so both apps render the same list from one definition, and a new setting appears on both without separate UI work. Settings that need the Mac's GUI (a sign-in window, a Keychain prompt) run on the Mac, and the phone shows their progress.
-- **Help:** a guide at the docs site, how scanning works, **Print the caliper card**, and **Print the scan rig**. The rig link opens Kass 3D's MakerWorld page, credited by name (§15).
+- **Help:** a guide at the docs site, how scanning works, and **Print the scan rig**. The rig link opens Kass 3D's MakerWorld page, credited by name (§15).
 - **About:** the app icon, "Counterpart", the version and build, the website, the licences, and open-source notices.
 
 ### 5.10 First run and pairing
@@ -468,10 +468,11 @@ Screenshots: `screens/phone-welcome.jpg`, `screens/phone-pair.jpg` and `screens/
 
 ### 5.11 Starter projects
 
-Every layout lists the starters while projects exist (§6.1): iPhone Home, the iPad start pane and sidebar, the Mac sidebar and New Project, Android Home and Linux Home, plus the welcome flow before pairing. They offer three starters from one shared catalog (`packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/catalog.json`, also used by Android and Linux):
-- the **scan platform**;
-- the **Counterpart caliper card**, which ships freshly generated model files, branding, QR and preview;
-- the **long vernier caliper with depth gauge**.
+Every layout lists the starters while projects exist (§6.1): iPhone Home, the iPad start pane and sidebar, the Mac sidebar and New Project, Android Home and Linux Home, plus the welcome flow before pairing. They offer two starters from one shared catalog (`packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/catalog.json`, also used by Android and Linux):
+- the **scan platform** by Kass 3D;
+- the **long vernier caliper with depth gauge** by 3D Print Masters Hub.
+
+Every starter is a real designer's model. Removed Nov 5: a bundled "Counterpart caliper card" whose files an agent generated with `tools/caliper` (588afd4c). Nobody designed or print-tested it, yet it was offered as something to print right now (David, Nov 5: "It just completely made up that one on its own"). The generator went with it.
 
 MakerWorld starters carry credits and instructions and import the designer's original files; Counterpart never redistributes their geometry (§15). Several original files can be imported into one project. `POST /v1/objects {"starterId": …}` creates the project on the companion. No personal project history is copied.
 
@@ -627,11 +628,12 @@ When a capability is missing, the app says "Update *MCP* in Settings → Printer
 - capture and close-ups;
 - reconstruction (`tools/mac-reconstruct`, `tools/linux-reconstruct`);
 - scan cleanup (`tools/scan-repair`, `tools/scan-correct`, `tools/capture-mesh-convert`), which is the app per David on Oct 31;
-- the caliper generator (starter content);
 - the companion's pairing, auth, relay, events, notifications, Live Activities and CloudKit project store;
 - the MCP install/update lifecycle;
 - the print monitor as orchestration, fed by `counterpart_print_progress`;
 - #306's legacy-pass detection.
+
+The caliper generator (`tools/caliper`) was on this list until Nov 5. It only made the bundled caliper card starter, which nobody designed or print-tested, so both were removed (§5.11).
 
 **In the app today; moves to the MCPs.** Migration order, one item at a time. For each item:
 1. extend `counterpart/1` in both MCPs;

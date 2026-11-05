@@ -16,22 +16,6 @@
     "source": "makerworld"
   },
   {
-    "id": "caliper-card",
-    "title": "Counterpart caliper card",
-    "subtitle": "A measurement tool for your scans",
-    "summary": "A compact 0–100 mm caliper with inside and outside jaws, a 0.2 mm vernier, and reference markers for close-up photos.",
-    "instructions": "Print the card and slider in their supplied positions. The slider prints face down; slide it into the card from the jaw end. Use contrasting colours for readable marks. Both jaws use the same scale: read the whole millimetres just before the vernier zero, then add 0.2 mm for each division to the line that aligns with a main-scale tick. Resolution is not a guarantee of accuracy: check the printed scale against a known ruler before using measurements.",
-    "designer": "Counterpart",
-    "site": "Counterpart",
-    "url": "https://counterpart.dtmont.com/",
-    "licence": "GPL-3.0-only · font outlines: SIL OFL 1.1",
-    "symbol": "ruler",
-    "image": "caliper/preview.png",
-    "detail": "1 plate · 0–100 mm",
-    "source": "bundled",
-    "model": "caliper/caliper-2colour.3mf"
-  },
-  {
     "id": "long-vernier-caliper",
     "title": "Long vernier caliper",
     "subtitle": "Measure larger parts and depths",

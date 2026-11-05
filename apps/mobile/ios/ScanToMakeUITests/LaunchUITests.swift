@@ -76,12 +76,13 @@ final class ProjectScreensUITests: XCTestCase {
 
     func testEmptyHomeShowsCleanStarterDetails() {
         let app = launch(set: "empty")
-        let card = app.buttons["starter-caliper-card"]
+        let card = app.buttons["starter-long-vernier-caliper"]
         XCTAssertTrue(card.waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["starter-scan-platform"].exists)
+        XCTAssertFalse(app.buttons["starter-caliper-card"].exists, "no starter the app made up (Nov 5)")
         card.tap()
         XCTAssertTrue(app.buttons["starter-add"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["A measurement tool for your scans"].exists)
+        XCTAssertTrue(app.staticTexts["Measure larger parts and depths"].exists)
         XCTAssertFalse(app.staticTexts["What changed"].exists)
     }
 

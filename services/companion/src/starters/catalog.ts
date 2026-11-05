@@ -6,7 +6,7 @@ import {join} from 'node:path';
 export const STARTER_ASSETS = fileURLToPath(new URL('../../../../packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/', import.meta.url));
 export interface StarterProject {
   id: string; title: string; summary: string; instructions: string; designer: string; site: string;
-  url: string; licence: string; source: 'bundled' | 'makerworld'; model?: string;
+  url: string; licence: string; source: 'makerworld';
 }
 export function starterProject(id: string): StarterProject | undefined {
   const catalog = JSON.parse(readFileSync(join(STARTER_ASSETS, 'catalog.json'), 'utf8')) as StarterProject[];

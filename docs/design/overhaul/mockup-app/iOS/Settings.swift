@@ -42,7 +42,6 @@ struct PhoneSettingsView: View {
                 Section {
                     SettingsLinkRow(symbol: "book.fill", tint: .blue, title: "Guide", detail: nil)
                     SettingsLinkRow(symbol: "cube.transparent.fill", tint: .indigo, title: "How scanning works", detail: nil)
-                    SettingsLinkRow(symbol: "ruler.fill", tint: .teal, title: "Print the caliper card", detail: "Checks your scans come out the right size")
                     SettingsLinkRow(symbol: "rotate.3d.fill", tint: .filament, title: "Print the scan rig", detail: "By Kass 3D on MakerWorld. For casual photos, not professional equipment.")
                 } header: { Text("Help") }
 

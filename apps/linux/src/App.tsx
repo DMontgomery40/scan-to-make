@@ -19,7 +19,6 @@ import { useWorkspace } from "./useWorkspace";
 import { useChangeQueue } from "./useChangeQueue";
 import type { HostStatus, Project } from "./types";
 import catalog from "../shared/catalog.json";
-import caliperImage from "../shared/caliper.png";
 import vernierImage from "../shared/vernier.png";
 export function App() {
   const [status, setStatus] = useState<HostStatus>();
@@ -384,12 +383,7 @@ export function App() {
                   <div className="starter-grid">
                     {catalog.map((starter) => (
                       <article className="starter" key={starter.id}>
-                        {starter.id === "caliper-card" ? (
-                          <img
-                            src={caliperImage}
-                            alt="Counterpart caliper card"
-                          />
-                        ) : starter.id === "long-vernier-caliper" ? (
+                        {starter.id === "long-vernier-caliper" ? (
                           <img src={vernierImage} alt="Long vernier caliper" />
                         ) : (
                           <div className="starter-symbol" aria-hidden>
