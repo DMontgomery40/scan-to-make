@@ -774,6 +774,18 @@ dialog::backdrop {
   background: #eaf0e3;
   border-radius: 14px;
 }
+.what-will-print figure {
+  margin: 0 0 10px;
+}
+.what-will-print .print-preview {
+  height: 200px;
+  background: #fff;
+}
+.what-will-print figcaption,
+.what-will-print small {
+  color: #5d6b57;
+  font-size: 0.85em;
+}
 .two-columns {
   display: grid;
   grid-template-columns: 1fr 1fr;

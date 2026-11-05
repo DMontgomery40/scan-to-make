@@ -314,7 +314,18 @@ data class PrinterFilament(val slot: Int, val colour: String = "#888888", val ma
 data class SliceEstimate(val destinationId: String = "", val quality: String = "standard", val strength: String = "standard",
                          val seconds: Double? = null, val grams: Double? = null, val layers: Int? = null, val slicerWarning: String? = null,
                          // What the printer MCP actually sliced with: the app never guesses slicer numbers (PRD §8.0).
-                         val layerHeightMm: Double? = null, val wallLoops: Int? = null, val infillPercent: Double? = null)
+                         val layerHeightMm: Double? = null, val wallLoops: Int? = null, val infillPercent: Double? = null,
+                         // The sliced file this estimate made, and the printer MCP's pictures of that exact file (Nov 5).
+                         val sliceSha256: String? = null, val preview: SlicePreview? = null) {
+    /** The slice Print may send: only one whose pictures are of that exact file. */
+    val shownSlice: String? get() = sliceSha256?.takeIf { sha -> preview?.sha256 == sha && preview.views.isNotEmpty() }
+}
+
+/** `PrintEstimate.preview` (packages/contracts): base64 PNGs the printer MCP drew from the sliced G-code. */
+@Serializable
+data class SlicePreview(val sha256: String, val views: List<View> = emptyList(), val mmPerPixel: Double? = null) {
+    @Serializable data class View(val name: String, val label: String, val png: String, val width: Int, val height: Int)
+}
 
 /** The print sheet's choices, sent as chosen; the printer MCP turns them into its slicer's settings. */
 enum class PrintQuality(val wire: String, val title: String) {
@@ -336,7 +347,11 @@ sealed class PrintColour {
 /** What the print sheet sends with Print (CounterpartKit `PrintChoice.body`). */
 data class PrintChoice(val colour: PrintColour? = null, val quality: PrintQuality = PrintQuality.Standard,
                        val strength: PrintStrength = PrintStrength.Standard, val checked: Boolean = false, val copies: Int? = null,
-                       val pauseBeforeLayers: List<Int> = emptyList()) {
+                       val pauseBeforeLayers: List<Int> = emptyList(), val sliceSha256: String? = null) {
+    /** The estimate of these exact choices (no `checked`, no slice yet): it slices the file Print then sends. */
+    fun estimateBody(destinationId: String?): JsonObject =
+        JsonObject(body - "checked" - "sliceSha256" + listOfNotNull(destinationId?.let { "destinationId" to JsonPrimitive(it) }))
+
     val body: JsonObject get() {
         val json = LinkedHashMap<String, JsonElement>()
         json["checked"] = JsonPrimitive(checked)
@@ -355,6 +370,7 @@ data class PrintChoice(val colour: PrintColour? = null, val quality: PrintQualit
             require(pauses.size <= 16 && pauses.all { it in 2..100_000 }) { "Choose up to 16 pause layers, starting at layer 2." }
             json["pauseBeforeLayers"] = kotlinx.serialization.json.JsonArray(pauses.map { JsonPrimitive(it) })
         }
+        sliceSha256?.let { json["sliceSha256"] = JsonPrimitive(it) }
         return JsonObject(json)
     }
 }

@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ReadOrder,
+  estimateRequest,
   freezePlate,
+  printRequest,
+  shownSlice,
   guardPlate,
   parseLayers,
   searchProject,
@@ -166,4 +169,30 @@ test("suggestion and component boxes drive the highlight; words stay human", () 
   assert.throws(() => parseExtentMm(""), /between 1 and 10,000 mm/);
   assert.throws(() => parseExtentMm("12x"));
   assert.equal(parseExtentMm("12.5"), 12.5);
+});
+
+test("the print sheet's estimate slices exactly what Print sends, and Print sends only the slice whose pictures were shown", () => {
+  const filament = { slot: 2, colour: "#FFD200", material: "PLA", name: "Bambu PLA Basic", filamentId: "GFA00", destinationId: "p1s" };
+  const choices = { destinationId: "p1s", quality: "fine", strength: "strong", copies: 2, filament, material: "PETG", pauseBeforeLayers: [3, 20] };
+  const sha = "a".repeat(64);
+  const estimate = estimateRequest("o1", choices);
+  // A loaded spool wins over "what's loaded"; the estimate takes every choice Print takes.
+  assert.deepEqual(estimate, { id: "o1", destinationId: "p1s", quality: "fine", strength: "strong", copies: 2, filament, pauseBeforeLayers: [3, 20] });
+  const { destinationId: _d, ...same } = estimate;
+  assert.deepEqual(printRequest("o1", choices, sha, "plate-1"), { ...same, expectedPlate: "plate-1", sliceSha256: sha });
+  const plain = { ...choices, filament: undefined, pauseBeforeLayers: [] };
+  assert.deepEqual((estimateRequest("o1", plain) as { colour?: unknown }).colour, { material: "PETG" });
+  assert.equal("pauseBeforeLayers" in estimateRequest("o1", plain), false);
+  assert.equal("expectedPlate" in printRequest("o1", plain, sha), false);
+  // Only an estimate whose pictures are of its own sliced file can be printed.
+  const views = [
+    { name: "top", label: "From above", png: "iVBORw0KGgo=", width: 400, height: 400 },
+    { name: "bed_side", label: "From the side", png: "iVBORw0KGgo=", width: 400, height: 200 },
+  ];
+  const base = { destinationId: "p1s", quality: "fine", strength: "strong" };
+  assert.equal(shownSlice({ ...base, sliceSha256: sha, preview: { sha256: sha, views } }), sha);
+  assert.equal(shownSlice({ ...base, sliceSha256: sha }), undefined, "an MCP that draws nothing");
+  assert.equal(shownSlice({ ...base, sliceSha256: sha, preview: { sha256: "b".repeat(64), views } }), undefined, "pictures of another file");
+  assert.equal(shownSlice({ ...base, preview: { sha256: sha, views } }), undefined, "an older companion");
+  assert.equal(shownSlice(undefined), undefined);
 });
