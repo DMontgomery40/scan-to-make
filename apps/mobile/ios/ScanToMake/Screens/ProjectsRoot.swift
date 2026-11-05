@@ -146,6 +146,8 @@ struct SidebarList: View {
     private var archived: [Project] { store.projects.filter { $0.isArchived && matches($0) } }
 
     var body: some View {
+        VStack(spacing: 0) {
+            ProjectSearchBar(query: $query, searching: $searching, matched: store.projects.filter { matches($0) }.count, total: store.projects.count)
         List(selection: $selection) {
             section("Now", group([.printing, .preparing, .working, .sending]))
             section("Needs you", group([.needsYou]))
@@ -169,11 +171,10 @@ struct SidebarList: View {
                 } header: { Text("Archived · \(archived.count)") }
             }
         }
+        }
         .navigationTitle("Projects")
         .navigationSubtitle(store.reachable == false ? "\(store.macName ?? "Your Mac") isn't answering" : store.reachable == true ? "\(store.macName ?? "Your Mac") connected" : store.macName ?? "Your Mac")
-         .safeAreaInset(edge: .top, spacing: 0) {
-            ProjectSearchBar(query: $query, searching: $searching, matched: store.projects.filter { matches($0) }.count, total: store.projects.count)
-        }
+
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .refreshable { await store.load() }
         .toolbar {

@@ -39,6 +39,8 @@ struct HomeView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            ProjectSearchBar(query: $query, searching: $searching, matched: searched.count, total: store.projects.count)
         ScrollView {
             if store.loaded && store.projects.isEmpty && store.error == nil {
                 VStack(alignment: .leading, spacing: 28) {
@@ -91,13 +93,12 @@ struct HomeView: View {
                 .padding(.bottom, 96)
             }
         }
+        }
         .background(Color.black)
         .refreshable { await store.load(); await store.loadPrinters() }
         .navigationTitle("Projects")
         .navigationSubtitle(subtitle)
-         .safeAreaInset(edge: .top, spacing: 0) {
-            ProjectSearchBar(query: $query, searching: $searching, matched: searched.count, total: store.projects.count)
-        }
+
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
