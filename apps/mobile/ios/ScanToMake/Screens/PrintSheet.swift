@@ -408,8 +408,8 @@ struct PrintSheet: View {
                 HStack { Text("Quality").font(.headline); Spacer(); Text("Standard").foregroundStyle(.secondary) }
                 Text(presetOnlyWords).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            if project?.printsWithOwnSettings == true, offersQuality || offersStrength {
-                Text(quality == .standard && strength == .standard ? "Prints with the designer’s settings saved in this file." : "Changes the designer’s settings saved in this file.")
+            if offersQuality || offersStrength, let words = project?.designerSettingsWords(quality: quality.rawValue, strength: strength.rawValue) {
+                Text(words)
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("designer-settings")
             }

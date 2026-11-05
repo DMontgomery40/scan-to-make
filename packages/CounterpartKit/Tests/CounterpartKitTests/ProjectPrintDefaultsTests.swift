@@ -42,6 +42,18 @@ final class ProjectPrintDefaultsTests: XCTestCase {
         var unknown = file; unknown["ownSettings"] = nil
         XCTAssertEqual(project(["print": history, "current": unknown]).resolvedPrintDefaults(destinationId: "old-printer").strength, "strong",
                        "an MCP that doesn't say: the last print's settings, as before")
+        XCTAssertEqual(designer.designerSettingsWords(quality: "standard", strength: "standard"), "Prints with the designer’s settings saved in this file.")
+        XCTAssertEqual(designer.designerSettingsWords(quality: "standard", strength: "strong"), "Changes the designer’s settings saved in this file.")
+        XCTAssertNil(project(["print": history, "current": unknown]).designerSettingsWords(quality: "standard", strength: "standard"))
+    }
+
+    /// Nov 2–3 review: "I checked the printer" held Print and nothing said why.
+    func testAnUncertainPrintSaysWhyPrintWaits() {
+        var last = history; last["uncertain"] = true; last["destination"] = ["id": "old-printer", "name": "P1S"]
+        XCTAssertEqual(project(["print": last]).uncertainPrintWords,
+                       "Counterpart couldn’t tell whether the last print reached P1S. Check the printer before printing this again.")
+        last["printerStatus"] = ["state": "RUNNING", "job": "caliper-card", "checkedAtMs": 1]
+        XCTAssertTrue(project(["print": last]).uncertainPrintWords.contains("It last reported “caliper-card”."))
     }
 
     func testLegacyDestinationRecordAndExplicitSavedColourRemainUsable() {

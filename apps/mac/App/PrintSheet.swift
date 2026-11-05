@@ -93,7 +93,7 @@ struct PrintSheet: View {
                         Text("Max").tag(PrintSettings.Strength.max)
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersStrength)
-                    if let words = Self.designerSettingsWords(own: object.printsWithOwnSettings, quality: quality, strength: strength) {
+                    if let words = object.designerSettingsWords(quality: quality.rawValue, strength: strength.rawValue) {
                         Text(words).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     if offersCopies { copiesRow }
@@ -105,7 +105,7 @@ struct PrintSheet: View {
             }
             if uncertain {
                 // Why Print waits (Nov 2–3 review: the toggle blocked Print and nothing said why).
-                Label { Text(Self.uncertainWords(object)).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: "exclamationmark.triangle.fill") }
+                Label { Text(object.uncertainPrintWords).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: "exclamationmark.triangle.fill") }
                     .font(.callout).foregroundStyle(.orange)
                 Toggle("I checked the printer: it isn’t already printing this.", isOn: $checked)
             }
@@ -386,23 +386,6 @@ struct PrintSheet: View {
                 Button("Choose") { copies = 1; copiesPicked = true }.buttonStyle(.link)
             }
         }
-    }
-
-    /// Under Quality and Strength for a designer's file (its MCP says it prints with its own settings, Nov 5).
-    static func designerSettingsWords(own: Bool, quality: PrintSettings.Quality, strength: PrintSettings.Strength) -> String? {
-        guard own else { return nil }
-        return quality == .standard && strength == .standard
-            ? "Prints with the designer’s settings saved in this file."
-            : "Changes the designer’s settings saved in this file."
-    }
-
-    /// Why Print waits for the switch: the last print of this project may have reached the printer.
-    static func uncertainWords(_ project: Project) -> String {
-        let printer = project.print?.destination?.name ?? "the printer"
-        if let status = project.print?.printerStatus, let job = status.job, !job.isEmpty {
-            return "Counterpart couldn’t tell whether the last print reached \(printer). It last reported “\(job)”. Check the printer before printing this again."
-        }
-        return "Counterpart couldn’t tell whether the last print reached \(printer). Check the printer before printing this again."
     }
 
     /// "1 h 12 min · 22 g · 0.20 mm · 15% infill".
