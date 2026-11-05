@@ -448,6 +448,9 @@ export class PrinterHandoffRunner {
     const plateCount = Math.max(facts.plateCount ?? 0, report?.plateCount ?? 0, reused?.plateCount ?? 0) || undefined;
     // Copies in this flow mean copies in one print. The MCP dispatches one selected plate,
     // so never present one plate's estimate or dispatch as fulfilling a multi-plate request.
+    // Without a plate count from the MCP (one from before `sliced`/`slicer_report`), copies can't be checked: Update.
+    if ((slicer.repetitions ?? 1) > 1 && plateCount === undefined)
+      throw new PrinterMcpError('print-settings-unsupported', undefined, `Update ${packageLabel(this.#config.backend)} in Settings → Printers to print copies from Counterpart.`);
     if ((slicer.repetitions ?? 1) > 1 && plateCount && plateCount > 1) {
       throw new PrinterMcpError('copies-multiple-plates', undefined,
         `The slicer placed ${slicer.repetitions} copies on ${plateCount} plates, requiring ${plateCount} separate prints. Choose fewer copies for this print.`);

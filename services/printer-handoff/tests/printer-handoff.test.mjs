@@ -28,7 +28,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, laidFlat, slicedBytes, slicing} = {}) {
+async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, noSlicedFacts = false, laidFlat, slicedBytes, slicing} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -39,7 +39,7 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
+      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(noSlicedFacts ? {HANDOFF_FIXTURE_NO_SLICED_FACTS: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -628,6 +628,19 @@ test('path-only MCP output cannot silently drop copies on a second plate', async
   const f = await setup(t, {settings: true, slicedBytes});
   await assert.rejects(f.runner.run({stlPath: f.stlPath, slicer: {repetitions: 2}}), {code: 'copies-multiple-plates'});
   assert.ok(!(await f.calls()).some(call => call.tool === 'print_3mf'));
+});
+
+test('copies need the MCP to say how many plates the slice has: an MCP that gives no count is refused with Update, never printed short', async t => {
+  // Codex on #344: a path-only slice of two plates from an MCP without `sliced` or `slicer_report`.
+  const slicedBytes = zipSync({'Metadata/plate_1.gcode': strToU8('; one'), 'Metadata/plate_2.gcode': strToU8('; two')});
+  const f = await setup(t, {settings: true, slicedBytes, noSlicedFacts: true});
+  const expected = error => error.code === 'print-settings-unsupported' && /^Update bambu-printer-mcp in Settings → Printers to print copies/.test(error.detail);
+  await assert.rejects(f.runner.estimate({stlPath: f.stlPath, slicer: {repetitions: 2}}), expected);
+  await assert.rejects(f.runner.run({stlPath: f.stlPath, slicer: {repetitions: 2}}), expected);
+  assert.ok(!(await f.calls()).some(call => call.tool === 'print_3mf'));
+  // One copy needs no count.
+  await f.runner.run({stlPath: f.stlPath, slicer: {repetitions: 1}});
+  assert.equal((await f.calls()).filter(call => call.tool === 'print_3mf').length, 1);
 });
 
 test('one-plate copy estimate uses the sliced total without multiplying it again', async t => {

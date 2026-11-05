@@ -183,7 +183,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const preview = args.include_preview === true && process.env.HANDOFF_FIXTURE_PREVIEW !== 'none' ? {artifact_sha256: sha256, plate_index: args.plate_index ?? 0, mm_per_pixel: 0.125,
       views: [{name: 'top', label: 'Top, as it sits on the bed', png_base64: png, width: 1, height: 1}, {name: 'bed_side', label: 'Bed side, turned over toward you', png_base64: png, width: 1, height: 1}]} : undefined;
     return text({receipt_version: '1', dispatchAuthorized: false, artifact: {sha256}, selection: {bambu_model: args.bambu_model, plate_index: args.plate_index ?? 0},
-      inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}, sliced: facts(readFileSync(args.file_path), args.plate_index ?? 0), ...(preview ? {preview} : {})});
+      inspection: {model: args.bambu_model, plate: args.plate_index ?? 0}, ...(process.env.HANDOFF_FIXTURE_NO_SLICED_FACTS === '1' ? {} : {sliced: facts(readFileSync(args.file_path), args.plate_index ?? 0)}), ...(preview ? {preview} : {})});
   }
   if (name === 'confirm_temperatures') return text({compatible: true, peakNozzleTempC: 220});
   if (name === 'counterpart_print_route') {
