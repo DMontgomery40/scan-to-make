@@ -10,7 +10,7 @@ const INFO = {contract: 'counterpart/1', server: {name: 'bambu-printer-mcp', ver
   capabilities: {progress: true, layers: true, camera: 'bambu-tcp', filaments: 'ams', pause: true, resume: false, cancel: true, print3mf: true, gcode: true}};
 const CONTRACT = [tool('counterpart_printer_info'), tool('counterpart_print_progress')];
 const progress = state => ({contract: 'counterpart/1', observedAt: new Date().toISOString(), state, problems: []});
-function destination({tools, status, failing = () => false, info = INFO}) {
+function destination({tools, status, failing = () => false, info = INFO, infoFails = 0}) {
   let directory;
   const reads = [];
   const factory = () => ({
@@ -19,7 +19,10 @@ function destination({tools, status, failing = () => false, info = INFO}) {
     hasTool(name) { return tools.some(item => item.name === name); },
     getTool(name) { return tools.find(item => item.name === name); },
     async callTool(name) {
-      if (name === 'counterpart_printer_info') return {content: [{type: 'text', text: JSON.stringify(info)}]};
+      if (name === 'counterpart_printer_info') {
+        if (infoFails-- > 0) throw Object.assign(new Error('MCP error -32001: Request timed out'), {code: 'tool-failed'});
+        return {content: [{type: 'text', text: JSON.stringify(info)}]};
+      }
       reads.push(name); return {content: [{type: 'text', text: JSON.stringify(status())}]};
     },
     async close() {},
@@ -55,6 +58,26 @@ test('a printer list answers at once, then fills in state and capabilities from 
   now += READINESS_REFRESH_MS;
   await directory.refresh('current');
   assert.equal(d.reads.length, 2);
+});
+
+test('a printer info read that fails is tried again at the next refresh, so a timeout never leaves the printer without its capabilities', async () => {
+  let now = 1_000_000;
+  const d = destination({tools: [...CONTRACT, tool('camera_snapshot'), tool('pause_print')], status: () => progress('idle'), infoFails: 1});
+  const directory = new PrinterDirectory(catalog, id => id === 'current' ? d.session : undefined, {now: () => now});
+  d.set(directory);
+  await directory.refresh('current');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(directory.capabilities('current').contract, undefined, 'the first read timed out');
+  assert.deepEqual([directory.capabilities('current').camera, directory.capabilities('current').pause], ['none', false]);
+  now += READINESS_REFRESH_MS;
+  await directory.refresh('current');
+  assert.equal(directory.capabilities('current').contract, 'counterpart/1');
+  assert.deepEqual([directory.capabilities('current').camera, directory.capabilities('current').pause], ['bambu-tcp', true]);
+  // Once it has answered, a refresh reads only the printer's progress.
+  const reads = d.reads.length;
+  now += READINESS_REFRESH_MS;
+  await directory.refresh('current');
+  assert.deepEqual(d.reads.slice(reads), ['counterpart_print_progress']);
 });
 
 test('a printer whose MCP can\'t be reached reads as offline', async () => {

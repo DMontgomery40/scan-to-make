@@ -53,6 +53,8 @@ export class PrinterDirectory {
   readonly catalog: PrinterCatalog;
   readonly #session: (destinationId: string) => PrinterSession | undefined;
   readonly #capabilities = new Map<string, PrinterCapabilities>();
+  /** The tool list each destination's session connected with, for reading its printer info again. */
+  readonly #catalogs = new Map<string, PrinterToolCatalog>();
   readonly #reports = new Map<string, {report?: PrintReport; state: Readiness; checkedAt: number}>();
   readonly #refreshing = new Map<string, Promise<void>>();
   readonly #now: () => number;
@@ -90,10 +92,18 @@ export class PrinterDirectory {
   connected(destinationId: string, catalog: PrinterToolCatalog): void {
     const session = this.#session(destinationId);
     if (!session) return;
+    this.#catalogs.set(destinationId, catalog);
     this.#capabilities.set(destinationId, detectCapabilities(session.config, catalog));
-    void readPrinterInfo(session, {failFast: true}).then(info => {
-      if (info) this.#capabilities.set(destinationId, detectCapabilities(session.config, catalog, info));
-    }).catch(() => undefined);
+    void this.#readInfo(destinationId, session, catalog);
+  }
+
+  /**
+   * Capabilities come only from `counterpart_printer_info` (PRD §8.0 item 4), so a read that failed (a timeout, the
+   * printer briefly away) is tried again at the next refresh instead of leaving the printer without them.
+   */
+  async #readInfo(destinationId: string, session: PrinterSession, catalog: PrinterToolCatalog): Promise<void> {
+    const info = await readPrinterInfo(session, {failFast: true}).catch(() => undefined);
+    if (info && this.#catalogs.get(destinationId) === catalog) this.#capabilities.set(destinationId, detectCapabilities(session.config, catalog, info));
   }
 
   /** Any report for the destination (the monitor's, a list refresh) updates its readiness. */
@@ -125,9 +135,13 @@ export class PrinterDirectory {
     if (last && this.#now() - last.checkedAt < READINESS_REFRESH_MS) return Promise.resolve();
     const running = this.#refreshing.get(id);
     if (running) return running;
-    const work = readPrintReport(session, {failFast: true, signal: AbortSignal.timeout(20_000)})
-      .then(report => this.record(id, report), () => this.record(id, undefined, true))
-      .finally(() => this.#refreshing.delete(id));
+    const catalog = this.#catalogs.get(id);
+    const retryInfo = catalog && !this.#capabilities.get(id)?.contract && catalog.tools.some(tool => tool.name === 'counterpart_printer_info');
+    const work = Promise.all([
+      readPrintReport(session, {failFast: true, signal: AbortSignal.timeout(20_000)})
+        .then(report => this.record(id, report), () => this.record(id, undefined, true)),
+      ...(retryInfo ? [this.#readInfo(id, session, catalog)] : []),
+    ]).then(() => undefined).finally(() => this.#refreshing.delete(id));
     this.#refreshing.set(id, work);
     return work;
   }
