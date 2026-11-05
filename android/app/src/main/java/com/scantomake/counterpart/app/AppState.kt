@@ -47,10 +47,19 @@ class AppState(private val app: Counterpart) {
     val pendingLink = MutableStateFlow<String?>(null)
 
     private var following: Job? = null
+    private var foreground = false
 
     init {
         readStatus()
-        scope.launch { app.pairingStore.changes.collect { readStatus(); reset() } }
+        scope.launch {
+            app.pairingStore.changes.collect {
+                readStatus()
+                reset()
+                // Pairing can remove its screen before that screen calls onPaired.
+                // The visible app, not the departing screen, owns its subscription.
+                if (foreground) startFollowing()
+            }
+        }
     }
 
     val needsMac: Boolean get() = status.value?.state != PairingStatus.State.Paired
@@ -108,6 +117,7 @@ class AppState(private val app: Counterpart) {
 
     /** Starts following the Mac while the app is visible: one consumer for every screen. */
     fun startFollowing() {
+        foreground = true
         if (following?.isActive == true || needsMac) return
         following = scope.launch {
             keepFresh()
@@ -141,7 +151,7 @@ class AppState(private val app: Counterpart) {
         }
     }
 
-    fun stopFollowing() { following?.cancel(); following = null }
+    fun stopFollowing() { foreground = false; following?.cancel(); following = null }
 
     /** Sends a new project's files after its sheet has closed. The project shows Sending until they land. */
     fun sendInBackground(id: String, body: suspend () -> Unit) {

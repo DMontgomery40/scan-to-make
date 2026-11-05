@@ -20,11 +20,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,7 +77,11 @@ private val scheme = darkColorScheme(
 )
 
 @Composable
-fun CounterpartTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = scheme, content = content)
+fun CounterpartTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = scheme) {
+    // MaterialTheme supplies the palette, but plain Text inherits LocalContentColor.
+    // Screens paint their own dark canvas; controls can still provide onPrimary/onSurface.
+    CompositionLocalProvider(LocalContentColor provides scheme.onBackground, content = content)
+}
 
 fun Tone.color(): Color = when (this) {
     Tone.Working -> Palette.working
