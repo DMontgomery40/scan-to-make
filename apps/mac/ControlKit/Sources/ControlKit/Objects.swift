@@ -145,7 +145,7 @@ public struct PrintEstimate: Decodable, Sendable, Equatable {
 
 /// What will print, drawn by the printer MCP from the exact sliced G-code (never a thumbnail or a design render).
 public struct PrintPreview: Decodable, Sendable, Equatable {
-    public struct View: Decodable, Sendable, Equatable, Identifiable {
+    public struct Picture: Decodable, Sendable, Equatable, Identifiable {
         /// `top` (as it sits on the bed) or `bed_side` (the face on the bed, turned over toward you).
         public let name: String
         public let label: String
@@ -157,7 +157,7 @@ public struct PrintPreview: Decodable, Sendable, Equatable {
         public var pngData: Data? { Data(base64Encoded: png) }
     }
     public let sha256: String
-    public let views: [View]
+    public let views: [Picture]
 }
 
 /// What the print sheet shows under its settings for one estimate (PRD §5.5): the numbers, Studio's warning, or
@@ -333,9 +333,11 @@ public extension ControlClient {
         return result.object
     }
     /// Slices the current model as a Print with these settings would, without printing. Up to 180 s.
+    /// It takes every choice Print takes (the colour and layer pauses too): its sliced file is the one Print sends.
     func estimate(_ id: String, destinationId: String?, quality: PrintSettings.Quality, strength: PrintSettings.Strength, copies: Int? = nil,
-                  filaments: [PrinterFilament] = [], modelVersion: String? = nil) async throws -> PrintEstimate {
-        var params: [String: JSONValue] = ["id": .string(id), "quality": .string(quality.rawValue), "strength": .string(strength.rawValue)]
+                  filaments: [PrinterFilament] = [], modelVersion: String? = nil, colour: PrintSettings.Colour? = nil, pauseBeforeLayers: [Int] = []) async throws -> PrintEstimate {
+        var params = PrintSettings(colour: colour, pauseBeforeLayers: pauseBeforeLayers).params
+        params["id"] = .string(id); params["quality"] = .string(quality.rawValue); params["strength"] = .string(strength.rawValue)
         if let destinationId { params["destinationId"] = .string(destinationId) }
         if let copies { params["copies"] = .number(Double(copies)) }
         if !filaments.isEmpty { params["filaments"] = .array(filaments.map(Self.value)) }

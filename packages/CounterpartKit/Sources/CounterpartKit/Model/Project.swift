@@ -702,7 +702,7 @@ public struct SliceEstimate: Codable, Equatable, Sendable {
 
 /// What will print, drawn by the printer MCP from the exact sliced G-code (never a thumbnail or a design render).
 public struct PrintPreviewImages: Codable, Equatable, Sendable {
-    public struct View: Codable, Equatable, Sendable, Identifiable {
+    public struct Picture: Codable, Equatable, Sendable, Identifiable {
         /// `top` (as it sits on the bed) or `bed_side` (the face on the bed, turned over toward you).
         public var name: String
         public var label: String
@@ -714,7 +714,7 @@ public struct PrintPreviewImages: Codable, Equatable, Sendable {
         public var pngData: Data? { Data(base64Encoded: png) }
     }
     public var sha256: String
-    public var views: [View]
+    public var views: [Picture]
 }
 
 /// ISO 8601 dates with or without fractional seconds.

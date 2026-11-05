@@ -199,7 +199,9 @@ export class PrinterHandoffRunner {
     /** The exact sliced file this estimate describes, to be printed as it is (`PrintRunInput.presliced`). */
     sliced: {bytes: Buffer; extension: string; sha256: string; slicerWarning?: string};
     /** The MCP's picture of that file's G-code (inspect_print_file `preview`), when it draws one. */
-    preview?: SlicePreview}> {
+    preview?: SlicePreview;
+    /** False when the installed MCP's inspect_print_file can't draw previews at all (an update would). */
+    previewSupported: boolean}> {
     let sliced: Buffer | undefined, extension = '.3mf';
     const plate = {...this.#config.selection, ...input.selection}.plateIndex ?? 0;
     const {slicerWarning, inspection} = await this.run({stlPath: input.stlPath, print: false, preview: true, ...(input.selection ? {selection: input.selection} : {}), ...(input.slicer ? {slicer: input.slicer} : {}),
@@ -209,9 +211,10 @@ export class PrinterHandoffRunner {
     if (!sliced) fail('invalid-output-path');
     const sha256 = createHash('sha256').update(sliced).digest('hex');
     const preview = slicePreview(inspection?.result, sha256);
+    const previewSupported = (inspection as {previewAsked?: boolean} | undefined)?.previewAsked === true;
     const estimate = await sliceEstimate(sliced, plate);
     return {...(estimate ? {estimate} : {}), settings: await sliceSettings(sliced, plate), ...(slicerWarning ? {slicerWarning} : {}),
-      sliced: {bytes: sliced, extension, sha256, ...(slicerWarning ? {slicerWarning} : {})}, ...(preview ? {preview} : {})};
+      sliced: {bytes: sliced, extension, sha256, ...(slicerWarning ? {slicerWarning} : {})}, ...(preview ? {preview} : {}), previewSupported};
   }
 
   /** Connects and lists the server's tools without calling one (a one-shot session then disconnects). */
@@ -255,7 +258,7 @@ export class PrinterHandoffRunner {
         nozzle_diameters: selection.nozzleDiameterMm === undefined ? undefined : [selection.nozzleDiameterMm],
         bed_type: selection.bedType,
       }, options);
-      return {tool: 'inspect_print_file', result: toolResultJson(result)};
+      return {tool: 'inspect_print_file', result: toolResultJson(result), previewAsked: takesPreview};
     }
     if (slicedPath.toLowerCase().endsWith('.gcode') && session.hasTool('confirm_temperatures')) {
       const result = await call(session, 'confirm_temperatures', {gcode_path: slicedPath}, options);
@@ -485,6 +488,9 @@ export class PrinterHandoffRunner {
     }
     if (inspection) step('inspect');
     if (input.persistOutput) ({slicedPath, orientedStlPath} = await input.persistOutput({slicedPath, orientedStlPath}));
+    // The file the printer is sent is the saved copy: it too must be the one previewed.
+    if (input.expectedSha256 !== undefined && createHash('sha256').update(await readFile(slicedPath)).digest('hex') !== input.expectedSha256)
+      throw new PrinterMcpError('preview-mismatch', undefined, 'What would print is not the file you were shown. Open Print again to see it before printing.');
     await progress('slice-ready', estimate);
     const common = {backend: this.#config.backend, catalog, stlPath: input.stlPath, orientedStlPath, slicedPath, inspection, steps,
       ...(slicerWarning ? {slicerWarning} : {})};

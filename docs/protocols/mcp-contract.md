@@ -35,6 +35,7 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `hardened_steel` `stainless_steel` `tungsten_carbide` | nozzle materials known to the app, **§8.0 #6** |
 | `timeout_ms` `max_bytes` `max_width` `min_change` `changed_only` `idle_timeout_ms` `since_seq` `wait_ms` `fps` | camera |
 | `angle_x` `angle_y` `angle_z` `scale_x` `scale_y` `scale_z` | rotate and scale |
+| `include_preview` `bed_side` | `inspect_print_file`'s preview of the exact sliced file: asked for with `include_preview`; the `top` and `bed_side` views are shown as they are. The app checks its `artifact_sha256` against the file and the PNG signature, never the G-code |
 | `source_path` `raw_key_count` | `get_slice_settings`'s argument and the result field compared, with `summary`, between a designer's 3MF and a copy's edit of it: the app checks the two reports match, never what's in them |
 | `tool_name` `user_prompt` `arguments` `code` | `blender_mcp_call` |
 | `launch` | `fusion_mcp_status` |

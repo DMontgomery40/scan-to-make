@@ -20,7 +20,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function fixture(t, scopes = ['printer-handoff:use'], makeServices) {
+async function fixture(t, scopes = ['printer-handoff:use'], makeServices, allowUnpreviewed = true) {
   const root = await mkdtemp(join(tmpdir(), 'print-handoff-http-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const remoteAuth = await RemoteAuthStore.create(join(root, 'auth'), {
@@ -30,12 +30,14 @@ async function fixture(t, scopes = ['printer-handoff:use'], makeServices) {
   const phone = await remoteAuth.exchange('alice@example.test', {code: invitation.code, deviceName: 'Fixture'});
   const log = join(root, 'calls.jsonl');
   await writeFile(log, '');
-  const printHandoff = makeServices ? makeServices(root) : createPrintHandoffServices({
+  // This route's own guarantees (admission, replay, recovery) are tested with its unpreviewed print allowed;
+  // production refuses it (see 'a bundle print is refused …').
+  const printHandoff = Object.assign(makeServices ? makeServices(root) : createPrintHandoffServices({
     backend: 'bambu-printer-mcp',
     process: {command: process.execPath, args: [fixtureServer, 'bambu', log], cwd: root},
     selection,
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 10000},
-  }, join(root, 'bundles'));
+  }, join(root, 'bundles')), {allowUnpreviewedBundlePrints: allowUnpreviewed});
   const server = await startCompanionServer({port: 0, remoteAuth, printHandoff});
   t.after(() => server.close());
   const headers = {authorization: `Bearer ${phone.token}`, 'x-scan-device': phone.deviceId};
@@ -303,7 +305,7 @@ for (const [pauseAt, outputFailure, revokeOnRetry] of [
     const pausedRead = Promise.withResolvers();
     const finishRead = Promise.withResolvers();
     const routes = createPrintHandoffRoutes({
-      store, relay: new InMemoryElicitationRelay(),
+      store, relay: new InMemoryElicitationRelay(), allowUnpreviewedBundlePrints: true,
       runner: {backend: 'bambu-printer-mcp', async runBundle(store, id) {
         await store.setStatus(id, 'uncertain', 'dispatch-uncertain');
         dispatch.resolve();
@@ -386,7 +388,7 @@ for (const shutdown of [false, true]) {
     let runs = 0;
     let requests = 0;
     const routes = createPrintHandoffRoutes({
-      store, relay: new InMemoryElicitationRelay(),
+      store, relay: new InMemoryElicitationRelay(), allowUnpreviewedBundlePrints: true,
       runner: {backend: 'bambu-printer-mcp', async runBundle(store, id) {
         runs++;
         await store.setStatus(id, 'printed');
@@ -545,7 +547,7 @@ for (const dispatch of ['crash', 'timeout']) {
       if (restart) {
         await f.server.close();
         const server = await startCompanionServer({port: 0,
-          remoteAuth: await RemoteAuthStore.open(join(f.root, 'auth')), printHandoff: servicesFor(f.root)});
+          remoteAuth: await RemoteAuthStore.open(join(f.root, 'auth')), printHandoff: Object.assign(servicesFor(f.root), {allowUnpreviewedBundlePrints: true})});
         t.after(() => server.close());
         client = {...f, server};
       }
@@ -586,4 +588,13 @@ test('HTTP successful retry of a declined print clears its persisted failure', {
   assert.equal(replay.status, 409);
   assert.equal(json(replay).error.code, 'already-printed');
   assert.equal((await f.calls()).filter(item => item.tool === 'print_3mf').length, 2);
+});
+
+test('a bundle print is refused: it would send a file nobody was shown (projects print from their sheet)', async t => {
+  const f = await fixture(t, ['printer-handoff:use'], undefined, false);
+  const bundle = await createBundle(f, 'refused');
+  const printed = await wire(f, `/v1/printer-handoff/bundles/${bundle.id}/print`, {method: 'POST'});
+  assert.equal(printed.status, 410);
+  assert.equal(json(printed).error.code, 'print-from-project');
+  assert.deepEqual((await f.calls()).filter(call => call.tool), [], 'nothing sliced or sent');
 });
