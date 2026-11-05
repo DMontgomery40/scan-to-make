@@ -346,9 +346,13 @@ public final class CompanionClient: @unchecked Sendable {
         try await request("POST", "/v1/objects/\(id)/printer", json: ["destinationId": destinationId], as: One.self).object
     }
     /// The slice estimate for these settings (PR 2): time, grams and layers. Can take up to 150 s.
+    /// It takes every choice Print takes (the spool and layer pauses too): its sliced file is the one Print sends.
     public func estimate(_ id: String, destinationId: String?, quality: PrintQuality, strength: PrintStrength, copies: Int? = nil, overrideDefaults: Bool = false,
-                         filaments: [PrinterFilament] = [], filamentsModelVersion: String? = nil) async throws -> SliceEstimate {
-        var json: [String: Any] = [:]
+                         filaments: [PrinterFilament] = [], filamentsModelVersion: String? = nil,
+                         colour: PrintColour? = nil, pauseBeforeLayers: [Int] = []) async throws -> SliceEstimate {
+        // The spool and pauses exactly as Print's body sends them.
+        var json = PrintChoice(colour: filaments.isEmpty ? colour : nil, pauseBeforeLayers: pauseBeforeLayers).body
+        json["checked"] = nil
         if let destinationId { json["destinationId"] = destinationId }
         if overrideDefaults || quality != .standard { json["quality"] = quality.rawValue }
         if overrideDefaults || strength != .standard { json["strength"] = strength.rawValue }

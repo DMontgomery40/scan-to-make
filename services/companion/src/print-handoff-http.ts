@@ -91,6 +91,12 @@ export interface PrintHandoffServices {
   admit?: () => () => void;
   /** The other destinations' relays: their remote (`/v1/mcp`) questions are listed and answered here too. */
   remoteRelays?: () => ElicitationRelay[];
+  /**
+   * A bundle's `POST …/print` slices and sends a file nobody was shown, so it is refused (Nov 5): projects print
+   * from their print sheet, which shows the MCP's picture of the exact file it sends. Only this route's own tests
+   * of admission, replay and recovery set this.
+   */
+  allowUnpreviewedBundlePrints?: boolean;
 }
 
 /**
@@ -306,6 +312,7 @@ export function createPrintHandoffRoutes(services: PrintHandoffServices) {
         if (!z.uuid().safeParse(bundleId).success) throw new Failure(400, 'invalid-request');
         if (isPrint) {
           if (request.method !== 'POST') throw new Failure(405, 'method-not-allowed');
+          if (!services.allowUnpreviewedBundlePrints) throw new Failure(410, 'print-from-project');
           // Reserve admission before reading status or re-authorizing. A
           // concurrent request must not dispatch from a stale ready manifest.
           if (activePrint || startingPrint) throw new Failure(409, 'print-busy');

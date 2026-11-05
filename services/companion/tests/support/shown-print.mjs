@@ -22,8 +22,8 @@ export function showingRunner(runner, {preview = true} = {}) {
   return Object.assign(runner, {estimate: async input => {
     const result = sheetOnly || !estimate ? {estimate: {seconds: 60, grams: 1}, settings: {}} : await estimate(input);
     const shown = shownSlice(`slice ${++n}`);
-    const out = {...shown, ...result};
-    if (!preview) delete out.preview;
+    const out = {...shown, previewSupported: preview, ...result};
+    if (!preview) { delete out.preview; out.previewSupported = false; }
     return out;
   }});
 }
@@ -34,10 +34,10 @@ export function showing(service) {
   service.printUnshown = print;
   service.print = async (id, options = {}) => {
     if (options.sliceSha256) return print(id, options);
-    const {quality, strength, copies, filaments, filamentsModelVersion} = options;
+    // The sheet's estimate gets every choice Print gets: it slices exactly what Print would send.
+    const {checked: _checked, expectedPlate: _plate, ...choices} = options;
     sheetOnly++;
-    const estimate = await service.estimate(id, {...(quality ? {quality} : {}), ...(strength ? {strength} : {}), ...(copies !== undefined ? {copies} : {}),
-      ...(filaments ? {filaments} : {}), ...(filamentsModelVersion ? {filamentsModelVersion} : {})}).finally(() => { sheetOnly--; });
+    const estimate = await service.estimate(id, choices).finally(() => { sheetOnly--; });
     return print(id, {...options, sliceSha256: estimate.sliceSha256});
   };
   return service;

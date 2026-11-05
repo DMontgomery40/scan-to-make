@@ -130,7 +130,7 @@ struct PrintSheet: View {
         .task(id: "\(printer?.id ?? "")|\(object.current?.model ?? "")|\(modelVersion)") { await loadFilaments() }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
         // must not hold Print for the new one. The chosen spools too: they change what the estimate slices.
-        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)|\(mappingSignature)") { await loadEstimate() }
+        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)|\(mappingSignature)|\(String(describing: colour))|\(offersPauses ? Array(Set(pauses)).sorted() : [])") { await loadEstimate() }
     }
 
     // MARK: Printers
@@ -492,7 +492,8 @@ struct PrintSheet: View {
         do {
             let result = try await model.estimate(object.id, destinationId: printer?.id, quality: offersQuality ? quality : .standard,
                                                   strength: offersStrength ? strength : .standard, copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),
-                                                  filaments: published ? chosenSpoolPerColour ?? [] : [], modelVersion: mapping?.modelVersion)
+                                                  filaments: published ? chosenSpoolPerColour ?? [] : [], modelVersion: mapping?.modelVersion,
+                                                  colour: colour, pauseBeforeLayers: offersPauses ? Array(Set(pauses)).sorted() : [])
             guard !Task.isCancelled else { return }
             estimate = result
             estimateState = .done

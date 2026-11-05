@@ -179,6 +179,17 @@ struct PrintSheet: View {
     /// The model's preview takes the chosen spool's colour; light grey when the printer doesn't say.
     private var spoolColour: Color { chosen?.color ?? Color(white: 0.72) }
 
+    /// The spool Print sends, and so the one the estimate slices with.
+    private var printColour: PrintColour? {
+        switch filamentKind {
+        // The tray as reported, so the Mac slices with its profile and routes it (AMS or external) as shown.
+        case "ams": chosen.map { .tray($0) }
+        case "single": filaments.first.map { .tray($0) }
+        // A printer that doesn't report its filament prints with its own profile's material.
+        default: (project?.settings?.printDefaults?.colour?.object?["material"]?.string).map(PrintColour.material)
+        }
+    }
+
     /// The sliced file shown on this sheet, when its pictures are of it: the only file Print may send.
     private var shownSlice: String? {
         guard let estimate, let sha = estimate.sliceSha256, estimate.preview?.sha256 == sha else { return nil }
@@ -681,7 +692,7 @@ struct PrintSheet: View {
 
     /// The model, printer and settings an estimate is for. Only an estimate for exactly these is shown.
     /// The chosen spools are part of it, so changing one drops the old estimate and slices again.
-    private var estimateKey: String { "\(project?.selectedPlate?.id ?? "")#\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)#\(offersCopies ? copies.map(String.init) ?? "profile" : "profile")#\(published ? mappingSignature : "")#\(published ? mapping?.modelVersion ?? "" : "")" }
+    private var estimateKey: String { "\(project?.selectedPlate?.id ?? "")#\(project?.mediaVersion ?? 0)#\(destinationId)#\(quality)#\(strength)#\(offersCopies ? copies.map(String.init) ?? "profile" : "profile")#\(published ? mappingSignature : "")#\(published ? mapping?.modelVersion ?? "" : "")#\(published ? "" : String(describing: printColour))#\(offersPauses ? pauses.map(String.init).joined(separator: ",") : "")" }
     /// The slice estimate on screen: always for these settings, or pending.
     private var estimate: SliceEstimate? { slice.estimate(for: estimateKey) }
 
@@ -696,7 +707,8 @@ struct PrintSheet: View {
                                                            strength: !slicedOriginal && printer?.offersStrength == true ? strength : .standard,
                                                            copies: slicedOriginal ? 1 : offersCopies ? copies : (project?.settings?.printDefaults?.copies != nil ? 1 : nil), overrideDefaults: true,
                                                            filaments: published ? chosenSpoolPerColour ?? [] : [],
-                                                           filamentsModelVersion: published ? mapping?.modelVersion : nil)
+                                                           filamentsModelVersion: published ? mapping?.modelVersion : nil,
+                                                           colour: published ? nil : printColour, pauseBeforeLayers: offersPauses ? pauses : [])
             guard !Task.isCancelled else { return }
             slice.finish(key, next)
         } catch let failure as CompanionError {
@@ -709,13 +721,7 @@ struct PrintSheet: View {
         guard canPrint else { return }
         busy = "print"; problem = nil
         defer { busy = nil }
-        let colour: PrintColour? = switch filamentKind {
-        // The tray as reported, so the Mac slices with its profile and routes it (AMS or external) as shown.
-        case "ams": chosen.map { .tray($0) }
-        case "single": filaments.first.map { .tray($0) }
-        // A printer that doesn't report its filament prints with its own profile's material.
-        default: (project?.settings?.printDefaults?.colour?.object?["material"]?.string).map(PrintColour.material)
-        }
+        let colour = printColour
         // A multi-part model prints from the spool chosen for each colour, bound to the model version
         // those choices were made against; with no complete mapping the companion's own matching applies.
         let perColour = published ? chosenSpoolPerColour : nil
