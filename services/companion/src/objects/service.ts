@@ -575,7 +575,7 @@ export class ObjectService {
       // A starter waiting only for Downloads access goes on by itself once macOS allows it (Codex on #372).
       // A starter project made before its kit rule (Nov 6, bb9da63c: the rig as one raw STL, Ready with no plates) gets
       // the designer's kit when the starter is added again: cache, then Downloads, then one worker pass.
-      if (existing && this.#staleKit(existing, starter)) return this.#refetchStarter(existing.id);
+      if (existing && this.#staleKit(existing, starter)) return this.#refetchStarter(existing.id, starter);
       if (existing) return await this.#resumeDownloads(existing) ?? this.get(existing.id);
       const store = this.#deps.store;
       const created = await store.create(starter.instructions, 'published');
@@ -2409,12 +2409,17 @@ export class ObjectService {
     return receipts.some(receipt => extname(receipt.name).toLowerCase() !== '.3mf') || receipts.length < starter.files || (!unlisted && plates < (starter.plates ?? 0));
   }
   /** The designer's kit replaces a starter project's wrong files; the project, its title, credit and messages stay. */
-  async #refetchStarter(id: string): Promise<StmObject> {
-    const before = await this.#deps.store.get(id);
-    console.error(`starter ${before.starterId}: project ${id} holds ${(before.files?.receipts ?? []).map(receipt => `${receipt.name} (${receipt.plates.length} plates)`).join(', ')}, not the designer’s kit; getting the kit`);
-    await this.#deps.store.update(id, o => ({...o, state: 'new', current: undefined, files: undefined, publishedSelection: undefined, ask: undefined, question: undefined,
-      failure: undefined, progress: undefined, print: undefined, printConfirmation: undefined}));
-    return this.start(id);
+  #refetchStarter(id: string, starter: StarterProject): Promise<StmObject> {
+    // Inside the project's gate, with its state read again there: a print, a correction or a pass that started since
+    // the tap is never overwritten (Codex on #372).
+    return this.#gate(id, async () => {
+      const before = await this.#deps.store.get(id);
+      if (this.#running.has(id) || !this.#staleKit(before, starter)) return this.get(id);
+      console.error(`starter ${before.starterId}: project ${id} holds ${(before.files?.receipts ?? []).map(receipt => `${receipt.name} (${receipt.plates.length} plates)`).join(', ')}, not the designer’s kit; getting the kit`);
+      await this.#deps.store.update(id, o => ({...o, state: 'new', current: undefined, files: undefined, publishedSelection: undefined, ask: undefined, question: undefined,
+        failure: undefined, progress: undefined, print: undefined, printConfirmation: undefined}));
+      return this.#start(id);
+    });
   }
   #downloads() { return this.#deps.downloads ?? join(homedir(), 'Downloads'); }
   #downloadsDeniedLogged = false;

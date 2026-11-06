@@ -348,6 +348,11 @@ test('adding a starter again replaces an old project’s raw STL with the design
  await store.update(old.id,o=>({...o,files:{...o.files,receipts:o.files.receipts.map(r=>({...r,plates:[],platesListed:false}))}}));
  const {value:unlisted}=await logged(()=>service.addStarter('scan-platform'));
  assert.equal(unlisted.id,old.id);assert.equal(asked.length,2);assert.equal(unlisted.current?.model,same.current?.model);
+ // Two taps at once on a stale project: one replacement, one pass, inside the project's gate (Codex on #372).
+ await store.update(old.id,o=>({...o,files:{...o.files,receipts:o.files.receipts.map(r=>({...r,name:'old.stl',plates:[],platesListed:undefined}))}}));
+ const {value:pair}=await logged(async()=>{const both=await Promise.all([service.addStarter('scan-platform'),service.addStarter('scan-platform')]);await service.settled(old.id);return both;});
+ assert.equal(pair[0].id,old.id);assert.equal(pair[1].id,old.id);assert.equal(asked.length,2,'the cache has the kit: no pass');
+ assert.equal((await service.get(old.id)).state,'ready');
  // A caliper project with only one of its two files gets the kit from the cache or a pass, too.
  const half=await setup(t,async(_input,root)=>caliper(root));
  const c=await half.service.create('Print this','published','https://makerworld.com/en/models/198362');
