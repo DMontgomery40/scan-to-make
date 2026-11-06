@@ -150,7 +150,8 @@ private struct AddPrinterForm: View {
             }
         }
         .onChange(of: model.form) { _, _ in model.formChanged() }
-        .onAppear { if model.secretMissing { focused = "secret" } }
+        // The one thing left to type gets the keyboard, unless the MCP can fetch it (its approval button stays in view).
+        .onAppear { if model.secretMissing && ObtainControl(options: model.options, form: model.form) == nil { focused = "secret" } }
     }
 
     @ViewBuilder private var printer: some View {
