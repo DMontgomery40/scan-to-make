@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 
 /// PRD §8.10: Update asks the companion, which updates the install its own way and reports with `mcp.update.*`.
 @MainActor final class PrinterUpdatesTests: XCTestCase {
@@ -77,13 +78,67 @@ import XCTest
         XCTAssertEqual(updates.status["bambu"]?.words, "Updating to 1.5.0…")
         XCTAssertTrue(updates.status["bambu"]?.busy == true)
         XCTAssertFalse(updates.apply(try event("mcp.update.waiting", #"{"mcpId":"bambu"}"#)))
-        XCTAssertEqual(updates.status["bambu"]?.words, "Updates after the current print.")
+        XCTAssertEqual(updates.status["bambu"]?.words, "Updates as soon as Counterpart finishes its work on this printer.")
         XCTAssertTrue(updates.apply(try event("mcp.update.done", #"{"mcpId":"bambu","toVersion":"1.5.0"}"#)), "a finished update reads the printers again")
         XCTAssertEqual(updates.status["bambu"]?.words, "Updated to 1.5.0.")
         XCTAssertFalse(updates.apply(try event("mcp.update.failed", #"{"mcpId":"generic","log":"npm ERR! 404"}"#)))
         XCTAssertEqual(updates.status["generic"], .failed(log: "npm ERR! 404"), "the log's tail goes with a failure")
         XCTAssertFalse(updates.apply(try event("print.done", #"{"progress":100}"#)))
         XCTAssertFalse(updates.apply(try event("mcp.update.done", #"{}"#)), "an update event without its install changes nothing")
+    }
+
+    /// Nov 6, David: "mcps won't update they just spin forever". Update did reach the companion; a print was running, so
+    /// it answered `waiting`, and the row drew a spinner for the hours the print had left. Pressing Update sends
+    /// `printers.updateMcp` for that install, and waiting reads as the sentence, with no spinner.
+    func testPressingUpdateSendsTheRequestAndWaitingForAPrintIsASentenceNotASpinner() async throws {
+        let companion = try OneRequestSocket(reply: ["update": ["mcpId": "mcp-c9d06fd7c405328e", "state": "waiting", "fromVersion": "1.1.73", "toVersion": "1.1.76"]])
+        let updates = PrinterUpdates()
+        await updates.update("mcp-c9d06fd7c405328e", fresh: false, socket: companion.path)
+        let request = try XCTUnwrap(companion.request)
+        XCTAssertEqual(request["method"] as? String, "printers.updateMcp")
+        XCTAssertEqual((request["params"] as? [String: Any])?["mcpId"] as? String, "mcp-c9d06fd7c405328e")
+        XCTAssertNil((request["params"] as? [String: Any])?["fresh"], "Update, not a fresh copy")
+        let status = try XCTUnwrap(updates.status["mcp-c9d06fd7c405328e"])
+        XCTAssertEqual(status, .waiting)
+        XCTAssertEqual(status.words, "Updates as soon as Counterpart finishes its work on this printer.")
+        XCTAssertFalse(status.spinning, "a print can take hours: waiting never spins")
+        XCTAssertTrue(status.busy, "Update isn't offered again while it waits")
+        XCTAssertTrue(McpUpdateStatus.updating(from: "1.1.73", to: "1.1.76").spinning, "an update under way does")
+        for finished in [McpUpdateStatus.updated(version: "1.1.76"), .current, .failed(log: nil), .problem("x"), .unresolved(found: "x")] {
+            XCTAssertFalse(finished.spinning, "\(finished)")
+        }
+    }
+
+    /// Nov 6, David: "now i only see one to update and missing the other one". printers.mcps timed out once, and the
+    /// rows fell back to the printer list, where a P1S set up in both MCPs is one printer: mcp-3D-printer-server had no row.
+    func testEveryMcpAPrinterIsSetUpInHasARowEvenWhenTheMcpListCantBeRead() {
+        let p1s = PrinterDestination(id: "current", name: "Bambu Lab P1S", backend: "bambu-printer-mcp",
+                                     capabilities: PrinterCapabilities(server: .init(name: "bambu-printer-mcp", version: "1.1.73"),
+                                                                       update: .init(message: "", package: "bambu-printer-mcp", command: nil, latestVersion: "1.1.76")),
+                                     mcpId: "mcp-812bcaf2d1ff2948",
+                                     mcps: [.init(backend: "bambu-printer-mcp", destinationId: "current"),
+                                            .init(backend: "mcp-3d-printer-server", destinationId: "counterpart-a07c6f7d")])
+        let rows = PrinterMCP.list([p1s])
+        XCTAssertEqual(rows.map(\.name), ["bambu-printer-mcp", "mcp-3D-printer-server"])
+        XCTAssertTrue(rows[0].updateAvailable, "the MCP prints go through keeps its Update")
+        XCTAssertEqual(rows[1].printers, ["Bambu Lab P1S"])
+        let alone = PrinterDestination(id: "a1", name: "A1", backend: "bambu-printer-mcp", mcpId: "m",
+                                       mcps: [.init(backend: "bambu-printer-mcp", destinationId: "a1")])
+        XCTAssertEqual(PrinterMCP.list([alone]).count, 1, "a printer in one MCP lists just that one")
+    }
+
+    /// The companion ends every wait within a minute with an event. One that never comes (it restarted, as on Nov 6)
+    /// never leaves a row waiting forever: it says so, and Update is offered again. Any word from the companion first wins.
+    func testAWaitThatHearsNothingMoreBecomesASentenceAndUpdateComesBack() async throws {
+        let updates = PrinterUpdates()
+        updates.waitingLimit = .milliseconds(50)
+        updates.set("unheard", .waiting)
+        updates.set("heard", .waiting)
+        XCTAssertFalse(updates.apply(try event("mcp.update.started", #"{"mcpId":"heard","toVersion":"1.1.76"}"#)))
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(updates.status["unheard"], .problem(PrinterUpdates.unheard))
+        XCTAssertEqual(updates.status["unheard"]?.busy, false, "Update can be pressed again")
+        XCTAssertEqual(updates.status["heard"], .updating(from: nil, to: "1.1.76"), "an update that started is left alone")
     }
 
     func testTheAnswerSaysWhetherItStartedWaitsOrNeedsAFreshCopy() {
@@ -119,4 +174,50 @@ import XCTest
         XCTAssertEqual(rows.first { $0.mcpId == "one" }?.printers.sorted(), ["a", "c"])
         XCTAssertEqual(PrinterMCP.list([printer("a", mcp: nil), printer("b", mcp: nil)]).count, 1, "an older companion groups as before")
     }
+}
+
+/// A companion control socket that answers one request, and keeps that request.
+private final class OneRequestSocket: @unchecked Sendable {
+    let path = "/tmp/stm-update-\(UUID().uuidString.prefix(8)).sock"
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var received: [String: Any]?
+    private let done = DispatchSemaphore(value: 0)
+    var request: [String: Any]? { _ = done.wait(timeout: .now() + 5); return lock.withLock { received } }
+
+    init(reply: [String: Any]) throws {
+        descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        let bytes = path.utf8CString
+        withUnsafeMutablePointer(to: &address.sun_path) { target in
+            target.withMemoryRebound(to: CChar.self, capacity: 104) { pointer in bytes.withUnsafeBufferPointer { pointer.update(from: $0.baseAddress!, count: $0.count) } }
+        }
+        let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        guard descriptor >= 0, bound == 0, listen(descriptor, 4) == 0 else { throw NSError(domain: "OneRequestSocket", code: 1) }
+        let fd = descriptor
+        DispatchQueue.global().async { [self] in
+            defer { done.signal() }
+            let client = accept(fd, nil, nil)
+            guard client >= 0 else { return }
+            defer { close(client) }
+            var one: Int32 = 1
+            setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+            var data = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+            while !data.contains(10) {
+                let count = read(client, &buffer, buffer.count)
+                if count <= 0 { return }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+            guard let request = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            lock.withLock { received = request }
+            guard var answer = try? JSONSerialization.data(withJSONObject: ["v": 1, "id": request["id"] ?? NSNull(), "result": reply]) else { return }
+            answer.append(10)
+            _ = answer.withUnsafeBytes { write(client, $0.baseAddress!, $0.count) }
+            shutdown(client, SHUT_WR)
+            while read(client, &buffer, buffer.count) > 0 {}
+        }
+    }
+    deinit { shutdown(descriptor, SHUT_RDWR); close(descriptor); unlink(path) }
 }

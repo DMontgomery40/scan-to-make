@@ -394,7 +394,7 @@ public extension ControlClient {
 /// `printers.updateMcp` (PRD §8.10): the companion updates an MCP install in its own way and reports progress as
 /// `mcp.update.*` events.
 public struct McpUpdate: Decodable, Sendable, Equatable {
-    /// `started`, `waiting` (after the current print), `current` (already the latest) or `unresolved` (it couldn't
+    /// `started`, `waiting` (until Counterpart's own send, slice or design on it finishes), `current` (already the latest) or `unresolved` (it couldn't
     /// tell how this copy is installed; `found` says what it saw, and a fresh copy can be installed instead).
     public let state: String
     public let mcpId: String

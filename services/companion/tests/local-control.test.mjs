@@ -246,6 +246,8 @@ test('long methods get their own socket deadline; everything else keeps 10 s', a
   assert.equal(methodDeadlineMs('objects.get', {}), undefined);
   // Nov 6: a 57 MB STL for a starter's file Ask outlived the 10 s deadline; the Mac got no answer at all.
   assert.equal(methodDeadlineMs('objects.addFile', {}), 120000);
+  // Nov 6, 14:43: printers.mcps missed 10 s on a busy Mac and Settings lost an MCP's row. It answers inside the Mac's 15 s.
+  assert.equal(methodDeadlineMs('printers.mcps', {}), 13000);
 });
 
 // Nov 6: David's project page said "Something went wrong on your Mac." The companion had closed the Mac's request

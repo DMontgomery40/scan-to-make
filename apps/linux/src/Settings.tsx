@@ -2,6 +2,7 @@ import { mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, o
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { mcpUpdateNotice } from "./domain";
 import { call, host, storeCredential, openLink } from "./bridge";
 import type { ObtainStep } from "./types";
 import { invoke } from "@tauri-apps/api/core";
@@ -715,18 +716,12 @@ function Printers({
                 run={async () => {
                   setNotice(pkg.appMcpId, "Requesting update…", true);
                   const r = await call<{
-                    update?: { state: string; found?: string };
+                    update?: { state: string; toVersion?: string; found?: string };
                     state?: string;
+                    toVersion?: string;
                     found?: string;
                   }>("printers.updateMcp", { mcpId: pkg.appMcpId });
-                  setNotice(
-                    pkg.appMcpId,
-                    r.update?.found ??
-                      r.found ??
-                      r.update?.state ??
-                      r.state ??
-                      "Update requested.",
-                  );
+                  setNotice(pkg.appMcpId, mcpUpdateNotice(r));
                   await refresh();
                 }}
               >

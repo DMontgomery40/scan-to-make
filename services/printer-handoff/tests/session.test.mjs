@@ -298,6 +298,56 @@ test('restart lets a running print call finish, then the next call starts the MC
   await assert.rejects(session.restart(), /session-closed/);
 });
 
+// Nov 6: an MCP update's restart could wait forever behind a stuck call, or on an MCP whose close hangs, and then
+// switch the session to the version that was being put back. With a deadline, a restart either changes the session
+// in time or changes nothing and says so.
+/** A deadline that keeps the test running until it fires (AbortSignal.timeout's timer doesn't). */
+const deadline = ms => { const controller = new AbortController(); setTimeout(() => controller.abort(), ms); return controller.signal; };
+test('a restart with a deadline never waits forever: a held session is left as it was, a hung close is left behind', async () => {
+  let release;
+  const {clients, factory} = fakes({gate: name => name === 'print_3mf' ? new Promise(resolve => { release = resolve; }) : undefined});
+  const session = new PrinterSession('p1s', config, {clientFactory: factory});
+  const printing = session.call('print_3mf', {});
+  await until(() => release);
+  await assert.rejects(session.restart({...config, process: {command: '/opt/new/mcp'}}, {signal: deadline(20)}), /cancelled/);
+  assert.equal(session.config.process.command, '/usr/bin/true', 'nothing changed');
+  release(); await printing;
+  // The MCP's close never finishes: the restart still ends by its deadline, with the new config in place.
+  clients[0].close = () => new Promise(() => undefined);
+  await session.restart({...config, process: {command: '/opt/previous/mcp'}}, {signal: deadline(20)});
+  assert.equal(session.config.process.command, '/opt/previous/mcp');
+  await session.call('get_printer_status', {});
+  assert.equal(clients.at(-1).command, '/opt/previous/mcp', 'the next call starts the config the restart set');
+  await session.restart(undefined, {signal: deadline(1000)});
+  await session.close();
+});
+
+// Codex review, Nov 6: a restart that stopped waiting for a connection still opening let that connection, made from
+// the previous config, become the session's client afterwards: a switch back could end on the version it undid.
+test('a connection still opening when a restart gives up on it never becomes the client', async () => {
+  let open;
+  const made = [];
+  const factory = cfg => {
+    const client = {command: cfg.process.command, closed: false, catalog: undefined,
+      async connect() { if (made.length === 1) await new Promise(resolve => { open = resolve; }); client.catalog = {server: {name: 'fake', version: '1'}, tools: TOOLS}; return client.catalog; },
+      hasTool: () => true, getTool: name => TOOLS.find(tool => tool.name === name),
+      async callTool() { return {content: [{type: 'text', text: '{}'}]}; }, async close() { client.closed = true; }};
+    made.push(client);
+    return client;
+  };
+  const session = new PrinterSession('p1s', {...config, process: {command: '/new'}}, {clientFactory: factory});
+  const opening = session.connect().catch(error => error);
+  await until(() => open);
+  await session.restart({...config, process: {command: '/restored'}}, {signal: deadline(20)});
+  open();
+  assert.match(String((await opening).code ?? await opening), /cancelled/, 'whoever waited on it is told');
+  assert.equal(made[0].closed, true, 'the stale connection closes itself');
+  await session.call('get_printer_status', {});
+  assert.deepEqual(made.map(client => client.command), ['/new', '/restored']);
+  assert.equal(session.health().lastError, undefined, "a connection a restart replaced isn't a failure");
+  await session.close();
+});
+
 test('each restart advances the session generation, so answers kept from the old MCP are told apart', async t => {
   const {factory} = fakes();
   const session = new PrinterSession('p1s', config, {clientFactory: factory});

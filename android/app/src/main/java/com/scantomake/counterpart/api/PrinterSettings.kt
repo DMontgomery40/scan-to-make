@@ -29,7 +29,7 @@ data class McpUpdate(val mcpId: String, val state: String, val fromVersion: Stri
                      val toVersion: String? = null, val found: String? = null) {
     val words: String get() = when (state) {
         "started" -> toVersion?.let { "Updating to $it…" } ?: "Updating…"
-        "waiting" -> "Updates after the current print or design finishes."
+        "waiting" -> "Updates as soon as Counterpart finishes its work on this printer."
         "current" -> fromVersion?.let { "Up to date · $it" } ?: "Up to date"
         "unresolved" -> found ?: "The companion couldn't identify this installation."
         else -> "Check the update on your computer."

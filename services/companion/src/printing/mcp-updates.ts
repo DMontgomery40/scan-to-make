@@ -1,4 +1,5 @@
-import {execFile} from 'node:child_process';
+import {spawn, type ChildProcess} from 'node:child_process';
+import {StringDecoder} from 'node:string_decoder';
 import {mkdir, readFile, rename, rm as fsRm, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {dirname, join} from 'node:path';
@@ -15,7 +16,9 @@ export const LATEST_EVERY_MS = 24 * 60 * 60_000;
 export const LATEST_ON_VIEW_MS = 5 * 60_000;
 /** When npm is slow to answer Update, a check this recent stands in for it. */
 const RECENT_ANSWER_MS = 60 * 60_000;
-export const WAIT_POLL_MS = 15_000;
+export const WAIT_POLL_MS = 1000;
+/** How long an update waits for Counterpart's own send, slice or design on that MCP to finish, before it gives up. */
+export const IN_FLIGHT_WAIT_MS = 60_000;
 export const LOG_TAIL_BYTES = 4096;
 /** How long Update waits for npm before answering (the Mac app's control requests give up after 10 s). */
 export const LOOKUP_TIMEOUT_MS = 7000;
@@ -23,6 +26,12 @@ export const LOOKUP_TIMEOUT_MS = 7000;
 export const ADMISSION_CHECK_MS = 250;
 /** How long Settings → Printers waits for npm's answer when it opens (printers.mcps answers within the Mac's 15 s). */
 export const SETTINGS_WAIT_MS = 3000;
+/** How long an updated MCP may take to restart and connect: what Add printer allows it to start (setup.ts). */
+export const MCP_START_MS = 25_000;
+/** How long the check that no print is running may take: a printer's report is read within 20 s (PrinterDirectory). */
+export const BUSY_CHECK_MS = 30_000;
+/** After a command's deadline, how long its process group gets to exit before the answer stops waiting for it. */
+export const KILL_GRACE_MS = 5000;
 
 export type McpUpdateStateName = 'started' | 'waiting' | 'current' | 'unresolved';
 export interface McpUpdate {mcpId: string; state: McpUpdateStateName; fromVersion?: string; toVersion?: string; found?: string}
@@ -83,16 +92,72 @@ export class McpOverrides {
   }
 }
 
+/**
+ * Runs a command to completion, or until its deadline. The command is spawned as its own process group (execFile
+ * doesn't pass `detached` on to spawn), and at the deadline the whole group is stopped: npm's install scripts are
+ * grandchildren that can hold its output open, and an answer that waits for that output never comes. The answer never
+ * waits past the deadline (or the command's own exit) plus KILL_GRACE_MS, whatever the group does.
+ */
 export const runCommand: CommandRunner = (command, args, options) => new Promise(resolve => {
-  execFile(command, args, {cwd: options.cwd, env: options.env, timeout: options.timeoutMs, maxBuffer: 16 * 1024 * 1024}, (error, stdout, stderr) => {
-    const code = error ? (typeof (error as {code?: unknown}).code === 'number' ? (error as {code: number}).code : 1) : 0;
-    resolve({code, output: `${stdout ?? ''}${stderr ?? ''}${error && code !== 0 && !stderr ? String(error.message) : ''}`});
+  const limit = 16 * 1024 * 1024;
+  let settled = false, output = '', bytes = 0, exitCode: number | null | undefined;
+  let child: ChildProcess;
+  // Never after the answer: a finished group's id may belong to another process group by then.
+  const group = (signal: NodeJS.Signals) => { try { if (child?.pid && !settled) process.kill(-child.pid, signal); } catch { /* already gone */ } };
+  const finish = (value: {code: number; output: string}) => {
+    if (settled) return;
+    group('SIGKILL'); // whatever it started and left running goes with it
+    settled = true; clearTimeout(stop); clearTimeout(abandon); resolve(value);
+  };
+  const late = () => `${output}${output && !output.endsWith('\n') ? '\n' : ''}${command.split('/').at(-1)} didn't finish within ${Math.round(options.timeoutMs / 1000)} seconds, so Counterpart stopped it.`;
+  const stop = setTimeout(() => { group('SIGTERM'); setTimeout(() => group('SIGKILL'), KILL_GRACE_MS / 2).unref?.(); }, options.timeoutMs);
+  const abandon = setTimeout(() => finish({code: 124, output: late()}), options.timeoutMs + KILL_GRACE_MS);
+  try {
+    child = spawn(command, args, {cwd: options.cwd, env: options.env, detached: true, stdio: ['ignore', 'pipe', 'pipe']});
+  } catch (error) { finish({code: 1, output: String((error as Error).message)}); return; }
+  // One decoder per stream: a character split between two chunks reads whole.
+  const take = (decoder: StringDecoder) => (chunk: Buffer) => {
+    bytes += chunk.length;
+    if (bytes > limit) { finish({code: 1, output: `${output}\nThe output was larger than 16 MB, so Counterpart stopped ${command.split('/').at(-1)}.`}); return; }
+    output += decoder.write(chunk);
+  };
+  child.stdout!.on('data', take(new StringDecoder('utf8')));
+  child.stderr!.on('data', take(new StringDecoder('utf8')));
+  child.once('error', error => finish({code: 1, output: `${output}${String(error.message)}`}));
+  // Every pipe closed: the usual answer.
+  child.once('close', (code, signal) => finish(code !== null ? {code, output} : {code: 1, output: `${output}${command.split('/').at(-1)} was stopped (${signal}).`}));
+  // Exited, but something it started still holds its output: answer with its own exit code once the grace is over.
+  child.once('exit', code => {
+    exitCode = code;
+    setTimeout(() => finish({code: exitCode ?? 1, output}), KILL_GRACE_MS).unref?.();
   });
 });
 
+/**
+ * What may hold an MCP update back: Counterpart's own work on that printer's MCP now (a send, a slice, a design pass,
+ * each held in PrintGate), never the printer's state. David, Nov 6: "the printer being busy has nothing to do with a
+ * update for an mcp, and also, that print has nothing to do with counterpart right now it was printed by studio".
+ */
+export function inFlight(gate: Pick<PrintGate, 'held'>, canonical?: (id: string) => string | undefined): (destinationId: string) => Promise<boolean> {
+  return async id => gate.held(id) || gate.held(canonical?.(id) ?? id);
+}
+
+/** `work`'s answer, or `late()`'s when it hasn't settled within `ms`. Work that settles afterwards is ignored. */
+function within<T>(work: Promise<T>, ms: number, late: () => T | Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  work.catch(() => undefined);
+  return Promise.race([work, new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => { Promise.resolve().then(late).then(resolve, reject); }, ms);
+  })]).finally(() => clearTimeout(timer));
+}
+
 const RESTORE_FAILED = "The previous version couldn't be put back, so these printers may not start their MCP. Install a fresh copy from Update.";
 const NO_PRINTERS = (pkg: string) => `No printer uses this MCP any more (it was removed), so Counterpart stopped updating ${pkg}.`;
-const BUSY_UNKNOWN = (pkg: string) => `Counterpart couldn't check whether a print is running, so it didn't update ${pkg}. Try Update again.`;
+const BUSY_UNKNOWN = (pkg: string) => `Counterpart couldn't check whether it is sending to this printer, so it didn't update ${pkg}. Try Update again.`;
+const STILL_BUSY = (pkg: string, seconds: number) =>
+  `Counterpart was still sending, slicing or designing for this printer after ${seconds} seconds, so it didn't update ${pkg}. Try Update again when that finishes.`;
+const NOT_STARTED_BACK = ', so Counterpart put the previous version back. Try Update again.';
+const NOT_STARTED = (pkg: string, seconds: number) => `The updated ${pkg} didn't start within ${seconds} seconds${NOT_STARTED_BACK}`;
 const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.length <= LOG_TAIL_BYTES ? text : bytes.subarray(bytes.length - LOG_TAIL_BYTES).toString('utf8').replace(/^�+/, ''); };
 const newer = newerVersion;
 
@@ -104,7 +169,7 @@ export interface McpUpdaterDeps {
   env: InstallEnvironment;
   overrides: McpOverrides;
   session(destinationId: string): PrinterSession | undefined;
-  /** A print being prepared or monitored on this printer. */
+  /** Counterpart work in flight on this printer's MCP now (a send, a slice, a design pass). Never the printer's state. */
   busy(destinationId: string): Promise<boolean>;
   /** The version the running MCP reports (capabilities.server.version), when it has connected. */
   runningVersion(destinationId: string): string | undefined;
@@ -116,7 +181,13 @@ export interface McpUpdaterDeps {
   path?: string;
   /** How often a waiting update looks again (WAIT_POLL_MS). */
   waitPollMs?: number;
+  /** How long it waits for Counterpart's work in flight (IN_FLIGHT_WAIT_MS). */
+  inFlightWaitMs?: number;
   lookupTimeoutMs?: number;
+  /** How long an updated MCP may take to restart and connect (MCP_START_MS). */
+  startTimeoutMs?: number;
+  /** How long the check that no print is running may take (BUSY_CHECK_MS). */
+  busyTimeoutMs?: number;
   /** Prints and updates on a printer exclude each other. */
   gate?: PrintGate;
   fs?: UpdateFs;
@@ -147,6 +218,8 @@ export class McpUpdater {
   /** One operation per install: a second request gets the first one's answer and state. */
   readonly #active = new Map<string, McpUpdate>();
   readonly #starting = new Map<string, Promise<McpUpdate>>();
+  /** The package each update in #active installs (a request while it waits asks npm again for it). */
+  readonly #packages = new Map<string, string>();
   /** Installs (by what they run) an update is changing now: a second update of the same files waits. */
   readonly #changing = new Map<string, string>();
   /** The printers #claim marked as updating, released by #perform even if they were removed meanwhile. */
@@ -280,13 +353,36 @@ export class McpUpdater {
     const unused = printerBackendSchema.options.find(pkg => appMcpId(pkg, this.#deps.env) === mcpId);
     if (unused && !this.#members(mcpId).length) return this.download(unused, {update: true});
     const running = this.#active.get(mcpId);
-    if (running) return Promise.resolve({...running});
+    if (running) {
+      // Waiting for a print: asking again asks npm again, so the update that runs after it is the latest one (Nov 6:
+      // an update parked at 12:32 for 1.1.75 would have installed 1.1.75 after 1.1.76 was out). Never waits for npm.
+      if (running.state === 'waiting') this.#raiseTarget(mcpId, running);
+      return Promise.resolve({...running});
+    }
     // Reserved before the first await: two requests at once share one update.
     const starting = this.#starting.get(mcpId);
     if (starting) return starting.then(update => ({...update}));
     const work = this.#admit(mcpId, options).finally(() => this.#starting.delete(mcpId));
     this.#starting.set(mcpId, work);
     return work.then(update => ({...update}));
+  }
+
+  /** A waiting update's version, raised to npm's newest answer when that is newer. In the background. */
+  #raiseTarget(mcpId: string, update: McpUpdate): void {
+    const pkg = this.#packages.get(mcpId);
+    if (!pkg) return;
+    const raise = (version: string | undefined) => {
+      if (version && this.#active.get(mcpId) === update && (!update.toVersion || newer(version, update.toVersion))) update.toVersion = version;
+    };
+    raise(this.#latest.get(pkg)?.version);
+    void this.checkLatest(pkg).then(raise, () => undefined);
+  }
+
+  /** The newest of `admitted` and what npm answers within the lookup bound: the version a waiting update installs. */
+  async #latestNow(pkg: string, admitted: string): Promise<string> {
+    const answer = await within(this.checkLatest(pkg).catch(() => undefined), this.#deps.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS, () => undefined);
+    const known = [answer, this.#latest.get(pkg)?.version].filter((version): version is string => !!version);
+    return known.reduce((best, version) => newer(version, best) ? version : best, admitted);
   }
 
   async #admit(mcpId: string, options: {fresh?: boolean}): Promise<McpUpdate> {
@@ -319,6 +415,7 @@ export class McpUpdater {
     if (!options.fresh && fromVersion && !newer(latest, fromVersion)) return {mcpId, state: 'current', fromVersion, toVersion: latest};
     const update: McpUpdate = {mcpId, state: 'started', ...(fromVersion ? {fromVersion} : {}), toVersion: latest};
     this.#active.set(mcpId, update);
+    this.#packages.set(mcpId, pkg);
     const claiming = this.#claim(mcpId, options);
     const pending = Symbol('checking printers');
     let admissionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -360,7 +457,12 @@ export class McpUpdater {
     if (gate && !gate.beginUpdate(ids)) return false;
     let busy: boolean;
     // A check that fails can't say no print is running: the printers are released and the caller says so.
-    try { busy = (await Promise.all(ids.map(id => this.#deps.busy(id)))).some(Boolean); }
+    const limit = this.#deps.busyTimeoutMs ?? BUSY_CHECK_MS;
+    try {
+      busy = (await within(Promise.all(ids.map(id => this.#deps.busy(id))), limit, () => {
+        throw new Error(`the print check took longer than ${Math.round(limit / 1000)} seconds`);
+      })).some(Boolean);
+    }
     catch (error) { gate?.endUpdate(ids); throw error; }
     if (busy || keys.some(key => this.#changing.has(key) && this.#changing.get(key) !== mcpId)) { gate?.endUpdate(ids); return false; }
     for (const key of keys) this.#changing.set(key, mcpId);
@@ -368,20 +470,29 @@ export class McpUpdater {
     return true;
   }
 
+  /** Waits, briefly, for Counterpart's own work on this MCP (a send, a slice, a design) to finish; never for the printer. */
   async #waitThenRun(mcpId: string, options: {fresh?: boolean}, latest: string, pkg: string): Promise<void> {
+    const limit = this.#deps.inFlightWaitMs ?? IN_FLIGHT_WAIT_MS, until = this.#now() + limit;
+    let why = BUSY_UNKNOWN(pkg);
     try {
-      do await new Promise(resolve => { const timer = setTimeout(resolve, this.#deps.waitPollMs ?? WAIT_POLL_MS); timer.unref?.(); });
-      while (!await this.#claim(mcpId, options));
+      let claimed = false;
+      do {
+        await new Promise(resolve => { const timer = setTimeout(resolve, this.#deps.waitPollMs ?? WAIT_POLL_MS); timer.unref?.(); });
+        claimed = await this.#claim(mcpId, options);
+      } while (!claimed && this.#now() < until);
+      if (!claimed) { why = STILL_BUSY(pkg, Math.round(limit / 1000)); throw new Error('still busy'); }
     } catch {
       // Nothing ran and nothing is held: the update ends, saying why.
       const update = this.#active.get(mcpId);
       this.#active.delete(mcpId);
-      if (update) await this.#emit('mcp.update.failed', pkg, update, BUSY_UNKNOWN(pkg));
+      if (update) await this.#emit('mcp.update.failed', pkg, update, why);
       return;
     }
     const update = this.#active.get(mcpId);
-    if (update) update.state = 'started';
-    await this.#perform(mcpId, options, latest, pkg);
+    // npm is asked again now: a newer version may be out since Update was pressed.
+    const now = await this.#latestNow(pkg, update?.toVersion && newer(update.toVersion, latest) ? update.toVersion : latest);
+    if (update) { update.state = 'started'; update.toVersion = now; }
+    await this.#perform(mcpId, options, now, pkg);
   }
 
   /** npm can succeed while skipping install scripts. Its foreground lifecycle banner plus
@@ -482,12 +593,20 @@ export class McpUpdater {
           args: (member.effective.process.args ?? []).map(arg => arg === (member.install as {spec?: string}).spec ? `${pkg}@${latest}` : arg)}, member.config);
         if (options.fresh && install.type === 'app') await this.#deps.overrides.set(member.id, this.#appCopyOverride(member.config), member.config);
       }
-      for (const member of members) await this.#deps.session(member.id)?.restart(this.#deps.overrides.apply(member.config, this.#override(member.id, member.config)));
+      // Each restart and connect is bounded: an MCP that never answers puts the previous version back with a sentence,
+      // instead of an update that never ends (and a Settings row that spins).
+      const startMs = this.#deps.startTimeoutMs ?? MCP_START_MS;
+      const stuck = () => { throw Object.assign(new Error('MCP start timed out'), {sentence: NOT_STARTED(pkg, Math.round(startMs / 1000))}); };
+      for (const member of members) {
+        const session = this.#deps.session(member.id);
+        if (session) await within(session.restart(this.#deps.overrides.apply(member.config, this.#override(member.id, member.config)), {signal: AbortSignal.timeout(startMs)}), startMs, stuck);
+      }
       // Every printer on these files starts the new version before the previous one is removed: one that can't
       // start it puts everything back.
       let catalog: Awaited<ReturnType<PrinterSession['connect']>> | undefined;
       for (const member of members) {
-        const connected = await this.#deps.session(member.id)?.connect();
+        const session = this.#deps.session(member.id);
+        const connected = session ? await within(session.connect({signal: AbortSignal.timeout(startMs)}), startMs, stuck) : undefined;
         if (member.id === first.id) catalog = connected;
       }
       await finish?.().catch(() => undefined);
@@ -500,9 +619,17 @@ export class McpUpdater {
         restoreFailed = true;
         sentence = [sentence, failure?.sentence ?? "Counterpart couldn't put the previous version back."].filter(Boolean).join(' ');
       });
+      const startMs = this.#deps.startTimeoutMs ?? MCP_START_MS;
       for (const member of members) {
         await this.#deps.overrides.set(member.id, previous.get(member.id), member.config).catch(() => undefined);
-        await this.#deps.session(member.id)?.restart(this.#deps.overrides.apply(member.config, previous.get(member.id))).catch(() => undefined);
+        const session = this.#deps.session(member.id);
+        // A printer whose MCP couldn't be switched back in time may still run the new version: never say it was put back.
+        if (session) await within(session.restart(this.#deps.overrides.apply(member.config, previous.get(member.id)), {signal: AbortSignal.timeout(startMs)}), startMs, () => {
+          throw new Error('restart timed out');
+        }).catch(() => {
+          if (!restoreFailed) sentence = [sentence?.replace(NOT_STARTED_BACK, '.'), "Counterpart couldn't switch this printer's MCP back in time."].filter(Boolean).join(' ');
+          restoreFailed = true;
+        });
       }
       this.#active.delete(mcpId);
       await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)),

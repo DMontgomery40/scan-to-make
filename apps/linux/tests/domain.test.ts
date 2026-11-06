@@ -351,11 +351,25 @@ test("Settings → Printers follow-up: two P1S profiles get Moves that read apar
   assert.ok(!mcpPackageIds(packages[0]).includes(id), "never under the other MCP");
 });
 
-test("an accepted MCP move explains that it is waiting for the print", async () => {
+test("an accepted MCP move explains that it waits for Counterpart's own work", async () => {
   const {readFile} = await import("node:fs/promises");
   const {mcpMoveNotice} = await import("../src/domain.ts");
   const reply = JSON.parse(await readFile(new URL("../../../packages/contracts/fixtures/mcp-update-waiting.json", import.meta.url), "utf8"));
-  assert.equal(mcpMoveNotice(reply), "Moves to Counterpart’s updated copy after the current print.");
+  assert.equal(mcpMoveNotice(reply), "Moves to Counterpart’s updated copy as soon as Counterpart finishes its work on this printer.");
+});
+
+// Nov 6, "mcps won't update they just spin forever": Update answered `waiting`, and Linux showed the bare word. Every
+// answer is a sentence.
+test("Update's answer is a sentence, and waiting says what for", async () => {
+  const {readFile} = await import("node:fs/promises");
+  const {mcpUpdateNotice} = await import("../src/domain.ts");
+  const waiting = JSON.parse(await readFile(new URL("../../../packages/contracts/fixtures/mcp-update-waiting.json", import.meta.url), "utf8"));
+  assert.equal(mcpUpdateNotice(waiting), "Updates as soon as Counterpart finishes its work on this printer.");
+  assert.equal(mcpUpdateNotice({update: {state: "started", toVersion: "1.1.76"}}), "Updating to 1.1.76…");
+  assert.equal(mcpUpdateNotice({update: {state: "current"}}), "Already the newest version.");
+  assert.equal(mcpUpdateNotice({update: {state: "unresolved", found: "It runs over SSH."}}), "It runs over SSH.");
+  assert.equal(mcpUpdateNotice({state: "waiting"}), "Updates as soon as Counterpart finishes its work on this printer.", "an older companion's flat answer");
+  for (const state of ["waiting", "started", "current", "unresolved"]) assert.notEqual(mcpUpdateNotice({update: {state}}), state);
 });
 
 test("a designer's file starts at its own settings, never the saved quality and strength (Nov 5)", () => {

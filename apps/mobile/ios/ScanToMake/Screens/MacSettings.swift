@@ -174,7 +174,7 @@ struct MacSettingsSections: View {
                     if let missing = printer.capabilities?.update?.message { Text(missing).font(.caption).foregroundStyle(.secondary) }
                     if let progress = printer.mcpId.flatMap({ model.store.mcpUpdates[$0] }) {
                         HStack(spacing: 6) {
-                            if progress.isRunning { ProgressView().controlSize(.small) }
+                            if progress.isWorking { ProgressView().controlSize(.small) }
                             Text(progress.words).font(.caption).foregroundStyle(progress.state == "failed" ? .red : .secondary)
                         }
                         if progress.state == "unresolved" {

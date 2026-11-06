@@ -766,7 +766,7 @@
    "type": "mcp.update.waiting",
    "destinationId": "current",
    "printerName": "Bambu Lab P1S",
-   "title": "bambu-printer-mcp updates after the current print",
+   "title": "bambu-printer-mcp updates as soon as Counterpart finishes with this printer",
    "body": "1.1.46 to 1.1.50 · Bambu Lab P1S",
    "notify": "none",
    "data": {

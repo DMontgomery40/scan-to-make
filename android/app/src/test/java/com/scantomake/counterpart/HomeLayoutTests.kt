@@ -180,7 +180,7 @@ class HomeLayoutTests {
                 compose.onNodeWithText(error).assertDoesNotExist()
             }
         } else {
-            compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates after the current print or design finishes.")).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates as soon as Counterpart finishes its work on this printer.")).fetchSemanticsNodes().isNotEmpty() }
         }
         if (secondUpdate) {
             compose.onNodeWithText("Update Counterpart’s copy").performScrollTo().performClick()

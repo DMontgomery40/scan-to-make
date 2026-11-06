@@ -47,6 +47,9 @@ export function methodDeadlineMs(method: ControlMethod, params: unknown): number
   if (method === 'objects.estimate') return 630_000;
   // npm lookup is bounded to 7 s, then admission waits at most 250 ms; longer printer checks continue under the update reservation.
   if (method === 'printers.updateMcp' || method === 'printers.installMcp' || method === 'printers.discover') return 15_000;
+  // It looks for copies in the home folder and waits up to 3 s for npm: inside the Mac's 15 s, past the usual 10 s
+  // (Nov 6, 14:43: a busy Mac missed 10 s, and Settings lost a printer MCP's row).
+  if (method === 'printers.mcps') return 13_000;
   // Check starts the MCP (up to 25 s), then status (20 s) and the camera (12 s).
   if (method === 'printers.check') return 60_000;
   // Obtain starts the MCP (up to 25 s), then waits up to 20 s for the person's answer in the MCP's own page.

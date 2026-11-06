@@ -631,7 +631,7 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertTrue(move.waitForNonExistence(timeout: 5), "the completed move is no longer offered")
             XCTAssertTrue(app.staticTexts["Updated to 1.2.45"].waitForExistence(timeout: 5), "completion remains under the original MCP ID")
         } else {
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "after the current print")).firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "finishes its work on this printer")).firstMatch.waitForExistence(timeout: 5))
         }
     }
 

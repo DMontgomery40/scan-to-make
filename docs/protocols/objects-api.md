@@ -227,7 +227,7 @@ Bambu Studio's own verdict on the slice (KAN-223, when the MCP returns `slicer_r
 | `state` | Meaning | Show |
 |---|---|---|
 | `started` | The update is running now. Progress and the result arrive as `mcp.update.*` events ([events.md](events.md)). | a progress bar |
-| `waiting` | A print on one of this install's printers is being prepared or monitored; it starts when that ends | "Updates after the current print" |
+| `waiting` | Counterpart is sending, slicing or designing on one of this install's printers; it starts when that ends (up to a minute, then it fails with a sentence). A printer printing on its own never makes it wait | "Updates as soon as Counterpart finishes its work on this printer" |
 | `current` | `fromVersion` is already the latest | "Up to date" |
 | `unresolved` | Counterpart can't tell how this copy is installed. `found` says what it found, in plain words. Nothing ran. | `found`, and **Install a Fresh Copy** (`{fresh: true}`) |
 

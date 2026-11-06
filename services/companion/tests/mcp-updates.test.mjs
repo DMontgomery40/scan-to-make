@@ -87,18 +87,20 @@ test('shell command lines: quotes, escapes, cd and variables', () => {
 });
 
 /** A scripted updater: commands are recorded, sessions are fakes, versions come from a fake registry. */
-async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog} = {}) {
+async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest: published = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog, session: sessionFor, busyTimeoutMs, startTimeoutMs, inFlightWaitMs} = {}) {
+  // The registry: a version, or a function when a test publishes a newer one partway through.
+  const registry = () => typeof published === 'function' ? published() : published;
   const root = await mkdtemp(join(tmpdir(), 'mcp-updates-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const env = mac({'/opt/homebrew/bin/npm': '', '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js': '', ...files}, {'/opt/homebrew/bin/npm': '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js', ...links});
   const readFile = env.readFile;
   env.readFile = path => {
     const staged = path.match(/\.counterpart-update-[0-9a-f-]+\/lib\/node_modules\/([^/]+)\/package\.json$/);
-    return staged ? JSON.stringify({name: staged[1], version: latest, ...(postinstall ? {scripts: {postinstall}} : {})}) : readFile(path);
+    return staged ? JSON.stringify({name: staged[1], version: installing ?? registry(), ...(postinstall ? {scripts: {postinstall}} : {})}) : readFile(path);
   };
   const commands = [], events = [], restarts = [], moves = [];
-  let version = '1.1.46';
-  const session = id => ({
+  let version = '1.1.46', installing;
+  const session = sessionFor ? id => sessionFor(id, restarts) : id => ({
     restart: async config => { restarts.push({id, ...config}); },
     connect: async () => { if (connectFail?.(id)) throw new Error('spawn ENOENT'); return {server: {name: 'bambu-printer-mcp', version}, tools: []}; },
   });
@@ -108,13 +110,14 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
     catalog, gate, fs: {rename: async (from, to) => { moves.push(['rename', from, to]); if (failRename && failRename(from, to)) throw new Error('EXDEV'); }, rm: async path => { moves.push(['rm', path]); }, mkdir: async () => undefined},
     destinations: () => profiles ?? [{id: 'p1s', config: profile}, {id: 'a1', config: profile}],
     env, overrides, session, busy: async id => busy(id), runningVersion: id => id in installed ? installed[id] : '1.1.46',
-    emit: async event => { events.push(event); }, waitPollMs: 20, node: '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node', path: '/usr/bin:/bin',
+    emit: async event => { events.push(event); }, waitPollMs: 20, busyTimeoutMs, startTimeoutMs, inFlightWaitMs, node: '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node', path: '/usr/bin:/bin',
     run: async (command, args, options) => {
       commands.push([command, ...args, ...(options.cwd ? [`(in ${options.cwd})`] : [])].join(' '));
-      if (args.includes('view')) { await new Promise(resolve => setTimeout(resolve, 5)); return {code: 0, output: `${latest}\n`}; }
+      if (args.includes('view')) { await new Promise(resolve => setTimeout(resolve, 5)); return {code: 0, output: `${registry()}\n`}; }
       if (args.includes('rev-parse')) return {code: 0, output: 'abc123\n'};
       if (fail && (typeof fail === 'function' ? fail(args) : args.join(' ').includes(fail))) return {code: 1, output: 'npm ERR! network'};
-      if (args.includes('install') || args.includes('pull')) version = latest;
+      if (args.includes('install')) installing = args.at(-1).split('@').at(-1);
+      if (args.includes('install') || args.includes('pull')) version = installing ?? registry();
       return {code: 0, output: args.includes('install') ? installOutput : ''};
     },
   });
@@ -198,7 +201,7 @@ test('an install Counterpart can\'t resolve says what it found and offers a fres
   assert.deepEqual(failing.moves.map(move => move[0]), ['rm'], 'nothing was swapped');
 });
 
-test('Update waits while a print on that printer is being prepared or monitored', async t => {
+test('Update waits while Counterpart sends to that printer, then runs', async t => {
   let printing = true;
   const prefix = `${APP}/printers/bambu`;
   const f = await updater(t, {profile: bambu('/x/node', [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]),
@@ -206,10 +209,138 @@ test('Update waits while a print on that printer is being prepared or monitored'
   assert.equal((await f.updates.update(f.mcpId)).state, 'waiting');
   assert.equal((await f.updates.update(f.mcpId)).state, 'waiting', 'asking again reports the same update');
   assert.deepEqual(f.events.map(event => event.type), ['mcp.update.waiting']);
-  assert.equal(f.commands.length, 1);
+  assert.ok(f.commands.every(command => command.includes(' view ')), 'nothing is installed while it waits');
   printing = false;
   await until(() => f.events.some(event => event.type === 'mcp.update.done'));
-  assert.equal(f.commands.length, 2);
+  assert.equal(f.commands.filter(command => command.includes(' install ')).length, 1);
+});
+
+// Nov 6: Update pressed at 12:32 MST parked bambu-printer-mcp for 1.1.75; 1.1.76 was published while it waited, and
+// pressing Update again only answered the parked update. Whatever it waits for, it installs the newest version.
+test('a waiting update installs the version that is newest when it runs, not when it was pressed', async t => {
+  let printing = true, published = '1.1.50';
+  const prefix = `${APP}/printers/bambu`;
+  const f = await updater(t, {profile: bambu('/x/node', [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]), latest: () => published,
+    files: {[`${prefix}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46')}, busy: () => printing});
+  assert.deepEqual(await f.updates.update(f.mcpId), {mcpId: f.mcpId, state: 'waiting', fromVersion: '1.1.46', toVersion: '1.1.50'});
+  published = '1.1.51';
+  // Asking again while it waits answers at once, and asks npm in the background: the next answer names the newer version.
+  await f.updates.update(f.mcpId);
+  await until(async () => (await f.updates.update(f.mcpId)).toVersion === '1.1.51');
+  published = '1.1.52';
+  printing = false;
+  await until(() => f.events.some(event => event.type === 'mcp.update.done'));
+  const started = f.events.find(event => event.type === 'mcp.update.started'), done = f.events.find(event => event.type === 'mcp.update.done');
+  assert.equal(started.data.toVersion, '1.1.52', 'npm is asked again when it runs');
+  assert.equal(done.data.toVersion, '1.1.52');
+  assert.ok(f.commands.some(command => command.endsWith('bambu-printer-mcp@1.1.52')), f.commands.join('\n'));
+  assert.ok(!f.commands.some(command => /install .*bambu-printer-mcp@1\.1\.5[01]$/.test(command)), 'the version from when it was pressed is never installed');
+});
+
+// "every await on an MCP or npm child gets a bounded time, and a stuck one shows a sentence instead of a spinner"
+test('an updated MCP that never restarts or connects ends the update with a sentence and the previous version back', async t => {
+  const live = `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp`;
+  for (const stuck of ['restart', 'connect', 'rollback']) {
+    const forever = new Promise(() => undefined);
+    const f = await updater(t, {profile: bambu('/x/node', [`${live}/dist/index.js`]), files: {[`${live}/package.json`]: pkgJson('1.1.46')}, startTimeoutMs: 40,
+      session: (id, restarts) => ({
+        // The session's own restart deadline ends a held restart with `cancelled`; these never end at all.
+        restart: async (config, options) => {
+          restarts.push({id, ...config});
+          if ((stuck === 'restart' && restarts.length === 1) || (stuck === 'rollback' && restarts.length > 2)) return forever;
+          assert.ok(options?.signal, 'every restart in an update has a deadline');
+        },
+        connect: async () => stuck !== 'restart' ? forever : {server: {version: '1.1.50'}},
+      })});
+    assert.equal((await f.updates.update(f.mcpId)).state, 'started');
+    await f.done();
+    const failed = f.events.at(-1);
+    assert.equal(failed.type, 'mcp.update.failed', stuck);
+    if (stuck === 'rollback') {
+      // Switching back timed out too: the printer may still run the new version, so it never says it was put back.
+      assert.doesNotMatch(failed.data.log, /put the previous version back\./);
+      assert.match(failed.data.log, /didn't start within \d+ seconds\. Counterpart couldn't switch this printer's MCP back in time\./);
+      assert.equal(failed.reason, "The previous version couldn't be put back, so these printers may not start their MCP. Install a fresh copy from Update.");
+      continue;
+    }
+    assert.match(failed.data.log, /The updated bambu-printer-mcp didn't start within \d+ seconds, so Counterpart put the previous version back\./, stuck);
+    assert.ok(f.moves.some(([kind, , to]) => kind === 'rename' && to === live), `${stuck}: the previous copy is put back`);
+    assert.equal((await f.updates.update(f.mcpId)).state, 'started', `${stuck}: nothing stays reserved; the next Update is a new one`);
+    await f.done();
+  }
+});
+
+// David, Nov 6: "the printer being busy has nothing to do with a update for an mcp, and also, that print has nothing to
+// do with counterpart right now it was printed by studio". Update runs at once while the printer prints; only
+// Counterpart's own send, slice or design on that MCP holds it back, and only briefly.
+test('a printing printer never holds Update back; Counterpart\'s own send does, briefly, then it runs or says why', async t => {
+  const {inFlight} = await import('../dist/printing/mcp-updates.js');
+  const prefix = `${APP}/printers/bambu`;
+  const files = {[`${prefix}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46')}, profile = bambu('/x/node', [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]);
+  // The printer is printing a job from Bambu Studio: nothing Counterpart holds. The update starts at once.
+  const idle = new PrintGate();
+  const free = await updater(t, {profile, files, gate: idle, busy: inFlight(idle)});
+  assert.equal((await free.updates.update(free.mcpId)).state, 'started');
+  await free.done();
+  assert.equal(free.events.at(-1).type, 'mcp.update.done');
+  // Counterpart is sending to it: Update waits for the send, then runs.
+  const sending = new PrintGate(), release = sending.hold('p1s');
+  const sent = await updater(t, {profile, files, gate: sending, busy: inFlight(sending)});
+  assert.equal((await sent.updates.update(sent.mcpId)).state, 'waiting');
+  release();
+  await sent.done();
+  assert.deepEqual(sent.events.map(event => event.type), ['mcp.update.waiting', 'mcp.update.started', 'mcp.update.done']);
+  // A send that doesn't finish in time: the update ends with a sentence, and nothing waits on.
+  const stuck = new PrintGate();
+  stuck.hold('a1');
+  const held = await updater(t, {profile, files, gate: stuck, busy: inFlight(stuck), inFlightWaitMs: 100});
+  assert.equal((await held.updates.update(held.mcpId)).state, 'waiting');
+  await held.done();
+  const failed = held.events.at(-1);
+  assert.equal(failed.type, 'mcp.update.failed');
+  assert.match(failed.data.log, /Counterpart was still sending, slicing or designing for this printer after 0 seconds, so it didn't update bambu-printer-mcp\. Try Update again when that finishes\./);
+  assert.ok(!held.commands.some(command => command.includes(' install ')));
+  assert.equal(stuck.updating('p1s'), false, 'no printer is left marked as updating');
+});
+
+test('a print check that never answers ends the update with a sentence, never a request that waits forever', async t => {
+  const prefix = `${APP}/printers/bambu`;
+  const files = {[`${prefix}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46')}, profile = bambu('/x/node', [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]);
+  const hangs = () => new Promise(() => undefined);
+  // Out of time before the request is answered: the request says so.
+  const soon = await updater(t, {profile, files, busyTimeoutMs: 30, busy: hangs});
+  await assert.rejects(soon.updates.update(soon.mcpId), {code: 'unavailable', message: /couldn't check whether it is sending to this printer/});
+  // Out of time after it was admitted (the check goes on under the update's reservation): the update ends with the sentence.
+  const later = await updater(t, {profile, files, busyTimeoutMs: 400, busy: hangs});
+  assert.equal((await later.updates.update(later.mcpId)).state, 'started');
+  await later.done();
+  assert.deepEqual(later.events.map(event => event.type), ['mcp.update.failed']);
+  assert.match(later.events[0].data.log, /couldn't check whether it is sending to this printer/);
+  assert.ok(!later.commands.some(command => command.includes(' install ')));
+  assert.equal((await later.updates.update(later.mcpId)).state, 'started', 'nothing stays reserved');
+});
+
+test('a command whose child keeps its output open still answers by its deadline, and its process group is stopped', async t => {
+  const {runCommand} = await import('../dist/printing/mcp-updates.js');
+  // npm exits, but a postinstall grandchild still holds stdout: execFile alone would wait for the grandchild.
+  const started = Date.now();
+  const exited = await runCommand('/bin/sh', ['-c', 'echo installed; (sleep 30) & echo "left:$!"; exit 0'], {env: process.env, timeoutMs: 60_000});
+  assert.equal(exited.code, 0);
+  assert.match(exited.output, /installed/);
+  assert.ok(Date.now() - started < 15_000, 'answers within the grace after its own exit');
+  const left = Number(exited.output.match(/left:(\d+)/)[1]);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.throws(() => process.kill(left, 0), {code: 'ESRCH'}, 'what it left running is stopped with it');
+  // A character split between two writes reads whole.
+  const split = await runCommand(process.execPath, ['-e', "const b = Buffer.from('€'); process.stdout.write(b.subarray(0, 1)); setTimeout(() => process.stdout.write(b.subarray(1)), 50)"], {env: process.env, timeoutMs: 10_000});
+  assert.equal(split.output, '€');
+  // A command that never exits answers at its deadline with a sentence, its group stopped.
+  const hung = await runCommand('/bin/sh', ['-c', 'echo "looking:$$"; sleep 30'], {env: process.env, timeoutMs: 200});
+  assert.notEqual(hung.code, 0);
+  assert.match(hung.output, /looking/);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.throws(() => process.kill(Number(hung.output.match(/looking:(\d+)/)[1]), 0), {code: 'ESRCH'}, 'stopped at its deadline');
+  assert.ok(Date.now() - started < 30_000);
 });
 
 test('npm is found beside the installation\'s node first, then on PATH and the usual places', () => {
@@ -496,7 +627,7 @@ test('review fixes, round five: every printer on the files starts the new versio
   const gate = new PrintGate();
   const g = await updater(t, {gate, profile: bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']), installed: {p1s: '1.1.40', a1: '1.1.40'},
     busy: () => { throw new Error('EIO: objects'); }});
-  await assert.rejects(g.updates.update(g.mcpId), error => error instanceof McpUpdateError && error.code === 'unavailable' && /couldn't check whether a print is running/.test(error.message));
+  await assert.rejects(g.updates.update(g.mcpId), error => error instanceof McpUpdateError && error.code === 'unavailable' && /couldn't check whether it is sending to this printer/.test(error.message));
   assert.deepEqual([gate.updating('p1s'), gate.updating('a1')], [false, false]);
   gate.hold('p1s')();
   // The same while waiting: the update ends with mcp.update.failed, and a new request is a new update.
@@ -507,7 +638,7 @@ test('review fixes, round five: every printer on the files starts the new versio
   assert.equal((await h.updates.update(h.mcpId)).state, 'waiting');
   await h.done();
   assert.equal(h.events.at(-1).type, 'mcp.update.failed');
-  assert.match(h.events.at(-1).data.log, /couldn't check whether a print is running/);
+  assert.match(h.events.at(-1).data.log, /couldn't check whether it is sending to this printer/);
   assert.deepEqual([gate2.updating('p1s'), gate2.updating('a1')], [false, false]);
   assert.equal(h.commands.filter(command => command.includes('install')).length, 0, 'nothing ran');
 });
@@ -638,7 +769,7 @@ test('a slow admitted printer check reports failure by event and releases its re
   busy.reject(new Error('printer unavailable'));
   await f.done();
   assert.equal(f.events.at(-1).type, 'mcp.update.failed');
-  assert.match(f.events.at(-1).data.log, /couldn't check whether a print is running/);
+  assert.match(f.events.at(-1).data.log, /couldn't check whether it is sending to this printer/);
   assert.equal(gate.updating('p1s'), false);
   assert.equal(f.commands.some(command => command.includes(' install ')), false);
   gate.hold('p1s')();
