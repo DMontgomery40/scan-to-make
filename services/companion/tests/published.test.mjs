@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,utimes,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,utimes,symlink,chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
@@ -12,7 +12,7 @@ import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {publicObject} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
-import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished,arrivedDuring,chromeAvailable} from '../dist/published/published.js';
+import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished,arrivedDuring,chromeAvailable,folderAccess} from '../dist/published/published.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {mcpPlates, mcpPlatesResult, showing, showingRunner, shownSlice} from './support/shown-print.mjs';
 const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
@@ -75,6 +75,16 @@ test('the companion lists every model file that arrived during the pass itself; 
  await mkdir(join(f.root,'brave'));await writeFile(join(f.root,'brave','host.json'),'{}');
  assert.equal(chromeAvailable([join(f.root,'chrome','host.json'),join(f.root,'brave','host.json')]),true);
  assert.equal(chromeAvailable([join(f.root,'chrome','host.json')]),false);
+});
+test('a Downloads folder macOS privacy refuses is "denied", never an empty folder, and the pass says so',async t=>{
+ if(process.getuid?.()===0)return t.skip('root reads any folder');
+ const f=await setup(t),downloads=join(f.root,'Downloads');await mkdir(downloads);
+ assert.equal(await folderAccess(downloads),'ok');assert.equal(await folderAccess(join(f.root,'nowhere')),'missing');
+ await chmod(downloads,0o000);t.after(()=>chmod(downloads,0o700).catch(()=>{}));
+ assert.equal(await folderAccess(downloads),'denied');
+ const pass=await prepareTouchupPass({root:join(f.root,'passes'),objectId:'p',scan:[],photos:[],requirePhotos:false});
+ const got=await runPublishedWorker({command:'/c',args:[],env:{},cwd:pass.dir,mcpConfigPath:'',mcpConfig:{mcpServers:{}}},pass,{url:LINK,site:'MakerWorld'},{downloads,spawn:spawnAnswer({status:'needs_file',reason:'other',summary:'x'})});
+ assert.equal(got.status,'needs_file');assert.equal(got.downloadsDenied,true);
 });
 test('old Downloads names require confirmation; escapes and symlinks never establish identity',async t=>{
  const f=await setup(t),downloads=join(f.root,'Downloads');await mkdir(downloads);const path=join(downloads,'caliper.3mf');await writeFile(path,model());const yesterday=new Date(Date.now()-86400000);await utimes(path,yesterday,yesterday);await symlink(path,join(downloads,'alias.3mf'));

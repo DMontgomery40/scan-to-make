@@ -1,7 +1,7 @@
 import test from 'node:test';
 import {mcpPlates} from './support/shown-print.mjs';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,rm,readFile,readdir,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,rm,readFile,readdir,writeFile,chmod} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
@@ -167,7 +167,7 @@ test('a starter’s file Ask wants the print profile’s 3MF by its button, and 
  assert.equal(o.state,'needs-closeup');assert.deepEqual(o.ask.accepts,['3mf']);
  assert.equal(o.ask.question,'On MakerWorld, open 3d scan platform, choose the designer’s print profile and press Download 3MF, then add that 3MF here. Not the raw model files (STL or a zip): they don’t have the designer’s plates.');
  const raw='That’s the raw model from MakerWorld, without the designer’s plates. On the model’s page, choose the designer’s print profile and press Download 3MF, then add that 3MF.';
- const stl=Buffer.alloc(184);stl.writeUInt32LE(1,80);
+ const stl=Buffer.alloc(134);stl.writeUInt32LE(1,80);
  await assert.rejects(service.addModelFile(o.id,'全3D打印360°摄影台.stl',stl),{message:raw});
  await assert.rejects(service.addModelFile(o.id,'全3D打印360°摄影台.zip',Buffer.from(zipSync({'a.stl':stl}))),{message:raw});
  assert.equal((await service.get(o.id)).state,'needs-closeup','nothing quietly accepted');
@@ -178,9 +178,27 @@ test('a starter’s file Ask wants the print profile’s 3MF by its button, and 
  const asked=await logged(()=>off.service.addStarter('scan-platform'));
  assert.deepEqual(asked.value.ask.accepts,['3mf']);assert.match(asked.value.ask.question,/press Download 3MF/);
 });
+// R24-002: the worker reporting the raw model "downloaded" went around the pickup's 3MF rule and made the rig Ready.
+test('a raw-model STL the worker reports downloaded is never a starter’s files; a pasted link still keeps its STL',async t=>{
+ const stl=Buffer.alloc(134);stl.writeUInt32LE(1,80);
+ const {service}=await setup(t,async(_input,root)=>downloaded(root,[['全3D打印360°摄影台.stl',stl]]));
+ const {value:o,lines}=await logged(async()=>service.settled((await service.addStarter('scan-platform')).id));
+ assert.equal(o.state,'failed');assert.equal(o.files,undefined);
+ assert.equal(o.failure,'That’s the raw model from MakerWorld, without the designer’s plates. On the model’s page, choose the designer’s print profile and press Download 3MF, then add that 3MF.');
+ assert.match(lines.join('\n'),/left out the raw model, not the print profile: 全3D打印360°摄影台\.stl/);
+ // With the 3MF beside it, only the 3MF is kept.
+ const both=await setup(t,async(_input,root)=>downloaded(root,[['全3D打印360°摄影台.stl',stl],['360 scan platform full kit.3mf',model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears','Feet'])]]));
+ const {value:kit}=await logged(async()=>both.service.settled((await both.service.addStarter('scan-platform')).id));
+ assert.equal(kit.state,'ready');assert.deepEqual(kit.files.receipts.map(r=>r.name),['360 scan platform full kit.3mf']);
+ const pasted=await setup(t,async(_input,root)=>downloaded(root,[['bracket.stl',stl]]));
+ const link=await pasted.service.create('Print this','published','https://makerworld.com/en/models/42');
+ await pasted.service.start(link.id);
+ const p=await pasted.service.settled(link.id);
+ assert.equal(p.state,'ready');assert.equal(p.files.receipts[0].name,'bracket.stl');
+});
 test('a raw-model download that arrived is never a starter’s files',async t=>{
  const {service}=await setup(t,async(_input,root)=>{
-  const stl=Buffer.alloc(184);stl.writeUInt32LE(1,80);
+  const stl=Buffer.alloc(134);stl.writeUInt32LE(1,80);
   const made=await downloaded(root,[['全3D打印360°摄影台.stl',stl]]);
   return {status:'needs_file',reason:'other',summary:'Only the raw model was offered.',arrived:made.files};
  });
@@ -229,6 +247,119 @@ test('a kit split between the cache and Downloads is used before any worker runs
  for(const [name,bytes] of [['c.3mf',COLOR],['g.3mf',GAUGE]])await writeFile(join(other.root,'Downloads',name),bytes);
  const {value:off}=await logged(()=>other.service.start(none.id));
  assert.equal(off.state,'ready');assert.equal(other.asked.length,1);
+});
+// Parent, Nov 6: "at most once per computer" holds when the designer republishes. Files that match none of the catalog's
+// pins are the kit by its counts, kept under the model id, the mismatch logged once; a repeat tap never downloads.
+test('a republished kit (no file matches the pins) is kept once, logged once, and never downloaded again',async t=>{
+ const entry={...pinnedCatalog('long-vernier-caliper'),sha256:['a'.repeat(64),'b'.repeat(64)]};
+ // Codex on #372: files that only arrived can't tell two caliper variants from the caliper and its gauge; only a
+ // set the worker reports downloaded (it chose the profiles from the request) is a republished kit.
+ {
+  const {service}=await setup(t,async(_input,root)=>{
+   const made=await downloaded(root,[['Vernier 150mm COLOR-03.3mf',COLOR],['Vernier 220mm COLOR-03.3mf',GAUGE]]);
+   return {status:'needs_file',reason:'other',summary:'Couldn’t confirm.',arrived:made.files};
+  },{starter:id=>id===entry.id?entry:pinnedCatalog(id)});
+  const {value:o}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+  assert.equal(o.state,'failed','arrivals alone are no republished kit');
+ }
+ for(const route of ['downloaded']){
+  const {service,asked,root}=await setup(t,async(_input,root)=>{
+   const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-03.3mf',COLOR],['DEPTH+GAUGE+150mm+COLOR-03.3mf',GAUGE]]);
+   return route==='downloaded'?made:{status:'needs_file',reason:'other',summary:'Couldn’t confirm.',arrived:made.files};
+  },{starter:id=>id===entry.id?entry:pinnedCatalog(id)});
+  const {value:first,lines}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+  assert.equal(first.state,'ready',route);assert.equal(first.files.receipts.length,2,route);
+  const kit=JSON.parse(await readFile(join(root,'starters','makerworld-198362','kit.json'),'utf8'));
+  assert.deepEqual(kit.sha256.sort(),[sha(COLOR),sha(GAUGE)].sort(),route);assert.equal(kit.republished,true,route);
+  await service.delete(first.id);
+  const {value:again,lines:later}=await logged(()=>service.addStarter('long-vernier-caliper'));
+  assert.equal(again.state,'ready',route);assert.equal(asked.length,1,`${route}: never downloaded again`);
+  const mismatch=[...lines,...later].filter(line=>/differ from the catalog’s pinned sha256/.test(line));
+  assert.equal(mismatch.length,1,`${route}: the mismatch is logged once`);
+ }
+});
+// macOS privacy (Files & Folders) can keep ~/Downloads from the companion: that is one sentence, never a download.
+test('a companion that macOS won’t let read Downloads asks once for access or the file, and starts no download',async t=>{
+ if(process.getuid?.()===0)return t.skip('root reads any folder');
+ const {service,asked,root}=await setup(t,async(_input,root)=>caliper(root));
+ await mkdir(join(root,'Downloads'));await chmod(join(root,'Downloads'),0o000);
+ t.after(()=>chmod(join(root,'Downloads'),0o700).catch(()=>{}));
+ const {value:o,lines}=await logged(()=>service.addStarter('scan-platform'));
+ assert.equal(o.state,'needs-closeup');assert.equal(asked.length,0,'no worker run');
+ assert.equal(o.ask.question,'Counterpart can’t open your Downloads folder, so it can’t use the designer’s files there. Turn on Downloads Folder for Counterpart in System Settings → Privacy & Security → Files & Folders, or drop the 3MF here.');
+ assert.deepEqual(o.ask.accepts,['3mf']);assert.match(lines.join('\n'),/macOS refused the companion .*Downloads \(EPERM\)/);
+ assert.equal((await service.addStarter('scan-platform')).id,o.id,'tapping again opens the same project');assert.equal(asked.length,0);
+ // A dropped 3MF needs no Downloads access.
+ const done=await service.addModelFile(o.id,'360 scan platform full kit.3mf',model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears','Feet']));
+ assert.equal(done.state,'ready');assert.equal(publicObject(done).plates.length,6);
+ // Refused during a pass: the same Ask, not a failure whose Try Again downloads again.
+ const mid=await setup(t,async()=>({status:'needs_file',reason:'other',summary:'x',downloadsDenied:true}));
+ const {value:m}=await logged(async()=>mid.service.settled((await mid.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(m.state,'needs-closeup');assert.match(m.ask.question,/can’t open your Downloads folder/);assert.equal(m.failure,undefined);
+});
+// Codex on #372: the companion's own cache needs no Downloads access, and granting access must let the project go on.
+test('with Downloads refused, a cached kit is still Ready, and a waiting project goes on once access is granted',async t=>{
+ if(process.getuid?.()===0)return t.skip('root reads any folder');
+ const {service,asked,root}=await setup(t,async(_input,root)=>caliper(root));
+ const first=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(first.state,'ready');assert.equal(asked.length,1);
+ await service.delete(first.id);
+ await mkdir(join(root,'Downloads'),{recursive:true});await chmod(join(root,'Downloads'),0o000);
+ t.after(()=>chmod(join(root,'Downloads'),0o700).catch(()=>{}));
+ const {value:cached}=await logged(()=>service.addStarter('long-vernier-caliper'));
+ assert.equal(cached.state,'ready','the cache, not Downloads');assert.equal(asked.length,1);
+ // The rig has nothing cached: it waits on the one sentence, then goes on when macOS allows Downloads.
+ const rigs=await setup(t,async(_input,root)=>rig(root),{downloads:join(root,'Downloads')});
+ const {value:waiting}=await logged(()=>rigs.service.addStarter('scan-platform'));
+ assert.equal(waiting.state,'needs-closeup');assert.equal(rigs.asked.length,0);
+ await logged(()=>rigs.service.list());assert.equal(rigs.asked.length,0,'still refused: still waiting');
+ await chmod(join(root,'Downloads'),0o700);
+ const {value:resumed}=await logged(async()=>{await rigs.service.addStarter('scan-platform');return rigs.service.settled(waiting.id);});
+ assert.equal(resumed.state,'ready');assert.equal(rigs.asked.length,1,'one pass, after access');
+ await chmod(join(root,'Downloads'),0o000);
+ const again=await setup(t,async(_input,root)=>rig(root),{downloads:join(root,'Downloads')});
+ const {value:w2}=await logged(()=>again.service.addStarter('scan-platform'));
+ await chmod(join(root,'Downloads'),0o700);
+ await logged(async()=>{await again.service.list();await new Promise(r=>setTimeout(r,50));});
+ const {value:r2}=await logged(()=>again.service.settled(w2.id));
+ assert.equal(r2.state,'ready','listing the projects resumes it too');assert.equal(again.asked.length,1);
+});
+// Nov 6, bb9da63c: a scan-platform project made before the kit rule held the raw STL, Ready with no plates, and adding the
+// starter again only reopened it. Now adding it again gets the designer's kit into the same project.
+test('adding a starter again replaces an old project’s raw STL with the designer’s kit, in the same project',async t=>{
+ const stl=Buffer.alloc(134);stl.writeUInt32LE(1,80);
+ let worker='raw';
+ const {service,store,asked}=await setup(t,async(_input,root)=>worker==='raw'?downloaded(root,[['全3D打印360°摄影台.stl',stl]]):rig(root));
+ // The old project: made from the link, as a pasted model, then marked as the starter (as projects from before #369 are).
+ const old=await service.create('Print this','published','https://makerworld.com/en/models/1531561');
+ await service.start(old.id);
+ const raw=await service.settled(old.id);assert.equal(raw.state,'ready');assert.equal(raw.files.receipts[0].name,'全3D打印360°摄影台.stl');
+ await store.update(old.id,o=>({...o,starterId:'scan-platform',title:'3D scan platform'}));
+ worker='kit';
+ const {value:again,lines}=await logged(async()=>service.settled((await service.addStarter('scan-platform')).id));
+ assert.equal(again.id,old.id,'the same project');assert.equal(again.title,'3D scan platform');
+ assert.equal(again.state,'ready');assert.equal(again.files.receipts.length,1);assert.match(again.files.receipts[0].name,/\.3mf$/);
+ assert.equal(publicObject(again).plates.length,6);assert.equal(asked.length,2,'one pass for the kit');
+ assert.match(lines.join('\n'),/holds 全3D打印360°摄影台\.stl \(0 plates\), not the designer’s kit; getting the kit/);
+ // A project that already has its kit is just reopened: no pass.
+ const {value:same}=await logged(()=>service.addStarter('scan-platform'));
+ assert.equal(same.id,old.id);assert.equal(asked.length,2);
+ // Plates no printer MCP has listed yet are unknown, not missing: the kit is reopened, never replaced (Codex on #372).
+ await store.update(old.id,o=>({...o,files:{...o.files,receipts:o.files.receipts.map(r=>({...r,plates:[],platesListed:false}))}}));
+ const {value:unlisted}=await logged(()=>service.addStarter('scan-platform'));
+ assert.equal(unlisted.id,old.id);assert.equal(asked.length,2);assert.equal(unlisted.current?.model,same.current?.model);
+ // Two taps at once on a stale project: one replacement, one pass, inside the project's gate (Codex on #372).
+ await store.update(old.id,o=>({...o,files:{...o.files,receipts:o.files.receipts.map(r=>({...r,name:'old.stl',plates:[],platesListed:undefined}))}}));
+ const {value:pair}=await logged(async()=>{const both=await Promise.all([service.addStarter('scan-platform'),service.addStarter('scan-platform')]);await service.settled(old.id);return both;});
+ assert.equal(pair[0].id,old.id);assert.equal(pair[1].id,old.id);assert.equal(asked.length,2,'the cache has the kit: no pass');
+ assert.equal((await service.get(old.id)).state,'ready');
+ // A caliper project with only one of its two files gets the kit from the cache or a pass, too.
+ const half=await setup(t,async(_input,root)=>caliper(root));
+ const c=await half.service.create('Print this','published','https://makerworld.com/en/models/198362');
+ await half.service.addModelFile(c.id,'Vernier 150mm.3mf',COLOR);
+ await half.store.update(c.id,o=>({...o,starterId:'long-vernier-caliper'}));
+ const {value:full}=await logged(async()=>half.service.settled((await half.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(full.id,c.id);assert.equal(full.files.receipts.length,2);
 });
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
