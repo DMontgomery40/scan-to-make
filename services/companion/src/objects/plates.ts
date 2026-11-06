@@ -34,6 +34,8 @@ export function retainedPlateProgress(object: StmObject): Record<string, PlatePr
     : end === 'failed' || end === 'not-started' || end === 'replaced' ? 'failed'
     : end === 'sent' || object.state === 'sent' ? 'sent'
     : active ? (print.live?.state === 'paused' ? 'paused' : print.live?.state === 'printing' ? 'printing' : 'preparing')
+    // A start Counterpart couldn't confirm (such as a timed-out printer report) is unknown, never "failed": it may be printing.
+    : print.uncertain ? 'unknown'
     : object.state === 'failed' ? 'failed' : 'unknown';
   const ended = print.monitor?.endedAt ? Date.parse(print.monitor.endedAt) : object.updatedAtMs;
   const completedAtMs = previous?.completedAtMs ?? (status === 'printed' ? (Number.isFinite(ended) ? ended : object.updatedAtMs) : undefined);
@@ -66,6 +68,13 @@ export function acknowledgePlate(object: StmObject, status: 'printed' | 'not-pri
     ...(object.print?.printId ? {printId: object.print.printId} : {}),
     ...(status === 'printed' ? {completedAtMs: saved[key(plate)]?.completedAtMs ?? now} : {})};
   return saved;
+}
+
+/** A plate whose last send may have reached the printer: printing it again needs the person to check the printer first. */
+export function plateNeedsPrinterCheck(object: StmObject): boolean {
+  if (object.print?.uncertain) return true;
+  const status = projectPlates(object).find(plate => plate.selected)?.status;
+  return status === 'unknown' || status === 'sent';
 }
 
 export function selectingPlate(object: StmObject, fileIndex: number, plateIndex: number): StmObject {

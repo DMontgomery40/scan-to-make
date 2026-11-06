@@ -20,6 +20,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertAll
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.isEnabled
+import androidx.compose.ui.test.isSelected
+import com.scantomake.counterpart.ui.ProjectPlates
+import com.scantomake.counterpart.core.toJson
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasAnyAncestor
@@ -323,5 +330,59 @@ class HomeLayoutTests {
         compose.onNodeWithText("Update bambu-printer-mcp in Settings → Printers so Counterpart can match each colour to a loaded spool. Nothing was sent to the printer.").assertExists()
         compose.waitForIdle()
         assertEquals("nothing is sliced while the colours are unread", emptyList<String>(), transport!!.paths.filter { it.endsWith("/estimate") })
+    }
+
+    /** David's six-plate rig on Nov 6: plate 1's start couldn't be confirmed. `selected` is the chosen plate. */
+    private fun rig(selected: Int, unconfirmed: Boolean): Map<String, Any> {
+        val names = listOf("Screws", "Photography Platform", "Main Framework", "Background Board", "Phone Holder", "Lifting Parts for Platform")
+        val plates = names.mapIndexed { i, name -> mapOf("id" to "ab:$i", "fileIndex" to 0, "plateIndex" to i, "name" to name, "fileName" to "rig.3mf",
+            "selected" to (i == selected), "sliced" to false, "status" to if (i == 0) "unknown" else "not-printed") }
+        return mapOf("id" to PROJECT, "title" to "3D scan platform", "instructions" to "The rig", "state" to if (unconfirmed) "failed" else "ready",
+            "createdAtMs" to 1, "updatedAtMs" to 2, "kind" to "published", "printerDestinationId" to "p1s", "plates" to plates,
+            "current" to mapOf("model" to "original/rig.3mf", "renders" to emptyList<String>())) +
+            (if (unconfirmed) mapOf("print" to mapOf("bundleId" to "b", "uncertain" to true)) else emptyMap())
+    }
+
+    /** David, Nov 6: "i can't select which plate to print in the app i can see them but i can't click on them". The plates
+     *  stay choosable after an unconfirmed start, on the project and inside Print, and the sheet follows the plate. */
+    @Test fun everyPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() {
+        val unconfirmed = requireNotNull(Project.decode(toJson(rig(0, true)).jsonObject))
+        assertEquals(true, unconfirmed.canSelectPlate)
+        assertEquals(true, unconfirmed.printNeedsCheck)
+        assertEquals(false, requireNotNull(Project.decode(toJson(rig(3, false)).jsonObject)).printNeedsCheck)
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        var selected = 0
+        val mappingAsks = mutableListOf<Int>()
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$PROJECT/plate-selection") -> {
+                selected = WireJson.parseToJsonElement(String(request.body!!)).jsonObject["plateIndex"].toString().toInt()
+                json(200, mapOf("object" to rig(selected, false)))
+            }
+            request.url.endsWith("/v1/objects/$PROJECT/colour-mapping") -> { synchronized(mappingAsks) { mappingAsks.add(selected) }; json(200, mapOf("filaments" to emptyList<Any>(), "trays" to emptyList<Any>())) }
+            request.url.endsWith("/v1/objects/$PROJECT/filaments") -> json(200, mapOf("filaments" to emptyList<Any>()))
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(unconfirmed)
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1s", "Bambu Lab P1S", backend = "bambu-printer-mcp")), "p1s")
+        var screen by mutableStateOf("project")
+        compose.setContent { WithApp {
+            if (screen == "project") ProjectPlates(state.projects.value.first(), busy = false, select = {}, print = {})
+            else PrintSheetScreen(PROJECT, close = {}, printing = {})
+        } }
+        compose.onAllNodes(hasText("Select")).fetchSemanticsNodes().also { assertEquals(5, it.size) }
+        compose.onAllNodes(hasText("Select")).assertAll(isEnabled())
+        compose.onAllNodes(hasText("Print…")).assertAll(isEnabled())
+        compose.onNodeWithText("Check the current print on your printer before changing plates.").assertDoesNotExist()
+        screen = "sheet"
+        compose.waitUntil(5_000) { mappingAsks.isNotEmpty() }
+        compose.onNode(hasTestTag("print-sheet-plate-0-0")).assertIsSelected()
+        compose.onNodeWithText("The last send of this plate may have reached the printer. I checked: it isn't printing this.").assertExists()
+        compose.onNode(hasTestTag("print-sheet-plate-0-3")).assertIsEnabled().performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("print-sheet-plate-0-3") and isSelected()).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(5_000) { synchronized(mappingAsks) { 3 in mappingAsks } }
+        compose.onNodeWithText("The last send of this plate may have reached the printer. I checked: it isn't printing this.").assertDoesNotExist()
+        compose.onNodeWithText("The selected plate changed. Close this sheet and open Print again.").assertDoesNotExist()
     }
 }

@@ -538,6 +538,39 @@ final class LayoutParityUITests: XCTestCase {
         return app
     }
 
+    /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
+    /// on them". Plate 1's start couldn't be confirmed; on the iPhone and the iPad every plate stays choosable on the
+    /// project and inside Print, and only plate 1 asks for the printer check again.
+    func testEveryPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "plates-unconfirmed",
+                               "-CounterpartScreen", "ready"]
+        app.launch()
+        let second = app.buttons["select-plate-0-1"]
+        XCTAssertTrue(second.waitForExistence(timeout: 20))
+        XCTAssertTrue(second.isEnabled, "a plate stays a button you can press after an unconfirmed start")
+        XCTAssertTrue(app.buttons["print-plate-0-0"].isEnabled)
+        XCTAssertTrue(app.buttons["select-plate-0-0"].label.contains("Check print result"), "the doubt stays on plate 1")
+        second.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "selected"), object: second)
+        XCTAssertEqual(XCTWaiter().wait(for: [selected], timeout: 5), .completed)
+        app.buttons["print"].tap()
+        let picker = app.buttons["print-sheet-plate"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10), "Print names its plate and can change it")
+        XCTAssertTrue(picker.isEnabled)
+        XCTAssertTrue((picker.value as? String ?? picker.label).contains("Plate 2"))
+        XCTAssertFalse(app.switches.matching(NSPredicate(format: "label BEGINSWITH %@", "I checked")).firstMatch.exists,
+                       "another plate prints without the check")
+        picker.tap()
+        app.buttons["Plate 6"].firstMatch.tap()
+        let sixth = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@ OR label CONTAINS %@", "Plate 6", "Plate 6"), object: picker)
+        XCTAssertEqual(XCTWaiter().wait(for: [sixth], timeout: 5), .completed, "the sheet follows the plate chosen in it")
+        picker.tap()
+        app.buttons["Plate 1"].firstMatch.tap()
+        XCTAssertTrue(app.switches.matching(NSPredicate(format: "label BEGINSWITH %@", "I checked")).firstMatch.waitForExistence(timeout: 5),
+                      "the plate that may have started asks for the printer check")
+    }
+
     /// The project list: the iPad sidebar, or iPhone Home.
     private func projectList(_ app: XCUIApplication) -> XCUIElement {
         regular ? app.collectionViews.firstMatch : app.scrollViews.firstMatch

@@ -28,6 +28,7 @@ enum Fixtures {
     nonisolated(unsafe) static var titles: [String: String] = [:]
     nonisolated(unsafe) static var projectPreferences: [String: [String: Any]] = [:]
     nonisolated(unsafe) static var selectedPlate = 0
+    nonisolated(unsafe) static var plateChanged = false
     nonisolated(unsafe) static var duplicates: [[String: Any]] = []
 
     static let ids = (mic: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", potato: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
@@ -61,20 +62,30 @@ enum Fixtures {
                 "current": ["model": "current/model.3mf", "renders": [], "ownSettings": true, "ownSettingsFor": "current"],
                 "settings": ["printDefaults": ["quality": "fine", "strength": "strong"]]]]
         }
-        if set == "plates" {
+        // "plates-unconfirmed" is David's rig on Nov 6: plate 1's start timed out, so the companion couldn't confirm it.
+        // Its doubt stays on plate 1 ("Check print result"); every plate stays choosable, here and in the Print sheet.
+        if set == "plates" || set == "plates-unconfirmed" {
             let now = now.timeIntervalSince1970 * 1000
             let sha = String(repeating: "ab", count: 32)
+            let unconfirmed = set == "plates-unconfirmed"
             let plates: [[String: Any]] = (0..<6).map { i in
                 var plate: [String: Any] = ["id": "\(sha):\(i)", "fileIndex": 0, "plateIndex": i,
                     "name": "Plate \(i + 1)", "fileName": "platform.3mf", "selected": selectedPlate == i, "sliced": false,
-                    "status": i == 0 ? "printed" : "not-printed", "thumbnail": "renders/plate-\(i + 1).png"]
-                if i == 0 { plate["completedAtMs"] = now - 60_000 }
+                    "status": i == 0 ? (unconfirmed ? "unknown" : "printed") : "not-printed", "thumbnail": "renders/plate-\(i + 1).png"]
+                if i == 0 && !unconfirmed { plate["completedAtMs"] = now - 60_000 }
                 return plate
             }
-            return [["id": ids.mic, "createdAtMs": now - 120_000, "updatedAtMs": now, "state": "ready",
+            var project: [String: Any] = ["id": ids.mic, "createdAtMs": now - 120_000, "updatedAtMs": now, "state": "ready",
                 "title": "Six-plate UI fixture", "kind": "published", "photos": [], "messages": [], "passes": [],
                 "current": ["model": "original/platform.3mf", "renders": ["renders/plate-\(selectedPlate + 1).png"]],
-                "publishedSelection": ["fileIndex": 0, "plateIndex": selectedPlate, "sliced": false], "plates": plates]]
+                "publishedSelection": ["fileIndex": 0, "plateIndex": selectedPlate, "sliced": false], "plates": plates]
+            // Until another plate is chosen, the project keeps the send it couldn't confirm (the companion drops it on a switch).
+            if unconfirmed && !plateChanged {
+                project["state"] = "failed"
+                project["failure"] = "Counterpart could not confirm a print start. Check the printer before trying again."
+                project["print"] = ["bundleId": "b", "uncertain": true, "destination": ["id": "current", "name": "Bambu Lab P1S"]]
+            }
+            return [project]
         }
         let ms = now.timeIntervalSince1970 * 1000
         func ago(_ minutes: Double) -> Double { ms - minutes * 60_000 }
@@ -363,6 +374,7 @@ struct FixtureTransport: HTTPTransport {
             if parts[3] == "plate-selection", method == "POST",
                let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
                let index = body["plateIndex"] as? Int, (0..<6).contains(index) {
+                Fixtures.plateChanged = Fixtures.plateChanged || index != Fixtures.selectedPlate
                 Fixtures.selectedPlate = index
                 return json(["object": Fixtures.objects()[0]])
             }

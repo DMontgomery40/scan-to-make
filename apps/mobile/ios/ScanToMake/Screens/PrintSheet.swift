@@ -37,6 +37,7 @@ struct PrintSheet: View {
     @Environment(\.horizontalSizeClass) private var widthClass
     private var wide: Bool { widthClass == .regular }
     @State private var checked = false
+    @State private var choosingPlate = false
     @State private var busy: String?
     @State private var problem: String?
     @State private var modelURL: URL?
@@ -66,8 +67,9 @@ struct PrintSheet: View {
             ScrollViewReader { scroll in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        if let plate = project?.selectedPlate, (project?.plates?.count ?? 0) > 1 {
-                            Label(plate.name, systemImage: "square.stack.3d.up").font(.headline)
+                        if let project, (project.plates?.count ?? 0) > 1 {
+                            ProjectPlatePicker(project: project, busy: busy == "print" || choosingPlate) { plate in choosePlate(plate) }
+                                .font(.headline)
                         }
                         printers
                         preview
@@ -131,6 +133,22 @@ struct PrintSheet: View {
         // The spool rows belong to this printer, plate and model version; any of them changing reloads them,
         // so a mapping made for another printer, plate or model is never reused.
         .task(id: mappingLoadKey) { await loadMapping() }
+        // "I checked" was about the plate it was ticked for.
+        .onChange(of: project?.selectedPlate?.id) { checked = false }
+    }
+
+    /// Another plate, chosen in the sheet: the companion selects it, and the estimate, pictures and colours follow it.
+    private func choosePlate(_ plate: ProjectPlate) {
+        guard busy != "print", !choosingPlate else { return }
+        choosingPlate = true; problem = nil
+        Task {
+            defer { choosingPlate = false }
+            do {
+                let ticket = store.startRequest()
+                store.replace(try await store.mac.client.selectPlate(projectId, fileIndex: plate.fileIndex, plateIndex: plate.plateIndex), ticket: ticket)
+            } catch let failure as CompanionError { problem = failure.message }
+            catch { problem = CompanionError.unreachable.message }
+        }
     }
 
     // MARK: Sections
@@ -540,7 +558,7 @@ struct PrintSheet: View {
 
     /// The last print may still be running. A Done project (the Mac's confirmed) prints again without the check.
     private var uncertain: Bool {
-        guard let project, project.print?.uncertain == true else { return false }
+        guard let project, project.printNeedsCheck else { return false }
         return project.state != .confirmed
     }
     /// Copies on a Mac that takes them, for a printer whose MCP really makes them (KAN-214 PR 8b).
@@ -550,7 +568,7 @@ struct PrintSheet: View {
     private var uncertainCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Check the previous print", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(.orange)
-            Text("The last request may have reached \(project?.print?.destination?.name ?? "the printer"). Check it before printing again.")
+            Text(project?.uncertainPrintWords ?? "")
                 .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("I checked; it isn't printing this model", isOn: $checked)
         }
@@ -588,7 +606,7 @@ struct PrintSheet: View {
     }
 
     private var canPrint: Bool {
-        guard busy == nil, printer != nil, printer?.isOffline != true else { return false }
+        guard busy == nil, !choosingPlate, printer != nil, printer?.isOffline != true else { return false }
         // Only the file shown above prints.
         if shownSlice == nil { return false }
         if uncertain && !checked { return false }

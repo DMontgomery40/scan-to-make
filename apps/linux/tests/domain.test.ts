@@ -17,6 +17,8 @@ import {
   startingChoices,
   designerSettingsWords,
   slicerControls,
+  canSelectPlate,
+  printNeedsCheck,
 } from "../src/domain.ts";
 import type { Project, ReconstructionReview } from "../src/types.ts";
 import {
@@ -50,6 +52,37 @@ test("a print sheet rejects a changed plate and never adopts it", () => {
     ),
   );
   assert.equal(frozen, "a:1");
+});
+// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
+// on them". Plate 1's start couldn't be confirmed; every plate stays choosable, on the project and in Print, and only
+// the plate that may have started asks for the printer check.
+test("after an unconfirmed start every plate stays choosable, and only its plate asks for a printer check", () => {
+  const rig = (selected: number, unconfirmed: boolean) =>
+    ({
+      ...project,
+      kind: "published",
+      state: unconfirmed ? "failed" : "ready",
+      ...(unconfirmed ? { print: { bundleId: "b", uncertain: true } } : {}),
+      plates: Array.from({ length: 6 }, (_, i) => ({
+        id: `${"ab".repeat(32)}:${i}`,
+        fileIndex: 0,
+        plateIndex: i,
+        name: `Plate ${i + 1}`,
+        fileName: "rig.3mf",
+        selected: i === selected,
+        sliced: false,
+        status: i === 0 ? "unknown" : "not-printed",
+      })),
+    }) as unknown as Project;
+  assert.equal(canSelectPlate(rig(0, true)), true);
+  assert.equal(printNeedsCheck(rig(0, true)), true);
+  assert.equal(canSelectPlate(rig(3, false)), true);
+  assert.equal(printNeedsCheck(rig(3, false)), false);
+  assert.equal(printNeedsCheck(rig(0, false)), true, "back on plate 1 it asks again");
+  assert.equal(canSelectPlate({ ...rig(3, false), state: "printing" }), false);
+  const choices = { destinationId: "p1s", quality: "standard", strength: "standard", pauseBeforeLayers: [] } as Parameters<typeof printRequest>[1];
+  assert.equal(printRequest("p", choices, "sha", rig(0, false).plates![0].id, true).checked, true);
+  assert.equal("checked" in printRequest("p", choices, "sha", rig(3, false).plates![3].id, false), false);
 });
 test("read issued before a mutation cannot overwrite its result", () => {
   const order = new ReadOrder();

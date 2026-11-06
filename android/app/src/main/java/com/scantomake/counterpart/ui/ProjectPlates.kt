@@ -15,6 +15,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectPlate
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 
 @Composable
 fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Unit, print: (ProjectPlate) -> Unit) {
@@ -42,8 +50,29 @@ fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Uni
                 }
             }
         }
-        if (!project.canSelectPlate) Text(if (project.print?.uncertain == true)
-            "Check the current print on your printer before changing plates." else "Choose another plate when this step finishes.",
-            color = Palette.secondary, fontSize = 13.sp)
+        if (!project.canSelectPlate) Text("Choose another plate when this step finishes.", color = Palette.secondary, fontSize = 13.sp)
+    }
+}
+
+/** The plate a Print sheet prints, and the way to change it there (David, Nov 6: the sheet opened on plate 1 and he
+ *  couldn't switch it). Each plate is a radio choice for TalkBack and the keyboard; the estimate and pictures follow it. */
+@Composable
+fun PrintSheetPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Unit) {
+    val plates = project.plates.orEmpty()
+    if (plates.size < 2) return
+    val manyFiles = plates.map { it.fileIndex }.distinct().size > 1
+    Row(Modifier.horizontalScroll(rememberScrollState()).selectableGroup().testTag("print-sheet-plates"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        plates.forEach { plate ->
+            val enabled = !busy && project.canSelectPlate
+            Column(Modifier.clip(RoundedCornerShape(14.dp)).background(if (plate.selected) Palette.filament.copy(alpha = 0.15f) else Palette.card)
+                .border(2.dp, if (plate.selected) Palette.filament else Color.Transparent, RoundedCornerShape(14.dp))
+                .selectable(selected = plate.selected, enabled = enabled, role = Role.RadioButton) { if (!plate.selected) select(plate) }
+                .semantics { contentDescription = "${plate.name}, ${plate.statusText}" }
+                .testTag("print-sheet-plate-${plate.fileIndex}-${plate.plateIndex}")
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Text(plate.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(if (manyFiles) "${plate.fileName} · ${plate.statusText}" else plate.statusText, color = Palette.secondary, fontSize = 12.sp)
+            }
+        }
     }
 }
