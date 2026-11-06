@@ -176,6 +176,8 @@ const ObtainAnswerSchema = z.object({
 const OBTAIN_LIFETIME_MS = 10 * 60_000;
 const OBTAIN_WAIT_MS = 20_000;
 const MAX_OBTAIN_SESSIONS = 4;
+/** Clients ask again as soon as an answer comes: one not asked about for this long was abandoned (a closed sheet). */
+const OBTAIN_IDLE_MS = 45_000;
 const webUrl = (value: string | undefined) => {
   if (!value) return undefined;
   try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined; } catch { return undefined; }
@@ -661,7 +663,7 @@ export class PrinterSetup {
     return result;
   }
 
-  readonly #obtaining = new Map<string, {client: ProbeClient; tool: string; requestId: string; key: string; field: string; env: string; timer: NodeJS.Timeout}>();
+  readonly #obtaining = new Map<string, {client: ProbeClient; tool: string; requestId: string; key: string; field: string; env: string; timer: NodeJS.Timeout; seen: number; asking: boolean}>();
 
   /** `printers.obtain` (ObtainRequestSchema). */
   async obtain(input: ObtainRequest): Promise<ObtainResult> {
@@ -669,12 +671,16 @@ export class PrinterSetup {
     if (input.session) {
       const open = this.#obtaining.get(input.session);
       if (!open || open.key !== key) return {status: 'failed', message: 'That approval request is no longer open. Start it again.'};
+      open.seen = Date.now();
       return this.#obtainAnswer(input.session, open, () => open.client.callTool(open.tool, {host: input.host, ...(input.port ? {port: input.port} : {}), request_id: open.requestId, wait_ms: OBTAIN_WAIT_MS},
         {timeoutMs: OBTAIN_WAIT_MS + 10_000}));
     }
     const {kind} = await this.#kindForForm({backend: input.backend, printerType: input.printerType, host: input.host, ...(input.port ? {port: input.port} : {})});
     const item = field(kind, input.field);
     if (!item?.obtain) throw new PrinterSetupError('invalid', `${this.#label(input.backend)} can’t fetch that for you. Enter it in the form.`);
+    // A sheet that closed or moved to another printer stops asking without saying so: a new start for the same printer
+    // replaces its approval, and one nobody has asked about for a while is let go before the limit applies.
+    for (const [id, open] of [...this.#obtaining]) if (open.key === key || (!open.asking && Date.now() - open.seen > OBTAIN_IDLE_MS)) this.#closeObtain(id);
     if (this.#obtaining.size >= MAX_OBTAIN_SESSIONS) throw new PrinterSetupError('conflict', 'Finish or close the other approvals first.');
     const entry = await this.#entry(input.backend);
     const cwd = join(this.deps.env.appPrinters, 'profiles');
@@ -683,7 +689,7 @@ export class PrinterSetup {
     const config: PrinterHandoffConfig = {backend: input.backend, process: {command: this.#node, args: [entry], cwd}};
     const client = this.deps.client?.(config) ?? new PrinterMcpClient(config);
     const id = randomUUID();
-    let open: {client: ProbeClient; tool: string; requestId: string; key: string; field: string; env: string; timer: NodeJS.Timeout} | undefined;
+    let open: {client: ProbeClient; tool: string; requestId: string; key: string; field: string; env: string; timer: NodeJS.Timeout; seen: number; asking: boolean} | undefined;
     try {
       const catalog = await client.connect(AbortSignal.timeout(25_000));
       if (!catalog.tools.some(tool => tool.name === item.obtain!.tool)) {
@@ -691,7 +697,7 @@ export class PrinterSetup {
         throw new PrinterSetupError('unavailable', `Update ${this.#label(input.backend)} in Settings → Printers to use ${item.obtain.label}.`);
       }
       open = {client, tool: item.obtain.tool, requestId: '', key, field: input.field, env: item.env,
-        timer: setTimeout(() => this.#closeObtain(id), OBTAIN_LIFETIME_MS)};
+        timer: setTimeout(() => this.#closeObtain(id), OBTAIN_LIFETIME_MS), seen: Date.now(), asking: false};
       open.timer.unref?.();
       this.#obtaining.set(id, open);
       const started = open;
@@ -704,10 +710,13 @@ export class PrinterSetup {
     }
   }
 
-  async #obtainAnswer(id: string, open: {client: ProbeClient; requestId: string; field: string; env: string}, call: () => Promise<unknown>): Promise<ObtainResult> {
+  async #obtainAnswer(id: string, open: {client: ProbeClient; requestId: string; field: string; env: string; seen: number; asking: boolean}, call: () => Promise<unknown>): Promise<ObtainResult> {
     let answer: z.infer<typeof ObtainAnswerSchema>;
     try {
-      const parsed = ObtainAnswerSchema.safeParse(toolResultJson(await call() as never));
+      open.asking = true;
+      let reply: unknown;
+      try { reply = await call(); } finally { open.asking = false; open.seen = Date.now(); }
+      const parsed = ObtainAnswerSchema.safeParse(toolResultJson(reply as never));
       if (!parsed.success) { this.#closeObtain(id); return {status: 'failed', message: 'The printer MCP answered in a way Counterpart can’t read. Update it in Settings → Printers.'}; }
       answer = parsed.data;
     } catch {

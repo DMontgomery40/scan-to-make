@@ -89,3 +89,21 @@ test('printers.obtain: another printer\'s session, a field without obtain, a den
   await assert.rejects(setup.obtain(ObtainRequestSchema.parse({...form, printerType: 'klipper'})), /can’t fetch that/);
   assert.throws(() => ObtainRequestSchema.parse({...form, host: 'https://octopi.local'}), 'a host is checked as the form checks it');
 });
+
+test('printers.obtain: an abandoned approval never blocks a new one (Codex review on #386)', async t => {
+  const {ObtainRequestSchema} = await import('../dist/printing/setup.js');
+  const pending = {status: 'pending', request_id: 'r', approve_url: 'http://octopi.local/a', message: 'Click Allow.'};
+  const {setup, closed} = await fixture(t, Array.from({length: 12}, () => ({...pending})));
+  // The same printer again replaces its approval: starting over never piles up.
+  assert.equal((await setup.obtain(ObtainRequestSchema.parse(form))).status, 'pending');
+  const before = closed(); // the setup-fields probe has closed by now
+  for (let i = 0; i < 5; i++) assert.equal((await setup.obtain(ObtainRequestSchema.parse(form))).status, 'pending');
+  assert.equal(closed() - before, 5, 'each new start for the printer stopped the one before');
+  // Four other printers fill the limit; once they go unasked for 45 s they are let go.
+  for (const host of ['a.local', 'b.local', 'c.local']) await setup.obtain(ObtainRequestSchema.parse({...form, host}));
+  await assert.rejects(setup.obtain(ObtainRequestSchema.parse({...form, host: 'd.local'})), /Finish or close/);
+  const realNow = Date.now;
+  t.after(() => { Date.now = realNow; });
+  Date.now = () => realNow() + 46_000;
+  assert.equal((await setup.obtain(ObtainRequestSchema.parse({...form, host: 'd.local'}))).status, 'pending');
+});
