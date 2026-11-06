@@ -651,7 +651,8 @@ private func project(_ item: [String: Any]) throws -> Project {
 
     func testErrorSentencesNeverDumpTheError() {
         for error: Error in [ControlRemoteError(code:"internal", message:"stack trace"), ControlClientError.invalidResponse,
-                             ControlClientError.timedOut, ControlClientError.unavailable, ControlRemoteError(code:"not-found", message:"x")] {
+                             ControlClientError.timedOut, ControlClientError.unavailable,
+                             ControlRemoteError(code:"not-found", message:"The requested item is no longer available")] {
             let text = ObjectsModel.sentence(for:error)
             XCTAssertFalse(text.contains("stack") || text.contains("Error") || text.contains("companion"), text)
             XCTAssertTrue(text.hasSuffix("."), text)
