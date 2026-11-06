@@ -127,19 +127,18 @@ import Darwin
         XCTAssertEqual(PrinterMCP.list([alone]).count, 1, "a printer in one MCP lists just that one")
     }
 
-    /// The companion restarted with both MCPs current, and no event said so: reading the list again ends the stale state.
-    func testReadingTheMcpListAgainEndsAWaitOrUpdateThatIsAlreadyCurrent() {
+    /// The companion ends every wait within a minute with an event. One that never comes (it restarted, as on Nov 6)
+    /// never leaves a row waiting forever: it says so, and Update is offered again. Any word from the companion first wins.
+    func testAWaitThatHearsNothingMoreBecomesASentenceAndUpdateComesBack() async throws {
         let updates = PrinterUpdates()
-        updates.set("app-bambu", .waiting); updates.set("use-bambu", .updating(from: "1.1.73", to: "1.1.76"))
-        updates.set("app-generic", .waiting); updates.set("failed", .failed(log: "x"))
-        let current = PrinterMcpPackage(package: "bambu-printer-mcp", label: "bambu-printer-mcp", description: "d", installed: true,
-                                        version: "1.1.76", latestVersion: "1.1.76", appMcpId: "app-bambu")
-        let behind = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "mcp-3D-printer-server", description: "d", installed: true,
-                                       version: "1.2.53", latestVersion: "1.2.56", appMcpId: "app-generic")
-        updates.settle([current, behind])
-        XCTAssertNil(updates.status["app-bambu"])
-        XCTAssertEqual(updates.status["app-generic"], .waiting, "one that still has an update to make keeps its state")
-        XCTAssertEqual(updates.status["failed"], .failed(log: "x"))
+        updates.waitingLimit = .milliseconds(50)
+        updates.set("unheard", .waiting)
+        updates.set("heard", .waiting)
+        XCTAssertFalse(updates.apply(try event("mcp.update.started", #"{"mcpId":"heard","toVersion":"1.1.76"}"#)))
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(updates.status["unheard"], .problem(PrinterUpdates.unheard))
+        XCTAssertEqual(updates.status["unheard"]?.busy, false, "Update can be pressed again")
+        XCTAssertEqual(updates.status["heard"], .updating(from: nil, to: "1.1.76"), "an update that started is left alone")
     }
 
     func testTheAnswerSaysWhetherItStartedWaitsOrNeedsAFreshCopy() {

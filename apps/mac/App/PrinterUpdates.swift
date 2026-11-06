@@ -69,37 +69,46 @@ enum McpUpdateStatus: Equatable, Sendable {
     static let shared = PrinterUpdates()
     @Published private(set) var status: [String: McpUpdateStatus] = [:]
 
-    func set(_ mcpId: String, _ status: McpUpdateStatus?) { self.status[mcpId] = status }
+    func set(_ mcpId: String, _ status: McpUpdateStatus?) { record(mcpId, status) }
 
-    /// The companion's list, read again: an install that is already the newest version isn't waiting or updating any
-    /// more, whatever this app last heard (an update replaced while the companion restarted sends no event for it).
-    func settle(_ packages: [PrinterMcpPackage]) {
-        for package in packages where package.installed && !package.offersUpdate && package.latestVersion != nil {
-            for id in [package.appMcpId] + (package.uses ?? []).map(\.mcpId) {
-                switch status[id] { case .waiting?, .updating?: status[id] = nil; default: break }
-            }
+    /// How long a wait may go without word from the companion, which ends every wait within a minute (a send, slice or
+    /// design that is still going ends it with a sentence). Past this, an event went missing, say a companion restart.
+    var waitingLimit: Duration = .seconds(90)
+    static let unheard = "Counterpart didn’t say whether this updated. Try Update again."
+    private var waits: [String: UUID] = [:]
+
+    /// Every change of an install's state: a wait that hears nothing more becomes a sentence and Update is offered again.
+    private func record(_ mcpId: String, _ value: McpUpdateStatus?) {
+        status[mcpId] = value
+        guard value == .waiting else { waits[mcpId] = nil; return }
+        let token = UUID(), limit = waitingLimit
+        waits[mcpId] = token
+        Task { [weak self] in
+            try? await Task.sleep(for: limit)
+            guard let self, self.waits[mcpId] == token, self.status[mcpId] == .waiting else { return }
+            self.record(mcpId, .problem(Self.unheard))
         }
     }
 
     /// An `mcp.update.*` event. Returns whether it finished one (so the printers are read again for the new version).
     @discardableResult func apply(_ event: CounterpartEvent) -> Bool {
         guard let (mcpId, status) = McpUpdateStatus.from(event) else { return false }
-        self.status[mcpId] = status
+        record(mcpId, status)
         if case .updated = status { return true }
         return false
     }
 
     /// Asks the companion to update (or, `fresh`, to install its own copy). The events carry it from there.
     func update(_ mcpId: String, fresh: Bool, socket: String) async {
-        status[mcpId] = .updating(from: nil, to: nil)
+        record(mcpId, .updating(from: nil, to: nil))
         do {
             let reply = try await ControlClient(socketPath: socket).updateMcp(mcpId, fresh: fresh)
             // An event may already have moved it on; never step back from a finished state.
-            if case .updating = status[mcpId] ?? .updating(from: nil, to: nil) { status[mcpId] = McpUpdateStatus(reply) }
+            if case .updating = status[mcpId] ?? .updating(from: nil, to: nil) { record(mcpId, McpUpdateStatus(reply)) }
         } catch let error as ControlRemoteError where !error.message.isEmpty {
-            status[mcpId] = .problem(error.message)
+            record(mcpId, .problem(error.message))
         } catch {
-            status[mcpId] = .problem("Counterpart couldn’t start the update. Try again.")
+            record(mcpId, .problem("Counterpart couldn’t start the update. Try again."))
         }
     }
 }

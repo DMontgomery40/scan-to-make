@@ -46,7 +46,6 @@ import ControlKit
         problem = nil
         if packages != state.packages { packages = state.packages }
         if options != state.options { options = state.options }
-        PrinterUpdates.shared.settle(state.packages)
     }
 
     /// Download: the companion installs only that package; `mcp.update.*` events carry the progress.
