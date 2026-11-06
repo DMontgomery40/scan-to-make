@@ -29,7 +29,7 @@ import Observation
 
     func refresh() async {
         guard !reading else { return }
-        guard Self.configured else { message = "This build isn't signed for iCloud. You can still pair with your Mac's code."; return }
+        guard Self.configured else { message = "This build isn't signed for iCloud. You can still connect with your Mac's code."; return }
         reading = true; defer { reading = false }
         do {
             let container = CKContainer(identifier: CounterpartIdentifiers.cloudKitContainer)

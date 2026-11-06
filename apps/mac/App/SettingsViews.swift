@@ -240,7 +240,7 @@ struct DevicesSettings: View {
         Form {
             Section {
                 if mac.groups.isEmpty {
-                    Text(mac.connection == .notRunning ? "Your phones show here while Counterpart is running." : "No phone is paired yet.")
+                    Text(mac.connection == .notRunning ? "Your phones show here while Counterpart is running." : "No phone is connected yet.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(mac.groups) { group in
@@ -258,7 +258,7 @@ struct DevicesSettings: View {
                 if let problem = mac.problem { Text(problem).foregroundStyle(.red) }
                 Button("Add a Phone…") { NSApp.activate(); openWindow(id:"pairing") }
             } header: { Text("Phones and iPads") } footer: {
-                Text("A phone on your Apple Account finds this Mac by itself. Add a Phone shows a code for any other phone. Pairing a phone again replaces its row; it never adds a second one.")
+                Text("A phone on your Apple Account finds this Mac by itself. Add a Phone shows a code for any other phone. Connecting a phone again replaces its row; it never adds a second one.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if !mac.legacy.isEmpty {
@@ -276,10 +276,10 @@ struct DevicesSettings: View {
                     }
                     HStack {
                         Spacer()
-                        Button("Remove All Older Pairings…") { removingAllLegacy = true }
+                        Button("Remove All Older Connections…") { removingAllLegacy = true }
                     }
                 } header: { Text("Older pairings") } footer: {
-                    Text("Pairings from before this version. Counterpart removes them after 14 days without use.")
+                    Text("Connections from before this version. Counterpart removes them after 14 days without use.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -296,7 +296,7 @@ struct DevicesSettings: View {
             Button("Remove", role:.destructive) { Task { await mac.remove([group.primary.deviceId]) } }
             Button("Cancel", role:.cancel) {}
         } message: { _ in
-            Text("It can’t reach this Mac until you pair it again.")
+            Text("It can’t reach this Mac until you connect it again.")
         }
         .confirmationDialog(removingLegacy.map { "Remove “\($0.deviceName)”?" } ?? "Remove?",
                             isPresented:Binding(get:{ removingLegacy != nil }, set:{ if !$0 { removingLegacy = nil } }),
@@ -316,7 +316,7 @@ struct DevicesSettings: View {
         .confirmationDialog(removingOlder.map { "Remove \($0.older) older pairing\($0.older == 1 ? "" : "s") of “\($0.primary.deviceName)”?" } ?? "Remove?",
                             isPresented:Binding(get:{ removingOlder != nil }, set:{ if !$0 { removingOlder = nil } }),
                             titleVisibility:.visible, presenting:removingOlder) { group in
-            Button("Remove Older Pairings", role:.destructive) { Task { await mac.remove(Array(group.ids.dropFirst())) } }
+            Button("Remove Older Connections", role:.destructive) { Task { await mac.remove(Array(group.ids.dropFirst())) } }
             Button("Cancel", role:.cancel) {}
         } message: { _ in
             Text("They haven’t been used since this phone paired again. A phone that still uses one will need pairing again.")
@@ -834,7 +834,7 @@ struct AdvancedSettings: View {
 
     /// PRD §5.10: a phone on the same Apple Account finds this Mac in iCloud and enrols by itself.
     private var macPublication: String {
-        if case .off(let why) = EventRelay.shared.cloud.status { return why + " Phones pair with the code in Add a Phone." }
+        if case .off(let why) = EventRelay.shared.cloud.status { return why + " Phones connect with the code in Add a Phone." }
         return EventRelay.shared.cloud.macPublication
     }
 
@@ -854,7 +854,7 @@ struct AdvancedSettings: View {
         if let local = addresses.localHostname { rows.append(Row(address:local, detail:"Bonjour on this Wi-Fi", inUse:same(local))) }
         rows += addresses.lan.map { Row(address:$0, detail:"Home network", inUse:same($0)) }
         rows += addresses.tailscale.map { Row(address:$0, detail:"Tailscale", inUse:same($0)) }
-        if let host, !rows.contains(where:{ same($0.address) }) { rows.insert(Row(address:host, detail:"Paired phones use this", inUse:true), at:0) }
+        if let host, !rows.contains(where:{ same($0.address) }) { rows.insert(Row(address:host, detail:"Connected phones use this", inUse:true), at:0) }
         return rows
     }
 

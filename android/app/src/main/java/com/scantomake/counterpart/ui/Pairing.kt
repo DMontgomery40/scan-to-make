@@ -103,7 +103,7 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
         if (working != null) return
         problem = null
         val invitation = try { PairingInvitation.parse(text) } catch (e: Exception) { problem = PairingWords.failure(e); return }
-        working = "Pairing with ${invitation.name ?: "your computer"}…"
+        working = "Connecting to ${invitation.name ?: "your computer"}…"
         job = scope.launch {
             try {
                 app.pairing.pair(invitation, app.pairingStore.deviceName())
@@ -130,8 +130,8 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
             return@Column
         }
         Text("Find your computer", fontSize = 30.sp, fontWeight = FontWeight.Bold)
-        Text(if (replace) "This phone is paired with a computer. Pairing with another one replaces it."
-            else "On your computer, open Counterpart. Point your camera at the code it shows.", color = Palette.secondary, textAlign = TextAlign.Center)
+        Text(if (replace) "This phone is connected to a computer. Connecting to another one replaces it."
+            else "Your computer keeps your projects, makes your parts and runs your printer. On your computer, open Counterpart and point your camera at the code it shows.", color = Palette.secondary, textAlign = TextAlign.Center)
 
         Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(28.dp)).background(Palette.card).border(2.dp, Palette.filament.copy(alpha = 0.6f), RoundedCornerShape(28.dp)),
             contentAlignment = Alignment.Center) {
@@ -179,7 +179,7 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
                             } catch (e: Exception) { problem = PairingWords.failure(e) } finally { code = null }
                         }
                     }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(mac.name, Modifier.weight(1f), fontWeight = FontWeight.Medium); Text("Pair", color = Palette.filament)
+                        Text(mac.name, Modifier.weight(1f), fontWeight = FontWeight.Medium); Text("Connect", color = Palette.filament)
                     }
                 }
                 SecondaryButton(if (nearby == null) "Look on This Wi-Fi" else "Look Again", Modifier.fillMaxWidth(), enabled = !looking && working == null) {
@@ -195,8 +195,8 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
         GlassCard(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Or paste the link from your computer", fontWeight = FontWeight.SemiBold)
-                OutlinedTextField(pasted, { pasted = it }, Modifier.fillMaxWidth(), placeholder = { Text("scantomake://pair?…") }, singleLine = true)
-                SecondaryButton("Pair", Modifier.fillMaxWidth(), enabled = pasted.isNotBlank() && working == null) { pair(pasted.trim()) }
+                OutlinedTextField(pasted, { pasted = it }, Modifier.fillMaxWidth(), placeholder = { Text("Paste the link") }, singleLine = true)
+                SecondaryButton("Connect", Modifier.fillMaxWidth(), enabled = pasted.isNotBlank() && working == null) { pair(pasted.trim()) }
             }
         }
     }

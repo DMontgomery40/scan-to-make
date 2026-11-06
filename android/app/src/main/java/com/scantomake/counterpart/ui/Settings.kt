@@ -119,7 +119,7 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> 
             GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(macName ?: "Your computer", fontWeight = FontWeight.SemiBold)
                 Text("Address in use: ${status?.host ?: "–"}", color = Palette.secondary, fontSize = 13.sp)
-                status?.expiresAtMs?.let { Text("Pairing renews by itself; next renewal before ${java.text.DateFormat.getDateInstance().format(java.util.Date(it.toLong()))}", color = Palette.secondary, fontSize = 12.sp) }
+                status?.expiresAtMs?.let { Text("The connection renews by itself; next renewal before ${java.text.DateFormat.getDateInstance().format(java.util.Date(it.toLong()))}", color = Palette.secondary, fontSize = 12.sp) }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     SecondaryButton("Connect a Different Computer", Modifier.weight(1f), onClick = pairAgain)
                 }
@@ -157,7 +157,7 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> 
         }
     }
     if (forget) AlertDialog(onDismissRequest = { forget = false }, title = { Text("Forget This Computer?") },
-        text = { Text("This phone stops connecting to it. Your projects stay on your computer; pair again to see them.") },
+        text = { Text("This phone stops connecting to it. Your projects stay on your computer; connect again to see them.") },
         confirmButton = { TextButton({ forget = false; state.forgetMac() }) { Text("Forget This Computer", color = Palette.failed) } },
         dismissButton = { TextButton({ forget = false }) { Text("Cancel") } })
 }

@@ -160,7 +160,7 @@ private func phone(_ id: String, _ name: String, pairedAt: Double = 1_700_000_00
                                               lastRefreshedAt:(now.timeIntervalSince1970 - 3 * 86_400) * 1000, expiresAt:0, model:model,
                                               lastSeenAt:seen.map { (now.timeIntervalSince1970 - $0) * 1000 }), ids:["d"])
         }
-        XCTAssertTrue(device(seen:60).detail(at:now).hasPrefix("iPhone · connected now · paired "))
+        XCTAssertTrue(device(seen:60).detail(at:now).hasPrefix("iPhone · connected now · added "))
         XCTAssertTrue(device(seen:86_400).detail(at:now).hasPrefix("iPhone · last seen yesterday"))
         XCTAssertFalse(device(seen:nil).connectedNow(at:now), "a token refresh alone is not a connection")
         XCTAssertEqual(device(seen:60, model:"iPad16,3").kind, "iPad")

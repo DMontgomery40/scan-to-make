@@ -187,9 +187,9 @@ struct SocketObjects: ObjectsCompanion {
     var missingPhoneText: String {
         if availability == .notRunning { return "Not running" }
         switch phoneDiscovery {
-        case .loading: return "Checking paired phones…"
-        case .ready: return "No phone paired yet"
-        case .failed: return "Couldn't read paired phones."
+        case .loading: return "Checking connected phones…"
+        case .ready: return "No phone connected yet"
+        case .failed: return "Couldn't read connected phones."
         }
     }
     var missingPrinterText: String {

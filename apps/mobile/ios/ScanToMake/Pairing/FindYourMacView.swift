@@ -90,10 +90,10 @@ struct FindYourMacView: View {
         }
         .onChange(of: app.pendingLink, initial: true) { _, _ in takeLink() }
         .onChange(of: working == nil) { _, idle in if idle { takeLink() } }
-        .alert("Pair with another Mac?", isPresented: Binding(get: { askReplace != nil }, set: { if !$0 { askReplace = nil } })) {
-            Button("Pair", role: .destructive) { if let link = askReplace { replacing = true; askReplace = nil; use(link) } }
+        .alert("Connect to another Mac?", isPresented: Binding(get: { askReplace != nil }, set: { if !$0 { askReplace = nil } })) {
+            Button("Connect", role: .destructive) { if let link = askReplace { replacing = true; askReplace = nil; use(link) } }
             Button("Cancel", role: .cancel) { askReplace = nil }
-        } message: { Text("This phone is paired with a Mac. Pairing with another one replaces it.") }
+        } message: { Text("This phone is connected to a Mac. Connecting to another one replaces it.") }
     }
 
     // MARK: Finding (screens/phone-pair.jpg)
@@ -105,7 +105,7 @@ struct FindYourMacView: View {
             VStack(spacing: 0) {
                 VStack(spacing: 6) {
                     Text("Find your Mac").font(.title2.bold())
-                    Text("On your Mac, open Counterpart. Point your camera at the code it shows.")
+                    Text("Your Mac keeps your projects, makes your parts and runs your printer. On your Mac, open Counterpart and point your camera at the code it shows.")
                         .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
@@ -142,7 +142,7 @@ struct FindYourMacView: View {
                     if camera == .denied {
                         Button("Open Settings") { openSettings() }.buttonStyle(.glass)
                     } else if cameraUnavailable || camera == .unavailable {
-                        Text("Open the link from your Mac, or pair with a Mac nearby.").font(.subheadline)
+                        Text("Open the link from your Mac, or connect to a Mac nearby.").font(.subheadline)
                             .foregroundStyle(.secondary).multilineTextAlignment(.center)
                         if cameraUnavailable {
                             Button("Try Camera Again") { scannerID = UUID(); cameraUnavailable = false }.buttonStyle(.glass)
@@ -179,7 +179,7 @@ struct FindYourMacView: View {
                         }
                         Spacer(minLength: 0)
                     }
-                    Button { pairNearby(mac) } label: { Text("Pair with \(mac.name)").fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 40) }
+                    Button { pairNearby(mac) } label: { Text("Connect to \(mac.name)").fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 40) }
                         .buttonStyle(.glassProminent).controlSize(.large).disabled(working != nil)
                 }
                 Text("You'll both see the same 6-digit code. Click Allow on the Mac.").font(.caption).foregroundStyle(.secondary)
@@ -192,7 +192,7 @@ struct FindYourMacView: View {
                 Text("Turn on Local Network for Counterpart in Settings.").font(.subheadline).foregroundStyle(.secondary)
                 HStack { Button("Open Settings") { openSettings() }.buttonStyle(.glassProminent); Button("Look Again") { look() }.buttonStyle(.glass) }
             case .code(let started, let name):
-                Text("Pair with \(name)?").font(.headline)
+                Text("Connect to \(name)?").font(.headline)
                 Text(NearbyCrypto.display(started.code))
                     .font(.system(size: 44, weight: .bold, design: .rounded).monospacedDigit())
                     .frame(maxWidth: .infinity)
@@ -218,7 +218,7 @@ struct FindYourMacView: View {
     @ViewBuilder private var status: some View {
         switch phase {
         case .pairing:
-            HStack(spacing: 12) { ProgressView(); Text("Pairing with your Mac…").font(.headline) }
+            HStack(spacing: 12) { ProgressView(); Text("Connecting to your Mac…").font(.headline) }
                 .frame(maxWidth: .infinity).padding(16).glassEffect(.regular, in: .capsule)
         case .explain(let value):
             VStack(alignment: .leading, spacing: 10) {
@@ -273,7 +273,7 @@ struct FindYourMacView: View {
                 .confirmationDialog("Forget this Mac?", isPresented: $confirmForget, titleVisibility: .visible) {
                     Button("Forget This Mac", role: .destructive) { forget() }
                 } message: {
-                    Text("This phone stops connecting to it. Your projects stay on your Mac; pair again to see them.")
+                    Text("This phone stops connecting to it. Your projects stay on your Mac; connect again to see them.")
                 }
             }
             .padding(20)

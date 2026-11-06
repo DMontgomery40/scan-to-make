@@ -198,16 +198,16 @@ private func project(_ item: [String: Any]) throws -> Project {
 
     func testDiscoveryDoesNotClaimEmptyPhonesOrPrintersBeforeSuccessfulReads() async {
         let failed = ObjectsModel(companion: FakeObjects())
-        XCTAssertEqual(failed.missingPhoneText, "Checking paired phones…")
+        XCTAssertEqual(failed.missingPhoneText, "Checking connected phones…")
         XCTAssertEqual(failed.missingPrinterText, "Reading your printer settings…")
         await failed.refresh()
-        XCTAssertEqual(failed.missingPhoneText, "Couldn't read paired phones.")
+        XCTAssertEqual(failed.missingPhoneText, "Couldn't read connected phones.")
         XCTAssertEqual(failed.missingPrinterText, "Couldn't read your printer settings.")
         let companion = FakeObjects()
         await companion.enableDiscovery()
         let empty = ObjectsModel(companion: companion)
         await empty.refresh()
-        XCTAssertEqual(empty.missingPhoneText, "No phone paired yet")
+        XCTAssertEqual(empty.missingPhoneText, "No phone connected yet")
         XCTAssertEqual(empty.missingPrinterText, "No printer found in your printer MCP’s settings.")
     }
 

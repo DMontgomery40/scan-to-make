@@ -57,7 +57,7 @@ export function Pairing({
     <dialog
       className="qr-only"
       ref={ref}
-      aria-label="Pair a phone. Scan this QR code. Press Escape to close."
+      aria-label="Connect a phone. Scan this QR code. Press Escape to close."
       onCancel={(e) => {
         e.preventDefault();
         onClose();
@@ -68,7 +68,7 @@ export function Pairing({
       ) : src ? (
         <img
           src={src}
-          alt="Scan this code with your phone to pair with this computer"
+          alt="Scan this code with your phone to connect to this computer"
         />
       ) : (
         <p>Creating QR code…</p>
@@ -576,7 +576,7 @@ function Devices({ onPair }: { onPair: () => Promise<void> }) {
             run={async () => {
               if (
                 window.confirm(
-                  `Remove ${d.deviceName}? It will need to pair again.`,
+                  `Remove ${d.deviceName}? It will need to connect again.`,
                 )
               ) {
                 await call("devices.remove", { deviceId: d.deviceId });

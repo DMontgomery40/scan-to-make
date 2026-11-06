@@ -13,18 +13,18 @@ public enum PairingWords {
         case .unauthorized: "Your Mac turned this phone down, or the code was already used. Show a new code on your Mac and scan it."
         case .forbidden: "Your Mac turned this phone down. Show a new code and scan it."
         case .rateLimited: "Too many tries. Wait a minute, then scan a new code from your Mac."
-        case .certificateChanged: "This Mac looks different from last time. Pair again to be safe."
+        case .certificateChanged: "This Mac looks different from last time. Connect again to be safe."
         case .certificate: "Your phone couldn’t check that this is your Mac. Show a new code on your Mac and scan it."
         case .wrongHost: "That code sent your phone somewhere else, so nothing was shared. Scan the code on your Mac again."
         case .network, .timeout: unreachable
         case .unavailable: "Your Mac is busy right now. Try again in a moment."
-        case .secureStorage: "This phone couldn’t store the pairing. Unlock it and try again."
-        case .pairingRequired: "Pair this phone with your Mac again."
+        case .secureStorage: "This phone couldn’t save the connection. Unlock it and try again."
+        case .pairingRequired: "Connect this phone to your Mac again."
         case .pairingChanged: "Your Mac changed while this was running. Try again."
-        case .invalidResponse: "Your Mac answered in a way this app doesn’t understand. Update Counterpart on both, then pair again."
+        case .invalidResponse: "Your Mac answered in a way this app doesn’t understand. Update Counterpart on both, then connect again."
         case .invalidDeviceName: "Give this phone a name between 1 and 80 characters."
         case .nearbyDenied: "Your Mac said no to this phone. If that was a mistake, try again and click Allow on your Mac."
-        case .nearbyExpired: "That took too long, so nothing was paired. Try again, then click Allow on your Mac."
+        case .nearbyExpired: "That took too long, so nothing connected. Try again, then click Allow on your Mac."
         case .localNetwork: "Counterpart can’t look on your Wi-Fi. Turn on Local Network for Counterpart in Settings."
         case .cancelled: "Cancelled. Nothing changed."
         case .busy: "Still working on the last request. Try again in a moment."
@@ -36,7 +36,7 @@ public enum PairingWords {
         let code: PairingError.Code
         if let error = error as? PairingError { code = error.code }
         else if let error = error as? PairingLinkError { code = PairingError(error).code }
-        else { return "Pairing didn’t finish. Show a new code on your Mac and scan it." }
+        else { return "Connecting didn’t finish. Show a new code on your Mac and scan it." }
         if code == .network || code == .timeout {
             return unreachable + " If your iPhone just asked about your Wi-Fi, tap Allow, then try again."
         }

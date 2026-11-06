@@ -132,7 +132,7 @@ import ControlKit
         await prepare()
         let enrolment: ICloudEnrolment
         do { enrolment = try await client.icloudEnrolment() } catch {
-            macPublication = "This Mac's Counterpart can't publish itself to iCloud yet. Phones pair with the code in Add a Phone."
+            macPublication = "This Mac's Counterpart can't publish itself to iCloud yet. Phones connect with the code in Add a Phone."
             macWrittenAt = now // try again in 5 minutes, not on every cycle
             macAddresses = addresses
             return
