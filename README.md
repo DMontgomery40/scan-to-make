@@ -51,3 +51,7 @@ The local gate runs the same jobs as CI (hosted runners aren't available):
 ```
 
 The docs site has its own: `node site/check.mjs`.
+
+## Licence
+
+Counterpart is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License, version 3 ([`LICENSE`](LICENSE)). The printer software it works with, [bambu-printer-mcp](https://github.com/DMontgomery40/bambu-printer-mcp) and [mcp-3D-printer-server](https://github.com/DMontgomery40/mcp-3D-printer-server), is GPL-2.0. Third-party components keep their own licences (`THIRD_PARTY_NOTICES` and the app's About screen).
