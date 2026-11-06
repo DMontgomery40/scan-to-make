@@ -349,7 +349,7 @@ figcaption b { color: var(--ink); font-weight: 600; }
 .cmp-card dt { font-weight: 550; font-size: .97rem; }
 .cmp-card dd { margin: 0; display: flex; align-items: center; gap: .55rem; flex: none; }
 .cmp-card dd small { color: var(--ink-soft); font-size: .8rem; text-align: right; }
-@media (max-width: 760px) {
+@media (max-width: 860px) {
   .js-cards .cmp-wrap { display: none; }
   .js-cards .cmp-cards { display: grid; }
 }
