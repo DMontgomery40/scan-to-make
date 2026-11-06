@@ -89,6 +89,8 @@ export interface SessionCallOptions {
   lockTimeoutMs?: number;
   /** Return the server's result as it is (errors and media included), for a transparent adapter. */
   forwardResult?: boolean;
+  /** A read whose answer carries pictures: allowed up to the forwarding limit. */
+  largeResult?: boolean;
 }
 
 function sleep(clock: SessionClock, ms: number, signal?: AbortSignal): Promise<void> {
@@ -190,6 +192,7 @@ export class PrinterSession {
         ...(options.dispatchSensitive ? {dispatchSensitive: true} : {}),
         ...(options.beforeDispatch ? {beforeDispatch: options.beforeDispatch} : {}),
         ...(options.forwardResult ? {forwardResult: true} : {}),
+        ...(options.largeResult ? {largeResult: true} : {}),
         ...(options.onProgress ? {onProgress: options.onProgress} : {}),
         // Only the mutex holder tags questions; any other question goes untagged.
         ...(exclusive ? {elicitationContext: options.elicitationContext ?? {}} : {}),

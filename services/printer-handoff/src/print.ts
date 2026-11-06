@@ -8,7 +8,7 @@ import {
 } from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {slicedFacts, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
-import {inspectModelFile} from './model-file.js';
+import {modelPlatesFrom, type McpModelPlates} from './model-plates.js';
 import {lacksSlicerReport, slicerReport} from './slicer-report.js';
 import {slicePreview, type SlicePreview} from './slice-preview.js';
 import {createHash} from 'node:crypto';
@@ -117,7 +117,18 @@ function filtered(session: PrinterSession, name: string, args: Record<string, un
   return Object.fromEntries(Object.entries(clean).filter(([key]) => allowed.has(key)));
 }
 const DISPATCH_TOOLS = ['print_3mf', 'upload_gcode', 'process_and_print_stl'];
-interface CallOptions {signal?: AbortSignal; beforeDispatch?: () => Promise<void>; elicitationContext?: ElicitationContext; failFast?: boolean; onProgress?: (progress: McpProgress) => void}
+interface CallOptions {signal?: AbortSignal; beforeDispatch?: () => Promise<void>; elicitationContext?: ElicitationContext; failFast?: boolean; onProgress?: (progress: McpProgress) => void; largeResult?: boolean}
+/** `list_3mf_plates` on this session's MCP: its plates, or `plates-unsupported` (Update) when it has no such tool. */
+async function listPlates(session: PrinterSession, modelPath: string, backend: PrinterHandoffConfig['backend'], options: CallOptions = {}, thumbnails = false): Promise<McpModelPlates> {
+  if (!session.hasTool('list_3mf_plates'))
+    throw new PrinterMcpError('plates-unsupported', undefined, `Update ${packageLabel(backend)} in Settings → Printers to show this file’s plates.`);
+  // With every plate's picture the answer can pass the usual result limit: it is a read, bounded by the forwarding one.
+  const result = await call(session, 'list_3mf_plates', {three_mf_path: modelPath, include_thumbnails: thumbnails}, {...options, ...(thumbnails ? {largeResult: true} : {})});
+  const plates = modelPlatesFrom(result.structuredContent);
+  if (!plates) throw new PrinterMcpError('plates-unsupported', undefined, `Update ${packageLabel(backend)} in Settings → Printers to show this file’s plates.`);
+  return plates;
+}
+
 async function call(session: PrinterSession, name: string, args: Record<string, unknown>, options: CallOptions = {}) {
   return session.call(name, filtered(session, name, args), {
     ...(options.signal ? {signal: options.signal} : {}),
@@ -126,6 +137,7 @@ async function call(session: PrinterSession, name: string, args: Record<string, 
     ...(options.elicitationContext ? {elicitationContext: options.elicitationContext} : {}),
     ...(options.failFast ? {failFast: true} : {}),
     ...(options.onProgress ? {onProgress: options.onProgress} : {}),
+    ...(options.largeResult ? {largeResult: true} : {}),
   });
 }
 function absolutePath(result: Parameters<typeof toolResultText>[0]): string {
@@ -266,6 +278,18 @@ export class PrinterHandoffRunner {
     });
   }
 
+  /**
+   * A 3MF's plates as the MCP lists them before slicing (`list_3mf_plates`), with each plate's own picture. An MCP
+   * without the tool is one to update: `plates-unsupported`, saying so. Counterpart reads no plate metadata itself.
+   */
+  async modelPlates(input: {modelPath: string; signal?: AbortSignal}): Promise<McpModelPlates> {
+    return this.#use(async (session, shared) => {
+      const options = {...(input.signal ? {signal: input.signal} : {}), failFast: shared};
+      await session.connect(options);
+      return listPlates(session, input.modelPath, this.#config.backend, options, true);
+    });
+  }
+
   /** Connects and lists the server's tools without calling one (a one-shot session then disconnects). */
   async discover(signal?: AbortSignal): Promise<PrinterToolCatalog> {
     return this.#use(session => session.connect(signal ? {signal} : {}));
@@ -390,14 +414,6 @@ export class PrinterHandoffRunner {
     const selection: PrinterSelection = {...this.#config.selection, ...input.selection};
     const threeMf = extname(input.stlPath).toLowerCase() === '.3mf';
     const slicer = runSlicer(this.#config.slicer, input.slicer, threeMf);
-    const model = threeMf ? inspectModelFile(await readFile(input.stlPath), '3mf') : undefined;
-    const plate = model?.plates.find(item => item.index === (selection.plateIndex ?? 0));
-    if (threeMf && !plate) throw new PrinterMcpError('invalid-plate', undefined, 'Choose a plate contained in this model.');
-    const alreadySliced = plate?.sliced === true;
-    if (alreadySliced && slicer.pauseAtLayers?.length)
-      throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced, so its layer pauses are the ones it was sliced with. Share the designer’s editable 3MF to add a pause.');
-    if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['quality', 'strength', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
-      throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced. Share the designer’s editable 3MF to change its slicing settings or copies.');
     // A chosen spool's profile (load_filaments) replaces the configured filament alias: MCPs refuse the two when they differ.
     if (input.slicer?.loadFilaments && input.slicer.filamentProfile === undefined) delete slicer.filamentProfile;
     const printOptions: PrinterPrintOptions = {...this.#config.print, ...input.printOptions};
@@ -416,6 +432,16 @@ export class PrinterHandoffRunner {
     await progress('connecting');
     const catalog = await session.connect(signal ? {signal} : {});
     step('discover');
+    // The file's plates as the MCP lists them (list_3mf_plates): the chosen one must be there, and whether it is
+    // already sliced decides what may still change.
+    const plate = threeMf ? (await listPlates(session, input.stlPath, this.#config.backend, local)).plates.find(item => item.index === (selection.plateIndex ?? 0)) : undefined;
+    if (threeMf && !plate) throw new PrinterMcpError('invalid-plate', undefined, 'Choose a plate contained in this model.');
+    const modelSha256 = threeMf ? createHash('sha256').update(await readFile(input.stlPath)).digest('hex') : undefined;
+    const alreadySliced = plate?.sliced === true;
+    if (alreadySliced && slicer.pauseAtLayers?.length)
+      throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced, so its layer pauses are the ones it was sliced with. Share the designer’s editable 3MF to add a pause.');
+    if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['quality', 'strength', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
+      throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced. Share the designer’s editable 3MF to change its slicing settings or copies.');
     if (slicer.filamentColours) {
       const sliceProperties = session.getTool('slice_stl').inputSchema.properties ?? {};
       if (!Object.hasOwn(sliceProperties, 'filament_colours') || !Object.hasOwn(sliceProperties, 'load_filaments'))
@@ -528,7 +554,7 @@ export class PrinterHandoffRunner {
     }
     if (alreadySliced) {
       const receipt = inspection?.result as {artifact?: {sha256?: string}; selection?: {plate_index?: number; bambu_model?: string}; inspection?: unknown} | undefined;
-      if (inspection?.tool !== 'inspect_print_file' || receipt?.artifact?.sha256 !== model!.sha256 || receipt.selection?.plate_index !== (selection.plateIndex ?? 0) || receipt.selection?.bambu_model !== selection.model)
+      if (inspection?.tool !== 'inspect_print_file' || receipt?.artifact?.sha256 !== modelSha256 || receipt?.selection?.plate_index !== (selection.plateIndex ?? 0) || receipt?.selection?.bambu_model !== selection.model)
         throw new PrinterMcpError('published-inspection-required', undefined, 'This sliced file needs a compatible printer and a current printer service that can check it.');
     }
     if (inspection) step('inspect');

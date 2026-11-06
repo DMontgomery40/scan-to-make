@@ -75,6 +75,9 @@ const tools = [
   {name: 'counterpart_printer_info', inputSchema: {type: 'object', properties: {}}},
   {name: 'lay_flat', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: {stl_path: string}}},
   {name: 'slice_stl', inputSchema: {type: 'object', additionalProperties: false, required: ['stl_path'], properties: sliceProps}},
+  // list_3mf_plates, as both MCPs answer it since 1.1.69 / 1.2.49 (HANDOFF_FIXTURE_NO_PLATES: an older MCP).
+  ...(process.env.HANDOFF_FIXTURE_NO_PLATES === '1' ? [] : [{name: 'list_3mf_plates', inputSchema: {type: 'object', additionalProperties: false, required: ['three_mf_path'],
+    properties: {three_mf_path: string, include_thumbnails: bool}}}]),
   // HANDOFF_FIXTURE_OWN_PROCESS: get_slice_settings' own_process (true, false), none of it (absent) or a tool error;
   // HANDOFF_FIXTURE_OWN_PROCESS_ARGS=old: an MCP that takes only source_path, template_name, slicer_type and bambu_model.
   ...(process.env.HANDOFF_FIXTURE_OWN_PROCESS ? [{name: 'get_slice_settings', inputSchema: {type: 'object', additionalProperties: false,
@@ -177,6 +180,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     writeFileSync(path, 'solid flat\nendsolid flat\n');
     return process.env.HANDOFF_FIXTURE_LAID_FLAT === 'true'
       ? {...text(path), structuredContent: {path, laid_flat: true}} : text(path);
+  }
+  if (name === 'list_3mf_plates') {
+    // The stand-in MCP reads the plates the way the real ones do (bambu-printer-mcp src/counterpart/model-plates.ts).
+    const {inspectModelFile, modelPlatePreview} = await import('../../dist/model-file.js');
+    const bytes = readFileSync(args.three_mf_path);
+    const info = inspectModelFile(bytes, '3mf');
+    const plates = info.plates.map(plate => {
+      const png = args.include_thumbnails ? modelPlatePreview(bytes, plate.index) : undefined;
+      return {index: plate.index, name: plate.name, objects: plate.objects, sliced: plate.sliced, ...(png ? {thumbnail_png_base64: png.toString('base64')} : {})};
+    });
+    const value = {plate_count: plates.length, plates, ...(info.title ? {title: info.title} : {}), ...(info.designer ? {designer: info.designer} : {})};
+    return {...text(value), structuredContent: value};
   }
   if (name === 'slice_stl') {
     // A real Bambu Studio result.json, returned as bambu-printer-mcp's slicer_result (verbatim).

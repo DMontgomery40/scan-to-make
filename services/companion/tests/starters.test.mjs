@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {mcpPlates} from './support/shown-print.mjs';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,rm,readFile,readdir,writeFile} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
@@ -28,7 +29,9 @@ async function setup(t,answer=async()=>({status:'needs_file'}),extra={}) {
  extra={downloads:join(root,'Downloads'),starter:pinnedCatalog,...extra};
  const runPublished=async input=>{asked.push(input);return answer(input,root);};
  const service=new ObjectService({store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},
-  printGate:{updating:()=>false,hold:()=>()=>{}},runPublished,runTouchup:async()=>{throw Error('a starter entered the design pass');},titleFor:async()=>'Generated',...extra});
+  printGate:{updating:()=>false,hold:()=>()=>{}},runPublished,runTouchup:async()=>{throw Error('a starter entered the design pass');},titleFor:async()=>'Generated',
+  // A printer whose MCP lists a 3MF's plates (list_3mf_plates).
+  print:{services:{runner:{backend:'bambu-printer-mcp',modelPlates:mcpPlates,runBundle:async()=>{throw Error('unused');}}}},...extra});
  t.after(async()=>{await service.close();await rm(root,{recursive:true,force:true});});
  return {root,store,service,asked};
 }

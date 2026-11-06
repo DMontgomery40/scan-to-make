@@ -6,7 +6,7 @@ import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, modelPlatePreview, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
+import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession, type FilamentProposalInput} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
@@ -1911,11 +1911,68 @@ export class ObjectService {
     if (!bytes || createHash('sha256').update(bytes).digest('hex') !== sha256) return undefined;
     return {bytes, extension: record.extension, shape: record.shape, ...(record.slicerWarning ? {slicerWarning: record.slicerWarning} : {})};
   }
+  /**
+   * A kept 3MF's plates and their pictures from the default printer's MCP (`list_3mf_plates`). Undefined when no
+   * printer MCP is there to ask; an MCP without the tool throws its Update sentence (PrinterMcpError `plates-unsupported`).
+   */
+  async #mcpPlates(dir: string, relative: string, sha256: string, options: {needed?: boolean; destinationId?: string} = {}): Promise<ModelFileInfo['plates'] | undefined> {
+    // The printer the project prints on (the catalog's default for a new file), through the MCP it uses now.
+    const destinationId = options.destinationId ?? this.#deps.printerCatalog?.defaultDestinationId;
+    const canonical = destinationId === undefined ? undefined : this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId;
+    const runner = (canonical ? this.#deps.print?.destinations?.get(canonical) : undefined)?.runner ?? this.#deps.print?.services?.runner;
+    if (!runner?.modelPlates) return undefined;
+    let listed;
+    try { listed = await runner.modelPlates({modelPath: join(dir, relative), signal: AbortSignal.timeout(60_000)}); }
+    catch (error) {
+      // An MCP to update says so where the plates are needed (an estimate, a print); an import keeps the file and
+      // lists its plates later, as it does with no printer to reach yet.
+      if (options.needed && error instanceof PrinterMcpError && error.code === 'plates-unsupported') throw new InvalidStateError(error.detail ?? 'Update your printer service in Settings → Printers.');
+      return undefined;
+    }
+    const plates: ModelFileInfo['plates'] = [];
+    for (const plate of listed.plates) {
+      let thumbnail: string | undefined;
+      if (plate.thumbnail) {
+        await mkdir(join(dir, 'renders'), {recursive: true});
+        thumbnail = join('renders', `${sha256}-${plate.index}.png`);
+        await writeFile(join(dir, thumbnail), plate.thumbnail, {mode: 0o600});
+      }
+      plates.push({index: plate.index, name: plate.name, objects: plate.objects, sliced: plate.sliced, ...(thumbnail ? {thumbnail} : {})});
+    }
+    return plates;
+  }
+
+  /** A project's 3MFs kept before a printer MCP could list their plates, listed now (or its Update sentence). */
+  async #listPlates(id: string, destinationId?: string): Promise<void> {
+    const object = await this.get(id);
+    const pending = (object.files?.receipts ?? []).filter(receipt => receipt.platesListed === false);
+    if (!pending.length) return;
+    const dir = this.#deps.store.dir(id);
+    const listed = new Map<string, ModelFileInfo['plates']>();
+    for (const receipt of pending) {
+      // Only the file being printed needs its plates now; another one stays pending if this MCP can't list it.
+      const plates = await this.#mcpPlates(dir, receipt.path, receipt.sha256, {needed: receipt.path === object.current?.model, destinationId: destinationId ?? this.#destinationId(object)});
+      if (plates) listed.set(receipt.sha256, plates);
+    }
+    if (!listed.size) return;
+    this.#changed(await this.#deps.store.update(id, o => {
+      const receipts = (o.files?.receipts ?? []).map(({platesListed, ...receipt}) => listed.has(receipt.sha256)
+        ? {...receipt, plates: listed.get(receipt.sha256)!} : {...receipt, ...(platesListed === false ? {platesListed} : {})});
+      const selected = o.publishedSelection && receipts[o.publishedSelection.fileIndex];
+      const plate = selected && listed.has(selected.sha256) ? (selected.plates.find(item => item.index === o.publishedSelection!.plateIndex) ?? selected.plates[0]) : undefined;
+      return {...o, files: {...o.files!, receipts},
+        ...(plate ? {publishedSelection: {fileIndex: o.publishedSelection!.fileIndex, plateIndex: plate.index, sliced: plate.sliced},
+          current: {...o.current!, renders: plate.thumbnail ? [plate.thumbnail] : o.current!.renders}} : {})};
+    }));
+  }
+
   /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
   async estimate(id: string, request: PrintOptions & {destinationId?: string} = {}): Promise<PrintEstimate> {
     // Whether the file prints with its own settings on the printer this slice is for is settled first, so this slice's
     // defaults are the ones Print uses (`printOptions`): an answer arriving later would change Print's recipe.
     const {destinationId: requested, ...choices} = request;
+    // A 3MF kept before there was a printer MCP gets its plates first, from the MCP of the printer this estimate is for.
+    await this.#listPlates(id, requested);
     const sliceFor = (o: StmObject) => requested ? this.#deps.printerCatalog?.canonical(requested) ?? requested : this.#destinationId(o);
     const before = await this.get(id);
     await this.#askOwnSettings(before, sliceFor(before));
@@ -2408,15 +2465,11 @@ export class ObjectService {
         try { await rename(temporary, join(dir, relative)); } finally { await rm(temporary, {force: true}); }
       }
       if (!originals.includes(relative)) {
-        if (format === '3mf') for (const plate of metadata.plates) {
-          const image = modelPlatePreview(bytes, plate.index);
-          if (!image) continue;
-          await mkdir(join(dir, 'renders'), {recursive: true});
-          const preview = join('renders', `${metadata.sha256}-${plate.index}.png`);
-          await writeFile(join(dir, preview), image, {mode: 0o600});
-          plate.thumbnail = preview;
-        }
-        originals.push(relative); receipts.push({...metadata, path: relative, name: basename(file), ...(info.credit ? {credit: {...info.credit, ...(metadata.designer ? {designer: metadata.designer} : {}), ...(metadata.licence ? {licence: metadata.licence} : {})}} : {})});
+        // A 3MF's plates are the printer MCP's reading of it (list_3mf_plates, PRD §8.0 item 9), as Bambu Studio shows
+        // them. With no printer MCP yet, they are listed when there is one (#listPlates).
+        const plates = format === '3mf' ? await this.#mcpPlates(dir, relative, metadata.sha256) : [];
+        originals.push(relative); receipts.push({...metadata, plates: plates ?? [], ...(format === '3mf' && !plates ? {platesListed: false} : {}),
+          path: relative, name: basename(file), ...(info.credit ? {credit: {...info.credit, ...(metadata.designer ? {designer: metadata.designer} : {}), ...(metadata.licence ? {licence: metadata.licence} : {})}} : {})});
       }
     }
     const options = receipts.flatMap((file, fileIndex) => (file.plates.length ? file.plates : [{index: 0, name: 'Model', objects: [], sliced: false}])
@@ -2466,7 +2519,7 @@ export class ObjectService {
         const [fileIndex, plateIndex] = choices[0]!.split(':').map(Number);
         const file = object.files.receipts[fileIndex!];
         const plate = file?.plates.find(item => item.index === plateIndex);
-        if (!file || (file.format === '3mf' && !plate)) throw new InvalidStateError('Choose a plate in this model.');
+        if (!file || (file.format === '3mf' && !plate && !(file.platesListed === false && plateIndex === 0))) throw new InvalidStateError('Choose a plate in this model.');
         const updated = await this.#deps.store.update(id, o => selectingPlate(o, fileIndex!, plateIndex!));
         await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id});
         return this.#changed(updated);

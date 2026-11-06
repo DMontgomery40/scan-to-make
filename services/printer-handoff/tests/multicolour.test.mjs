@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {platesResult} from './support/plates-tool.mjs';
 import assert from 'node:assert/strict';
 import {mkdtemp, writeFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -124,11 +125,12 @@ test('a multi-colour run slices with one profile and colour per filament and pri
     'bambu_model', 'plate_index', 'three_mf_path', 'use_ams', 'ams_slots', 'ams_mapping', 'auto_match_ams'].map(x => [x, {}]));
   const session = {
     hold: () => () => {}, connect: async () => ({tools: []}), config: {backend: 'bambu-printer-mcp'},
-    hasTool: name => ['slice_stl', 'print_3mf', 'counterpart_printer_info'].includes(name),
+    hasTool: name => ['slice_stl', 'print_3mf', 'counterpart_printer_info', 'list_3mf_plates'].includes(name),
     getTool: name => ({name, inputSchema: {type: 'object', properties}}),
     call: async (name, args, opts) => {
       if (name === 'counterpart_printer_info') return {content: [{type: 'text', text: JSON.stringify({contract: 'counterpart/1', server: {name: 'x', version: '1'},
         printer: {kind: 'bambu', host: 'h'}, capabilities: {progress: true, layers: true, camera: 'none', filaments: 'ams', pause: true, resume: true, cancel: true, print3mf: true, gcode: true}})}]};
+      if (name === 'list_3mf_plates') return platesResult(args.three_mf_path);
       calls.push({name, args});
       if (name === 'slice_stl') return {content: [{type: 'text', text: sliced}]};
       if (name === 'print_3mf') { await opts?.beforeDispatch?.(); return {structuredContent: {jobName: 'pick'}, content: []}; }
