@@ -1,6 +1,6 @@
 import Foundation
 
-/// Add printer… on the iPhone and iPad: the Mac's own `printers.discover`, `.check`, `.obtain`, `.add` and `.installMcp`,
+/// Add printer… on the iPhone and iPad: the Mac's own `printers.discover`, `.check`, `.obtain`, and `.add`,
 /// over `/v1/printers/setup/*` (objects-api.md). The companion and the MCPs do the work; the phone sends the form.
 public extension CompanionClient {
     /// Printers the MCPs found, and every MCP's setup fields. The companion gives discovery 15 s.
@@ -26,11 +26,6 @@ public extension CompanionClient {
         return try await setupCall("obtain", body: body, as: ObtainStep.self, timeout: 70)
     }
 
-    /// Downloads a printer MCP the form needs. Its progress comes as `mcp.update.*` events.
-    func installPrinterMcp(_ package: String) async throws {
-        struct Reply: Decodable {}
-        _ = try await setupCall("install", body: ["package": package], as: Reply.self, timeout: 25)
-    }
 
     private func setupCall<Body: Encodable, T: Decodable>(_ method: String, body: Body, as type: T.Type, timeout: TimeInterval) async throws -> T {
         let path = "/v1/printers/setup/" + method

@@ -30,9 +30,9 @@ import {
 const MAX_PAIR_REQUEST_BYTES = 4096;
 const McpUpdateRequestSchema = z.strictObject({ fresh: z.boolean().optional() });
 
-type PhoneSetupMethod='discover'|'check'|'obtain'|'add'|'install';
+type PhoneSetupMethod='discover'|'check'|'obtain'|'add';
 type PhoneSetup=NonNullable<Parameters<typeof startCompanionServer>[0]>['printerSetup'];
-const SETUP_METHODS={discover:'printers.discover',check:'printers.check',obtain:'printers.obtain',add:'printers.add',install:'printers.installMcp'} as const;
+const SETUP_METHODS={discover:'printers.discover',check:'printers.check',obtain:'printers.obtain',add:'printers.add'} as const;
 
 /** One phone Add printer… call, parsed with the Mac's own `printers.*` schema. */
 async function phoneSetupCall(setup:NonNullable<PhoneSetup>,method:PhoneSetupMethod,input:unknown,discoveredFolders:Set<string>):Promise<unknown>{
@@ -57,9 +57,6 @@ async function phoneSetupCall(setup:NonNullable<PhoneSetup>,method:PhoneSetupMet
     case 'obtain':
       if(!setup.obtain)throw unavailable();
       return await setup.obtain(parsed.data as import('./printing/setup.js').ObtainRequest);
-    case 'install':
-      if(!setup.installMcp)throw unavailable();
-      return await setup.installMcp((parsed.data as {package:import('@scan-to-make/printer-handoff').PrinterBackend}).package);
   }
 }
 /** `POST /v1/pair/icloud`. `installId` is the phone's installation key, the same value QR pairing sends as `installationKey`. */
@@ -191,7 +188,7 @@ export async function startCompanionServer(
     name?: string;
     /** Settings -> Printers on the phone: which MCP a printer uses (`PUT /v1/objects/printers/<id>/mcp`). */
     printerSetup?: Pick<import('./printing/setup.js').PrinterSetup, 'chooseMcp' | 'mcps'> &
-      Partial<Pick<import('./printing/setup.js').PrinterSetup, 'discover' | 'check' | 'obtain' | 'add' | 'installMcp'>>;
+      Partial<Pick<import('./printing/setup.js').PrinterSetup, 'discover' | 'check' | 'obtain' | 'add'>>;
   } = {}
 ): Promise<{
   url: string;
@@ -382,10 +379,10 @@ export async function startCompanionServer(
         const {packages}=await options.printerSetup.mcps();
         response.end(JSON.stringify({packages}));return;
       }
-      const setupCall=/^\/v1\/printers\/setup\/(discover|check|obtain|add|install)$/.exec(request.url??'')?.[1] as PhoneSetupMethod|undefined;
+      const setupCall=/^\/v1\/printers\/setup\/(discover|check|obtain|add)$/.exec(request.url??'')?.[1] as PhoneSetupMethod|undefined;
       if(options.printerSetup&&setupCall){
         // Add printer… on the phone: the same companion methods as the Mac and Linux (`printers.discover`, `.check`,
-        // `.obtain`, `.add`, `.installMcp`), with the same parameter schemas. It writes an MCP's .env, so it needs both
+        // `.obtain`, `.add`), with the same parameter schemas. It writes an MCP's .env, so it needs both
         // printing and settings, as choosing a printer's MCP does.
         if(request.method!=='POST')throw new ServerFailure('method-not-allowed');
         await authorize('printer-handoff:use');await authorize('projects:write');
@@ -403,10 +400,6 @@ export async function startCompanionServer(
             response.statusCode=error.code==='not-found'?404:error.code==='invalid'?400:error.code==='conflict'?409:503;
             // Written for the person ("Download mcp-3D-printer-server first, then add the printer."): the phone shows it as is.
             response.end(JSON.stringify({error:{code:error.code==='invalid'?'invalid-request':error.code,message:error.message,sentence:error.message}}));return;
-          }
-          if(error instanceof McpUpdateError){
-            response.statusCode=error.code==='not-found'?404:503;
-            response.end(JSON.stringify({error:{code:error.code,message:error.message}}));return;
           }
           throw error;
         }

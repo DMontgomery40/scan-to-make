@@ -191,7 +191,6 @@ test('a paired phone adds a printer through the same discover, check, obtain and
   f.setup.check = async printer => { seen.push(['check', printer]); return answers.check.check; };
   f.setup.add = async printer => { seen.push(['add', printer]); return answers.add; };
   f.setup.obtain = async input => { seen.push(['obtain', input]); return input.session ? answers.obtainApproved : answers.obtainPending; };
-  f.setup.installMcp = async pkg => { seen.push(['install', pkg]); return {installed: true, package: pkg}; };
   assert.equal((await f.call('/healthz')).body.capabilities.printerAdd, true);
   const found = await f.call('/v1/printers/setup/discover', 'POST', {});
   assert.equal(found.status, 200);
@@ -203,26 +202,25 @@ test('a paired phone adds a printer through the same discover, check, obtain and
   const pending = await f.call('/v1/printers/setup/obtain', 'POST', octo);
   assert.deepEqual(pending.body, answers.obtainPending);
   assert.deepEqual((await f.call('/v1/printers/setup/obtain', 'POST', {...octo, session: pending.body.session})).body, answers.obtainApproved);
-  assert.deepEqual((await f.call('/v1/printers/setup/install', 'POST', {package: 'mcp-3d-printer-server'})).body, {installed: true, package: 'mcp-3d-printer-server'});
   // A found folder adds as it does on the Mac; a path the phone names itself never reaches the setup.
   assert.equal((await f.call('/v1/printers/setup/add', 'POST', {printer: {folder}})).status, 200);
   assert.equal((await f.call('/v1/printers/setup/add', 'POST', {printer: {folder: '/tmp/elsewhere'}})).status, 400);
   assert.equal((await f.call('/v1/printers/setup/check', 'POST', {printer: {folder: '/tmp/elsewhere'}})).status, 400);
-  assert.deepEqual(seen.map(([name]) => name), ['discover', 'check', 'add', 'obtain', 'obtain', 'install', 'add']);
+  assert.deepEqual(seen.map(([name]) => name), ['discover', 'check', 'add', 'obtain', 'obtain', 'add']);
   assert.deepEqual(seen[1][1], p1s, 'the Mac\'s PrinterFormSchema parses it');
 });
 
 test('phone Add printer needs printing and settings, refuses what the Mac would refuse, and says the MCP\'s words', async t => {
   const f = await fixture(t);
   let reached = 0;
-  for (const name of ['discover', 'check', 'add', 'obtain', 'installMcp']) f.setup[name] = async () => { reached++; return {}; };
+  for (const name of ['discover', 'check', 'add', 'obtain']) f.setup[name] = async () => { reached++; return {}; };
   for (const credential of [f.readOnly, f.printOnly, f.settingsOnly])
     assert.equal((await f.call('/v1/printers/setup/discover', 'POST', {}, credential)).status, 403);
   assert.equal((await f.call('/v1/printers/setup/discover')).status, 405);
   for (const [path, body] of [['check', {printer: {backend: 'bambu-printer-mcp', printerType: 'bambu', host: 'h', port: '0'}}],
     ['add', {printer: {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'http://x/'}}], ['add', {}],
     ['obtain', {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local', field: 'secret', session: 'nope'}],
-    ['install', {package: 'something-else'}], ['discover', {extra: true}]])
+    ['discover', {extra: true}]])
     assert.equal((await f.call('/v1/printers/setup/' + path, 'POST', body)).status, 400, path);
   assert.equal(reached, 0, 'nothing invalid or unauthorized reaches the MCPs');
   const {PrinterSetupError} = await import('../dist/printing/setup.js');
