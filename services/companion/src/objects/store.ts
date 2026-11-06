@@ -161,6 +161,8 @@ export class ObjectStore {
   /** Read-modify-write of one object is serialized, so simultaneous changes never overwrite each other. */
   readonly #queues = new Map<string, Promise<unknown>>();
   constructor(root: string) { this.#root = root; }
+  /** The folder that holds every project's folder. */
+  get root(): string { return this.#root; }
 
   dir(id: string): string {
     if (!ID.test(id)) throw new ObjectNotFoundError();

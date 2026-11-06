@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,rm,readFile,readdir,writeFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
@@ -18,6 +19,7 @@ const model=(title,plates)=>Buffer.from(zipSync({'[Content_Types].xml':strToU8('
 /** The published-model worker (PRD §8.11), faked: what it was asked, and the files it "downloaded". */
 async function setup(t,answer=async()=>({status:'needs_file'}),extra={}) {
  const root=await mkdtemp(join(tmpdir(),'starters-')),store=new ObjectStore(join(root,'objects')),asked=[];
+ extra={downloads:join(root,'Downloads'),...extra};
  const runPublished=async input=>{asked.push(input);return answer(input,root);};
  const service=new ObjectService({store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},
   printGate:{updating:()=>false,hold:()=>()=>{}},runPublished,runTouchup:async()=>{throw Error('a starter entered the design pass');},titleFor:async()=>'Generated',...extra});
@@ -131,6 +133,62 @@ test('a starter never takes a download that isn’t the designer’s, nor half a
   assert.equal(o.state,'failed',label);assert.equal(o.files,undefined,label);
   assert.equal(o.failure,'Counterpart couldn’t download the designer’s files from MakerWorld. Nothing arrived. Try again.',label);
  }
+});
+// Parent, Nov 6 (after "you've downloaded the models from bambu 10 fucking times"): a starter downloads its files at
+// most once per computer. The cache, then ~/Downloads, before any browser work.
+test('a starter whose files are in its cache opens Ready with no worker run, on a second tap and on Try Again',async t=>{
+ const {service,store,asked,root}=await setup(t,async(_input,root)=>caliper(root));
+ const first=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(first.state,'ready');assert.equal(asked.length,1,'one download, the first time');
+ await service.delete(first.id);
+ const {value:again,lines}=await logged(()=>service.addStarter('long-vernier-caliper'));
+ assert.notEqual(again.id,first.id);assert.equal(again.state,'ready');assert.equal(again.files.receipts.length,2);
+ assert.deepEqual(again.files.receipts.map(r=>r.sha256).sort(),first.files.receipts.map(r=>r.sha256).sort());
+ assert.equal(again.credit.url,'https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths');
+ assert.match(lines.join('\n'),/already on this computer \(cache\), no download/);
+ // The cache is keyed by MakerWorld's model id, beside the projects.
+ assert.equal((await readdir(join(root,'starters','makerworld-198362'))).length,2);
+ // Try Again on a failed starter takes the cache too.
+ await store.update(again.id,o=>({...o,state:'failed',failure:'x',current:undefined,files:undefined}));
+ const retried=await service.settled((await service.start(again.id)).id);
+ assert.equal(retried.state,'ready');assert.equal(asked.length,1,'never downloaded again');
+});
+test('a starter whose pinned files are already in Downloads opens Ready with no worker run; other files there never count',async t=>{
+ const color=model('Vernier Caliper Ruler - Two Lengths',['Plate 1']),gauge=model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1']);
+ const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+ const entry={...JSON.parse(await readFile(join(STARTER_ASSETS,'catalog.json'),'utf8')).find(item=>item.id==='long-vernier-caliper'),sha256:[sha(color),sha(gauge)]};
+ const {service,asked,root}=await setup(t,async(_input,root)=>caliper(root),{starter:id=>id===entry.id?entry:undefined});
+ await mkdir(join(root,'Downloads'));
+ // Only one pinned file, plus a same-designer file that isn't one of them: not enough, so the worker runs.
+ await writeFile(join(root,'Downloads','Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),color);
+ await writeFile(join(root,'Downloads','Some other caliper.3mf'),model('Vernier Caliper Ruler - Two Lengths',['A','B']));
+ const partial=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(asked.length,1);await service.delete(partial.id);
+ await rm(join(root,'starters'),{recursive:true,force:true});
+ await writeFile(join(root,'Downloads','DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf'),gauge);
+ const {value:o,lines}=await logged(()=>service.addStarter('long-vernier-caliper'));
+ assert.equal(o.state,'ready');assert.equal(asked.length,1,'no worker run when Downloads already has them');
+ assert.deepEqual(o.files.receipts.map(r=>r.sha256).sort(),[sha(color),sha(gauge)].sort());
+ assert.match(lines.join('\n'),/already on this computer \(Downloads\), no download/);
+});
+test('Try Again after a pickup never downloads again: what arrived is kept, even part of a kit',async t=>{
+ let pass=0;
+ const {service,asked}=await setup(t,async(_input,root)=>{
+  pass++;
+  if(pass===1){const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1'])]]);
+   return {status:'needs_file',reason:'site_error',summary:'The depth gauge’s file answered 503.',arrived:made.files};}
+  assert.match(_input.request,/Already on this computer, so don't download these again: Vernier\+Caliper\+Ruler\+150mm\+COLOR-02\.3mf\. Download only the other file\./);
+  const made=await downloaded(root,[['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1'])]]);
+  return {status:'needs_file',reason:'download_not_saved',summary:'Only the gauge.',arrived:made.files};
+ });
+ const {value:first}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+ assert.equal(first.state,'failed','half a kit is not ready');
+ const {value:second}=await logged(async()=>service.settled((await service.start(first.id)).id));
+ assert.equal(second.state,'ready','the kept colour file and the new gauge make the kit');assert.equal(second.files.receipts.length,2);
+ assert.equal(asked.length,2);
+ await service.delete(second.id);
+ const third=await service.addStarter('long-vernier-caliper');
+ assert.equal(third.state,'ready');assert.equal(asked.length,2,'a pickup is never downloaded again');
 });
 test('every published pass that ends without the file logs why: a worker failure, a thrown pass, a starter with no worker',async t=>{
  const failing=await setup(t,async()=>({status:'failed',reason:'Claude Code couldn’t start: spawn EACCES',run:{toolCalls:0,seconds:0,exitCode:null}}));

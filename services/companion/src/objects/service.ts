@@ -1,8 +1,8 @@
-import {starterProject} from '../starters/catalog.js';
+import {starterModelId, starterProject as bundledStarter, type StarterProject} from '../starters/catalog.js';
 import {acknowledgePlate, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
 import {copyFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
-import {tmpdir} from 'node:os';
+import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
@@ -149,6 +149,12 @@ export interface ObjectServiceDeps {
   stlInfo: (stlPath: string) => Promise<[number, number, number] | undefined>;
   claudePath: string;
   modelAccess?: import('../model-access.js').ModelAccessService;
+  /** Starters' designer files, kept once per computer by model id (default: beside the projects folder). */
+  starterCache?: string;
+  /** Where the person's browser saves downloads (default ~/Downloads). */
+  downloads?: string;
+  /** The starter catalog (default: the bundled catalog.json). */
+  starter?: (id: string) => StarterProject | undefined;
   requireModelAccess?:boolean;
   handoff: PrinterHandoffConfig;
   /** The handoff profile as the companion runs it now: after an MCP update (PRD §8.10) it carries that update's command. */
@@ -551,7 +557,7 @@ export class ObjectService {
   /** Curated assets only; this never copies an existing project or any of its activity. */
   addStarter(starterId: string): Promise<StmObject> {
     const next = this.#starterAdding.catch(() => undefined).then(async () => {
-      const starter = starterProject(starterId);
+      const starter = this.#starter(starterId);
       if (!starter) throw new InvalidStateError('Choose one of the starter projects.');
       const existing = (await this.#deps.store.list()).find(o => o.starterId === starterId);
       if (existing) return this.get(existing.id);
@@ -1181,6 +1187,15 @@ export class ObjectService {
       throw new InvalidStateError("Add photos of it, or describe what you'd like changed.");
     if (object.state === 'touching-up') return object;
     if (object.kind === 'published' && object.current && ['ready', 'needs-closeup'].includes(object.state)) return object;
+    // A starter downloads its files at most once per computer: the cache, then ~/Downloads, before any browser work.
+    if (object.starterId && !object.current && ['new', 'failed', 'needs-closeup'].includes(object.state)) {
+      const starter = this.#starter(object.starterId);
+      const found = starter ? await this.#starterOnDisk(starter) : undefined;
+      if (starter && found) {
+        console.error(`starter ${starter.id}: project ${id} uses the designer’s files already on this computer (${found.from}), no download: ${found.files.map(file => basename(file)).join(', ')}`);
+        return this.#changed(await this.#keepPublished(id, found.files, {...(object.credit ? {credit: object.credit} : {})}));
+      }
+    }
     if (object.state === 'needs-closeup') return this.#pass(object, {});
     if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('This object has already been touched up.');
     return this.#pass(object, {});
@@ -2169,7 +2184,11 @@ export class ObjectService {
     onProgress: NonNullable<TouchupInput['onProgress']>, stage: (id: StageId) => void, worker?: import('../touchup/runner.js').ProjectWorker): Promise<PublishedResult> {
     const link = publishedLink(note) ?? publishedLink(object.instructions) ?? (object.credit ? {url: object.credit.url, site: object.credit.site ?? new URL(object.credit.url).hostname} : undefined);
     if (!link) return {status: 'needs_file'};
-    const request = [object.instructions?.trim(), note?.trim()].filter(Boolean).join('\n\n');
+    // A starter's files already kept on this computer are never downloaded again: the worker gets only what's missing.
+    const starter = object.starterId ? this.#starter(object.starterId) : undefined;
+    const kept = starter ? await this.#starterDownloads(starter, await this.#modelFiles(this.#starterCacheDir(starter), 1)) : [];
+    const keptNote = kept.length ? `Already on this computer, so don't download these again: ${kept.map(file => basename(file)).join(', ')}. Download only the other file${starter!.files - kept.length === 1 ? '' : 's'}.` : undefined;
+    const request = [object.instructions?.trim(), note?.trim(), keptNote].filter(Boolean).join('\n\n');
     const run = this.#deps.runPublished ?? (input => defaultRunPublished(input));
     return run({worker, root: join(this.dir(object.id), 'passes'), photos, request, link, claudePath: this.#deps.claudePath,
       startedAtMs, signal, onProgress, onStage: stage});
@@ -2187,8 +2206,11 @@ export class ObjectService {
     // e95f31ea: both 150 mm profiles were in Downloads at 21:08, the worker's own check missed them, and the project
     // said "Sign in"). PRD §8.11 step 2.2: a matching download is used at once.
     if (result.status !== 'downloaded' && result.arrived?.length && !(result.status === 'failed' && result.run?.stopReason === 'cancelled')) {
-      const object = await store.get(id), starter = object.starterId ? starterProject(object.starterId) : undefined;
-      const picked = starter ? await this.#starterDownloads(starter, result.arrived) : [];
+      const object = await store.get(id), starter = object.starterId ? this.#starter(object.starterId) : undefined;
+      const kept = starter ? await this.#modelFiles(this.#starterCacheDir(starter), 1) : [];
+      const picked = starter ? await this.#starterDownloads(starter, [...kept, ...result.arrived]) : [];
+      // Even part of a kit is kept, so a later pass never downloads what already arrived.
+      if (starter && picked.length < starter.files) await this.#cacheStarter(starter, picked);
       if (starter && picked.length >= starter.files) {
         console.error(`published pass: project ${id} took ${picked.length} of the designer’s files from Downloads (the worker reported ${result.status}): ${picked.map(file => basename(file)).join(', ')}`);
         return this.#keepPublished(id, picked, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(credit ? {credit} : {})});
@@ -2236,19 +2258,65 @@ export class ObjectService {
   }
 
   /**
-   * The arrived files a starter can take: model files whose own metadata names the catalog's designer, one per
-   * distinct file (repeat clicks save byte-identical copies). Anything else that arrived is left alone.
+   * The files a starter can take: model files whose own metadata names the catalog's designer, one per distinct file
+   * (repeat clicks save byte-identical copies), and, when `pinned`, only the catalog's own published files.
    */
-  async #starterDownloads(starter: NonNullable<ReturnType<typeof starterProject>>, arrived: string[]): Promise<string[]> {
+  async #starterDownloads(starter: StarterProject, files: string[], pinned = false): Promise<string[]> {
     const picked: string[] = [], seen = new Set<string>();
-    for (const file of arrived) {
+    for (const file of files) {
       try {
         const metadata = inspectModelFile(await readModelFile(file), extname(file).toLowerCase() === '.stl' ? 'stl' : '3mf');
         if (metadata.designer !== starter.designer || seen.has(metadata.sha256)) continue;
+        if (pinned && !starter.sha256?.includes(metadata.sha256)) continue;
         seen.add(metadata.sha256); picked.push(file);
       } catch { /* not a model this starter can use */ }
     }
     return picked;
+  }
+
+  #starter(id: string) { return (this.#deps.starter ?? bundledStarter)(id); }
+  #starterCacheDir(starter: StarterProject) {
+    return join(this.#deps.starterCache ?? join(dirname(this.#deps.store.root), 'starters'), starterModelId(starter));
+  }
+  /** A model file in a folder, one level down (the cache keeps each file in a folder named by its sha256). */
+  async #modelFiles(folder: string, depth: number): Promise<string[]> {
+    const out: string[] = [];
+    for (const entry of await readdir(folder, {withFileTypes: true}).catch(() => [])) {
+      if (entry.name.startsWith('.')) continue;
+      const path = join(folder, entry.name);
+      if (entry.isDirectory() && depth > 0) out.push(...await this.#modelFiles(path, depth - 1));
+      else if (entry.isFile() && /\.(3mf|stl)$/i.test(entry.name)) out.push(path);
+    }
+    return out.sort();
+  }
+  /**
+   * Everything a starter needs that is already on this computer: its cache first, then ~/Downloads, where a file
+   * counts only when its metadata names the designer and, for a starter whose files are pinned, its sha256 is one of them.
+   */
+  async #starterOnDisk(starter: StarterProject): Promise<{files: string[]; from: 'cache' | 'Downloads'} | undefined> {
+    const cached = await this.#starterDownloads(starter, await this.#modelFiles(this.#starterCacheDir(starter), 1));
+    if (cached.length >= starter.files) return {files: cached, from: 'cache'};
+    if (!starter.sha256?.length) return undefined;
+    const downloads = await this.#starterDownloads(starter, await this.#modelFiles(this.#deps.downloads ?? join(homedir(), 'Downloads'), 0), true);
+    return downloads.length >= starter.files ? {files: downloads, from: 'Downloads'} : undefined;
+  }
+  /** Keeps a starter's designer files once per computer, so Try Again and a second tap never download them again. */
+  async #cacheStarter(starter: StarterProject, files: string[]) {
+    const root = this.#starterCacheDir(starter);
+    for (const file of files) {
+      try {
+        const bytes = await readModelFile(file);
+        const sha256 = inspectModelFile(bytes, extname(file).toLowerCase() === '.stl' ? 'stl' : '3mf').sha256;
+        const folder = join(root, sha256), target = join(folder, basename(file));
+        if (await stat(target).then(() => true, () => false)) continue;
+        await mkdir(folder, {recursive: true, mode: 0o700});
+        const temporary = join(folder, `.incoming-${randomUUID()}`);
+        await writeFile(temporary, bytes, {flag: 'wx', mode: 0o600});
+        await rename(temporary, target);
+      } catch (error) {
+        console.error(`starter ${starter.id}: couldn’t keep ${basename(file)} in its cache: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   /** One companion-log line per published pass that ended without the file: the real cause, never only the sentence shown. */
@@ -2266,6 +2334,8 @@ export class ObjectService {
   async #keepPublished(id: string, files: string[], info: {startedAtMs?: number; now?: number; model?: PublishedModel; summary?: string; credit?: StmObject['credit']}): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(id), now = info.now ?? Date.now();
     const object = await store.get(id);
+    const starter = object.starterId ? this.#starter(object.starterId) : undefined;
+    if (starter) await this.#cacheStarter(starter, await this.#starterDownloads(starter, files));
     const originals = [...(object.files?.original ?? [])];
     const receipts = [...(object.files?.receipts ?? [])];
     await mkdir(join(dir, 'original'), {recursive: true});

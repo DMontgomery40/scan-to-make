@@ -9,6 +9,15 @@ export interface StarterProject {
   url: string; licence: string; source: 'makerworld';
   /** How many distinct designer files make the project ready: the caliper and its depth gauge are two. */
   files: number;
+  /** The designer's files as published, when known: a file already in ~/Downloads is used only when it is one of these. */
+  sha256?: string[];
+}
+/** The site's own id for the model (MakerWorld's /models/<id>-<slug>), which names its files' cache folder. */
+export function starterModelId(starter: Pick<StarterProject, 'url' | 'id'>): string {
+  const parts = new URL(starter.url).pathname.split('/').filter(Boolean);
+  const after = parts[parts.indexOf('models') + 1] ?? '';
+  const digits = after.split('-')[0] ?? '';
+  return /^\d+$/.test(digits) ? `makerworld-${digits}` : `starter-${starter.id}`;
 }
 export function starterProject(id: string): StarterProject | undefined {
   const catalog = JSON.parse(readFileSync(join(STARTER_ASSETS, 'catalog.json'), 'utf8')) as StarterProject[];
