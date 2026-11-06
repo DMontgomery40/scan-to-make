@@ -99,7 +99,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route") { return "printer-handoff:use" }
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/mcp") { return "projects:write" }
             // Add printer… (the Mac also checks printing, `printer-handoff:use`; every phone pairing has both).
-            if is_("/v1/printers/setup/(discover|check|obtain|add|install)") { return "projects:write" }
+            if is_("/v1/printers/setup/(discover|check|obtain|add)") { return "projects:write" }
         default: break
         }
         return nil

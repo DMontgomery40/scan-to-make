@@ -217,15 +217,14 @@ Bambu Studio's own verdict on the slice (KAN-223, when the MCP returns `slicer_r
 
 ### Adding a printer from the phone (PRD §5.8, §6.1)
 
-Add printer… on the iPhone, iPad and Android calls the same companion methods as the Mac and Linux (`local-control.md`: `printers.discover`, `printers.check`, `printers.obtain`, `printers.add`, `printers.installMcp`), with the same parameter schemas and replies. Every route is `POST`, needs PRINT and SETTINGS (it writes an MCP's `.env`), and is advertised by `printerAdd` in `/healthz`.
+Add printer… on the iPhone, iPad and Android calls the same companion methods as the Mac and Linux (`local-control.md`: `printers.discover`, `printers.check`, `printers.obtain`, `printers.add`), with the same parameter schemas and replies. Every route is `POST`, needs PRINT and SETTINGS (it writes an MCP's `.env`), and is advertised by `printerAdd` in `/healthz`.
 
 | Path | Body | Reply |
 |---|---|---|
-| `/v1/printers/setup/discover` | `{}` | `{found, network, options}`: printers the MCPs found, and every MCP's own setup fields (`counterpart_setup_fields`) |
+| `/v1/printers/setup/discover` | `{}` | `{found, network, options}`: printers the MCPs found, and every MCP's own setup fields (`counterpart_setup_fields`). The brands list only MCPs that answered, so the form never offers one that isn't on the computer |
 | `/v1/printers/setup/check` | `{printer}` | `{check}` |
 | `/v1/printers/setup/obtain` | `{backend, printerType, host, port?, field, session?}` | one `printers.obtain` step (`status`, `message`, `approveUrl?`, `value?`) |
 | `/v1/printers/setup/add` | `{printer}` | `{id, destinationId?, sameAs?}` |
-| `/v1/printers/setup/install` | `{package}` | `{installed, package}` or `{update}`; progress comes as `mcp.update.*` events |
 
 `printer` is `PrinterFormSchema`. A `{folder}` printer is accepted only when the last discovery from a phone listed that folder: a paired device never names a path on the computer itself. A refusal from the setup is `{error: {code, message}}` with its own sentence in `message` and `sentence` (400 `invalid-request`, 404, 409 `conflict`, 503 `unavailable`). The answers in `packages/contracts/fixtures/printer-setup-phone.json` are shared by the companion, iPhone and Android tests.
 
