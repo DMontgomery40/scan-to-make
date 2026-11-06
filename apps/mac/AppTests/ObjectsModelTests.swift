@@ -264,6 +264,34 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertNil(SlicerControls(options: nil, backend: "mcp-3d-printer-server"))
     }
 
+    /// Add printer…'s "Approve in OctoPrint" stays reachable with projects present: the button is the chosen MCP's own
+    /// (`obtain` on OctoPrint's key, mcp-3d-printer-server 1.2.53's `counterpart_setup_fields`), and none elsewhere.
+    func testAddPrinterApprovalButtonComesFromTheChosenMCPWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("caliper", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertFalse(model.objects.isEmpty, "projects are present")
+        let options = try JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
+        {"types":[
+          {"printerType":"bambu","label":"Bambu Lab","backends":["bambu-printer-mcp"],"serial":true,"secret":{"label":"Access code","required":true}},
+          {"printerType":"octoprint","label":"OctoPrint","backends":["mcp-3d-printer-server"],"serial":false,
+           "secret":{"label":"API key","hint":"Approve this app in OctoPrint, or copy a key from OctoPrint: Settings → Application Keys","required":true,
+             "obtain":{"label":"Approve in OctoPrint","hint":"OctoPrint asks you to allow this app in its web page","backends":["mcp-3d-printer-server"]}}}],
+         "models":{}}
+        """.utf8))
+        var form = PrinterForm()
+        form.backend = "mcp-3d-printer-server"; form.printerType = "octoprint"; form.host = "octopi.local"
+        let control = try XCTUnwrap(ObtainControl(options: options, form: form))
+        XCTAssertEqual(control.label, "Approve in OctoPrint")
+        XCTAssertEqual(control.hint, "OctoPrint asks you to allow this app in its web page")
+        var bambu = PrinterForm()
+        bambu.host = "192.168.1.40"
+        XCTAssertNil(ObtainControl(options: options, form: bambu), "a field the MCP doesn't fetch shows no button")
+        XCTAssertNil(ObtainControl(options: options, form: PrinterForm(folder: "/Users/someone/mcp-3D-printer-server")), "a found folder has its own .env")
+        XCTAssertEqual(ControlClient.timeout(for: "printers.obtain"), 70)
+    }
+
     func testDiscoveryDoesNotClaimEmptyPhonesOrPrintersBeforeSuccessfulReads() async {
         let failed = ObjectsModel(companion: FakeObjects())
         XCTAssertEqual(failed.missingPhoneText, "Checking connected phones…")

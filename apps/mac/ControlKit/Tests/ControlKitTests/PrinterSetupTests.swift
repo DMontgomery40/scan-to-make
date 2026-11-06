@@ -30,6 +30,36 @@ final class PrinterSetupTests: XCTestCase {
         XCTAssertEqual(PrinterForm(folder: "/Users/someone/mcp-3D-printer-server").json, .object(["folder": .string("/Users/someone/mcp-3D-printer-server")]))
     }
 
+    /// OctoPrint's key approved in OctoPrint (mcp-3d-printer-server 1.2.51+): the button is the MCP's, the steps run
+    /// until the person answers, and only the field's value comes back.
+    @MainActor func testObtainRunsTheMCPsApprovalUntilAnswered() async throws {
+        let options = try JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
+        {"types":[{"printerType":"octoprint","label":"OctoPrint","backends":["mcp-3d-printer-server"],"serial":false,
+          "secret":{"label":"API key","required":true,"obtain":{"label":"Approve in OctoPrint","hint":"OctoPrint asks you to allow this app in its web page","backends":["mcp-3d-printer-server"]}}}],"models":{}}
+        """.utf8))
+        var form = PrinterForm()
+        form.backend = "mcp-3d-printer-server"; form.printerType = "octoprint"; form.host = " octopi.local "
+        let control = try XCTUnwrap(ObtainControl(options: options, form: form))
+        XCTAssertEqual(control.label, "Approve in OctoPrint")
+        var other = form; other.backend = "bambu-printer-mcp"
+        XCTAssertNil(ObtainControl(options: options, form: other), "only the MCP that declares it")
+
+        let answers = [ObtainStep(session: "s", status: "pending", message: "Click Allow.", approveUrl: "http://octopi.local/plugin/appkeys/auth/t"),
+                       ObtainStep(session: "s", status: "pending", message: "Click Allow.", approveUrl: "javascript:alert(1)"),
+                       ObtainStep(status: "approved", message: "Allowed.", value: "KEY")]
+        let asked = Asked()
+        let shown = Shown()
+        let last = try await obtainSetupValue(form, field: control.field, step: { _, field, session in
+            await asked.add(field, session); return answers[await asked.count - 1]
+        }, shown: { shown.steps.append($0) })
+        XCTAssertEqual(last.value, "KEY")
+        let sessions = await asked.sessions
+        XCTAssertEqual(sessions, ["secret:-", "secret:s", "secret:s"])
+        XCTAssertEqual(shown.steps.map(\.status), ["pending", "pending", "approved"])
+        XCTAssertEqual(answers[0].approvalPage?.host, "octopi.local")
+        XCTAssertNil(answers[1].approvalPage, "only an http or https page opens")
+    }
+
     func testDiscoveryAndPrinterChoicesDecode() throws {
         let discovery = try JSONDecoder().decode(PrinterDiscovery.self, from: Data("""
         {"found":[{"id":"folder:/Users/someone/mcp-3D-printer-server","source":"folder","name":"Bambu Lab P1S via mcp-3D-printer-server","backend":"mcp-3d-printer-server",
@@ -89,3 +119,10 @@ final class PrinterSetupTests: XCTestCase {
         XCTAssertEqual(ControlClient.timeout(for: "printers.completeSettings"), 40)
     }
 }
+
+private actor Asked {
+    var sessions: [String] = []
+    var count: Int { sessions.count }
+    func add(_ field: String, _ session: String?) { sessions.append("\(field):\(session ?? "-")") }
+}
+@MainActor private final class Shown { var steps: [ObtainStep] = [] }

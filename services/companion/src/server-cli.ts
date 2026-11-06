@@ -337,6 +337,7 @@ process.stdout.write(
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
     modelAccess?.close();
+    printerSetup?.closeObtaining();
     // Wake every waiting events.wait and /v1/events first, so shutdown never waits out a long poll.
     eventLog?.close();
     void Promise.all([printerCheck?.close(),control?.close(),server.close()]).then(()=>printerPool.close()).catch(() => {

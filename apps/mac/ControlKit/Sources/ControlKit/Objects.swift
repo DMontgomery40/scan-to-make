@@ -473,6 +473,7 @@ public extension ControlClient {
         case "printers.mcps": return 15 // it looks for copies in the home folder
         case "printers.installMcp", "printers.discover": return 25 // 15 s on the companion (npm lookup 7 s; discovery about 4 s)
         case "printers.check": return 70 // 60 s on the companion: it starts the MCP, then reads status and the camera
+        case "printers.obtain": return 70 // 60 s on the companion: it starts the MCP, or waits about 20 s for the person's answer
         case "printers.add", "printers.remove", "printers.chooseMcp", "printers.completeSettings": return 40 // 30 s on the companion
         default: return 30
         }
@@ -743,6 +744,14 @@ public struct PrinterSetupOptions: Decodable, Sendable, Equatable {
         public let label: String
         public let hint: String?
         public let required: Bool
+        /// The MCPs that can fetch it for the person (`printers.obtain`, e.g. OctoPrint's key approved in OctoPrint), in their words.
+        public let obtain: Obtain?
+    }
+    /// A field's value the MCP can fetch instead of the person typing it: the button's words and the MCPs that offer it.
+    public struct Obtain: Decodable, Sendable, Equatable {
+        public let label: String
+        public let hint: String?
+        public let backends: [String]
     }
     /// One of the MCP's own settings (`counterpart_setup_fields`): the `.env` variable, its label and hint, and whether it's needed.
     public struct Field: Decodable, Sendable, Equatable, Identifiable {
@@ -853,6 +862,35 @@ public struct SlicerControls: Sendable, Equatable {
     public func choose(_ value: String, in form: inout PrinterForm) { form.slicer = value == slicer.type ? nil : value }
 }
 
+/// Add printer…'s button that fetches the key or access code through the chosen MCP, when its field declares one
+/// (`obtain` in `counterpart_setup_fields`). Its words are the MCP's own; nil otherwise.
+public struct ObtainControl: Sendable, Equatable {
+    public let field = "secret"
+    public let label: String
+    public let hint: String?
+    public init?(options: PrinterSetupOptions?, form: PrinterForm) {
+        guard form.folder == nil, let obtain = options?.types.first(where: { $0.printerType == form.printerType })?.secret?.obtain,
+              obtain.backends.contains(form.backend) else { return nil }
+        label = obtain.label; hint = obtain.hint
+    }
+}
+
+/// One step of `printers.obtain`: what the person sees, the page where they approve it, and once approved the value.
+public struct ObtainStep: Decodable, Sendable, Equatable {
+    public let session: String?
+    /// `pending`, `approved` or `failed`.
+    public let status: String
+    public let message: String
+    public let approveUrl: String?
+    public let value: String?
+    public init(session: String? = nil, status: String, message: String, approveUrl: String? = nil, value: String? = nil) {
+        self.session = session; self.status = status; self.message = message; self.approveUrl = approveUrl; self.value = value
+    }
+    public var pending: Bool { status == "pending" }
+    /// The approval page, http or https only.
+    public var approvalPage: URL? { approveUrl.flatMap(URL.init(string:)).flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil } }
+}
+
 public struct PrinterForm: Sendable, Equatable {
     public var folder: String?
     public var backend = "bambu-printer-mcp"
@@ -910,6 +948,14 @@ public extension ControlClient {
         return reply.check
     }
     func addPrinter(_ form: PrinterForm) async throws -> PrinterAdded { try await call("printers.add", ["printer": form.json]) }
+    /// One `printers.obtain` step for the form's printer: starts without `session`, waits about 20 s for the answer with it.
+    func obtainSetupValue(_ form: PrinterForm, field: String, session: String? = nil) async throws -> ObtainStep {
+        var params: [String: JSONValue] = ["backend": .string(form.backend), "printerType": .string(form.printerType),
+                                           "host": .string(form.host.trimmingCharacters(in: .whitespaces)), "field": .string(field)]
+        if let port = form.port, !port.isEmpty { params["port"] = .string(port) }
+        if let session { params["session"] = .string(session) }
+        return try await call("printers.obtain", params)
+    }
     func removePrinter(_ destinationId: String) async throws {
         struct Reply: Decodable { let removed: Bool }
         let _: Reply = try await call("printers.remove", ["destinationId": .string(destinationId)])
@@ -927,4 +973,17 @@ public extension ControlClient {
         let reply: Reply = try await call("printers.chooseMcp", ["destinationId": .string(destinationId), "backend": .string(backend)])
         return reply.destinationId
     }
+}
+
+/// Runs `printers.obtain` for the form until the person answers in the MCP's page, it fails, or the task is cancelled
+/// (the sheet closed or the printer changed). Each step is shown as it comes; the last is returned.
+public func obtainSetupValue(_ form: PrinterForm, field: String, step: (PrinterForm, String, String?) async throws -> ObtainStep,
+                             shown: @MainActor (ObtainStep) -> Void) async throws -> ObtainStep {
+    var current = try await step(form, field, nil)
+    await shown(current)
+    while current.pending, let session = current.session, !Task.isCancelled {
+        current = try await step(form, field, session)
+        if !Task.isCancelled { await shown(current) }
+    }
+    return current
 }

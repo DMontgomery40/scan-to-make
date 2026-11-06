@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {ModelAccessChoiceSchema} from './model-access-protocol.js';
-import {PrinterFormSchema} from './printing/setup.js';
+import {ObtainRequestSchema, PrinterFormSchema} from './printing/setup.js';
 import {CompanionSettingsPatchSchema, ProjectSettingsPatchSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema, PrintSettingsSchema} from '@scan-to-make/contracts/counterpart';
 import {ReconstructionAnswerSchema} from '@scan-to-make/contracts/reconstruction';
 
@@ -108,6 +108,7 @@ export const parameters = {
   'printers.installMcp': z.strictObject({package: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server'])}),
   'printers.discover': empty,
   'printers.check': z.strictObject({printer: PrinterFormSchema}),
+  'printers.obtain': ObtainRequestSchema,
   'printers.add': z.strictObject({printer: PrinterFormSchema}),
   'printers.remove': z.strictObject({destinationId: z.string().min(1).max(256)}),
   'printers.completeSettings': z.strictObject({destinationId: z.string().min(1).max(256), model: z.string().regex(/^[a-z0-9]{1,16}$/).optional()}),

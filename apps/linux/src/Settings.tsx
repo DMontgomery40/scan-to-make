@@ -1,8 +1,9 @@
-import { mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, slicerControls } from "./domain";
+import { mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { call, host, storeCredential, openLink } from "./bridge";
+import type { ObtainStep } from "./types";
 import { invoke } from "@tauri-apps/api/core";
 import { Action, Modal } from "./ui";
 import type {
@@ -952,6 +953,13 @@ function AddPrinter({
   }>();
   const type = options?.types.find((t) => t.printerType === form.printerType);
   const slicer = slicerControls(options, form.backend);
+  // The key fetched through the MCP (approved in the printer's own page), when its field says it can.
+  const obtain = obtainControl(options, form);
+  const [obtaining, setObtaining] = useState<ObtainStep>();
+  // Bumped when the sheet closes or the printer changes: an approval still waiting stops asking and isn't shown.
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current++; }, []);
+  useEffect(() => { generation.current++; setObtaining(undefined); }, [form.backend, form.printerType, form.host, form.port]);
   const update = (key: string, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
   // The MCP that drives this kind here, from the MCPs' own fields: never one that isn't installed.
@@ -1107,6 +1115,37 @@ function AddPrinter({
           />
           {type.secret.hint && <small>{type.secret.hint}</small>}
         </label>
+      )}
+      {obtain && (
+        <div className="field">
+          <Action
+            disabled={!form.host || obtaining?.status === "pending"}
+            onError={(message) => setObtaining({ status: "failed", message })}
+            run={async () => {
+              const asked = { ...form };
+              const mine = generation.current;
+              const stopped = () => generation.current !== mine;
+              const last = await obtainValue(call, asked, (step) => { if (!stopped()) setObtaining(step); }, stopped);
+              if (last.status === "approved" && last.value && !stopped()) setForm((f) => ({ ...f, secret: last.value! }));
+            }}
+          >
+            {obtain.label}
+          </Action>
+          {obtain.hint && !obtaining && <small>{obtain.hint}</small>}
+          {obtaining && (
+            <p className={obtaining.status === "failed" ? "error" : "notice"}>
+              {obtaining.status === "approved" ? `✓ ${obtaining.message}` : obtaining.message}
+              {obtaining.status === "pending" && obtaining.approveUrl && (
+                <>
+                  {" "}
+                  <button className="link" onClick={() => void openLink(obtaining.approveUrl!)}>
+                    Open the approval page
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+        </div>
       )}
       {/* The slicer the MCP runs, from its own list: chosen with its app below, so the two always agree. */}
       {slicer?.choice && (

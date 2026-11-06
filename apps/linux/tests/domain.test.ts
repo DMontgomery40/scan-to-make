@@ -17,6 +17,8 @@ import {
   startingChoices,
   designerSettingsWords,
   slicerControls,
+  obtainControl,
+  obtainValue,
   canSelectPlate,
   printNeedsCheck,
 } from "../src/domain.ts";
@@ -428,4 +430,47 @@ test("Add a printer offers the chosen MCP's own slicer choice and paths, and sen
   // An MCP that declares no slicer settings shows no Slicer section.
   assert.equal(slicerControls(options, "bambu-printer-mcp"), undefined);
   assert.equal(slicerControls(undefined, "mcp-3d-printer-server"), undefined);
+});
+
+test("Add a printer offers the MCP's own approval button for its key, and the approved key fills the form (Nov 6)", async () => {
+  // The options `printers.discover` returns from mcp-3d-printer-server 1.2.53's counterpart_setup_fields.
+  const options = {
+    types: [
+      { printerType: "bambu", label: "Bambu Lab", backends: ["bambu-printer-mcp"], serial: true, secret: { label: "Access code", required: true } },
+      {
+        printerType: "octoprint", label: "OctoPrint", backends: ["mcp-3d-printer-server"], serial: false,
+        secret: { label: "API key", required: true, obtain: { label: "Approve in OctoPrint", hint: "OctoPrint asks you to allow this app in its web page", backends: ["mcp-3d-printer-server"] } },
+      },
+    ],
+    models: {},
+  };
+  assert.deepEqual(obtainControl(options, { printerType: "octoprint", backend: "mcp-3d-printer-server" }),
+    { field: "secret", label: "Approve in OctoPrint", hint: "OctoPrint asks you to allow this app in its web page" });
+  assert.equal(obtainControl(options, { printerType: "bambu", backend: "bambu-printer-mcp" }), undefined, "only where the MCP declares it");
+  assert.equal(obtainControl(options, { printerType: "octoprint", backend: "bambu-printer-mcp" }), undefined, "only for the MCP that declares it");
+
+  const sent: object[] = [];
+  const answers = [
+    { session: "s1", status: "pending", message: "Click Allow in OctoPrint.", approveUrl: "http://octopi.local/plugin/appkeys/auth/t" },
+    { session: "s1", status: "pending", message: "Click Allow in OctoPrint.", approveUrl: "http://octopi.local/plugin/appkeys/auth/t" },
+    { status: "approved", message: "Allowed.", value: "KEY" },
+  ];
+  const fake = async <T,>(method: string, params: object): Promise<T> => {
+    assert.equal(method, "printers.obtain");
+    sent.push(params);
+    return answers.shift() as T;
+  };
+  const steps: string[] = [];
+  const last = await obtainValue(fake, { backend: "mcp-3d-printer-server", printerType: "octoprint", host: " octopi.local ", port: "", secret: "" },
+    (step) => steps.push(step.status), () => false);
+  assert.deepEqual(last, { status: "approved", message: "Allowed.", value: "KEY" });
+  assert.deepEqual(steps, ["pending", "pending", "approved"]);
+  assert.deepEqual(sent[0], { backend: "mcp-3d-printer-server", printerType: "octoprint", host: "octopi.local", field: "secret" });
+  assert.deepEqual(sent[2], { ...sent[0], session: "s1" });
+
+  // Closing the sheet stops asking.
+  let asked = 0;
+  await obtainValue(async <T,>() => { asked++; return { session: "s2", status: "pending", message: "Click Allow." } as T; },
+    { backend: "mcp-3d-printer-server", printerType: "octoprint", host: "octopi.local" }, () => {}, () => asked >= 1);
+  assert.equal(asked, 1);
 });

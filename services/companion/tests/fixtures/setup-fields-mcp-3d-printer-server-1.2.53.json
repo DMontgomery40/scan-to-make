@@ -1,0 +1,328 @@
+{
+ "contract": "counterpart/1",
+ "server": {
+  "name": "mcp-3d-printer-server",
+  "version": "1.2.53"
+ },
+ "kinds": [
+  {
+   "kind": "bambu",
+   "label": "Bambu Lab",
+   "env": {
+    "MCP_TRANSPORT": "stdio",
+    "PRINTER_TYPE": "bambu"
+   },
+   "fields": [
+    {
+     "name": "host",
+     "env": "PRINTER_HOST",
+     "label": "Address",
+     "hint": "The printer's IP address: on the printer, Settings \u2192 WLAN",
+     "required": true
+    },
+    {
+     "name": "serial",
+     "env": "BAMBU_SERIAL",
+     "label": "Serial number",
+     "hint": "On the printer: Settings \u2192 Device",
+     "required": true,
+     "transform": "uppercase"
+    },
+    {
+     "name": "model",
+     "env": "BAMBU_MODEL",
+     "label": "Model",
+     "required": true,
+     "choices": [
+      {
+       "value": "p1s",
+       "label": "P1S"
+      },
+      {
+       "value": "p1p",
+       "label": "P1P"
+      },
+      {
+       "value": "x1c",
+       "label": "X1C"
+      },
+      {
+       "value": "x1e",
+       "label": "X1E"
+      },
+      {
+       "value": "a1",
+       "label": "A1"
+      },
+      {
+       "value": "a1mini",
+       "label": "A1 Mini"
+      },
+      {
+       "value": "h2d",
+       "label": "H2D"
+      }
+     ],
+     "fromSerial": {
+      "prefixLength": 3,
+      "models": {
+       "094": "h2d",
+       "00M": "x1c",
+       "03W": "x1e",
+       "01S": "p1p",
+       "01P": "p1s",
+       "039": "a1",
+       "030": "a1mini"
+      }
+     }
+    },
+    {
+     "name": "secret",
+     "env": "BAMBU_TOKEN",
+     "label": "Access code",
+     "hint": "On the printer: Settings \u2192 WLAN \u2192 Access Code",
+     "required": true
+    }
+   ]
+  },
+  {
+   "kind": "octoprint",
+   "label": "OctoPrint",
+   "env": {
+    "MCP_TRANSPORT": "stdio",
+    "PRINTER_TYPE": "octoprint"
+   },
+   "fields": [
+    {
+     "name": "host",
+     "env": "PRINTER_HOST",
+     "label": "Address",
+     "hint": "OctoPrint's address (octopi.local or an IP address), or its full URL for HTTPS or a sub-path (https://octoprint.example.com, http://pi.lan/octoprint)",
+     "required": true
+    },
+    {
+     "name": "port",
+     "env": "PRINTER_PORT",
+     "label": "Port",
+     "hint": "Only if OctoPrint isn't on port 80 (OctoPi uses 80; a plain install uses 5000)",
+     "required": false
+    },
+    {
+     "name": "secret",
+     "env": "API_KEY",
+     "label": "API key",
+     "hint": "Approve this app in OctoPrint, or copy a key from OctoPrint: Settings \u2192 Application Keys",
+     "required": true,
+     "obtain": {
+      "tool": "octoprint_request_api_key",
+      "label": "Approve in OctoPrint",
+      "hint": "OctoPrint asks you to allow this app in its web page"
+     }
+    }
+   ],
+   "default": true
+  },
+  {
+   "kind": "klipper",
+   "label": "Klipper (Moonraker)",
+   "env": {
+    "MCP_TRANSPORT": "stdio",
+    "PRINTER_TYPE": "klipper"
+   },
+   "fields": [
+    {
+     "name": "host",
+     "env": "PRINTER_HOST",
+     "label": "Address",
+     "hint": "The printer's IP address or host name",
+     "required": true
+    },
+    {
+     "name": "port",
+     "env": "PRINTER_PORT",
+     "label": "Port",
+     "hint": "Moonraker's port, often 7125",
+     "required": false
+    },
+    {
+     "name": "secret",
+     "env": "API_KEY",
+     "label": "API key",
+     "hint": "Only if Moonraker asks for one",
+     "required": false
+    }
+   ]
+  },
+  {
+   "kind": "prusa",
+   "label": "Prusa (PrusaLink)",
+   "env": {
+    "MCP_TRANSPORT": "stdio",
+    "PRINTER_TYPE": "prusa"
+   },
+   "fields": [
+    {
+     "name": "host",
+     "env": "PRINTER_HOST",
+     "label": "Address",
+     "hint": "The printer's IP address or host name",
+     "required": true
+    },
+    {
+     "name": "port",
+     "env": "PRINTER_PORT",
+     "label": "Port",
+     "hint": "Only if PrusaLink isn't on port 80",
+     "required": false
+    },
+    {
+     "name": "secret",
+     "env": "API_KEY",
+     "label": "API key",
+     "hint": "The key PrusaLink shows in its settings",
+     "required": true
+    }
+   ]
+  },
+  {
+   "kind": "creality",
+   "label": "Creality",
+   "env": {
+    "MCP_TRANSPORT": "stdio",
+    "PRINTER_TYPE": "creality"
+   },
+   "fields": [
+    {
+     "name": "host",
+     "env": "PRINTER_HOST",
+     "label": "Address",
+     "hint": "The printer's IP address or host name",
+     "required": true
+    },
+    {
+     "name": "port",
+     "env": "PRINTER_PORT",
+     "label": "Port",
+     "hint": "Only if your printer uses another port",
+     "required": false
+    },
+    {
+     "name": "secret",
+     "env": "API_KEY",
+     "label": "API key",
+     "hint": "Only if your printer asks for one",
+     "required": false
+    }
+   ]
+  },
+  {
+   "kind": "duet",
+   "label": "Duet",
+   "env": {
+    "MCP_TRANSPORT": "stdio",
+    "PRINTER_TYPE": "duet"
+   },
+   "fields": [
+    {
+     "name": "host",
+     "env": "PRINTER_HOST",
+     "label": "Address",
+     "hint": "The printer's IP address or host name",
+     "required": true
+    },
+    {
+     "name": "port",
+     "env": "PRINTER_PORT",
+     "label": "Port",
+     "hint": "Only if your Duet isn't on port 80",
+     "required": false
+    },
+    {
+     "name": "secret",
+     "env": "API_KEY",
+     "label": "Password",
+     "hint": "Only if your Duet has one set",
+     "required": false
+    }
+   ]
+  },
+  {
+   "kind": "repetier",
+   "label": "Repetier",
+   "env": {
+    "MCP_TRANSPORT": "stdio",
+    "PRINTER_TYPE": "repetier"
+   },
+   "fields": [
+    {
+     "name": "host",
+     "env": "PRINTER_HOST",
+     "label": "Address",
+     "hint": "The printer's IP address or host name",
+     "required": true
+    },
+    {
+     "name": "port",
+     "env": "PRINTER_PORT",
+     "label": "Port",
+     "hint": "Repetier-Server's port, often 3344",
+     "required": false
+    },
+    {
+     "name": "secret",
+     "env": "API_KEY",
+     "label": "API key",
+     "hint": "The key Repetier-Server shows in its settings",
+     "required": true
+    }
+   ]
+  }
+ ],
+ "slicer": {
+  "type": "prusaslicer",
+  "path": "/opt/nowhere/bambu-studio",
+  "found": false,
+  "fields": [
+   {
+    "name": "slicer",
+    "env": "SLICER_TYPE",
+    "label": "Slicer",
+    "required": false,
+    "choices": [
+     {
+      "value": "prusaslicer",
+      "label": "PrusaSlicer"
+     },
+     {
+      "value": "cura",
+      "label": "Cura"
+     },
+     {
+      "value": "slic3r",
+      "label": "Slic3r"
+     },
+     {
+      "value": "orcaslicer",
+      "label": "OrcaSlicer"
+     },
+     {
+      "value": "orcaslicer-bambulab",
+      "label": "OrcaSlicer-bambulab (FULU)"
+     },
+     {
+      "value": "bambustudio",
+      "label": "Bambu Studio"
+     }
+    ]
+   },
+   {
+    "name": "slicer-path",
+    "env": "SLICER_PATH",
+    "label": "PrusaSlicer app",
+    "input": "path",
+    "required": true,
+    "hint": "PrusaSlicer isn't at /opt/nowhere/bambu-studio. Install it, or choose where it is."
+   }
+  ]
+ }
+}
