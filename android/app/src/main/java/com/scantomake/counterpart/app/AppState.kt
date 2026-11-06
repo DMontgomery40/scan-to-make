@@ -1,5 +1,7 @@
 package com.scantomake.counterpart.app
 
+import com.scantomake.counterpart.api.mcpCopies
+
 import android.content.Context
 import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.CounterpartEvent
@@ -40,6 +42,8 @@ class AppState(private val app: Counterpart) {
     val sendFailures = MutableStateFlow<Map<String, String>>(emptyMap())
     val macName = MutableStateFlow(app.prefs.getString(MAC_NAME_KEY, null))
     val eventsSupported = MutableStateFlow<Boolean?>(null)
+    val mcpCopies = MutableStateFlow<List<com.scantomake.counterpart.api.McpPackageCopies>?>(null)
+    val mcpCopiesProblem = MutableStateFlow<String?>(null)
     val mcpUpdateEvents = MutableStateFlow<Map<String, CounterpartEvent>>(emptyMap())
     /** A project to open, from a notification tap. */
     val route = MutableStateFlow<String?>(null)
@@ -100,11 +104,18 @@ class AppState(private val app: Counterpart) {
 
     fun remove(id: String) { projects.update { list -> list.filterNot { it.id == id } } }
 
-    suspend fun loadPrinters() { try { catalog.value = app.companion.printers() } catch (_: Exception) {} }
+    suspend fun loadPrinters() { try { catalog.value = app.companion.printers() } catch (_: Exception) {}; loadMcpCopies() }
+    suspend fun loadMcpCopies() {
+        if (!capabilities.value.contains("mcpCopies")) { mcpCopies.value = null; return }
+        try { mcpCopies.value = app.companion.mcpCopies(); mcpCopiesProblem.value = null }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { mcpCopiesProblem.value = "Couldn’t refresh the printer software copies." }
+    }
 
     suspend fun loadCapabilities() {
         val health = try { app.companion.health() } catch (_: Exception) { return }
         capabilities.value = health.capabilities
+        loadMcpCopies()
         health.name?.let { if (it != macName.value) { app.prefs.edit().putString(MAC_NAME_KEY, it).apply(); macName.value = it } }
     }
 
@@ -112,7 +123,7 @@ class AppState(private val app: Counterpart) {
         following?.cancel(); following = null
         projects.value = emptyList(); loaded.value = false; error.value = null; catalog.value = null; reachable.value = null
         capabilities.value = emptySet(); eventsSupported.value = null; sendFailures.value = emptyMap()
-        mcpUpdateEvents.value = emptyMap()
+        mcpUpdateEvents.value = emptyMap(); mcpCopies.value = null; mcpCopiesProblem.value = null
     }
 
     /** Starts following the Mac while the app is visible: one consumer for every screen. */

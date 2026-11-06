@@ -362,3 +362,7 @@ and `pendingFollowup`; retrying it retains its message and photos. Both clients 
 messages with their timestamps and claimed photo names, so later queued photos cannot attach to
 an earlier message. Old photos without recorded ownership remain separate; their association is
 not guessed from file order or a project's modification time.
+
+### Printer software copies
+
+`GET /v1/printers/mcps` requires `projects:read` and returns `{packages}` from the local-control `printers.mcps` catalog, without setup options. Each `uses` entry includes `printerId` (the selected/canonical printer), `destinationId` (the particular profile), its effective copy’s path/version, stable `mcpId`, and `canMove`. `mcpCopies` in `/healthz` advertises this read. Clients keep `appCopy.version` separate from each use’s version. An explicit move uses the existing `POST /v1/printers/mcp/<mcpId>/update` with `{fresh:true}` and requires `projects:write`; it names all profiles sharing that installation, preserves the checkout and settings, and reports waiting/progress via the existing reply/events. Reads never change a profile.

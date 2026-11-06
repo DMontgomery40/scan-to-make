@@ -28,6 +28,7 @@ import com.scantomake.counterpart.api.PrinterCatalog
 import com.scantomake.counterpart.api.PrinterDestination
 import com.scantomake.counterpart.ui.designerSettingsWords
 import kotlinx.coroutines.cancel
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -99,6 +100,19 @@ class HomeLayoutTests {
         home()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("3D scan platform")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Vernier caliper with depth gauge").assertExists()
+    }
+
+    @Test fun printerSoftwareShowsTheHiddenCopyAndExplicitMoveWithProjectsPresent() {
+        val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
+        state.projects.value = listOf(project("a", "Existing project", "ready"))
+        state.mcpCopies.value = listOf(pkg)
+        state.capabilities.value = setOf("mcpCopies", "mcpUpdates")
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.McpCopiesPanel("current", state) } }
+        compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
+        compose.onNodeWithText("Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25).").assertExists()
+        compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").assertExists()
+        org.junit.Assert.assertEquals(listOf("mcp-0000000000000002"), pkg.moveIds)
+        org.junit.Assert.assertEquals("projects:read", CompanionClient.scope("GET", "/v1/printers/mcps"))
     }
 
     /** Settings has Help and Printers, as on iPhone, Mac and Linux; the print sheet sends people to Settings → Printers. */

@@ -77,6 +77,7 @@ class CompanionClient(
             fun m(pattern: String) = Pattern(pattern).matches(path)
             when (method) {
                 "GET" -> {
+                    if (path == "/v1/printers/mcps") return "projects:read"
                     if (path == "/v1/blender") return "projects:read"
                     if (m("/v1/objects(?:/printers)?") || m(one) || m("$one/passes/(0|[1-9][0-9]{0,15})/activity")) return "projects:read"
                     if (m("/healthz")) return "generation:health"

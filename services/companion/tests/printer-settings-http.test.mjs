@@ -166,3 +166,15 @@ test('an MCP preference mutation excludes print admissions through both aliases 
   } finally { unexpectedRelease?.(); barrier.release(); await changing; }
   for (const choice of f.catalog.destinations[0].mcps) assert.equal(f.gate.updating(choice.destinationId), false);
 });
+
+test('paired clients can read every MCP copy, including hidden profiles, without update permission', async t => {
+  const f = await fixture(t);
+  const response = await f.call('/v1/printers/mcps', 'GET', undefined, f.readOnly);
+  assert.equal(response.status, 200);
+  const generic = response.body.packages.find(item => item.package === 'mcp-3d-printer-server');
+  assert.equal(generic.uses.length, 1);
+  assert.equal(generic.uses[0].printerId, f.catalog.canonical(generic.uses[0].destinationId));
+  assert.equal(JSON.stringify(response.body).includes('192.0.2.1'), false, 'process environment is not exposed');
+  assert.equal((await f.call('/v1/printers/mcps', 'GET', undefined, f.printOnly)).status, 403);
+  assert.equal((await f.call('/v1/printers/mcps', 'POST', {}, f.readOnly)).status, 405);
+});

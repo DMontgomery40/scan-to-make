@@ -25,6 +25,7 @@ struct PrintersView: View {
                 } footer: {
                     Text(store.macCapabilities.contains("printerChoices") ? "Add printers in Counterpart on your Mac. Pick a printer here to change its MCP or connection." : "These come from bambu-printer-mcp and mcp-3D-printer-server on your Mac. Add or change printers there; Counterpart picks them up.")
                 }
+                Section("Printer software") { MCPCopiesView(store: store) }
             }
             .navigationTitle("Printers")
             .navigationDestination(for: PrinterLink.self) { link in
@@ -118,6 +119,7 @@ struct PrinterDetailView: View {
             if let printer {
                 VStack(alignment: .leading, spacing: 22) {
                     hero(printer)
+                    MCPCopiesView(store: store, printerId: printer.id)
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             StatusDot(text: job != nil ? "Printing" : printer.isOffline ? "Offline" : printer.isReady == true ? "Ready" : "Busy",

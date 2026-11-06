@@ -78,7 +78,7 @@ export interface McpPackageView {
   /** The selected runnable copy first, so its displayed location and version describe the same install. */
   installs: PackageInstall[];
   appCopy?: PackageInstall;
-  uses: {destinationId: string; printer: string; mcpId: string; kind: string; path?: string; version?: string; canMove: boolean}[];
+  uses: {destinationId: string; printerId: string; printer: string; mcpId: string; kind: string; path?: string; version?: string; canMove: boolean}[];
 }
 
 /**
@@ -282,7 +282,7 @@ export class PrinterSetup {
           : install.type === 'npx' ? install.spec : undefined;
         const version = install.type === 'npx' ? undefined : installedVersion(install, env);
         const printer = catalog?.destinations.find(destination => destination.id === catalog.canonical(id))?.name ?? id;
-        return {destinationId: id, printer, mcpId: mcpIdFor(resolveMcpInstall(config, env), config), kind: install.type,
+        return {destinationId: id, printerId: catalog?.canonical(id) ?? id, printer, mcpId: mcpIdFor(resolveMcpInstall(config, env), config), kind: install.type,
           ...(path ? {path} : {}), ...(version ? {version} : {}), canMove: install.type !== 'app' || install.prefix !== own.prefix};
       });
       const latestVersion = this.deps.latestVersion?.(item.package, {view: true});

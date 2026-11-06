@@ -33,6 +33,7 @@ fun PrinterSettingsControls(printer: PrinterDestination, state: AppState) {
     val client = Counterpart.instance.companion
     val scope = rememberCoroutineScope()
     val events by state.mcpUpdateEvents.collectAsState()
+    val capabilities by state.capabilities.collectAsState()
     var route by remember(printer.id, printer.backend) { mutableStateOf<PrinterPrintRoute?>(null) }
     var routeLoading by remember(printer.id, printer.backend) { mutableStateOf(true) }
     var routeProblem by remember(printer.id, printer.backend) { mutableStateOf<String?>(null) }
@@ -70,6 +71,7 @@ fun PrinterSettingsControls(printer: PrinterDestination, state: AppState) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        McpCopiesPanel(printer.id, state)
         printer.capabilities?.server?.let { Text("${it.name} ${it.version}", color = Palette.secondary, fontSize = 12.sp) }
         val currentRoute = route
         if (routeLoading) Text("Reading the connection…", color = Palette.secondary, fontSize = 12.sp)
@@ -98,7 +100,7 @@ fun PrinterSettingsControls(printer: PrinterDestination, state: AppState) {
                 }
             }
         }
-        if (printer.mcpId != null) {
+        if (printer.mcpId != null && !capabilities.contains("mcpCopies")) {
             SecondaryButton(if (printer.capabilities?.update != null) "Update Printer Software" else "Check for Updates",
                 Modifier.fillMaxWidth(), enabled = !busy) { updateMcp(false) }
             if (update?.state == "unresolved" && updateEvent == null)
@@ -110,5 +112,51 @@ fun PrinterSettingsControls(printer: PrinterDestination, state: AppState) {
             } else update?.let { Text(it.words, color = Palette.secondary, fontSize = 12.sp) }
         }
         problem?.let { Text(it, color = Palette.failed, fontSize = 13.sp) }
+    }
+}
+
+
+@Composable
+fun McpCopiesPanel(printerId: String, state: AppState) {
+    val packages by state.mcpCopies.collectAsState()
+    val readProblem by state.mcpCopiesProblem.collectAsState()
+    val capabilities by state.capabilities.collectAsState()
+    val events by state.mcpUpdateEvents.collectAsState()
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf<String?>(null) }
+    var result by remember { mutableStateOf<Pair<String, McpUpdate>?>(null) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    var eventFloor by remember { mutableStateOf(-1L) }
+    LaunchedEffect(printerId) { state.loadCapabilities(); state.loadMcpCopies() }
+    fun update(id: String, fresh: Boolean) {
+        if (busy != null) return
+        busy = id; problem = null; result = null; eventFloor = events[id]?.seq ?: -1
+        scope.launch {
+            try { result = id to Counterpart.instance.companion.updatePrinterMcp(id, fresh); state.loadMcpCopies() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { problem = e.message ?: "Couldn’t update the printer software." }
+            finally { busy = null }
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        packages?.filter { pkg -> pkg.uses.any { it.printerId == printerId } }?.forEach { pkg ->
+            Text(pkg.label, fontSize = 14.sp)
+            pkg.appCopy?.let { Text("Counterpart’s copy ${it.version ?: "version unknown"}", fontSize = 12.sp) }
+            pkg.uses.filter { it.printerId == printerId }.forEach { Text(it.words, fontSize = 12.sp) }
+            if (capabilities.contains("mcpUpdates")) {
+                pkg.moveIds.forEach { id ->
+                    SecondaryButton(pkg.moveTitle(id), Modifier.fillMaxWidth(), enabled = busy == null) { update(id, true) }
+                }
+                if (pkg.appCopy != null) SecondaryButton("Update Counterpart’s copy", Modifier.fillMaxWidth(), enabled = busy == null) { update(pkg.appMcpId, false) }
+            }
+            Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.", color = Palette.secondary, fontSize = 12.sp)
+        }
+        val reply = result
+        if (reply != null) {
+            val event = events[reply.first]?.takeIf { it.seq > eventFloor }
+            Text(event?.body?.takeIf { it.isNotBlank() } ?: event?.title ?: reply.second.words, fontSize = 12.sp)
+        }
+        (problem ?: readProblem)?.let { Text(it, color = Palette.failed, fontSize = 12.sp) }
+        if (!capabilities.contains("mcpCopies")) Text("Update Counterpart on your computer to see each printer’s software copy.", color = Palette.secondary, fontSize = 12.sp)
     }
 }

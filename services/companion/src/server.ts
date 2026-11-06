@@ -156,7 +156,7 @@ export async function startCompanionServer(
     /** The Mac's name as people know it ("Mac mini"), in /healthz so the phone can say which Mac it reached. */
     name?: string;
     /** Settings -> Printers on the phone: which MCP a printer uses (`PUT /v1/objects/printers/<id>/mcp`). */
-    printerSetup?: Pick<import('./printing/setup.js').PrinterSetup, 'chooseMcp'>;
+    printerSetup?: Pick<import('./printing/setup.js').PrinterSetup, 'chooseMcp' | 'mcps'>;
   } = {}
 ): Promise<{
   url: string;
@@ -265,7 +265,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, colourMapping: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerChoices: !!options.objects && !!options.printerSetup, printerSettings: !!options.objects && !!options.printerSetup, reconstructionReviewV1: !!options.objects && (await reconstructionReadiness()).ok } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, colourMapping: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, mcpCopies: !!options.printerSetup, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerChoices: !!options.objects && !!options.printerSetup, printerSettings: !!options.objects && !!options.printerSetup, reconstructionReviewV1: !!options.objects && (await reconstructionReadiness()).ok } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
@@ -338,6 +338,12 @@ export async function startCompanionServer(
         await authorize('projects:write');
         await options.liveActivityTokens.store(credential().deviceId!,parsed.data);
         response.end(JSON.stringify({stored:true}));return;
+      }
+      if(options.printerSetup && request.url === '/v1/printers/mcps'){
+        if(request.method !== 'GET')throw new ServerFailure('method-not-allowed');
+        await authorize('projects:read');
+        const {packages}=await options.printerSetup.mcps();
+        response.end(JSON.stringify({packages}));return;
       }
       const mcpUpdate=/^\/v1\/printers\/mcp\/(mcp-[0-9a-f]{16})\/update$/.exec(request.url??'');
       if(options.mcpUpdates&&mcpUpdate){

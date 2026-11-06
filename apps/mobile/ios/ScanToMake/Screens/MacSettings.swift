@@ -138,6 +138,7 @@ struct MacSettingsSections: View {
 
     var body: some View {
         printers
+        Section("Printer software") { MCPCopiesView(store: model.store) }
         if model.store.macCapabilities.contains("blenderAddon") {
             BlenderAddonSettingsSection { action in try await model.store.mac.client.blenderAddon(action) }
         }
@@ -180,7 +181,7 @@ struct MacSettingsSections: View {
                             Button("Install a Fresh Copy") { Task { await model.update(printer, fresh: true) } }.font(.caption.weight(.semibold))
                         }
                     }
-                    if model.store.macCapabilities.contains("mcpUpdates"), let words = printer.updateWords,
+                    if !model.store.macCapabilities.contains("mcpCopies"), model.store.macCapabilities.contains("mcpUpdates"), let words = printer.updateWords,
                        !(printer.mcpId.flatMap { model.store.mcpUpdates[$0]?.isRunning } ?? false) {
                         Button { Task { await model.update(printer) } } label: { Text("Update · \(words)").fontWeight(.semibold) }
                             .buttonStyle(.glassProminent).controlSize(.small)
@@ -300,5 +301,59 @@ struct MacSettingsSections: View {
             }
         } header: { Text("General") } footer: { Text("Each one changes \(model.macName).") }
         .disabled(model.working != nil)
+    }
+}
+
+
+/// Shared by Settings and Printers on compact and regular-width layouts.
+struct MCPCopiesView: View {
+    let store: ProjectsStore
+    var printerId: String? = nil
+    @State private var working: String?
+    @State private var problem: String?
+    private var packages: [MCPPackageCopies] {
+        (store.mcpCopies ?? []).filter { package in printerId == nil || package.uses.contains { $0.printerId == printerId } }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(packages) { package in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(package.label).font(.headline)
+                    if let copy = package.appCopy { Text("Counterpart’s copy \(copy.version ?? "version unknown")").font(.caption) }
+                    ForEach(package.uses.filter { printerId == nil || $0.printerId == printerId }) { use in
+                        Text(use.words).font(.footnote).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if store.macCapabilities.contains("mcpUpdates") {
+                        ForEach(package.moveIDs, id: \.self) { id in
+                            Button(package.moveTitle(id)) { Task { await update(id, fresh: true) } }
+                                .disabled(working != nil || store.mcpUpdates[id]?.isRunning == true)
+                                .accessibilityIdentifier("mcp-move-" + id)
+                            progress(id)
+                        }
+                        if package.appCopy != nil {
+                            Button("Update Counterpart’s copy") { Task { await update(package.appMcpId, fresh: false) } }
+                                .disabled(working != nil || store.mcpUpdates[package.appMcpId]?.isRunning == true)
+                            progress(package.appMcpId)
+                        }
+                    }
+                }
+            }
+            if !packages.isEmpty { Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.").font(.caption).foregroundStyle(.secondary) }
+            if let problem = problem ?? store.mcpCopiesProblem { Text(problem).font(.footnote).foregroundStyle(.orange) }
+            if !store.macCapabilities.contains("mcpCopies") { Text("Update Counterpart on your computer to see each printer’s software copy.").font(.footnote) }
+        }
+        .accessibilityIdentifier("mcp-copies")
+        .task { await store.loadCapabilities(); await store.loadMCPCopies() }
+    }
+    @ViewBuilder private func progress(_ id: String) -> some View {
+        if let progress = store.mcpUpdates[id] { Text(progress.words).font(.caption) }
+    }
+    private func update(_ id: String, fresh: Bool) async {
+        guard working == nil else { return }
+        working = id; problem = nil
+        defer { working = nil }
+        do { store.mcpUpdates[id] = MCPUpdateProgress(try await store.mac.client.updateMCP(id, fresh: fresh)); await store.loadMCPCopies() }
+        catch let failure as CompanionError { problem = failure.message }
+        catch { problem = CompanionError.unreachable.message }
     }
 }

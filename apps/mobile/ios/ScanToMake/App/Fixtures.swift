@@ -307,7 +307,8 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "mcpCopies": FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies.json").path), "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true]]) }
+        if path == "/v1/printers/mcps" { return json(["packages": [try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appending(path: "mcp-profile-copies.json")))]]) }
         if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/route") {
             guard path.contains("/current/") else { return json(["route": NSNull()]) }
@@ -330,6 +331,7 @@ struct FixtureTransport: HTTPTransport {
         if path == "/v1/devices" && method == "GET" { return json(["devices": Fixtures.devices]) }
         if path.hasPrefix("/v1/devices/") && method == "DELETE" { return json(["removed": true]) }
         if path.hasPrefix("/v1/settings/") && method == "POST" { return json(["check": ["state": "checking"]]) }
+        if path.hasPrefix("/v1/printers/mcp/"), method == "POST", FileManager.default.fileExists(atPath: folder.appending(path: "mcp-update-waiting.json").path) { return HTTPReply(status: 200, body: try Data(contentsOf: folder.appending(path: "mcp-update-waiting.json"))) }
         if path.hasPrefix("/v1/printers/mcp/") && method == "POST" { return json(["update": ["mcpId": "mcp-3d", "state": "waiting", "fromVersion": "1.2.9", "toVersion": "1.2.22"]]) }
         if path == "/v1/events" { return json(["error": ["code": "not-found", "message": "Not found"]], 404) }
         if path == "/v1/objects" && method == "GET" { return json(["objects": objects]) }

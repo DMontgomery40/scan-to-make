@@ -70,6 +70,7 @@ public final class CompanionClient: @unchecked Sendable {
         func is_(_ pattern: String) -> Bool { Pattern(pattern).matches(path) }
         switch method {
         case "GET":
+            if path == "/v1/printers/mcps" { return "projects:read" }
             if path == "/v1/blender" { return "projects:read" }
             if is_("/v1/objects(?:/printers)?") || is_(one) || is_(one + "/passes/(0|[1-9][0-9]{0,15})/activity") { return "projects:read" }
             if is_("/healthz") { return "generation:health" }
@@ -94,7 +95,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
             if is_("/v1/settings/(ai/test|fusion/setup)") { return "projects:write" }
-            if is_("/v1/printers/mcp/[^/]+/update") { return "printer-handoff:use" }
+            if is_("/v1/printers/mcp/[^/]+/update") { return "projects:write" }
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route") { return "printer-handoff:use" }
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/mcp") { return "projects:write" }
         default: break
@@ -493,6 +494,11 @@ public final class CompanionClient: @unchecked Sendable {
     public func removeDevice(_ deviceId: String) async throws {
         let id = deviceId.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(.init(charactersIn: "-"))) ?? deviceId
         _ = try await send("DELETE", "/v1/devices/\(id)").checked(path: "/v1/devices/\(id)")
+    }
+
+    public func mcpCopies() async throws -> [MCPPackageCopies] {
+        struct Reply: Decodable { let packages: [MCPPackageCopies] }
+        return try await request("GET", "/v1/printers/mcps", as: Reply.self).packages
     }
 
     private struct UpdateReply: Decodable { var update: MCPUpdate }
