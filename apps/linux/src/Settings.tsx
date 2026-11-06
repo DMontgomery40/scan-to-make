@@ -1,7 +1,8 @@
-import { mcpUsageWords, mcpMoveNotice, mcpUpdateNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls } from "./domain";
+import { mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { mcpUpdateNotice } from "./domain";
 import { call, host, storeCredential, openLink } from "./bridge";
 import type { ObtainStep } from "./types";
 import { invoke } from "@tauri-apps/api/core";
