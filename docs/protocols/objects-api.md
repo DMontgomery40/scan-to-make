@@ -227,7 +227,7 @@ Add printer… on the iPhone, iPad and Android calls the same companion methods 
 | `/v1/printers/setup/add` | `{printer}` | `{id, destinationId?, sameAs?}` |
 | `/v1/printers/setup/install` | `{package}` | `{installed, package}` or `{update}`; progress comes as `mcp.update.*` events |
 
-`printer` is `PrinterFormSchema`. A `{folder}` printer is accepted only when the last discovery from a phone listed that folder: a paired device never names a path on the computer itself. A refusal from the setup is `{error: {code, message}}` with its own sentence (400 `invalid-request`, 404, 409 `conflict`, 503 `unavailable`). The answers in `packages/contracts/fixtures/printer-setup-phone.json` are shared by the companion, iPhone and Android tests.
+`printer` is `PrinterFormSchema`. A `{folder}` printer is accepted only when the last discovery from a phone listed that folder: a paired device never names a path on the computer itself. A refusal from the setup is `{error: {code, message}}` with its own sentence in `message` and `sentence` (400 `invalid-request`, 404, 409 `conflict`, 503 `unavailable`). The answers in `packages/contracts/fixtures/printer-setup-phone.json` are shared by the companion, iPhone and Android tests.
 
 ### Updating the printer MCPs (PR 6, PRD §8.10)
 

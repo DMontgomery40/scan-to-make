@@ -229,5 +229,6 @@ test('phone Add printer needs printing and settings, refuses what the Mac would 
   f.setup.add = async () => { throw new PrinterSetupError('unavailable', 'Download mcp-3D-printer-server first, then add the printer.'); };
   const refused = await f.call('/v1/printers/setup/add', 'POST', {printer: {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local'}});
   assert.equal(refused.status, 503);
-  assert.deepEqual(refused.body.error, {code: 'unavailable', message: 'Download mcp-3D-printer-server first, then add the printer.'});
+  const words = 'Download mcp-3D-printer-server first, then add the printer.';
+  assert.deepEqual(refused.body.error, {code: 'unavailable', message: words, sentence: words}, 'the phone shows the setup\'s own sentence');
 });

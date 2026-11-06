@@ -401,7 +401,8 @@ export async function startCompanionServer(
           const {PrinterSetupError}=await import('./printing/setup.js');
           if(error instanceof PrinterSetupError){
             response.statusCode=error.code==='not-found'?404:error.code==='invalid'?400:error.code==='conflict'?409:503;
-            response.end(JSON.stringify({error:{code:error.code==='invalid'?'invalid-request':error.code,message:error.message}}));return;
+            // Written for the person ("Download mcp-3D-printer-server first, then add the printer."): the phone shows it as is.
+            response.end(JSON.stringify({error:{code:error.code==='invalid'?'invalid-request':error.code,message:error.message,sentence:error.message}}));return;
           }
           if(error instanceof McpUpdateError){
             response.statusCode=error.code==='not-found'?404:503;
