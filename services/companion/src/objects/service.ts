@@ -330,6 +330,10 @@ function resumedHere(events: readonly {message: string}[]): boolean {
   return false;
 }
 
+/** The one sentence for a companion that macOS won't let read ~/Downloads (also how a waiting project is recognised). */
+function downloadsDeniedQuestion(starter: boolean): string {
+  return `Counterpart can’t open your Downloads folder, so it can’t use the designer’s files there. Turn on Downloads Folder for Counterpart in System Settings → Privacy & Security → Files & Folders, or drop the ${starter ? '3MF' : 'file'} here.`;
+}
 /** A starter's file Ask: the print profile's 3MF, by the site's own button (its raw model has lost the plates). */
 function starterFileQuestion(starter: StarterProject): string {
   return `On ${starter.site}, open ${starter.title.toLowerCase()}, choose the designer’s print profile and press Download 3MF, then add that 3MF here. Not the raw model files (STL or a zip): they don’t have the designer’s plates.`;
@@ -568,7 +572,8 @@ export class ObjectService {
       const starter = this.#starter(starterId);
       if (!starter) throw new InvalidStateError('Choose one of the starter projects.');
       const existing = (await this.#deps.store.list()).find(o => o.starterId === starterId);
-      if (existing) return this.get(existing.id);
+      // A starter waiting only for Downloads access goes on by itself once macOS allows it (Codex on #372).
+      if (existing) return await this.#resumeDownloads(existing) ?? this.get(existing.id);
       const store = this.#deps.store;
       const created = await store.create(starter.instructions, 'published');
       try {
@@ -602,6 +607,8 @@ export class ObjectService {
   }
   async list() {
     const objects = await Promise.all((await this.#deps.store.list()).map(o => this.get(o.id)));
+    // A project waiting only for Downloads access resumes, in the background, once macOS allows it.
+    for (const object of objects) void this.#resumeDownloads(object).catch(error => console.error(`project ${object.id}: couldn’t resume after Downloads access: ${error instanceof Error ? error.message : String(error)}`));
     // Projects from before titles get one, once and in the background, the first time they're listed.
     // (A new project gets its title at its first pass, from the request as it is then.)
     for (const object of objects) if (object.state !== 'new') this.#title(object, {backfill: true});
@@ -1194,14 +1201,20 @@ export class ObjectService {
       throw new InvalidStateError("Add photos of it, or describe what you'd like changed.");
     if (object.state === 'touching-up') return object;
     if (object.kind === 'published' && object.current && ['ready', 'needs-closeup'].includes(object.state)) return object;
+    const waiting = !object.current && ['new', 'failed', 'needs-closeup'].includes(object.state);
+    // A starter downloads its files at most once per computer. Its own cache needs no Downloads access, so it comes first.
+    const starter = object.starterId && waiting ? this.#starter(object.starterId) : undefined;
+    const cached = starter ? await this.#cachedKit(starter) : undefined;
+    if (starter && cached) {
+      console.error(`starter ${starter.id}: project ${id} uses the designer’s files already on this computer (cache), no download: ${cached.map(file => basename(file)).join(', ')}`);
+      return this.#changed(await this.#keepPublished(id, cached, {...(object.credit ? {credit: object.credit} : {})}));
+    }
     // A published model whose Downloads macOS won't let the companion read: one sentence, never a silent new download.
-    if (object.kind === 'published' && !object.current && ['new', 'failed', 'needs-closeup'].includes(object.state)
-      && await folderAccess(this.#downloads()) === 'denied') return this.#downloadsDenied(id);
-    // A starter downloads its files at most once per computer: the cache, then ~/Downloads, before any browser work.
-    if (object.starterId && !object.current && ['new', 'failed', 'needs-closeup'].includes(object.state)) {
-      const starter = this.#starter(object.starterId);
-      const found = starter ? await this.#starterOnDisk(starter) : undefined;
-      if (starter && found) {
+    if (object.kind === 'published' && waiting && await folderAccess(this.#downloads()) === 'denied') return this.#downloadsDenied(id);
+    // Then ~/Downloads, before any browser work.
+    if (starter) {
+      const found = await this.#starterOnDisk(starter);
+      if (found) {
         console.error(`starter ${starter.id}: project ${id} uses the designer’s files already on this computer (${found.from}), no download: ${found.files.map(file => basename(file)).join(', ')}`);
         return this.#changed(await this.#keepPublished(id, found.files, {...(object.credit ? {credit: object.credit} : {})}));
       }
@@ -2382,6 +2395,14 @@ export class ObjectService {
   #starter(id: string) { return (this.#deps.starter ?? bundledStarter)(id); }
   #downloads() { return this.#deps.downloads ?? join(homedir(), 'Downloads'); }
   #downloadsDeniedLogged = false;
+  /** Starts again a project whose only open question is the Downloads-access one, once macOS allows the folder. */
+  async #resumeDownloads(object: StmObject): Promise<StmObject | undefined> {
+    if (object.state !== 'needs-closeup' || object.ask?.status !== 'open' || object.ask.type !== 'file' || object.current) return undefined;
+    if (object.ask.question !== downloadsDeniedQuestion(!!object.starterId)) return undefined;
+    if (await folderAccess(this.#downloads()) !== 'ok') return undefined;
+    console.error(`project ${object.id}: Downloads is readable now; going on`);
+    return this.start(object.id);
+  }
   /**
    * macOS privacy keeps ~/Downloads from the companion: the project asks once, in one sentence, for the permission or the
    * file itself (a dropped 3MF needs no Downloads access), and starts no download (parent, Nov 6).
@@ -2390,8 +2411,7 @@ export class ObjectService {
     const store = this.#deps.store, object = await store.get(id), now = Date.now();
     const starter = object.starterId ? this.#starter(object.starterId) : undefined;
     if (!this.#downloadsDeniedLogged) { this.#downloadsDeniedLogged = true; console.error(`published project ${id}: macOS refused the companion ${this.#downloads()} (EPERM); asking for access or the file instead of downloading`); }
-    const ask = {id: randomUUID(), type: 'file' as const,
-      question: `Counterpart can’t open your Downloads folder, so it can’t use the designer’s files there. Turn on Downloads Folder for Counterpart in System Settings → Privacy & Security → Files & Folders, or drop the ${starter ? '3MF' : 'file'} here.`,
+    const ask = {id: randomUUID(), type: 'file' as const, question: downloadsDeniedQuestion(!!starter),
       ...(object.credit?.url ? {url: object.credit.url} : {}), ...(object.credit?.title ? {modelName: object.credit.title} : {}), ...(object.credit?.site ? {site: object.credit.site} : {}),
       accepts: starter ? ['3mf' as const] : ['3mf' as const, 'stl' as const], answers: ['file' as const], status: 'open' as const, askedAtMs: now};
     const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined, failure: undefined, question: undefined, ask,

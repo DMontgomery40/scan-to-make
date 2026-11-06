@@ -269,6 +269,33 @@ test('a companion that macOS won’t let read Downloads asks once for access or 
  const {value:m}=await logged(async()=>mid.service.settled((await mid.service.addStarter('long-vernier-caliper')).id));
  assert.equal(m.state,'needs-closeup');assert.match(m.ask.question,/can’t open your Downloads folder/);assert.equal(m.failure,undefined);
 });
+// Codex on #372: the companion's own cache needs no Downloads access, and granting access must let the project go on.
+test('with Downloads refused, a cached kit is still Ready, and a waiting project goes on once access is granted',async t=>{
+ if(process.getuid?.()===0)return t.skip('root reads any folder');
+ const {service,asked,root}=await setup(t,async(_input,root)=>caliper(root));
+ const first=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(first.state,'ready');assert.equal(asked.length,1);
+ await service.delete(first.id);
+ await mkdir(join(root,'Downloads'),{recursive:true});await chmod(join(root,'Downloads'),0o000);
+ t.after(()=>chmod(join(root,'Downloads'),0o700).catch(()=>{}));
+ const {value:cached}=await logged(()=>service.addStarter('long-vernier-caliper'));
+ assert.equal(cached.state,'ready','the cache, not Downloads');assert.equal(asked.length,1);
+ // The rig has nothing cached: it waits on the one sentence, then goes on when macOS allows Downloads.
+ const rigs=await setup(t,async(_input,root)=>rig(root),{downloads:join(root,'Downloads')});
+ const {value:waiting}=await logged(()=>rigs.service.addStarter('scan-platform'));
+ assert.equal(waiting.state,'needs-closeup');assert.equal(rigs.asked.length,0);
+ await logged(()=>rigs.service.list());assert.equal(rigs.asked.length,0,'still refused: still waiting');
+ await chmod(join(root,'Downloads'),0o700);
+ const {value:resumed}=await logged(async()=>{await rigs.service.addStarter('scan-platform');return rigs.service.settled(waiting.id);});
+ assert.equal(resumed.state,'ready');assert.equal(rigs.asked.length,1,'one pass, after access');
+ await chmod(join(root,'Downloads'),0o000);
+ const again=await setup(t,async(_input,root)=>rig(root),{downloads:join(root,'Downloads')});
+ const {value:w2}=await logged(()=>again.service.addStarter('scan-platform'));
+ await chmod(join(root,'Downloads'),0o700);
+ await logged(async()=>{await again.service.list();await new Promise(r=>setTimeout(r,50));});
+ const {value:r2}=await logged(()=>again.service.settled(w2.id));
+ assert.equal(r2.state,'ready','listing the projects resumes it too');assert.equal(again.asked.length,1);
+});
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
   ['one of two files',[['Vernier Caliper Ruler 150mm COLOR.3mf','Vernier Caliper Ruler - Two Lengths']]],
