@@ -12,7 +12,7 @@ import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} 
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
-import {defaultRunPublished, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
+import {defaultRunPublished, folderAccess, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
 import {filamentProposalUnavailable, ownSettingsUnavailable, previewUnavailable, sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {RuntimeSettings} from '../runtime-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
@@ -1194,6 +1194,9 @@ export class ObjectService {
       throw new InvalidStateError("Add photos of it, or describe what you'd like changed.");
     if (object.state === 'touching-up') return object;
     if (object.kind === 'published' && object.current && ['ready', 'needs-closeup'].includes(object.state)) return object;
+    // A published model whose Downloads macOS won't let the companion read: one sentence, never a silent new download.
+    if (object.kind === 'published' && !object.current && ['new', 'failed', 'needs-closeup'].includes(object.state)
+      && await folderAccess(this.#downloads()) === 'denied') return this.#downloadsDenied(id);
     // A starter downloads its files at most once per computer: the cache, then ~/Downloads, before any browser work.
     if (object.starterId && !object.current && ['new', 'failed', 'needs-closeup'].includes(object.state)) {
       const starter = this.#starter(object.starterId);
@@ -2272,7 +2275,7 @@ export class ObjectService {
     if (result.status !== 'downloaded' && !(result.status === 'failed' && result.run?.stopReason === 'cancelled')) {
       const object = await store.get(id), starter = object.starterId ? this.#starter(object.starterId) : undefined;
       const files = starter ? await this.#starterFiles(starter, result.arrived ?? []) : [];
-      const kit = starter ? this.#kit(starter, files) : undefined;
+      const kit = starter ? this.#kit(starter, files)?.files : undefined;
       if (starter && kit) {
         console.error(`published pass: project ${id} took the designer’s ${kit.length} file${kit.length === 1 ? '' : 's'} from Downloads (the worker reported ${result.status}): ${kit.map(file => basename(file)).join(', ')}`);
         return this.#keepPublished(id, kit, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(credit ? {credit} : {})});
@@ -2280,6 +2283,8 @@ export class ObjectService {
       // Even part of a kit is kept (only the catalog's own files, when it pins them), so a later pass never downloads it again.
       if (starter) await this.#cacheStarter(starter, files.filter(file => !starter.sha256?.length || starter.sha256.includes(file.sha256)).map(file => file.path));
     }
+    // Downloads refused mid-pass: the same one sentence, not a failure that a Try Again would turn into another download.
+    if (result.status !== 'downloaded' && result.downloadsDenied) { this.#logPublished(id, startedAtMs, result); return this.#downloadsDenied(id, startedAtMs); }
     // Every published pass that doesn't bring the file back logs why, with what finds its transcript (Nov 6:
     // a starter said "Sign in" while the browser was signed in, and the log had nothing).
     if (result.status !== 'downloaded') this.#logPublished(id, startedAtMs, result);
@@ -2325,7 +2330,7 @@ export class ObjectService {
     let files = result.files;
     if (starter) {
       const all = await this.#starterFiles(starter, result.files);
-      const kit = this.#kit(starter, all);
+      const kit = this.#kit(starter, all)?.files;
       files = kit ?? [...new Set([...all.map(file => file.path), ...result.files])];
     }
     return this.#keepPublished(id, files, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(summary ? {summary} : {}), ...(credit ? {credit} : {})});
@@ -2348,15 +2353,20 @@ export class ObjectService {
   /**
    * The complete kit among a starter's files, or nothing: every one of the catalog's pinned files when it pins them
    * (two calipers of other lengths never stand in for the caliper and its gauge), else the catalog's file and plate
-   * counts (the rig's full kit has six plates, never a part of it).
+   * counts (the rig's full kit has six plates, never a part of it). When none of the files is a pinned one, the
+   * designer has republished: the designer's files make the kit by those counts, so a hash change never means a
+   * download on every tap (parent, Nov 6: "at most once per computer"). Part of the pinned kit with another file is no kit.
    */
-  #kit(starter: StarterProject, files: {path: string; sha256: string; plates: number}[]): string[] | undefined {
-    if (starter.sha256?.length) {
-      const kit = starter.sha256.map(sha256 => files.find(file => file.sha256 === sha256));
-      return kit.every(Boolean) ? kit.map(file => file!.path) : undefined;
+  #kit(starter: StarterProject, files: {path: string; sha256: string; plates: number}[]): {files: string[]; republished?: true} | undefined {
+    const pins = starter.sha256 ?? [];
+    if (pins.length) {
+      const kit = pins.map(sha256 => files.find(file => file.sha256 === sha256));
+      if (kit.every(Boolean)) return {files: kit.map(file => file!.path)};
+      if (files.some(file => pins.includes(file.sha256))) return undefined;
     }
     const plates = files.reduce((sum, file) => sum + file.plates, 0);
-    return files.length >= starter.files && plates >= (starter.plates ?? 0) ? files.map(file => file.path) : undefined;
+    if (files.length < starter.files || plates < (starter.plates ?? 0)) return undefined;
+    return {files: files.map(file => file.path), ...(pins.length ? {republished: true as const} : {})};
   }
 
   /**
@@ -2365,11 +2375,31 @@ export class ObjectService {
    */
   async #starterFiles(starter: StarterProject, extra: string[]) {
     const kept = await this.#modelFiles(this.#starterCacheDir(starter), 1);
-    const pinned = starter.sha256?.length ? (await this.#starterDownloads(starter, await this.#modelFiles(this.#deps.downloads ?? join(homedir(), 'Downloads'), 0)))
+    const pinned = starter.sha256?.length ? (await this.#starterDownloads(starter, await this.#modelFiles(this.#downloads(), 0)))
       .filter(file => starter.sha256!.includes(file.sha256)).map(file => file.path) : [];
     return this.#starterDownloads(starter, [...kept, ...pinned, ...extra]);
   }
   #starter(id: string) { return (this.#deps.starter ?? bundledStarter)(id); }
+  #downloads() { return this.#deps.downloads ?? join(homedir(), 'Downloads'); }
+  #downloadsDeniedLogged = false;
+  /**
+   * macOS privacy keeps ~/Downloads from the companion: the project asks once, in one sentence, for the permission or the
+   * file itself (a dropped 3MF needs no Downloads access), and starts no download (parent, Nov 6).
+   */
+  async #downloadsDenied(id: string, startedAtMs?: number): Promise<StmObject> {
+    const store = this.#deps.store, object = await store.get(id), now = Date.now();
+    const starter = object.starterId ? this.#starter(object.starterId) : undefined;
+    if (!this.#downloadsDeniedLogged) { this.#downloadsDeniedLogged = true; console.error(`published project ${id}: macOS refused the companion ${this.#downloads()} (EPERM); asking for access or the file instead of downloading`); }
+    const ask = {id: randomUUID(), type: 'file' as const,
+      question: `Counterpart can’t open your Downloads folder, so it can’t use the designer’s files there. Turn on Downloads Folder for Counterpart in System Settings → Privacy & Security → Files & Folders, or drop the ${starter ? '3MF' : 'file'} here.`,
+      ...(object.credit?.url ? {url: object.credit.url} : {}), ...(object.credit?.title ? {modelName: object.credit.title} : {}), ...(object.credit?.site ? {site: object.credit.site} : {}),
+      accepts: starter ? ['3mf' as const] : ['3mf' as const, 'stl' as const], answers: ['file' as const], status: 'open' as const, askedAtMs: now};
+    const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined, failure: undefined, question: undefined, ask,
+      ...(startedAtMs === undefined ? {} : {passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, endedAtMs: now, status: 'needs_file',
+        stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item)})})}));
+    await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, data: {askId: ask.id}, detail: {question: ask.question}});
+    return this.#changed(updated);
+  }
   #starterCacheDir(starter: StarterProject) {
     return join(this.#deps.starterCache ?? join(dirname(this.#deps.store.root), 'starters'), starterModelId(starter));
   }
@@ -2404,11 +2434,12 @@ export class ObjectService {
     if (cached) return {files: cached, from: 'cache'};
     if (!starter.sha256?.length) return undefined;
     // Pinned files, wherever they are kept: the cache's fragments and ~/Downloads together (Codex on #369).
+    // Only the pinned kit itself, before any pass: a republished set is learned from a pass, then kept.
     const kit = this.#kit(starter, await this.#starterFiles(starter, []));
-    return kit ? {files: kit, from: 'Downloads'} : undefined;
+    return kit && !kit.republished ? {files: kit.files, from: 'Downloads'} : undefined;
   }
   /** Keeps a starter's designer files once per computer (and, with `kit`, which of them make it ready), so Try Again and a second tap never download them again. */
-  async #cacheStarter(starter: StarterProject, files: string[], kit?: string[]) {
+  async #cacheStarter(starter: StarterProject, files: string[], kit?: {sha256: string[]; republished?: boolean}) {
     const root = this.#starterCacheDir(starter);
     for (const file of files) {
       try {
@@ -2424,9 +2455,13 @@ export class ObjectService {
         console.error(`starter ${starter.id}: couldn’t keep ${basename(file)} in its cache: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    if (kit?.length) {
+    if (kit?.sha256.length) {
+      const recorded = await readFile(join(root, 'kit.json'), 'utf8').then(text => (JSON.parse(text) as {sha256?: string[]}).sha256 ?? [], () => [] as string[]);
+      if ([...recorded].sort().join() === [...kit.sha256].sort().join()) return;
+      // Logged once, when the kit is first recorded: later taps use it without a pass.
+      if (kit.republished) console.error(`starter ${starter.id}: the designer’s files differ from the catalog’s pinned sha256 (republished?); kept as its kit: ${kit.sha256.join(', ')} (catalog: ${(starter.sha256 ?? []).join(', ')})`);
       const temporary = join(root, `.kit-${randomUUID()}`);
-      try { await mkdir(root, {recursive: true, mode: 0o700}); await writeFile(temporary, JSON.stringify({sha256: kit}), {mode: 0o600}); await rename(temporary, join(root, 'kit.json')); }
+      try { await mkdir(root, {recursive: true, mode: 0o700}); await writeFile(temporary, JSON.stringify({sha256: kit.sha256, ...(kit.republished ? {republished: true} : {})}), {mode: 0o600}); await rename(temporary, join(root, 'kit.json')); }
       catch (error) { await rm(temporary, {force: true}); console.error(`starter ${starter.id}: couldn’t record its kit: ${error instanceof Error ? error.message : String(error)}`); }
     }
   }
@@ -2496,7 +2531,7 @@ export class ObjectService {
     if (starter && updated.state === 'ready') {
       const files = await this.#starterDownloads(starter, receipts.map(receipt => join(dir, receipt.path)));
       const kit = this.#kit(starter, files);
-      await this.#cacheStarter(starter, files.map(file => file.path), kit ? files.filter(file => kit.includes(file.path)).map(file => file.sha256) : undefined);
+      await this.#cacheStarter(starter, files.map(file => file.path), kit ? {sha256: files.filter(file => kit.files.includes(file.path)).map(file => file.sha256), ...(kit.republished ? {republished: true} : {})} : undefined);
     }
     await this.#emit({id: randomUUID(), type: ask ? 'pass.ask' : 'pass.ready', projectId: id, ...(ask ? {data: {askId: ask.id}, detail: {question: ask.question}} : {})});
     return this.#changed(updated);

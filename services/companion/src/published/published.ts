@@ -106,8 +106,8 @@ export type PublishedMissReason = 'not_signed_in' | 'download_not_saved' | 'site
 export interface PublishedRunFacts {toolCalls: number; seconds: number; exitCode: number | null; stopReason?: string; sessionId?: string; chrome?: boolean}
 export type PublishedResult =
   | {status: 'downloaded'; files: string[]; profile?: string; model?: PublishedModel; summary?: string; run?: PublishedRunFacts; arrived?: string[]}
-  | {status: 'needs_file'; model?: PublishedModel; summary?: string; reason?: PublishedMissReason; candidate?: string; /** false when the pass had no browser to download with */ browser?: boolean; run?: PublishedRunFacts; arrived?: string[]}
-  | {status: 'failed'; reason: string; model?: PublishedModel; run?: PublishedRunFacts; arrived?: string[]};
+  | {status: 'needs_file'; model?: PublishedModel; summary?: string; reason?: PublishedMissReason; candidate?: string; /** false when the pass had no browser to download with */ browser?: boolean; run?: PublishedRunFacts; arrived?: string[]; /** macOS privacy refused ~/Downloads */ downloadsDenied?: true}
+  | {status: 'failed'; reason: string; model?: PublishedModel; run?: PublishedRunFacts; arrived?: string[]; downloadsDenied?: true};
 const MISS_REASONS: readonly PublishedMissReason[] = ['not_signed_in', 'download_not_saved', 'site_error', 'not_found', 'other'];
 
 const MODEL_FILE = /\.(3mf|stl)$/i;
@@ -125,6 +125,17 @@ export async function findNamed(fileNames: string[], folders: string[]): Promise
     if (path) { if (!found.includes(path)) found.push(path); } else missing.push(name);
   }
   return {found, missing};
+}
+/**
+ * Whether the companion can list a folder. macOS privacy refuses ~/Downloads (EPERM) to an app the person hasn't
+ * allowed; that must never read as an empty folder, or a starter would download again instead of saying so.
+ */
+export async function folderAccess(path: string): Promise<'ok' | 'denied' | 'missing'> {
+  try { await readdir(path); return 'ok'; }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'EPERM' || code === 'EACCES' ? 'denied' : 'missing';
+  }
 }
 /**
  * Every model file that arrived in the folders while the pass ran: born (or, where the file system keeps no birth
@@ -179,7 +190,8 @@ export async function runPublishedWorker(inv: TouchupInvocation, pass: TouchupPa
   const credit = model(answer, link);
   const folders = [opts.downloads ?? join(homedir(), 'Downloads'), pass.outDir];
   const landed = await arrivedDuring(folders, startedAtMs, endedAtMs);
-  const arrived = landed.length ? {arrived: landed} : {};
+  const denied = await folderAccess(folders[0]!) === 'denied';
+  const arrived = {...(landed.length ? {arrived: landed} : {}), ...(denied ? {downloadsDenied: true as const} : {})};
   const sessionId = typeof run.resultEvent?.session_id === 'string' ? run.resultEvent.session_id : undefined;
   const facts: PublishedRunFacts = {toolCalls: run.toolCalls, seconds: run.seconds, exitCode: run.exitCode,
     ...(run.stopReason !== undefined ? {stopReason: run.stopReason} : {}), ...(sessionId ? {sessionId} : {})};

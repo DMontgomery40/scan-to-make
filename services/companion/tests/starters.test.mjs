@@ -1,7 +1,7 @@
 import test from 'node:test';
 import {mcpPlates} from './support/shown-print.mjs';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,rm,readFile,readdir,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,rm,readFile,readdir,writeFile,chmod} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
@@ -229,6 +229,45 @@ test('a kit split between the cache and Downloads is used before any worker runs
  for(const [name,bytes] of [['c.3mf',COLOR],['g.3mf',GAUGE]])await writeFile(join(other.root,'Downloads',name),bytes);
  const {value:off}=await logged(()=>other.service.start(none.id));
  assert.equal(off.state,'ready');assert.equal(other.asked.length,1);
+});
+// Parent, Nov 6: "at most once per computer" holds when the designer republishes. Files that match none of the catalog's
+// pins are the kit by its counts, kept under the model id, the mismatch logged once; a repeat tap never downloads.
+test('a republished kit (no file matches the pins) is kept once, logged once, and never downloaded again',async t=>{
+ const entry={...pinnedCatalog('long-vernier-caliper'),sha256:['a'.repeat(64),'b'.repeat(64)]};
+ for(const route of ['downloaded','arrived']){
+  const {service,asked,root}=await setup(t,async(_input,root)=>{
+   const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-03.3mf',COLOR],['DEPTH+GAUGE+150mm+COLOR-03.3mf',GAUGE]]);
+   return route==='downloaded'?made:{status:'needs_file',reason:'other',summary:'Couldn’t confirm.',arrived:made.files};
+  },{starter:id=>id===entry.id?entry:pinnedCatalog(id)});
+  const {value:first,lines}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+  assert.equal(first.state,'ready',route);assert.equal(first.files.receipts.length,2,route);
+  const kit=JSON.parse(await readFile(join(root,'starters','makerworld-198362','kit.json'),'utf8'));
+  assert.deepEqual(kit.sha256.sort(),[sha(COLOR),sha(GAUGE)].sort(),route);assert.equal(kit.republished,true,route);
+  await service.delete(first.id);
+  const {value:again,lines:later}=await logged(()=>service.addStarter('long-vernier-caliper'));
+  assert.equal(again.state,'ready',route);assert.equal(asked.length,1,`${route}: never downloaded again`);
+  const mismatch=[...lines,...later].filter(line=>/differ from the catalog’s pinned sha256/.test(line));
+  assert.equal(mismatch.length,1,`${route}: the mismatch is logged once`);
+ }
+});
+// macOS privacy (Files & Folders) can keep ~/Downloads from the companion: that is one sentence, never a download.
+test('a companion that macOS won’t let read Downloads asks once for access or the file, and starts no download',async t=>{
+ if(process.getuid?.()===0)return t.skip('root reads any folder');
+ const {service,asked,root}=await setup(t,async(_input,root)=>caliper(root));
+ await mkdir(join(root,'Downloads'));await chmod(join(root,'Downloads'),0o000);
+ t.after(()=>chmod(join(root,'Downloads'),0o700).catch(()=>{}));
+ const {value:o,lines}=await logged(()=>service.addStarter('scan-platform'));
+ assert.equal(o.state,'needs-closeup');assert.equal(asked.length,0,'no worker run');
+ assert.equal(o.ask.question,'Counterpart can’t open your Downloads folder, so it can’t use the designer’s files there. Turn on Downloads Folder for Counterpart in System Settings → Privacy & Security → Files & Folders, or drop the 3MF here.');
+ assert.deepEqual(o.ask.accepts,['3mf']);assert.match(lines.join('\n'),/macOS refused the companion .*Downloads \(EPERM\)/);
+ assert.equal((await service.addStarter('scan-platform')).id,o.id,'tapping again opens the same project');assert.equal(asked.length,0);
+ // A dropped 3MF needs no Downloads access.
+ const done=await service.addModelFile(o.id,'360 scan platform full kit.3mf',model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears','Feet']));
+ assert.equal(done.state,'ready');assert.equal(publicObject(done).plates.length,6);
+ // Refused during a pass: the same Ask, not a failure whose Try Again downloads again.
+ const mid=await setup(t,async()=>({status:'needs_file',reason:'other',summary:'x',downloadsDenied:true}));
+ const {value:m}=await logged(async()=>mid.service.settled((await mid.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(m.state,'needs-closeup');assert.match(m.ask.question,/can’t open your Downloads folder/);assert.equal(m.failure,undefined);
 });
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
