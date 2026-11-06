@@ -439,7 +439,11 @@ test('Add printer: found MCP folders and the printers each MCP finds; Check; Add
   await assert.rejects(setup.check(PrinterFormSchema.parse({...form, printerType: 'makerbot'})), /doesn’t drive that kind of printer/);
   await assert.rejects(setup.check(PrinterFormSchema.parse({...a1, model: 'x2d'})), /doesn’t know that model/);
   await assert.rejects(setup.add(PrinterFormSchema.parse({...a1, slicer: 'cura-classic'})), /doesn’t use that slicer/);
-  assert.equal(PrinterFormSchema.safeParse({...form, host: 'http://evil/x'}).success, false);
+  // A web address only where the MCP's own host field takes one (`input: "url"`; this MCP version declares none), and
+  // never with credentials, a query or a second line.
+  await assert.rejects(setup.check(PrinterFormSchema.parse({...form, host: 'http://evil/x'})), /without http:\/\/ or a path/);
+  for (const host of ['http://user:pw@evil/x', 'http://evil/x?PRINTER_HOST=y', 'http://evil/x\nPRINTER_HOST=evil', "http://evil/x'"])
+    assert.equal(PrinterFormSchema.safeParse({...form, host}).success, false, host);
   assert.equal(PrinterFormSchema.safeParse({...form, secret: "a'\nPRINTER_HOST=evil"}).success, false);
   const bambuKind = SETUP_FIELDS['mcp-3d-printer-server'].kinds.find(kind => kind.kind === 'bambu'), slicer = SETUP_FIELDS['mcp-3d-printer-server'].slicer;
   assert.deepEqual(envFor(PrinterFormSchema.parse({backend: 'mcp-3d-printer-server', printerType: 'bambu', host: '192.0.2.9', serial: '03900a000000001', model: 'a1', secret: '87654321'}), bambuKind, slicer),

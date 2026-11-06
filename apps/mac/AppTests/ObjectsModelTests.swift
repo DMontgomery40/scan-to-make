@@ -292,6 +292,34 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(ControlClient.timeout(for: "printers.obtain"), 70)
     }
 
+    /// Add printer…'s address offers a web address only where the MCP's own host field takes one (mcp-3d-printer-server
+    /// 1.2.55's `input: "url"` on OctoPrint), with projects present.
+    func testAddPrinterAddressOffersAWebAddressOnlyWhereTheMCPTakesOneWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("caliper", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertFalse(model.objects.isEmpty, "projects are present")
+        let options = try JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
+        {"types":[
+          {"printerType":"octoprint","label":"OctoPrint","backends":["mcp-3d-printer-server"],"serial":false,
+           "address":{"hint":"OctoPrint's address (octopi.local or an IP address), or its full URL for HTTPS or a sub-path","url":true}},
+          {"printerType":"klipper","label":"Klipper (Moonraker)","backends":["mcp-3d-printer-server"],"serial":false,"address":{"hint":"The printer's IP address or host name"}}],
+         "models":{}}
+        """.utf8))
+        let octoprint = AddressField(options: options, printerType: "octoprint")
+        XCTAssertTrue(octoprint.prompt.contains("https://"))
+        XCTAssertEqual(octoprint.hint?.contains("sub-path"), true)
+        let klipper = AddressField(options: options, printerType: "klipper")
+        XCTAssertFalse(klipper.prompt.contains("https://"))
+        XCTAssertEqual(klipper.hint, "The printer's IP address or host name")
+        XCTAssertFalse(AddressField(options: nil, printerType: "octoprint").prompt.contains("https://"))
+        var form = PrinterForm()
+        form.backend = "mcp-3d-printer-server"; form.printerType = "octoprint"; form.host = " https://pi.example.com/octoprint "
+        XCTAssertEqual(form.json, .object(["backend": .string("mcp-3d-printer-server"), "printerType": .string("octoprint"), "host": .string("https://pi.example.com/octoprint")]),
+                       "sent as typed; the companion checks it against the MCP's field")
+    }
+
     func testDiscoveryDoesNotClaimEmptyPhonesOrPrintersBeforeSuccessfulReads() async {
         let failed = ObjectsModel(companion: FakeObjects())
         XCTAssertEqual(failed.missingPhoneText, "Checking connected phones…")

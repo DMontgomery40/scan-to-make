@@ -592,3 +592,12 @@ export async function obtainValue(
   }
   return step;
 }
+
+/** Add a printer's address field: the MCP's hint, and a placeholder that offers a web address only where the MCP takes one. */
+export function addressField(options: SetupOptions | undefined, printerType: string | undefined) {
+  const address = options?.types.find((t) => t.printerType === printerType)?.address;
+  return {
+    hint: address?.hint,
+    placeholder: address?.url ? "192.168.1.20, printer.local or https://…" : "192.168.1.20 or printer.local",
+  };
+}

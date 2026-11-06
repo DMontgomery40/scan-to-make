@@ -1,4 +1,4 @@
-import { mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls } from "./domain";
+import { addressField, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -1064,6 +1064,7 @@ function AddPrinter({
             }
             <input
               value={form[key] ?? ""}
+              placeholder={key === "host" ? addressField(options, form.printerType).placeholder : undefined}
               onChange={(e) => {
                 update(key, e.target.value);
                 if (key === "serial") {
@@ -1079,6 +1080,9 @@ function AddPrinter({
                 }
               }}
             />
+            {key === "host" && addressField(options, form.printerType).hint && (
+              <small>{addressField(options, form.printerType).hint}</small>
+            )}
           </label>
         ),
       )}

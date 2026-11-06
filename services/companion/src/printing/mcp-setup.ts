@@ -84,7 +84,9 @@ export function envOf(kind: SetupKind, values: Partial<Record<string, string>>):
 export interface SetupOptions {
   types: {printerType: string; label: string; backends: PrinterBackend[]; serial: boolean;
     /** `obtain`: the MCPs that can fetch it (`printers.obtain`), and the button's words, from the first that declares it. */
-    secret?: {label: string; hint?: string; required: boolean; obtain?: {label: string; hint?: string; backends: PrinterBackend[]}}; fields: SetupField[]}[];
+    secret?: {label: string; hint?: string; required: boolean; obtain?: {label: string; hint?: string; backends: PrinterBackend[]}};
+    /** The address field in the first MCP's words: its hint, and `url` when it also takes a web address (`input: "url"`). */
+    address?: {hint?: string; url?: true}; fields: SetupField[]}[];
   serialModels: Record<string, string>;
   models: Partial<Record<PrinterBackend, {value: string; label: string}[]>>;
   /** The slicer each MCP would run and the settings that choose it. */
@@ -109,11 +111,13 @@ export function setupOptions(byPackage: {package: PrinterBackend; label: string;
     }
     if (setup.slicer) options.slicer[pkg] = setup.slicer;
     for (const kind of setup.kinds) {
-      const secret = field(kind, 'secret'), model = field(kind, 'model');
+      const secret = field(kind, 'secret'), model = field(kind, 'model'), host = field(kind, 'host');
       const listed = options.types.find(item => item.printerType === kind.kind);
       if (listed) { if (!listed.backends.includes(pkg)) listed.backends.push(pkg); }
       else options.types.push({printerType: kind.kind, label: kind.label, backends: [pkg], serial: !!field(kind, 'serial'),
-        ...(secret ? {secret: {label: secret.label, ...(secret.hint ? {hint: secret.hint} : {}), required: secret.required}} : {}), fields: kind.fields});
+        ...(secret ? {secret: {label: secret.label, ...(secret.hint ? {hint: secret.hint} : {}), required: secret.required}} : {}),
+        ...(host && (host.hint || host.input === 'url') ? {address: {...(host.hint ? {hint: host.hint} : {}), ...(host.input === 'url' ? {url: true as const} : {})}} : {}),
+        fields: kind.fields});
       const type = options.types.find(item => item.printerType === kind.kind)!;
       if (secret?.obtain && type.secret) {
         type.secret.obtain ??= {label: secret.obtain.label, ...(secret.obtain.hint ? {hint: secret.obtain.hint} : {}), backends: []};

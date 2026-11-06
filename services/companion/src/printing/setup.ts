@@ -103,6 +103,21 @@ export interface McpUse {destinationId: string; printerId: string; printer: stri
 
 // KAN-163's checks: a literal host (no scheme, path, port or credentials), a Bambu serial, a port.
 const HOST = /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/;
+/** A web address an MCP's host field may take (`input: "url"`): http or https, no credentials, query or fragment, one printable line with no quote. */
+export function webAddress(value: string): boolean {
+  if (value.length > 512 || !/^https?:\/\//i.test(value) || !/^[\x21-\x26\x28-\x7e]+$/.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && HOST.test(url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '')) === true
+      && !url.username && !url.password && !url.search && !url.hash;
+  } catch { return false; }
+}
+/**
+ * The form's address: a host name or address, or a web address. Which one a printer takes is its MCP's own field
+ * (`input: "url"`), checked against the kind in #kindForForm.
+ */
+const address = z.string().trim().max(512).transform(value => webAddress(value) ? value : value.replace(/\.$/, ''))
+  .refine(value => webAddress(value) || (value.length >= 1 && value.length <= 253 && HOST.test(value)), 'Enter the printer’s address.');
 /** A value written to the `.env` in single quotes: one line, printable, no quote. */
 const envValue = z.string().max(512).regex(/^[\x20-\x26\x28-\x7e]*$/);
 /**
@@ -117,7 +132,7 @@ export const PrinterFormSchema = z.union([
   z.strictObject({
     backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server']),
     printerType: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
-    host: z.string().trim().max(254).transform(value => value.replace(/\.$/, '')).pipe(z.string().min(1).max(253).regex(HOST)),
+    host: address,
     port: z.string().regex(/^[1-9][0-9]{0,4}$/).refine(value => Number(value) <= 65535).optional(),
     serial: z.string().trim().regex(/^[A-Za-z0-9]{1,64}$/).optional(),
     model: z.string().regex(/^[a-z0-9]{1,16}$/).optional(),
@@ -150,7 +165,7 @@ export const envFile = (env: Record<string, string>) =>
 export const ObtainRequestSchema = z.strictObject({
   backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server']),
   printerType: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
-  host: z.string().trim().max(254).transform(value => value.replace(/\.$/, '')).pipe(z.string().min(1).max(253).regex(HOST)),
+  host: address,
   port: z.string().regex(/^[1-9][0-9]{0,4}$/).refine(value => Number(value) <= 65535).optional(),
   /** The form field to fill: one whose MCP field declares `obtain` (only `secret` today). */
   field: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
@@ -606,6 +621,9 @@ export class PrinterSetup {
     if (!setup) throw new PrinterSetupError('unavailable', `Update ${this.#label(input.backend)} in Settings → Printers so Counterpart can set up printers with it.`);
     const kind = setup.kinds.find(item => item.kind === input.printerType);
     if (!kind) throw new PrinterSetupError('invalid', `${this.#label(input.backend)} doesn’t drive that kind of printer.`);
+    // A web address only where the MCP's own host field says it takes one (mcp-3d-printer-server 1.2.55+: OctoPrint).
+    if (webAddress(input.host) && field(kind, 'host')?.input !== 'url')
+      throw new PrinterSetupError('invalid', `Enter the printer’s address without http:// or a path: ${this.#label(input.backend)} takes a host name or IP address for ${kind.label}.`);
     const values: Record<string, string | undefined> = {host: input.host, port: input.port, serial: input.serial, model: input.model};
     for (const item of kind.fields) if (item.required && item.name !== 'secret' && item.name in values && !values[item.name])
       throw new PrinterSetupError('invalid', `Enter the printer’s ${item.label.toLowerCase()}.`);

@@ -311,6 +311,8 @@ export interface SetupOptions {
       /** The MCPs that can fetch it for the person (`printers.obtain`), and the button's words, in the MCP's own words. */
       obtain?: { label: string; hint?: string; backends: string[] };
     };
+    /** The address field in the MCP's words; `url` when it also takes a web address (https://…, a sub-path). */
+    address?: { hint?: string; url?: boolean };
   }[];
   models: Record<string, { value: string; label: string }[]>;
   serialModels?: Record<string, string>;

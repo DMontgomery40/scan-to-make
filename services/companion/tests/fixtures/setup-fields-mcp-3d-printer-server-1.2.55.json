@@ -2,7 +2,7 @@
  "contract": "counterpart/1",
  "server": {
   "name": "mcp-3d-printer-server",
-  "version": "1.2.53"
+  "version": "1.2.55"
  },
  "kinds": [
   {
@@ -98,7 +98,8 @@
      "env": "PRINTER_HOST",
      "label": "Address",
      "hint": "OctoPrint's address (octopi.local or an IP address), or its full URL for HTTPS or a sub-path (https://octoprint.example.com, http://pi.lan/octoprint)",
-     "required": true
+     "required": true,
+     "input": "url"
     },
     {
      "name": "port",
