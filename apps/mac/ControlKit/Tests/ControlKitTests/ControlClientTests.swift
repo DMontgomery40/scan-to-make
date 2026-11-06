@@ -129,7 +129,19 @@ final class ControlClientTests: XCTestCase {
         }
         do { try await ControlClient(socketPath: gone.path).answerNearby(id, allow: false); XCTFail("Missing remote error") }
         catch { XCTAssertEqual((error as? ControlRemoteError)?.code, "not-found") }
-        withExtendedLifetime([list, answer, gone]) {}
+        // Nov 6: past its connection limit the companion answers before reading the request, so the answer has no id.
+        // It is a refusal the Mac shows, never "no answer".
+        let busy = try UnixFixture { _ in
+            var data = try JSONSerialization.data(withJSONObject: ["v": 1, "id": NSNull(), "error": ["code": "busy", "message": "Your Mac is answering too many requests at once. Try again in a moment."]]); data.append(10); return [data]
+        }
+        do { try await ControlClient(socketPath: busy.path).answerNearby(id, allow: false); XCTFail("Missing remote error") }
+        catch { XCTAssertEqual(error as? ControlRemoteError, ControlRemoteError(code: "busy", message: "Your Mac is answering too many requests at once. Try again in a moment.")) }
+        let stray = try UnixFixture { _ in
+            var data = try JSONSerialization.data(withJSONObject: ["v": 1, "id": NSNull(), "result": ["answered": true]]); data.append(10); return [data]
+        }
+        do { try await ControlClient(socketPath: stray.path).answerNearby(id, allow: false); XCTFail("an id-less result is never accepted") }
+        catch { XCTAssertEqual(error as? ControlClientError, .invalidResponse) }
+        withExtendedLifetime([list, answer, gone, busy, stray]) {}
     }
     func testPairingRemainsPrivateAndLetsServerChooseRetainedLogin() async throws {
         let secret = String(repeating: "a", count: 32)

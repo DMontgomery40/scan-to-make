@@ -10,7 +10,7 @@ public struct ControlClient: Sendable {
         self.socketPath = socketPath; self.timeout = timeout
     }
     private struct Request: Encodable { let v = 1; let id: String, method: String; let params: JSONValue }
-    private struct Response<T: Decodable>: Decodable { let v: Int; let id: String; let result: T?; let error: ControlRemoteError? }
+    private struct Response<T: Decodable>: Decodable { let v: Int; let id: String?; let result: T?; let error: ControlRemoteError? }
     func call<T: Decodable>(_ method: String, _ params: [String: JSONValue] = [:]) async throws -> T {
         let id = UUID().uuidString
         var data: Data
@@ -25,7 +25,9 @@ public struct ControlClient: Sendable {
         let reply: Response<T>
         do { reply = try JSONDecoder().decode(Response<T>.self, from: bytes) }
         catch { throw ControlClientError.invalidResponse }
-        guard reply.v == 1, reply.id == id, (reply.result == nil) != (reply.error == nil) else { throw ControlClientError.invalidResponse }
+        // An answer before the request was read (`id: null`, the companion's `busy`) can only be a refusal (Nov 6).
+        let unread = reply.id == nil && reply.error != nil && reply.result == nil
+        guard reply.v == 1, reply.id == id || unread, (reply.result == nil) != (reply.error == nil) else { throw ControlClientError.invalidResponse }
         if let error = reply.error { throw error }
         return reply.result!
     }
