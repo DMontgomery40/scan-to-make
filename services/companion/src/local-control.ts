@@ -52,7 +52,7 @@ export function methodDeadlineMs(method: ControlMethod, params: unknown): number
   if (method === 'printers.add' || method === 'printers.remove' || method === 'printers.chooseMcp' || method === 'printers.completeSettings') return 30_000;
   // Starting the printer MCP's session can take a few seconds before its route is read.
   if (method === 'printers.route') return 25_000;
-  // fusion_mcp_setup starts the printer MCP; an install downloads and checks the add-in (the MCP allows 300 s).
+  // fusion.setup waits for the printer MCP's own setup tool, which may take minutes (it allows itself 300 s).
   if (method === 'fusion.setup') return (params as {install?: unknown})?.install === true ? 330_000 : 100_000;
   // The printer MCP may ask its own confirmation: the control waits the question's window (10 min) plus 2 min,
   // so the app's request must outlive it, or an answer after the app gave up would still run the control.
