@@ -304,3 +304,16 @@ test('a printer MCP without list_3mf_plates keeps the file and says to update it
  assert.equal(kept.files.receipts[0].platesListed,false);
  await assert.rejects(f.service.estimate(object.id),{message:update});
 });
+// Codex on #370: plates are listed through the MCP of the printer the estimate is for, not the startup one.
+test('plates are listed through the chosen printer’s MCP, not the startup one',async t=>{
+ const update='Update mcp-3D-printer-server in Settings → Printers to show this file’s plates.';
+ const startup={backend:'mcp-3d-printer-server',modelPlates:async()=>{throw new PrinterMcpError('plates-unsupported',undefined,update);},runBundle:async()=>{throw Error('unused');}};
+ const asked=[];
+ const chosen={backend:'bambu-printer-mcp',modelPlates:async input=>{asked.push(input.modelPath);return mcpPlates(input);},estimate:async()=>({estimate:{seconds:60},settings:{}}),runBundle:async()=>{throw Error('unused');}};
+ const catalog={defaultDestinationId:'current',destinations:[{id:'current',name:'Startup',backend:'mcp-3d-printer-server'},{id:'p1s',name:'P1S',backend:'bambu-printer-mcp'}],canonical:id=>['current','p1s'].includes(id)?id:undefined,resolve:()=>undefined};
+ const f=await setup(t,undefined,{printerCatalog:catalog,print:{services:{runner:startup},destinations:new Map([['current',{runner:startup}],['p1s',{runner:chosen,selection:{model:'p1s'}}]])}});
+ const object=await f.service.create('Print this','published',LINK);const kept=await f.service.addModelFile(object.id,'kit.3mf',kit());
+ assert.equal(kept.files.receipts[0].platesListed,false,'the default printer’s MCP couldn’t list them');
+ await f.service.estimate(object.id,{destinationId:'p1s'});
+ assert.equal(asked.length,1);assert.equal((await f.service.get(object.id)).files.receipts[0].plates.length,6);
+});

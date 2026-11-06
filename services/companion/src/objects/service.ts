@@ -1915,8 +1915,11 @@ export class ObjectService {
    * A kept 3MF's plates and their pictures from the default printer's MCP (`list_3mf_plates`). Undefined when no
    * printer MCP is there to ask; an MCP without the tool throws its Update sentence (PrinterMcpError `plates-unsupported`).
    */
-  async #mcpPlates(dir: string, relative: string, sha256: string, options: {needed?: boolean} = {}): Promise<ModelFileInfo['plates'] | undefined> {
-    const runner = this.#deps.print?.services?.runner;
+  async #mcpPlates(dir: string, relative: string, sha256: string, options: {needed?: boolean; destinationId?: string} = {}): Promise<ModelFileInfo['plates'] | undefined> {
+    // The printer the project prints on (the catalog's default for a new file), through the MCP it uses now.
+    const destinationId = options.destinationId ?? this.#deps.printerCatalog?.defaultDestinationId;
+    const canonical = destinationId === undefined ? undefined : this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId;
+    const runner = (canonical ? this.#deps.print?.destinations?.get(canonical) : undefined)?.runner ?? this.#deps.print?.services?.runner;
     if (!runner?.modelPlates) return undefined;
     let listed;
     try { listed = await runner.modelPlates({modelPath: join(dir, relative), signal: AbortSignal.timeout(60_000)}); }
@@ -1940,14 +1943,14 @@ export class ObjectService {
   }
 
   /** A project's 3MFs kept before a printer MCP could list their plates, listed now (or its Update sentence). */
-  async #listPlates(id: string): Promise<void> {
+  async #listPlates(id: string, destinationId?: string): Promise<void> {
     const object = await this.get(id);
     const pending = (object.files?.receipts ?? []).filter(receipt => receipt.platesListed === false);
     if (!pending.length) return;
     const dir = this.#deps.store.dir(id);
     const listed = new Map<string, ModelFileInfo['plates']>();
     for (const receipt of pending) {
-      const plates = await this.#mcpPlates(dir, receipt.path, receipt.sha256, {needed: true});
+      const plates = await this.#mcpPlates(dir, receipt.path, receipt.sha256, {needed: true, destinationId: destinationId ?? this.#destinationId(object)});
       if (plates) listed.set(receipt.sha256, plates);
     }
     if (!listed.size) return;
@@ -1967,8 +1970,8 @@ export class ObjectService {
     // Whether the file prints with its own settings on the printer this slice is for is settled first, so this slice's
     // defaults are the ones Print uses (`printOptions`): an answer arriving later would change Print's recipe.
     const {destinationId: requested, ...choices} = request;
-    // A 3MF kept before there was a printer MCP gets its plates first: the estimate is for one of them.
-    await this.#listPlates(id);
+    // A 3MF kept before there was a printer MCP gets its plates first, from the MCP of the printer this estimate is for.
+    await this.#listPlates(id, requested);
     const sliceFor = (o: StmObject) => requested ? this.#deps.printerCatalog?.canonical(requested) ?? requested : this.#destinationId(o);
     const before = await this.get(id);
     await this.#askOwnSettings(before, sliceFor(before));
