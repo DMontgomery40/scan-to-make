@@ -124,6 +124,27 @@ import CounterpartKit
                        "the draft response may itself prove Start succeeded even when its display ticket is old")
     }
 
+    func testPrinterRefreshKeepsCopyActionsAfterTheCanonicalProfileChanges() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let fixtures = root.appendingPathComponent("packages/contracts/fixtures")
+        let mac = try CopyCatalogMac(packages: Data(contentsOf: fixtures.appendingPathComponent("mcp-profile-copies.json")),
+                                     printers: Data(contentsOf: fixtures.appendingPathComponent("mcp-profile-printers.json")))
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        store.macCapabilities = ["mcpCopies", "mcpUpdates"]
+        await store.loadMCPCopies()
+        XCTAssertEqual(store.mcpCopies?.first?.uses.first?.printerId, "current")
+        await mac.selectOtherProfile()
+        // The same refresh used after choosing another MCP and by the printer screen.
+        await store.loadPrinters()
+        let selected = try XCTUnwrap(store.catalog?.defaultDestinationId)
+        XCTAssertEqual(selected, "other-profile")
+        let uses = store.mcpCopies?.first?.uses.filter { $0.printerId == selected }
+        XCTAssertEqual(uses?.count, 1, "the new canonical printer retains its software row")
+        XCTAssertEqual(uses?.first?.canMove, true, "its explicit move action remains available")
+    }
+
     func testRemoteDeletionEvictsProjectAndRejectsOlderReplies() async throws {
         let mac = SettingsMac()
         let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
@@ -307,5 +328,30 @@ private actor DelayedMissingProjectMac: HTTPTransport {
     func finish() {
         reply?.resume(returning: HTTPReply(status: 404, body: Data(#"{"error":{"code":"not-found","message":"Object not found"}}"#.utf8)))
         reply = nil
+    }
+}
+
+
+/// Changes only identity in the shared contract fixtures, as choosing the other MCP does on the host.
+private actor CopyCatalogMac: HTTPTransport {
+    private let package: Data
+    private let printers: Data
+    private var selected = "current"
+    init(packages: Data, printers: Data) { self.package = packages; self.printers = printers }
+    func selectOtherProfile() { selected = "other-profile" }
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        var result: [String: Any]
+        if request.url?.path == "/v1/printers/mcps" {
+            var package = try XCTUnwrap(JSONSerialization.jsonObject(with: package) as? [String: Any])
+            var uses = try XCTUnwrap(package["uses"] as? [[String: Any]])
+            uses[0]["printerId"] = selected; package["uses"] = uses
+            result = ["packages": [package]]
+        } else if request.url?.path == "/v1/objects/printers" {
+            result = try XCTUnwrap(JSONSerialization.jsonObject(with: printers) as? [String: Any])
+            var destinations = try XCTUnwrap(result["destinations"] as? [[String: Any]])
+            destinations[0]["id"] = selected; result["destinations"] = destinations
+            result["defaultDestinationId"] = selected
+        } else { throw TransportError("network") }
+        return HTTPReply(status: 200, body: try JSONSerialization.data(withJSONObject: result))
     }
 }

@@ -60,3 +60,21 @@ suspend fun CompanionClient.updatePrinterMcp(mcpId: String, fresh: Boolean = fal
     return request("POST", "/v1/printers/mcp/$mcpId/update", if (fresh) jsonOf("fresh" to true) else JsonObject(emptyMap()))
         .opt<McpUpdate>("update") ?: throw CompanionException("invalid-response", "The companion didn't return an update result.")
 }
+
+
+@Serializable
+data class McpPackageCopies(val `package`: String, val label: String, val appMcpId: String, val appCopy: Copy? = null, val uses: List<Usage>) {
+    @Serializable data class Copy(val version: String? = null)
+    @Serializable data class Usage(val destinationId: String, val printerId: String, val printer: String, val mcpId: String,
+        val kind: String, val path: String? = null, val version: String? = null, val canMove: Boolean) {
+        val words: String get() {
+            val source = if (kind == "app") "Counterpart’s copy" else "your copy" + (path?.let { " at $it" } ?: "")
+            return "$printer uses $source (${version ?: "version unknown"})."
+        }
+    }
+    val moveIds: List<String> get() = uses.filter { it.canMove }.map { it.mcpId }.distinct().sorted()
+    fun moveTitle(id: String) = "Move " + uses.filter { it.mcpId == id }.map { it.printer }.distinct().sorted().joinToString(", ") + " to Counterpart’s updated copy"
+}
+@Serializable private data class McpCopiesReply(val packages: List<McpPackageCopies>)
+suspend fun CompanionClient.mcpCopies(): List<McpPackageCopies> =
+    WireJson.decodeFromJsonElement<McpCopiesReply>(request("GET", "/v1/printers/mcps")).packages

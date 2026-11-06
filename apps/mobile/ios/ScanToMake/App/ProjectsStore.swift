@@ -27,7 +27,10 @@ import CounterpartKit
     /// Bumped by `settings.changed`: Settings reads again.
     var settingsChanges = 0
     /// What each printer MCP's update is doing, from `mcp.update.*` events and the Update reply.
+    var mcpCopies: [MCPPackageCopies]?
+    var mcpCopiesProblem: String?
     var mcpUpdates: [String: MCPUpdateProgress] = [:]
+    var attemptedMcpMoves: [String: String] = [:]
     /// What each printer last reported loaded, from a print sheet (the Mac reports spools per project).
     var spools: [String: [PrinterFilament]] = [:]
     /// The Mac serves `/v1/events`; false after it answered "not supported".
@@ -115,6 +118,7 @@ import CounterpartKit
         } else if event.type.hasPrefix("mcp.update.") {
             if let id = event.data?.mcpId { mcpUpdates[id] = MCPUpdateProgress(event) }
             await loadPrinters()
+            await loadMCPCopies()
         } else if event.type == "settings.changed" { settingsChanges += 1 }
     }
 
@@ -143,9 +147,24 @@ import CounterpartKit
             let latest = try await mac.printers()
             guard !Task.isCancelled else { return }
             catalog = latest; printerProblem = nil
+            // Choosing another MCP can change the canonical printer ID used by copy rows.
+            await loadMCPCopies()
         } catch {
             guard !Task.isCancelled else { return }
             if catalog == nil { printerProblem = "Couldn't read the printers configured on your Mac." }
+        }
+    }
+
+    func loadMCPCopies() async {
+        guard macCapabilities.contains("mcpCopies") else { mcpCopies = nil; return }
+        let ticket = startRequest()
+        do {
+            let copies = try await mac.client.mcpCopies()
+            guard requestIsCurrent(ticket) else { return }
+            mcpCopies = copies; mcpCopiesProblem = nil
+        } catch {
+            guard requestIsCurrent(ticket) else { return }
+            mcpCopiesProblem = "Couldn’t refresh the printer software copies."
         }
     }
 
@@ -219,7 +238,7 @@ import CounterpartKit
     /// Clears everything read from the previous Mac.
     func reset() {
         reads.reset()
-        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]
+        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
         sendFailures = [:]
     }
 

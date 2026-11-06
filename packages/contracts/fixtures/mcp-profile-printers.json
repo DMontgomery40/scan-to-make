@@ -1,0 +1,12 @@
+{
+  "destinations": [
+    {
+      "id": "current",
+      "name": "Bambu Lab P1S",
+      "backend": "bambu-printer-mcp",
+      "source": "current",
+      "state": "ready"
+    }
+  ],
+  "defaultDestinationId": "current"
+}

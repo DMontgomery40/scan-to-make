@@ -1,0 +1,25 @@
+{
+  "package": "mcp-3d-printer-server",
+  "label": "mcp-3D-printer-server",
+  "description": "Printer tools",
+  "installed": true,
+  "version": "1.2.45",
+  "appMcpId": "mcp-0000000000000001",
+  "installs": [],
+  "appCopy": {
+    "kind": "app",
+    "version": "1.2.45"
+  },
+  "uses": [
+    {
+      "destinationId": "other-profile",
+      "printer": "Bambu Lab P1S",
+      "mcpId": "mcp-0000000000000002",
+      "kind": "app",
+      "path": "/home/ada/.local/share/counterpart/printers/generic",
+      "version": "1.2.45",
+      "canMove": false,
+      "printerId": "current"
+    }
+  ]
+}

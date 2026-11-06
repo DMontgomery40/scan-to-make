@@ -1011,3 +1011,51 @@ test('the updater addresses hidden catalog profiles and reserves their selected 
   assert.deepEqual(f.restarts.map(item => item.id), [hidden.id]);
   assert.equal(gate.updating(selected), false);
 });
+
+
+test('paired update and move require settings scope and retain the desktop print exclusion', async t => {
+  const {RemoteAuthStore} = await import('../dist/remote-auth.js');
+  const {startCompanionServer} = await import('../dist/server.js');
+  const {request} = await import('node:http');
+  const {readFile} = await import('node:fs/promises');
+  const forwarded = JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url), 'utf8')).expected;
+  for (const fresh of [false, true]) {
+    const dir = fresh ? `${HOME}/src/bambu-printer-mcp` : `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp`;
+    const gate = new PrintGate(), release = gate.hold('p1s');
+    t.after(release);
+    const f = await updater(t, {gate, profile: bambu('node', [dir + '/dist/index.js']), files: {
+      [dir + '/package.json']: pkgJson('1.1.46'), [dir + '/dist/index.js']: '',
+      ...(fresh ? {[dir + '/.git/HEAD']: 'ref'} : {}),
+    }});
+    const root = await mkdtemp(join(tmpdir(), 'paired-mcp-auth-'));
+    t.after(() => rm(root, {recursive: true, force: true}));
+    const auth = await RemoteAuthStore.create(join(root, 'auth'), {host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test']});
+    const phone = async scopes => {
+      const {code} = await auth.createPairing('alice@example.test', scopes);
+      return auth.exchange('alice@example.test', {code, deviceName: 'Test phone'});
+    };
+    const server = await startCompanionServer({port: 0, remoteAuth: auth, mcpUpdates: f.updates});
+    t.after(() => server.close());
+    const post = credential => new Promise((resolve, reject) => {
+      const req = request(server.url + `/v1/printers/mcp/${f.mcpId}/update`, {method: 'POST', headers: {
+        ...forwarded, authorization: `Bearer ${credential.token}`, 'x-scan-device': credential.deviceId, 'content-type': 'application/json',
+      }}, response => {
+        const chunks = []; response.on('data', chunk => chunks.push(chunk));
+        response.on('end', () => resolve({status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString())}));
+      }); req.on('error', reject); req.end(JSON.stringify({fresh}));
+    });
+    for (const scopes of [['projects:read'], ['printer-handoff:use']]) {
+      assert.equal((await post(await phone(scopes))).status, 403, `${scopes} cannot ${fresh ? 'move' : 'update'}`);
+    }
+    assert.deepEqual(f.commands, [], 'refused requests cannot even start a registry check');
+    const allowed = await post(await phone(['projects:write']));
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.body.update.state, 'waiting');
+    assert.equal(f.commands.some(command => command.includes(' install ') || command.includes(' pull ')), false);
+    assert.deepEqual(f.restarts, [], 'no process restarts while a desktop print owns the guard');
+    release(); await f.done();
+    assert.equal(f.events.at(-1).type, 'mcp.update.done');
+    assert.ok(f.restarts.length > 0);
+    if (fresh) assert.equal(f.commands.some(command => command.startsWith('git ')), false, 'moving never edits the checkout');
+  }
+});

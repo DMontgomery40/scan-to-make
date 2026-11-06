@@ -236,6 +236,15 @@ measurement and ten canonical views run as one preview-only capture job. See
 [SCAN-PROCESSING.md](SCAN-PROCESSING.md) for configuration, routes, retention,
 resource bounds and tests.
 
+## Printer software copies and updates
+
+| Route | Device scope | Result |
+| --- | --- | --- |
+| GET `/v1/printers/mcps` | `projects:read` | `{packages}`: each printer profile's effective path/version and the separate Counterpart-managed copy. No process settings or secrets. |
+| POST `/v1/printers/mcp/<mcpId>/update` | `projects:write` | `{update}`; `{fresh:true}` explicitly moves the named installation's profiles to Counterpart's copy without modifying the user's checkout. |
+
+`/healthz` advertises `mcpCopies` and `mcpUpdates`. Reading never installs, updates or moves a profile. A read-only or print-only credential cannot update or move; write permission alone does not grant the catalog read. Mutations use the same `McpUpdater` and `PrintGate` as desktop, including canonical printer aliases and all profiles sharing the target copy. Active prints defer the operation (`waiting`) until the guard permits it. See [the paired protocol](../../docs/protocols/objects-api.md#printer-software-copies) for the catalog and progress events.
+
 ## Printer handoff
 
 Optional routes hand a clean STL to the operator-installed printer MCP

@@ -7,6 +7,7 @@ import CounterpartKit
 /// The folder holds the mockups' own assets (mic.stl, thumb-mic.png, photo1–4.jpg, bed.jpg, …), which stay
 /// out of Git. Release builds don't contain any of this.
 enum Fixtures {
+    static let mcpCopyState = FixtureMcpCopyState()
     static var folder: URL? {
         guard let path = UserDefaults.standard.string(forKey: "CounterpartFixtures"), !path.isEmpty else { return nil }
         return URL(fileURLWithPath: path, isDirectory: true)
@@ -296,6 +297,12 @@ enum Fixtures {
     }
 }
 
+/// The move fixture changes its catalog and emits completion under the original installation ID.
+actor FixtureMcpCopyState {
+    private(set) var moved = false
+    func accept() { moved = true }
+}
+
 /// The canned Mac.
 struct FixtureTransport: HTTPTransport {
     let folder: URL
@@ -307,7 +314,13 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "mcpCopies": FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies.json").path), "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true]]) }
+        let completingMove = FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies-moved.json").path)
+        if path == "/v1/printers/mcps" {
+            let moved = await Fixtures.mcpCopyState.moved
+            let name = completingMove && moved ? "mcp-profile-copies-moved.json" : "mcp-profile-copies.json"
+            return json(["packages": [try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appending(path: name)))]])
+        }
         if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/route") {
             guard path.contains("/current/") else { return json(["route": NSNull()]) }
@@ -330,7 +343,17 @@ struct FixtureTransport: HTTPTransport {
         if path == "/v1/devices" && method == "GET" { return json(["devices": Fixtures.devices]) }
         if path.hasPrefix("/v1/devices/") && method == "DELETE" { return json(["removed": true]) }
         if path.hasPrefix("/v1/settings/") && method == "POST" { return json(["check": ["state": "checking"]]) }
+        if completingMove, path.hasPrefix("/v1/printers/mcp/"), method == "POST" { await Fixtures.mcpCopyState.accept() }
+        if path.hasPrefix("/v1/printers/mcp/"), method == "POST", FileManager.default.fileExists(atPath: folder.appending(path: "mcp-update-waiting.json").path) { return HTTPReply(status: 200, body: try Data(contentsOf: folder.appending(path: "mcp-update-waiting.json"))) }
         if path.hasPrefix("/v1/printers/mcp/") && method == "POST" { return json(["update": ["mcpId": "mcp-3d", "state": "waiting", "fromVersion": "1.2.9", "toVersion": "1.2.22"]]) }
+        if path == "/v1/events", completingMove {
+            try await Task.sleep(for: .milliseconds(200))
+            let moved = await Fixtures.mcpCopyState.moved
+            let after = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "after" }?.value.flatMap(Int.init) ?? 0
+            let recorded = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appending(path: "mcp-copy-update-events.json"))) as! [[String: Any]]
+            let events = moved ? recorded.filter { $0["type"] as? String == "mcp.update.done" && ($0["seq"] as? Int ?? 0) > after } : []
+            return json(["events": events, "next": moved ? 2 : 0, "latest": moved ? 2 : 0, "truncated": false, "reset": false])
+        }
         if path == "/v1/events" { return json(["error": ["code": "not-found", "message": "Not found"]], 404) }
         if path == "/v1/objects" && method == "GET" { return json(["objects": objects]) }
         if parts.count >= 3, parts[0] == "v1", parts[1] == "objects" {

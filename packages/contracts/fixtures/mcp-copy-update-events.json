@@ -1,0 +1,47 @@
+[
+  {
+    "v": 1,
+    "seq": 1,
+    "id": "mcp-copy-update-1",
+    "at": "2026-11-06T00:00:00Z",
+    "type": "mcp.update.started",
+    "title": "Updating printer software",
+    "body": "Updating Counterpart’s copy to 1.2.45.",
+    "notify": "passive",
+    "data": {
+      "mcpId": "mcp-0000000000000002",
+      "fromVersion": "1.2.25",
+      "toVersion": "1.2.45"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 2,
+    "id": "mcp-copy-update-2",
+    "at": "2026-11-06T00:00:00Z",
+    "type": "mcp.update.done",
+    "title": "Printer software updated",
+    "body": "Counterpart’s copy 1.2.45 is ready.",
+    "notify": "passive",
+    "data": {
+      "mcpId": "mcp-0000000000000002",
+      "fromVersion": "1.2.25",
+      "toVersion": "1.2.45"
+    }
+  },
+  {
+    "v": 1,
+    "seq": 3,
+    "id": "mcp-copy-update-3",
+    "at": "2026-11-06T00:00:00Z",
+    "type": "mcp.update.failed",
+    "title": "Printer software update failed",
+    "body": "The update did not finish; the previous copy is still in use.",
+    "notify": "passive",
+    "data": {
+      "mcpId": "mcp-0000000000000002",
+      "fromVersion": "1.2.25",
+      "toVersion": "1.2.45"
+    }
+  }
+]

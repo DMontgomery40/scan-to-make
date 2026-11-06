@@ -6,6 +6,16 @@ import android.content.ContextWrapper
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performScrollTo
+import com.scantomake.counterpart.api.PrinterCatalog
+import com.scantomake.counterpart.api.PrinterDestination
+import com.scantomake.counterpart.ui.PrintersScreen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -24,11 +34,14 @@ import com.scantomake.counterpart.pairing.PairingStore
 import com.scantomake.counterpart.ui.HomeScreen
 import com.scantomake.counterpart.ui.SettingsScreen
 import com.scantomake.counterpart.ui.PrintSheetScreen
-import com.scantomake.counterpart.api.PrinterCatalog
-import com.scantomake.counterpart.api.PrinterDestination
 import com.scantomake.counterpart.ui.designerSettingsWords
+import com.scantomake.counterpart.net.HttpReply
 import kotlinx.coroutines.cancel
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
+import com.scantomake.counterpart.api.CounterpartEvent
+import com.scantomake.counterpart.net.TransportException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -99,6 +112,84 @@ class HomeLayoutTests {
         home()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("3D scan platform")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Vernier caliper with depth gauge").assertExists()
+    }
+
+    @Test fun printerSoftwareShowsTheHiddenCopyAndExplicitMoveWithProjectsPresent() = printerSoftwareMove(false)
+
+    @Test fun printerSoftwareShowsEventsEvenWhenTheMoveReplyIsLost() = printerSoftwareMove(true)
+
+    @Test fun printerSoftwareKeepsWaitingMoveCompletionAfterReturningHome() = printerSoftwareMove(false, navigateHome = true)
+
+    @Test fun printerSoftwareRetainsWaitingMoveWhenAnotherUpdateStarts() = printerSoftwareMove(false, secondUpdate = true)
+
+    private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false, secondUpdate: Boolean = false) {
+        val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
+        app.pairingStore.save(v2Record(), false)
+        val transport = FakeTransport { request, _ ->
+            when {
+                request.url.endsWith("/healthz") -> json(200, mapOf("status" to "ok", "capabilities" to mapOf("mcpCopies" to true, "mcpUpdates" to true)))
+                request.url.endsWith("/mcps") -> HttpReply(200, ("{\"packages\":[" + contractFixture("mcp-profile-copies.json").readText() + "]}").toByteArray())
+                request.url.endsWith("/update") -> if (lostReply) throw TransportException("network") else HttpReply(200, contractFixture("mcp-update-waiting.json").readBytes())
+                else -> json(404, mapOf("error" to "not-found"))
+            }
+        }
+        app.pairing = PairingClient(app.pairingStore, transport)
+        app.companion = CompanionClient(app.pairing, transport, null, null, app.cacheDir)
+        state.projects.value = listOf(project("a", "Existing project", "ready"))
+        state.mcpCopies.value = listOf(pkg)
+        state.capabilities.value = setOf("mcpCopies", "mcpUpdates")
+        state.loaded.value = true
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination(id = "current", name = "Bambu Lab P1S", backend = "bambu-printer-mcp")), "current")
+        compose.setContent {
+            WithApp {
+                var showPrinters by remember { mutableStateOf(false) }
+                if (showPrinters) PrintersScreen(back = { showPrinters = false })
+                else HomeScreen(open = { _, _ -> }, newProject = {}, printers = { showPrinters = true }, settings = {})
+            }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Existing project"))
+        compose.onNodeWithText("Existing project").assertExists()
+        compose.onNodeWithContentDescription("Printers").performClick()
+        compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
+        compose.onNodeWithText("Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25).").assertExists()
+        compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").assertExists()
+        compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").performScrollTo().performClick()
+        if (lostReply) {
+            val error = "Your computer isn't answering. Check it's on and awake, then try again."
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText(error)).fetchSemanticsNodes().isNotEmpty() }
+            val events = WireJson.parseToJsonElement(contractFixture("mcp-copy-update-events.json").readText()).jsonArray
+                .map { requireNotNull(CounterpartEvent.decode(it.jsonObject)) }
+            for (event in events) {
+                compose.runOnIdle { state.mcpUpdateEvents.value = mapOf(requireNotNull(event.data?.mcpId) to event) }
+                compose.onNodeWithText(event.body).assertExists()
+                compose.onNodeWithText(error).assertDoesNotExist()
+            }
+        } else {
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates after the current print or design finishes.")).fetchSemanticsNodes().isNotEmpty() }
+        }
+        if (secondUpdate) {
+            compose.onNodeWithText("Update Counterpart’s copy").performScrollTo().performClick()
+            compose.waitUntil(5_000) { transport.calls.count { it.request.url.endsWith("/update") } == 2 }
+            val done = WireJson.parseToJsonElement(contractFixture("mcp-copy-update-events.json").readText()).jsonArray
+                .map { requireNotNull(CounterpartEvent.decode(it.jsonObject)) }.first { it.type.endsWith("done") }
+            compose.runOnIdle { state.mcpUpdateEvents.value = mapOf(requireNotNull(done.data?.mcpId) to done) }
+            compose.onNodeWithText(done.body).assertExists()
+        }
+        if (navigateHome) {
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.onNodeWithContentDescription("Printers").assertExists()
+            val done = WireJson.parseToJsonElement(contractFixture("mcp-copy-update-events.json").readText()).jsonArray
+                .map { requireNotNull(CounterpartEvent.decode(it.jsonObject)) }.first { it.type.endsWith("done") }
+            compose.runOnIdle { state.mcpUpdateEvents.value = mapOf(requireNotNull(done.data?.mcpId) to done) }
+            compose.onNodeWithContentDescription("Printers").performClick()
+            compose.onNodeWithText(done.body).assertExists()
+        }
+        val moves = transport.calls.filter { it.request.url.endsWith("/update") }
+        org.junit.Assert.assertEquals(if (secondUpdate) 2 else 1, moves.size)
+        org.junit.Assert.assertTrue(moves.first().request.url.endsWith("/mcp-0000000000000002/update"))
+        org.junit.Assert.assertEquals("{\"fresh\":true}", String(moves.first().request.body!!))
+        org.junit.Assert.assertEquals(listOf("mcp-0000000000000002"), pkg.moveIds)
+        org.junit.Assert.assertEquals("projects:read", CompanionClient.scope("GET", "/v1/printers/mcps"))
     }
 
     /** Settings has Help and Printers, as on iPhone, Mac and Linux; the print sheet sends people to Settings → Printers. */

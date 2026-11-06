@@ -25,6 +25,7 @@ struct PrintersView: View {
                 } footer: {
                     Text(store.macCapabilities.contains("printerChoices") ? "Add printers in Counterpart on your Mac. Pick a printer here to change its MCP or connection." : "These come from bambu-printer-mcp and mcp-3D-printer-server on your Mac. Add or change printers there; Counterpart picks them up.")
                 }
+                Section("Printer software") { MCPCopiesView(store: store) }
             }
             .navigationTitle("Printers")
             .navigationDestination(for: PrinterLink.self) { link in
@@ -118,6 +119,7 @@ struct PrinterDetailView: View {
             if let printer {
                 VStack(alignment: .leading, spacing: 22) {
                     hero(printer)
+                    MCPCopiesView(store: store, printerId: printer.id)
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             StatusDot(text: job != nil ? "Printing" : printer.isOffline ? "Offline" : printer.isReady == true ? "Ready" : "Busy",
@@ -224,7 +226,9 @@ struct PrinterDetailView: View {
                 Image(systemName: "arrow.down.app.fill").font(.title2).foregroundStyle(Color.filament).frame(width: 30)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(update.message.hasSuffix(".") ? String(update.message.dropLast()) : update.message).font(.headline).fixedSize(horizontal: false, vertical: true)
-                    Text("Version \(printer.capabilities?.server?.version ?? "") on your Mac can start prints but can't report \(missingWords(printer)). Update it from Counterpart on \(store.macName ?? "your Mac"); it runs your own package manager there.")
+                    Text(store.macCapabilities.contains("mcpCopies")
+                         ? "Version \(printer.capabilities?.server?.version ?? "unknown") can’t report \(missingWords(printer)). Use Printer software above to update Counterpart’s copy or explicitly move this printer to it."
+                         : "Version \(printer.capabilities?.server?.version ?? "unknown") on your Mac can’t report \(missingWords(printer)). Update it from Counterpart on \(store.macName ?? "your Mac").")
                         .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }

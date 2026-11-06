@@ -219,6 +219,7 @@ Bambu Studio's own verdict on the slice (KAN-223, when the MCP returns `slicer_r
 
 | Method and path | Scope | Body | Reply |
 |---|---|---|---|
+| `GET /v1/printers/mcps` | READ | none | `{packages}`: effective per-profile copies, canonical `printerId`, and separate `appCopy`; read-only, advertised by `mcpCopies` |
 | `POST /v1/printers/mcp/<mcpId>/update` | SETTINGS | `{fresh?: boolean}` (`{}` or no body is fine) | `{update: McpUpdate}`; 404 `not-found` for an unknown `mcpId`; 503 `unavailable` with a sentence when npm can't be reached |
 
 `McpUpdate` is `{mcpId, state, fromVersion?, toVersion?, found?}` (`McpUpdateSchema`):
@@ -362,3 +363,9 @@ and `pendingFollowup`; retrying it retains its message and photos. Both clients 
 messages with their timestamps and claimed photo names, so later queued photos cannot attach to
 an earlier message. Old photos without recorded ownership remain separate; their association is
 not guessed from file order or a project's modification time.
+
+### Printer software copies
+
+`GET /v1/printers/mcps` requires `projects:read` and returns `{packages}` from the local-control `printers.mcps` catalog, without setup options. Each `uses` entry includes `printerId` (the selected/canonical printer), `destinationId` (the particular profile), its effective copy’s path/version, stable `mcpId`, and `canMove`. `mcpCopies` in `/healthz` advertises this read. Clients keep `appCopy.version` separate from each use’s version. An explicit move uses the existing `POST /v1/printers/mcp/<mcpId>/update` with `{fresh:true}` and requires `projects:write`; it names all profiles sharing that installation, preserves the checkout and settings, and reports waiting/progress via the existing reply/events. Reads never change a profile.
+
+Read-only and print-only credentials receive 403 for update or move; a write-only credential receives 403 for the copy catalog. Update and move share the desktop updater and print guard: active prints defer replacement and process restarts until the guard is released.

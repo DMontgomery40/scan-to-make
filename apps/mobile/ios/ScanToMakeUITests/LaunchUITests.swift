@@ -556,6 +556,48 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["starter-add"].waitForNonExistence(timeout: 5))
     }
 
+    func testPrinterCopiesAndExplicitMoveAreReachableWithProjects() throws { try checkCopyMove(completes: false) }
+
+    func testCompletedPrinterMoveKeepsItsResultAfterItsButtonDisappears() throws { try checkCopyMove(completes: true) }
+
+    func testPrinterMoveCompletionSurvivesDismissingPrinters() throws { try checkCopyMove(completes: true, reopen: true) }
+
+    private func checkCopyMove(completes: Bool, reopen: Bool = false) throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let files = ["mcp-profile-copies.json", "mcp-update-waiting.json"] + (completes ? ["mcp-profile-copies-moved.json", "mcp-copy-update-events.json"] : [])
+        for name in files {
+            try FileManager.default.copyItem(at: root.appendingPathComponent("packages/contracts/fixtures/" + name), to: folder.appendingPathComponent(name))
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all"]
+        app.launch()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
+        let move = app.buttons["mcp-move-mcp-0000000000000002"]
+        XCTAssertTrue(move.waitForExistence(timeout: 5), app.debugDescription)
+        let list = app.collectionViews.firstMatch
+        reveal(move, in: list)
+        XCTAssertTrue(app.staticTexts["Counterpart’s copy 1.2.45"].exists)
+        XCTAssertTrue(app.staticTexts["Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25)."].exists)
+        move.tap()
+        if reopen {
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 5))
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
+        }
+        if completes {
+            XCTAssertTrue(app.staticTexts["Bambu Lab P1S uses Counterpart’s copy (1.2.45)."].waitForExistence(timeout: 5))
+            XCTAssertTrue(move.waitForNonExistence(timeout: 5), "the completed move is no longer offered")
+            XCTAssertTrue(app.staticTexts["Updated to 1.2.45"].waitForExistence(timeout: 5), "completion remains under the original MCP ID")
+        } else {
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "after the current print")).firstMatch.waitForExistence(timeout: 5))
+        }
+    }
+
     func testStartersStayReachableWithProjects() {
         let app = launch()
         XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))

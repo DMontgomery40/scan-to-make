@@ -66,7 +66,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(CompanionClient.scope("DELETE", "/v1/devices/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"), "projects:write")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/settings/ai/test"), "projects:write")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/settings/fusion/setup"), "projects:write")
-        XCTAssertEqual(CompanionClient.scope("POST", "/v1/printers/mcp/m1/update"), "printer-handoff:use")
+        XCTAssertEqual(CompanionClient.scope("POST", "/v1/printers/mcp/m1/update"), "projects:write")
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/printers/current/route"), "printer-handoff:use")
         XCTAssertEqual(CompanionClient.scope("PUT", "/v1/objects/printers/current/route"), "projects:write")
         XCTAssertEqual(CompanionClient.scope("PUT", "/v1/objects/printers/mcp-1a2b/mcp"), "projects:write")
