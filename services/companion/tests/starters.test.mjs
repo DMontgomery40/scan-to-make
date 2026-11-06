@@ -361,6 +361,35 @@ test('adding a starter again replaces an old project’s raw STL with the design
  const {value:full}=await logged(async()=>half.service.settled((await half.service.addStarter('long-vernier-caliper')).id));
  assert.equal(full.id,c.id);assert.equal(full.files.receipts.length,2);
 });
+// Nov 6, 7f1a9e33: David's own download of the rig (100%打印360角度摄影台.3mf, six plates) was in Downloads, but the rig had
+// no pins, so only its cache was checked and the worker fetched a second copy.
+test('a starter’s own download in Downloads is used with no worker run: by its pin, or by designer and plate count',async t=>{
+ const RIG=model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears','Feet']);
+ const bundled=id=>CATALOG.find(item=>item.id===id);
+ for(const [label,entry] of [['pinned',{...bundled('scan-platform'),sha256:[sha(RIG)]}],['unpinned',(({sha256:_pins,...rest})=>rest)(bundled('scan-platform'))]]){
+  const {service,asked,root}=await setup(t,async(_input,root)=>rig(root),{starter:id=>id==='scan-platform'?entry:pinnedCatalog(id)});
+  await mkdir(join(root,'Downloads'));await writeFile(join(root,'Downloads','100%打印360角度摄影台.3mf'),RIG);
+  const {value:o,lines}=await logged(()=>service.addStarter('scan-platform'));
+  assert.equal(o.state,'ready',label);assert.equal(asked.length,0,`${label}: no worker run`);
+  assert.equal(o.files.receipts[0].name,'100%打印360角度摄影台.3mf',label);assert.equal(publicObject(o).plates.length,6,label);
+  assert.match(lines.join('\n'),/already on this computer \(Downloads\), no download/,label);
+ }
+ // Unpinned, a file that isn't the whole kit by its plate count, or isn't the designer's, never counts.
+ const entry=(({sha256:_pins,...rest})=>rest)(bundled('scan-platform'));
+ for(const [label,bytes] of [['five plates',model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears'])],
+  ['another designer',Buffer.from(zipSync({'[Content_Types].xml':strToU8('<Types/>'),'3D/3dmodel.model':strToU8('<model><metadata name="Title">Rig</metadata><metadata name="Designer">Somebody</metadata><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+   'Metadata/model_settings.config':strToU8(`<config>${[1,2,3,4,5,6].map(i=>`<plate><metadata key="plater_id" value="${i}"/></plate>`).join('')}</config>`)}))]]){
+  const {service,asked,root}=await setup(t,async(_input,root)=>rig(root),{starter:id=>id==='scan-platform'?entry:pinnedCatalog(id)});
+  await mkdir(join(root,'Downloads'));await writeFile(join(root,'Downloads','rig.3mf'),bytes);
+  const {value:o}=await logged(async()=>service.settled((await service.addStarter('scan-platform')).id));
+  assert.equal(asked.length,1,`${label}: the worker runs`);assert.equal(o.state,'ready',label);
+ }
+});
+test('the bundled catalog pins each starter’s published files, read from the real downloads (Nov 6)',async()=>{
+ const rigEntry=CATALOG.find(item=>item.id==='scan-platform'),caliperEntry=CATALOG.find(item=>item.id==='long-vernier-caliper');
+ assert.deepEqual(rigEntry.sha256,['483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219']);assert.equal(rigEntry.files,1);assert.equal(rigEntry.plates,6);
+ assert.deepEqual(caliperEntry.sha256,['f3a30ef247a4d1778e075b834c81d027933a0c3f10d53d6d71695e1ca160077e','95554a2bf390fd6cdfa5fa1c27087945799e633dfdbebb38091befa7864c58aa']);
+});
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
   ['one of two files',[['Vernier Caliper Ruler 150mm COLOR.3mf','Vernier Caliper Ruler - Two Lengths']]],
