@@ -32,9 +32,17 @@ async function removeStaleSocket(path: string) {
   await unlink(path);
 }
 
+/** Every refused control request is logged with its method and code, so a refusal is never invisible (Nov 6). */
+function logRefusal(method: string | undefined, error: unknown) {
+  const {code, message} = controlError(error);
+  console.error(`control ${method ?? 'request'} refused: ${code}: ${message}`);
+}
+
 /** Methods allowed past the usual 10 s connection deadline. */
 export function methodDeadlineMs(method: ControlMethod, params: unknown): number | undefined {
   if (method === 'objects.correct') return 25_000; // a completion classification is bounded to 20 s
+  // A model file of up to 64 MB is read, hashed, inspected and kept twice (original and current).
+  if (method === 'objects.addFile') return 120_000;
   if (method === 'objects.estimate') return 180_000;
   // npm lookup is bounded to 7 s, then admission waits at most 250 ms; longer printer checks continue under the update reservation.
   if (method === 'printers.updateMcp' || method === 'printers.installMcp' || method === 'printers.discover') return 15_000;
@@ -69,18 +77,30 @@ export async function startLocalControl(options: {
   const clients = new Set<Socket>();
   const active = new Set<Promise<void>>();
   const server = createServer({allowHalfOpen:true}, socket => {
-    if (clients.size >= 16 || active.size >= 16) { socket.destroy(); return; }
-    clients.add(socket);
-    let bytes = Buffer.alloc(0), received = false;
-    let timer = setTimeout(() => socket.destroy(), options.timeoutMs ?? 10_000);
-    /** Long methods get their own deadline once their request is read (events.wait, objects.estimate). */
-    const extend = (ms: number) => { clearTimeout(timer); timer = setTimeout(() => socket.destroy(), ms); };
     socket.on('error', () => {});
+    // Past the limit the request is answered `busy`, so the app can say so (Nov 6: a silent close read as
+    // "Something went wrong on your Mac.").
+    if (clients.size >= 16 || active.size >= 16) {
+      logRefusal(undefined, new ControlFailure('busy'));
+      socket.resume(); // its request is never read; draining lets the client's end close the socket
+      socket.setTimeout(options.timeoutMs ?? 10_000, () => socket.destroy());
+      socket.end(JSON.stringify({v:1,id:null,error:controlError(new ControlFailure('busy'))}) + '\n');
+      return;
+    }
+    clients.add(socket);
+    let bytes = Buffer.alloc(0), received = false, answered = false, method: string | undefined, id: string | null = null;
+    /** A frame never completed is closed; a request being worked on is answered `timed-out` (the work goes on). */
+    const expire = () => { if (received && !answered) reply(id, null, new ControlFailure('timed-out')); else socket.destroy(); };
+    let timer = setTimeout(expire, options.timeoutMs ?? 10_000);
+    /** Long methods get their own deadline once their request is read (events.wait, objects.estimate). */
+    const extend = (ms: number) => { clearTimeout(timer); timer = setTimeout(expire, ms); };
     socket.once('close', () => { clearTimeout(timer); clients.delete(socket); });
-    const reply = (id: string | null, result: unknown, error?: unknown) => {
-      if (socket.destroyed) return;
-      let encoded = JSON.stringify(error ? {v:1,id,error:controlError(error)} : {v:1,id,result}) + '\n';
-      if (Buffer.byteLength(encoded) > MAX_RESPONSE_BYTES) encoded = JSON.stringify({v:1,id,error:controlError(new ControlFailure('unavailable'))}) + '\n';
+    const reply = (replyId: string | null, result: unknown, error?: unknown) => {
+      if (socket.destroyed || answered) return;
+      answered = true;
+      if (error) logRefusal(method, error);
+      let encoded = JSON.stringify(error ? {v:1,id:replyId,error:controlError(error)} : {v:1,id:replyId,result}) + '\n';
+      if (Buffer.byteLength(encoded) > MAX_RESPONSE_BYTES) encoded = JSON.stringify({v:1,id:replyId,error:controlError(new ControlFailure('unavailable'))}) + '\n';
       socket.end(encoded);
     };
     socket.once('end', () => { if (!received) { received = true; reply(null, null, new ControlFailure('invalid-request')); } });
@@ -91,7 +111,6 @@ export async function startLocalControl(options: {
       const newline = bytes.indexOf(10);
       if (newline < 0) return;
       received = true;
-      let id: string | null = null;
       const work = (async () => {
         try {
           if (newline !== bytes.length - 1) throw new ControlFailure('invalid-request');
@@ -99,6 +118,7 @@ export async function startLocalControl(options: {
           const possibleID = z.object({id:z.uuid()}).safeParse(raw);
           if (possibleID.success) id = possibleID.data.id;
           const request = parseRequest(raw);
+          method = request.method;
           const deadline = methodDeadlineMs(request.method, request.params);
           if (deadline !== undefined) extend(deadline);
           const result = await options.dispatch(request.method, request.params);

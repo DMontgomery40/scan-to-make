@@ -244,6 +244,40 @@ test('long methods get their own socket deadline; everything else keeps 10 s', a
   assert.equal(methodDeadlineMs('objects.estimate', {}), 180000);
   assert.equal(methodDeadlineMs('objects.cancelPrint', {}), 730000, 'the printer question window (10 min) plus 2 min, plus 10 s');
   assert.equal(methodDeadlineMs('objects.get', {}), undefined);
+  // Nov 6: a 57 MB STL for a starter's file Ask outlived the 10 s deadline; the Mac got no answer at all.
+  assert.equal(methodDeadlineMs('objects.addFile', {}), 120000);
+});
+
+// Nov 6: David's project page said "Something went wrong on your Mac." The companion had closed the Mac's request
+// at its deadline without a word, then finished the work. Every refused or unfinished request now gets a code and
+// a sentence, and the companion's log says which method and why.
+test('a request past its deadline is answered timed-out, never dropped, and the refusal is logged',async t=>{
+  const root=await mkdtemp('/tmp/stmc-');t.after(()=>rm(root,{recursive:true,force:true}));
+  let finished=false;
+  const server=await startLocalControl({path:join(root,'slow.sock'),timeoutMs:100,dispatch:async()=>{await new Promise(r=>setTimeout(r,400));finished=true;return {ok:true};}});
+  t.after(()=>server.close());
+  const logged=[];const original=console.error;console.error=(...args)=>logged.push(args.join(' '));t.after(()=>{console.error=original;});
+  const reply=await wire(server.path,{v:1,id:randomUUID(),method:'objects.list',params:{}});
+  assert.equal(reply.error.code,'timed-out');assert.match(reply.error.message,/took too long/);
+  assert.ok(logged.some(line=>line.includes('objects.list')&&line.includes('timed-out')),logged.join('\n'));
+  await new Promise(r=>setTimeout(r,500));assert.equal(finished,true,'the work itself goes on');
+});
+test('a connection past the limit is answered busy, never dropped; any refusal is logged with its code',async t=>{
+  const root=await mkdtemp('/tmp/stmc-');t.after(()=>rm(root,{recursive:true,force:true}));
+  let release;const held=new Promise(r=>release=r);
+  let calls=0;
+  const server=await startLocalControl({path:join(root,'busy.sock'),timeoutMs:5000,dispatch:async()=>{if(++calls<=16){await held;return {ok:true};}throw new Error('not a ControlFailure');}});
+  t.after(()=>server.close());
+  const logged=[];const original=console.error;console.error=(...args)=>logged.push(args.join(' '));t.after(()=>{console.error=original;});
+  const waiting=Array.from({length:16},()=>wire(server.path,{v:1,id:randomUUID(),method:'objects.list',params:{}}));
+  await new Promise(r=>setTimeout(r,200));
+  const refused=await wire(server.path,{v:1,id:randomUUID(),method:'objects.list',params:{}});
+  assert.equal(refused.error.code,'busy');assert.match(refused.error.message,/too many/);
+  release();assert.ok((await Promise.all(waiting)).every(reply=>reply.result?.ok));
+  const failed=await wire(server.path,{v:1,id:randomUUID(),method:'objects.list',params:{}});
+  assert.equal(failed.error.code,'internal');
+  assert.ok(logged.some(line=>line.includes('busy')),logged.join('\n'));
+  assert.ok(logged.some(line=>line.includes('objects.list')&&line.includes('internal')),logged.join('\n'));
 });
 
 test('status.get names the Mac as people know it ("Mac mini"), as /healthz does',async t=>{

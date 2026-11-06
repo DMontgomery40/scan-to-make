@@ -1038,7 +1038,7 @@ test('a spool the MCP names with an eight-digit colour round-trips as the same s
   const viaSocket = await dispatch('objects.estimate', {id: f.object.id, filaments: [mapping.trays[0], mapping.trays[1]], filamentsModelVersion: mapping.modelVersion});
   assert.equal(viaSocket.seconds, 3420, 'an eight-digit spool is a valid choice through the request schema');
   await assert.rejects(dispatch('objects.estimate', {id: f.object.id, filaments: [{...mapping.trays[0], colour: 'black'}, mapping.trays[1]], filamentsModelVersion: mapping.modelVersion}),
-    /Invalid local control request/, 'only a colour in the MCP\'s hex format');
+    error => error.code === 'invalid-request', 'only a colour in the MCP\'s hex format');
   // The MCP's refusal is never read by its code to fall back: it reaches the person as the MCP says it.
   runner.filaments = async () => ({slots: []});
   await assert.rejects(f.service.estimate(f.object.id, {}), /No filament is loaded/);

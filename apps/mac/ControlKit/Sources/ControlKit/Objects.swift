@@ -467,6 +467,7 @@ public extension ControlClient {
     static func timeout(for method: String) -> TimeInterval {
         switch method {
         case "objects.estimate": return 190 // it slices: 180 s on the companion
+        case "objects.addFile": return 130 // 120 s on the companion: a model file up to 64 MB is read, hashed and kept
         case "objects.pausePrint", "objects.resumePrint", "objects.cancelPrint": return 740 // 730 s on the companion: the printer's question may stay open 10 min
         case "printers.route": return 35 // 25 s on the companion: it may start the MCP's session first
         case "printers.mcps": return 15 // it looks for copies in the home folder

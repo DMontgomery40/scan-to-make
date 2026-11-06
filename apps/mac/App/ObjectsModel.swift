@@ -151,7 +151,7 @@ struct SocketObjects: ObjectsCompanion {
         try await ControlClient(socketPath: path, timeout: 30).addPhotoFile(id, path: file, forMessage: forMessage)
     }
     func addFile(_ id: String, kind: String, path file: String) async throws -> Project {
-        try await ControlClient(socketPath:path, timeout:30).addFile(id, kind:kind, path:file)
+        try await ControlClient(socketPath:path, timeout:ControlClient.timeout(for:"objects.addFile")).addFile(id, kind:kind, path:file)
     }
     func correct(_ id: String, note: String, photos: [String]) async throws -> Project {
         try await ControlClient(socketPath:path, timeout:30).correctObject(id, note:note, photos:photos)
@@ -776,23 +776,36 @@ struct SocketObjects: ObjectsCompanion {
         }
     }
 
-    /// One plain sentence for an action that didn't go through.
+    /// One plain sentence for an action that didn't go through: the companion's own, whenever it sends one (Nov 6:
+    /// every refusal but a conflict read "Something went wrong on your Mac."). `internal` never carries one.
     nonisolated static func sentence(for error: Error) -> String {
-        switch (error as? ControlRemoteError)?.code {
-        case "conflict"?:
-            // A current Mac sends its own plain sentence ("There is no model to print yet.").
-            let message = (error as? ControlRemoteError)?.message ?? ""
-            return message.isEmpty || message.hasPrefix("The requested operation") ? "That can't be done right now." : message
-        case "not-found"?: return "This one is no longer on your Mac."
-        case .some: return "Something went wrong on your Mac."
-        case nil: break
+        if let remote = error as? ControlRemoteError {
+            let message = remote.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            if remote.code != "internal", !message.isEmpty, !legacyDefaults.contains(message) { return message }
+            switch remote.code {
+            case "conflict": return "That can't be done right now."
+            case "not-found": return "This one is no longer on your Mac."
+            case "unavailable": return "That isn’t available on your Mac right now."
+            case "invalid-request", "unsupported-version": return "Update Counterpart on this Mac, then try again."
+            case "timed-out": return "Your Mac took too long to answer. It may still finish; this page updates when it does."
+            case "busy": return "Your Mac is answering too many requests at once. Try again in a moment."
+            default: return "Something went wrong on your Mac."
+            }
         }
         switch error as? ControlClientError {
         case .timedOut?: return "That's taking longer than usual. This page will update when it's done."
         case .unavailable?: return "Counterpart couldn’t start in the background."
+        // An older companion closed a request at its deadline without a word; the work may still have been done.
+        case .invalidResponse?: return "Your Mac didn’t answer. It may still have done it: this page shows what it did."
         default: return "Something went wrong on your Mac."
         }
     }
+
+    /// The words a companion from before Nov 6 sent with each code: written for developers, never shown.
+    nonisolated private static let legacyDefaults: Set<String> = [
+        "Invalid local control request", "Unsupported local control version", "The requested item is no longer available",
+        "The requested operation conflicts with current state", "The requested capability is unavailable", "The local control operation failed",
+    ]
 }
 
 private extension String {

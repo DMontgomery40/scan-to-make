@@ -71,8 +71,10 @@ func launchAgent(_ installation: Installation) -> Never {
     child.environment = installation.environment
     child.environment?["SCAN_TO_MAKE_MODEL_WORKER"] = installation.bundle.executableURL?.path
     child.standardInput = FileHandle.nullDevice
-    child.standardOutput = FileHandle.nullDevice
-    child.standardError = FileHandle.nullDevice
+    // The companion's own log lines (refused control requests, refused print controls) land in the files Settings and
+    // Diagnostics show. Since Oct 31 they went to /dev/null, so a refusal was invisible (Nov 6).
+    child.standardOutput = companionLog(installation.state, "companion.log")
+    child.standardError = companionLog(installation.state, "companion-error.log")
     child.terminationHandler = { process in exit(process.terminationStatus) }
     var sources: [DispatchSourceSignal] = []
     for number in [SIGTERM,SIGINT] {
@@ -84,6 +86,21 @@ func launchAgent(_ installation: Installation) -> Never {
     do { try child.run() } catch { exit(1) }
     withExtendedLifetime(sources) { RunLoop.main.run() }
     exit(1)
+}
+
+/// A private log in the state folder's `logs/`, appended to; past 5 MB it starts again, so it never grows without bound.
+func companionLog(_ state: URL, _ name: String) -> FileHandle {
+    let folder = state.appendingPathComponent("logs")
+    let file = folder.appendingPathComponent(name)
+    let fm = FileManager.default
+    try? fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    let size = (try? fm.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
+    if size > 5 * 1024 * 1024 || !fm.fileExists(atPath: file.path) {
+        guard fm.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { return FileHandle.nullDevice }
+    }
+    guard let handle = try? FileHandle(forWritingTo: file) else { return FileHandle.nullDevice }
+    _ = try? handle.seekToEnd()
+    return handle
 }
 
 /// Headless signed entry point; it does not initialize SwiftUI or open windows.

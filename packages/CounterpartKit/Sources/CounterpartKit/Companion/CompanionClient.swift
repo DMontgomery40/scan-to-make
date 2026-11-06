@@ -193,6 +193,8 @@ public final class CompanionClient: @unchecked Sendable {
             return CompanionError(code: "no-camera", message: "This printer has no camera Counterpart can use.")
         case 404 where newer || code == "method-not-allowed": return .unsupported
         case 405: return .unsupported
+        // The Mac's own sentence, whatever the status, when it says the message is written for the person (Nov 6).
+        case _ where !(error?["sentence"]?.string ?? "").isEmpty: return CompanionError(code: code ?? "refused", message: error!["sentence"]!.string!)
         case 404: return CompanionError(code: "not-found", message: "This is no longer on your Mac.")
         case 409: return CompanionError(code: "conflict", message: message ?? "Wait until the current step finishes.")
         case 503: return CompanionError(code: "unavailable", message: path.hasSuffix("/camera.jpg") ? "The printer's camera isn't answering right now."
