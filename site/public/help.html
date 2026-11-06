@@ -30,6 +30,8 @@
   <aside class="help-side glass" aria-label="Guide contents">
     <label for="help-search" class="visually-hidden">Search the guide</label>
     <input id="help-search" class="search" type="search" placeholder="Search (press /)" autocomplete="off">
+    <details class="toc-disclosure">
+    <summary>Contents</summary>
     <ol class="toc">
       <li><a href="#setup">Set up</a></li>
       <li><a href="#pair">Connect a phone</a></li>
@@ -45,6 +47,7 @@
       <li><a href="#privacy">Privacy</a></li>
       <li><a href="#credits">Credits</a></li>
     </ol>
+    </details>
   </aside>
 
   <main class="help-body" id="help-body">
@@ -70,9 +73,6 @@
       </ul>
       <h3>4. Your phone</h3>
       <p>Install Counterpart on your iPhone, iPad or Android phone, then <a href="#pair">connect it</a>.</p>
-      <div class="shots">
-        <figure class="mac"><a class="shot mac" href="screens/mac-settings-printers.jpg"><img src="screens/mac-settings-printers.jpg" width="620" height="678" loading="lazy" alt="Mac Settings, Printers: each printer and the software that runs it"></a><figcaption>Settings › Printers on the Mac.</figcaption></figure>
-      </div>
     </section>
 
     <section id="pair" aria-labelledby="pair-h">
@@ -85,15 +85,11 @@
       </ul>
       <p><strong>Away from home:</strong> with a Mac, your iPhone keeps showing projects and updates through iCloud. To reach your computer from anywhere, put the phone and the computer on the same Tailscale network.</p>
       <p>Remove a connected phone in Settings on the phone or the computer.</p>
-      <div class="shots">
-        <figure><a class="shot" href="screens/phone-pair.jpg"><img src="screens/phone-pair.jpg" width="644" height="1400" loading="lazy" alt="Find your Mac: scan the code, or connect on this Wi-Fi"></a><figcaption>Point the camera at the code.</figcaption></figure>
-        <figure><a class="shot" href="screens/android-home.jpg"><img src="screens/android-home.jpg" width="720" height="1600" loading="lazy" alt="Counterpart on Android, connected: Mac mini connected, 1 printer"></a><figcaption>Android, connected to a Mac.</figcaption></figure>
-      </div>
     </section>
 
     <section id="start" aria-labelledby="start-h">
       <h2 id="start-h">Start a project</h2>
-      <p>The first time you open Counterpart, it offers two starter projects: Kass 3D's <a href="https://makerworld.com/en/models/1531561">3D scan platform</a> and 3D Print Masters Hub's <a href="https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths#profileId-232006">long vernier caliper</a>.</p>
+      <p>The first time you open Counterpart, it offers two starter projects: Kass 3D's <a href="https://makerworld.com/en/models/1531561">3D scan platform</a> and 3D Print Masters Hub's <a href="https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths#profileId-232006">vernier caliper with depth gauge</a>.</p>
       <p>For your own idea, tap <strong>New</strong> on your phone, or <strong>New Project</strong> on the computer. Choose <strong>Make something that fits</strong> or <strong>Copy something</strong>, then add as much or as little as you like:</p>
       <ul>
         <li><strong>Describe it.</strong> “A hook for a 25 mm tube that holds a mug.” Name a known product and Counterpart looks up its sizes.</li>
@@ -103,7 +99,7 @@
       </ul>
       <p>On the computer you can also drop photos, STL, 3MF or USDZ files into a new project.</p>
       <div class="shots">
-        <figure class="mac"><a class="shot wide" href="made/mic-mount.jpg"><img src="made/mic-mount.jpg" width="960" height="720" loading="lazy" alt="A grey mic mount: a round base with a two-armed clip"></a><figcaption>“Something that attaches this microphone to my monitor, both pictured here.”</figcaption></figure>
+        <figure class="mac"><a class="shot wide" href="made/mic-mount.jpg"><img src="made/mic-mount.jpg" width="960" height="720" loading="lazy" alt="The design Counterpart made: a cap for a monitor arm’s 36 mm round post, with a cradle for a RØDE VideoMic GO II"></a><figcaption>“Attach my RØDE VideoMic GO II to the round post on my monitor arm” — the design Counterpart made.</figcaption></figure>
       </div>
     </section>
 
@@ -132,9 +128,6 @@
         <li>When it's ready, turn it in 3D and check the size in millimetres. Ask for changes in plain words, like “make it 2 mm wider”.</li>
         <li>On the computer, <strong>Activity</strong> lists every step.</li>
       </ul>
-      <div class="shots">
-        <figure class="mac"><a class="shot wide" href="made/mic-mount.jpg"><img src="made/mic-mount.jpg" width="960" height="720" loading="lazy" alt="A mic mount designed to fit a monitor"></a><figcaption>Ready: a mic mount for a monitor.</figcaption></figure>
-      </div>
     </section>
 
     <section id="print" aria-labelledby="print-h">
@@ -148,11 +141,6 @@
       </ol>
       <p>Clear the build plate before you print, as you normally would.</p>
       <p>While it prints, the project shows progress, the layer, the time left and the printer's camera, with <strong>Pause</strong> and <strong>Stop</strong>.</p>
-      <div class="shots">
-        <figure class="mac"><a class="shot mac" href="screens/mac-what-will-print.jpg"><img src="screens/mac-what-will-print.jpg" width="1320" height="820" loading="lazy" alt="Mac Print sheet: what will print, colours per part, quality and strength"></a><figcaption>What will print, on the Mac.</figcaption></figure>
-        <figure><a class="shot" href="screens/iphone-print.jpg"><img src="screens/iphone-print.jpg" width="660" height="1434" loading="lazy" alt="iPhone Print sheet with colour, quality, strength, copies and pauses"></a><figcaption>Print on iPhone.</figcaption></figure>
-        <figure><a class="shot" href="screens/android-what-will-print.jpg"><img src="screens/android-what-will-print.jpg" width="720" height="1600" loading="lazy" alt="Android Print sheet: what will print, and Print"></a><figcaption>What will print, on Android.</figcaption></figure>
-      </div>
     </section>
 
     <section id="printers" aria-labelledby="printers-h">
@@ -163,10 +151,6 @@
         <li><strong>Connection</strong> chooses how Counterpart reaches the printer, such as your local network or Bambu Cloud.</li>
         <li>On a phone, <strong>Printers</strong> shows each printer, what's loaded and its camera.</li>
       </ul>
-      <div class="shots">
-        <figure><a class="shot" href="screens/phone-printers.jpg"><img src="screens/phone-printers.jpg" width="644" height="1400" loading="lazy" alt="Printers on iPhone: ready, what's loaded, offline"></a><figcaption>Printers on iPhone.</figcaption></figure>
-        <figure><a class="shot" href="screens/iphone-printer.jpg"><img src="screens/iphone-printer.jpg" width="660" height="1434" loading="lazy" alt="A printer's page on iPhone: its software and connection"></a><figcaption>One printer's connection.</figcaption></figure>
-      </div>
     </section>
 
     <section id="after" aria-labelledby="after-h">
@@ -182,9 +166,6 @@
       <h2 id="settings-h">Settings and updates</h2>
       <p>Notifications, AI, connected devices and general options are on the phone and the computer alike. Printers are set up on the computer.</p>
       <p>If a button in this guide is missing on your phone, update Counterpart on your computer. The Mac app updates itself; on Linux, install the newer package.</p>
-      <div class="shots">
-        <figure class="mac"><a class="shot mac" href="screens/mac-settings-ai.jpg"><img src="screens/mac-settings-ai.jpg" width="620" height="588" loading="lazy" alt="Mac Settings, AI: your AI provider and design tool"></a><figcaption>Settings › AI.</figcaption></figure>
-      </div>
     </section>
 
     <section id="notifications" aria-labelledby="notifications-h">
@@ -195,9 +176,6 @@
         <li><strong>Android:</strong> notifications for “Ready to print” and “Did it fit?”.</li>
         <li><strong>Mac and Linux:</strong> desktop notifications.</li>
       </ul>
-      <div class="shots">
-        <figure><a class="shot" href="screens/phone-settings-notifications.jpg"><img src="screens/phone-settings-notifications.jpg" width="644" height="1400" loading="lazy" alt="Notification choices"></a><figcaption>Choose which ones you get.</figcaption></figure>
-      </div>
     </section>
 
     <section id="trouble" aria-labelledby="trouble-h">
@@ -206,7 +184,7 @@
         <details><summary>My phone can't find my computer</summary><p>Make sure Counterpart is open on the computer and both are on the same Wi-Fi. On iPhone, check Settings › Counterpart › Local Network is on. Turn off a VPN that might block it. Then connect again with the QR code.</p></details>
         <details><summary>Making it stopped with an error</summary><p>The project says what went wrong. Check your AI connection in Settings, then open the project and choose Try Again.</p></details>
         <details><summary>The print didn't start</summary><p>Open the project: it shows what the printer said. If the printer shows an error on its own screen, clear it there, then print again. If Bambu Cloud refused the print, switch the printer's Connection to your local network in Settings › Printers.</p></details>
-        <details><summary>I don't see What will print</summary><p>Update your printer software in Settings › Printers. On the Mac and iPhone, What will print arrives with the next Counterpart update.</p></details>
+        <details><summary>I don't see What will print</summary><p>Update Counterpart on your computer, and update your printer software in Settings › Printers.</p></details>
         <details><summary>The size is a little off</summary><p>Measure the size that matters with a caliper and say it in Ask for changes, like “the tube is 25.4 mm across”. It redoes that part only.</p></details>
         <details><summary>Android won't install the app</summary><p>Allow your browser, or the app you opened the file from, to install apps when Android asks.</p></details>
         <details><summary>I don't see a button this page mentions</summary><p>Update Counterpart on your computer, then reopen the app on your phone.</p></details>
@@ -215,7 +193,7 @@
 
     <section id="privacy" aria-labelledby="privacy-h">
       <h2 id="privacy-h">Privacy</h2>
-      <p>Counterpart has no accounts. Your Mac or Linux computer stores your scans, photos and projects. Your phone reaches it directly, at home or over Tailscale.</p>
+      <p>Counterpart is self-hosted: it runs on your Mac or Linux computer, and nothing goes to a Counterpart cloud. It has no accounts and no subscription. Your computer stores your scans, photos and projects, and your phone reaches it directly, at home or over Tailscale. Counterpart is developed in public at <a href="https://github.com/DMontgomery40/scan-to-make">github.com/DMontgomery40/scan-to-make</a>, and the printer software it installs is open source (GPL-2.0).</p>
       <ul>
         <li><strong>With a Mac,</strong> your iPhone or iPad also reads project summaries and updates from your own private iCloud when you're away.</li>
         <li><strong>Lock Screen updates</strong> go through Counterpart's relay at counterpart.dtmont.com, which receives the project name, the printer name, the progress and your phone's delivery token so Apple can deliver them. You turn it on in the Mac's Settings.</li>
@@ -227,7 +205,7 @@
     <section id="credits" aria-labelledby="credits-h">
       <h2 id="credits-h">Credits</h2>
       <ul>
-        <li>3D scan platform: <a href="https://makerworld.com/en/models/1531561">Kass 3D on MakerWorld</a>. Long vernier caliper: <a href="https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths#profileId-232006">3D Print Masters Hub on MakerWorld</a>.</li>
+        <li>3D scan platform: <a href="https://makerworld.com/en/models/1531561">Kass 3D on MakerWorld</a>. Vernier caliper with depth gauge: <a href="https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths#profileId-232006">3D Print Masters Hub on MakerWorld</a>.</li>
         <li>Published models you print are credited to their designers on the project, with a link to the original.</li>
         <li>Printing: <a href="https://dmontgomery40.github.io/bambu-printer-mcp/">bambu-printer-mcp</a> and <a href="https://dmontgomery40.github.io/mcp-3D-printer-server/">mcp-3D-printer-server</a>.</li>
         <li>Optional tools: Blender and Autodesk Fusion. Open-source licences are in the app under <span class="path">Settings › About</span>.</li>

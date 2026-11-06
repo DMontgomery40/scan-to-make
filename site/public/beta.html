@@ -10,6 +10,7 @@
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
+<script src="site.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to setup</a>
@@ -33,16 +34,17 @@
 <article class="glass"><h3>Mac</h3><p class="spec">Apple silicon · macOS 27 or newer</p><p>Signed and notarized. It updates itself.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.4/ScanToMake-202611040930.zip">Download for Mac</a></p></article>
 <article class="glass"><h3>Android</h3><p class="spec">Android 8 or newer</p><p>Allow your browser to install the app when Android asks.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-android.apk">Download for Android</a></p></article>
 <article class="glass"><h3>Linux</h3><p class="spec">Ubuntu 26.04 · x86_64</p><p>Open the .deb to install it, or use the AppImage.</p><p class="get"><a class="button" href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-amd64.deb">Download .deb</a></p><p class="alt"><a href="https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-x86_64.AppImage">Download AppImage</a></p></article>
-<article class="glass"><h3>iPhone and iPad</h3><p class="spec">iOS 27 or iPadOS 27 or newer</p><p>Through TestFlight, as soon as Apple approves the beta.</p><p class="get"><a class="button" href="https://testflight.apple.com/join/S4tExVzp">Open TestFlight</a></p></article>
+<article class="glass"><h3>iPhone and iPad</h3><p class="spec">iOS 27 or iPadOS 27 or newer</p><p>Through Apple TestFlight.</p><p class="get"><a class="button" href="https://testflight.apple.com/join/S4tExVzp">Join the TestFlight beta</a></p></article>
 </div>
 <div class="after-downloads"><p><a href="https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.5-android-linux">Release notes and checksums</a></p></div>
 </section>
 
 <section id="install" aria-labelledby="install-title">
-<h2 id="install-title">Mac, with iPhone and iPad</h2>
+<h2 id="install-title">Mac</h2>
 <ol id="mac-release">
 <li>Move Counterpart to Applications and open it. Allow Local Network access so it can reach your phone and printer.</li>
-<li>In Settings › Printers, add your printer. Counterpart installs the printer software it needs.</li>
+<li>In Settings › Printers, add your printer. Counterpart installs the printer software it needs. Install the slicer that software uses — the app that prepares files for the printer, such as Bambu Studio.</li>
+<li>An Android phone connects to a Mac too: choose Add a Phone and scan the code.</li>
 <li>For design and changes, choose your AI in Settings › AI: Claude Code, Codex, an API key, or a local model.</li>
 <li>Install Counterpart on your iPhone or iPad from TestFlight and open it. With the same Apple Account it finds your Mac by itself; otherwise choose Add a Phone in the Mac's menu bar and scan the code.</li>
 <li>For print progress on your Lock Screen, turn on Live Activity updates in the Mac's Settings › Advanced.</li>
@@ -71,7 +73,7 @@
 
 <section id="cleanup" aria-labelledby="cleanup-title">
 <h2 id="cleanup-title">Scan cleanup on the Mac</h2>
-<p>Scan cleanup uses Blender and a few free tools that install separately. Open Counterpart once, then follow the <a href="https://github.com/DMontgomery40/scan-to-make/blob/fbd1a69b/deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app">cleanup tools guide</a>. Printing published models doesn't need them.</p>
+<p>Design can use Blender, or Autodesk Fusion for parametric work: install either app, then choose Set Up in Settings › AI and Counterpart connects it for you. Scan cleanup also needs Counterpart's free cleanup tools installed once — the <a href="https://github.com/DMontgomery40/scan-to-make/blob/fbd1a69b/deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app">cleanup tools guide</a> walks through it. Printing published models needs none of this.</p>
 </section>
 
 <section id="starters" aria-labelledby="starters-title">
@@ -79,7 +81,7 @@
 <p>The first time you open Counterpart, it offers two starter projects.</p>
 <ul>
 <li><strong>3D scan platform</strong> by <a href="https://makerworld.com/en/models/1531561">Kass 3D</a>: six plates and a quick assembly, for steady scans of small objects.</li>
-<li><strong>Long vernier caliper</strong> by <a href="https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths#profileId-232006">3D Print Masters Hub</a>: two colours, with an optional depth gauge.</li>
+<li><strong>Vernier caliper with depth gauge</strong> by <a href="https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths#profileId-232006">3D Print Masters Hub</a>: two colours, with an optional depth gauge.</li>
 </ul>
 </section>
 

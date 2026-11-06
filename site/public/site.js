@@ -10,6 +10,13 @@
     mark(); window.addEventListener('scroll', mark, {passive: true});
   }
 
+  // Help contents: open on wide screens, a disclosure on phones.
+  const tocBox = $('.toc-disclosure');
+  if (tocBox) {
+    const sync = () => { tocBox.open = window.innerWidth > 980; };
+    sync(); window.addEventListener('resize', sync);
+  }
+
   // Tabs: the step-through and the device switch. Arrow keys move between tabs.
   for (const list of $$('[role="tablist"]')) {
     const tabs = $$('[role="tab"]', list);
@@ -67,20 +74,6 @@
   }
 
   // What you need: ticking every line says you're ready. Remembered on this device only.
-  const needs = $$('.needs input');
-  if (needs.length) {
-    const done = $('.needs-done');
-    let saved = [];
-    try { saved = JSON.parse(localStorage.getItem('counterpart-needs') ?? '[]'); } catch {}
-    needs.forEach((box, index) => { box.checked = saved.includes(index); });
-    const update = () => {
-      const ticked = needs.flatMap((box, index) => box.checked ? [index] : []);
-      try { localStorage.setItem('counterpart-needs', JSON.stringify(ticked)); } catch {}
-      if (done) done.textContent = needs.filter(box => !box.hasAttribute('data-optional')).every(box => box.checked) ? 'You have what you need to print published models and reprints. Open Counterpart on your computer, then pair your phone.' : '';
-    };
-    needs.forEach(box => box.addEventListener('change', update));
-    update();
-  }
 
   // Help: search filters the sections and questions, and the contents follow your place on the page.
   const search = $('#help-search');
