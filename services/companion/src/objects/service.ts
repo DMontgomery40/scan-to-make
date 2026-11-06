@@ -330,6 +330,14 @@ function resumedHere(events: readonly {message: string}[]): boolean {
   return false;
 }
 
+/** A starter's file Ask: the print profile's 3MF, by the site's own button (its raw model has lost the plates). */
+function starterFileQuestion(starter: StarterProject): string {
+  return `On ${starter.site}, open ${starter.title.toLowerCase()}, choose the designer’s print profile and press Download 3MF, then add that 3MF here. Not the raw model files (STL or a zip): they don’t have the designer’s plates.`;
+}
+function starterRawModel(starter: StarterProject): string {
+  return `That’s the raw model from ${starter.site}, without the designer’s plates. On the model’s page, choose the designer’s print profile and press Download 3MF, then add that 3MF.`;
+}
+
 export class ObjectService {
   readonly #deps: ObjectServiceDeps;
   readonly #running = new Map<string, Promise<StmObject>>();
@@ -574,9 +582,8 @@ export class ObjectService {
           console.error(`starter ${starterId}: no download pass for project ${created.id}: ${this.#publicText(error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').slice(0, 400)}`);
           // No worker to download with (AI is off, or its settings are unavailable): the project stays, and the person
           // adds the designer's files, as a pasted link asks when they can't be fetched.
-          const ask = {id: randomUUID(), type: 'file' as const,
-            question: `Download ${starter.title.toLowerCase()} from ${starter.site} and add the designer’s files here.`,
-            url: starter.url, modelName: starter.title, site: starter.site, accepts: ['3mf' as const, 'stl' as const],
+          const ask = {id: randomUUID(), type: 'file' as const, question: starterFileQuestion(starter),
+            url: starter.url, modelName: starter.title, site: starter.site, accepts: ['3mf' as const],
             answers: ['file' as const], status: 'open' as const, askedAtMs: Date.now()};
           return this.#changed(await store.update(created.id, o => ({...o, state: 'needs-closeup', ask})));
         }
@@ -2245,8 +2252,10 @@ export class ObjectService {
       const site = result.model?.site ?? object.credit?.site ?? publishedLink(object.instructions)?.site;
       const url = result.model?.url ?? object.credit?.url ?? publishedLink(object.instructions)?.url;
       const modelName = result.model?.title ?? object.credit?.title;
-      const ask = {id: randomUUID(), type: 'file' as const, question: `Download ${modelName ?? 'the model'} from ${site ?? 'its page'} and share it here.`.slice(0, 300),
-        ...(url ? {url} : {}), ...(modelName ? {modelName} : {}), ...(site ? {site} : {}), accepts: ['3mf' as const, 'stl' as const],
+      // A starter asks for its print profile's 3MF (the designer's plates) and names the button; any other link takes a 3MF or STL.
+      const starter = object.starterId ? this.#starter(object.starterId) : undefined;
+      const ask = {id: randomUUID(), type: 'file' as const, question: (starter ? starterFileQuestion(starter) : `Download ${modelName ?? 'the model'} from ${site ?? 'its page'} and share it here.`).slice(0, 300),
+        ...(url ? {url} : {}), ...(modelName ? {modelName} : {}), ...(site ? {site} : {}), accepts: starter ? ['3mf' as const] : ['3mf' as const, 'stl' as const],
         ...(result.candidate ? {candidate: {path: result.candidate, name: basename(result.candidate)}} : {}),
         answers: ['file' as const], status: 'open' as const, askedAtMs: now};
       const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined, ask, question: undefined, kind: 'published' as const,
@@ -2262,8 +2271,10 @@ export class ObjectService {
   async #starterDownloads(starter: StarterProject, files: string[]): Promise<{path: string; sha256: string; plates: number}[]> {
     const picked: {path: string; sha256: string; plates: number}[] = [];
     for (const path of files) {
+      // Only the print profile's 3MF has the designer's plates; a raw-model STL never stands in for it.
+      if (extname(path).toLowerCase() !== '.3mf') continue;
       try {
-        const metadata = inspectModelFile(await readModelFile(path), extname(path).toLowerCase() === '.stl' ? 'stl' : '3mf');
+        const metadata = inspectModelFile(await readModelFile(path), '3mf');
         if (metadata.designer !== starter.designer || picked.some(file => file.sha256 === metadata.sha256)) continue;
         picked.push({path, sha256: metadata.sha256, plates: Math.max(1, metadata.plates.length)});
       } catch { /* not a model this starter can use */ }
@@ -2511,6 +2522,9 @@ export class ObjectService {
       if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
       if (object.print?.uncertain) throw new InvalidStateError('Check the current print on your printer before adding files.');
       if (object.kind !== 'published') throw new InvalidStateError('Start a project with the model’s link before sharing its file.');
+      // A starter is the designer's print profile: its raw model (an STL, or the zip of them) has lost the plates.
+      const starter = object.starterId ? this.#starter(object.starterId) : undefined;
+      if (starter && !/\.3mf$/i.test(name)) throw new InvalidStateError(starterRawModel(starter));
       if (!/\.(3mf|stl)$/i.test(name)) throw new InvalidStateError('Share the model as a 3MF or STL file.');
       if (/\.3mf$/i.test(name) ? !(bytes[0] === 0x50 && bytes[1] === 0x4b) : bytes.length < 84) throw new InvalidStateError("That file isn't a 3MF or STL model.");
       const folder = join(this.dir(id), 'incoming');

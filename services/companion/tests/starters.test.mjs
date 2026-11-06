@@ -149,6 +149,41 @@ test('a set the worker or the person chose that isn’t the whole kit is never r
  const again=await service.settled((await service.addStarter('long-vernier-caliper')).id);
  assert.equal(asked.length,2,'no cache hit: the worker runs again');assert.equal(again.state,'ready');
 });
+// Nov 6, bb9da63c: the scan platform got MakerWorld's raw-model zip (one 850×521 mm STL of all six plates baked into one
+// mesh), and the file Ask accepted it. A starter is the designer's full-kit print profile: one 3MF, six plates.
+test('the scan platform is one 3MF with its six plates',async t=>{
+ const {service}=await setup(t,async(_input,root)=>rig(root));
+ const o=await service.settled((await service.addStarter('scan-platform')).id);
+ assert.equal(o.state,'ready');assert.equal(o.files.receipts.length,1);assert.match(o.files.receipts[0].name,/\.3mf$/);
+ assert.equal(o.files.receipts[0].plates.length,6);assert.equal(publicObject(o).plates.length,6);
+ assert.equal(o.ask,undefined,'no "which plate?" question');
+});
+test('a starter’s file Ask wants the print profile’s 3MF by its button, and a raw STL or zip handed in says what it is',async t=>{
+ const {service}=await setup(t,async()=>({status:'needs_file',browser:false}));
+ const o=await service.settled((await service.addStarter('scan-platform')).id);
+ assert.equal(o.state,'needs-closeup');assert.deepEqual(o.ask.accepts,['3mf']);
+ assert.equal(o.ask.question,'On MakerWorld, open 3d scan platform, choose the designer’s print profile and press Download 3MF, then add that 3MF here. Not the raw model files (STL or a zip): they don’t have the designer’s plates.');
+ const raw='That’s the raw model from MakerWorld, without the designer’s plates. On the model’s page, choose the designer’s print profile and press Download 3MF, then add that 3MF.';
+ const stl=Buffer.alloc(184);stl.writeUInt32LE(1,80);
+ await assert.rejects(service.addModelFile(o.id,'全3D打印360°摄影台.stl',stl),{message:raw});
+ await assert.rejects(service.addModelFile(o.id,'全3D打印360°摄影台.zip',Buffer.from(zipSync({'a.stl':stl}))),{message:raw});
+ assert.equal((await service.get(o.id)).state,'needs-closeup','nothing quietly accepted');
+ const done=await service.addModelFile(o.id,'360 scan platform full kit.3mf',model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears','Feet']));
+ assert.equal(done.state,'ready');assert.equal(publicObject(done).plates.length,6);
+ // AI off asks the same way.
+ const off=await setup(t,undefined,{modelAccess:{projectWorker:()=>{throw new Error('AI is off.');}}});
+ const asked=await logged(()=>off.service.addStarter('scan-platform'));
+ assert.deepEqual(asked.value.ask.accepts,['3mf']);assert.match(asked.value.ask.question,/press Download 3MF/);
+});
+test('a raw-model download that arrived is never a starter’s files',async t=>{
+ const {service}=await setup(t,async(_input,root)=>{
+  const stl=Buffer.alloc(184);stl.writeUInt32LE(1,80);
+  const made=await downloaded(root,[['全3D打印360°摄影台.stl',stl]]);
+  return {status:'needs_file',reason:'other',summary:'Only the raw model was offered.',arrived:made.files};
+ });
+ const {value:o}=await logged(async()=>service.settled((await service.addStarter('scan-platform')).id));
+ assert.equal(o.state,'failed');assert.equal(o.files,undefined);
+});
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
   ['one of two files',[['Vernier Caliper Ruler 150mm COLOR.3mf','Vernier Caliper Ruler - Two Lengths']]],
