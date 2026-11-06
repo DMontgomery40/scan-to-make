@@ -146,6 +146,8 @@ import CounterpartKit
             let latest = try await mac.printers()
             guard !Task.isCancelled else { return }
             catalog = latest; printerProblem = nil
+            // Choosing another MCP can change the canonical printer ID used by copy rows.
+            await loadMCPCopies()
         } catch {
             guard !Task.isCancelled else { return }
             if catalog == nil { printerProblem = "Couldn't read the printers configured on your Mac." }
