@@ -122,6 +122,7 @@ export class PrinterSession {
   #mutex: Promise<void> = Promise.resolve();
   #failures = 0;
   #retryAt = 0;
+  #generation = 0;
   #lastSuccessAt?: number;
   #lastFailureAt?: number;
   #lastError?: string;
@@ -141,6 +142,11 @@ export class PrinterSession {
   /** The catalog of the live connection, or of the last one (tools rarely change between restarts). */
   get catalog(): PrinterToolCatalog | undefined { return this.#client?.catalog ?? this.#lastCatalog; }
   get closed(): boolean { return this.#closed; }
+  /**
+   * Counts restarts (an Update, a Move, new settings): an answer cached with an older generation came from an MCP
+   * process that is gone. Read it before a call: a reply arriving after a restart then belongs to the old generation.
+   */
+  get generation(): number { return this.#generation; }
 
   health(): SessionHealth {
     return {connected: !!this.#client, consecutiveFailures: this.#failures, holders: this.#holders,
@@ -272,6 +278,7 @@ export class PrinterSession {
     try {
       await this.#connecting?.catch(() => undefined);
       if (config) this.#config = structuredClone(config);
+      this.#generation += 1;
       const client = this.#client;
       this.#client = undefined;
       this.#failures = 0;
