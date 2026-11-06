@@ -49,6 +49,27 @@ final class PrinterSetupTests: XCTestCase {
         XCTAssertEqual(ControlClient.timeout(for: "printers.check"), 70, "Check runs for up to 60 s on the companion")
     }
 
+    /// PRD §8.0 item 6: the slicer settings and update notes come from the MCPs (`counterpart_setup_fields`), and the form sends them.
+    func testTheSlicerSettingsTheMCPDeclaresReachTheForm() throws {
+        let options = try JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
+        {"types":[],"models":{},"serialModels":{"01P":"p1s"},"updates":[{"package":"mcp-3d-printer-server","message":"Update mcp-3D-printer-server in Settings → Printers so Counterpart can set up printers with it."}],
+         "slicer":{"bambu-printer-mcp":{"type":"bambustudio","path":"BambuStudio","found":false,"profilesFound":false,"fields":[
+           {"name":"slicer","env":"SLICER_TYPE","label":"Slicer","required":false,"choices":[{"value":"bambustudio","label":"Bambu Studio"}]},
+           {"name":"slicer-path","env":"SLICER_PATH","label":"Bambu Studio app","input":"path","required":true,"hint":"Bambu Studio isn't at BambuStudio. Install it, or choose where it is."},
+           {"name":"profiles","env":"BAMBU_PROFILES_ROOT","label":"Bambu profiles folder","input":"path","required":true}]}}}
+        """.utf8))
+        let slicer = try XCTUnwrap(options.slicer?["bambu-printer-mcp"])
+        XCTAssertEqual(slicer.field("slicer-path")?.required, true)
+        XCTAssertEqual(slicer.field("slicer-path")?.hint, "Bambu Studio isn't at BambuStudio. Install it, or choose where it is.")
+        XCTAssertEqual(options.updates?.first?.package, "mcp-3d-printer-server")
+        var form = PrinterForm(); form.host = "192.168.1.40"; form.slicer = "orcaslicer"; form.slicerPath = "/opt/bambu/bin/bambu-studio"
+        guard case .object(let json) = form.json else { return XCTFail("an object") }
+        XCTAssertEqual(json["slicer"], .string("orcaslicer"), "the slicer chosen from the MCP's list goes with its app")
+        XCTAssertEqual(json["slicerPath"], .string("/opt/bambu/bin/bambu-studio"))
+        XCTAssertNil(json["profiles"], "a setting left empty isn't sent")
+        XCTAssertEqual(options.model(forSerial: "01P00A1"), "p1s", "the prefix length is the MCP table's own")
+    }
+
     func testMissingModelIsFilledFromTheSerialOrAsked() throws {
         let options = try JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
         {"types":[],"models":{"mcp-3d-printer-server":[{"value":"p1s","label":"P1S"}]},"serialModels":{"01P":"p1s","039":"a1"}}

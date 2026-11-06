@@ -717,8 +717,36 @@ public extension ControlClient {
 public struct PrinterSetupOptions: Decodable, Sendable, Equatable {
     public struct Secret: Decodable, Sendable, Equatable {
         public let label: String
-        public let hint: String
+        public let hint: String?
         public let required: Bool
+    }
+    /// One of the MCP's own settings (`counterpart_setup_fields`): the `.env` variable, its label and hint, and whether it's needed.
+    public struct Field: Decodable, Sendable, Equatable, Identifiable {
+        public let name: String
+        public let env: String
+        public let label: String
+        public let hint: String?
+        public let required: Bool
+        /// "path": a file or folder on this Mac.
+        public let input: String?
+        public let choices: [Model]?
+        public var id: String { name }
+    }
+    /// The slicer an MCP would run, as it resolves it now, and the settings that choose it.
+    public struct Slicer: Decodable, Sendable, Equatable {
+        public let type: String
+        public let path: String?
+        public let found: Bool
+        public let profilesRoot: String?
+        public let profilesFound: Bool?
+        public let fields: [Field]
+        public func field(_ name: String) -> Field? { fields.first { $0.name == name } }
+    }
+    /// An MCP on this Mac that can't say yet what it needs: its words for the person.
+    public struct Update: Decodable, Sendable, Equatable, Identifiable {
+        public let package: String
+        public let message: String
+        public var id: String { package }
     }
     /// A brand or host software: mcp-3D-printer-server's `PRINTER_TYPE`, and the MCPs that can reach it (the default first).
     public struct PrinterType: Decodable, Sendable, Equatable, Identifiable {
@@ -738,12 +766,17 @@ public struct PrinterSetupOptions: Decodable, Sendable, Equatable {
     public let types: [PrinterType]
     /// Each MCP's own model names, by package.
     public let models: [String: [Model]]
-    /// A Bambu serial number's first three characters → its model (bambu-printer-mcp's own table).
+    /// A serial number's prefix → its model (the MCP's own table).
     public let serialModels: [String: String]?
-    /// The model a typed serial number names, when it is one the MCP knows.
+    /// The slicer each MCP would run and its settings, by package; nil from an older companion.
+    public let slicer: [String: Slicer]?
+    /// MCPs that need an update before they can set up printers.
+    public let updates: [Update]?
+    /// The model a typed serial number names, when it is one the MCP knows (its prefixes are all one length).
     public func model(forSerial serial: String) -> String? {
-        let prefix = String(serial.trimmingCharacters(in: .whitespaces).prefix(3)).uppercased()
-        return prefix.count == 3 ? serialModels?[prefix] : nil
+        guard let length = serialModels?.keys.first?.count else { return nil }
+        let prefix = String(serial.trimmingCharacters(in: .whitespaces).prefix(length)).uppercased()
+        return prefix.count == length ? serialModels?[prefix] : nil
     }
 }
 
@@ -778,6 +811,24 @@ public struct PrinterDiscovery: Decodable, Sendable, Equatable {
 }
 
 /// What Check and Add send: a found folder, or the form's fields. `secret` is the access code or API key.
+/// Add printer…'s Slicer section, from the chosen MCP's own `slicer` fields (`counterpart_setup_fields`): its slicer
+/// choice, and the paths it reads when it can't find its slicer or Bambu profiles. None for an MCP that declares none.
+public struct SlicerControls: Sendable, Equatable {
+    public let slicer: PrinterSetupOptions.Slicer
+    public init?(options: PrinterSetupOptions?, backend: String) {
+        guard let slicer = options?.slicer?[backend] else { return nil }
+        self.slicer = slicer
+    }
+    /// The slicer choice, when the MCP offers one.
+    public var choice: PrinterSetupOptions.Field? { slicer.field("slicer").flatMap { ($0.choices ?? []).isEmpty ? nil : $0 } }
+    public var path: PrinterSetupOptions.Field? { slicer.field("slicer-path") }
+    public var profiles: PrinterSetupOptions.Field? { slicer.field("profiles") }
+    /// The slicer shown as chosen: the person's, else the one the MCP would run.
+    public func selected(in form: PrinterForm) -> String { form.slicer ?? slicer.type }
+    /// The MCP's own slicer sends nothing, so only a change is sent (and SLICER_TYPE agrees with SLICER_PATH).
+    public func choose(_ value: String, in form: inout PrinterForm) { form.slicer = value == slicer.type ? nil : value }
+}
+
 public struct PrinterForm: Sendable, Equatable {
     public var folder: String?
     public var backend = "bambu-printer-mcp"
@@ -788,6 +839,10 @@ public struct PrinterForm: Sendable, Equatable {
     public var model: String?
     public var secret = ""
     public var name: String?
+    /// The MCP's slicer settings, when the person sets them (`slicer.fields`): where the slicer and its Bambu profiles are.
+    public var slicer: String?
+    public var slicerPath: String?
+    public var profiles: String?
     public init(folder: String? = nil) { self.folder = folder }
     public var json: JSONValue {
         if let folder { return .object(["folder": .string(folder)].merging(model.map { ["model": .string($0)] } ?? [:]) { $1 }) }
@@ -799,6 +854,9 @@ public struct PrinterForm: Sendable, Equatable {
         }
         if !secret.isEmpty { value["secret"] = .string(secret) }
         if let name, !name.isEmpty { value["name"] = .string(name) }
+        if let slicer, !slicer.isEmpty { value["slicer"] = .string(slicer) }
+        if let slicerPath, !slicerPath.isEmpty { value["slicerPath"] = .string(slicerPath) }
+        if let profiles, !profiles.isEmpty { value["profiles"] = .string(profiles) }
         return .object(value)
     }
 }

@@ -205,6 +205,8 @@ struct AddPrinterSheet: View {
         }
         .frame(width:540, height:600)
         .task { await discover() }
+        // An MCP downloaded from this sheet brings its own kinds and fields: read them again, so setup goes on here.
+        .onChange(of: missingMcp == nil) { _, installed in if installed { Task { await discover() } } }
         .onChange(of:form) { _, _ in check = nil; problem = nil }
     }
 
@@ -219,6 +221,7 @@ struct AddPrinterSheet: View {
             }
             ForEach(discovery?.found ?? []) { candidate in candidateRow(candidate) }
         } header: { Text("Found") } footer: {
+            ForEach(options?.updates ?? []) { update in Text(update.message).font(.caption).foregroundStyle(.orange) }
             if discovery?.network == "unavailable" {
                 Text("Counterpart couldn’t listen for Bambu printers on this network (another app, such as Bambu Studio, may be using it). Enter the address instead.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -293,7 +296,8 @@ struct AddPrinterSheet: View {
             Picker("Brand", selection:Binding(get: { form.printerType }, set: { value in
                 form.printerType = value
                 form.backend = options?.types.first { $0.printerType == value }?.backends.first ?? form.backend
-                form.model = nil; check = nil
+                // A slicer choice belongs to the MCP that offered it.
+                form.model = nil; form.slicer = nil; check = nil
             })) {
                 ForEach(options?.types ?? []) { Text($0.label).tag($0.printerType) }
             }
@@ -317,13 +321,39 @@ struct AddPrinterSheet: View {
             if let secret = type?.secret {
                 VStack(alignment:.leading, spacing:4) {
                     SecureField(secret.label + (secret.required ? "" : " (optional)"), text:$form.secret)
-                    Text(secret.hint).font(.caption).foregroundStyle(.secondary)
+                    if let hint = secret.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
                 }
             }
         }
+        if let controls = SlicerControls(options:options, backend:form.backend) {
+            let slicer = controls.slicer
+            // The slicer the MCP would run and where its profiles are, in the MCP's words: set only what it can't find.
+            Section {
+                if let field = controls.choice {
+                    // The slicer the MCP runs, from its own list: chosen with its app below, so the two always agree.
+                    Picker(field.label, selection:Binding(get: { controls.selected(in:form) }, set: { controls.choose($0, in:&form) })) {
+                        ForEach(field.choices ?? []) { Text($0.label).tag($0.value) }
+                    }
+                }
+                if let field = controls.path {
+                    VStack(alignment:.leading, spacing:4) {
+                        TextField(field.label + (field.required ? "" : " (optional)"), text:Binding(get: { form.slicerPath ?? "" }, set: { form.slicerPath = $0.isEmpty ? nil : $0 }),
+                                  prompt:Text(slicer.path ?? "/Applications/…"))
+                        if let hint = field.hint { Text(hint).font(.caption).foregroundStyle(field.required ? .orange : .secondary) }
+                    }
+                }
+                if let field = controls.profiles {
+                    VStack(alignment:.leading, spacing:4) {
+                        TextField(field.label + (field.required ? "" : " (optional)"), text:Binding(get: { form.profiles ?? "" }, set: { form.profiles = $0.isEmpty ? nil : $0 }),
+                                  prompt:Text(slicer.profilesRoot ?? "…/profiles"))
+                        if let hint = field.hint { Text(hint).font(.caption).foregroundStyle(field.required ? .orange : .secondary) }
+                    }
+                }
+            } header: { Text("Slicer") }
+        }
         if let backends = type?.backends, backends.count > 1 {
             Section {
-                Picker("Printer MCP", selection:Binding(get: { form.backend }, set: { form.backend = $0; form.model = nil; check = nil })) {
+                Picker("Printer MCP", selection:Binding(get: { form.backend }, set: { form.backend = $0; form.model = nil; form.slicer = nil; check = nil })) {
                     ForEach(backends, id:\.self) { Text(PrinterSetupModel.label($0)).tag($0) }
                 }
             } footer: { Text("Counterpart sends this printer’s prints through this MCP.").font(.caption).foregroundStyle(.secondary) }
@@ -371,6 +401,9 @@ struct AddPrinterSheet: View {
 
     private func start(_ value: PrinterForm) {
         form = value
+        // The MCP that drives this kind on this Mac, from the MCPs' own fields: never one that isn't installed.
+        if let backends = options?.types.first(where: { $0.printerType == form.printerType })?.backends,
+           !backends.contains(form.backend), let first = backends.first { form.backend = first; form.slicer = nil }
         if form.printerType == "bambu", form.model == nil, models.count == 1 { form.model = models.first?.value }
         check = nil; problem = nil; editing = true
     }

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   ReadOrder,
   estimateRequest,
@@ -15,6 +16,7 @@ import {
   validateAnswer,
   startingChoices,
   designerSettingsWords,
+  slicerControls,
 } from "../src/domain.ts";
 import type { Project, ReconstructionReview } from "../src/types.ts";
 import {
@@ -364,4 +366,23 @@ test("software results retain a waiting move when another MCP updates", async ()
   assert.equal(later[move.data.mcpId], `${move.title} ${move.body}`);
   assert.equal(later[update.data.mcpId], `${update.title} ${update.body}`);
   assert.deepEqual(mcpUpdateNotices({}, [move, update]), later);
+});
+
+test("Add a printer offers the chosen MCP's own slicer choice and paths, and sends only a changed slicer (Codex review on #346)", () => {
+  // What mcp-3d-printer-server 1.2.50 really declares (counterpart_setup_fields, captured with no slicer installed).
+  const fields = JSON.parse(readFileSync(new URL("../../../services/companion/tests/fixtures/setup-fields-mcp-3d-printer-server-1.2.50.json", import.meta.url), "utf8"));
+  const options = { types: [], models: {}, slicer: { "mcp-3d-printer-server": fields.slicer } };
+  const controls = slicerControls(options, "mcp-3d-printer-server");
+  assert.ok(controls, "the Slicer section is reachable for an MCP that declares one");
+  assert.equal(controls.choice?.env, "SLICER_TYPE");
+  assert.deepEqual(controls.choice?.choices?.map((c) => c.value), fields.slicer.fields[0].choices.map((c: { value: string }) => c.value));
+  assert.deepEqual(controls.paths.map((p) => [p.key, p.field.required, p.placeholder]), [["slicerPath", true, "/opt/nowhere/bambu-studio"]]);
+  // The MCP's own slicer shows as chosen and sends nothing; another one is sent, so SLICER_TYPE and SLICER_PATH agree.
+  assert.equal(controls.selected({ slicer: "" }), "prusaslicer");
+  assert.equal(controls.choose("prusaslicer"), "");
+  assert.equal(controls.choose("orcaslicer"), "orcaslicer");
+  assert.equal(controls.selected({ slicer: "orcaslicer" }), "orcaslicer");
+  // An MCP that declares no slicer settings shows no Slicer section.
+  assert.equal(slicerControls(options, "bambu-printer-mcp"), undefined);
+  assert.equal(slicerControls(undefined, "mcp-3d-printer-server"), undefined);
 });

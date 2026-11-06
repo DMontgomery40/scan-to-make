@@ -1,4 +1,4 @@
-import { mcpUsageWords, mcpMoveNotice } from "./domain";
+import { mcpUsageWords, mcpMoveNotice, slicerControls } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -956,8 +956,14 @@ function AddPrinter({
     image?: { mimeType: string; base64: string };
   }>();
   const type = options?.types.find((t) => t.printerType === form.printerType);
+  const slicer = slicerControls(options, form.backend);
   const update = (key: string, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
+  // The MCP that drives this kind here, from the MCPs' own fields: never one that isn't installed.
+  useEffect(() => {
+    if (type && !type.backends.includes(form.backend) && type.backends[0])
+      setForm((f) => ({ ...f, backend: type.backends[0]!, slicer: "" }));
+  }, [type, form.backend]);
   const payload = () =>
     Object.fromEntries(Object.entries(form).filter(([, v]) => v !== ""));
   return (
@@ -1037,7 +1043,8 @@ function AddPrinter({
         Printer MCP
         <select
           value={form.backend}
-          onChange={(e) => update("backend", e.target.value)}
+          // A slicer choice belongs to the MCP that offered it.
+          onChange={(e) => setForm((f) => ({ ...f, backend: e.target.value, slicer: "" }))}
         >
           {type?.backends.map((b) => (
             <option key={b}>{b}</option>
@@ -1062,10 +1069,14 @@ function AddPrinter({
               onChange={(e) => {
                 update(key, e.target.value);
                 if (key === "serial") {
-                  const detected =
-                    options?.serialModels?.[
-                      e.target.value.trim().slice(0, 3).toUpperCase()
-                    ];
+                  // The MCP's own serial table; its prefixes are all one length.
+                  const length = Object.keys(options?.serialModels ?? {})[0]
+                    ?.length;
+                  const detected = length
+                    ? options?.serialModels?.[
+                        e.target.value.trim().slice(0, length).toUpperCase()
+                      ]
+                    : undefined;
                   if (detected) update("model", detected);
                 }
               }}
@@ -1099,9 +1110,36 @@ function AddPrinter({
             value={form.secret ?? ""}
             onChange={(e) => update("secret", e.target.value)}
           />
-          <small>{type.secret.hint}</small>
+          {type.secret.hint && <small>{type.secret.hint}</small>}
         </label>
       )}
+      {/* The slicer the MCP runs, from its own list: chosen with its app below, so the two always agree. */}
+      {slicer?.choice && (
+        <label className="field">
+          {slicer.choice.label}
+          <select value={slicer.selected(form)} onChange={(e) => update("slicer", slicer.choose(e.target.value))}>
+            {slicer.choice.choices!.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {/* Where the slicer and its Bambu profiles are, when the MCP can't find them (the MCP's own fields). */}
+      {(slicer?.paths ?? []).map(({ field: f, key, placeholder }) => (
+        <label className="field" key={f.name}>
+          {f.label}
+          {f.required ? " *" : ""}
+          <input value={form[key] ?? ""} placeholder={placeholder} onChange={(e) => update(key, e.target.value)} />
+          {f.hint && <small>{f.hint}</small>}
+        </label>
+      ))}
+      {(options?.updates ?? []).map((u) => (
+        <p className="notice" key={u.package}>
+          {u.message}
+        </p>
+      ))}
       {check && (
         <div className="notice">
           {check.reached ? "Printer connected" : "Printer not reached"} ·

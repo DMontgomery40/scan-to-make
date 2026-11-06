@@ -196,6 +196,34 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertTrue(model.projects(forPrinter: "here").isEmpty)
     }
 
+    /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and
+    /// paths (mcp-3d-printer-server 1.2.50's `counterpart_setup_fields`), and only a changed slicer is sent (Codex review on #346).
+    func testAddPrinterSlicerControlsComeFromTheChosenMCPWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("caliper", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertFalse(model.objects.isEmpty, "projects are present")
+        let options = try JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
+        {"types":[],"models":{},"slicer":{"mcp-3d-printer-server":{"type":"prusaslicer","path":"/opt/nowhere/bambu-studio","found":false,"fields":[
+          {"name":"slicer","env":"SLICER_TYPE","label":"Slicer","required":false,"choices":[{"value":"prusaslicer","label":"PrusaSlicer"},{"value":"orcaslicer","label":"OrcaSlicer"},{"value":"bambustudio","label":"Bambu Studio"}]},
+          {"name":"slicer-path","env":"SLICER_PATH","label":"PrusaSlicer app","input":"path","required":true,"hint":"PrusaSlicer isn't at /opt/nowhere/bambu-studio. Install it, or choose where it is."}]}}}
+        """.utf8))
+        var form = PrinterForm()
+        form.backend = "mcp-3d-printer-server"
+        let controls = try XCTUnwrap(SlicerControls(options: options, backend: form.backend))
+        XCTAssertEqual(controls.choice?.choices?.map(\.value), ["prusaslicer", "orcaslicer", "bambustudio"])
+        XCTAssertEqual(controls.path?.env, "SLICER_PATH")
+        XCTAssertNil(controls.profiles, "no profiles folder unless the MCP asks for one")
+        XCTAssertEqual(controls.selected(in: form), "prusaslicer", "the MCP's own slicer shows as chosen")
+        controls.choose("orcaslicer", in: &form)
+        XCTAssertEqual(form.slicer, "orcaslicer", "another slicer is sent with its app")
+        controls.choose("prusaslicer", in: &form)
+        XCTAssertNil(form.slicer, "the MCP's own slicer sends nothing")
+        XCTAssertNil(SlicerControls(options: options, backend: "bambu-printer-mcp"), "an MCP that declares no slicer settings shows none")
+        XCTAssertNil(SlicerControls(options: nil, backend: "mcp-3d-printer-server"))
+    }
+
     func testDiscoveryDoesNotClaimEmptyPhonesOrPrintersBeforeSuccessfulReads() async {
         let failed = ObjectsModel(companion: FakeObjects())
         XCTAssertEqual(failed.missingPhoneText, "Checking connected phones…")

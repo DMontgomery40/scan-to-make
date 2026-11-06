@@ -4,6 +4,7 @@ import {parseEnv} from 'node:util';
 import {dirname} from 'node:path';
 import {z} from 'zod';
 import {printerBackendSchema} from '@scan-to-make/printer-handoff';
+import {field, modelForSerial, names, requiredOf, type SetupKind} from './mcp-setup.js';
 
 /**
  * Printers added in Counterpart (Settings → Printers → Add printer…): `<appPrinters>/profiles.json`. Each runs one
@@ -29,17 +30,6 @@ export const SavedProfilesSchema = z.strictObject({
 });
 export type SavedProfiles = z.infer<typeof SavedProfilesSchema>;
 
-/**
- * The settings each MCP needs for a printer type, by the variable names it reads (first name canonical, then aliases):
- * bambu-printer-mcp's manifest `user_config` (all required) and mcp-3D-printer-server's .env.example / README.
- */
-const BAMBU_REQUIRED: [string, ...string[]][] = [['PRINTER_HOST', 'BAMBU_PRINTER_HOST'], ['BAMBU_SERIAL', 'BAMBU_PRINTER_SERIAL'],
-  ['BAMBU_TOKEN', 'BAMBU_PRINTER_ACCESS_TOKEN'], ['BAMBU_MODEL', 'BAMBU_PRINTER_MODEL']];
-export function requiredSettings(backend: string, printerType: string | undefined): [string, ...string[]][] {
-  if (backend === 'bambu-printer-mcp') return BAMBU_REQUIRED;
-  if (printerType === 'bambu') return [['PRINTER_HOST'], ['BAMBU_SERIAL'], ['BAMBU_TOKEN'], ['BAMBU_MODEL']];
-  return [['PRINTER_HOST']];
-}
 /** The Bambu route settings both MCPs read (bambu-printer-mcp; mcp-3D-printer-server from its feat/bambu-complete). */
 export const ROUTE_KEYS = ['BAMBU_DEFAULT_CONNECTION_MODE', 'BAMBU_DEFAULT_CONNECTION_TYPE', 'BAMBU_NETWORK_BRIDGE_COMMAND', 'BAMBU_NETWORK_CONFIG_DIR'] as const;
 /** Another MCP's authenticated route for the same printer: its raw `.env` lines (verbatim) and their values. */
@@ -94,22 +84,27 @@ export async function findBambuRoute(serial: string | undefined, envPaths: strin
 }
 
 /**
- * What an MCP's `.env` lacks for its printer, and what Counterpart can fill without asking: the model, from
- * `model` (SSDP's DevModel or a choice) or else the serial number; and for an mcp-3D-printer-server Bambu printer
- * with no route of its own, `route`: the authenticated route another MCP config uses for the same serial (the
- * caller only passes one the target MCP reads). Never a secret, never a value already there. `lines` are what is appended.
+ * What an MCP's `.env` lacks for its printer, by the MCP's own fields (`counterpart_setup_fields`), and what
+ * Counterpart can fill without asking: the model, from `model` (the printer's announcement or a choice) or else the
+ * model the MCP says the serial number names; and for an mcp-3D-printer-server Bambu printer with no route of its
+ * own, `route`: the authenticated route another MCP config uses for the same serial (the caller only passes one the
+ * target MCP reads). Never a secret, never a value already there. `lines` are what is appended. With no `kind`
+ * (an MCP that can't say what it needs), nothing is reported missing.
  */
-export function settingsGap(backend: string, env: Record<string, string | undefined>,
-  options: {model?: string; modelFromSerial?: (serial?: string) => string | undefined; route?: RouteSource} = {}):
+export function settingsGap(backend: string, env: Record<string, string | undefined>, kind: SetupKind | undefined,
+  options: {model?: string; route?: RouteSource} = {}):
   {missing: string[]; fill: Record<string, string>; lines: Record<string, string>} {
   const value = (names: string[]) => names.map(name => env[name]?.trim()).find(item => !!item);
-  const printerType = backend === 'bambu-printer-mcp' ? 'bambu' : value(['PRINTER_TYPE'])?.toLowerCase() ?? 'octoprint';
-  const missing = requiredSettings(backend, printerType).filter(names => !value(names)).map(names => names[0]);
+  const missing = kind ? requiredOf(kind).filter(item => !value(item.names)).map(item => item.env) : [];
   const fill: Record<string, string> = {}, lines: Record<string, string> = {};
-  if (missing.includes('BAMBU_MODEL')) {
-    const model = options.model ?? options.modelFromSerial?.(value(['BAMBU_SERIAL', 'BAMBU_PRINTER_SERIAL']));
-    if (model && /^[a-z0-9]{1,16}$/.test(model)) { fill.BAMBU_MODEL = model; lines.BAMBU_MODEL = `BAMBU_MODEL='${model}'`; }
+  const modelField = field(kind, 'model'), serialField = field(kind, 'serial');
+  if (modelField && missing.includes(modelField.env)) {
+    const model = options.model ?? modelForSerial(kind, serialField ? value(names(serialField)) : undefined);
+    if (model && /^[a-z0-9]{1,16}$/.test(model) && (!modelField.choices || modelField.choices.some(choice => choice.value === model))) {
+      fill[modelField.env] = model; lines[modelField.env] = `${modelField.env}='${model}'`;
+    }
   }
+  const printerType = kind?.kind;
   if (options.route && backend === 'mcp-3d-printer-server' && printerType === 'bambu' && !value(['BAMBU_DEFAULT_CONNECTION_MODE'])) {
     for (const key of ROUTE_KEYS) if (options.route.lines[key] && env[key] === undefined) { fill[key] = options.route.values[key]!; lines[key] = options.route.lines[key]!; }
   }

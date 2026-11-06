@@ -7,6 +7,7 @@ import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {PrinterHandoffRunner} from '@scan-to-make/printer-handoff';
 import {loadPrinterCatalog} from '../dist/objects/printers.js';
+import {SETUP_FIELDS, withSetupMcp, writeSetupFieldsCache} from './support/setup-mcp.mjs';
 
 async function fixture(t) {
   const home = await mkdtemp(join(tmpdir(), 'printer-catalog-'));
@@ -317,7 +318,7 @@ test('a shared address never merges two printers with different serials, and the
   assert.equal(routed.canonical('current'), routed.destinations[0].id);
 });
 
-test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a folder as is, a form into its own .env); Printer MCP choice; Remove', async t => {
+test('Add printer: found MCP folders and the printers each MCP finds; Check; Add (a folder as is, a form into its own .env, both by the MCP\'s own fields); Printer MCP choice; Remove', async t => {
   const {PrinterSetup, envFor} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
   const {stat} = await import('node:fs/promises');
@@ -344,9 +345,8 @@ test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a f
   const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, reload: () => catalog.reload(), profilesPath,
     node: '/usr/local/bin/node', busy: async id => busy.has(id),
     folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true}],
-    ssdp: async () => ({state: 'complete', printers: [{host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', name: 'Workshop P1S'}, {host: '192.0.2.9', serial: '03900A000000001', model: 'a1', name: 'A1'}]}),
-    bonjour: async () => [{type: '_octoprint._tcp', name: 'OctoPi', host: 'octopi.local', port: '80'}],
-    client: config => {
+    // Only mcp-3D-printer-server is on this Mac: it finds the Bambu printers and the OctoPrint host itself.
+    client: withSetupMcp(config => {
       const calls = [];
       clients.push({config, calls});
       return {connect: async () => ({server: {name: 'x', version: '1'}, tools: [{name: 'get_printer_status'}, {name: 'camera_snapshot'}]}),
@@ -355,17 +355,24 @@ test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a f
           if (config.process.env?.PRINTER_HOST === '192.0.2.99') throw new Error('connect ECONNREFUSED 192.0.2.99 token=12345678');
           return {content: [{type: 'text', text: JSON.stringify(name === 'camera_snapshot' ? {format: cameraFormat, base64: jpeg} : {connected: true, status: 'idle', model: 'Bambu Lab P1S', raw: {secret: 'x'}})}]};
         }, close: async () => undefined};
-    }});
+    }, {announced: () => [{kind: 'bambu', source: 'ssdp', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', name: 'Workshop P1S'},
+      {kind: 'bambu', source: 'ssdp', host: '192.0.2.9', serial: '03900A000000001', model: 'a1', name: 'A1'},
+      {kind: 'octoprint', source: 'bonjour', name: 'OctoPi', host: 'octopi.local', port: 80}]})});
 
   // Found first: the clone (one click), the P1S already a printer, the new A1, the OctoPrint. No secret anywhere.
   const discovery = await setup.discover();
   assert.deepEqual(discovery.found.map(item => [item.source, item.name, item.added]), [
-    ['folder', 'Bambu Lab P1S via mcp-3D-printer-server', false], ['ssdp', 'Workshop P1S', true], ['ssdp', 'A1', false], ['bonjour', 'OctoPi', false]]);
-  assert.deepEqual(discovery.found[0], {id: `folder:${clone}`, source: 'folder', name: 'Bambu Lab P1S via mcp-3D-printer-server', backend: 'mcp-3d-printer-server',
+    ['folder', 'Bambu Lab P1S', false], ['ssdp', 'Workshop P1S', true], ['ssdp', 'A1', false], ['bonjour', 'OctoPi', false]]);
+  assert.deepEqual(discovery.found[0], {id: `folder:${clone}`, source: 'folder', name: 'Bambu Lab P1S', backend: 'mcp-3d-printer-server',
     printerType: 'bambu', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', folder: clone, added: false});
   assert.ok(!JSON.stringify(discovery).includes('55550000'), 'never an access code');
-  assert.deepEqual(discovery.options.types.map(type => type.printerType), ['bambu', 'octoprint', 'klipper', 'prusa', 'creality', 'duet', 'repetier']);
-  assert.ok(discovery.options.models['bambu-printer-mcp'].some(model => model.value === 'x2d'));
+  // The brand list, models and serial table are the MCP's own (counterpart_setup_fields), never the app's.
+  assert.deepEqual(discovery.options.types.map(type => type.printerType), SETUP_FIELDS['mcp-3d-printer-server'].kinds.map(kind => kind.kind));
+  assert.deepEqual(discovery.options.models['mcp-3d-printer-server'], SETUP_FIELDS['mcp-3d-printer-server'].kinds[0].fields.find(item => item.name === 'model').choices);
+  assert.equal(discovery.options.models['bambu-printer-mcp'], undefined, 'an MCP this Mac doesn\'t have offers nothing');
+  assert.equal(discovery.options.slicer['mcp-3d-printer-server'].fields[0].env, 'SLICER_TYPE', 'and the slicer settings it declares');
+  assert.deepEqual(discovery.found.find(item => item.source === 'bonjour'), {id: 'bonjour:octopi.local:80', source: 'bonjour', name: 'OctoPi',
+    backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local', port: '80', added: false});
 
   // Check runs the chosen MCP with these settings (nothing written) and only status and camera; never a print.
   const form = {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local.', port: '80', secret: 'octo-key'};
@@ -419,7 +426,7 @@ test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a f
   const folder = join(env.appPrinters, 'profiles', octo.id);
   assert.equal(octo.destinationId, octo.id);
   assert.equal(await readFile(join(folder, '.env'), 'utf8'), "# Written by Counterpart (Settings → Printers → Add printer…). The printer MCP reads it; edit it here for anything advanced.\n" +
-    "MCP_TRANSPORT='stdio'\nPRINTER_HOST='octopi.local'\nPRINTER_TYPE='octoprint'\nPRINTER_PORT='80'\nAPI_KEY='octo-key'\n");
+    "MCP_TRANSPORT='stdio'\nPRINTER_TYPE='octoprint'\nPRINTER_HOST='octopi.local'\nPRINTER_PORT='80'\nAPI_KEY='octo-key'\n");
   assert.equal((await stat(join(folder, '.env'))).mode & 0o777, 0o600);
   assert.equal((await stat(folder)).mode & 0o777, 0o700);
   const added = catalog.destinations.find(item => item.id === octo.id);
@@ -428,12 +435,25 @@ test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a f
   assert.ok(!(await readFile(profilesPath, 'utf8')).includes('octo-key'), 'the list keeps no settings');
   // Bambu through bambu-printer-mcp needs that MCP on this Mac first.
   await assert.rejects(setup.add(PrinterFormSchema.parse({backend: 'bambu-printer-mcp', printerType: 'bambu', host: '192.0.2.9', serial: '03900A000000001', model: 'a1', secret: '87654321'})), /Download bambu-printer-mcp first/);
-  // The form refuses what the MCP can't use.
-  assert.equal(PrinterFormSchema.safeParse({backend: 'bambu-printer-mcp', printerType: 'octoprint', host: 'x'}).success, false);
+  // The form refuses what the MCP can't use, by the MCP's own fields.
+  await assert.rejects(setup.check(PrinterFormSchema.parse({...form, printerType: 'makerbot'})), /doesn’t drive that kind of printer/);
+  await assert.rejects(setup.check(PrinterFormSchema.parse({...a1, model: 'x2d'})), /doesn’t know that model/);
+  await assert.rejects(setup.add(PrinterFormSchema.parse({...a1, slicer: 'cura-classic'})), /doesn’t use that slicer/);
   assert.equal(PrinterFormSchema.safeParse({...form, host: 'http://evil/x'}).success, false);
   assert.equal(PrinterFormSchema.safeParse({...form, secret: "a'\nPRINTER_HOST=evil"}).success, false);
-  assert.deepEqual(envFor(PrinterFormSchema.parse({backend: 'mcp-3d-printer-server', printerType: 'bambu', host: '192.0.2.9', serial: '03900a000000001', model: 'a1', secret: '87654321'})),
+  const bambuKind = SETUP_FIELDS['mcp-3d-printer-server'].kinds.find(kind => kind.kind === 'bambu'), slicer = SETUP_FIELDS['mcp-3d-printer-server'].slicer;
+  assert.deepEqual(envFor(PrinterFormSchema.parse({backend: 'mcp-3d-printer-server', printerType: 'bambu', host: '192.0.2.9', serial: '03900a000000001', model: 'a1', secret: '87654321'}), bambuKind, slicer),
     {MCP_TRANSPORT: 'stdio', PRINTER_HOST: '192.0.2.9', PRINTER_TYPE: 'bambu', BAMBU_SERIAL: '03900A000000001', BAMBU_MODEL: 'a1', BAMBU_TOKEN: '87654321'});
+  // Where Bambu Studio is, when it isn't where the MCP looks (the Linux desktop, Nov 5): written as the MCP's own setting.
+  assert.equal(envFor(PrinterFormSchema.parse({...form, slicerPath: '/opt/bambu/bin/bambu-studio'}), SETUP_FIELDS['mcp-3d-printer-server'].kinds[1], slicer).SLICER_PATH, '/opt/bambu/bin/bambu-studio');
+  assert.equal(PrinterFormSchema.safeParse({...form, slicerPath: 'relative/bambu-studio'}).success, false);
+  // A folder may be named "José"; only what would break the .env line is refused (Codex review on #346).
+  const unicode = envFor(PrinterFormSchema.parse({...form, slicerPath: '/Users/José/Applications/BambuStudio.app/Contents/MacOS/BambuStudio'}), SETUP_FIELDS['mcp-3d-printer-server'].kinds[1], slicer);
+  assert.equal(unicode.SLICER_PATH, '/Users/José/Applications/BambuStudio.app/Contents/MacOS/BambuStudio');
+  for (const bad of ["/Users/x/it's/slicer", '/Users/x/a\nPRINTER_HOST=evil']) assert.equal(PrinterFormSchema.safeParse({...form, slicerPath: bad}).success, false, bad);
+  // The slicer the person picks from the MCP's list is written with its app, so the two agree.
+  const chosen = envFor(PrinterFormSchema.parse({...form, slicer: 'orcaslicer', slicerPath: '/opt/orca/bin/orca-slicer'}), SETUP_FIELDS['mcp-3d-printer-server'].kinds[1], slicer);
+  assert.deepEqual([chosen.SLICER_TYPE, chosen.SLICER_PATH], ['orcaslicer', '/opt/orca/bin/orca-slicer']);
 
   // Remove: only Counterpart's printers, between prints; its folder goes only if Counterpart made it.
   await assert.rejects(setup.remove('current'), /Only printers added in Counterpart/);
@@ -446,64 +466,6 @@ test('Add printer: found MCP folders, SSDP and Bonjour printers; Check; Add (a f
   await setup.remove(viaClone.id);
   assert.ok((await stat(join(clone, '.env'))).isFile(), 'a folder found on the Mac stays');
   assert.equal(catalog.destinations.find(item => item.id === 'current').mcps, undefined);
-});
-
-test('discovery: a Bambu SSDP announcement from the printer itself, and dns-sd SRV lines; nothing else is trusted', async () => {
-  const {parseBambuAdvert, parseZoneLine, discoverBonjour} = await import('../dist/printing/discovery.js');
-  const {EventEmitter} = await import('node:events');
-  const {PassThrough} = await import('node:stream');
-  const packet = (location, extra = '') => Buffer.from(`NOTIFY * HTTP/1.1\r\nHOST: 239.255.255.250:1990\r\nLocation: ${location}\r\nUSN: 01P00A123456789\r\nDevModel.bambu.com: C12\r\nDevName.bambu.com: Workshop P1S\r\nDevConnect.bambu.com: lan\r\nDevVersion.bambu.com: 01.08.02.00\r\n${extra}\r\n`);
-  assert.deepEqual(parseBambuAdvert(packet('192.168.1.40'), '192.168.1.40'), {host: '192.168.1.40', serial: '01P00A123456789', model: 'p1s', name: 'Workshop P1S', firmware: '01.08.02.00'});
-  assert.equal(parseBambuAdvert(packet('192.168.1.41'), '192.168.1.40'), undefined, 'Location must be the sender');
-  assert.equal(parseBambuAdvert(packet('8.8.8.8'), '8.8.8.8'), undefined, 'private addresses only');
-  assert.equal(parseBambuAdvert(packet('192.168.1.40', 'USN: other\r\n'), '192.168.1.40'), undefined, 'a repeated header');
-  assert.deepEqual(parseZoneLine('OctoPrint\\032on\\032octopi._octoprint._tcp     SRV     0 0 80 octopi.local. ; Replace with unicast FQDN of target host', '_octoprint._tcp'),
-    {type: '_octoprint._tcp', name: 'OctoPrint on octopi', host: 'octopi.local', port: '80'});
-  assert.equal(parseZoneLine('_octoprint._tcp PTR OctoPrint._octoprint._tcp', '_octoprint._tcp'), undefined);
-  const spawned = [];
-  const spawn = (command, args) => {
-    const child = Object.assign(new EventEmitter(), {stdout: new PassThrough(), kill: () => child.stdout.end()});
-    spawned.push([command, ...args]);
-    if (args[1] === '_moonraker._tcp') setTimeout(() => child.stdout.write('Voron._moonraker._tcp SRV 0 0 7125 voron.local.\n'), 5);
-    return child;
-  };
-  assert.deepEqual(await discoverBonjour(40, {spawn, platform: 'darwin'}), [{type: '_moonraker._tcp', name: 'Voron', host: 'voron.local', port: '7125'}]);
-  assert.deepEqual(spawned.map(args => args[2]), ['_octoprint._tcp', '_moonraker._tcp', '_prusalink._tcp']);
-  assert.deepEqual(await discoverBonjour(40, {spawn, platform: 'win32'}), []);
-});
-
-test('Linux printer discovery browses each Bonjour type with avahi-browse and keeps resolved IPv4 rows once', async () => {
-  const {parseAvahiLine, discoverBonjour} = await import('../dist/printing/discovery.js');
-  const {EventEmitter} = await import('node:events');
-  const {PassThrough} = await import('node:stream');
-  // Real avahi-browse --parsable --resolve rows: browse (+), resolved (=) per interface and family.
-  assert.deepEqual(parseAvahiLine('=;wlp2s0;IPv4;OctoPrint\\032instance\\032on\\032octopi;_octoprint._tcp;local;octopi.local;192.168.1.20;80;"path=/" "version=1.10.2"', '_octoprint._tcp'),
-    {type: '_octoprint._tcp', name: 'OctoPrint instance on octopi', host: 'octopi.local', port: '80'});
-  assert.equal(parseAvahiLine('+;wlp2s0;IPv4;OctoPrint;_octoprint._tcp;local', '_octoprint._tcp'), undefined, 'unresolved');
-  // Captured from avahi-browse on agents-136 for a name containing a literal backslash.
-  assert.equal(parseAvahiLine('=;eth0;IPv4;STM\\032host\\032test\\\\032name;_stmhosttest._tcp;local;agents-136.local;192.168.68.215;19999;"k=ab" "v=1"', '_stmhosttest._tcp')?.name,
-    'STM host test\\032name', 'an escaped backslash is not a second escape');
-  assert.equal(parseAvahiLine('=;wlp2s0;IPv6;OctoPrint;_octoprint._tcp;local;octopi.local;fe80::1;80;', '_octoprint._tcp'), undefined, 'IPv4 rows only');
-  assert.equal(parseAvahiLine('=;wlp2s0;IPv4;Voron;_moonraker._tcp;local;voron.local;192.168.1.30;7125;', '_octoprint._tcp'), undefined, 'another type');
-  assert.equal(parseAvahiLine('=;wlp2s0;IPv4;Bad;_octoprint._tcp;local;bad host;192.168.1.31;80;', '_octoprint._tcp'), undefined, 'invalid host');
-  assert.equal(parseAvahiLine('=;wlp2s0;IPv4;Bad;_octoprint._tcp;local;bad.local;192.168.1.31;70000;', '_octoprint._tcp'), undefined, 'invalid port');
-  const spawned = [];
-  const spawn = (command, args, options) => {
-    const child = Object.assign(new EventEmitter(), {stdout: new PassThrough(), kill: () => {}});
-    spawned.push([command, args, options.stdio]);
-    setTimeout(() => {
-      if (args.at(-1) === '_moonraker._tcp') {
-        child.stdout.write('+;eth0;IPv4;Voron;_moonraker._tcp;local\n=;eth0;IPv4;Voron;_moonraker._tcp;local;voron.local;192.168.1.30;7125;\n=;wlan0;IPv4;Voron;_moonraker._tcp;local;voron.local;192.168.1.30;7125;\n');
-      }
-      child.stdout.end(); child.emit('exit', 0);
-    }, 5);
-    return child;
-  };
-  const started = Date.now();
-  assert.deepEqual(await discoverBonjour(5000, {spawn, platform: 'linux'}), [{type: '_moonraker._tcp', name: 'Voron', host: 'voron.local', port: '7125'}]);
-  assert.ok(Date.now() - started < 2000, 'avahi-browse --terminate ends the scan before the deadline');
-  assert.deepEqual(spawned.map(([command, args]) => [command, ...args]), ['_octoprint._tcp', '_moonraker._tcp', '_prusalink._tcp'].map(type =>
-    ['/usr/bin/avahi-browse', '--parsable', '--resolve', '--terminate', '--no-db-lookup', type]));
 });
 
 test('a found install missing the model its MCP needs: Counterpart fills only BAMBU_MODEL (SSDP, else the serial), appends it, records it, and Complete Settings fixes one already added', async t => {
@@ -528,24 +490,24 @@ test('a found install missing the model its MCP needs: Counterpart fills only BA
   await put('src/mcp-3d-printer-server/package.json', JSON.stringify({name: 'mcp-3d-printer-server', version: '1.2.17'}));
   const data = join(home, 'Library/Application Support/Scan to Make');
   const env = {...hostEnvironment(data), home};
-  const profilesPath = join(env.appPrinters, 'profiles.json');
+  const profilesPath = join(env.appPrinters, 'profiles.json'), setupCachePath = join(env.appPrinters, 'mcp-setup.json');
   const current = {backend: 'mcp-3d-printer-server', process: {command: '/usr/bin/ssh', args: ['printer-tunnel'], cwd: home}};
-  const catalog = await loadPrinterCatalog(current, {homeDirectory: home, sourcePaths: [], profilesPath});
+  const catalog = await loadPrinterCatalog(current, {homeDirectory: home, sourcePaths: [], profilesPath, setupCachePath});
   let announced = [];
   const restarted = [];
   const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, reload: () => catalog.reload(), profilesPath,
-    node: '/usr/local/bin/node', busy: async () => false, restart: async id => { restarted.push(id); }, bonjour: async () => [],
-    ssdp: async () => ({state: 'complete', printers: announced}),
+    node: '/usr/local/bin/node', busy: async () => false, restart: async id => { restarted.push(id); }, setupCachePath,
+    client: withSetupMcp(undefined, {announced: () => announced}),
     folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true}, {dir: other, package: 'mcp-3d-printer-server', version: '1.2.17', hasEnv: true}]});
 
   // Offered with what Counterpart will add: the model from the serial (01P → P1S), and nothing else.
   let found = (await setup.discover()).found;
   const p1s = found.find(item => item.folder === clone);
-  assert.deepEqual([p1s.name, p1s.model, p1s.missing, p1s.fill], ['Bambu Lab P1S via mcp-3D-printer-server', 'p1s', ['BAMBU_MODEL'], {BAMBU_MODEL: 'p1s'}]);
+  assert.deepEqual([p1s.name, p1s.model, p1s.missing, p1s.fill], ['Bambu Lab P1S', 'p1s', ['BAMBU_MODEL'], {BAMBU_MODEL: 'p1s'}]);
   const unknown = found.find(item => item.folder === other);
-  assert.deepEqual([unknown.missing, unknown.fill, unknown.model], [['BAMBU_TOKEN', 'BAMBU_MODEL'], {}, undefined], 'a secret is never filled; an unknown serial needs the dropdown');
+  assert.deepEqual([unknown.missing, unknown.fill, unknown.model], [['BAMBU_MODEL', 'BAMBU_TOKEN'], {}, undefined], 'a secret is never filled; an unknown serial needs the dropdown');
   // The printer's own announcement (DevModel) outranks the serial.
-  announced = [{host: '192.0.2.1', serial: '01P00A123456789', model: 'p1p', name: 'Workshop'}];
+  announced = [{kind: 'bambu', source: 'ssdp', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1p', name: 'Workshop'}];
   assert.deepEqual((await setup.discover()).found.find(item => item.folder === clone).fill, {BAMBU_MODEL: 'p1p'});
   announced = [];
   assert.deepEqual((await setup.discover()).found.find(item => item.source === 'ssdp'), undefined);
@@ -641,11 +603,12 @@ test('an mcp-3D-printer-server Bambu printer with no route gets the authenticate
   const env = {...hostEnvironment(join(home, 'Library/Application Support/Scan to Make')), home};
   const profilesPath = join(env.appPrinters, 'profiles.json');
   const current = {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/ssh', args: ['127.0.0.1', `cd '${bambuDir}' && exec node dist/index.js`]}};
-  const catalog = await loadPrinterCatalog(current, {homeDirectory: home, sourcePaths: [], profilesPath});
+  const setupCachePath = await writeSetupFieldsCache(join(env.appPrinters, 'mcp-setup.json'));
+  const catalog = await loadPrinterCatalog(current, {homeDirectory: home, sourcePaths: [], profilesPath, setupCachePath});
   const restarted = [];
   const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, reload: () => catalog.reload(), profilesPath,
-    node: '/usr/local/bin/node', busy: async () => false, restart: async id => { restarted.push(id); }, bonjour: async () => [],
-    ssdp: async () => ({state: 'complete', printers: []}), folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.3.0', hasEnv: true}]});
+    node: '/usr/local/bin/node', busy: async () => false, restart: async id => { restarted.push(id); }, client: withSetupMcp(), setupCachePath,
+    folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.3.0', hasEnv: true}]});
   const offered = async () => (await setup.discover()).found.find(item => item.folder === clone);
   const values = {BAMBU_DEFAULT_CONNECTION_MODE: 'bambu_network', BAMBU_DEFAULT_CONNECTION_TYPE: 'lan', BAMBU_NETWORK_CONFIG_DIR: '/sessions/source-bambu',
     BAMBU_NETWORK_BRIDGE_COMMAND: 'ssh -i ~/.ssh/fulu fulu-vm /opt/bridge --printer 01P00A123456789'};
@@ -729,15 +692,16 @@ test('Complete Settings repairs a copied FULU route with the source MCP session 
   const profilesPath = await f.put('printers/profiles.json', {version: 1, profiles: [{id, name: 'Generic', backend: 'mcp-3d-printer-server',
     process: {command: process.execPath, args: [join(target, 'dist/index.js')], cwd: target}, owned: false}], choices: {'serial:PRIVATE-SERIAL-ONE': 'mcp-3d-printer-server'}});
   const current = {backend: 'bambu-printer-mcp', process: {command: process.execPath, args: ['/test/source-mcp.js'], cwd: source}};
-  const catalog = await loadPrinterCatalog(current, {homeDirectory: f.home, sourcePaths: [], profilesPath});
+  const setupCachePath = await writeSetupFieldsCache(join(f.home, 'printers/mcp-setup.json'));
+  const catalog = await loadPrinterCatalog(current, {homeDirectory: f.home, sourcePaths: [], profilesPath, setupCachePath});
   const calls = [];
   const setup = new PrinterSetup({env: {...hostEnvironment(join(f.home, 'app')), home: f.home}, configs: () => catalog.entries(), catalog: () => catalog,
-    profilesPath, reload: () => catalog.reload(), restart: async () => {}, client: config => {
+    profilesPath, setupCachePath, reload: () => catalog.reload(), restart: async () => {}, client: withSetupMcp(config => {
       assert.equal(config.process.cwd, source, 'inspect the existing source MCP, never the generic target');
       return {connect: async () => ({tools: [{name: 'bambu_network_bridge_status'}]}),
         callTool: async name => { calls.push(name); return {content: [{type: 'text', text: JSON.stringify({configDir: '/sessions/source default'})}]}; },
         close: async () => {}};
-    }});
+    })});
   assert.ok(catalog.destinations.find(item => item.id === id).incomplete, 'an already copied route missing its session folder must offer completion');
   const before = await readFile(join(target, '.env'), 'utf8');
   await setup.completeSettings(id);
@@ -781,7 +745,7 @@ test('review fix (#295): a printer that only borrows a found checkout\'s code do
   ];
   const setup = new PrinterSetup({env, configs: () => configs, profilesPath, node: '/usr/local/bin/node',
     folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.2.27', hasEnv: true}],
-    ssdp: async () => ({state: 'complete', printers: []}), bonjour: async () => []});
+    client: withSetupMcp()});
   const found = (await setup.discover()).found.filter(item => item.source === 'folder');
   assert.deepEqual(found.map(item => [item.folder, item.host]), [[clone, '192.0.2.5']], 'the clone\'s own P1S is still offered');
   const added = await setup.add({folder: clone});
@@ -805,4 +769,230 @@ test('public aliases include every canonical duplicate, including two configurat
   assert.equal(aliases.length, 2);
   assert.deepEqual(catalog.destinations.find(d => d.id === 'current').aliases, aliases);
   assert.equal(catalog.destinations.find(d => d.address === '192.0.2.88').aliases, undefined);
+});
+
+test('a printer\'s missing settings show as soon as its MCP\'s fields are read, without a restart (Cursor review on #346)', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await mkdtemp(join(tmpdir(), 'printer-fields-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  const clone = join(home, 'mcp-3D-printer-server');
+  await put('mcp-3D-printer-server/.env', 'PRINTER_TYPE=bambu\nPRINTER_HOST=192.0.2.1\nBAMBU_SERIAL=01P00A123456789\nBAMBU_TOKEN=55550000\n');
+  await put('mcp-3D-printer-server/dist/index.js', '');
+  await put('mcp-3D-printer-server/package.json', JSON.stringify({name: 'mcp-3d-printer-server', version: '1.2.37'}));
+  const env = {...hostEnvironment(join(home, 'Library/Application Support/Scan to Make')), home};
+  const profilesPath = join(env.appPrinters, 'profiles.json'), setupCachePath = join(env.appPrinters, 'mcp-setup.json');
+  const id = 'counterpart-0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a12';
+  await put('Library/Application Support/Scan to Make/printers/profiles.json', JSON.stringify({version: 1, choices: {}, profiles: [{id, name: 'P1S', backend: 'mcp-3d-printer-server',
+    process: {command: '/usr/local/bin/node', args: [join(clone, 'dist/index.js')], cwd: clone}, owned: false}]}));
+  const current = {backend: 'mcp-3d-printer-server', process: {command: '/usr/bin/ssh', args: ['printer-tunnel'], cwd: home}};
+  const catalog = await loadPrinterCatalog(current, {homeDirectory: home, sourcePaths: [], profilesPath, setupCachePath});
+  const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, reload: () => catalog.reload(), profilesPath, setupCachePath,
+    node: '/usr/local/bin/node', client: withSetupMcp(), folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.2.37', hasEnv: true}]});
+  assert.equal(catalog.destinations.find(item => item.id === id).incomplete, undefined, 'no MCP fields read yet');
+  await setup.discover();
+  assert.deepEqual(catalog.destinations.find(item => item.id === id).incomplete, {missing: ['BAMBU_MODEL'], fill: {BAMBU_MODEL: 'p1s'}});
+});
+
+test('an MCP updated in place is asked again; one slow MCP never makes Find printers miss its deadline (Codex review on #346)', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const {utimes} = await import('node:fs/promises');
+  const home = await mkdtemp(join(tmpdir(), 'printer-probes-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const data = join(home, 'Library/Application Support/Scan to Make');
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  for (const [dir, pkg] of [['bambu', 'bambu-printer-mcp'], ['generic', 'mcp-3d-printer-server']]) {
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/package.json`, JSON.stringify({name: pkg, version: '1.0.0'}));
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/dist/index.js`, '');
+  }
+  const env = {...hostEnvironment(data), home};
+  const catalog = await loadPrinterCatalog({backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true', args: []}}, {homeDirectory: home, sourcePaths: [], profilesPath: join(env.appPrinters, 'profiles.json')});
+  let bambuHasTools = false, slowGeneric = false;
+  const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, profilesPath: join(env.appPrinters, 'profiles.json'), node: '/usr/local/bin/node',
+    discoverBudgetMs: 6_000, folders: async () => [],
+    client: config => {
+      if (config.backend === 'mcp-3d-printer-server' && slowGeneric) return {connect: () => new Promise(() => {}), callTool: async () => ({}), close: async () => undefined};
+      if (config.backend === 'bambu-printer-mcp' && !bambuHasTools) return withSetupMcp(undefined, {tools: []})(config);
+      return withSetupMcp(undefined, {announced: () => [{kind: 'bambu', source: 'ssdp', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', name: 'P1S'}]})(config);
+    }});
+  // An older bambu-printer-mcp: it asks for its update.
+  let {options} = await setup.discover();
+  assert.deepEqual(options.updates.map(item => item.package), ['bambu-printer-mcp']);
+  // The Update replaces the files at the same path: asked again at once, not after ten minutes.
+  bambuHasTools = true;
+  const entry = join(env.appPrinters, 'bambu/lib/node_modules/bambu-printer-mcp/dist/index.js');
+  await utimes(entry, new Date(), new Date(Date.now() + 5_000));
+  ({options} = await setup.discover());
+  assert.deepEqual(options.updates, [], 'the updated MCP is asked again');
+  assert.ok(options.models['bambu-printer-mcp']?.length);
+  // mcp-3D-printer-server stops answering: Find printers still answers in its budget, with what bambu-printer-mcp found.
+  slowGeneric = true;
+  await utimes(join(env.appPrinters, 'generic/lib/node_modules/mcp-3d-printer-server/dist/index.js'), new Date(), new Date(Date.now() + 10_000));
+  const started = Date.now();
+  const found = await setup.discover();
+  assert.ok(Date.now() - started < 7_000, `answered in ${Date.now() - started} ms, inside its budget`);
+  assert.deepEqual(found.found.map(item => [item.source, item.backend]), [['ssdp', 'bambu-printer-mcp']]);
+  // Settings answers from the fields already read; it never waits for an MCP.
+  const settingsStarted = Date.now();
+  await setup.mcps();
+  assert.ok(Date.now() - settingsStarted < 1_000);
+});
+
+test('an MCP that was only slow is asked again, not reported as needing an update; a stalled first MCP leaves the second its time (Codex review on #346)', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await mkdtemp(join(tmpdir(), 'printer-retry-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const data = join(home, 'Library/Application Support/Scan to Make');
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  for (const [dir, pkg] of [['bambu', 'bambu-printer-mcp'], ['generic', 'mcp-3d-printer-server']]) {
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/package.json`, JSON.stringify({name: pkg, version: '1.0.0'}));
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/dist/index.js`, '');
+  }
+  const env = {...hostEnvironment(data), home};
+  const catalog = await loadPrinterCatalog({backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true', args: []}}, {homeDirectory: home, sourcePaths: [], profilesPath: join(env.appPrinters, 'profiles.json')});
+  let bambuStalls = true, bambuStallsOnlyListening = false;
+  const healthy = withSetupMcp(undefined, {announced: pkg => pkg === 'mcp-3d-printer-server'
+    ? [{kind: 'octoprint', source: 'bonjour', name: 'OctoPi', host: 'octopi.local', port: 80}] : []});
+  const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, profilesPath: join(env.appPrinters, 'profiles.json'), node: '/usr/local/bin/node',
+    discoverBudgetMs: 8_000, retryAfterMs: 0, folders: async () => [],
+    client: config => {
+      if (config.backend !== 'bambu-printer-mcp') return healthy(config);
+      if (bambuStalls) return {connect: () => new Promise(() => {}), callTool: async () => ({}), close: async () => undefined};
+      const fine = healthy(config);
+      // Answers its setup fields, then never finishes listening for printers.
+      return bambuStallsOnlyListening ? {...fine, callTool: (name, args) => name === 'counterpart_discover_printers' ? new Promise(() => {}) : fine.callTool(name, args)} : fine;
+    }});
+  // bambu-printer-mcp didn't start in time: that's not an answer, so it isn't told to update and is asked again.
+  let {options} = await setup.discover();
+  assert.deepEqual(options.updates.map(item => item.message), ['bambu-printer-mcp didn’t answer in time. Find Printers again in a moment.'], 'a slow start is not "needs an update"');
+  bambuStalls = false;
+  ({options} = await setup.discover());
+  assert.ok(options.models['bambu-printer-mcp']?.length, 'asked again once it answers');
+  // It answers its fields but stalls while listening: mcp-3D-printer-server still gets its share and finds the OctoPi.
+  bambuStallsOnlyListening = true;
+  const found = await setup.discover();
+  assert.deepEqual(found.found.map(item => [item.source, item.backend, item.name]), [['bonjour', 'mcp-3d-printer-server', 'OctoPi']]);
+});
+
+test('an odd time budget still lets every MCP listen: shares are whole milliseconds (Codex review on #346)', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await mkdtemp(join(tmpdir(), 'printer-share-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const data = join(home, 'Library/Application Support/Scan to Make');
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  for (const [dir, pkg] of [['bambu', 'bambu-printer-mcp'], ['generic', 'mcp-3d-printer-server']]) {
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/package.json`, JSON.stringify({name: pkg, version: '1.0.0'}));
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/dist/index.js`, '');
+  }
+  const env = {...hostEnvironment(data), home};
+  const catalog = await loadPrinterCatalog({backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true', args: []}}, {homeDirectory: home, sourcePaths: [], profilesPath: join(env.appPrinters, 'profiles.json')});
+  const signals = [];
+  const fake = withSetupMcp(undefined, {announced: pkg => pkg === 'bambu-printer-mcp'
+    ? [{kind: 'bambu', source: 'ssdp', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', name: 'P1S'}]
+    : [{kind: 'octoprint', source: 'bonjour', name: 'OctoPi', host: 'octopi.local', port: 80}]});
+  const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, profilesPath: join(env.appPrinters, 'profiles.json'), node: '/usr/local/bin/node',
+    discoverBudgetMs: 7_777, folders: async () => [],
+    // As the real client does, the signal is made before connecting: a fractional delay would throw right here.
+    client: config => { const client = fake(config); return {...client, connect: signal => { signals.push(signal); return client.connect(signal); }}; }});
+  for (let i = 0; i < 3; i++) {
+    const found = await setup.discover();
+    assert.deepEqual(found.found.map(item => item.backend).sort(), ['bambu-printer-mcp', 'mcp-3d-printer-server']);
+  }
+  assert.ok(signals.length >= 6);
+});
+
+test('an mcp-3D-printer-server folder whose .env sets no PRINTER_TYPE is the kind that MCP says it runs then (Codex review on #346)', async () => {
+  const {kindFor} = await import('../dist/printing/mcp-setup.js');
+  const setup = SETUP_FIELDS['mcp-3d-printer-server'];
+  assert.equal(kindFor(setup, {PRINTER_HOST: 'octopi.local', API_KEY: 'k'})?.kind, 'octoprint', 'the MCP declares its own fallback');
+  assert.equal(kindFor(setup, {PRINTER_TYPE: 'klipper', PRINTER_HOST: 'voron.local'})?.kind, 'klipper');
+  assert.equal(kindFor(setup, {PRINTER_TYPE: 'makerbot', PRINTER_HOST: 'x'}), undefined, 'a type the MCP doesn\'t drive is never guessed');
+  const older = {...setup, kinds: setup.kinds.map(({default: _default, ...kind}) => kind)};
+  assert.equal(kindFor(older, {PRINTER_HOST: 'octopi.local'}), undefined, 'an MCP that declares no default gets no guess from the app');
+  assert.equal(kindFor(SETUP_FIELDS['bambu-printer-mcp'], {PRINTER_HOST: '192.0.2.1'})?.kind, 'bambu');
+});
+
+test('Check reads only the chosen MCP\'s fields and answers inside one budget, even when the printer stalls (Codex review on #346)', async t => {
+  const {PrinterSetup, PrinterFormSchema} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await mkdtemp(join(tmpdir(), 'printer-check-budget-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const data = join(home, 'Library/Application Support/Scan to Make');
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  for (const [dir, pkg] of [['bambu', 'bambu-printer-mcp'], ['generic', 'mcp-3d-printer-server']]) {
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/package.json`, JSON.stringify({name: pkg, version: '1.0.0'}));
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/dist/index.js`, '');
+  }
+  const env = {...hostEnvironment(data), home};
+  const catalog = await loadPrinterCatalog({backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true', args: []}}, {homeDirectory: home, sourcePaths: [], profilesPath: join(env.appPrinters, 'profiles.json')});
+  const started = [];
+  let statusStalls = false;
+  const stalled = {connect: () => new Promise(() => {}), callTool: () => new Promise(() => {}), close: async () => undefined};
+  const fields = withSetupMcp(config => ({connect: async () => ({server: {name: 'x', version: '1'}, tools: [{name: 'get_printer_status'}, {name: 'camera_snapshot'}]}),
+    callTool: name => statusStalls && name === 'get_printer_status' ? new Promise(() => {})
+      : Promise.resolve({content: [{type: 'text', text: JSON.stringify({connected: true, status: 'idle', model: 'Bambu Lab P1S'})}]}), close: async () => undefined}));
+  const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, profilesPath: join(env.appPrinters, 'profiles.json'), node: '/usr/local/bin/node',
+    checkBudgetMs: 3_000, folders: async () => [],
+    client: config => { started.push(config.backend); return config.backend === 'mcp-3d-printer-server' ? stalled : fields(config); }});
+  const p1s = PrinterFormSchema.parse({backend: 'bambu-printer-mcp', printerType: 'bambu', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', secret: '12345678'});
+  // No fields read yet, and mcp-3D-printer-server never answers: Check doesn't start it or wait for it.
+  const first = await setup.check(p1s);
+  assert.equal(first.reached, true);
+  assert.equal(first.model, 'p1s', 'the model from the chosen MCP\'s own choices');
+  assert.ok(!started.includes('mcp-3d-printer-server'), 'the other MCP is never started for this Check');
+  // The printer stops answering: Check still returns inside its budget, as unreached.
+  statusStalls = true;
+  const t0 = Date.now();
+  assert.deepEqual(await setup.check(p1s), {reached: false, camera: 'not-supported'});
+  assert.ok(Date.now() - t0 < 3_500, `answered in ${Date.now() - t0} ms, inside its budget`);
+});
+
+test('a configured folder is found while the MCPs listen; Add names its printer without starting the other MCP (Codex review on #346)', async t => {
+  const {PrinterSetup, PrinterFormSchema} = await import('../dist/printing/setup.js');
+  const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
+  const home = await mkdtemp(join(tmpdir(), 'printer-folder-budget-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
+  const data = join(home, 'Library/Application Support/Scan to Make');
+  for (const [dir, pkg] of [['bambu', 'bambu-printer-mcp'], ['generic', 'mcp-3d-printer-server']]) {
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/package.json`, JSON.stringify({name: pkg, version: '1.0.0'}));
+    await put(`Library/Application Support/Scan to Make/printers/${dir}/lib/node_modules/${pkg}/dist/index.js`, '');
+  }
+  // Someone's own mcp-3D-printer-server checkout, set up for an OctoPrint, whose fields haven't been read yet.
+  const clone = join(home, 'mcp-3D-printer-server');
+  await put('mcp-3D-printer-server/.env', 'PRINTER_TYPE=octoprint\nPRINTER_HOST=octopi.local\nPRINTER_PORT=80\nAPI_KEY=k\n');
+  await put('mcp-3D-printer-server/dist/index.js', '');
+  const env = {...hostEnvironment(data), home};
+  const profilesPath = join(env.appPrinters, 'profiles.json');
+  const catalog = await loadPrinterCatalog({backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true', args: []}}, {homeDirectory: home, sourcePaths: [], profilesPath});
+  const started = [];
+  let genericStalls = false;
+  const fields = withSetupMcp(undefined);
+  const setup = new PrinterSetup({env, configs: () => catalog.entries(), catalog: () => catalog, reload: () => catalog.reload(), profilesPath, node: '/usr/local/bin/node',
+    discoverBudgetMs: 6_000, folders: async () => [{dir: clone, package: 'mcp-3d-printer-server', version: '1.2.50', hasEnv: true}],
+    client: config => {
+      const fromClone = config.process.args[0] === join(clone, 'dist', 'index.js');
+      started.push(fromClone ? 'clone' : config.backend);
+      if (config.backend === 'mcp-3d-printer-server' && !fromClone && genericStalls) return {connect: () => new Promise(() => {}), callTool: () => new Promise(() => {}), close: async () => undefined};
+      const fine = fields(config);
+      // bambu-printer-mcp answers its fields, then never finishes listening for printers.
+      return config.backend === 'bambu-printer-mcp' ? {...fine, callTool: (name, args) => name === 'counterpart_discover_printers' ? new Promise(() => {}) : fine.callTool(name, args)} : fine;
+    }});
+  const t0 = Date.now();
+  const discovery = await setup.discover();
+  assert.ok(Date.now() - t0 < 7_000, `answered in ${Date.now() - t0} ms`);
+  assert.deepEqual(discovery.found.filter(item => item.source === 'folder').map(item => [item.folder, item.printerType, item.host]), [[clone, 'octoprint', 'octopi.local']],
+    'the configured checkout is listed although network discovery used up its time');
+  // Add a P1S on bambu-printer-mcp with no name: mcp-3D-printer-server now stalls, and Add never waits for it.
+  genericStalls = true;
+  started.length = 0;
+  const t1 = Date.now();
+  const added = await setup.add(PrinterFormSchema.parse({backend: 'bambu-printer-mcp', printerType: 'bambu', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', secret: '12345678'}));
+  assert.ok(Date.now() - t1 < 2_000, `added in ${Date.now() - t1} ms`);
+  assert.ok(added.id);
+  assert.ok(!started.includes('mcp-3d-printer-server'), 'naming the printer never starts the other MCP');
 });
