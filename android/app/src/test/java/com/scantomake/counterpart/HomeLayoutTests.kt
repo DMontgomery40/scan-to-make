@@ -27,6 +27,7 @@ import com.scantomake.counterpart.ui.PrintSheetScreen
 import com.scantomake.counterpart.api.PrinterCatalog
 import com.scantomake.counterpart.api.PrinterDestination
 import com.scantomake.counterpart.ui.designerSettingsWords
+import com.scantomake.counterpart.net.HttpReply
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonObject
@@ -104,6 +105,17 @@ class HomeLayoutTests {
 
     @Test fun printerSoftwareShowsTheHiddenCopyAndExplicitMoveWithProjectsPresent() {
         val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
+        app.pairingStore.save(v2Record(), false)
+        val transport = FakeTransport { request, _ ->
+            when {
+                request.url.endsWith("/healthz") -> json(200, mapOf("status" to "ok", "capabilities" to mapOf("mcpCopies" to true, "mcpUpdates" to true)))
+                request.url.endsWith("/mcps") -> HttpReply(200, ("{\"packages\":[" + contractFixture("mcp-profile-copies.json").readText() + "]}").toByteArray())
+                request.url.endsWith("/update") -> HttpReply(200, contractFixture("mcp-update-waiting.json").readBytes())
+                else -> json(404, mapOf("error" to "not-found"))
+            }
+        }
+        app.pairing = PairingClient(app.pairingStore, transport)
+        app.companion = CompanionClient(app.pairing, transport, null, null, app.cacheDir)
         state.projects.value = listOf(project("a", "Existing project", "ready"))
         state.mcpCopies.value = listOf(pkg)
         state.capabilities.value = setOf("mcpCopies", "mcpUpdates")
@@ -111,6 +123,12 @@ class HomeLayoutTests {
         compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
         compose.onNodeWithText("Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25).").assertExists()
         compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").assertExists()
+        compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates after the current print")).fetchSemanticsNodes().isNotEmpty() }
+        val moves = transport.calls.filter { it.request.url.endsWith("/update") }
+        org.junit.Assert.assertEquals(1, moves.size)
+        org.junit.Assert.assertTrue(moves.single().request.url.endsWith("/mcp-0000000000000002/update"))
+        org.junit.Assert.assertEquals("{\"fresh\":true}", String(moves.single().request.body!!))
         org.junit.Assert.assertEquals(listOf("mcp-0000000000000002"), pkg.moveIds)
         org.junit.Assert.assertEquals("projects:read", CompanionClient.scope("GET", "/v1/printers/mcps"))
     }

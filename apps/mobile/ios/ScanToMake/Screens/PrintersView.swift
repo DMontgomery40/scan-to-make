@@ -226,7 +226,9 @@ struct PrinterDetailView: View {
                 Image(systemName: "arrow.down.app.fill").font(.title2).foregroundStyle(Color.filament).frame(width: 30)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(update.message.hasSuffix(".") ? String(update.message.dropLast()) : update.message).font(.headline).fixedSize(horizontal: false, vertical: true)
-                    Text("Version \(printer.capabilities?.server?.version ?? "") on your Mac can start prints but can't report \(missingWords(printer)). Update it from Counterpart on \(store.macName ?? "your Mac"); it runs your own package manager there.")
+                    Text(store.macCapabilities.contains("mcpCopies")
+                         ? "Version \(printer.capabilities?.server?.version ?? "unknown") can’t report \(missingWords(printer)). Use Printer software above to update Counterpart’s copy or explicitly move this printer to it."
+                         : "Version \(printer.capabilities?.server?.version ?? "unknown") on your Mac can’t report \(missingWords(printer)). Update it from Counterpart on \(store.macName ?? "your Mac").")
                         .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }

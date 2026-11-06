@@ -569,7 +569,7 @@ final class LayoutParityUITests: XCTestCase {
         app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all"]
         app.launch()
         XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))
-        app.buttons["Printers"].firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
         let move = app.buttons["mcp-move-mcp-0000000000000002"]
         let list = app.collectionViews.firstMatch
         reveal(move, in: list)

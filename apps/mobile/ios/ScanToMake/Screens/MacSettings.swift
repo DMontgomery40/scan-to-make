@@ -342,6 +342,7 @@ struct MCPCopiesView: View {
             if let problem = problem ?? store.mcpCopiesProblem { Text(problem).font(.footnote).foregroundStyle(.orange) }
             if !store.macCapabilities.contains("mcpCopies") { Text("Update Counterpart on your computer to see each printer’s software copy.").font(.footnote) }
         }
+        .buttonStyle(.borderless)
         .accessibilityIdentifier("mcp-copies")
         .task { await store.loadCapabilities(); await store.loadMCPCopies() }
     }

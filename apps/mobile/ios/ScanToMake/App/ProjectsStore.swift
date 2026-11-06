@@ -154,8 +154,15 @@ import CounterpartKit
 
     func loadMCPCopies() async {
         guard macCapabilities.contains("mcpCopies") else { mcpCopies = nil; return }
-        do { mcpCopies = try await mac.client.mcpCopies(); mcpCopiesProblem = nil }
-        catch { mcpCopiesProblem = "Couldn’t refresh the printer software copies." }
+        let ticket = startRequest()
+        do {
+            let copies = try await mac.client.mcpCopies()
+            guard requestIsCurrent(ticket) else { return }
+            mcpCopies = copies; mcpCopiesProblem = nil
+        } catch {
+            guard requestIsCurrent(ticket) else { return }
+            mcpCopiesProblem = "Couldn’t refresh the printer software copies."
+        }
     }
 
     func startRequest() -> Int { reads.start() }
