@@ -6,6 +6,16 @@ import android.content.ContextWrapper
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performScrollTo
+import com.scantomake.counterpart.api.PrinterCatalog
+import com.scantomake.counterpart.api.PrinterDestination
+import com.scantomake.counterpart.ui.PrintersScreen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -119,12 +129,23 @@ class HomeLayoutTests {
         state.projects.value = listOf(project("a", "Existing project", "ready"))
         state.mcpCopies.value = listOf(pkg)
         state.capabilities.value = setOf("mcpCopies", "mcpUpdates")
-        compose.setContent { WithApp { com.scantomake.counterpart.ui.McpCopiesPanel("current", state) } }
+        state.loaded.value = true
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination(id = "current", name = "Bambu Lab P1S", backend = "bambu-printer-mcp")), "current")
+        compose.setContent {
+            WithApp {
+                var showPrinters by remember { mutableStateOf(false) }
+                if (showPrinters) PrintersScreen(back = { showPrinters = false })
+                else HomeScreen(open = { _, _ -> }, newProject = {}, printers = { showPrinters = true }, settings = {})
+            }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Existing project"))
+        compose.onNodeWithText("Existing project").assertExists()
+        compose.onNodeWithContentDescription("Printers").performClick()
         compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
         compose.onNodeWithText("Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25).").assertExists()
         compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").assertExists()
-        compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").performClick()
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates after the current print")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates after the current print or design finishes.")).fetchSemanticsNodes().isNotEmpty() }
         val moves = transport.calls.filter { it.request.url.endsWith("/update") }
         org.junit.Assert.assertEquals(1, moves.size)
         org.junit.Assert.assertTrue(moves.single().request.url.endsWith("/mcp-0000000000000002/update"))
