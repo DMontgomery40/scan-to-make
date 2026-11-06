@@ -131,6 +131,7 @@ private struct AddPrinterForm: View {
         Form {
             if let done = model.done { AddPrinterDone(words: done) } else { printer; mcp; slicer; checkSection }
         }
+        .accessibilityIdentifier("add-printer-form")
         .navigationTitle(model.form.name ?? type?.label ?? "Printer")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
