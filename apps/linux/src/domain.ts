@@ -6,6 +6,7 @@ import type {
   Project,
   Question,
   RawQuestion,
+  SetupOptions,
   ReconstructionAnswer,
   ReconstructionComponent,
   ReconstructionReview,
@@ -482,4 +483,29 @@ export function mcpUpdateNotices(previous: Record<string, string>, events: {type
     if (event.type.startsWith("mcp.update.")) next[event.data?.mcpId ?? event.type] = `${event.title} ${event.body}`;
   }
   return next;
+}
+
+/**
+ * Add a printer's Slicer section, from the chosen MCP's own `slicer` fields (`counterpart_setup_fields`): its slicer
+ * choice, and the paths it reads when it can't find its slicer or Bambu profiles. None for an MCP that declares none.
+ */
+export function slicerControls(options: SetupOptions | undefined, backend: string) {
+  const slicer = options?.slicer?.[backend];
+  if (!slicer) return undefined;
+  const choice = slicer.fields.find((f) => f.name === "slicer" && f.choices?.length);
+  const paths = slicer.fields
+    .filter((f) => f.input === "path")
+    .map((f) => ({
+      field: f,
+      key: (f.name === "slicer-path" ? "slicerPath" : "profiles") as "slicerPath" | "profiles",
+      placeholder: (f.name === "slicer-path" ? slicer.path : slicer.profilesRoot) ?? "",
+    }));
+  return {
+    choice,
+    paths,
+    /** The slicer shown as chosen: the person's, else the one the MCP would run. */
+    selected: (form: { slicer?: string }) => form.slicer || slicer.type,
+    /** What the form keeps for a choice: nothing for the MCP's own, so only a change is sent. */
+    choose: (value: string) => (value === slicer.type ? "" : value),
+  };
 }

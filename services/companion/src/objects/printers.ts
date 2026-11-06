@@ -8,7 +8,7 @@ import {printerHandoffConfigSchema, printerTypeSchema, type PrinterBackend, type
 import {parseToml} from './toml.js';
 import {findBambuRoute, readProfiles, readsRouteSettings, settingsGap, type RouteSource} from '../printing/profiles.js';
 import {hostEnvironment, resolveMcpInstall} from '../printing/mcp-install.js';
-import {modelFromSerial} from '../printing/discovery.js';
+import {kindFor, readSetupCache} from '../printing/mcp-setup.js';
 
 /** Configured destinations, not claims about live printer connectivity. */
 export interface PrinterDestination {
@@ -60,6 +60,8 @@ export interface PrinterCatalogOptions {
   profilesPath?: string;
   /** The host's empty installation target. Keep it for Download, but do not present it as a printer. */
   placeholderEntryPoint?: string;
+  /** The MCPs' last `counterpart_setup_fields` answers (`<appPrinters>/mcp-setup.json`): what a printer's `.env` must set. */
+  setupCachePath?: string;
 }
 
 type RecordValue = Record<string, unknown>;
@@ -295,6 +297,7 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
     source: 'current', origin: 'printer-handoff', keys: currentMetadata.keys, bambuKind: currentMetadata.bambuKind,
     ...(currentMetadata.serial ? {serial: currentMetadata.serial} : {}), config: currentConfig}];
   const saved = options.profilesPath ? await readProfiles(options.profilesPath) : undefined;
+  const setups = options.setupCachePath ? await readSetupCache(options.setupCachePath) : new Map();
   const seenProfiles = new Set<string>();
   // Printers added in Counterpart come right after the Mac app's own config: within one MCP they win over client configs.
   for (const profile of saved?.profiles ?? []) {
@@ -382,7 +385,7 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
       route = await findBambuRoute(env.BAMBU_SERIAL ?? env.BAMBU_PRINTER_SERIAL,
         candidates.flatMap(other => other === candidate ? [] : envPaths(other.config)).filter(path => path !== own));
     }
-    const gap = settingsGap(candidate.backend, env, {...(candidate.profileModel ? {model: candidate.profileModel} : {}), modelFromSerial, ...(route ? {route} : {})});
+    const gap = settingsGap(candidate.backend, env, kindFor(setups.get(candidate.backend), env), {...(candidate.profileModel ? {model: candidate.profileModel} : {}), ...(route ? {route} : {})});
     if (gap.missing.length || Object.keys(gap.fill).length) candidate.incomplete = {missing: gap.missing, fill: gap.fill};
   }
   const {chosen, groups} = winners(candidates, saved?.choices);

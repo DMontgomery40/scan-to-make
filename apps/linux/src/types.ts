@@ -302,10 +302,31 @@ export interface SetupOptions {
     label: string;
     backends: string[];
     serial: boolean;
-    secret?: { label: string; hint: string; required: boolean };
+    secret?: { label: string; hint?: string; required: boolean };
   }[];
   models: Record<string, { value: string; label: string }[]>;
   serialModels?: Record<string, string>;
+  /** The slicer each MCP would run and the settings that choose it, in the MCP's words (`counterpart_setup_fields`). */
+  slicer?: Record<string, SlicerSetup>;
+  /** MCPs that need an update before they can set up printers. */
+  updates?: { package: string; message: string }[];
+}
+export interface SetupField {
+  name: string;
+  env: string;
+  label: string;
+  hint?: string;
+  required: boolean;
+  input?: string;
+  choices?: { value: string; label: string }[];
+}
+export interface SlicerSetup {
+  type: string;
+  path?: string;
+  found: boolean;
+  profilesRoot?: string;
+  profilesFound?: boolean;
+  fields: SetupField[];
 }
 export interface McpPackage {
   appCopy?: { kind: string; path?: string; version?: string };

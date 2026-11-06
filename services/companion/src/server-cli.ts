@@ -150,6 +150,8 @@ if(remoteAuth)mcpUpdates=new McpUpdater({
   ...(eventLog&&projectlessEvents?{emit:async event=>{await eventLog.append({id:randomUUID(),type:event.type,data:event.data,detail:{package:mcpLabels[event.package]??event.package,...(event.reason?{reason:event.reason}:{})}});}}:{}),
 });
 const printerProfiles=join(dataRoot,'printers','profiles.json');
+// Each printer MCP's last counterpart_setup_fields answer, written by Add printer… and read by the printer list.
+const printerSetupCache=join(dataRoot,'printers','mcp-setup.json');
 /** After Add, Remove or a Printer MCP choice: the catalog reads every source again (in place), new printers get
  * their services, and a removed one's MCP session closes. */
 const reloadPrinters=async()=>{
@@ -169,7 +171,7 @@ const reloadPrinters=async()=>{
 const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,gate:printGate,configs:()=>printerCatalog?.entries()??[],
   effective:(id,config)=>mcpUpdates!.effective(id,config),download:pkg=>mcpUpdates!.download(pkg),
   latestVersion:(pkg,options)=>mcpUpdates!.latestVersion(pkg,options),folders:()=>findMcpFolders(homedir()),
-  node:process.execPath,profilesPath:printerProfiles,catalog:()=>printerCatalog,reload:reloadPrinters,
+  node:process.execPath,profilesPath:printerProfiles,setupCachePath:printerSetupCache,catalog:()=>printerCatalog,reload:reloadPrinters,
   // Complete Settings changed its .env: the MCP reads it again on a fresh start (with any Update's override).
   // Its services are rebuilt with the catalog's new config (the recorded model, passed as bambu_model), keeping the
   // pooled session and its confirmation relay.
@@ -185,7 +187,7 @@ const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,gate:printGate,co
 // replace entries in this map in place, and `/v1/mcp` reads it live.
 if(handoffConfig&&printHandoff){
   const services=printHandoff;
-  printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles,
+  printerCatalog=await loadPrinterCatalog(handoffConfig,{profilesPath:printerProfiles,setupCachePath:printerSetupCache,
     placeholderEntryPoint:process.env.SCAN_TO_MAKE_DEFAULT_PRINTER_ENTRY});
   const catalog=printerCatalog;
   // `current` is the Mac app's own config and keeps the phone handoff route's services.
@@ -199,6 +201,9 @@ if(handoffConfig&&printHandoff){
   printerDirectory=directory;
   printerBusy=id=>directory.printing(id);
   if(mcpUpdates)directory.useVersions(mcpUpdates);
+  // What each MCP needs for a printer (counterpart_setup_fields), read once in the background: the printer list's
+  // missing-settings notes follow the installed MCPs' own fields from the first minute, not from the first Add printer….
+  setTimeout(()=>{void printerSetup?.mcps().catch(()=>undefined);},5000).unref();
 }
 if(handoffConfig&&printHandoff&&captureDirectory){
   const objectStore=new ObjectStore(join(captureDirectory,'objects'));

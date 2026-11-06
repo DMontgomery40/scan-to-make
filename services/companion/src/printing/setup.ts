@@ -1,5 +1,5 @@
 import {appendFile, mkdir, readdir, readFile, rm, stat, writeFile} from 'node:fs/promises';
-import {readdirSync} from 'node:fs';
+import {readdirSync, statSync} from 'node:fs';
 import {dirname, isAbsolute, join, normalize, sep} from 'node:path';
 import {parseEnv} from 'node:util';
 import {z} from 'zod';
@@ -7,7 +7,7 @@ import {PrinterMcpClient, toolResultJson, type PrinterBackend, type PrinterHando
 import {appInstall, appMcpId, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
 import type {McpUpdate} from './mcp-updates.js';
 import type {PrinterCatalog} from '../objects/printers.js';
-import {discoverBambu, discoverBonjour, modelFromSerial, BAMBU_SERIAL_MODELS, BONJOUR_TYPES, type BambuAdvert, type BonjourService} from './discovery.js';
+import {envOf, field, kindFor, modelForSerial, names, readMcpSetup, readSetupCache, setupOptions, writeSetupCache, type McpSetup, type SetupKind, type SetupOptions} from './mcp-setup.js';
 import type {PrintGate} from './print-gate.js';
 import {changeProfiles, findBambuRoute, newProfileId, readProfiles, readsRouteSettings, settingsGap, type RouteSource, type SavedProfile} from './profiles.js';
 
@@ -27,6 +27,8 @@ export interface FoundFolder {dir: string; package: PrinterBackend; version?: st
 // Folders macOS guards with a privacy prompt (and iCloud): a background agent reading them would raise one.
 const SKIP = new Set(['Library', 'Desktop', 'Documents', 'Downloads', 'Pictures', 'Movies', 'Music', 'Applications', 'node_modules', 'Public']);
 const MAX_ENTRIES = 400;
+/** Reading an MCP's fields for Add, inside printers.add's 30 s request deadline with time left to save. */
+const ADD_SETUP_BUDGET_MS = 20_000;
 
 async function packageAt(dir: string): Promise<FoundFolder | undefined> {
   try {
@@ -81,70 +83,41 @@ export interface McpPackageView {
   uses: {destinationId: string; printerId: string; printer: string; mcpId: string; kind: string; path?: string; version?: string; canMove: boolean}[];
 }
 
-/**
- * The choices Add printer… offers, from the MCPs themselves: mcp-3D-printer-server's PRINTER_TYPE values (its
- * PrinterFactory) and each MCP's own model list (VALID_BAMBU_MODELS in each server's src/index.ts).
- */
-export const PRINTER_TYPES = [
-  {printerType: 'bambu', label: 'Bambu Lab', backends: ['bambu-printer-mcp', 'mcp-3d-printer-server'], serial: true,
-    secret: {label: 'Access code', hint: 'On the printer: Settings → WLAN → Access Code', required: true}},
-  {printerType: 'octoprint', label: 'OctoPrint', backends: ['mcp-3d-printer-server'], serial: false,
-    secret: {label: 'API key', hint: 'In OctoPrint: Settings → API', required: true}},
-  {printerType: 'klipper', label: 'Klipper (Moonraker)', backends: ['mcp-3d-printer-server'], serial: false,
-    secret: {label: 'API key', hint: 'Only if Moonraker asks for one', required: false}},
-  {printerType: 'prusa', label: 'Prusa (PrusaLink)', backends: ['mcp-3d-printer-server'], serial: false,
-    secret: {label: 'API key', hint: 'The key PrusaLink shows in its settings', required: true}},
-  {printerType: 'creality', label: 'Creality', backends: ['mcp-3d-printer-server'], serial: false,
-    secret: {label: 'API key', hint: 'Only if your printer asks for one', required: false}},
-  {printerType: 'duet', label: 'Duet', backends: ['mcp-3d-printer-server'], serial: false,
-    secret: {label: 'Password', hint: 'Only if your Duet has one set', required: false}},
-  {printerType: 'repetier', label: 'Repetier', backends: ['mcp-3d-printer-server'], serial: false,
-    secret: {label: 'API key', hint: 'The key Repetier-Server shows in its settings', required: true}},
-] as const;
-const MODEL_LABELS: Record<string, string> = {p1s: 'P1S', p1p: 'P1P', p2s: 'P2S', x1c: 'X1C', x1e: 'X1E', a1: 'A1', a1mini: 'A1 mini',
-  h2d: 'H2D', h2dpro: 'H2D Pro', h2s: 'H2S', h2c: 'H2C', x2d: 'X2D'};
-export const MODELS: Record<PrinterBackend, string[]> = {
-  'bambu-printer-mcp': ['p1s', 'p1p', 'p2s', 'x1c', 'x1e', 'a1', 'a1mini', 'h2d', 'h2dpro', 'h2s', 'h2c', 'x2d'],
-  'mcp-3d-printer-server': ['p1s', 'p1p', 'x1c', 'x1e', 'a1', 'a1mini', 'h2d'],
-};
-export function setupOptions() {
-  return {types: PRINTER_TYPES.map(type => ({...type, backends: [...type.backends]})), serialModels: {...BAMBU_SERIAL_MODELS},
-    models: Object.fromEntries(Object.entries(MODELS).map(([backend, models]) => [backend, models.map(value => ({value, label: MODEL_LABELS[value] ?? value.toUpperCase()}))]))};
-}
-
 // KAN-163's checks: a literal host (no scheme, path, port or credentials), a Bambu serial, a port.
 const HOST = /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/;
 /** A value written to the `.env` in single quotes: one line, printable, no quote. */
 const envValue = z.string().max(512).regex(/^[\x20-\x26\x28-\x7e]*$/);
-const printerTypes = PRINTER_TYPES.map(type => type.printerType) as [string, ...string[]];
+/**
+ * A path on this computer, written to the `.env` in single quotes: any printable text (a folder may be named
+ * "José"), on one line, with no single quote to end the value early.
+ */
+const localPath = z.string().min(1).max(1024).regex(/^[^\u0000-\u001f\u007f\u2028\u2029']+$/u).refine(value => isAbsolute(value), 'Choose a full path.');
 export const PrinterFormSchema = z.union([
-  /** A found folder; `model` fills a missing BAMBU_MODEL when Counterpart couldn't tell it. */
+  /** A found folder; `model` fills the model its MCP needs when Counterpart couldn't tell it. */
   z.strictObject({folder: z.string().min(2).max(4096), model: z.string().regex(/^[a-z0-9]{1,16}$/).optional()}),
+  /** The form: which MCP drives it and the values of that MCP's own fields (`counterpart_setup_fields`), checked against them on Check and Add. */
   z.strictObject({
     backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server']),
-    printerType: z.enum(printerTypes),
+    printerType: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
     host: z.string().trim().max(254).transform(value => value.replace(/\.$/, '')).pipe(z.string().min(1).max(253).regex(HOST)),
     port: z.string().regex(/^[1-9][0-9]{0,4}$/).refine(value => Number(value) <= 65535).optional(),
     serial: z.string().trim().regex(/^[A-Za-z0-9]{1,64}$/).optional(),
-    model: z.string().max(16).optional(),
+    model: z.string().regex(/^[a-z0-9]{1,16}$/).optional(),
     secret: envValue.optional(),
     name: z.string().trim().min(1).max(120).regex(/^[^\x00-\x1f\x7f]+$/).optional(),
-  }).superRefine((form, context) => {
-    if (form.backend === 'bambu-printer-mcp' && form.printerType !== 'bambu') context.addIssue({code: 'custom', message: 'bambu-printer-mcp is for Bambu Lab printers.'});
-    if (form.printerType === 'bambu' && (!form.serial || !form.model)) context.addIssue({code: 'custom', message: 'A Bambu printer needs its serial number and model.'});
-    if (form.model !== undefined && !MODELS[form.backend].includes(form.model)) context.addIssue({code: 'custom', message: 'That MCP doesn’t know that model.'});
+    /** The slicer settings the MCP declares (`slicer.fields`): which slicer, where it is, where its Bambu profiles are. */
+    slicer: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/).optional(),
+    slicerPath: localPath.optional(),
+    profiles: localPath.optional(),
   }),
 ]);
 export type PrinterForm = z.infer<typeof PrinterFormSchema>;
 type FormFields = Exclude<PrinterForm, {folder: string}>;
 
-/** Exactly the MCP's own variables (bambu-printer-mcp's manifest env; mcp-3D-printer-server's .env.example). */
-export function envFor(form: FormFields): Record<string, string> {
-  const env: Record<string, string> = {MCP_TRANSPORT: 'stdio', PRINTER_HOST: form.host};
-  const bambu = () => ({BAMBU_SERIAL: (form.serial ?? '').toUpperCase(), BAMBU_MODEL: form.model ?? '', ...(form.secret ? {BAMBU_TOKEN: form.secret} : {})});
-  if (form.backend === 'bambu-printer-mcp') return {...env, ...bambu()};
-  return {...env, PRINTER_TYPE: form.printerType, ...(form.port ? {PRINTER_PORT: form.port} : {}),
-    ...(form.printerType === 'bambu' ? bambu() : form.secret ? {API_KEY: form.secret} : {})};
+/** The form's values as exactly the MCP's own variables, by the fields it declares for this kind and its slicer. */
+export function envFor(form: FormFields, kind: SetupKind, slicer?: McpSetup['slicer']): Record<string, string> {
+  return envOf({...kind, fields: [...kind.fields, ...(slicer?.fields ?? [])]}, {host: form.host, port: form.port, serial: form.serial, model: form.model,
+    secret: form.secret, slicer: form.slicer, 'slicer-path': form.slicerPath, profiles: form.profiles});
 }
 export const envFile = (env: Record<string, string>) =>
   '# Written by Counterpart (Settings → Printers → Add printer…). The printer MCP reads it; edit it here for anything advanced.\n' +
@@ -200,11 +173,29 @@ export interface PrinterSetupDeps {
   restart?(destinationId: string): Promise<void>;
   busy?(destinationId: string): Promise<boolean>;
   gate?: PrintGate;
-  ssdp?(): Promise<{state: 'complete' | 'unavailable'; printers: BambuAdvert[]}>;
-  bonjour?(): Promise<BonjourService[]>;
+  /** `<appPrinters>/mcp-setup.json`: each MCP's last setup fields, for the printer list. */
+  setupCachePath?: string;
+  /** How long `printers.discover` may take in all (default 13 s, inside its 15 s request deadline). */
+  discoverBudgetMs?: number;
+  /** How soon an MCP that didn't start or answer in time is asked again (default 20 s). */
+  retryAfterMs?: number;
+  /** printers.check's whole budget (default 55 s, inside local-control's 60 s): setup fields, connect, status and camera. */
+  checkBudgetMs?: number;
   /** Starts an MCP for Check (a fresh process, closed after; never a printer's shared session). */
   client?(config: PrinterHandoffConfig): ProbeClient;
 }
+
+/** `counterpart_discover_printers` (docs/protocols/mcp-contract.md): printers an MCP heard on the network itself. */
+const DiscoverySchema = z.object({
+  contract: z.literal('counterpart/1'),
+  network: z.enum(['complete', 'unavailable']),
+  printers: z.array(z.object({
+    kind: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/), source: z.enum(['ssdp', 'bonjour']), name: z.string().max(256),
+    host: z.string().max(253).regex(HOST), port: z.number().int().min(1).max(65535).optional(),
+    serial: z.string().regex(/^[A-Za-z0-9]{1,64}$/).optional(), model: z.string().regex(/^[a-z0-9]{1,16}$/).optional(), firmware: z.string().max(64).optional(),
+  })).max(128),
+});
+type DiscoveredPrinter = z.infer<typeof DiscoverySchema>['printers'][number];
 
 export class PrinterSetupError extends Error {
   constructor(readonly code: 'not-found' | 'unavailable' | 'invalid' | 'conflict', message: string) { super(message); this.name = 'PrinterSetupError'; }
@@ -230,8 +221,15 @@ export class PrinterSetup {
     try { return readdirSync(path); } catch { return []; }
   }
 
-  /** `printers.mcps`: both packages, always, with every copy of each the companion can see. */
-  async mcps(): Promise<{packages: McpPackageView[]; options: ReturnType<typeof setupOptions>}> {
+  /** `printers.mcps`: both packages, always, with every copy of each the companion can see, and Add printer…'s choices from them. */
+  async mcps(): Promise<{packages: McpPackageView[]; options: SetupOptions}> {
+    // Settings answers within its deadline from the fields already read; reading them again never holds it up.
+    const options = setupOptions(await this.#setups({cachedOnly: true}));
+    void this.#setups().catch(() => undefined);
+    return {packages: await this.#packages(), options};
+  }
+
+  async #packages(): Promise<McpPackageView[]> {
     const {env} = this.deps;
     const installs = new Map<PrinterBackend, Map<string, PackageInstall>>(MCP_PACKAGES.map(item => [item.package, new Map()]));
     const add = (pkg: PrinterBackend, key: string, install: PackageInstall) => { if (!installs.get(pkg)!.has(key)) installs.get(pkg)!.set(key, install); };
@@ -258,7 +256,7 @@ export class PrinterSetup {
     for (const folder of await (this.deps.folders?.() ?? Promise.resolve([]))) {
       add(folder.package, `checkout:${folder.dir}`, {kind: 'folder', path: folder.dir, ...(folder.version ? {version: folder.version} : {})});
     }
-    return {packages: MCP_PACKAGES.map(item => {
+    return MCP_PACKAGES.map(item => {
       const found = [...installs.get(item.package)!.values()];
       // Match #entry: the managed copy wins, then the first other runnable copy. A development
       // checkout's future version must not label the installed package that Download/Update manages.
@@ -288,12 +286,91 @@ export class PrinterSetup {
       const latestVersion = this.deps.latestVersion?.(item.package, {view: true});
       return {...item, installed: !!selected, ...(version ? {version} : {}), ...(latestVersion ? {latestVersion} : {}),
         appMcpId: appMcpId(item.package, env), uses, ...(appCopy ? {appCopy} : {}), installs: selected ? [selected, ...found.filter(install => install !== selected)] : found};
-    }), options: setupOptions()};
+    });
   }
+
+  /** Starts a copy of an MCP with no printer settings (a folder with no `.env`), as Add printer… runs it, for its setup tools. */
+  /** The work's answer (`{value}`), or undefined when the MCP didn't start or answer in time: a failure worth retrying, not an answer. */
+  async #probe<T>(pkg: PrinterBackend, entry: string, work: (client: ProbeClient, tools: Set<string>, remainingMs: () => number) => Promise<T>,
+      budgetMs = 25_000): Promise<{value: T} | undefined> {
+    // Whole milliseconds: AbortSignal.timeout and setTimeout refuse a fraction (a shared budget splits unevenly).
+    const until = Date.now() + Math.floor(budgetMs), remainingMs = () => Math.max(0, Math.floor(until - Date.now()));
+    const cwd = join(this.deps.env.appPrinters, 'profiles');
+    const config: PrinterHandoffConfig = {backend: pkg, process: {command: this.#node, args: [entry], cwd}};
+    const client = this.deps.client?.(config) ?? new PrinterMcpClient(config);
+    try {
+      await mkdir(cwd, {recursive: true, mode: 0o700});
+      // The budget holds even for an MCP that ignores the abort: whatever is still pending when it runs out is dropped.
+      const within = <V>(work: Promise<V>) => new Promise<V>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('timeout')), remainingMs());
+        work.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+      });
+      const catalog = await within(client.connect(AbortSignal.timeout(remainingMs())));
+      if (remainingMs() < 500) return undefined;
+      return {value: await within(work(client, new Set(catalog.tools.map(tool => tool.name)), remainingMs))};
+    } catch { return undefined; }
+    finally { await client.close().catch(() => undefined); }
+  }
+
+  readonly #setupCache = new Map<string, {at: number; setup?: McpSetup; failed?: boolean}>();
+  #setupKey(entry: string): string { return `${entry}|${statSync(entry, {throwIfNoEntry: false})?.mtimeMs ?? 0}`; }
+  /**
+   * One copy's own setup fields (`counterpart_setup_fields`), kept ten minutes per copy and version: an Update
+   * replaces the files in place, so the entry's modification time is part of the key. None from a copy without the tool.
+   */
+  async #setupFor(pkg: PrinterBackend, entry: string, options: {cachedOnly?: boolean; budgetMs?: number} = {}): Promise<McpSetup | undefined> {
+    const key = this.#setupKey(entry);
+    const cached = this.#setupCache.get(key);
+    // A confirmed answer (its fields, or no such tool) keeps ten minutes; an MCP that didn't start or answer in time, 20 s.
+    if (options.cachedOnly || (cached && Date.now() - cached.at < (cached.failed ? this.deps.retryAfterMs ?? 20_000 : 10 * 60_000))) return cached?.setup;
+    const answer = await this.#probe(pkg, entry, async (client, tools, remainingMs) => tools.has('counterpart_setup_fields')
+      ? readMcpSetup(toolResultJson(await client.callTool('counterpart_setup_fields', {}, {timeoutMs: Math.min(10_000, remainingMs())}))) : undefined,
+      options.budgetMs);
+    // A transient failure never hides fields an earlier answer gave.
+    const setup = answer ? answer.value : cached?.setup;
+    this.#setupCache.set(key, {at: Date.now(), ...(setup ? {setup} : {}), ...(answer ? {} : {failed: true})});
+    return setup;
+  }
+  /**
+   * Each MCP's own setup fields (`counterpart_setup_fields`), from the copy an added printer would run, kept ten
+   * minutes per copy. An MCP that isn't on this Mac, or doesn't have the tool, has none.
+   */
+  async #setups(options: {cachedOnly?: boolean; budgetMs?: number} = {}): Promise<{package: PrinterBackend; label: string; entry?: string; setup?: McpSetup; installed: boolean}[]> {
+    // Both MCPs at once: a slow one never delays the other's fields.
+    type Setup = {package: PrinterBackend; label: string; entry?: string; setup?: McpSetup; installed: boolean; unanswered?: boolean};
+    const out = await Promise.all(MCP_PACKAGES.map(async (item): Promise<Setup> => {
+      const entry = await this.#entry(item.package).catch(() => undefined);
+      if (!entry) return {package: item.package, label: item.label, installed: false};
+      const setup = await this.#setupFor(item.package, entry, options);
+      const unanswered = !setup && !!this.#setupCache.get(this.#setupKey(entry))?.failed;
+      return {package: item.package, label: item.label, entry, ...(setup ? {setup} : {}), installed: true, ...(unanswered ? {unanswered} : {})};
+    }));
+    if (!options.cachedOnly) await this.#saveSetups(new Map(out.flatMap(item => item.setup ? [[item.package, item.setup] as const] : [])));
+    return out;
+  }
+  /** The printer list judges each .env by these fields: when they change, it reads them again now, not at a restart. */
+  async #saveSetups(known: Map<PrinterBackend, McpSetup>, merge = false): Promise<void> {
+    if (!this.deps.setupCachePath) return;
+    const saved = await readSetupCache(this.deps.setupCachePath);
+    const next = merge ? new Map([...saved, ...known]) : known;
+    if (JSON.stringify(Object.fromEntries(next)) === JSON.stringify(Object.fromEntries(saved))) return;
+    await writeSetupCache(this.deps.setupCachePath, next).catch(() => undefined);
+    await this.deps.reload?.();
+  }
+  /** One MCP's fields, from the copy an added printer would run: never waits on the other MCP. */
+  async #setupOf(pkg: PrinterBackend, options: {cachedOnly?: boolean; budgetMs?: number} = {}): Promise<McpSetup | undefined> {
+    const entry = await this.#entry(pkg).catch(() => undefined);
+    if (!entry) return undefined;
+    const setup = await this.#setupFor(pkg, entry, options);
+    if (setup && !options.cachedOnly) await this.#saveSetups(new Map([[pkg, setup]]), true);
+    return setup;
+  }
+  /** The fields already read (the chosen MCP's among them): naming a printer never starts another MCP. */
+  async #cachedOptions(): Promise<SetupOptions> { return setupOptions(await this.#setups({cachedOnly: true})); }
 
   /** `printers.installMcp`: Download installs only that package, only when no copy of it is on this Mac. */
   async installMcp(pkg: PrinterBackend): Promise<{installed: true; package: PrinterBackend} | {update: McpUpdate}> {
-    const view = (await this.mcps()).packages.find(item => item.package === pkg);
+    const view = (await this.#packages()).find(item => item.package === pkg);
     if (!view) throw new PrinterSetupError('not-found', 'Counterpart doesn’t know that MCP.');
     if (view.installed) return {installed: true, package: pkg};
     if (!this.deps.download) throw new PrinterSetupError('unavailable', 'Counterpart can’t install printer MCPs on this Mac yet.');
@@ -326,72 +403,105 @@ export class PrinterSetup {
   }
 
   /** A built copy of an MCP with its own `.env`, as found (never a path the caller made up). */
-  async #folder(dir: string) {
+  async #folder(dir: string, options: {cachedOnly?: boolean; budgetMs?: number} = {}) {
     if (!isAbsolute(dir) || normalize(dir) !== dir) throw new PrinterSetupError('invalid', 'That folder isn’t a printer MCP Counterpart found.');
     const found = (await (this.deps.folders?.() ?? Promise.resolve([]))).find(folder => folder.dir === dir);
     if (!found?.hasEnv) throw new PrinterSetupError('invalid', 'That folder isn’t a printer MCP with its settings.');
     const env = await readFile(join(dir, '.env'), 'utf8').then(text => text.length <= 256 * 1024 ? parseEnv(text) : {}, () => ({} as Record<string, string | undefined>));
-    const bambu = found.package === 'bambu-printer-mcp';
-    const pick = (...keys: string[]) => keys.map(key => env[key]?.trim()).find(value => !!value);
-    const host = pick(...(bambu ? ['BAMBU_PRINTER_HOST'] : []), 'PRINTER_HOST');
-    const printerType = bambu ? 'bambu' : (pick('PRINTER_TYPE')?.toLowerCase() ?? 'octoprint');
-    const serial = pick(...(bambu ? ['BAMBU_PRINTER_SERIAL'] : []), 'BAMBU_SERIAL');
-    const model = pick(...(bambu ? ['BAMBU_PRINTER_MODEL'] : []), 'BAMBU_MODEL')?.toLowerCase();
-    return {found, env, host: host && HOST.test(host.replace(/^https?:\/\//, '').replace(/[:/].*$/, '')) ? host.replace(/^https?:\/\//, '').replace(/[:/].*$/, '') : undefined,
-      printerType, ...(serial && /^[A-Za-z0-9]{1,64}$/.test(serial) ? {serial: serial.toUpperCase()} : {}),
+    // What it is and where its printer is, by the fields its own MCP declares for that kind.
+    const setup = await this.#setupFor(found.package, join(dir, 'dist', 'index.js'), options), kind = kindFor(setup, env);
+    const read = (name: string) => { const item = field(kind, name); return item ? names(item).map(key => env[key]?.trim()).find(value => !!value) : undefined; };
+    const host = read('host')?.replace(/^https?:\/\//, '').replace(/[:/].*$/, '');
+    const serial = read('serial'), model = read('model')?.toLowerCase();
+    return {found, env, setup, kind, host: host && HOST.test(host) ? host : undefined, printerType: kind?.kind ?? 'unknown',
+      ...(serial && /^[A-Za-z0-9]{1,64}$/.test(serial) ? {serial: serial.toUpperCase()} : {}),
       ...(model && /^[a-z0-9]{1,16}$/.test(model) ? {model} : {})};
   }
 
-  #nameFor(printerType: string, model?: string, host?: string, backend?: PrinterBackend): string {
-    const type = PRINTER_TYPES.find(item => item.printerType === printerType);
-    const base = printerType === 'bambu' ? `Bambu Lab ${model ? MODEL_LABELS[model] ?? model.toUpperCase() : 'printer'}` : `${type?.label ?? 'Printer'}${host ? ` at ${host}` : ''}`;
-    return (backend === 'mcp-3d-printer-server' && printerType === 'bambu' ? `${base} via mcp-3D-printer-server` : base).slice(0, 120);
+  /** "Bambu Lab P1S", "OctoPrint at octopi.local": the kind and model in the MCP's own words; "via <MCP>" when another MCP is the usual one. */
+  #nameFor(options: SetupOptions, printerType: string, model?: string, host?: string, backend?: PrinterBackend): string {
+    const type = options.types.find(item => item.printerType === printerType);
+    const modelLabel = model ? (backend ? options.models[backend] : undefined)?.find(choice => choice.value === model)?.label ?? model.toUpperCase() : undefined;
+    const base = `${type?.label ?? 'Printer'}${modelLabel ? ` ${modelLabel}` : host ? ` at ${host}` : ''}`;
+    const via = backend && type && type.backends.length > 1 && type.backends[0] !== backend ? ` via ${this.#label(backend)}` : '';
+    return (base + via).slice(0, 120);
   }
 
-  /** `printers.discover`: configured MCP folders on this Mac, Bambu printers (SSDP) and other printers (Bonjour). About 4 s. */
-  async discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: ReturnType<typeof setupOptions>}> {
-    const [folders, bambu, bonjour, saved] = await Promise.all([
+  /**
+   * `printers.discover`: configured MCP folders on this Mac, and the printers each MCP finds on the network itself
+   * (`counterpart_discover_printers`), asked one MCP at a time so two never listen on the same port. A printer both
+   * MCPs find is listed once, with the MCP listed first for its kind (PRD §8.2). About 4 s per MCP.
+   */
+  async discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: SetupOptions}> {
+    // All of it inside the request's 15 s: what doesn't fit is left out, never the whole answer.
+    const until = Date.now() + (this.deps.discoverBudgetMs ?? 13_000), remainingMs = () => Math.max(0, until - Date.now());
+    const [folders, saved, setups] = await Promise.all([
       (this.deps.folders?.() ?? Promise.resolve([])).catch(() => []),
-      (this.deps.ssdp ?? (() => discoverBambu()))().catch(() => ({state: 'unavailable' as const, printers: []})),
-      (this.deps.bonjour ?? (() => discoverBonjour()))().catch(() => []),
       readProfiles(this.#profilesPath),
+      this.#setups({budgetMs: Math.round((this.deps.discoverBudgetMs ?? 13_000) * 6 / 13)}),
     ]);
+    const options = setupOptions(setups);
+    const runs = [...this.#runs(), ...saved.profiles.map(profile => profile.process.cwd)];
+    // A configured folder's own fields are read while the MCPs listen, not after: a slow network never hides it.
+    const configured = folders.filter(folder => folder.hasEnv && !runs.some(path => path === folder.dir || path.startsWith(folder.dir + sep)));
+    const reading = Promise.all(configured.map(folder => this.#folder(folder.dir, {budgetMs: remainingMs()}).catch(() => undefined)));
+    const announced: {package: PrinterBackend; printer: DiscoveredPrinter}[] = [];
+    let network: 'complete' | 'unavailable' = 'unavailable';
+    // Each MCP gets an equal share of the time left, so a stalled first one can't take the second's.
+    const listening = setups.filter(item => item.entry && item.setup);
+    for (const [i, item] of listening.entries()) {
+      const share = Math.floor(remainingMs() / (listening.length - i));
+      if (share < 2_500) continue;
+      const answer = await this.#probe(item.package, item.entry!, async (client, tools, left) => tools.has('counterpart_discover_printers')
+        ? DiscoverySchema.safeParse(toolResultJson(await client.callTool('counterpart_discover_printers',
+          {duration_ms: Math.max(500, Math.min(3_000, left() - 1_500))}, {timeoutMs: left()}))) : undefined, share);
+      const result = answer?.value;
+      if (!result?.success) continue;
+      if (result.data.network === 'complete') network = 'complete';
+      for (const printer of result.data.printers) announced.push({package: item.package, printer});
+    }
     const catalog = this.deps.catalog?.();
     const known = new Set((catalog?.entries() ?? []).map(entry => catalog!.choiceKey(entry.id)).filter((key): key is string => !!key));
-    const runs = [...this.#runs(), ...saved.profiles.map(profile => profile.process.cwd)];
     const found: SetupCandidate[] = [];
-    for (const folder of folders) {
-      if (!folder.hasEnv || runs.some(path => path === folder.dir || path.startsWith(folder.dir + sep))) continue;
-      const read = await this.#folder(folder.dir).catch(() => undefined);
-      if (!read?.host) continue;
-      // A model its .env lacks: the printer's own announcement (DevModel) first, else its serial number.
-      const announced = bambu.printers.find(printer => read.serial && printer.serial.toUpperCase() === read.serial)?.model;
+    const reads = await reading;
+    for (const [i, folder] of configured.entries()) {
+      const read = reads[i];
+      if (!read?.host || !read.kind) continue;
+      // A model its .env lacks: the printer's own announcement first, else the model its MCP says the serial names.
+      const heard = announced.find(item => read.serial && item.printer.serial?.toUpperCase() === read.serial)?.printer.model;
       const route = await this.#route(folder.package, read.env, join(folder.dir, 'dist', 'index.js'), folder.dir);
-      const gap = settingsGap(folder.package, read.env, {...(announced ? {model: announced} : {}), modelFromSerial, ...(route ? {route} : {})});
-      const model = read.model ?? gap.fill.BAMBU_MODEL;
-      found.push({id: `folder:${folder.dir}`, source: 'folder', name: this.#nameFor(read.printerType, model, read.host, folder.package),
+      const gap = settingsGap(folder.package, read.env, read.kind, {...(heard ? {model: heard} : {}), ...(route ? {route} : {})});
+      const modelEnv = field(read.kind, 'model')?.env;
+      const model = read.model ?? (modelEnv ? gap.fill[modelEnv] : undefined);
+      found.push({id: `folder:${folder.dir}`, source: 'folder', name: this.#nameFor(options, read.printerType, model, read.host, folder.package),
         backend: folder.package, printerType: read.printerType, host: read.host, ...(read.serial ? {serial: read.serial} : {}),
         ...(model ? {model} : {}), folder: folder.dir, added: false,
         ...(gap.missing.length || Object.keys(gap.fill).length ? {missing: gap.missing, fill: gap.fill} : {})});
     }
-    for (const printer of bambu.printers) {
-      const model = printer.model ?? modelFromSerial(printer.serial);
-      found.push({id: `ssdp:${printer.serial}`, source: 'ssdp', name: printer.name.slice(0, 120), backend: 'bambu-printer-mcp', printerType: 'bambu', host: printer.host,
-        serial: printer.serial, ...(model ? {model} : {}), added: known.has(`serial:${printer.serial.toUpperCase()}`)});
+    const listed = new Set<string>();
+    for (const {package: pkg, printer} of announced) {
+      const key = printer.serial ? `serial:${printer.serial.toUpperCase()}` : `host:${printer.host.toLowerCase()}:${printer.port ?? ''}`;
+      // The MCP listed first for this kind takes a printer both find.
+      const preferred = options.types.find(type => type.printerType === printer.kind)?.backends
+        .find(backend => announced.some(item => item.package === backend && item.printer.host === printer.host && item.printer.serial === printer.serial));
+      if (listed.has(key) || (preferred && preferred !== pkg)) continue;
+      listed.add(key);
+      const kind = setups.find(item => item.package === pkg)?.setup?.kinds.find(item => item.kind === printer.kind);
+      const model = printer.model ?? modelForSerial(kind, printer.serial);
+      const port = printer.port === undefined ? undefined : String(printer.port);
+      found.push({id: printer.serial ? `${printer.source}:${printer.serial}` : `${printer.source}:${printer.host}:${port ?? ''}`, source: printer.source,
+        name: (printer.name || this.#nameFor(options, printer.kind, model, printer.host, pkg)).slice(0, 120), backend: pkg, printerType: printer.kind,
+        host: printer.host, ...(port ? {port} : {}), ...(printer.serial ? {serial: printer.serial} : {}), ...(model ? {model} : {}),
+        added: known.has(printer.serial ? `serial:${printer.serial.toUpperCase()}` : `host:${printer.host.toLowerCase()}:${port}`)});
     }
-    for (const service of bonjour) {
-      const printerType = BONJOUR_TYPES[service.type] ?? 'octoprint';
-      found.push({id: `bonjour:${service.host}:${service.port}`, source: 'bonjour', name: (service.name || this.#nameFor(printerType, undefined, service.host)).slice(0, 120),
-        backend: 'mcp-3d-printer-server', printerType, host: service.host, port: service.port, added: known.has(`host:${service.host.toLowerCase()}:${service.port}`)});
-    }
-    return {found, network: bambu.state, options: setupOptions()};
+    return {found, network, options};
   }
 
   /** The MCP an added printer runs: the app's own copy, else another copy of that package on this Mac. */
   async #entry(pkg: PrinterBackend): Promise<string> {
     const own = appInstall(pkg, this.deps.env).entry!;
     if (this.deps.env.exists(own)) return own;
-    const view = (await this.mcps()).packages.find(item => item.package === pkg)!;
+    const view = (await this.#packages()).find(item => item.package === pkg)!;
     for (const install of view.installs) {
       const entry = localEntry(pkg, install, this.deps.env);
       if (entry) return entry;
@@ -399,15 +509,38 @@ export class PrinterSetup {
     throw new PrinterSetupError('unavailable', `Download ${this.#label(pkg)} first, then add the printer.`);
   }
 
-  async #config(input: PrinterForm): Promise<PrinterHandoffConfig> {
+  async #config(input: PrinterForm, options: {budgetMs?: number} = {}): Promise<PrinterHandoffConfig> {
     if ('folder' in input) {
-      const {found} = await this.#folder(input.folder);
+      const {found} = await this.#folder(input.folder, options);
       return {backend: found.package, process: {command: this.#node, args: [join(found.dir, 'dist', 'index.js')], cwd: found.dir}};
     }
     // Check runs the MCP with these settings and no .env (its working directory has none); nothing is written.
     const cwd = join(this.deps.env.appPrinters, 'profiles');
     await mkdir(cwd, {recursive: true, mode: 0o700});
-    return {backend: input.backend, process: {command: this.#node, args: [await this.#entry(input.backend)], cwd, env: envFor(input)}};
+    const entry = await this.#entry(input.backend);
+    const {kind, setup} = await this.#kindForForm(input, options);
+    return {backend: input.backend, process: {command: this.#node, args: [entry], cwd, env: envFor(input, kind, setup.slicer)}};
+  }
+
+  /**
+   * The form checked against the MCP's own fields: a kind it drives, every required printer field filled, a model
+   * from its choices. Nothing about any printer is known here beyond what that MCP declares.
+   */
+  async #kindForForm(input: FormFields, options: {budgetMs?: number} = {}): Promise<{kind: SetupKind; setup: McpSetup}> {
+    const setup = await this.#setupOf(input.backend, options);
+    if (!setup) throw new PrinterSetupError('unavailable', `Update ${this.#label(input.backend)} in Settings → Printers so Counterpart can set up printers with it.`);
+    const kind = setup.kinds.find(item => item.kind === input.printerType);
+    if (!kind) throw new PrinterSetupError('invalid', `${this.#label(input.backend)} doesn’t drive that kind of printer.`);
+    const values: Record<string, string | undefined> = {host: input.host, port: input.port, serial: input.serial, model: input.model};
+    for (const item of kind.fields) if (item.required && item.name !== 'secret' && item.name in values && !values[item.name])
+      throw new PrinterSetupError('invalid', `Enter the printer’s ${item.label.toLowerCase()}.`);
+    const model = field(kind, 'model');
+    if (input.model !== undefined && (!model || (model.choices && !model.choices.some(choice => choice.value === input.model))))
+      throw new PrinterSetupError('invalid', `${this.#label(input.backend)} doesn’t know that model.`);
+    const slicer = field(setup.slicer ? {...kind, fields: setup.slicer.fields} : undefined, 'slicer');
+    if (input.slicer !== undefined && (!slicer?.choices || !slicer.choices.some(choice => choice.value === input.slicer)))
+      throw new PrinterSetupError('invalid', `${this.#label(input.backend)} doesn’t use that slicer.`);
+    return {kind, setup};
   }
 
   /**
@@ -416,23 +549,32 @@ export class PrinterSetup {
    * returned: no telemetry, MCP error text or credentials (KAN-163's check).
    */
   async check(input: PrinterForm): Promise<CheckResult> {
-    const config = await this.#config(input);
+    // One budget for the whole check, inside local-control's 60 s: reading the MCP's fields comes out of it too.
+    const total = this.deps.checkBudgetMs ?? 55_000;
+    const until = Date.now() + total, remainingMs = () => Math.max(0, Math.floor(until - Date.now()));
+    const config = await this.#config(input, {budgetMs: Math.floor(total * 10 / 55)});
     const bambuKind = config.backend === 'bambu-printer-mcp' || ('printerType' in input && input.printerType === 'bambu')
-      || ('folder' in input && (await this.#folder(input.folder)).printerType === 'bambu');
+      || ('folder' in input && (await this.#folder(input.folder, {cachedOnly: true})).printerType === 'bambu');
     const result: CheckResult = {reached: false, camera: 'not-supported'};
     const client = this.deps.client?.(config) ?? new PrinterMcpClient(config);
+    // The budget holds even for an MCP that ignores its timeouts: whatever is still pending when it runs out is dropped.
+    const within = <V>(work: Promise<V>) => new Promise<V>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout')), remainingMs());
+      work.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+    });
     try {
-      const catalog = await client.connect(AbortSignal.timeout(25_000));
-      const status = toolResultJson(await client.callTool('get_printer_status', {}, {timeoutMs: 20_000}));
+      const catalog = await within(client.connect(AbortSignal.timeout(Math.min(25_000, remainingMs()))));
+      const status = toolResultJson(await within(client.callTool('get_printer_status', {}, {timeoutMs: Math.min(20_000, remainingMs())})));
       if (config.backend === 'bambu-printer-mcp') {
         result.reached = status.connected === true && status.status !== 'error';
         const model = String(status.model ?? '').toLowerCase().replace(/^bambu lab\s+|\s+/g, '');
-        if (MODELS['bambu-printer-mcp'].includes(model)) result.model = model;
+        const kind = 'printerType' in input ? (await this.#setupOf(config.backend, {cachedOnly: true}))?.kinds.find(item => item.kind === input.printerType) : undefined;
+        if (field(kind, 'model')?.choices?.some(choice => choice.value === model)) result.model = model;
       } else result.reached = status.error === undefined && status.status !== 'error' && status.connected !== false && Object.keys(status).length > 0;
-      if (result.reached && bambuKind && catalog.tools.some(tool => tool.name === 'camera_snapshot')) {
+      if (result.reached && bambuKind && catalog.tools.some(tool => tool.name === 'camera_snapshot') && remainingMs() >= 2_000) {
         result.camera = 'failed';
         try {
-          const frame = toolResultJson(await client.callTool('camera_snapshot', {timeout_ms: 8000}, {timeoutMs: 12_000}));
+          const frame = toolResultJson(await within(client.callTool('camera_snapshot', {timeout_ms: Math.min(8000, remainingMs() - 1000)}, {timeoutMs: Math.min(12_000, remainingMs())})));
           if (['image/jpeg', 'jpeg'].includes(frame.format as string) && typeof frame.base64 === 'string' && frame.base64.length <= 700_000 && /^[A-Za-z0-9+/]+={0,2}$/.test(frame.base64)) {
             const bytes = Buffer.from(frame.base64, 'base64');
             if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9) {
@@ -456,21 +598,23 @@ export class PrinterSetup {
     let profile: SavedProfile;
     let created: string | undefined;
     if ('folder' in input) {
-      const read = await this.#folder(input.folder);
+      const read = await this.#folder(input.folder, {budgetMs: ADD_SETUP_BUDGET_MS});
       if (this.#runs().some(path => path === read.found.dir || path.startsWith(read.found.dir + sep))
         || (await readProfiles(this.#profilesPath)).profiles.some(item => item.process.cwd === read.found.dir))
         throw new PrinterSetupError('conflict', 'That printer MCP is one of your printers already.');
       // Its .env gains only what its MCP needs and lacks, and only the model; nothing there is changed.
       const model = await this.#completeEnv(read.found.dir, read.found.package, input.model, join(read.found.dir, 'dist', 'index.js'));
-      profile = {id, name: this.#nameFor(read.printerType, model ?? read.model, read.host, read.found.package), backend: read.found.package,
+      profile = {id, name: this.#nameFor(await this.#cachedOptions(), read.printerType, model ?? read.model, read.host, read.found.package), backend: read.found.package,
         process: {command: this.#node, args: [join(read.found.dir, 'dist', 'index.js')], cwd: read.found.dir}, owned: false,
         ...((model ?? read.model) && /^[a-z0-9]{1,16}$/.test(model ?? read.model!) ? {model: model ?? read.model!} : {})};
     } else {
       const entry = await this.#entry(input.backend);
       created = join(this.deps.env.appPrinters, 'profiles', id);
       await mkdir(created, {recursive: true, mode: 0o700});
-      await writeFile(join(created, '.env'), envFile(envFor(input)), {mode: 0o600, flag: 'wx'});
-      profile = {id, name: input.name ?? this.#nameFor(input.printerType, input.model, input.host, input.backend), backend: input.backend,
+      const {kind, setup} = await this.#kindForForm(input, {budgetMs: ADD_SETUP_BUDGET_MS});
+      const env = envFor(input, kind, setup.slicer);
+      await writeFile(join(created, '.env'), envFile(env), {mode: 0o600, flag: 'wx'});
+      profile = {id, name: input.name ?? this.#nameFor(await this.#cachedOptions(), input.printerType, input.model, input.host, input.backend), backend: input.backend,
         process: {command: this.#node, args: [entry], cwd: created}, owned: true, ...(input.model ? {model: input.model} : {})};
     }
     try { await changeProfiles(this.#profilesPath, state => { state.profiles.push(profile); }); }
@@ -551,20 +695,23 @@ export class PrinterSetup {
     const path = join(dir, '.env');
     const text = await readFile(path, 'utf8');
     const env = parseEnv(text);
+    // The fields of the copy that reads this .env: the printer's own MCP.
+    const kind = kindFor(entry ? await this.#setupFor(backend, entry) : await this.#setupOf(backend), env);
+    if (!kind) throw new PrinterSetupError('unavailable', `Update ${this.#label(backend)} in Settings → Printers so Counterpart can complete this printer’s settings.`);
     const route = await this.#route(backend, env, entry, dir);
-    const gap = settingsGap(backend, env, {...(model ? {model} : {}), modelFromSerial, ...(route ? {route} : {})});
+    const gap = settingsGap(backend, env, kind, {...(model ? {model} : {}), ...(route ? {route} : {})});
     if (gap.missing.includes('BAMBU_NETWORK_CONFIG_DIR')) {
       throw new PrinterSetupError('unavailable', 'Counterpart couldn’t read the FULU session folder from the source MCP. Set BAMBU_NETWORK_CONFIG_DIR in that MCP’s .env, then try again.');
     }
-    const existing = (env.BAMBU_MODEL ?? env.BAMBU_PRINTER_MODEL)?.trim().toLowerCase();
-    if (gap.missing.includes('BAMBU_MODEL')) {
-      const value = gap.fill.BAMBU_MODEL;
-      if (!value) throw new PrinterSetupError('invalid', 'Choose the printer’s model: its MCP needs it, and Counterpart couldn’t tell it from the printer.');
-      if (!MODELS[backend].includes(value)) throw new PrinterSetupError('invalid', `${this.#label(backend)} doesn’t know that model.`);
+    const modelField = field(kind, 'model');
+    const existing = modelField ? names(modelField).map(key => env[key]?.trim()).find(value => !!value)?.toLowerCase() : undefined;
+    if (modelField && gap.missing.includes(modelField.env) && !gap.fill[modelField.env]) {
+      if (model !== undefined) throw new PrinterSetupError('invalid', `${this.#label(backend)} doesn’t know that model.`);
+      throw new PrinterSetupError('invalid', 'Choose the printer’s model: its MCP needs it, and Counterpart couldn’t tell it from the printer.');
     }
     const lines = Object.values(gap.lines);
     if (lines.length) await appendFile(path, `${text.length && !text.endsWith('\n') ? '\n' : ''}${lines.join('\n')}\n`);
-    return gap.fill.BAMBU_MODEL ?? existing;
+    return (modelField ? gap.fill[modelField.env] : undefined) ?? existing;
   }
 
   /**
