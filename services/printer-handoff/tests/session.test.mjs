@@ -297,3 +297,15 @@ test('restart lets a running print call finish, then the next call starts the MC
   await session.close();
   await assert.rejects(session.restart(), /session-closed/);
 });
+
+test('each restart advances the session generation, so answers kept from the old MCP are told apart', async t => {
+  const {factory} = fakes();
+  const session = new PrinterSession('p1s', config, {clientFactory: factory});
+  t.after(() => session.close());
+  assert.equal(session.generation, 0);
+  await session.call('get_printer_status', {});
+  assert.equal(session.generation, 0, 'calls never advance it');
+  await session.restart();
+  await session.restart({...config, process: {command: '/opt/new/bambu-printer-mcp'}});
+  assert.equal(session.generation, 2);
+});

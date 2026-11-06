@@ -356,6 +356,46 @@ test('a plate the MCP marks incomplete keeps every filament it lists as a row, a
   assert.ok(run.selection.amsMapping.every(slot => slot >= 0), 'each listed filament gets a tray: none dropped');
 });
 
+// R24-005: an Update or Move restarts the MCP session; the plate filaments the old MCP gave are not reused, and a
+// reply the old MCP sends after the restart can't fill the new MCP's place.
+test('after an Update the new MCP is asked for the plate’s filaments again, and a late old reply is never kept', async t => {
+  const {zipSync, strToU8} = fflate();
+  const bytes = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/></object></config>')}));
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes, kind: 'published', publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: false}});
+  const runner = f.deps.print.services.runner;
+  const session = {generation: 0};
+  runner.session = session;
+  const answers = [];
+  // Each answer is its own: the old MCP lists filament 1, the updated one filaments 1 and 2 (R24-004's fix).
+  const answer = filaments => ({plates: [{index: 0, name: 'Plate 1', objects: [], sliced: false, filaments: filaments.map(index => ({index, colour: '#111111', material: 'PLA'}))}],
+    projectFilaments: [{index: 1}, {index: 2}]});
+  let gate;
+  runner.modelPlates = async () => { answers.push(session.generation); if (gate) await gate; return answer(session.generation === 0 ? [1] : [1, 2]); };
+  assert.deepEqual((await f.service.colourMapping(f.object.id)).filaments.map(x => x.index), [1]);
+  assert.deepEqual((await f.service.colourMapping(f.object.id)).filaments.map(x => x.index), [1], 'reopened: kept');
+  assert.equal(answers.length, 1);
+  session.generation = 1; // Update: the session restarts
+  assert.deepEqual((await f.service.colourMapping(f.object.id)).filaments.map(x => x.index), [1, 2], 'the updated MCP is asked');
+  assert.equal(answers.length, 2);
+
+  // A call in flight when the session restarts: its reply is not kept for the new generation.
+  session.generation = 2; // nothing kept for generation 2 yet
+  let release; gate = new Promise(resolve => { release = resolve; });
+  const pending = f.service.colourMapping(f.object.id);
+  while (!answers.includes(2)) await new Promise(resolve => setImmediate(resolve));
+  session.generation = 3; // restarted while generation 2's MCP is still answering
+  release(); gate = undefined;
+  await pending.catch(() => undefined);
+  const before = answers.length;
+  await f.service.colourMapping(f.object.id);
+  assert.equal(answers.length, before + 1, 'generation 3 asks its own MCP; nothing from the call in flight was kept for it');
+  await f.service.colourMapping(f.object.id);
+  assert.equal(answers.length, before + 1, 'and keeps its own answer');
+});
+
 test('spool choices for a 3MF whose filaments cannot be read are refused, never dropped', async t => {
   const {zipSync, strToU8} = fflate();
   const bare = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),

@@ -896,7 +896,11 @@ export class ObjectService {
     const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
     const runner = services?.runner;
     if (!runner?.modelPlates || !object.current) return undefined;
-    const key = `${destinationId ?? ''}|${runner.backend}|${createHash('sha256').update(bytes).digest('hex')}`;
+    // The session's generation is in the key: after an Update or Move the new MCP is asked again. It is read before
+    // the call, so a reply from the old process can only fill the old generation's entry, and isn't kept at all
+    // when a restart happened meanwhile.
+    const generation = runner.session?.generation ?? 0;
+    const key = `${destinationId ?? ''}|${runner.backend}|${generation}|${createHash('sha256').update(bytes).digest('hex')}`;
     const kept = this.#listedPlates.get(key);
     if (kept) return kept;
     let listed: McpModelPlates;
@@ -906,7 +910,7 @@ export class ObjectService {
       throw new InvalidStateError('Couldn’t read this model’s plates. Check your printer service in Settings → Printers and try again.');
     }
     if (listed.plates.some(plate => !plate.filaments)) throw new McpUpdateNeeded(plateFilamentsUnavailable(runner.backend));
-    this.#listedPlates.set(key, listed);
+    if ((runner.session?.generation ?? 0) === generation) this.#listedPlates.set(key, listed);
     if (this.#listedPlates.size > 32) this.#listedPlates.delete(this.#listedPlates.keys().next().value!);
     return listed;
   }
