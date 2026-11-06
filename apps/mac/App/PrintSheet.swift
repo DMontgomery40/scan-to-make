@@ -58,6 +58,8 @@ struct PrintSheet: View {
     private var published: Bool { object.preservesPublishedFilaments }
     private var slicedOriginal: Bool { object.publishedSelection?.sliced == true }
     private var printer: PrinterDestination? { model.printer(for: object) }
+    /// The printer's spools, and a multi-colour model's mapping to them, have answered: what Print would slice is known.
+    private var settled: Bool { filamentState != .loading && !(published && mappingState == .loading) }
     private var settingsServed: Bool { model.capabilities?.printSettings == true }
     private var words: ObjectWords { object.words }
     private var uncertain: Bool { object.print?.uncertain == true }
@@ -143,7 +145,7 @@ struct PrintSheet: View {
         }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
         // must not hold Print for the new one. The chosen spools too: they change what the estimate slices.
-        .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)|\(mappingSignature)|\(String(describing: colour))|\(offersPauses ? Array(Set(pauses)).sorted() : [])") { await loadEstimate() }
+        .task(id: "\(settled)|\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)|\(mappingSignature)|\(String(describing: colour))|\(offersPauses ? Array(Set(pauses)).sorted() : [])") { await loadEstimate() }
     }
 
     // MARK: Printers
@@ -511,6 +513,13 @@ struct PrintSheet: View {
     private func loadEstimate() async {
         guard settingsServed, object.modelURL != nil else { estimateState = .idle; return }
         estimateState = .loading
+        // One slice for what the sheet settles on (Nov 6: opening Print started four slices of one plate, one per
+        // setting as it loaded). The printer, its spools and a multi-colour model's mapping each change the slice, so
+        // wait for them (`settled` is in this task's id, so it starts again when they arrive). A quick run of changes
+        // then slices once.
+        guard settled else { return }
+        try? await Task.sleep(for: .milliseconds(600))
+        guard !Task.isCancelled else { return }
         do {
             let result = try await model.estimate(object.id, destinationId: printer?.id, quality: offersQuality ? quality : .standard,
                                                   strength: offersStrength ? strength : .standard, copies: slicedOriginal ? 1 : offersCopies && copiesPicked ? copies : (object.settings?.printDefaults?.copies != nil ? 1 : nil),

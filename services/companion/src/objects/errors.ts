@@ -9,3 +9,10 @@ export class InvalidStateError extends Error {
 export class SlicerRefusedError extends InvalidStateError {
   constructor(message: string) { super(message); this.name = 'SlicerRefusedError'; }
 }
+/**
+ * The print sheet asked for a newer estimate (other settings, same project and printer) while this one was slicing:
+ * this slice was stopped. The sheet already shows the newer one, so clients drop this answer.
+ */
+export class EstimateSupersededError extends InvalidStateError {
+  constructor() { super('A newer estimate replaced this one.'); this.name = 'EstimateSupersededError'; }
+}

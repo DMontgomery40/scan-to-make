@@ -9,7 +9,7 @@ import {
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {slicedFacts, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
 import {modelPlatesFrom, type McpModelPlates} from './model-plates.js';
-import {lacksSlicerReport, slicerReport} from './slicer-report.js';
+import {lacksSlicerReport, logSlicerRefusal, slicerReport} from './slicer-report.js';
 import {slicePreview, type SlicePreview} from './slice-preview.js';
 import {createHash} from 'node:crypto';
 import type {HandoffBundleStore} from './bundle.js';
@@ -528,7 +528,7 @@ export class PrinterHandoffRunner {
     if (sliced && lacksSlicerReport(sliced.structuredContent))
       throw new PrinterMcpError('slicer-report-unavailable', undefined, `Update ${packageLabel(this.#config.backend)} in Settings → Printers to print from Counterpart.`);
     const report = reused ? undefined : slicerReport(sliced?.structuredContent);
-    if (report?.failed) throw new PrinterMcpError('slicer-error', undefined, report.message);
+    if (report?.failed) { logSlicerRefusal(report); throw new PrinterMcpError('slicer-error', undefined, report.message); }
     const slicerWarning = reused ? reused.slicerWarning : report?.message;
     await progress('inspecting');
     const inspection = await this.inspect(session, slicedPath, selection, local, input.preview === true);

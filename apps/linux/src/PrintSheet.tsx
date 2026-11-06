@@ -200,6 +200,12 @@ export function PrintSheet({
       await ensureCurrent();
       if (ticket === sequence.current && currentKey.current === submittedKey)
         setEstimate(value);
+    } catch (e) {
+      // The sheet moved on to newer settings (the companion stops this slice for them): this answer, a failure
+      // included, is no longer the sheet's to show.
+      if (ticket !== sequence.current || currentKey.current !== submittedKey)
+        return;
+      throw e;
     } finally {
       if (ticket === sequence.current) setEstimating(false);
     }
