@@ -343,7 +343,6 @@ struct MCPCopiesView: View {
             if !store.macCapabilities.contains("mcpCopies") { Text("Update Counterpart on your computer to see each printer’s software copy.").font(.footnote) }
         }
         .buttonStyle(.borderless)
-        .accessibilityIdentifier("mcp-copies")
         .task { await store.loadCapabilities(); await store.loadMCPCopies() }
     }
     @ViewBuilder private func progress(_ id: String) -> some View {

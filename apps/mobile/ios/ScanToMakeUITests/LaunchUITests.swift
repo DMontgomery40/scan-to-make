@@ -571,6 +571,7 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
         let move = app.buttons["mcp-move-mcp-0000000000000002"]
+        XCTAssertTrue(move.waitForExistence(timeout: 5), app.debugDescription)
         let list = app.collectionViews.firstMatch
         reveal(move, in: list)
         XCTAssertTrue(app.staticTexts["Counterpart’s copy 1.2.45"].exists)
