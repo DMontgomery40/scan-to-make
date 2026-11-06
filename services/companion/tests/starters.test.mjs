@@ -77,6 +77,12 @@ test('a starter that can’t be downloaded says so in one sentence, and Try Agai
  const done=await service.settled(first.id);
  assert.equal(done.state,'ready');assert.equal(done.failure,undefined);assert.equal(asked.length,2);
 });
+test('with no browser to download with (Linux), a starter asks for the designer’s files instead of a sign-in',async t=>{
+ const {service}=await setup(t,async()=>({status:'needs_file',browser:false}));
+ const o=await service.settled((await service.addStarter('scan-platform')).id);
+ assert.equal(o.state,'needs-closeup');assert.equal(o.ask.type,'file');assert.equal(o.ask.url,o.credit.url);
+ assert.match(o.ask.question,/MakerWorld/);assert.equal(o.failure,undefined);
+});
 test('a published link that isn’t a starter still asks which plate, and still asks for a file it can’t get',async t=>{
  const {service}=await setup(t,async(_input,root)=>rig(root));
  const pasted=await service.create('Print this','published','https://makerworld.com/en/models/1531561');

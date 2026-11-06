@@ -2038,8 +2038,9 @@ export class ObjectService {
     }
     if (result.status === 'needs_file') {
       const object = await store.get(id);
-      if (object.starterId) {
+      if (object.starterId && result.browser !== false) {
         // A starter has nothing for the person to choose or download by hand: one sentence and Try Again.
+        // With no browser to download with (Linux, no Chrome extension), it asks for the files as any link does.
         const site = object.credit?.site ?? 'MakerWorld';
         const message = `Counterpart couldn’t download the designer’s files from ${site}. Sign in to ${site} in Chrome on this computer, then try again.`;
         const updated = await store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined, ask: undefined, passes: endPass(o, 'failed', message)}));

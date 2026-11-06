@@ -476,6 +476,7 @@ Every starter is a real designer's model. Removed Nov 5: a bundled "Counterpart 
 
 **Ready to go.** David, Nov 5: "READY TO GO. not ready to be downloaded from maker world... fully ready to go". Tapping a starter (`POST /v1/objects {"starterId": …}`, the same call on every client) creates the project and at once runs the published-model pass a pasted link runs (§8.11). The worker gets the designer's own files from MakerWorld with the person's own sign-in in Chrome, and the catalog entry's request names which files: the rig's full-kit profile with all six plates; the caliper's 150 mm colour profile and its 150 mm depth-gauge profile. The project keeps every file and plate together (no "which plate?" question; the plate picker prints each one) and lands at **Ready to print**, credited to the designer.
 - If the files can't be downloaded (MakerWorld wants a sign-in, the site refuses, a file won't open), the project is Failed with one sentence, for example "Counterpart couldn't download the designer's files from MakerWorld. Sign in to MakerWorld in Chrome on this computer, then try again.", and every client's **Try Again** runs the pass again.
+- With no browser to download with (the Linux companion, or Chrome without the Claude extension), signing in can't help, so the starter asks for the designer's files as a pasted link does (§8.11 step 2.3).
 - Counterpart never bundles or re-hosts the files: both are under the MakerWorld Standard Digital File License (§15). No personal project history is copied.
 
 **Status:** Built. Not accepted: a starter printed.

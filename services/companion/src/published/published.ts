@@ -91,7 +91,7 @@ export function buildPublishedInvocation(input: PublishedInput): TouchupInvocati
 export interface PublishedModel {title: string; designer?: string; site: string; url: string; licence?: string}
 export type PublishedResult =
   | {status: 'downloaded'; files: string[]; profile?: string; model?: PublishedModel; summary?: string}
-  | {status: 'needs_file'; model?: PublishedModel; summary?: string; candidate?: string}
+  | {status: 'needs_file'; model?: PublishedModel; summary?: string; candidate?: string; /** false when the pass had no browser to download with */ browser?: boolean}
   | {status: 'failed'; reason: string; model?: PublishedModel};
 
 const MODEL_FILE = /\.(3mf|stl)$/i;
@@ -174,9 +174,11 @@ export interface PublishedPassInput {
 export async function defaultRunPublished(input: PublishedPassInput, deps: {chrome?: () => boolean; downloads?: string; spawn?: typeof import('node:child_process').spawn} = {}): Promise<PublishedResult> {
   const pass = await prepareTouchupPass({root: input.root, objectId: 'pass', scan: [], photos: input.photos, requirePhotos: false});
   input.onStage?.('working');
-  const inv = buildPublishedInvocation({pass, claudePath: input.claudePath, request: input.request, link: input.link,
-    chrome: (deps.chrome ?? chromeAvailable)()});
+  const chrome = (deps.chrome ?? chromeAvailable)();
+  const inv = buildPublishedInvocation({pass, claudePath: input.claudePath, request: input.request, link: input.link, chrome});
   inv.worker = input.worker;
-  return runPublishedWorker(inv, pass, input.link, {startedAtMs: input.startedAtMs, ...(deps.downloads ? {downloads: deps.downloads} : {}),
+  const result = await runPublishedWorker(inv, pass, input.link, {startedAtMs: input.startedAtMs, ...(deps.downloads ? {downloads: deps.downloads} : {}),
     ...(deps.spawn ? {spawn: deps.spawn} : {}), ...(input.onProgress ? {onProgress: input.onProgress} : {}), ...(input.signal ? {signal: input.signal} : {})});
+  // Without the browser (Linux, or Chrome's extension not set up) a sign-in can't help: the person adds the files.
+  return result.status === 'needs_file' ? {...result, browser: chrome} : result;
 }

@@ -12,7 +12,7 @@ import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {publicObject} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
-import {buildPublishedInvocation,runPublishedWorker,findNamed} from '../dist/published/published.js';
+import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished} from '../dist/published/published.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {showing, showingRunner, shownSlice} from './support/shown-print.mjs';
 const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
@@ -32,6 +32,14 @@ test('retrieval has browser/web but no printer, geometry, heating or dispatch to
  const inv=buildPublishedInvocation({pass,printer:{command:'/unused'},claudePath:'/c',request:LINK,link:{url:LINK,site:'MakerWorld'},chrome:true});
  assert.deepEqual(inv.args[inv.args.indexOf('--allowedTools')+1].split(','),['Read','Glob','WebSearch','WebFetch','mcp__claude-in-chrome']);assert.deepEqual(inv.mcpConfig.mcpServers,{});assert.ok(inv.args.includes('--chrome'));
  const cancelled=await runPublishedWorker(inv,pass,{url:LINK,site:'MakerWorld'},{signal:AbortSignal.abort(),spawn:()=>{throw Error('spawned after cancellation');}});assert.equal(cancelled.status,'failed');
+});
+test('the production pass says when it had no browser to download with (a starter then asks for the files)',async t=>{
+ const f=await setup(t),downloads=join(f.root,'Downloads');await mkdir(downloads);
+ for(const chrome of [false,true]){
+  const got=await defaultRunPublished({root:join(f.root,`passes-${chrome}`),photos:[],request:'Print this',link:{url:LINK,site:'MakerWorld'},claudePath:'/c',startedAtMs:Date.now()},
+   {chrome:()=>chrome,downloads,spawn:spawnAnswer({status:'needs_file',summary:'Not signed in.'})});
+  assert.equal(got.status,'needs_file');assert.equal(got.browser,chrome);
+ }
 });
 test('old Downloads names require confirmation; escapes and symlinks never establish identity',async t=>{
  const f=await setup(t),downloads=join(f.root,'Downloads');await mkdir(downloads);const path=join(downloads,'caliper.3mf');await writeFile(path,model());const yesterday=new Date(Date.now()-86400000);await utimes(path,yesterday,yesterday);await symlink(path,join(downloads,'alias.3mf'));
