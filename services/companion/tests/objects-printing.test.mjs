@@ -1488,6 +1488,10 @@ test('an estimate that runs out of time, or whose MCP call never finishes, says 
   const f = await setup(t, {reports: [status('RUNNING', 10)], sliceArgs: true});
   slowEstimates(f);
   f.deps.estimateTimeoutMs = 50;
+  // AbortSignal.timeout's timer doesn't hold the event loop open (the running companion's server does); without this,
+  // Node 22's runner sees an empty loop and cancels the test before the timeout fires.
+  const hold = setInterval(() => {}, 1000);
+  t.after(() => clearInterval(hold));
   const timedOut = await f.service.estimate(f.object.id).then(() => undefined, error => error);
   assert.ok(timedOut instanceof InvalidStateError);
   assert.equal(timedOut.message, 'Slicing is taking longer than usual. Try again in a moment.');
