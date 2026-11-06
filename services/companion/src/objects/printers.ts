@@ -153,11 +153,19 @@ function publicAddress(value?: string): string | undefined {
  * OctoPrints behind one reverse proxy at different sub-paths (`https://pi.lan/printer-a/`, `…/printer-b/`) are two
  * printers (Codex review on #389).
  */
-function webIdentity(value?: string): string | undefined {
+function webIdentity(value: string | undefined, port: string): string | undefined {
   if (!value?.includes('://')) return undefined;
   try {
     const url = new URL(value);
-    return `${url.protocol}//${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, '')}`;
+    const path = url.pathname.replace(/\/+$/, '');
+    // A web address at the server's root is the same printer as its host and port (`http://pi.lan:5000/` is
+    // `pi.lan` on 5000): one key for both (Codex review on #389). The MCP adds PRINTER_PORT to a URL without one
+    // unless it is 80 or 443.
+    if (!path) {
+      const extra = !url.port && port && port !== '80' && port !== '443' ? `:${port}` : '';
+      return `host:${url.host.toLowerCase()}${extra}`;
+    }
+    return `url:${url.protocol}//${url.host.toLowerCase()}${path}`;
   } catch { return undefined; }
 }
 
@@ -176,10 +184,10 @@ async function metadata(config: PrinterHandoffConfig, envPath?: string) {
   // different generic API ports can represent distinct printers on one host.
   const port = config.selection?.port ?? text(env.PRINTER_PORT) ?? '';
   const hostKey = address?.toLowerCase();
-  const web = bambuKind ? undefined : webIdentity(host);
+  const web = bambuKind ? undefined : webIdentity(host, port);
   const keys = [
     ...(serial ? [`serial:${serial.toUpperCase()}`] : []),
-    ...(web ? [`url:${web}`] : hostKey ? [bambuKind ? `bambu-host:${hostKey.replace(/:\d+$/, '')}` : `host:${port && !/:\d+$/.test(hostKey) ? `${hostKey}:${port}` : hostKey}`] : []),
+    ...(web ? [web] : hostKey ? [bambuKind ? `bambu-host:${hostKey.replace(/:\d+$/, '')}` : `host:${port && !/:\d+$/.test(hostKey) ? `${hostKey}:${port}` : hostKey}`] : []),
   ];
   return {address, model: model && /^[a-zA-Z0-9 _.-]{1,64}$/.test(model) ? model.toLowerCase() : undefined,
     printerType: printerType.success ? printerType.data : undefined, keys, bambuKind, ...(serial ? {serial: serial.toUpperCase()} : {})};

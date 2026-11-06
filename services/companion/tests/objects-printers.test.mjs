@@ -58,6 +58,12 @@ test('two OctoPrints behind one reverse proxy at different sub-paths stay two pr
   const configured = catalog.destinations.filter(item => item.id !== 'current');
   assert.deepEqual(configured.map(item => item.name).sort(), ['Printer A', 'Printer B'], 'printer-b is its own printer; the two printer-a entries are one');
   assert.ok(configured.every(item => item.address === 'pi.lan'), 'shown by host, told apart by path');
+
+  // At the server's root, a web address is its host and port: the same printer as a host-and-port profile.
+  const plain = {command: process.execPath, args: ['/opt/mcp-3d-printer-server/dist/index.js'], env: {PRINTER_TYPE: 'octoprint', PRINTER_HOST: 'pi.lan', PRINTER_PORT: '5000', API_KEY: 'k'}};
+  const rooted = await f.put('mcp-root.json', {mcpServers: {'By port': plain, 'By URL': octo('http://pi.lan:5000/'), 'Other port': octo('http://pi.lan:5001')}});
+  const same = await loadPrinterCatalog(current, {...f.options([rooted]), placeholderEntryPoint: entry});
+  assert.deepEqual(same.destinations.filter(item => item.id !== 'current').map(item => item.name).sort(), ['By port', 'Other port']);
 });
 
 test('placeholder detection preserves customized local configurations and remote SSH printers', async t => {
