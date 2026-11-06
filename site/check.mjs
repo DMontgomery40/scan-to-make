@@ -10,10 +10,10 @@ const failures = [];
 // from the same address).
 const PUBLIC = /^https:\/\/(fonts\.(googleapis|gstatic)\.com(\/|$)|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|www\.npmjs\.com\/package\/(bambu-printer-mcp|mcp-3d-printer-server)$|github\.com\/DMontgomery40\/(bambu-printer-mcp|mcp-3D-printer-server|scan-to-make)$|makerworld\.com\/en\/models\/(1531561|198362-vernier-caliper-ruler-two-lengths#profileId-232006)$)/;
 const RELEASE_LINKS = new Set([
-  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-android.apk',
-  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-amd64.deb',
-  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.5-android-linux/Counterpart-linux-x86_64.AppImage',
-  'https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.5-android-linux',
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.6/Counterpart-android.apk',
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.6/Counterpart-linux-amd64.deb',
+  'https://github.com/DMontgomery40/scan-to-make/releases/download/v2.0-beta.6/Counterpart-linux-x86_64.AppImage',
+  'https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.6',
 ]);
 const fail = message => failures.push(message);
 const pages = readdirSync(root).filter(name => name.endsWith('.html'));
@@ -33,7 +33,7 @@ for (const page of pages) {
   if (/Scan to Make/.test(html)) fail(`${page}: still says Scan to Make`);
   for (const [, href] of html.matchAll(/href="([^"]+)"/g)) {
     if (/^(https?:|mailto:)/.test(href)) {
-      if (!/^https:\/\/(testflight\.apple\.com\/join\/S4tExVzp$|github\.com\/DMontgomery40\/scan-to-make\/(blob\/fbd1a69b\/deploy\/companion\/README\.md|releases\/download\/v2\.0-beta\.4\/ScanToMake-202611040930\.zip)|fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href) && !PUBLIC.test(href) && !RELEASE_LINKS.has(href)) fail(`${page}: outside link not on the public list: ${href}`);
+      if (!/^https:\/\/(testflight\.apple\.com\/join\/S4tExVzp$|github\.com\/DMontgomery40\/scan-to-make\/(blob\/30e3afdd\/deploy\/companion\/README\.md|releases\/download\/v2\.0-beta\.6\/Counterpart-202611061933\.zip)|fonts\.(googleapis|gstatic)\.com|dmontgomery40\.github\.io\/(bambu-printer-mcp|mcp-3D-printer-server)\/|makerworld\.com\/en\/models\/1531561)/.test(href) && !PUBLIC.test(href) && !RELEASE_LINKS.has(href)) fail(`${page}: outside link not on the public list: ${href}`);
       continue;
     }
     const [file, hash] = href.replace(/^\//, '').split('#');
