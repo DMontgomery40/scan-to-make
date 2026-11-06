@@ -41,6 +41,9 @@ import com.scantomake.counterpart.net.HttpReply
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonArray
+import com.scantomake.counterpart.api.CounterpartEvent
+import com.scantomake.counterpart.net.TransportException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -113,14 +116,18 @@ class HomeLayoutTests {
         compose.onNodeWithText("Vernier caliper with depth gauge").assertExists()
     }
 
-    @Test fun printerSoftwareShowsTheHiddenCopyAndExplicitMoveWithProjectsPresent() {
+    @Test fun printerSoftwareShowsTheHiddenCopyAndExplicitMoveWithProjectsPresent() = printerSoftwareMove(false)
+
+    @Test fun printerSoftwareShowsEventsEvenWhenTheMoveReplyIsLost() = printerSoftwareMove(true)
+
+    private fun printerSoftwareMove(lostReply: Boolean) {
         val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
         app.pairingStore.save(v2Record(), false)
         val transport = FakeTransport { request, _ ->
             when {
                 request.url.endsWith("/healthz") -> json(200, mapOf("status" to "ok", "capabilities" to mapOf("mcpCopies" to true, "mcpUpdates" to true)))
                 request.url.endsWith("/mcps") -> HttpReply(200, ("{\"packages\":[" + contractFixture("mcp-profile-copies.json").readText() + "]}").toByteArray())
-                request.url.endsWith("/update") -> HttpReply(200, contractFixture("mcp-update-waiting.json").readBytes())
+                request.url.endsWith("/update") -> if (lostReply) throw TransportException("network") else HttpReply(200, contractFixture("mcp-update-waiting.json").readBytes())
                 else -> json(404, mapOf("error" to "not-found"))
             }
         }
@@ -145,7 +152,19 @@ class HomeLayoutTests {
         compose.onNodeWithText("Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25).").assertExists()
         compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").assertExists()
         compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").performScrollTo().performClick()
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates after the current print or design finishes.")).fetchSemanticsNodes().isNotEmpty() }
+        if (lostReply) {
+            val error = "Your computer isn't answering. Check it's on and awake, then try again."
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText(error)).fetchSemanticsNodes().isNotEmpty() }
+            val events = WireJson.parseToJsonElement(contractFixture("mcp-copy-update-events.json").readText()).jsonArray
+                .map { requireNotNull(CounterpartEvent.decode(it.jsonObject)) }
+            for (event in events) {
+                compose.runOnIdle { state.mcpUpdateEvents.value = mapOf(requireNotNull(event.data?.mcpId) to event) }
+                compose.onNodeWithText(event.body).assertExists()
+                compose.onNodeWithText(error).assertDoesNotExist()
+            }
+        } else {
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates after the current print or design finishes.")).fetchSemanticsNodes().isNotEmpty() }
+        }
         val moves = transport.calls.filter { it.request.url.endsWith("/update") }
         org.junit.Assert.assertEquals(1, moves.size)
         org.junit.Assert.assertTrue(moves.single().request.url.endsWith("/mcp-0000000000000002/update"))
