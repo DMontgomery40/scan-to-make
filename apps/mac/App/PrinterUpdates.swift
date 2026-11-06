@@ -152,4 +152,8 @@ extension PrinterMcpPackage {
     /// Installed, and a newer version is published: a package no printer uses then offers Update, which installs
     /// the latest as Counterpart's own copy (`printers.updateMcp` with `appMcpId`, #320's path).
     var offersUpdate: Bool { installed && McpUpdateStatus.newer(installed: version, latest: latestVersion) }
+    /// The Update button's name outside its row (the rotor lists buttons alone).
+    func updateLabel(failed: Bool) -> String {
+        failed ? "Try updating \(label) again" : "Update \(label)" + (latestVersion.map { " to " + $0 } ?? "")
+    }
 }

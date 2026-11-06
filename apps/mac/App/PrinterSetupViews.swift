@@ -124,7 +124,7 @@ struct McpPackageRow: View {
                 // Only while busy: a finished install earlier in this session must not block the next version.
                 Button(failed ? "Try Again" : "Update", action:update)
                     .buttonStyle(.glassProminent).disabled(busy)
-                    .accessibilityLabel(Self.updateLabel(package, failed:failed))
+                    .accessibilityLabel(package.updateLabel(failed:failed))
                     .help("Installs \(package.latestVersion ?? "the latest version") as Counterpart’s own copy. Other copies on this Mac are left as they are.")
             }
         }
@@ -132,11 +132,6 @@ struct McpPackageRow: View {
         .accessibilityElement(children:.contain)
         .accessibilityLabel(package.label)
         .accessibilityIdentifier("mcp-row-" + package.package)
-    }
-
-    /// The Update button's name outside its row (the rotor lists buttons alone).
-    static func updateLabel(_ package: PrinterMcpPackage, failed: Bool) -> String {
-        failed ? "Try updating \(package.label) again" : "Update \(package.label)" + (package.latestVersion.map { " to " + $0 } ?? "")
     }
 
     private var failed: Bool { if case .failed = status { return true }; if case .problem = status { return true }; return false }

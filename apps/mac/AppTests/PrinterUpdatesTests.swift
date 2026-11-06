@@ -30,7 +30,7 @@ import XCTest
         for package in packages { XCTAssertEqual(package.moves.map(\.mcpId), (package.uses ?? []).filter(\.canMove).map(\.mcpId)) }
         let stale = try XCTUnwrap(packages.first?.uses?.first)
         XCTAssertTrue(stale.words.contains("older than Counterpart’s copy (1.1.69)"), stale.words)
-        XCTAssertEqual(McpPackageRow.updateLabel(packages[0], failed: false), "Update bambu-printer-mcp to 1.1.69")
+        XCTAssertEqual(packages[0].updateLabel(failed: false), "Update bambu-printer-mcp to 1.1.69")
     }
 
     /// A companion from before Nov 6 sends no `moves` or `words`: the Mac names the MCP and copy itself, still in listed order.
