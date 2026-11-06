@@ -580,6 +580,26 @@ final class LayoutParityUITests: XCTestCase {
         }
     }
 
+    /// Nov 5, caliper card 1f1c5515: "It shouldn't have changed a single thing about the physical print". A designer's
+    /// file opens its print sheet at Standard, saying it prints the designer's settings, on the iPhone and the iPad.
+    func testADesignersFilePrintsWithItsOwnSettings() {
+        let app = launch(set: "designer")
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))
+        let project = projectList(app).descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Caliper card copy")).firstMatch
+        XCTAssertTrue(project.waitForExistence(timeout: 10))
+        project.tap()
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10))
+        app.buttons["print"].tap()
+        let words = app.staticTexts["designer-settings"]
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
+        for _ in 0..<6 where !(words.exists && words.isHittable) { app.swipeUp() }
+        XCTAssertTrue(words.waitForExistence(timeout: 5), "the sheet says it prints the designer's settings")
+        XCTAssertEqual(words.label, "Prints with the designer’s settings saved in this file.")
+        XCTAssertTrue(app.segmentedControls.buttons["Standard"].firstMatch.isSelected, "never the saved Fine or Strong")
+        XCTAssertFalse(app.segmentedControls.buttons["Strong"].isSelected)
+        XCTAssertFalse(app.segmentedControls.buttons["Fine"].isSelected)
+    }
+
     func testEmptyProjectsOfferStartersAndBothJobs() {
         let app = launch(set: "empty")
         XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))

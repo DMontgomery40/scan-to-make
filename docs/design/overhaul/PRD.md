@@ -512,6 +512,7 @@ What a person can see and reach, checked in code on `main` Nov 5 (after this PR:
 | Archived | "Archived · N" on Home | "Archived · N" sidebar section | Archived sidebar group | "Archived · N" on Home | Archive view in the sidebar |
 | Project page | yes | yes, in the detail | yes, with the inspector | yes | yes, with the side panel |
 | Print sheet, What will print | yes (#321) | yes, the same sheet | yes (#321) | yes (#324) | yes (#324) |
+| Print sheet: a designer's 3MF prints with its own settings, and says so (#336) | † yes: starts at Standard, "Prints with the designer’s settings saved in this file." (`testADesignersFilePrintsWithItsOwnSettings`) | † the same sheet (the same test on the iPad) | † yes (`ObjectsModelTests`) | † yes (`HomeLayoutTests`) | † yes (`domain.test.ts`) |
 | Printers | the toolbar's printer button | the sidebar's printer button | sidebar Printers section; Settings → Printers | Home's printer icon; † Settings → Printers (before: the print sheet said "Settings → Printers", which didn't exist on Android) | Settings → Printers |
 | Settings, pairing | Settings sheet; Connect a Different Mac | the same | Settings; Add a Phone | Settings; Connect a Different Computer | Settings; Add a phone |
 | Help | Settings → Help: guide, scanning, the scan rig | the same | Help menu: Counterpart Help, the scan rig | † Settings → Help: the guide and the scan rig. **Before: none** | Settings → About → Open guide |

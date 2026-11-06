@@ -12,6 +12,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.hasText
 import com.scantomake.counterpart.api.CompanionClient
+import com.scantomake.counterpart.api.PrintQuality
+import com.scantomake.counterpart.api.PrintStrength
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.app.AppState
 import com.scantomake.counterpart.app.Counterpart
@@ -21,9 +23,12 @@ import com.scantomake.counterpart.pairing.PairingClient
 import com.scantomake.counterpart.pairing.PairingStore
 import com.scantomake.counterpart.ui.HomeScreen
 import com.scantomake.counterpart.ui.SettingsScreen
+import com.scantomake.counterpart.ui.designerSettingsWords
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -103,5 +108,18 @@ class HomeLayoutTests {
         compose.onNodeWithText("Print the Scan Rig by Kass 3D").assertExists()
         compose.onNodeWithText("Printers and Their MCPs").performClick()
         compose.runOnIdle { org.junit.Assert.assertEquals(1, printers) }
+    }
+
+    /** Nov 5, caliper card 1f1c5515: the print sheet says a designer's file prints with its own settings (PRD §6.1). */
+    @Test fun aDesignersFileSaysItPrintsWithItsOwnSettings() {
+        val designer = requireNotNull(Project.decode(WireJson.parseToJsonElement(
+            """{"id":"d","title":"Caliper card copy","state":"ready","createdAtMs":1,"updatedAtMs":2,
+               "current":{"model":"current/model.3mf","renders":[],"ownSettings":true,"ownSettingsFor":"current"}}"""
+        ).jsonObject))
+        assertEquals("Prints with the designer’s settings saved in this file.",
+            designerSettingsWords(designer, PrintQuality.Standard, PrintStrength.Standard))
+        assertEquals("Changes the designer’s settings saved in this file.",
+            designerSettingsWords(designer, PrintQuality.Fine, PrintStrength.Standard))
+        assertNull(designerSettingsWords(project("p", "Mic mount", "ready"), PrintQuality.Standard, PrintStrength.Standard))
     }
 }

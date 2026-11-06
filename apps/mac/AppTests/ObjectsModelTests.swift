@@ -572,6 +572,27 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.selection, "w", "the first row in the sidebar is shown first")
     }
 
+    /// Nov 5, caliper card 1f1c5515: "It shouldn't have changed a single thing about the physical print". The Mac's
+    /// print sheet starts a designer's file at Standard and says so, from the project the companion serves (PRD §6.1).
+    func testADesignersFilePrintsWithItsOwnSettings() async throws {
+        let companion = FakeObjects()
+        let designer: [String: Any] = ["model": "current/model.3mf", "renders": [], "ownSettings": true, "ownSettingsFor": "current"]
+        await companion.set([item("d", "ready", ["title": "Caliper card copy", "kind": "copy", "current": designer,
+                                                 "settings": ["printDefaults": ["quality": "fine", "strength": "strong"]]]),
+                             item("m", "ready", ["title": "Mic mount", "settings": ["printDefaults": ["quality": "fine", "strength": "strong"]]])])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let copy = try XCTUnwrap(model.objects.first { $0.id == "d" })
+        let start = PrintSettings(saved: copy.resolvedPrintDefaults(destinationId: "current"))
+        XCTAssertEqual(start.quality, .standard, "never the saved Fine")
+        XCTAssertEqual(start.strength, .standard, "never the saved Strong")
+        XCTAssertEqual(copy.designerSettingsWords(quality: start.quality.rawValue, strength: start.strength.rawValue),
+                       "Prints with the designer’s settings saved in this file.")
+        let other = try XCTUnwrap(model.objects.first { $0.id == "m" })
+        XCTAssertEqual(PrintSettings(saved: other.resolvedPrintDefaults(destinationId: "current")).strength, .strong, "any other file keeps its saved defaults")
+        XCTAssertNil(other.designerSettingsWords(quality: "standard", strength: "standard"))
+    }
+
     /// Nov 5: "caliper card" left in the search showed 1 of 10 projects and nothing said the rest were hidden.
     func testASearchSaysHowManyProjectsItHides() async {
         let companion = FakeObjects()

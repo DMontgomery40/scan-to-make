@@ -72,6 +72,12 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
+/** Under Quality and Strength for a designer's file (its printer's MCP says it carries its own settings, Nov 5). */
+fun designerSettingsWords(project: Project, quality: PrintQuality, strength: PrintStrength): String? =
+    if (project.current?.ownSettings != true) null
+    else if (quality == PrintQuality.Standard && strength == PrintStrength.Standard) "Prints with the designer’s settings saved in this file."
+    else "Changes the designer’s settings saved in this file."
+
 /** The print sheet (PRD §5.5): printer, quality, strength, filament, estimate, Print. */
 @Composable
 fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
@@ -177,9 +183,7 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                 Segmented(PrintStrength.entries.map { it.title }, PrintStrength.entries.indexOf(strength), enabled = !working) { strength = PrintStrength.entries[it] }
             }
             // A designer's file (its printer's MCP says it carries its own settings): Standard sends nothing (Nov 5).
-            if ((offersQuality || offersStrength) && project.current?.ownSettings == true) Text(
-                if (quality == PrintQuality.Standard && strength == PrintStrength.Standard) "Prints with the designer’s settings saved in this file."
-                else "Changes the designer’s settings saved in this file.", color = Palette.secondary, fontSize = 13.sp)
+            if (offersQuality || offersStrength) designerSettingsWords(project, quality, strength)?.let { Text(it, color = Palette.secondary, fontSize = 13.sp) }
             estimate?.ownSettingsUpdate?.let { Text(it, color = Palette.secondary, fontSize = 13.sp) }
             if (offersQuality || offersStrength) estimate?.let { e ->
                 // The slice's own settings, as the printer MCP reported them.
