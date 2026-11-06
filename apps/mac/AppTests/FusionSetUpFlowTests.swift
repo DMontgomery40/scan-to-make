@@ -51,26 +51,31 @@ final class FusionSetUpFlowTests: XCTestCase {
         XCTAssertFalse(statusAsked, "Fusion isn't asked until its setup finished")
     }
 
-    func testFusionsAnswerIsSaidPlainly() {
-        XCTAssertEqual(FusionSetup.Status.from(toolMissing: false, isError: false, text: #"{"connected":true,"configured":true}"#), .connected)
-        XCTAssertEqual(FusionSetup.Status.from(toolMissing: false, isError: false, text: #"{"configured":false}"#), .notConfigured)
-        XCTAssertEqual(FusionSetup.Status.from(toolMissing: true, isError: false, text: ""), .noBridge)
-        // faust-machines/fusion360-mcp-server#12
-        let twelve = FusionSetup.Status.from(toolMissing: false, isError: false,
-                                             text: #"{"connected":false,"error":"'NoneType' object has no attribute 'rootComponent': no active design"}"#)
+    /// The answer comes from `fusion_mcp_status`'s structured result through the companion (the same copy Settings →
+    /// Printers runs), never from its wording (Settings → Printers follow-up, Nov 6; PRD §8.0's boundary).
+    func testFusionsAnswerIsSaidPlainlyFromItsStructuredResult() {
+        func status(_ json: String?, error: String? = nil) -> FusionSetup.Status {
+            let value = json.flatMap { try? JSONDecoder().decode(JSONValue.self, from: Data($0.utf8)) }
+            return FusionSetup.Status.from(FusionStatusReply(status: value, server: "bambu-printer-mcp", error: error))
+        }
+        XCTAssertEqual(status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true,"activeDesign":true}"#), .connected)
+        XCTAssertEqual(status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true}"#), .connected, "an MCP from before activeDesign")
+        // faust-machines/fusion360-mcp-server#12: connected on Fusion's Home tab, no design open.
+        let twelve = status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true,"activeDesign":false}"#)
         XCTAssertEqual(twelve, .needsDesign)
         XCTAssertEqual(twelve.words, "Open a design in Fusion first (File → New Design), then press Set Up Again.")
-        XCTAssertEqual(FusionSetup.Status.from(toolMissing: false, isError: false, text: #"{"connected":false,"error":"timed out after 90 s"}"#),
-                       .notConnected("timed out after 90 s"))
-        XCTAssertEqual(FusionSetup.Status.from(toolMissing: false, isError: true, text: "spawn uvx ENOENT"), .unreachable("spawn uvx ENOENT"))
-        XCTAssertFalse(FusionSetup.Status.needsDesign.words.lowercased().contains("level"))
+        XCTAssertEqual(status(#"{"configured":false,"connected":false,"addinReachable":false,"fusionRunning":false}"#), .notConfigured)
         // Fusion open from before Set Up: running, but the add-in isn't on the new port.
-        XCTAssertEqual(FusionSetup.Status.from(toolMissing: false, isError: false,
-                                               text: #"{"configured":true,"connected":false,"addinReachable":false,"fusionRunning":true}"#), .reopenFusion)
-        // Connected on the Home tab: the parameters read says no design is open (#12).
-        let connected = MCPCall.Reply(isError: false, text: #"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true}"#)
-        XCTAssertEqual(FusionSetup.Status.from(status: connected, design: MCPCall.Reply(isError: true, text: "Error: NO_ACTIVE_DESIGN")), .needsDesign)
-        XCTAssertEqual(FusionSetup.Status.from(status: connected, design: MCPCall.Reply(isError: false, text: #"{"count":0}"#)), .connected)
+        XCTAssertEqual(status(#"{"configured":true,"connected":false,"addinReachable":false,"fusionRunning":true}"#), .reopenFusion)
+        XCTAssertEqual(status(#"{"configured":true,"connected":false,"addinReachable":true,"fusionRunning":true,"error":"timed out after 90 s"}"#),
+                       .notConnected("timed out after 90 s"))
+        // Wording is shown, never matched: an error that mentions a design or port 9876 is still just Fusion not connecting.
+        XCTAssertEqual(status(#"{"configured":true,"connected":false,"addinReachable":true,"fusionRunning":true,"error":"no active design; 9876 refused while running"}"#),
+                       .notConnected("no active design; 9876 refused while running"))
+        XCTAssertEqual(status(nil), .noBridge(server: "bambu-printer-mcp"))
+        XCTAssertTrue(FusionSetup.Status.noBridge(server: "mcp-3d-printer-server").words.contains("Update it in Settings → Printers"))
+        XCTAssertEqual(status(nil, error: "spawn uvx ENOENT"), .unreachable("spawn uvx ENOENT"))
+        XCTAssertFalse(FusionSetup.Status.needsDesign.words.lowercased().contains("level"))
     }
 
     /// A fake printer MCP on stdio, answering in order; its reply to the tool call is `FAKE_REPLY`.
@@ -141,35 +146,5 @@ final class FusionSetUpFlowTests: XCTestCase {
         XCTAssertEqual(call.env["PATH"], "\(node.deletingLastPathComponent().path):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
         let ssh = MCPCall.appOwned(command: "/usr/bin/ssh", args: ["me@127.0.0.1"], cwd: nil, env: [:], bundledNode: node)
         XCTAssertEqual(ssh.command, "/usr/bin/ssh")
-    }
-
-    /// The pinned add-in's ping reply is `{"status":"success","result":{"ok":true,"status":"pong"}}`: a listening add-in
-    /// counts as answering, so Set Up never tells David to reopen a Fusion that is fine.
-    func testTheAddinsOwnPingDecidesBetweenReopenAndUpdate() async throws {
-        let listener = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        var address = sockaddr_in()
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_addr.s_addr = inet_addr("127.0.0.1")
-        address.sin_port = 0
-        _ = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
-        XCTAssertEqual(Darwin.listen(listener, 1), 0)
-        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(listener, $0, &length) } }
-        let port = UInt16(bigEndian: address.sin_port)
-        Thread.detachNewThread {
-            let client = Darwin.accept(listener, nil, nil)
-            var buffer = [UInt8](repeating: 0, count: 256)
-            _ = recv(client, &buffer, buffer.count, 0)
-            let reply = Array("{\"status\": \"success\", \"result\": {\"ok\": true, \"status\": \"pong\"}}\n".utf8)
-            _ = reply.withUnsafeBufferPointer { send(client, $0.baseAddress, reply.count, 0) }
-            Darwin.close(client)
-        }
-        let answers = await FusionSetup.addinAnswers(port: port)
-        Darwin.close(listener)
-        XCTAssertTrue(answers)
-        let closed = await FusionSetup.addinAnswers(port: port)
-        XCTAssertFalse(closed, "nothing listening: reopen Fusion")
-        XCTAssertTrue(FusionSetup.Status.bridgeOutdated(server: "mcp-3d-printer-server").words.contains("Update mcp-3d-printer-server"),
-                      "the printer MCP actually configured, either one")
     }
 }

@@ -51,6 +51,8 @@ export interface ControlServices {
   blenderAddon?: import('./touchup/addon-repair.js').BlenderAddonRepair;
   /** fusion_mcp_setup on the printer MCP as the companion runs it (with its Update override): the Mac's Fusion Set Up. */
   fusionSetup?: (install: boolean) => Promise<{setup: Record<string, unknown> | null; server: string; error?: string}>;
+  /** fusion_mcp_status {launch: true} on the same printer MCP, its structured result as the MCP gives it (null without the tool). */
+  fusionStatus?: () => Promise<{status: Record<string, unknown> | null; server: string; error?: string}>;
   mcpUpdates?: import('./printing/mcp-updates.js').McpUpdater;
   /** Settings → Printers: both MCPs (Download), finding and adding printers. Present without a printer. */
   printerSetup?: import('./printing/setup.js').PrinterSetup;
@@ -253,6 +255,11 @@ export function createControlDispatcher(services: ControlServices) {
         case 'fusion.setup': {
           if (!services.fusionSetup) throw new ControlFailure('unavailable');
           return await services.fusionSetup(parameters[method].parse(raw).install);
+        }
+        case 'fusion.status': {
+          if (!services.fusionStatus) throw new ControlFailure('unavailable');
+          parameters[method].parse(raw);
+          return await services.fusionStatus();
         }
         case 'fusion.report': case 'fusion.claimSetup': case 'fusion.setupDone': {
           if (!services.runtimeSettings) throw new ControlFailure('unavailable');

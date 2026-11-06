@@ -157,6 +157,37 @@ test('fusion.setup asks the printer MCP the companion runs, and passes its answe
   await assert.rejects(createControlDispatcher({auth:{},companionVersion:'test'})('fusion.setup',{install:false}),{code:'unavailable'});
 });
 
+test('fusion.status asks the printer MCP as the companion runs it (with its Move override), and passes its structured result as it is',async t=>{
+  const {createControlDispatcher}=await import('../dist/local-control-services.js');
+  const {fusionCalls}=await import('../dist/fusion-calls.js');
+  const {McpOverrides}=await import('../dist/printing/mcp-updates.js');
+  const {mkdtemp,rm}=await import('node:fs/promises');
+  const {tmpdir}=await import('node:os');
+  const {join}=await import('node:path');
+  const root=await mkdtemp(join(tmpdir(),'fusion-status-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  // printer-handoff.json's own route is ssh to an older copy; the Move left an override to Counterpart's copy (Nov 6).
+  const profile={backend:'bambu-printer-mcp',process:{command:'/usr/bin/ssh',args:['-i','/k','me@127.0.0.1']}};
+  const overrides=new McpOverrides(join(root,'overrides.json'));await overrides.load();
+  await overrides.set('current',{command:'/node',args:['/app/printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js']},profile);
+  const started=[],calls=[];let tools=['fusion_mcp_status','fusion_mcp_setup'],reply={structuredContent:{configured:true,connected:true,addinReachable:true,fusionRunning:true,activeDesign:false,tools:[]},content:[{type:'text',text:'{}'}]};
+  const client=config=>({connect:async()=>{started.push(config.process);},hasTool:name=>tools.includes(name),
+    callTool:async(name,args)=>{calls.push([name,args]);return reply;},close:async()=>{}});
+  const {fusionSetup,fusionStatus}=fusionCalls(()=>overrides.apply(profile,overrides.peek('current',profile)),client);
+  const dispatch=createControlDispatcher({auth:{},companionVersion:'test',fusionSetup,fusionStatus});
+  const answer=await dispatch('fusion.status',{});
+  assert.deepEqual([started[0].command,started[0].args],['/node',['/app/printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js']],'never the ssh route');
+  assert.deepEqual(calls[0],['fusion_mcp_status',{launch:true,timeout_ms:90_000}]);
+  assert.deepEqual(answer,{status:reply.structuredContent,server:'bambu-printer-mcp'});
+  await dispatch('fusion.setup',{install:false});
+  assert.equal(started[1].command,'/node','Set Up and its check run the same copy');
+  reply={isError:true,content:[{type:'text',text:'Fusion MCP timed out during connect.'}]};
+  assert.deepEqual(await dispatch('fusion.status',{}),{status:null,server:'bambu-printer-mcp',error:'Fusion MCP timed out during connect.'});
+  tools=[];
+  assert.deepEqual(await dispatch('fusion.status',{}),{status:null,server:'bambu-printer-mcp'},'an MCP without the tool: the Mac says Update it');
+  await assert.rejects(dispatch('fusion.status',{launch:false}),'nothing is passed through');
+  await assert.rejects(createControlDispatcher({auth:{},companionVersion:'test'})('fusion.status',{}),{code:'unavailable'});
+});
+
 test('a lost Fusion claim reply can be replayed only by the same claimant until expiry',async t=>{
   const {service,advance}=await fixture(t);
   const owner=randomUUID(),other=randomUUID();

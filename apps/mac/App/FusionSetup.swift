@@ -52,15 +52,6 @@ enum FusionSetup {
         }
     }
 
-    /// The printer MCP the companion uses (printer-handoff.json's process), started fresh so it reads its current settings.
-    static func printerMCP(state: URL) -> MCPCall? {
-        guard let data = try? Data(contentsOf: state.appendingPathComponent("printer-handoff.json")),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let process = json["process"] as? [String: Any],
-              let command = process["command"] as? String else { return nil }
-        return MCPCall.appOwned(command: command, args: process["args"] as? [String] ?? [], cwd: process["cwd"] as? String,
-                                env: process["env"] as? [String: String] ?? [:])
-    }
-
     /// Where Set Up goes. Tests swap in a fake printer MCP and a fake Fusion.
     struct Steps {
         /// `fusion_mcp_setup` (`install` installs what is missing); nil when the MCP has no such tool.
@@ -72,7 +63,7 @@ enum FusionSetup {
         static func live(state: URL, socket: String) -> Steps {
             Steps(setup: { install in
                 return try reply(from: try await ControlClient(socketPath: socket, timeout: install ? 330 : 100).fusionSetup(install: install))
-            }, status: { await FusionSetup.checkStatus(state: state) })
+            }, status: { await FusionSetup.checkStatus(socket: socket) })
         }
 
         /// The companion's answer as the MCP's reply; an MCP without the tool is named in the update message.
@@ -141,19 +132,17 @@ enum FusionSetup {
 
     // MARK: Is it working?
 
-    /// What `fusion_mcp_status {launch: true}` said, in plain words for Settings.
+    /// What `fusion_mcp_status {launch: true}` said, in plain words for Settings. Read from its structured result only
+    /// (`configured`, `connected`, `addinReachable`, `fusionRunning`, `activeDesign`); its error text is shown, never matched.
     enum Status: Equatable {
         case connected
-        /// faust-machines/fusion360-mcp-server#12: Fusion answers only with a design open.
+        /// faust-machines/fusion360-mcp-server#12: Fusion answers only with a design open (`activeDesign: false`).
         case needsDesign
         /// Fusion was already open before Set Up, so it listens on the old port until it is opened again.
         case reopenFusion
-        /// The add-in answers on its port, but the printer MCP doesn't recognise its reply (bambu-printer-mcp 1.1.49
-        /// expects `result.pong`; the pinned add-in says `result.status: "pong"`).
-        case bridgeOutdated(server: String)
         case notConfigured
-        /// The printer MCP has no Fusion bridge (older than bambu-printer-mcp 1.1.4x).
-        case noBridge
+        /// The printer MCP has no Fusion bridge (no `fusion_mcp_status`): `server` is the MCP to update.
+        case noBridge(server: String)
         case notConnected(String)
         case unreachable(String)
 
@@ -163,7 +152,6 @@ enum FusionSetup {
             switch self {
             case .connected: return nil
             case .needsDesign, .reopenFusion, .notConfigured, .noBridge: return words
-            case .bridgeOutdated: return "Update your printer MCP on the Mac, then try Fusion setup again."
             case .notConnected, .unreachable: return "Fusion did not connect. Check Counterpart on your Mac, then try again."
             }
         }
@@ -172,97 +160,38 @@ enum FusionSetup {
             case .connected: return "Fusion is connected. New designs use it while it's running."
             case .needsDesign: return "Open a design in Fusion first (File → New Design), then press Set Up Again."
             case .reopenFusion: return "Quit Fusion and open it again, so it picks up the new settings. Then press Set Up Again."
-            case .bridgeOutdated(let server):
-                return "Fusion's add-in is answering, but \(server) doesn't recognise it yet. Update \(server), then press Set Up Again."
             case .notConfigured: return "Your printer MCP doesn't see the Fusion settings yet. Press Set Up Again."
-            case .noBridge: return "Your printer MCP can't talk to Fusion. Update it in Settings → Printers, then press Set Up Again."
+            case .noBridge(let server): return "\(server) can't talk to Fusion. Update it in Settings → Printers, then press Set Up Again."
             case .notConnected(let reason): return reason.isEmpty ? "Fusion didn't connect." : "Fusion didn't connect: \(reason)"
             case .unreachable(let reason): return "Counterpart couldn't ask your printer MCP about Fusion: \(reason)"
             }
         }
 
-        /// The status reply, then the design check when there was one.
-        static func from(status: MCPCall.Reply?, design: MCPCall.Reply?) -> Status {
-            let first = from(toolMissing: status == nil, isError: status?.isError ?? false, text: status?.text ?? "")
-            guard first == .connected, let design, design.isError else { return first }
-            let lower = design.text.lowercased()
-            return lower.contains("no_active_design") || lower.contains("no active design") || lower.contains("no open design") ? .needsDesign : first
+        /// From `fusion.status`: the companion's call of `fusion_mcp_status` on the printer MCP as it runs it.
+        static func from(_ reply: FusionStatusReply) -> Status {
+            guard case .object(let value)? = reply.status else {
+                if let error = reply.error { return .unreachable(short(error)) }
+                return .noBridge(server: reply.server)
+            }
+            let flag = { (key: String) -> Bool? in if case .bool(let on)? = value[key] { return on }; return nil }
+            if flag("configured") == false { return .notConfigured }
+            // An MCP from before `activeDesign` says nothing about the design: connected is all it knows.
+            if flag("connected") == true { return flag("activeDesign") == false ? .needsDesign : .connected }
+            if flag("fusionRunning") == true, flag("addinReachable") == false { return .reopenFusion }
+            if case .string(let error)? = value["error"] { return .notConnected(short(error)) }
+            return .notConnected("")
         }
-
-        /// From the tool's reply (`{configured, connected, addinReachable, fusionRunning, error}`), or its error text.
-        static func from(toolMissing: Bool, isError: Bool, text: String) -> Status {
-            if toolMissing { return .noBridge }
-            let value = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
-            let error = (value?["error"] as? String ?? (isError ? text : "")).trimmingCharacters(in: .whitespacesAndNewlines)
-            let lower = error.lowercased()
-            if !isError, value?["configured"] as? Bool == false { return .notConfigured }
-            if !isError, value?["connected"] as? Bool == true { return .connected }
-            // Fusion was open before Set Up: it runs, but without the add-in on the new port until it is opened again.
-            if !isError, value?["fusionRunning"] as? Bool == true, value?["addinReachable"] as? Bool == false { return .reopenFusion }
-            if lower.contains("no_active_design") || lower.contains("no open design")
-                || lower.contains("design") && (lower.contains("no active") || lower.contains("none open") || lower.contains("open a design")
-                                            || lower.contains("activeproduct") || lower.contains("nonetype")) { return .needsDesign }
-            if lower.contains("9876") || (lower.contains("refused") && lower.contains("running")) { return .reopenFusion }
-            let short = error.count > 200 ? String(error.prefix(199)) + "…" : error
-            return isError ? .unreachable(short) : .notConnected(short)
+        private static func short(_ text: String) -> String {
+            let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.count > 200 ? String(text.prefix(199)) + "…" : text
         }
     }
 
-    /// Starts the printer MCP the companion uses (printer-handoff.json's process, fresh, so it reads the new settings)
-    /// and asks it once.
-    static func checkStatus(state: URL) async -> Status {
-        guard let call = printerMCP(state: state) else { return .unreachable("there's no printer MCP set up in Counterpart yet.") }
-        do {
-            // Connected on Fusion's Home tab still can't make the first design (#12): a read of the open design's
-            // parameters, which changes nothing, says whether one is open.
-            let (reply, design) = try await call.callTool("fusion_mcp_status", arguments: ["launch": true, "timeout_ms": 90_000], timeout: 150) { reply in
-                Status.from(toolMissing: false, isError: reply.isError, text: reply.text) == .connected
-                    ? ("fusion_mcp_call", ["tool_name": "get_parameters", "arguments": [String: Any](), "timeout_ms": 20_000]) : nil
-            }
-            let status = Status.from(status: reply, design: design)
-            // "Reopen Fusion" only when the add-in really doesn't answer on its port.
-            if status == .reopenFusion, await addinAnswers(port: UInt16(port) ?? 9877) {
-                return .bridgeOutdated(server: reply?.server ?? "your printer MCP")
-            }
-            return status
-        } catch {
-            return .unreachable(error.localizedDescription)
-        }
-    }
-}
-
-extension FusionSetup {
-    /// Whether the Fusion360MCP add-in answers a ping on this Mac (`{"type":"ping"}`, a success reply within 2 s).
-    static func addinAnswers(port: UInt16, timeout: Int = 2) async -> Bool {
-        await Task.detached { () -> Bool in
-            let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-            guard socket >= 0 else { return false }
-            defer { close(socket) }
-            // A listener that hangs up must fail the probe, not raise SIGPIPE in the app.
-            var on: Int32 = 1
-            setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-            var time = timeval(tv_sec: timeout, tv_usec: 0)
-            setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
-            setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, &time, socklen_t(MemoryLayout<timeval>.size))
-            var address = sockaddr_in()
-            address.sin_family = sa_family_t(AF_INET)
-            address.sin_port = in_port_t(port).bigEndian
-            address.sin_addr.s_addr = inet_addr("127.0.0.1")
-            let connected = withUnsafePointer(to: &address) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(socket, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
-            }
-            guard connected == 0 else { return false }
-            let ping = Array("{\"type\":\"ping\",\"params\":{}}\n".utf8)
-            guard ping.withUnsafeBufferPointer({ send(socket, $0.baseAddress, ping.count, 0) }) == ping.count else { return false }
-            var reply = Data(), buffer = [UInt8](repeating: 0, count: 4096)
-            while !reply.contains(0x0A), reply.count < 65_536 {
-                let read = recv(socket, &buffer, buffer.count, 0)
-                guard read > 0 else { break }
-                reply.append(contentsOf: buffer[0..<read])
-            }
-            let line = reply.split(separator: 0x0A).first.map { Data($0) } ?? reply
-            return ((try? JSONSerialization.jsonObject(with: line)) as? [String: Any])?["status"] as? String == "success"
-        }.value
+    /// Asks the companion, which calls `fusion_mcp_status {launch: true}` on the printer MCP as it runs it (with its
+    /// Update or Move override), never printer-handoff.json's own route.
+    static func checkStatus(socket: String) async -> Status {
+        do { return Status.from(try await ControlClient(socketPath: socket, timeout: 160).fusionStatus()) }
+        catch { return .unreachable(error.localizedDescription) }
     }
 }
 
