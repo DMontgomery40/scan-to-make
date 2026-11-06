@@ -789,7 +789,13 @@ public struct PrinterSetupOptions: Decodable, Sendable, Equatable {
         /// It needs a serial number and a model (Bambu Lab).
         public let serial: Bool
         public let secret: Secret?
+        /// The address field in the MCP's words; `url` when it also takes a web address (https://…, a sub-path).
+        public let address: Address?
         public var id: String { printerType }
+    }
+    public struct Address: Decodable, Sendable, Equatable {
+        public let hint: String?
+        public let url: Bool?
     }
     public struct Model: Decodable, Sendable, Equatable, Identifiable {
         public let value: String
@@ -860,6 +866,17 @@ public struct SlicerControls: Sendable, Equatable {
     public func selected(in form: PrinterForm) -> String { form.slicer ?? slicer.type }
     /// The MCP's own slicer sends nothing, so only a change is sent (and SLICER_TYPE agrees with SLICER_PATH).
     public func choose(_ value: String, in form: inout PrinterForm) { form.slicer = value == slicer.type ? nil : value }
+}
+
+/// Add printer…'s address field: the MCP's hint, and a prompt that offers a web address only where the MCP takes one.
+public struct AddressField: Sendable, Equatable {
+    public let hint: String?
+    public let prompt: String
+    public init(options: PrinterSetupOptions?, printerType: String) {
+        let address = options?.types.first { $0.printerType == printerType }?.address
+        hint = address?.hint
+        prompt = address?.url == true ? "192.168.1.20, printer.local or https://…" : "192.168.1.20 or printer.local"
+    }
 }
 
 /// Add printer…'s button that fetches the key or access code through the chosen MCP, when its field declares one

@@ -19,6 +19,7 @@ import {
   slicerControls,
   obtainControl,
   obtainValue,
+  addressField,
   canSelectPlate,
   printNeedsCheck,
 } from "../src/domain.ts";
@@ -487,4 +488,21 @@ test("Add a printer offers the MCP's own approval button for its key, and the ap
   await obtainValue(async <T,>() => { asked++; return { session: "s2", status: "pending", message: "Click Allow." } as T; },
     { backend: "mcp-3d-printer-server", printerType: "octoprint", host: "octopi.local" }, () => {}, () => asked >= 1);
   assert.equal(asked, 1);
+});
+
+test("Add a printer's address offers a web address only where the MCP's field takes one (mcp-3d-printer-server 1.2.55)", () => {
+  const options = {
+    types: [
+      { printerType: "octoprint", label: "OctoPrint", backends: ["mcp-3d-printer-server"], serial: false,
+        address: { hint: "OctoPrint's address (octopi.local or an IP address), or its full URL for HTTPS or a sub-path", url: true } },
+      { printerType: "klipper", label: "Klipper (Moonraker)", backends: ["mcp-3d-printer-server"], serial: false,
+        address: { hint: "The printer's IP address or host name" } },
+    ],
+    models: {},
+  };
+  assert.match(addressField(options, "octoprint").placeholder, /https:/);
+  assert.match(addressField(options, "octoprint").hint!, /sub-path/);
+  assert.doesNotMatch(addressField(options, "klipper").placeholder, /https:/);
+  assert.equal(addressField(options, "klipper").hint, "The printer's IP address or host name");
+  assert.doesNotMatch(addressField(undefined, "octoprint").placeholder, /https:/);
 });

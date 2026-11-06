@@ -148,6 +148,21 @@ function publicAddress(value?: string): string | undefined {
   return /^[A-Za-z0-9._:[\]-]+$/.test(value) ? value : undefined;
 }
 
+/**
+ * A web address's identity: exactly what is configured, normalized only as a URL is (scheme, lowercased host with
+ * its own port, path without a trailing slash), plus PRINTER_PORT as written. Two OctoPrints behind one reverse proxy
+ * at different sub-paths, or on different ports, stay two printers (Codex review on #389). How the MCP turns these
+ * into an endpoint (default ports, which port wins) is the MCP's rule and is not repeated here (AGENTS.md), so one
+ * printer configured in two spellings may be listed twice: a duplicate, never one printer standing in for another.
+ */
+function webIdentity(value: string | undefined, port: string): string | undefined {
+  if (!value?.includes('://')) return undefined;
+  try {
+    const url = new URL(value);
+    return `url:${url.protocol}//${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, '')}${port ? `|${port}` : ''}`;
+  } catch { return undefined; }
+}
+
 async function metadata(config: PrinterHandoffConfig, envPath?: string) {
   const env = {...await environment(envPath ?? (config.process.cwd ? join(config.process.cwd, '.env') : undefined)), ...config.process.env};
   const bambu = config.backend === 'bambu-printer-mcp';
@@ -163,9 +178,10 @@ async function metadata(config: PrinterHandoffConfig, envPath?: string) {
   // different generic API ports can represent distinct printers on one host.
   const port = config.selection?.port ?? text(env.PRINTER_PORT) ?? '';
   const hostKey = address?.toLowerCase();
+  const web = bambuKind ? undefined : webIdentity(host, port);
   const keys = [
     ...(serial ? [`serial:${serial.toUpperCase()}`] : []),
-    ...(hostKey ? [bambuKind ? `bambu-host:${hostKey.replace(/:\d+$/, '')}` : `host:${port && !/:\d+$/.test(hostKey) ? `${hostKey}:${port}` : hostKey}`] : []),
+    ...(web ? [web] : hostKey ? [bambuKind ? `bambu-host:${hostKey.replace(/:\d+$/, '')}` : `host:${port && !/:\d+$/.test(hostKey) ? `${hostKey}:${port}` : hostKey}`] : []),
   ];
   return {address, model: model && /^[a-zA-Z0-9 _.-]{1,64}$/.test(model) ? model.toLowerCase() : undefined,
     printerType: printerType.success ? printerType.data : undefined, keys, bambuKind, ...(serial ? {serial: serial.toUpperCase()} : {})};

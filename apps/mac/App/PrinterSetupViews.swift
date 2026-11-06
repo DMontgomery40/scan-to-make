@@ -329,7 +329,11 @@ struct AddPrinterSheet: View {
                     ForEach(models) { Text($0.label).tag($0.value) }
                 }
             }
-            TextField("Address", text:$form.host, prompt:Text("192.168.1.20 or printer.local"))
+            let address = AddressField(options:options, printerType:form.printerType)
+            VStack(alignment:.leading, spacing:4) {
+                TextField("Address", text:$form.host, prompt:Text(address.prompt))
+                if let hint = address.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
+            }
             if form.printerType != "bambu" {
                 TextField("Port (optional)", text:Binding(get: { form.port ?? "" }, set: { form.port = $0.isEmpty ? nil : $0 }), prompt:Text("Default"))
             }

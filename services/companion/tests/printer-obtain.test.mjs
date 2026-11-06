@@ -1,5 +1,5 @@
 // Add printer…'s "Approve in OctoPrint": a form field the MCP can fetch for the person (`obtain` on its setup field,
-// mcp-3d-printer-server 1.2.51+). The fixture is mcp-3d-printer-server 1.2.53's own counterpart_setup_fields answer.
+// mcp-3d-printer-server 1.2.51+). The fixture is mcp-3d-printer-server 1.2.55's own counterpart_setup_fields answer.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
@@ -7,7 +7,7 @@ import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 
-const FIELDS = JSON.parse(readFileSync(new URL('./fixtures/setup-fields-mcp-3d-printer-server-1.2.53.json', import.meta.url), 'utf8'));
+const FIELDS = JSON.parse(readFileSync(new URL('./fixtures/setup-fields-mcp-3d-printer-server-1.2.55.json', import.meta.url), 'utf8'));
 const text = value => ({content: [{type: 'text', text: JSON.stringify(value)}], structuredContent: value});
 
 async function fixture(t, answers) {
@@ -87,7 +87,7 @@ test('printers.obtain: another printer\'s session, a field without obtain, a den
   assert.equal((await setup.obtain(ObtainRequestSchema.parse({...form, host: 'other.local', session: first.session}))).status, 'failed', 'a session is for its own printer');
   assert.deepEqual(await setup.obtain(ObtainRequestSchema.parse({...form, session: first.session})), {status: 'failed', message: 'OctoPrint said no.'});
   await assert.rejects(setup.obtain(ObtainRequestSchema.parse({...form, printerType: 'klipper'})), /can’t fetch that/);
-  assert.throws(() => ObtainRequestSchema.parse({...form, host: 'https://octopi.local'}), 'a host is checked as the form checks it');
+  assert.throws(() => ObtainRequestSchema.parse({...form, host: 'https://user:pw@octopi.local'}), 'a host is checked as the form checks it');
 });
 
 test('printers.obtain: an abandoned approval never blocks a new one (Codex review on #386)', async t => {

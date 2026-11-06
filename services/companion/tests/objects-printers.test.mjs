@@ -46,6 +46,27 @@ test('the first configured printer becomes default instead of the empty host ins
   assert.equal(catalog.defaultDestinationId, catalog.destinations[0].id);
 });
 
+test('two OctoPrints behind one reverse proxy at different sub-paths stay two printers; the same address is one (Codex review on #389)', async t => {
+  const f = await fixture(t);
+  const entry = join(f.home, 'printers/generic/lib/node_modules/mcp-3d-printer-server/dist/index.js');
+  const current = {backend: 'mcp-3d-printer-server', process: {command: process.execPath, args: [entry]}};
+  const octo = (host) => ({command: process.execPath, args: ['/opt/mcp-3d-printer-server/dist/index.js'], env: {PRINTER_TYPE: 'octoprint', PRINTER_HOST: host, API_KEY: 'k'}});
+  const source = await f.put('mcp.json', {mcpServers: {
+    'Printer A': octo('https://pi.lan/printer-a/'), 'Printer B': octo('https://pi.lan/printer-b'), 'Printer A again': octo('https://PI.lan/printer-a'),
+  }});
+  const catalog = await loadPrinterCatalog(current, {...f.options([source]), placeholderEntryPoint: entry});
+  const configured = catalog.destinations.filter(item => item.id !== 'current');
+  assert.deepEqual(configured.map(item => item.name).sort(), ['Printer A', 'Printer B'], 'printer-b is its own printer; the two printer-a entries are one');
+  assert.ok(configured.every(item => item.address === 'pi.lan'), 'shown by host, told apart by path');
+
+  // The configured PRINTER_PORT is part of a web address's identity as written: two ports are two printers. The MCP's
+  // own port rules (defaults, which one wins) aren't repeated in the app, so differently spelled addresses aren't merged.
+  const withPort = (port) => ({...octo('http://pi.lan/octoprint'), env: {...octo('http://pi.lan/octoprint').env, PRINTER_PORT: port}});
+  const ported = await f.put('mcp-ports.json', {mcpServers: {'On 5000': withPort('5000'), 'On 5001': withPort('5001'), 'On 5000 again': withPort('5000')}});
+  const ports = await loadPrinterCatalog(current, {...f.options([ported]), placeholderEntryPoint: entry});
+  assert.deepEqual(ports.destinations.filter(item => item.id !== 'current').map(item => item.name).sort(), ['On 5000', 'On 5001']);
+});
+
 test('placeholder detection preserves customized local configurations and remote SSH printers', async t => {
   const f = await fixture(t);
   const entry = join(f.home, 'printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js');
@@ -439,7 +460,11 @@ test('Add printer: found MCP folders and the printers each MCP finds; Check; Add
   await assert.rejects(setup.check(PrinterFormSchema.parse({...form, printerType: 'makerbot'})), /doesn’t drive that kind of printer/);
   await assert.rejects(setup.check(PrinterFormSchema.parse({...a1, model: 'x2d'})), /doesn’t know that model/);
   await assert.rejects(setup.add(PrinterFormSchema.parse({...a1, slicer: 'cura-classic'})), /doesn’t use that slicer/);
-  assert.equal(PrinterFormSchema.safeParse({...form, host: 'http://evil/x'}).success, false);
+  // A web address only where the MCP's own host field takes one (`input: "url"`; this MCP version declares none), and
+  // never with credentials, a query or a second line.
+  await assert.rejects(setup.check(PrinterFormSchema.parse({...form, host: 'http://evil/x'})), /without http:\/\/ or a path/);
+  for (const host of ['http://user:pw@evil/x', 'http://evil/x?PRINTER_HOST=y', 'http://evil/x\nPRINTER_HOST=evil', "http://evil/x'"])
+    assert.equal(PrinterFormSchema.safeParse({...form, host}).success, false, host);
   assert.equal(PrinterFormSchema.safeParse({...form, secret: "a'\nPRINTER_HOST=evil"}).success, false);
   const bambuKind = SETUP_FIELDS['mcp-3d-printer-server'].kinds.find(kind => kind.kind === 'bambu'), slicer = SETUP_FIELDS['mcp-3d-printer-server'].slicer;
   assert.deepEqual(envFor(PrinterFormSchema.parse({backend: 'mcp-3d-printer-server', printerType: 'bambu', host: '192.0.2.9', serial: '03900a000000001', model: 'a1', secret: '87654321'}), bambuKind, slicer),
