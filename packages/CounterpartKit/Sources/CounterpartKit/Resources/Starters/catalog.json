@@ -15,7 +15,8 @@
     "detail": "6 plates · assembly required",
     "source": "makerworld",
     "files": 1,
-    "plates": 6
+    "plates": 6,
+    "sha256": ["483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219"]
   },
   {
     "id": "long-vernier-caliper",

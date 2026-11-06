@@ -2480,7 +2480,16 @@ export class ObjectService {
     // ('Downloads' when any of it comes from there or from the cache's kept fragments.)
     const cached = await this.#cachedKit(starter);
     if (cached) return {files: cached, from: 'cache'};
-    if (!starter.sha256?.length) return undefined;
+    if (!starter.sha256?.length) {
+      // A one-file starter with a plate count is its own proof: the designer's 3MF with exactly that many plates (Nov 6,
+      // 7f1a9e33: the person's own download of the rig sat in Downloads while the worker fetched a second copy). Several
+      // files, like the caliper and its gauge, need pins: two variants can't be told from the pair.
+      if (starter.files !== 1 || !starter.plates) return undefined;
+      const files = (await this.#starterDownloads(starter, await this.#modelFiles(this.#downloads(), 0))).filter(file => file.plates === starter.plates);
+      if (!files.length) return undefined;
+      const newest = (await Promise.all(files.map(async file => ({file, atMs: (await stat(file.path)).mtimeMs})))).sort((a, b) => b.atMs - a.atMs)[0]!.file;
+      return {files: [newest.path], from: 'Downloads'};
+    }
     // Pinned files, wherever they are kept: the cache's fragments and ~/Downloads together (Codex on #369).
     // Only the pinned kit itself, before any pass: a republished set is learned from a pass, then kept.
     const kit = this.#kit(starter, await this.#starterFiles(starter, []));
