@@ -107,6 +107,8 @@ class CompanionClient(
                     if (m("/v1/printers/mcp/mcp-[0-9a-f]{16}/update")) return "projects:write"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/mcp")) return "projects:write"
+                    // Add printer (the computer also checks printing, `printer-handoff:use`; every phone pairing has both).
+                    if (m("/v1/printers/setup/(discover|check|obtain|add)")) return "projects:write"
                 }
             }
             return null
