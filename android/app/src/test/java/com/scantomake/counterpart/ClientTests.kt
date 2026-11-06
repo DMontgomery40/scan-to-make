@@ -1,5 +1,6 @@
 package com.scantomake.counterpart
 
+import kotlinx.serialization.json.jsonObject
 import com.scantomake.counterpart.api.withSerial
 import com.scantomake.counterpart.api.ColourMapping
 import com.scantomake.counterpart.api.CompanionClient
@@ -515,5 +516,18 @@ class PrinterFormSerialTests {
         val found = com.scantomake.counterpart.api.PrinterDiscovery(labels = mapOf("mcp-3d-printer-server" to "mcp-3D-printer-server"))
         org.junit.Assert.assertEquals("mcp-3D-printer-server", found.label("mcp-3d-printer-server"))
         org.junit.Assert.assertEquals("an MCP the companion didn't name keeps its own name", "some-new-mcp", found.label("some-new-mcp"))
+    }
+}
+
+/** #389's address field on Android: a web address only where the MCP's host field takes one (mcp-3D 1.2.55: OctoPrint). */
+class PrinterAddressFieldTests {
+    @org.junit.Test fun aWebAddressOnlyWhereTheMcpTakesOne() {
+        val answers = com.scantomake.counterpart.core.WireJson.parseToJsonElement(contractFixture("printer-setup-phone.json").readText()).jsonObject
+        val options = com.scantomake.counterpart.core.WireJson.decodeFromJsonElement<com.scantomake.counterpart.api.PrinterDiscovery>(answers["discover"]!!).options
+        val octo = com.scantomake.counterpart.api.addressField(options, "octoprint")
+        org.junit.Assert.assertTrue(octo.url)
+        org.junit.Assert.assertTrue(octo.prompt.contains("https://"))
+        org.junit.Assert.assertFalse(com.scantomake.counterpart.api.addressField(options, "bambu").url)
+        org.junit.Assert.assertFalse(com.scantomake.counterpart.api.addressField(options, "bambu").prompt.contains("https://"))
     }
 }

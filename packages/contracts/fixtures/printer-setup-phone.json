@@ -1,5 +1,5 @@
 {
- "_about": "Add printer… on the phone (/v1/printers/setup/*). discover.options is setupOptions() run on bambu-printer-mcp 1.1.63's and mcp-3d-printer-server 1.2.53's real counterpart_setup_fields (services/companion/tests/fixtures); the found printers, check, obtain and add answers are example values in the companion's reply shapes. The companion route test, the iPhone fixtures and Android's tests all read it.",
+ "_about": "Add printer… on the phone (/v1/printers/setup/*). discover.options is setupOptions() run on bambu-printer-mcp 1.1.63's and mcp-3d-printer-server 1.2.55's real counterpart_setup_fields (services/companion/tests/fixtures); the found printers, check, obtain and add answers are example values in the companion's reply shapes. The companion route test, the iPhone fixtures and Android's tests all read it.",
  "discover": {
   "network": "complete",
   "options": {
@@ -16,6 +16,9 @@
       "label": "Access code",
       "hint": "On the printer: Settings → WLAN → Access Code",
       "required": true
+     },
+     "address": {
+      "hint": "The printer's IP address: on the printer, Settings → WLAN"
      },
      "fields": [
       {
@@ -146,13 +149,18 @@
        ]
       }
      },
+     "address": {
+      "hint": "OctoPrint's address (octopi.local or an IP address), or its full URL for HTTPS or a sub-path (https://octoprint.example.com, http://pi.lan/octoprint)",
+      "url": true
+     },
      "fields": [
       {
        "name": "host",
        "env": "PRINTER_HOST",
        "label": "Address",
        "hint": "OctoPrint's address (octopi.local or an IP address), or its full URL for HTTPS or a sub-path (https://octoprint.example.com, http://pi.lan/octoprint)",
-       "required": true
+       "required": true,
+       "input": "url"
       },
       {
        "name": "port",
@@ -186,6 +194,9 @@
       "label": "API key",
       "hint": "Only if Moonraker asks for one",
       "required": false
+     },
+     "address": {
+      "hint": "The printer's IP address or host name"
      },
      "fields": [
       {
@@ -223,6 +234,9 @@
       "hint": "The key PrusaLink shows in its settings",
       "required": true
      },
+     "address": {
+      "hint": "The printer's IP address or host name"
+     },
      "fields": [
       {
        "name": "host",
@@ -258,6 +272,9 @@
       "label": "API key",
       "hint": "Only if your printer asks for one",
       "required": false
+     },
+     "address": {
+      "hint": "The printer's IP address or host name"
      },
      "fields": [
       {
@@ -295,6 +312,9 @@
       "hint": "Only if your Duet has one set",
       "required": false
      },
+     "address": {
+      "hint": "The printer's IP address or host name"
+     },
      "fields": [
       {
        "name": "host",
@@ -330,6 +350,9 @@
       "label": "API key",
       "hint": "The key Repetier-Server shows in its settings",
       "required": true
+     },
+     "address": {
+      "hint": "The printer's IP address or host name"
      },
      "fields": [
       {

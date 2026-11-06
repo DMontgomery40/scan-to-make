@@ -60,6 +60,7 @@ import com.scantomake.counterpart.api.PrinterDiscovery
 import com.scantomake.counterpart.api.PrinterForm
 import com.scantomake.counterpart.api.PrinterSetupOptions
 import com.scantomake.counterpart.api.addPrinter
+import com.scantomake.counterpart.api.addressField
 import com.scantomake.counterpart.api.checkPrinter
 import com.scantomake.counterpart.api.discoverPrinters
 import com.scantomake.counterpart.api.obtainControl
@@ -248,8 +249,9 @@ private fun PrinterFormFields(form: PrinterForm, options: PrinterSetupOptions, l
         edit(form.copy(printerType = value, backend = options.type(value)?.backends?.firstOrNull() ?: form.backend, model = null, slicer = null, modelInferred = false))
     }, "add-printer-brand")
     if (type?.serial == true) ChoiceField(type.field("model")?.label ?: "Model", form.model, models.map { it.value to it.label }, { edit(form.copy(model = it, modelInferred = false)) }, "add-printer-model")
-    TextSetting("host", type?.field("host")?.label ?: "Address", form.host, type?.field("host")?.hint,
-        if (type?.field("host")?.input == "url") KeyboardType.Uri else KeyboardType.Ascii) { edit(form.copy(host = it)) }
+    val address = addressField(options, form.printerType)
+    TextSetting("host", type?.field("host")?.label ?: "Address", form.host, address.hint ?: type?.field("host")?.hint,
+        if (address.url) KeyboardType.Uri else KeyboardType.Ascii, placeholder = address.prompt) { edit(form.copy(host = it)) }
     if (type?.field("port") != null) TextSetting("port", type.field("port")!!.label, form.port ?: "", type.field("port")!!.hint, KeyboardType.Number) { edit(form.copy(port = it.ifEmpty { null })) }
     if (type?.serial == true) TextSetting("serial", type.field("serial")?.label ?: "Serial number", form.serial, type.field("serial")?.hint, KeyboardType.Ascii, KeyboardCapitalization.Characters) { value -> edit(form.withSerial(value, options)) }
     type?.secret?.let { secret ->
@@ -315,8 +317,9 @@ private fun stillNeeded(form: PrinterForm, type: PrinterSetupOptions.PrinterType
 
 @Composable
 private fun TextSetting(name: String, label: String, value: String, hint: String?, keyboard: KeyboardType,
-                        capitalization: KeyboardCapitalization = KeyboardCapitalization.None, change: (String) -> Unit) {
+                        capitalization: KeyboardCapitalization = KeyboardCapitalization.None, placeholder: String? = null, change: (String) -> Unit) {
     OutlinedTextField(value, change, Modifier.fillMaxWidth().testTag("add-printer-$name"), label = { Text(label) }, singleLine = true,
+        placeholder = placeholder?.let { { Text(it) } },
         keyboardOptions = KeyboardOptions(keyboardType = keyboard, capitalization = capitalization, autoCorrectEnabled = false))
     hint?.let { Text(it, color = Palette.secondary, fontSize = 12.sp) }
 }
