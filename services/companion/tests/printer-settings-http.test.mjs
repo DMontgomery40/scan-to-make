@@ -175,6 +175,7 @@ test('paired clients can read every MCP copy, including hidden profiles, without
   assert.equal(generic.uses.length, 1);
   assert.equal(generic.uses[0].printerId, f.catalog.canonical(generic.uses[0].destinationId));
   assert.equal(JSON.stringify(response.body).includes('192.0.2.1'), false, 'process environment is not exposed');
-  assert.equal((await f.call('/v1/printers/mcps', 'GET', undefined, f.printOnly)).status, 403);
+  for (const credential of [f.printOnly, f.settingsOnly])
+    assert.equal((await f.call('/v1/printers/mcps', 'GET', undefined, credential)).status, 403);
   assert.equal((await f.call('/v1/printers/mcps', 'POST', {}, f.readOnly)).status, 405);
 });

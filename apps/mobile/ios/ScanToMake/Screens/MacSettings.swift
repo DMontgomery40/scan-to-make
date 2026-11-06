@@ -324,15 +324,15 @@ struct MCPCopiesView: View {
                         Text(use.words).font(.footnote).fixedSize(horizontal: false, vertical: true)
                     }
                     if store.macCapabilities.contains("mcpUpdates") {
-                        ForEach(package.moveIDs, id: \.self) { id in
+                        ForEach(package.moveIDs.filter { id in printerId == nil || package.uses.contains { $0.printerId == printerId && $0.mcpId == id } }, id: \.self) { id in
                             Button(package.moveTitle(id)) { Task { await update(id, fresh: true) } }
-                                .disabled(working != nil || store.mcpUpdates[id]?.isRunning == true)
+                                .disabled(working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[id]?.isRunning == true)
                                 .accessibilityIdentifier("mcp-move-" + id)
                             progress(id)
                         }
                         if package.appCopy != nil {
                             Button("Update Counterpart’s copy") { Task { await update(package.appMcpId, fresh: false) } }
-                                .disabled(working != nil || store.mcpUpdates[package.appMcpId]?.isRunning == true)
+                                .disabled(working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[package.appMcpId]?.isRunning == true)
                             progress(package.appMcpId)
                         }
                     }

@@ -126,7 +126,7 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
     var busy by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<Pair<String, McpUpdate>?>(null) }
     var problem by remember { mutableStateOf<String?>(null) }
-    var eventFloor by remember { mutableStateOf(-1L) }
+    var eventFloor by remember { mutableStateOf(-1) }
     LaunchedEffect(printerId) { state.loadCapabilities(); state.loadMcpCopies() }
     fun update(id: String, fresh: Boolean) {
         if (busy != null) return
@@ -144,10 +144,10 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
             pkg.appCopy?.let { Text("Counterpart’s copy ${it.version ?: "version unknown"}", fontSize = 12.sp) }
             pkg.uses.filter { it.printerId == printerId }.forEach { Text(it.words, fontSize = 12.sp) }
             if (capabilities.contains("mcpUpdates")) {
-                pkg.moveIds.forEach { id ->
-                    SecondaryButton(pkg.moveTitle(id), Modifier.fillMaxWidth(), enabled = busy == null) { update(id, true) }
+                pkg.moveIds.filter { id -> pkg.uses.any { it.printerId == printerId && it.mcpId == id } }.forEach { id ->
+                    SecondaryButton(pkg.moveTitle(id), Modifier.fillMaxWidth(), enabled = busy == null && readProblem == null) { update(id, true) }
                 }
-                if (pkg.appCopy != null) SecondaryButton("Update Counterpart’s copy", Modifier.fillMaxWidth(), enabled = busy == null) { update(pkg.appMcpId, false) }
+                if (pkg.appCopy != null) SecondaryButton("Update Counterpart’s copy", Modifier.fillMaxWidth(), enabled = busy == null && readProblem == null) { update(pkg.appMcpId, false) }
             }
             Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.", color = Palette.secondary, fontSize = 12.sp)
         }
