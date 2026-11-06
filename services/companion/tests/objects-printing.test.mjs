@@ -284,57 +284,49 @@ test('profiles and mapping cover every declared slot, and choices for an older m
   assert.equal(f.runs.at(-1).options.slicer.filamentColours.split(';').length, 4);
 });
 
-test('a sliced plate is not blocked by a declared material it never uses, but a painted one with no plate list still refuses', async t => {
+test('a plate prints only the filaments its MCP lists: an unused declared material never blocks it and gets no tray', async t => {
   const {zipSync, strToU8} = fflate();
-  const build = plate => Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+  const bytes = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
     '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
     'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
       + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
     'Metadata/project_settings.config': strToU8(JSON.stringify({filament_colour: ['#FEC600', '#000000'], filament_type: ['PLA', 'ABS']})),
-    ...(plate ? {'Metadata/plate_1.json': strToU8(JSON.stringify({filament_ids: [0]}))} : {})}));
-  const selection = {fileIndex: 0, plateIndex: 0, sliced: true};
+    'Metadata/plate_1.json': strToU8(JSON.stringify({filament_ids: [0]}))}));
   // Plate 1 uses only filament 1 (PLA, loaded): the unused ABS slot must not block it.
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
-  await multipart(f, {bytes: build(true), kind: 'published', publishedSelection: selection});
+  await multipart(f, {bytes, kind: 'published', publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: true}});
   await f.service.print(f.object.id);
   await f.approve();
   await f.service.settled(f.object.id);
-  assert.equal(f.runs[0].selection.amsMapping.length, 2, 'the mapping still covers every declared slot');
-  assert.equal(f.runs[0].selection.amsMapping[0], 1, 'the PLA part prints from the loaded PLA spool');
-  // No plate list: slot 2 may be painted, and no ABS spool is loaded — refuse, don't guess.
-  const g = await setup(t, {reports: [status('RUNNING', 10)]});
-  await multipart(g, {bytes: build(false), kind: 'published', publishedSelection: selection});
-  await assert.rejects(g.service.print(g.object.id), /painted part of this file was sliced for ABS/);
+  assert.deepEqual(f.runs[0].selection.amsMapping, [1, -1], 'the PLA part prints from the loaded PLA spool; the unused slot gets -1, as Bambu Studio sends it');
 });
 
-test('a painted unsliced model shows its painted filament as a colour row; without painting it stays an unused preset', async t => {
+// Nov 6 (the Kass scan rig's Screws plate): which filaments a plate prints is the MCP's to say (list_3mf_plates
+// `filaments`), never the app's own reading of the whole file. Painted or not, a row is a filament the MCP lists.
+test('the colour rows are the MCP’s filaments for the chosen plate, and an MCP without them asks for its update', async t => {
   const {zipSync, strToU8} = fflate();
-  const build = painted => Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
-    '3D/3dmodel.model': strToU8(`<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2"${painted ? ' paint_color="8"' : ''}/></triangles></mesh></object></resources><build><item objectid="1"/></build></model>`),
-    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
-      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
-    'Metadata/project_settings.config': strToU8(JSON.stringify({filament_colour: ['#FEC600', '#000000'], filament_type: ['PLA', 'PLA']}))}));
+  const bytes = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/></object></config>')}));
+  const listed = filaments => async () => ({plates: [{index: 0, name: 'Screws', objects: [], sliced: false, ...(filaments ? {filaments} : {})},
+    {index: 1, name: 'Board', objects: [], sliced: false, ...(filaments ? {filaments: [{index: 2, colour: '#37C837'}]} : {})}],
+    ...(filaments ? {projectFilaments: [{index: 1, colour: '#5F6478'}, {index: 2, colour: '#37C837'}, {index: 3, colour: '#FF0000'}]} : {})});
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
-  await multipart(f, {bytes: build(true), kind: 'published'});
+  await multipart(f, {bytes, kind: 'published', publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: false}});
+  f.deps.print.services.runner.modelPlates = listed([{index: 3, colour: '#FF0000', material: 'PLA', name: 'Gear'}]);
   const mapping = await f.service.colourMapping(f.object.id);
-  assert.deepEqual(mapping.filaments.map(x => x.index), [1, 2], 'the painted filament is a row the person can change');
+  assert.deepEqual(mapping.filaments.map(x => [x.index, x.name]), [[3, 'Gear']], 'filaments 1 and 2 belong to other plates: no rows for them');
   await f.service.print(f.object.id);
   await f.approve();
   await f.service.settled(f.object.id);
-  assert.deepEqual(f.runs[0].selection.amsMapping, [1, 0], 'body on the yellow PLA spool, painted black on the black spool');
+  const run = f.runs.at(-1);
+  assert.equal(run.selection.amsMapping.length, 3, 'one entry per declared filament');
+  assert.deepEqual(run.selection.amsMapping.map(slot => slot >= 0), [false, false, true], 'a tray only for the filament the plate prints');
+  assert.equal(run.options.slicer.loadFilaments.split(';').length, 3, 'one profile per declared filament (slice_stl takes no fewer)');
   const g = await setup(t, {reports: [status('RUNNING', 10)]});
-  await multipart(g, {bytes: build(false), kind: 'published'});
-  assert.deepEqual((await g.service.colourMapping(g.object.id)).filaments.map(x => x.index), [1], 'no painting: the second declared slot is just an unused preset');
-  // Studio layout: painting only in a component file under 3D/Objects/ still earns its row.
-  const componentPainted = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
-    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><components><component p:path="/3D/Objects/object_1.model" objectid="1"/></components></object></resources><build><item objectid="1"/></build></model>'),
-    '3D/Objects/object_1.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources></model>'),
-    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
-      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part></object></config>'),
-    'Metadata/project_settings.config': strToU8(JSON.stringify({filament_colour: ['#FEC600', '#000000'], filament_type: ['PLA', 'PLA']}))}));
-  const h = await setup(t, {reports: [status('RUNNING', 10)]});
-  await multipart(h, {bytes: componentPainted, kind: 'published'});
-  assert.deepEqual((await h.service.colourMapping(h.object.id)).filaments.map(x => x.index), [1, 2], 'component-file painting earns its row too');
+  await multipart(g, {bytes, kind: 'published', publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: false}});
+  g.deps.print.services.runner.modelPlates = listed(undefined);
+  await assert.rejects(g.service.colourMapping(g.object.id), /Update bambu-printer-mcp in Settings → Printers to choose colours for this plate/);
 });
 
 test('spool choices for a 3MF whose filaments cannot be read are refused, never dropped', async t => {
