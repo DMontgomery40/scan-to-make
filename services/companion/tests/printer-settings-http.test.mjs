@@ -69,7 +69,7 @@ async function fixture(t) {
       response.on('end', () => resolve({status: response.statusCode, body: JSON.parse(Buffer.concat(chunks).toString())}));
     }); req.on('error', reject); req.end(body === undefined ? undefined : JSON.stringify(body));
   });
-  return {call, readOnly, printOnly, settingsOnly, objects, store, gate, catalog, calls, liveBusy: value => { liveBusy = value; }, holdRoute: () => {
+  return {call, setup, readOnly, printOnly, settingsOnly, objects, store, gate, catalog, calls, liveBusy: value => { liveBusy = value; }, holdRoute: () => {
     const barrier = {started: Promise.withResolvers(), finished: Promise.withResolvers()};
     routeBarrier = barrier;
     return {started: barrier.started.promise, release: () => barrier.finished.resolve()};
@@ -178,4 +178,56 @@ test('paired clients can read every MCP copy, including hidden profiles, without
   for (const credential of [f.printOnly, f.settingsOnly])
     assert.equal((await f.call('/v1/printers/mcps', 'GET', undefined, credential)).status, 403);
   assert.equal((await f.call('/v1/printers/mcps', 'POST', {}, f.readOnly)).status, 405);
+});
+
+// Add printer… on the phone (PRD §6.1): the Mac's own printers.* methods behind HTTP, with the shared answers the
+// iPhone and Android tests also read (packages/contracts/fixtures/printer-setup-phone.json).
+test('a paired phone adds a printer through the same discover, check, obtain and add calls as the Mac', async t => {
+  const f = await fixture(t);
+  const answers = JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/printer-setup-phone.json', import.meta.url), 'utf8'));
+  const seen = [];
+  const folder = '/home/ada/bambu-printer-mcp';
+  f.setup.discover = async () => { seen.push(['discover']); return {...answers.discover, found: [...answers.discover.found, {id: `folder:${folder}`, source: 'folder', name: 'P1S', backend: 'bambu-printer-mcp', printerType: 'bambu', host: '192.168.1.42', folder, added: false}]}; };
+  f.setup.check = async printer => { seen.push(['check', printer]); return answers.check.check; };
+  f.setup.add = async printer => { seen.push(['add', printer]); return answers.add; };
+  f.setup.obtain = async input => { seen.push(['obtain', input]); return input.session ? answers.obtainApproved : answers.obtainPending; };
+  f.setup.installMcp = async pkg => { seen.push(['install', pkg]); return {installed: true, package: pkg}; };
+  assert.equal((await f.call('/healthz')).body.capabilities.printerAdd, true);
+  const found = await f.call('/v1/printers/setup/discover', 'POST', {});
+  assert.equal(found.status, 200);
+  assert.deepEqual(found.body.options, answers.discover.options, 'the MCPs\' own fields reach the phone unchanged');
+  const p1s = {backend: 'bambu-printer-mcp', printerType: 'bambu', host: '192.168.1.42', serial: '01P00A451601106', model: 'p1s', secret: '12345678'};
+  assert.deepEqual((await f.call('/v1/printers/setup/check', 'POST', {printer: p1s})).body, answers.check);
+  assert.deepEqual((await f.call('/v1/printers/setup/add', 'POST', {printer: p1s})).body, answers.add);
+  const octo = {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local', port: '80', field: 'secret'};
+  const pending = await f.call('/v1/printers/setup/obtain', 'POST', octo);
+  assert.deepEqual(pending.body, answers.obtainPending);
+  assert.deepEqual((await f.call('/v1/printers/setup/obtain', 'POST', {...octo, session: pending.body.session})).body, answers.obtainApproved);
+  assert.deepEqual((await f.call('/v1/printers/setup/install', 'POST', {package: 'mcp-3d-printer-server'})).body, {installed: true, package: 'mcp-3d-printer-server'});
+  // A found folder adds as it does on the Mac; a path the phone names itself never reaches the setup.
+  assert.equal((await f.call('/v1/printers/setup/add', 'POST', {printer: {folder}})).status, 200);
+  assert.equal((await f.call('/v1/printers/setup/add', 'POST', {printer: {folder: '/tmp/elsewhere'}})).status, 400);
+  assert.equal((await f.call('/v1/printers/setup/check', 'POST', {printer: {folder: '/tmp/elsewhere'}})).status, 400);
+  assert.deepEqual(seen.map(([name]) => name), ['discover', 'check', 'add', 'obtain', 'obtain', 'install', 'add']);
+  assert.deepEqual(seen[1][1], p1s, 'the Mac\'s PrinterFormSchema parses it');
+});
+
+test('phone Add printer needs printing and settings, refuses what the Mac would refuse, and says the MCP\'s words', async t => {
+  const f = await fixture(t);
+  let reached = 0;
+  for (const name of ['discover', 'check', 'add', 'obtain', 'installMcp']) f.setup[name] = async () => { reached++; return {}; };
+  for (const credential of [f.readOnly, f.printOnly, f.settingsOnly])
+    assert.equal((await f.call('/v1/printers/setup/discover', 'POST', {}, credential)).status, 403);
+  assert.equal((await f.call('/v1/printers/setup/discover')).status, 405);
+  for (const [path, body] of [['check', {printer: {backend: 'bambu-printer-mcp', printerType: 'bambu', host: 'h', port: '0'}}],
+    ['add', {printer: {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'http://x/'}}], ['add', {}],
+    ['obtain', {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local', field: 'secret', session: 'nope'}],
+    ['install', {package: 'something-else'}], ['discover', {extra: true}]])
+    assert.equal((await f.call('/v1/printers/setup/' + path, 'POST', body)).status, 400, path);
+  assert.equal(reached, 0, 'nothing invalid or unauthorized reaches the MCPs');
+  const {PrinterSetupError} = await import('../dist/printing/setup.js');
+  f.setup.add = async () => { throw new PrinterSetupError('unavailable', 'Download mcp-3D-printer-server first, then add the printer.'); };
+  const refused = await f.call('/v1/printers/setup/add', 'POST', {printer: {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local'}});
+  assert.equal(refused.status, 503);
+  assert.deepEqual(refused.body.error, {code: 'unavailable', message: 'Download mcp-3D-printer-server first, then add the printer.'});
 });
