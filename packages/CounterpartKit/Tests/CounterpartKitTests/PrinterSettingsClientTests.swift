@@ -80,8 +80,10 @@ final class PrinterSetupClientTests: XCTestCase {
         XCTAssertEqual(found.options.model(forSerial: "01P00A451601106"), "p1s", "the MCP's serial table")
         var form = PrinterForm()
         form.printerType = p1s.printerType; form.backend = p1s.backend; form.host = p1s.host!; form.serial = p1s.serial!; form.model = p1s.model; form.secret = "12345678"
-        XCTAssertTrue(try await mac.checkPrinter(form).reached)
-        XCTAssertEqual(try await mac.addPrinter(form).destinationId, "profile-p-9f2c4e")
+        let checked = try await mac.checkPrinter(form)
+        XCTAssertTrue(checked.reached)
+        let added = try await mac.addPrinter(form)
+        XCTAssertEqual(added.destinationId, "profile-p-9f2c4e")
         var octo = PrinterForm(); octo.printerType = "octoprint"; octo.backend = "mcp-3d-printer-server"; octo.host = "octopi.local"; octo.port = "80"
         let obtain = try XCTUnwrap(ObtainControl(options: found.options, form: octo))
         XCTAssertEqual(obtain.label, "Approve in OctoPrint")
