@@ -5,7 +5,7 @@ import {mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
-import {runTouchup, chooseEngine, printerDesignGuidance} from '../dist/touchup/touchup.js';
+import {runTouchup, chooseEngine, printerDesignGuidance, slicingGuidanceUnavailable} from '../dist/touchup/touchup.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {systemRules, TOUCHUP_SYSTEM_RULES, TOUCHUP_RESULT_SCHEMA, buildTouchupInvocation} from '../dist/touchup/invocation.js';
 import {runTouchupWorker} from '../dist/touchup/runner.js';
@@ -36,6 +36,32 @@ test('a pass reads both of the printer MCP\'s prompts, fdm_design and fdm_slicin
     design: 'Design the finished object the user wants, with the manufacturing plan as part of the design.',
     slicing: 'How this printer MCP slices. Its slicer is the fixture slicer.'});
   assert.deepEqual(await printerDesignGuidance(config({})), {});
+});
+
+test('a pass doesn\'t start when the printer MCP serves no fdm_slicing: Update it in Settings → Printers', async () => {
+  const log = [];
+  const fusion = bridge({fusion_mcp_status: text({configured: true, connected: true})});
+  const root = await mkdtemp(join(tmpdir(), 'touchup-engine-'));
+  const base = {root, objectId: 'obj', scan: [], photos: [], handoff, claudePath: '/c', instructions: 'A hook for a 25 mm rail', kind: 'fit'};
+  const deps = guidance => ({
+    lockPath: join(mkdtempSync(join(tmpdir(), 'touchup-engine-lock-')), 'blender.lock'),
+    fusionLockPath: join(mkdtempSync(join(tmpdir(), 'touchup-engine-fusion-')), 'fusion.lock'),
+    ensureBlender: async () => {}, resetScene: async () => {}, client: fusion.client,
+    prepare: args => prepareTouchupPass(args),
+    guidance: async () => guidance,
+    run: async (inv, pass) => { log.push('run'); return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
+  });
+  // An MCP older than fdm_slicing: the slicer facts the app no longer carries would be missing, so nothing runs.
+  const older = await runTouchup(base, deps({design: 'Plan the print as part of the design.'}));
+  assert.equal(older.status, 'failed');
+  assert.equal(older.reason, slicingGuidanceUnavailable('bambu-printer-mcp'));
+  assert.match(older.reason, /^Update bambu-printer-mcp in Settings → Printers/);
+  assert.deepEqual(log, [], 'the worker never started');
+  assert.equal(slicingGuidanceUnavailable('mcp-3d-printer-server').startsWith('Update mcp-3D-printer-server in Settings → Printers'), true);
+  // An MCP that couldn't be reached gives no guidance at all; the pass runs and reaches the MCP itself.
+  const unreachable = await runTouchup(base, deps(undefined));
+  assert.equal(unreachable.status, 'done');
+  assert.deepEqual(log, ['run']);
 });
 
 test('copies always use Blender; a design uses Fusion only when it is connected and a new design opens', async () => {

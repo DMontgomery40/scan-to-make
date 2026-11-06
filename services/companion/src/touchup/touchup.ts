@@ -10,6 +10,7 @@ import {buildTouchupInvocation, type DesignEngine, type DesignGuidance, type Tou
 import {toolErrorText} from './blender.js';
 import {runTouchupWorker, type TouchupProgress, type TouchupResult} from './runner.js';
 import {DESIGNER_FILE_REBUILT, designerEditProblem} from './designer-file.js';
+import {mcpPackageName} from '../printing/print-settings.js';
 
 export interface TouchupInput {
   worker?: import('./runner.js').ProjectWorker;
@@ -106,7 +107,15 @@ export async function acquireBlenderLock(lockPath = BLENDER_LOCK_PATH, opts: {po
   }
 }
 
-/** The printer MCP owns the manufacturing and slicing guidance; an MCP without a prompt just gives the pass none of it. */
+/** The pass's refusal when the installed MCP serves no fdm_slicing prompt. */
+export function slicingGuidanceUnavailable(backend: string): string {
+  return `Update ${mcpPackageName(backend)} in Settings → Printers so Counterpart can plan how this prints. Nothing was changed.`;
+}
+
+/**
+ * The printer MCP's manufacturing and slicing guidance. Undefined when the MCP couldn't be reached; an MCP that
+ * answers without fdm_slicing is refused by the pass (slicingGuidanceUnavailable).
+ */
 export async function printerDesignGuidance(handoff: PrinterHandoffConfig, signal?: AbortSignal): Promise<DesignGuidance | undefined> {
   const client = new PrinterMcpClient(handoff);
   try {
@@ -246,6 +255,11 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   // service supplies the explicit flag, including false for failed first passes.
   const currentModel = input.currentModel ?? (input.note !== undefined && input.scan.length === 1 && input.scan[0]!.toLowerCase().endsWith('.stl'));
   const guidance = await (deps.guidance ?? printerDesignGuidance)(input.handoff, input.signal);
+  // PRD §8.0 #10: how the slicer orients, supports and checks a slice comes only from the MCP. An MCP that answers
+  // without fdm_slicing predates it: the pass doesn't start without that guidance.
+  if (guidance && !guidance.slicing?.trim()) {
+    return {status: 'failed', reason: slicingGuidanceUnavailable(input.handoff.backend), renders: [], checkpoints: [], stats: {seconds: 0, toolCalls: 0}, passDir: pass.dir};
+  }
   input.onStage?.('working', choice.engine);
   const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
     ...(input.designerCopy ? {designerCopy: true} : {}),
