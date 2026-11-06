@@ -66,7 +66,7 @@ class CompanionClient(
 
     companion object {
         /** The companion may slice an estimate for 600 s (630 s with what it reads first): wait a little longer. */
-        const val ESTIMATE_TIMEOUT_MS = 640_000
+        const val ESTIMATE_TIMEOUT_MS = 640_000L
         const val JSON_LIMIT = 4 * 1024 * 1024
         const val SCAN_LIMIT = 64 * 1024 * 1024
         const val PHOTO_LIMIT = 25 * 1024 * 1024
