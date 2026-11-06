@@ -605,6 +605,14 @@ export class ObjectService {
     const identity = [object.id, current.model, file.mtimeMs, file.size, destinationId ?? null];
     return {key: JSON.stringify([...identity, server]), file: JSON.stringify(identity), modelPath, destinationId};
   }
+  /**
+   * Whose answer `current.ownSettings` is: the printer and its MCP's running version (`current@1.1.65`). An updated MCP
+   * may decide differently, so its answer is asked for again.
+   */
+  #ownSettingsFor(destinationId: string | undefined): string {
+    const version = destinationId ? this.#deps.printers?.capabilities(destinationId)?.server?.version : undefined;
+    return `${destinationId ?? 'current'}${version ? `@${version}` : ''}`;
+  }
   /** That printer's MCP can't say whether this project's 3MF prints with its own settings: an older MCP to update. */
   async #ownSettingsUnsupported(object: StmObject, destinationId: string | undefined): Promise<boolean> {
     const asked = await this.#ownSettingsKey(object, destinationId);
@@ -615,7 +623,7 @@ export class ObjectService {
    * or this run's answer for another printer the sheet slices for.
    */
   async #ownSettingsOn(object: StmObject, destinationId: string | undefined): Promise<boolean> {
-    if (object.current?.ownSettingsFor === (destinationId ?? 'current')) return object.current.ownSettings === true;
+    if (object.current?.ownSettingsFor === this.#ownSettingsFor(destinationId)) return object.current.ownSettings === true;
     const asked = await this.#ownSettingsKey(object, destinationId);
     return !!asked && this.#ownSettingsAsked.get(asked.key) === true;
   }
@@ -626,7 +634,7 @@ export class ObjectService {
    */
   #askOwnSettings(object: StmObject, destinationId = this.#destinationId(object)): Promise<void> {
     const current = object.current;
-    if (current?.ownSettings !== undefined && current.ownSettingsFor === (destinationId ?? 'current')) return Promise.resolve();
+    if (current?.ownSettings !== undefined && current.ownSettingsFor === this.#ownSettingsFor(destinationId)) return Promise.resolve();
     return (async () => {
       const asked = await this.#ownSettingsKey(object, destinationId);
       if (!asked) return;
@@ -662,9 +670,9 @@ export class ObjectService {
       const answer = own;
       const updated = await this.#deps.store.update(object.id, o => {
         if (!o.current || o.current.model !== object.current!.model || this.#destinationId(o) !== destinationId
-            || (o.current.ownSettings === answer && o.current.ownSettingsFor === (destinationId ?? 'current'))) return o;
+            || (o.current.ownSettings === answer && o.current.ownSettingsFor === this.#ownSettingsFor(destinationId))) return o;
         changed = true;
-        return {...o, current: {...o.current, ownSettings: answer, ownSettingsFor: destinationId ?? 'current'}};
+        return {...o, current: {...o.current, ownSettings: answer, ownSettingsFor: this.#ownSettingsFor(destinationId)}};
       });
       if (!changed) return;
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: object.id, data: {keys: ['current']}});

@@ -572,15 +572,22 @@ test("the own-settings answer belongs to its printer, and another plate of the s
   await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
   await f.service.list();
   await until(async () => (await f.service.get(f.object.id)).current.ownSettings === true);
-  assert.equal((await f.service.get(f.object.id)).current.ownSettingsFor, 'current');
+  const mine = (await f.service.get(f.object.id)).current.ownSettingsFor;
+  assert.match(mine, /^current(@|$)/, 'this printer, with its MCP version');
   // An answer recorded for another printer is not this printer's: the estimate settles this printer's first (from
   // what it already knows about this file, without asking again), and slices with it.
   await f.store.update(f.object.id, o => ({...o, current: {...o.current, ownSettingsFor: 'garage'}}));
   await f.service.estimate(f.object.id, {});
-  assert.equal((await f.service.get(f.object.id)).current.ownSettingsFor, 'current');
+  assert.equal((await f.service.get(f.object.id)).current.ownSettingsFor, mine);
   const {quality} = f.runs.filter(run => run.estimate).at(-1).estimate.slicer;
   assert.equal(quality, undefined, 'this printer\'s answer, settled before the slice, keeps the designer\'s settings');
   assert.equal(asked.length, 1, 'the answer for this file and printer is remembered, not asked again');
+  // Updating the MCP (Settings → Printers) may change its decision: the updated MCP is asked again (Codex on #336).
+  const capabilities = f.deps.printers.capabilities.bind(f.deps.printers);
+  f.deps.printers.capabilities = id => ({...capabilities(id), server: {name: 'bambu-printer-mcp', version: '9.9.9'}});
+  await f.service.estimate(f.object.id, {});
+  assert.equal(asked.length, 2, 'the updated MCP is asked');
+  assert.equal((await f.service.get(f.object.id)).current.ownSettingsFor, 'current@9.9.9');
 });
 
 test("the first estimate waits for the own-settings answer; an MCP that can't answer says to update it; a failure or a replaced file is asked again", async t => {

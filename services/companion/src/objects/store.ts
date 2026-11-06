@@ -122,7 +122,7 @@ export interface StmObject {
      * strength the person didn't choose. Absent until the MCP has been asked, or when it doesn't say.
      */
     ownSettings?: boolean;
-    /** The destination `ownSettings` was answered for: its MCP and config decide it, so another printer asks again. */
+    /** Whose answer `ownSettings` is: the destination and its MCP's version (`current@1.1.65`); another printer or an updated MCP asks again. */
     ownSettingsFor?: string};
   question?: {closeup: string};
   /** The printer MCP's original question. Only an explicit answer to this ID can approve it. */
