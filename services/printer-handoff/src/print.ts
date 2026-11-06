@@ -9,7 +9,7 @@ import {
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
 import {slicedFacts, type SliceEstimate, type SliceSettings} from './slice-estimate.js';
 import {inspectModelFile} from './model-file.js';
-import {lacksSlicerReport, slicerReport} from './slicer-report.js';
+import {bedSplit, lacksSlicerReport, slicerReport, type BedSplit} from './slicer-report.js';
 import {slicePreview, type SlicePreview} from './slice-preview.js';
 import {createHash} from 'node:crypto';
 import type {HandoffBundleStore} from './bundle.js';
@@ -46,6 +46,12 @@ export interface PrintRunInput {
   /** Ask the MCP's inspect_print_file for its G-code preview of the sliced file. */
   preview?: boolean;
   /**
+   * A model bigger than the bed may be split across plates by the MCP (slice_stl `split_to_plates`, where its
+   * capabilities.slicing.plates says so). An estimate then returns the split (`PrintRunResult.split`) for the person
+   * to choose a plate; a print refuses (`plates-split`), since a plate was never shown.
+   */
+  splitToPlates?: boolean;
+  /**
    * A question Counterpart asks before slicing, through the relay that carries the printer's own questions.
    * The print goes on only when the person picks `proceed`; any other choice, a decline or a timeout stops
    * before anything is sliced or sent (PrinterMcpError `print-choice`, detail = the choice or `declined`).
@@ -74,6 +80,8 @@ export interface PrintRunResult {
   inspection?: {tool: string; result: unknown};
   /** Bambu Studio's warning on this slice, word for word (slice_stl's `slicer_result`); printing it needed the user's go. */
   slicerWarning?: string;
+  /** The MCP split the model across plates (`PrintRunInput.splitToPlates`): its project 3MF's bytes and plates. */
+  split?: Omit<BedSplit, 'path'> & {bytes: Buffer};
   print?: unknown;
   steps: PrintStep[];
 }
@@ -214,18 +222,21 @@ export class PrinterHandoffRunner {
    * Slices the model exactly as a print would, then reads the
    * time, grams and settings from the sliced file. Never prints.
    */
-  async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal}): Promise<{estimate?: SliceEstimate; settings: SliceSettings; slicerWarning?: string;
-    /** The exact sliced file this estimate describes, to be printed as it is (`PrintRunInput.presliced`). */
-    sliced: {bytes: Buffer; extension: string; sha256: string; slicerWarning?: string};
+  async estimate(input: {stlPath: string; selection?: PrinterSelection; slicer?: PrinterSlicer; signal?: AbortSignal; splitToPlates?: boolean}): Promise<{estimate?: SliceEstimate; settings: SliceSettings; slicerWarning?: string;
+    /** The exact sliced file this estimate describes, to be printed as it is (`PrintRunInput.presliced`); absent with `split`. */
+    sliced?: {bytes: Buffer; extension: string; sha256: string; slicerWarning?: string};
+    /** The model is bigger than the bed and the MCP put it on plates: nothing is estimated until a plate is chosen. */
+    split?: PrintRunResult['split'];
     /** The MCP's picture of that file's G-code (inspect_print_file `preview`), when it draws one. */
     preview?: SlicePreview;
     /** False when the installed MCP's inspect_print_file can't draw previews at all (an update would). */
     previewSupported: boolean}> {
     let sliced: Buffer | undefined, extension = '.3mf';
-    const {slicerWarning, inspection} = await this.run({stlPath: input.stlPath, print: false, preview: true, ...(input.selection ? {selection: input.selection} : {}), ...(input.slicer ? {slicer: input.slicer} : {}),
-      ...(input.signal ? {signal: input.signal} : {}),
+    const {slicerWarning, inspection, split} = await this.run({stlPath: input.stlPath, print: false, preview: true, ...(input.selection ? {selection: input.selection} : {}), ...(input.slicer ? {slicer: input.slicer} : {}),
+      ...(input.signal ? {signal: input.signal} : {}), ...(input.splitToPlates ? {splitToPlates: true} : {}),
       // Read the output while the MCP is alive: a one-shot backend may delete it when it closes.
       persistOutput: async output => { sliced = await readFile(output.slicedPath); extension = extname(output.slicedPath) || '.3mf'; return output; }});
+    if (split) return {settings: {}, split, previewSupported: true};
     if (!sliced) fail('invalid-output-path');
     const sha256 = createHash('sha256').update(sliced).digest('hex');
     const preview = slicePreview(inspection?.result, sha256);
@@ -476,6 +487,8 @@ export class PrinterHandoffRunner {
       ensure_on_bed: !threeMf,
       // An STL is oriented by the slicer where the MCP says it can (capabilities.slicing.orient); a 3MF keeps its placement.
       orient: threeMf ? false : slicing?.orient ? true : undefined,
+      // A model bigger than the bed goes on plates where the MCP can split it; it says how (PRD §5.5, §8.0).
+      split_to_plates: !threeMf && input.splitToPlates && slicing?.plates === true ? true : undefined,
     };
     // The file the person was shown is printed as it is: it is never sliced again (see expectedSha256 below).
     // Slicing the same model the same way again is the MCP's to reuse (its slice cache), not Counterpart's.
@@ -502,7 +515,16 @@ export class PrinterHandoffRunner {
     if (sliced && lacksSlicerReport(sliced.structuredContent))
       throw new PrinterMcpError('slicer-report-unavailable', undefined, `Update ${packageLabel(this.#config.backend)} in Settings → Printers to print from Counterpart.`);
     const report = reused ? undefined : slicerReport(sliced?.structuredContent);
-    if (report?.failed) throw new PrinterMcpError('slicer-error', undefined, report.message);
+    if (report?.failed) throw new PrinterMcpError('slicer-error', report.slicerMessage ? new Error(report.slicerMessage) : undefined, report.message);
+    // The MCP put the model on plates: the person chooses one, and only a plate they were shown is printed.
+    const split = sliced && sliceArgs.split_to_plates ? bedSplit(sliced.structuredContent) : undefined;
+    if (split) {
+      if (input.print !== false) throw new PrinterMcpError('plates-split', undefined, `${split.message} Open Print again and choose a plate.`);
+      // Read while the MCP is alive: a one-shot backend may delete its files when it closes.
+      const bytes = await readFile(split.path);
+      return {backend: this.#config.backend, catalog, stlPath: input.stlPath, orientedStlPath, slicedPath, steps,
+        split: {bytes, plates: split.plates, message: split.message}};
+    }
     const slicerWarning = reused ? reused.slicerWarning : report?.message;
     await progress('inspecting');
     const inspection = await this.inspect(session, slicedPath, selection, local, input.preview === true);

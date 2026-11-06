@@ -27,7 +27,8 @@ export const counterpartPrinterInfoSchema = z.object({
     filaments: z.enum(['ams', 'single', 'none']),
     pause: z.boolean(), resume: z.boolean(), cancel: z.boolean(), print3mf: z.boolean(), gcode: z.boolean(),
     /** What slice_stl can apply with the MCP's slicer for this printer (PRD §8.0): the app never knows slicers. */
-    slicing: z.object({supports: z.boolean(), copies: z.boolean(), orient: z.boolean()}).optional(),
+    // `plates`: slice_stl splits a model bigger than the bed across plates (split_to_plates; bambu-printer-mcp 1.1.67+).
+    slicing: z.object({supports: z.boolean(), copies: z.boolean(), orient: z.boolean(), plates: z.boolean().optional()}).optional(),
   }),
 });
 export type CounterpartPrinterInfo = z.infer<typeof counterpartPrinterInfoSchema>;

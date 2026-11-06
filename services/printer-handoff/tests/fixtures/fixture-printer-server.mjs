@@ -50,6 +50,8 @@ const sliceProps = {
   use_printer_filaments: bool, orient: bool, arrange: bool, ensure_on_bed: bool,
 };
 if (process.env.HANDOFF_FIXTURE_NO_COLOUR === '1') delete sliceProps.filament_colours;
+// HANDOFF_FIXTURE_BED_SPLIT (split | too-large): slice_stl takes split_to_plates, as bambu-printer-mcp 1.1.67 does.
+if (process.env.HANDOFF_FIXTURE_BED_SPLIT) sliceProps.split_to_plates = bool;
 if (process.env.HANDOFF_FIXTURE_SLICE_SETTINGS === '1') Object.assign(sliceProps, {layer_height: number, wall_loops: integer, sparse_infill_density: string, repetitions: integer});
 // The slice_stl support arguments a newer MCP takes (enable_support, support_type).
 if (process.env.HANDOFF_FIXTURE_SUPPORTS === '1') Object.assign(sliceProps, {enable_support: bool, support_type: {type: 'string', enum: ['normal(auto)', 'tree(auto)', 'normal(manual)', 'tree(manual)']}});
@@ -177,6 +179,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     writeFileSync(path, 'solid flat\nendsolid flat\n');
     return process.env.HANDOFF_FIXTURE_LAID_FLAT === 'true'
       ? {...text(path), structuredContent: {path, laid_flat: true}} : text(path);
+  }
+  if (name === 'slice_stl' && args.split_to_plates === true && process.env.HANDOFF_FIXTURE_BED_SPLIT) {
+    if (process.env.HANDOFF_FIXTURE_BED_SPLIT === 'too-large') {
+      const message = 'Part 2 is 300 × 120 mm and 40 mm tall, larger than the P1S bed (256 × 256 mm, 250 mm tall), so it can\'t be printed on it as it is. Scale it down or cut it into pieces that fit.';
+      return {isError: true, content: [{type: 'text', text: message}], structuredContent: {slicer_report: {failed: true, message},
+        bed_split: {fits: false, too_large: [{name: 'Part 2', size_mm: [300, 120, 40]}], bed_mm: [256, 256, 250], message}}};
+    }
+    const three_mf_path = join(directory, `${basename(args.stl_path, '.stl')}_plates.3mf`);
+    writeFileSync(three_mf_path, 'fixture plates 3mf');
+    const path = join(directory, `${basename(args.stl_path, '.stl')}_plates_sliced.3mf`);
+    writeFileSync(path, `fixture 3mf ${Date.now()}`);
+    return {...text(path), structuredContent: {path, slicer_report: {failed: false, plate_count: 1}, bed_split: {fits: false, three_mf_path, bed_mm: [256, 256, 250],
+      plates: [{index: 0, name: 'Plate 1', objects: ['Part 1']}, {index: 1, name: 'Plate 2', objects: ['Part 2', 'Part 3']}],
+      message: 'This model is bigger than the P1S bed (256 × 256 mm, 250 mm tall), so its 3 parts are arranged on 2 plates. Each plate prints on its own.'}}};
   }
   if (name === 'slice_stl') {
     // A real Bambu Studio result.json, returned as bambu-printer-mcp's slicer_result (verbatim).

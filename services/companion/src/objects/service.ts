@@ -1849,7 +1849,8 @@ export class ObjectService {
       throw new InvalidStateError('This file is already sliced. Share the designer’s editable 3MF to change quality, strength or copies.');
   }
 
-  readonly #estimates2 = new Map<string, Promise<PrintEstimate>>();
+  /** Kept estimates; `plates` is a model the MCP put on plates (#adoptSplit), whose estimate is its first plate's. */
+  readonly #estimates2 = new Map<string, Promise<PrintEstimate | {plates: {bytes: Buffer; plates: {index: number; name: string; objects: string[]}[]; message: string}}>>();
 
   /**
    * The sliced file a print sheet showed (its estimate and preview), kept so Print sends exactly it
@@ -1881,8 +1882,48 @@ export class ObjectService {
     if (!bytes || createHash('sha256').update(bytes).digest('hex') !== sha256) return undefined;
     return {bytes, extension: record.extension, shape: record.shape, ...(record.slicerWarning ? {slicerWarning: record.slicerWarning} : {})};
   }
+  /**
+   * A downloaded model bigger than the printer's bed, which the printer MCP put on plates (slice_stl `split_to_plates`,
+   * PRD §5.5): its project 3MF joins the project's files with the MCP's plates, and its first plate is selected, so the
+   * print sheet's plate list offers each plate. The same split (the same bytes) is kept once.
+   */
+  #adoptSplit(id: string, split: {bytes: Buffer; plates: {index: number; name: string; objects: string[]}[]; message: string}): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      if (object.kind !== 'published' || !object.files?.receipts?.length || !object.current) throw new InvalidStateError(split.message);
+      if (object.state === 'printing' || object.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
+      if (object.print?.uncertain) throw new InvalidStateError('Check the current print on your printer before changing plates.');
+      const sha256 = createHash('sha256').update(split.bytes).digest('hex');
+      const dir = this.#deps.store.dir(id);
+      const source = object.files.receipts.find(receipt => receipt.path === object.current!.model) ?? object.files.receipts[0]!;
+      const stem = basename(source.name, extname(source.name));
+      const relative = join('original', `${sha256}-${stem.replace(/[^A-Za-z0-9._ ()-]/g, '_').slice(-100)}_plates.3mf`);
+      if (!object.files.receipts.some(receipt => receipt.sha256 === sha256)) {
+        await mkdir(join(dir, 'original'), {recursive: true});
+        const temporary = join(dir, 'original', `.incoming-${randomUUID()}`);
+        await writeFile(temporary, split.bytes, {flag: 'wx', mode: 0o600});
+        try { await rename(temporary, join(dir, relative)); } finally { await rm(temporary, {force: true}); }
+      }
+      const updated = await this.#deps.store.update(id, o => {
+        const receipts = [...(o.files?.receipts ?? [])];
+        let fileIndex = receipts.findIndex(receipt => receipt.sha256 === sha256);
+        if (fileIndex < 0) {
+          // The MCP's plates, as it lists them (PRD §8.0): the app reads none of the file's slicer metadata.
+          receipts.push({format: '3mf', sha256, byteLength: split.bytes.length, path: relative, name: `${stem} (${split.plates.length} plates).3mf`,
+            plates: split.plates.map(plate => ({index: plate.index, name: plate.name, objects: plate.objects, sliced: false})),
+            ...(source.credit ? {credit: source.credit} : {})});
+          fileIndex = receipts.length - 1;
+        }
+        const files = {...o.files!, original: o.files!.original.includes(relative) ? o.files!.original : [...o.files!.original, relative], receipts};
+        return selectingPlate({...o, files}, fileIndex, 0);
+      });
+      await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id});
+      return this.#changed(updated);
+    });
+  }
+
   /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
-  async estimate(id: string, request: PrintOptions & {destinationId?: string} = {}): Promise<PrintEstimate> {
+  async estimate(id: string, request: PrintOptions & {destinationId?: string} = {}, split = true): Promise<PrintEstimate> {
     // Whether the file prints with its own settings on the printer this slice is for is settled first, so this slice's
     // defaults are the ones Print uses (`printOptions`): an answer arriving later would change Print's recipe.
     const {destinationId: requested, ...choices} = request;
@@ -1917,7 +1958,7 @@ export class ObjectService {
     // A kept estimate whose sliced file is gone (only the last few are kept) is sliced again.
     if (running) {
       const kept = await running.catch(() => undefined);
-      if (kept?.sliceSha256 && !await this.#shownSlice(id, kept.sliceSha256)) { this.#estimates2.delete(key); running = undefined; }
+      if (kept && 'sliceSha256' in kept && kept.sliceSha256 && !await this.#shownSlice(id, kept.sliceSha256)) { this.#estimates2.delete(key); running = undefined; }
     }
     if (!running) {
       const runner = services.runner;
@@ -1926,9 +1967,12 @@ export class ObjectService {
         try {
           const stlPath = join(work, object.current!.model.toLowerCase().endsWith('.3mf') ? 'model.3mf' : 'model.stl');
           await writeFile(stlPath, model);
-          const {estimate, settings, slicerWarning, sliced: slicedFile, preview, previewSupported} = await runner.estimate!({stlPath,
+          const {estimate, settings, slicerWarning, sliced: slicedFile, preview, previewSupported, split: plates} = await runner.estimate!({stlPath,
             ...(recipe.selected ? {selection: recipe.selected} : {}), ...(Object.keys(recipe.sliced).length ? {slicer: recipe.sliced} : {}),
+            // A downloaded model bigger than the bed may go on plates the person chooses from (#adoptSplit).
+            ...(object.kind === 'published' && split ? {splitToPlates: true} : {}),
             signal: AbortSignal.timeout(150_000)});
+          if (plates) return {plates};
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
             ...(settings.layers !== undefined ? {layers: settings.layers} : {}), ...(settings.layerHeightMm !== undefined ? {layerHeightMm: settings.layerHeightMm} : {}),
@@ -1947,13 +1991,22 @@ export class ObjectService {
     }
     // An MCP that can't say whether this file prints with its own settings: the person updates it (AGENTS.md).
     const update = await this.#ownSettingsUnsupported(object, sliceFor(object)) ? {ownSettingsUpdate: ownSettingsUnavailable(services.runner.backend)} : {};
-    try { return {...structuredClone(await running), ...update}; }
+    let result: Awaited<typeof running>;
+    try { result = await running; }
     catch (error) {
       if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, supports: designedSupports(object).enableSupport !== undefined}));
       // Bambu Studio refused the slice: its own words, exactly what a Print of the same model fails with.
       if (error instanceof PrinterMcpError && ['slicer-error', 'copies-multiple-plates'].includes(error.code) && error.detail) throw new SlicerRefusedError(error.detail);
       throw new InvalidStateError(error instanceof PrinterMcpError && error.detail ? `Couldn't slice it for an estimate: ${error.detail}` : "Couldn't slice it for an estimate. Check the printer service, then try again.");
     }
+    // Bigger than the bed: its plates join the project, and the first plate's estimate is the answer.
+    if ('plates' in result) {
+      await this.#adoptSplit(id, result.plates);
+      // Spools chosen for the whole model don't carry over: the plate's own colours are offered again.
+      const {filaments: _filaments, filamentsModelVersion: _version, ...rest} = request;
+      return this.estimate(id, rest, false);
+    }
+    return {...structuredClone(result), ...update};
   }
 
 

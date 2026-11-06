@@ -302,9 +302,9 @@ export class PrinterMcpClient {
     // must be reconciled at the printer before another print is attempted.
     if (options.dispatchSensitive && this.#declinedElicitations === declinedBefore
       && (result.isError || Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES)) fail('dispatch-uncertain', undefined, failureDetail(result, this.#config));
-    // The slicer's own refusal, word for word, from the MCP's verdict on it (slicer_report).
+    // The slicer's refusal, in the MCP's plain words (slicer_report); its own words ride along as the cause, for logs.
     const refused = result.isError && name === 'slice_stl' ? slicerReport(result.structuredContent) : undefined;
-    if (refused?.failed) fail('slicer-error', undefined, refused.message);
+    if (refused?.failed) fail('slicer-error', refused.slicerMessage ? new Error(refused.slicerMessage) : undefined, refused.message);
     if (result.isError) fail('tool-failed', undefined, failureDetail(result, this.#config));
     if (Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES) fail('result-limit');
     return structuredClone(result);

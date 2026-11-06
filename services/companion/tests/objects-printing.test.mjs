@@ -14,7 +14,7 @@ import {CameraFrames} from '../dist/printing/camera.js';
 import {CompanionSettingsStore} from '../dist/settings.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
-import {showing, showingRunner} from './support/shown-print.mjs';
+import {showing, showingRunner, shownSlice} from './support/shown-print.mjs';
 import {createHash} from 'node:crypto';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
@@ -1389,4 +1389,56 @@ test('an MCP that cannot draw what will print is asked to update; nothing is sen
   assert.equal(shown.preview, undefined);
   await assert.rejects(f.service.printUnshown(f.object.id, {sliceSha256: shown.sliceSha256}), /Update bambu-printer-mcp in Settings → Printers so Counterpart can show you what will print/);
   assert.equal(f.runs.filter(run => run.id).length, 0);
+});
+
+// David's kit (Nov 6): a MakerWorld STL holding six plates of parts, wider than his P1S. The MCP puts it on plates
+// (slice_stl split_to_plates); its project 3MF joins the project with the MCP's plates, plate 1 is chosen, and the
+// estimate the sheet gets is plate 1's. Choosing the STL again reuses the same file.
+test('a downloaded model bigger than the bed joins the project as the MCP’s plates, and the estimate is plate 1’s', async t => {
+  const f = await setup(t);
+  const dir = f.store.dir(f.object.id);
+  await mkdir(join(dir, 'original'), {recursive: true});
+  await writeFile(join(dir, 'original', 'kit.stl'), STL);
+  const stlSha = createHash('sha256').update(STL).digest('hex');
+  const credit = {url: 'https://makerworld.com/en/models/1531561', designer: 'Kass 3D', site: 'MakerWorld', title: '3D scan platform'};
+  await f.store.update(f.object.id, o => ({...o, kind: 'published', current: {model: 'original/kit.stl', renders: []},
+    files: {original: ['original/kit.stl'], current: 'original/kit.stl', receipts: [{format: 'stl', sha256: stlSha, byteLength: STL.length, plates: [], path: 'original/kit.stl', name: 'kit.stl', credit}]},
+    publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: false}}));
+  const plates3mf = Buffer.from('PK\x03\x04 the MCP\'s plates');
+  const plates = [{index: 0, name: 'Plate 1', objects: ['Part 1']}, {index: 1, name: 'Plate 2', objects: ['Part 2', 'Part 3']}];
+  const runner = f.deps.print.services.runner, seen = [];
+  runner.estimate = async input => {
+    seen.push({model: input.stlPath.slice(-4), splitToPlates: input.splitToPlates});
+    if (input.stlPath.endsWith('.stl')) return {settings: {}, previewSupported: true,
+      split: {bytes: plates3mf, plates, message: 'This model is bigger than the P1S bed (256 × 256 mm, 250 mm tall), so its 3 parts are arranged on 2 plates. Each plate prints on its own.'}};
+    return {...shownSlice('plate 1'), estimate: {seconds: 3600, grams: 40}, settings: {layers: 10}, previewSupported: true};
+  };
+  const estimate = await f.service.estimate(f.object.id);
+  assert.equal(estimate.seconds, 3600, "plate 1's estimate");
+  assert.deepEqual(seen, [{model: '.stl', splitToPlates: true}, {model: '.3mf', splitToPlates: undefined}]);
+  const object = await f.service.get(f.object.id);
+  assert.equal(object.files.receipts.length, 2);
+  const receipt = object.files.receipts[1];
+  assert.deepEqual(receipt.plates, plates.map(plate => ({...plate, sliced: false})));
+  assert.equal(receipt.name, 'kit (2 plates).3mf');
+  assert.deepEqual(receipt.credit, credit, "the designer's credit stays with their parts");
+  assert.deepEqual(await readFile(join(dir, receipt.path)), plates3mf);
+  assert.equal(object.current.model, receipt.path);
+  assert.deepEqual(object.publishedSelection, {fileIndex: 1, plateIndex: 0, sliced: false});
+  // Each plate is offered in the project's plate list.
+  const {projectPlates} = await import('../dist/objects/plates.js');
+  assert.deepEqual(projectPlates(object).filter(plate => plate.fileIndex === 1).map(plate => [plate.name, plate.selected]), [['Plate 1', true], ['Plate 2', false]]);
+  // The STL chosen again: the same plates file, selected again, never a second copy.
+  await f.service.selectPlate(f.object.id, 0, 0);
+  await f.service.estimate(f.object.id);
+  const again = await f.service.get(f.object.id);
+  assert.equal(again.files.receipts.length, 2);
+  assert.deepEqual(again.publishedSelection, {fileIndex: 1, plateIndex: 0, sliced: false});
+});
+
+test('a part bigger than the bed reaches the sheet as the MCP’s sentence', async t => {
+  const f = await setup(t);
+  const sentence = 'Part 2 is 300 × 120 mm and 40 mm tall, larger than the P1S bed (256 × 256 mm, 250 mm tall), so it can\'t be printed on it as it is. Scale it down or cut it into pieces that fit.';
+  f.deps.print.services.runner.estimate = async () => { throw new PrinterMcpError('slicer-error', new Error('raw words'), sentence); };
+  await assert.rejects(f.service.estimate(f.object.id), error => error.name === 'SlicerRefusedError' && error.message === sentence);
 });

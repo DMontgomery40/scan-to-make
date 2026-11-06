@@ -29,7 +29,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, noSlicedFacts = false, laidFlat, slicedBytes, slicing, ownProcess, ownProcessArgs} = {}) {
+async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, noSlicedFacts = false, laidFlat, slicedBytes, slicing, ownProcess, ownProcessArgs, bedSplit} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -40,7 +40,7 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(noSlicedFacts ? {HANDOFF_FIXTURE_NO_SLICED_FACTS: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {}), ...(ownProcess ? {HANDOFF_FIXTURE_OWN_PROCESS: ownProcess} : {}), ...(ownProcessArgs ? {HANDOFF_FIXTURE_OWN_PROCESS_ARGS: ownProcessArgs} : {})}},
+      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(noSlicedFacts ? {HANDOFF_FIXTURE_NO_SLICED_FACTS: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {}), ...(ownProcess ? {HANDOFF_FIXTURE_OWN_PROCESS: ownProcess} : {}), ...(ownProcessArgs ? {HANDOFF_FIXTURE_OWN_PROCESS_ARGS: ownProcessArgs} : {}), ...(bedSplit ? {HANDOFF_FIXTURE_BED_SPLIT: bedSplit} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -741,12 +741,49 @@ test("an estimate reports Bambu Studio's warning without asking anything", async
   assert.equal(f.seen.length, 0);
 });
 
+// David's kit (Nov 6): one STL wider than the P1S bed. Where the MCP says it can (capabilities.slicing.plates), it puts
+// the model on plates; the estimate hands back the plates for the person to choose from, and Print never prints one unseen.
+const PLATES = JSON.stringify({supports: true, copies: true, orient: true, plates: true});
+test('a model bigger than the bed comes back from the estimate on the MCP\'s plates, and a print of it is refused', async t => {
+  const f = await setup(t, {bedSplit: 'split', slicing: PLATES});
+  const result = await f.runner.estimate({stlPath: f.stlPath, splitToPlates: true});
+  assert.equal(result.sliced, undefined, 'nothing is estimated until a plate is chosen');
+  assert.equal(result.split.bytes.toString(), 'fixture plates 3mf');
+  assert.deepEqual(result.split.plates, [{index: 0, name: 'Plate 1', objects: ['Part 1']}, {index: 1, name: 'Plate 2', objects: ['Part 2', 'Part 3']}]);
+  assert.match(result.split.message, /arranged on 2 plates/);
+  const slice = (await f.calls()).find(call => call.tool === 'slice_stl');
+  assert.equal(slice.arguments.split_to_plates, true);
+  assert.ok(!(await f.calls()).some(call => call.tool === 'inspect_print_file'), 'no plate was picked to inspect');
+  await assert.rejects(f.runner.run({stlPath: f.stlPath, splitToPlates: true}), error => error.code === 'plates-split' && /arranged on 2 plates\. Each plate prints on its own\. Open Print again and choose a plate\.$/.test(error.detail));
+  assert.ok(!(await f.calls()).some(call => call.tool === 'print_3mf'));
+});
+
+test('split_to_plates is sent only for an STL, only when asked, and only where the MCP says it splits', async t => {
+  const sent = async (options, input = {}) => {
+    const f = await setup(t, {bedSplit: 'split', ...options});
+    await f.runner.estimate({stlPath: f.stlPath, ...input}).catch(() => undefined);
+    return (await f.calls()).find(call => call.tool === 'slice_stl')?.arguments.split_to_plates;
+  };
+  assert.equal(await sent({slicing: PLATES}, {splitToPlates: true}), true);
+  assert.equal(await sent({slicing: PLATES}), undefined, 'not asked');
+  assert.equal(await sent({}, {splitToPlates: true}), undefined, 'an MCP without capabilities.slicing.plates');
+});
+
+test("a part bigger than the bed is the MCP's own sentence, not the slicer's words", async t => {
+  const f = await setup(t, {bedSplit: 'too-large', slicing: PLATES});
+  await assert.rejects(f.runner.estimate({stlPath: f.stlPath, splitToPlates: true}),
+    {code: 'slicer-error', detail: 'Part 2 is 300 × 120 mm and 40 mm tall, larger than the P1S bed (256 × 256 mm, 250 mm tall), so it can\'t be printed on it as it is. Scale it down or cut it into pieces that fit.'});
+});
+
 test("the slicer's verdict is read from the MCP's slicer_report, and an MCP that passes only result.json must be updated", async t => {
   const {slicerReport, lacksSlicerReport} = await import('../dist/index.js');
   assert.equal(slicerReport(undefined), undefined);
   assert.equal(slicerReport({path: '/x.3mf'}), undefined);
   assert.deepEqual(slicerReport({slicer_report: {failed: false, plate_count: 2}}), {failed: false, plateCount: 2});
   assert.deepEqual(slicerReport({slicer_report: {failed: true, message: 'Failed slicing the model.'}}), {failed: true, message: 'Failed slicing the model.'});
+  // The MCP's plain sentence is what's shown; the slicer's own words are kept apart, for the log.
+  assert.deepEqual(slicerReport({slicer_report: {failed: true, message: 'Nothing on this plate can be printed.', slicer_message: 'One of the plate is empty or has no object fully inside it.'}}),
+    {failed: true, message: 'Nothing on this plate can be printed.', slicerMessage: 'One of the plate is empty or has no object fully inside it.'});
   assert.equal(slicerReport({slicer_report: {message: 'no verdict'}}), undefined, 'a report without its verdict is none');
   // Counterpart never reads result.json itself (PRD §8.0 item 9): an MCP from before slicer_report is refused, never trusted.
   assert.equal(lacksSlicerReport({path: '/x.3mf', slicer_result: {return_code: 0}}), true);
