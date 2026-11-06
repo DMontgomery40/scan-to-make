@@ -593,6 +593,77 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["starter-add"].waitForNonExistence(timeout: 5))
     }
 
+    /// David, Nov 6: "adding a printer is filling out a form that hsould be mostly autofilled by discovery". With projects
+    /// present, Printers → Add Printer… lists what the MCPs found; a found P1S opens filled in, and only the access code is
+    /// typed before Check and Add (the companion's printers.check and printers.add, as on the Mac).
+    func testAddPrinterFillsAFoundPrinterAndAsksOnlyTheAccessCodeWithProjects() throws {
+        let app = try openAddPrinter()
+        let found = app.buttons["add-printer-found-ssdp:01P00A451601106"]
+        XCTAssertTrue(found.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.buttons["add-printer-found-bonjour:octopi.local:80"].exists, "every printer the MCPs found is listed")
+        found.tap()
+        let host = app.textFields["add-printer-host"]
+        XCTAssertTrue(host.waitForExistence(timeout: 5))
+        XCTAssertEqual(host.value as? String, "192.168.1.42", "the address comes from discovery")
+        XCTAssertEqual(app.textFields["add-printer-serial"].value as? String, "01P00A451601106", "so does the serial number")
+        XCTAssertTrue(app.staticTexts["On the printer: Settings → Device"].exists || app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Settings → Device")).firstMatch.exists,
+                      "the MCP's own hint")
+        let add = app.buttons["add-printer-add"]
+        XCTAssertFalse(add.isEnabled, "the access code is still needed")
+        let secret = app.secureTextFields["add-printer-secret"]
+        XCTAssertTrue(secret.exists)
+        secret.tap(); secret.typeText("12345678")
+        XCTAssertTrue(add.isEnabled)
+        let check = app.buttons["add-printer-check"]
+        reveal(check, in: app.collectionViews.firstMatch)
+        check.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Connected")).firstMatch.waitForExistence(timeout: 10))
+        add.tap()
+        XCTAssertTrue(app.staticTexts["Added."].waitForExistence(timeout: 10), "the companion added it")
+        app.buttons["add-printer-done"].tap()
+        XCTAssertTrue(app.buttons["add-printer"].waitForExistence(timeout: 5), "back on Printers")
+    }
+
+    /// The MCP fetches the key for the person (`obtain`, "Approve in OctoPrint"): its button sits under the key, and the
+    /// approved key fills the field, so Add needs nothing typed.
+    func testAddPrinterApprovalFromTheMCPFillsTheKey() throws {
+        let app = try openAddPrinter()
+        let octo = app.buttons["add-printer-found-bonjour:octopi.local:80"]
+        XCTAssertTrue(octo.waitForExistence(timeout: 10), app.debugDescription)
+        octo.tap()
+        let approve = app.buttons["add-printer-obtain"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 5))
+        XCTAssertEqual(approve.label, "Approve in OctoPrint", "the MCP's words")
+        let add = app.buttons["add-printer-add"]
+        XCTAssertFalse(add.isEnabled)
+        approve.tap()
+        XCTAssertTrue(app.staticTexts["OctoPrint approved Counterpart."].waitForExistence(timeout: 10))
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: add)
+        XCTAssertEqual(XCTWaiter().wait(for: [enabled], timeout: 5), .completed, "the approved key filled the field")
+        add.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Added")).firstMatch.waitForExistence(timeout: 10))
+    }
+
+    private func openAddPrinter() throws -> XCUIApplication {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.copyItem(at: root.appendingPathComponent("packages/contracts/fixtures/printer-setup-phone.json"),
+                                         to: folder.appendingPathComponent("printer-setup-phone.json"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all"]
+        app.launch()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20), "with projects present")
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
+        let add = app.buttons["add-printer"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10), app.debugDescription)
+        reveal(add, in: app.collectionViews.firstMatch)
+        add.tap()
+        return app
+    }
+
     func testPrinterCopiesAndExplicitMoveAreReachableWithProjects() throws { try checkCopyMove(completes: false) }
 
     func testCompletedPrinterMoveKeepsItsResultAfterItsButtonDisappears() throws { try checkCopyMove(completes: true) }
