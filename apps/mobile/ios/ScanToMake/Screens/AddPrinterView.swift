@@ -160,7 +160,7 @@ private struct AddPrinterForm: View {
                 ForEach(model.options?.types ?? []) { Text($0.label).tag($0.printerType) }
             }
             if type?.serial == true {
-                Picker(type?.field("model")?.label ?? "Model", selection: Binding(get: { model.form.model ?? "" }, set: { model.form.model = $0.isEmpty ? nil : $0 })) {
+                Picker(type?.field("model")?.label ?? "Model", selection: Binding(get: { model.form.model ?? "" }, set: { model.choose(model: $0.isEmpty ? nil : $0) })) {
                     if model.form.model == nil { Text("Choose…").tag("") }
                     ForEach(model.models) { Text($0.label).tag($0.value) }
                 }
@@ -325,6 +325,8 @@ private struct AddPrinterDone: View {
     var problem: String?
     var form = PrinterForm()
     var prefilledFromDiscovery = false
+    /// The model came from discovery or the serial number, not the person: a changed serial picks it again.
+    var modelInferred = false
     var check: PrinterCheckResult?
     var checking = false
     var saving: String?
@@ -356,7 +358,8 @@ private struct AddPrinterDone: View {
         return missing.isEmpty ? "" : "Still needed: " + missing.joined(separator: ", ") + "."
     }
 
-    func label(_ backend: String) -> String { backend == "bambu-printer-mcp" ? "bambu-printer-mcp" : "mcp-3D-printer-server" }
+    /// The MCP's name as the companion gives it; never mapped here.
+    func label(_ backend: String) -> String { discovery?.label(backend) ?? backend }
 
     func discover() async {
         looking = true
@@ -388,6 +391,7 @@ private struct AddPrinterDone: View {
             value.backend = first
         }
         form = value
+        modelInferred = value.model != nil
         if type?.serial == true, form.model == nil, models.count == 1 { form.model = models.first?.value }
         check = nil; problem = nil; stopObtaining()
         path = [.form]
@@ -396,16 +400,16 @@ private struct AddPrinterDone: View {
     func choose(type value: String) {
         form.printerType = value
         form.backend = options?.types.first { $0.printerType == value }?.backends.first ?? form.backend
-        form.model = nil; form.slicer = nil
+        form.model = nil; form.slicer = nil; modelInferred = false
     }
 
-    func choose(backend: String) { form.backend = backend; form.model = nil; form.slicer = nil }
+    func choose(backend: String) { form.backend = backend; form.model = nil; form.slicer = nil; modelInferred = false }
 
-    /// The serial names the model (the MCP's own table), unless one was chosen.
-    func type(serial value: String) {
-        form.serial = value
-        if form.model == nil, let model = options?.model(forSerial: value), models.contains(where: { $0.value == model }) { form.model = model }
-    }
+    /// The serial names the model (the MCP's own table), unless the person chose one: a corrected serial picks again.
+    func type(serial value: String) { modelInferred = form.setSerial(value, options: options, inferred: modelInferred) }
+
+    /// The person picked the model: a serial change no longer replaces it.
+    func choose(model value: String?) { form.model = value; modelInferred = false }
 
     /// A changed printer drops the last check, and stops asking for a key for the old one.
     func formChanged() {

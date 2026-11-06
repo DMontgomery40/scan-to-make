@@ -45,7 +45,9 @@ async function phoneSetupCall(setup:NonNullable<PhoneSetup>,method:PhoneSetupMet
       const found=await setup.discover();
       discoveredFolders.clear();
       for(const candidate of found.found)if(candidate.folder)discoveredFolders.add(candidate.folder);
-      return found;
+      // Each MCP's name as people see it, so the phones never map package names themselves.
+      const {MCP_PACKAGES}=await import('./printing/setup.js');
+      return {...found,labels:Object.fromEntries(MCP_PACKAGES.map(item=>[item.package,item.label]))};
     }
     case 'check':case 'add':{
       const printer=(parsed.data as {printer:import('./printing/setup.js').PrinterForm}).printer;

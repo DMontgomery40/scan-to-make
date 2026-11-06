@@ -57,7 +57,12 @@ data class PrinterCandidate(val id: String, val source: String, val name: String
     fun filledModel(options: PrinterSetupOptions?): String? = modelSetting(options)?.let { fill?.get(it) }
 }
 
-@Serializable data class PrinterDiscovery(val found: List<PrinterCandidate> = emptyList(), val network: String = "complete", val options: PrinterSetupOptions = PrinterSetupOptions())
+@Serializable data class PrinterDiscovery(val found: List<PrinterCandidate> = emptyList(), val network: String = "complete", val options: PrinterSetupOptions = PrinterSetupOptions(),
+                                         /** Each MCP's name as people see it, from the companion. */
+                                         val labels: Map<String, String>? = null) {
+    /** An MCP's name: the companion's, else its package name as it is. Never mapped here. */
+    fun label(backend: String): String = labels?.get(backend) ?: backend
+}
 @Serializable data class PrinterCheckResult(val reached: Boolean, val camera: String = "not-supported", val image: Image? = null, val model: String? = null) {
     @Serializable data class Image(val mimeType: String, val base64: String)
 }
@@ -72,7 +77,9 @@ data class PrinterCandidate(val id: String, val source: String, val name: String
 data class PrinterForm(val folder: String? = null, val backend: String = "bambu-printer-mcp", val printerType: String = "bambu",
                        val host: String = "", val port: String? = null, val serial: String = "", val model: String? = null,
                        val secret: String = "", val name: String? = null, val slicer: String? = null, val slicerPath: String? = null,
-                       val profiles: String? = null) {
+                       val profiles: String? = null,
+                       /** The model came from discovery or the serial number, not the person: a changed serial picks it again. Not sent. */
+                       val modelInferred: Boolean = false) {
     /** The same wire form as CounterpartKit's `PrinterForm` encoding. */
     fun json(): JsonObject {
         if (folder != null) return jsonOf("folder" to folder, "model" to model)
@@ -115,6 +122,13 @@ suspend fun CompanionClient.obtainUntilAnswered(form: PrinterForm, field: String
         shown(current)
     }
     return current
+}
+
+/** The serial names the model (the MCP's own table), unless the person chose one: a corrected serial picks again. */
+fun PrinterForm.withSerial(value: String, options: PrinterSetupOptions): PrinterForm {
+    if (model != null && !modelInferred) return copy(serial = value)
+    val named = options.model(value)?.takeIf { m -> options.models[backend].orEmpty().any { it.value == m } }
+    return copy(serial = value, model = named ?: if (modelInferred) null else model, modelInferred = named != null)
 }
 
 /** The key or access code the chosen MCP can fetch for the person (`obtain`): its button's words, or null. */

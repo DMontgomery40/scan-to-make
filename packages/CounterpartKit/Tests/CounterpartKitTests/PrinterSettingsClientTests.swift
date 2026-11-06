@@ -125,3 +125,27 @@ final class PrinterCandidateModelTests: XCTestCase {
         XCTAssertFalse(try candidate(missing: ["PRINTER_MODEL"]).needsModel(nil), "no fields from the MCP: no guess")
     }
 }
+
+/// Codex on #392: a model the serial named follows a corrected serial; a model the person chose stays.
+final class PrinterFormSerialTests: XCTestCase {
+    private let options = try! JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
+    {"types":[{"printerType":"bambu","label":"Bambu Lab","backends":["bambu-printer-mcp"],"serial":true}],
+     "models":{"bambu-printer-mcp":[{"value":"p1s","label":"P1S"},{"value":"p1p","label":"P1P"}]},"serialModels":{"01P":"p1s","01S":"p1p"}}
+    """.utf8))
+
+    func testACorrectedSerialPicksItsModelAgain() {
+        var form = PrinterForm(); var inferred = false
+        inferred = form.setSerial("01P00A", options: options, inferred: inferred)
+        XCTAssertEqual(form.model, "p1s"); XCTAssertTrue(inferred)
+        inferred = form.setSerial("01S00A", options: options, inferred: inferred)
+        XCTAssertEqual(form.model, "p1p", "the corrected serial names another model")
+        inferred = form.setSerial("XYZ", options: options, inferred: inferred)
+        XCTAssertNil(form.model, "a serial the MCP doesn't know leaves the model to choose"); XCTAssertFalse(inferred)
+    }
+
+    func testAModelThePersonChoseStays() {
+        var form = PrinterForm(); form.model = "p1p"
+        let inferred = form.setSerial("01P00A", options: options, inferred: false)
+        XCTAssertEqual(form.model, "p1p"); XCTAssertFalse(inferred)
+    }
+}
