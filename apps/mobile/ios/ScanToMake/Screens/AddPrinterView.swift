@@ -293,7 +293,7 @@ private struct AddPrinterForm: View {
                       systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             }
             if let problem = model.problem { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-            Color.clear.frame(height: 1).listRowBackground(Color.clear).id("add-printer-check-result").accessibilityHidden(true)
+            Color.clear.frame(height: 1).listRowBackground(Color.clear).listRowSeparator(.hidden).listRowInsets(EdgeInsets()).id("add-printer-check-result").accessibilityHidden(true)
         } footer: {
             if model.check?.reached != true && !model.checking {
                 Text(model.formReady
