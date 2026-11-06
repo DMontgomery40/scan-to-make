@@ -180,6 +180,8 @@ private struct AddPrinterForm: View {
                     LabeledContent(secret.label) {
                         SecureField(secret.label, text: $model.form.secret, prompt: Text(secret.required ? "Required" : "Optional"))
                             .multilineTextAlignment(.trailing)
+                            // A printer's code, not a website password: no Passwords bar, no "Save Password?" after Add.
+                            .textContentType(.oneTimeCode)
                             .focused($focused, equals: "secret")
                             .accessibilityIdentifier("add-printer-secret")
                     }
@@ -257,6 +259,7 @@ private struct AddPrinterForm: View {
 
     private func pathField(_ field: PrinterSetupOptions.Field, text: Binding<String>, prompt: String?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
+            Text(field.label + (field.required ? "" : " (optional)"))
             TextField(field.label + (field.required ? "" : " (optional)"), text: text, prompt: prompt.map { Text($0) })
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
             if let hint = field.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
