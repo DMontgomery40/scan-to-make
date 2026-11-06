@@ -16,11 +16,11 @@ const model=(title,plates)=>Buffer.from(zipSync({'[Content_Types].xml':strToU8('
  'Metadata/model_settings.config':strToU8(`<config>${plates.map((name,i)=>`<plate><metadata key="plater_id" value="${i+1}"/><metadata key="plater_name" value="${name}"/></plate>`).join('')}</config>`)}));
 
 /** The published-model worker (PRD §8.11), faked: what it was asked, and the files it "downloaded". */
-async function setup(t,answer=async()=>({status:'needs_file'})) {
+async function setup(t,answer=async()=>({status:'needs_file'}),extra={}) {
  const root=await mkdtemp(join(tmpdir(),'starters-')),store=new ObjectStore(join(root,'objects')),asked=[];
  const runPublished=async input=>{asked.push(input);return answer(input,root);};
  const service=new ObjectService({store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},
-  printGate:{updating:()=>false,hold:()=>()=>{}},runPublished,runTouchup:async()=>{throw Error('a starter entered the design pass');},titleFor:async()=>'Generated'});
+  printGate:{updating:()=>false,hold:()=>()=>{}},runPublished,runTouchup:async()=>{throw Error('a starter entered the design pass');},titleFor:async()=>'Generated',...extra});
  t.after(async()=>{await service.close();await rm(root,{recursive:true,force:true});});
  return {root,store,service,asked};
 }
@@ -82,6 +82,12 @@ test('with no browser to download with (Linux), a starter asks for the designer�
  const o=await service.settled((await service.addStarter('scan-platform')).id);
  assert.equal(o.state,'needs-closeup');assert.equal(o.ask.type,'file');assert.equal(o.ask.url,o.credit.url);
  assert.match(o.ask.question,/MakerWorld/);assert.equal(o.failure,undefined);
+});
+test('with AI off, a starter stays and asks for the designer’s files',async t=>{
+ const {service,asked}=await setup(t,undefined,{modelAccess:{projectWorker:()=>{throw new Error('AI is off. Choose a provider in AI Settings.');}}});
+ const o=await service.addStarter('long-vernier-caliper');
+ assert.equal(o.state,'needs-closeup');assert.equal(o.ask.type,'file');assert.equal(o.ask.url,o.credit.url);
+ assert.equal(asked.length,0);assert.equal((await service.list()).length,1,'the project is kept');
 });
 test('a published link that isn’t a starter still asks which plate, and still asks for a file it can’t get',async t=>{
  const {service}=await setup(t,async(_input,root)=>rig(root));

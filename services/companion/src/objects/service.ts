@@ -543,7 +543,16 @@ export class ObjectService {
         // Ready to go (David, Nov 5: "READY TO GO. not ready to be downloaded from maker world"): the same
         // published-model pass a pasted link runs (PRD §8.11) gets the designer's own files with the person's own
         // MakerWorld sign-in. Never bundled: the MakerWorld Standard Digital File License doesn't allow re-hosting.
-        return await this.start(created.id);
+        try { return await this.start(created.id); }
+        catch {
+          // No worker to download with (AI is off, or its settings are unavailable): the project stays, and the person
+          // adds the designer's files, as a pasted link asks when they can't be fetched.
+          const ask = {id: randomUUID(), type: 'file' as const,
+            question: `Download ${starter.title.toLowerCase()} from ${starter.site} and add the designer’s files here.`,
+            url: starter.url, modelName: starter.title, site: starter.site, accepts: ['3mf' as const, 'stl' as const],
+            answers: ['file' as const], status: 'open' as const, askedAtMs: Date.now()};
+          return this.#changed(await store.update(created.id, o => ({...o, state: 'needs-closeup', ask})));
+        }
       } catch (error) { await store.remove(created.id); throw error; }
     });
     this.#starterAdding = next;
