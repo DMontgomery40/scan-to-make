@@ -143,8 +143,8 @@ enum FusionSetup {
         case notConfigured
         /// The printer MCP has no Fusion bridge (no `fusion_mcp_status`): `server` is the MCP to update.
         case noBridge(server: String)
-        /// Fusion answers, but the MCP doesn't say whether a design is open (no `activeDesign`): Fusion can't be used
-        /// until it does, so this is never success (Codex P1 on #377).
+        /// Fusion answers, but the MCP can't say whether a design is open (no `activeDesign`, and no `fusion_mcp_call` for
+        /// the interim read): never success (Codex P1 on #377).
         case designUnknown(server: String)
         case notConnected(String)
         case unreachable(String)
@@ -181,7 +181,18 @@ enum FusionSetup {
             if flag("configured") == false { return .notConfigured }
             // An MCP from before `activeDesign` can't say a design is open, and the add-in refuses everything without one.
             if flag("connected") == true {
-                switch flag("activeDesign") { case true?: return .connected; case false?: return .needsDesign; case nil: return .designUnknown(server: reply.server) }
+                switch flag("activeDesign") {
+                case true?: return .connected
+                case false?: return .needsDesign
+                case nil:
+                    // Interim, until both MCPs report `activeDesign` and it is installed through Update (PRD §8.0's order):
+                    // the companion read the open design's parameters, and Fusion's refusal is recognised as before.
+                    // Delete with the companion's read once the field ships.
+                    guard let design = reply.design else { return .designUnknown(server: reply.server) }
+                    let refusal = (design.text ?? "").lowercased()
+                    return design.isError && (refusal.contains("no_active_design") || refusal.contains("no active design") || refusal.contains("no open design"))
+                        ? .needsDesign : .connected
+                }
             }
             if flag("fusionRunning") == true, flag("addinReachable") == false { return .reopenFusion }
             if case .string(let error)? = value["error"] { return .notConnected(short(error)) }

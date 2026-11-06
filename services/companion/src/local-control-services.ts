@@ -52,7 +52,7 @@ export interface ControlServices {
   /** fusion_mcp_setup on the printer MCP as the companion runs it (with its Update override): the Mac's Fusion Set Up. */
   fusionSetup?: (install: boolean) => Promise<{setup: Record<string, unknown> | null; server: string; error?: string}>;
   /** fusion_mcp_status {launch: true} on the same printer MCP, its structured result as the MCP gives it (null without the tool). */
-  fusionStatus?: () => Promise<{status: Record<string, unknown> | null; server: string; error?: string}>;
+  fusionStatus?: () => Promise<{status: Record<string, unknown> | null; server: string; error?: string; design?: {isError: boolean; text?: string}}>;
   mcpUpdates?: import('./printing/mcp-updates.js').McpUpdater;
   /** Settings → Printers: both MCPs (Download), finding and adding printers. Present without a printer. */
   printerSetup?: import('./printing/setup.js').PrinterSetup;
