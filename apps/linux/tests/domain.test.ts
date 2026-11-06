@@ -282,3 +282,29 @@ test("Home lists the starters in the Projects view whatever projects exist", () 
   assert.equal(startersShown({ search: "", filter: "working" }), false);
   assert.equal(startersShown({ search: "", filter: "archived" }), false);
 });
+
+test("MCP row shows the printer’s checkout separately from the app copy", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { mcpUsageWords } = await import("../src/domain.ts");
+  const fixture = JSON.parse(
+    await readFile(
+      new URL(
+        "../../../packages/contracts/fixtures/mcp-profile-copies.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    mcpUsageWords(fixture.uses[0]),
+    "Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25).",
+  );
+  assert.equal(fixture.appCopy.version, "1.2.45");
+});
+
+test("an accepted MCP move explains that it is waiting for the print", async () => {
+  const {readFile} = await import("node:fs/promises");
+  const {mcpMoveNotice} = await import("../src/domain.ts");
+  const reply = JSON.parse(await readFile(new URL("../../../packages/contracts/fixtures/mcp-update-waiting.json", import.meta.url), "utf8"));
+  assert.equal(mcpMoveNotice(reply), "Moves to Counterpart’s updated copy after the current print.");
+});

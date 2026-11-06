@@ -131,9 +131,19 @@ let printerBusy:((id:string)=>Promise<boolean>)|undefined;
 const printerEnv=hostEnvironment(dataRoot);
 const mcpLabels:Record<string,string>={'bambu-printer-mcp':'bambu-printer-mcp','mcp-3d-printer-server':'mcp-3D-printer-server'};
 if(remoteAuth)mcpUpdates=new McpUpdater({
+  catalog:()=>printerCatalog,
   destinations:()=>printerCatalog?printerCatalog.destinations.map(destination=>({id:destination.id,config:printerCatalog!.resolve(destination.id)!})):[],
   env:printerEnv,overrides:new McpOverrides(join(dataRoot,'printers','overrides.json')),
-  session:id=>printerDestinations?.get(id)?.runner.session,
+  session:id=>{
+    const services=printerDestinations;
+    if(!services)return undefined;
+    // A non-selected profile still needs its own session for an explicit move and connection verification.
+    if(!services.has(id)){
+      const config=printerCatalog?.entries().find(entry=>entry.id===id)?.config;
+      if(config&&handoffDirectory)services.set(id,createPrintHandoffServices(config,handoffDirectory,{pool:printerPool,destinationId:id,onConnect:onConnect(id)}));
+    }
+    return services.get(id)?.runner.session;
+  },
   // A project printing there, or the printer itself printing (the phone's handoff prints have no project).
   busy:async id=>printerBusy?await printerBusy(id):false,
   runningVersion:id=>printerDirectory?.capabilities(id)?.server.version,node:process.execPath,gate:printGate,

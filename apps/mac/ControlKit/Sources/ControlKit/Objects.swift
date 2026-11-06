@@ -633,6 +633,22 @@ public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
         public let version: String?
         public init(kind: String, path: String? = nil, version: String? = nil) { self.kind = kind; self.path = path; self.version = version }
     }
+    public struct Usage: Decodable, Sendable, Equatable, Identifiable {
+        public let destinationId: String
+        public let printer: String
+        public let mcpId: String
+        public let kind: String
+        public let path: String?
+        public let version: String?
+        public let canMove: Bool
+        public var id: String { destinationId }
+        public var words: String {
+            let location = kind == "app" ? "Counterpart’s copy" : "your copy" + (path.map { " at " + ($0 as NSString).abbreviatingWithTildeInPath } ?? "")
+            return "\(printer) uses \(location) (\(version ?? "version unknown"))."
+        }
+    }
+    public let uses: [Usage]?
+    public let appCopy: Install?
     /// The npm package: `bambu-printer-mcp` or `mcp-3d-printer-server`.
     public let package: String
     /// As people know it: `mcp-3D-printer-server`.
@@ -646,9 +662,9 @@ public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
     public let installs: [Install]
     public var id: String { package }
     public init(package: String, label: String, description: String, installed: Bool, version: String? = nil, latestVersion: String? = nil,
-                appMcpId: String, installs: [Install] = []) {
+                appMcpId: String, installs: [Install] = [], uses: [Usage]? = nil, appCopy: Install? = nil) {
         self.package = package; self.label = label; self.description = description; self.installed = installed; self.version = version
-        self.latestVersion = latestVersion; self.appMcpId = appMcpId; self.installs = installs
+        self.latestVersion = latestVersion; self.appMcpId = appMcpId; self.installs = installs; self.uses = uses; self.appCopy = appCopy
     }
 }
 

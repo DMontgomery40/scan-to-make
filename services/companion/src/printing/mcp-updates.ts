@@ -5,6 +5,7 @@ import {dirname, join} from 'node:path';
 import {printerBackendSchema, type PrinterHandoffConfig, type PrinterSession} from '@scan-to-make/printer-handoff';
 import {newerVersion} from './directory.js';
 import type {PrintGate} from './print-gate.js';
+import type {PrinterCatalog} from '../objects/printers.js';
 import {appInstall, appMcpId, findNpm, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type McpInstall, type ResolvedMcpInstall} from './mcp-install.js';
 
 export const MCP_UPDATE_TIMEOUT_MS = 10 * 60_000;
@@ -92,6 +93,8 @@ const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.l
 const newer = newerVersion;
 
 export interface McpUpdaterDeps {
+  /** Production catalog: includes profiles hidden behind the selected MCP, and the printer they share. */
+  catalog?: () => Pick<PrinterCatalog, 'entries' | 'canonical'> | undefined;
   /** Every destination with the profile as configured (before overrides). */
   destinations(): {id: string; config: PrinterHandoffConfig}[];
   env: InstallEnvironment;
@@ -154,7 +157,7 @@ export class McpUpdater {
    * the install is the one actually run, after an npx or fresh-copy override.
    */
   install(destinationId: string): {mcpId: string; install: ResolvedMcpInstall; config: PrinterHandoffConfig; effective: PrinterHandoffConfig; runs: string} | undefined {
-    const entry = this.#deps.destinations().find(item => item.id === destinationId);
+    const entry = this.#destinations().find(item => item.id === destinationId);
     if (!entry) return undefined;
     const mcpId = mcpIdFor(resolveMcpInstall(entry.config, this.#deps.env), entry.config);
     const effective = this.#deps.overrides.apply(entry.config, this.#deps.overrides.peek(destinationId, entry.config));
@@ -162,15 +165,20 @@ export class McpUpdater {
     // What actually runs: two profiles moved to the same fresh copy share it, whatever their ids.
     return {mcpId, install, config: entry.config, effective, runs: mcpIdFor(install, effective)};
   }
+  #destinations() { return this.#deps.catalog?.()?.entries() ?? this.#deps.destinations(); }
+  #gateIds(ids: string[]) {
+    const catalog = this.#deps.catalog?.();
+    return [...new Set(ids.flatMap(id => [id, catalog?.canonical(id) ?? id]))];
+  }
   mcpId(destinationId: string): string | undefined { return this.install(destinationId)?.mcpId; }
   /** Every printer on this install: by its id, and by the files it actually runs (so shared files are locked and restarted together). */
   #members(mcpId: string, options: {fresh?: boolean} = {}) {
-    const all = this.#deps.destinations().map(entry => ({...entry, ...this.install(entry.id)!}));
-    const runs = new Set(all.filter(entry => entry.mcpId === mcpId).map(entry => entry.runs));
+    const all = this.#destinations().map(entry => ({...entry, ...this.install(entry.id)!}));
+    const runs = new Set(all.filter(entry => (entry.mcpId === mcpId || entry.runs === mcpId)).map(entry => entry.runs));
     // A fresh copy replaces the app's own copy: every printer already running it is part of the update.
-    const target = all.find(entry => entry.mcpId === mcpId);
+    const target = all.find(entry => (entry.mcpId === mcpId || entry.runs === mcpId));
     if (options.fresh && target) { const fresh = this.#freshInstall(target.config); runs.add(mcpIdFor(fresh, target.config)); }
-    return all.filter(entry => entry.mcpId === mcpId || runs.has(entry.runs)).sort((a, b) => Number(b.mcpId === mcpId) - Number(a.mcpId === mcpId));
+    return all.filter(entry => (entry.mcpId === mcpId || entry.runs === mcpId) || runs.has(entry.runs)).sort((a, b) => Number(b.mcpId === mcpId || b.runs === mcpId) - Number(a.mcpId === mcpId || a.runs === mcpId));
   }
 
   /** The latest published version, as last checked; a view checks again after an hour, otherwise once a day. */
@@ -200,7 +208,7 @@ export class McpUpdater {
   }
   /** The daily check for every package in use. */
   start(): void {
-    const all = () => { for (const pkg of new Set(this.#deps.destinations().map(entry => entry.config.backend))) void this.checkLatest(pkg).catch(() => undefined); };
+    const all = () => { for (const pkg of new Set(this.#destinations().map(entry => entry.config.backend))) void this.checkLatest(pkg).catch(() => undefined); };
     all();
     this.#timer = setInterval(all, LATEST_EVERY_MS);
     this.#timer.unref?.();
@@ -214,7 +222,7 @@ export class McpUpdater {
   }
   async applyOverrides(): Promise<void> {
     await this.#deps.overrides.load();
-    for (const entry of this.#deps.destinations()) {
+    for (const entry of this.#destinations()) {
       const found = this.install(entry.id);
       if (found && this.#deps.overrides.peek(entry.id, entry.config)) await this.#deps.session(entry.id)?.restart(found.effective).catch(() => undefined);
     }
@@ -222,7 +230,7 @@ export class McpUpdater {
 
   /** A destination listed after start (Add, a Printer MCP choice): its saved override, applied as at start. */
   async applyOverride(destinationId: string): Promise<void> {
-    const entry = this.#deps.destinations().find(item => item.id === destinationId);
+    const entry = this.#destinations().find(item => item.id === destinationId);
     const found = entry ? this.install(entry.id) : undefined;
     if (entry && found && this.#deps.overrides.peek(entry.id, entry.config)) await this.#deps.session(entry.id)?.restart(found.effective).catch(() => undefined);
   }
@@ -249,7 +257,7 @@ export class McpUpdater {
     const first = members[0]!, pkg = first.config.backend;
     // The oldest version any of its printers runs (npx profiles may pin different ones). One whose version
     // isn't known yet (an npx range that hasn't connected) can't be called current.
-    const known = members.filter(member => member.mcpId === mcpId)
+    const known = members.filter(member => (member.mcpId === mcpId || member.runs === mcpId))
       .map(member => installedVersion(member.install, this.#deps.env) ?? this.#deps.runningVersion(member.id));
     const versions = known.filter((version): version is string => !!version);
     const everyKnown = versions.length === known.length;
@@ -305,10 +313,10 @@ export class McpUpdater {
 
   /** Marks the install's printers as updating (no print can start), then makes sure none is printing. */
   async #claim(mcpId: string, options: {fresh?: boolean} = {}): Promise<boolean> {
-    const members = this.#members(mcpId, options), ids = members.map(member => member.id), gate = this.#deps.gate;
+    const members = this.#members(mcpId, options), ids = this.#gateIds(members.map(member => member.id)), gate = this.#deps.gate;
     // The files this update writes, reserved for it alone: a fresh copy reserves the app's own copy.
-    const target = members.find(member => member.mcpId === mcpId);
-    const keys = [...new Set([...members.filter(member => member.mcpId === mcpId).map(member => member.runs),
+    const target = members.find(member => (member.mcpId === mcpId || member.runs === mcpId));
+    const keys = [...new Set([...members.filter(member => (member.mcpId === mcpId || member.runs === mcpId)).map(member => member.runs),
       ...(options.fresh && target ? [mcpIdFor(this.#freshInstall(target.config), target.config)] : [])])];
     if (keys.some(key => this.#changing.has(key) && this.#changing.get(key) !== mcpId)) return false;
     if (gate && !gate.beginUpdate(ids)) return false;
@@ -370,7 +378,7 @@ export class McpUpdater {
       return;
     }
     const previous = new Map(members.map(member => [member.id, this.#deps.overrides.peek(member.id, member.config)]));
-    const own = members.filter(member => member.mcpId === mcpId);
+    const own = members.filter(member => (member.mcpId === mcpId || member.runs === mcpId));
     let log = '';
     const run = async (label: string, command: string, args: string[], cwd: string | undefined, env: NodeJS.ProcessEnv) => {
       const result = await this.#run(command, args, {cwd, env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});

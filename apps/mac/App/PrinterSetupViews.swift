@@ -65,6 +65,8 @@ struct McpPackageRow: View {
     let status: McpUpdateStatus?
     let download: () -> Void
     var update: (() -> Void)? = nil
+    var move: ((String) -> Void)? = nil
+    @ObservedObject private var updates = PrinterUpdates.shared
 
     /// Installed, a newer version is published, and this view can update it.
     var offersUpdate: Bool { update != nil && package.offersUpdate }
@@ -88,9 +90,24 @@ struct McpPackageRow: View {
                     if package.installed, let version = package.version { Text(version).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
                 }
                 Text(package.description).font(.caption).foregroundStyle(.secondary)
+                if let copy = package.appCopy {
+                    Text("Counterpart’s copy \(copy.version ?? "version unknown")").font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(package.uses ?? []) { use in
+                    Text(use.words).font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(Array(Set((package.uses ?? []).filter(\.canMove).map(\.mcpId))).sorted(), id: \.self) { id in
+                    if let move {
+                        let names = (package.uses ?? []).filter { $0.mcpId == id }.map(\.printer).joined(separator:", ")
+                        Button("Move \(names) to Counterpart’s updated copy") { move(id) }
+                            .disabled(updates.status[id]?.busy == true)
+                        Text("Updates Counterpart’s copy and switches these profiles. Your copy is left untouched.").font(.caption).foregroundStyle(.secondary)
+                        if let progress = updates.status[id] { Text(progress.words).font(.caption) }
+                    }
+                }
                 if let status { statusLine(status) }
                 else if package.installed {
-                    Text(["Installed", place].compactMap { $0 }.joined(separator:" · ") + ". No printer uses it yet.").font(.caption).foregroundStyle(.secondary)
+                    Text(["Installed", place].compactMap { $0 }.joined(separator:" · ") + ((package.uses ?? []).isEmpty ? ". No printer uses it yet." : ".")).font(.caption).foregroundStyle(.secondary)
                     if offersUpdate, let latest = package.latestVersion {
                         Text("\(latest) is available.").font(.caption.weight(.medium)).foregroundStyle(Color.filament)
                     }

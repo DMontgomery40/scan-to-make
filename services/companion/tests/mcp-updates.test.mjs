@@ -87,7 +87,7 @@ test('shell command lines: quotes, escapes, cd and variables', () => {
 });
 
 /** A scripted updater: commands are recorded, sessions are fakes, versions come from a fake registry. */
-async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = ''} = {}) {
+async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'mcp-updates-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const env = mac({'/opt/homebrew/bin/npm': '', '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js': '', ...files}, {'/opt/homebrew/bin/npm': '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js', ...links});
@@ -105,7 +105,7 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
   const overrides = new McpOverrides(join(root, 'overrides.json'));
   await overrides.load();
   const updates = new McpUpdater({
-    gate, fs: {rename: async (from, to) => { moves.push(['rename', from, to]); if (failRename && failRename(from, to)) throw new Error('EXDEV'); }, rm: async path => { moves.push(['rm', path]); }, mkdir: async () => undefined},
+    catalog, gate, fs: {rename: async (from, to) => { moves.push(['rename', from, to]); if (failRename && failRename(from, to)) throw new Error('EXDEV'); }, rm: async path => { moves.push(['rm', path]); }, mkdir: async () => undefined},
     destinations: () => profiles ?? [{id: 'p1s', config: profile}, {id: 'a1', config: profile}],
     env, overrides, session, busy: async id => busy(id), runningVersion: id => id in installed ? installed[id] : '1.1.46',
     emit: async event => { events.push(event); }, waitPollMs: 20, node: '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node', path: '/usr/bin:/bin',
@@ -916,4 +916,98 @@ test('npm script policy: Update and Download authorize only the selected MCP and
       }
     }
   }
+});
+
+test('Settings lists a non-selected printer profile using a checkout beside Counterpart’s newer copy', async () => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const pkg = 'mcp-3d-printer-server', dir = `${HOME}/mcp-3D-printer-server`, prefix = `${APP}/printers/generic`;
+  const config = {backend: pkg, process: {command: '/node', args: [`${dir}/dist/index.js`]}};
+  const env = mac({[`${dir}/.git/HEAD`]: 'afcf378', [`${dir}/package.json`]: pkgJson('1.2.25', pkg), [`${dir}/dist/index.js`]: '',
+    [`${prefix}/lib/node_modules/${pkg}/package.json`]: pkgJson('1.2.45', pkg), [`${prefix}/lib/node_modules/${pkg}/dist/index.js`]: ''});
+  let effective = config;
+  const setup = new PrinterSetup({env, configs: () => [{id: 'other-profile', config}], effective: () => effective,
+    list: () => ['generic'], catalog: () => ({canonical: () => 'selected', destinations: [{id: 'selected', name: 'Bambu Lab P1S'}]})});
+  const card = (await setup.mcps()).packages.find(p => p.package === pkg);
+  assert.equal(card.uses[0].printer, 'Bambu Lab P1S');
+  assert.equal(card.uses[0].version, '1.2.25');
+  assert.equal(card.uses[0].path, dir);
+  assert.equal(card.uses[0].canMove, true);
+  assert.equal(card.appCopy.version, '1.2.45');
+  const originalId = card.uses[0].mcpId;
+  effective = {...config, process: {command: '/node', args: [`${prefix}/lib/node_modules/${pkg}/dist/index.js`]}};
+  const moved = (await setup.mcps()).packages.find(p => p.package === pkg);
+  assert.equal(moved.uses[0].version, '1.2.45');
+  assert.equal(moved.uses[0].canMove, false);
+  assert.equal(moved.uses[0].mcpId, originalId);
+});
+
+test('explicitly moving a checkout to Counterpart’s updated copy preserves the checkout and printer settings', async t => {
+  const dir = `${HOME}/mcp-3D-printer-server`, pkg = 'mcp-3d-printer-server';
+  const profile = {backend: pkg, process: {command: '/node', args: [`${dir}/dist/index.js`], cwd: dir, env: {PRINTER_HOST: '192.0.2.1'}}};
+  const f = await updater(t, {profiles: [{id: 'p1s', config: profile}], latest: '1.2.45', files: {
+    [`${dir}/package.json`]: pkgJson('1.2.25', pkg), [`${dir}/dist/index.js`]: '', [`${dir}/.git/HEAD`]: 'afcf378',
+  }});
+  assert.equal(await f.overrides.get('p1s'), undefined);
+  assert.deepEqual(f.commands, [], 'reading the install never switches or updates it');
+  await f.updates.update(f.mcpId, {fresh: true});
+  await f.done();
+  assert.equal(f.events.at(-1).type, 'mcp.update.done');
+  assert.ok(f.commands.every(command => !command.includes(`(in ${dir})`) && !command.includes('git ')), 'no checkout command');
+  assert.ok(f.moves.every(move => move.slice(1).every(path => !path.startsWith(dir))), 'no checkout file moves');
+  const effective = f.updates.effective('p1s', profile);
+  assert.deepEqual(effective.process.args, [`${APP}/printers/generic/lib/node_modules/${pkg}/dist/index.js`]);
+  assert.equal(effective.process.cwd, dir);
+  assert.equal(effective.process.env.PRINTER_HOST, '192.0.2.1');
+});
+
+test('updating the app copy finds overridden users and waits for their print before restarting them', async t => {
+  const dir = `${HOME}/src/bambu`, entry = `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js`;
+  const profile = bambu('/node', [`${dir}/dist/index.js`]);
+  let printing = true;
+  const f = await updater(t, {profiles: [{id: 'p1s', config: profile}], busy: () => printing, files: {
+    [`${dir}/package.json`]: pkgJson('1.1.46'), [`${dir}/.git/HEAD`]: 'ref', [`${dir}/dist/index.js`]: '',
+    [entry]: '', [entry.replace('dist/index.js', 'package.json')]: pkgJson('1.1.47'),
+  }});
+  await f.overrides.set('p1s', {command: '/node', args: [entry]}, profile);
+  const {appMcpId} = await import('../dist/printing/mcp-install.js');
+  const id = appMcpId('bambu-printer-mcp', mac());
+  assert.equal((await f.updates.update(id)).state, 'waiting');
+  assert.equal(f.moves.length, 0);
+  printing = false;
+  await f.done();
+  assert.equal(f.events.at(-1).type, 'mcp.update.done');
+  assert.deepEqual(f.restarts.map(item => item.id), ['p1s']);
+});
+
+test('the updater addresses hidden catalog profiles and reserves their selected printer too', async t => {
+  const {loadPrinterCatalog} = await import('../dist/objects/printers.js');
+  const {mkdir, writeFile} = await import('node:fs/promises');
+  const home = await mkdtemp(join(tmpdir(), 'hidden-update-'));
+  t.after(() => rm(home, {recursive: true, force: true}));
+  const dir = join(home, 'mcp-3D-printer-server'), pkg = 'mcp-3d-printer-server';
+  await mkdir(dir);
+  const settings = 'PRINTER_HOST=192.0.2.1\nBAMBU_SERIAL=01P00A123456789\nBAMBU_MODEL=p1s\n';
+  await writeFile(join(home, '.env'), settings);
+  await writeFile(join(dir, '.env'), settings + 'PRINTER_TYPE=bambu\n');
+  const profile = {backend: pkg, process: {command: '/node', args: [`${dir}/dist/index.js`], cwd: dir}};
+  const configPath = join(home, 'mcp.json');
+  await writeFile(configPath, JSON.stringify({mcpServers: {generic: profile.process}}));
+  const catalog = await loadPrinterCatalog(bambu('/node', [], {cwd: home}), {homeDirectory: home, sourcePaths: [configPath]});
+  const hidden = catalog.entries().find(entry => entry.backend === pkg);
+  assert.ok(hidden);
+  assert.notEqual(catalog.canonical(hidden.id), hidden.id, 'the second MCP profile is hidden behind the selected one');
+  const gate = new PrintGate(), selected = catalog.canonical(hidden.id), release = gate.hold(selected);
+  const f = await updater(t, {catalog: () => catalog, gate, profiles: catalog.destinations.map(item => ({id: item.id, config: catalog.resolve(item.id)})), files: {
+    [`${dir}/package.json`]: pkgJson('1.2.25', pkg), [`${dir}/.git/HEAD`]: 'ref', [`${dir}/dist/index.js`]: '',
+  }, latest: '1.2.45'});
+  const id = f.updates.mcpId(hidden.id);
+  assert.ok(id, 'the same catalog wiring used in production exposes the hidden profile to Update');
+  assert.equal((await f.updates.update(id, {fresh: true})).state, 'waiting');
+  assert.equal(f.moves.length, 0);
+  release();
+  await f.done();
+  assert.equal(f.events.at(-1).type, 'mcp.update.done');
+  assert.ok(await f.overrides.get(hidden.id));
+  assert.deepEqual(f.restarts.map(item => item.id), [hidden.id]);
+  assert.equal(gate.updating(selected), false);
 });

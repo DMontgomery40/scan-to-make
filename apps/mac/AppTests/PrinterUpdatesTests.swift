@@ -2,6 +2,18 @@ import XCTest
 
 /// PRD §8.10: Update asks the companion, which updates the install its own way and reports with `mcp.update.*`.
 @MainActor final class PrinterUpdatesTests: XCTestCase {
+    func testPackageShowsTheProfileCopySeparatelyFromTheAppCopy() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf:root.appendingPathComponent("packages/contracts/fixtures/mcp-profile-copies.json"))
+        let package = try JSONDecoder().decode(PrinterMcpPackage.self, from:data)
+        let use = try XCTUnwrap(package.uses?.first)
+        XCTAssertEqual(use.words, "Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25).")
+        XCTAssertEqual(package.appCopy?.version, "1.2.45")
+        XCTAssertTrue(use.canMove)
+        XCTAssertNotEqual(use.mcpId, package.appMcpId)
+    }
+
     private func event(_ type: String, _ data: String) throws -> CounterpartEvent {
         try JSONDecoder().decode(CounterpartEvent.self, from: Data(#"""
         {"seq":1,"id":"e","at":"2026-11-01T10:00:00Z","type":"\#(type)","title":"t","body":"b","notify":"passive","data":\#(data)}
