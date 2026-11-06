@@ -1,4 +1,4 @@
-import {starterProject, STARTER_ASSETS} from '../starters/catalog.js';
+import {starterProject} from '../starters/catalog.js';
 import {acknowledgePlate, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
 import {copyFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
@@ -540,9 +540,6 @@ export class ObjectService {
       try {
         const credit = {url: starter.url, designer: starter.designer, site: starter.site, title: starter.title, licence: starter.licence};
         await store.update(created.id, o => ({...o, starterId, title: starter.title, credit}));
-        if (starter.source === 'bundled' && starter.model) {
-          return await this.#keepPublished(created.id, [join(STARTER_ASSETS, starter.model)], {credit, summary: starter.summary});
-        }
         // The designer's original files are imported into this person's project, not re-hosted in the app.
         const ask = {id: randomUUID(), type: 'file' as const,
           question: `Download the original ${starter.title.toLowerCase()} files from ${starter.site}, then add them here.`,

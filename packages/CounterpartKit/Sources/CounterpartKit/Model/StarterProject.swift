@@ -17,11 +17,8 @@ public struct StarterProject: Decodable, Identifiable, Sendable {
     public let imageCredit: String?
     public let detail: String
     public let source: String
-    public let model: String?
 
-    public var bundled: Bool { source == "bundled" }
     public var imageFile: URL? { image.flatMap(Self.resource) }
-    public var modelFile: URL? { model.flatMap(Self.resource) }
     private static func resource(_ path: String) -> URL? {
         Bundle.module.url(forResource: path, withExtension: nil, subdirectory: "Starters")
     }

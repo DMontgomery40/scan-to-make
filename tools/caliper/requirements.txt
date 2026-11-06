@@ -1,5 +1,0 @@
-fonttools==4.68.0
-manifold3d==3.5.4
-numpy==2.5.4
-pillow==13.0.0
-segno==1.6.6

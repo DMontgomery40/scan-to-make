@@ -8,7 +8,7 @@ work and the print, pauses and stops prints, and shows notifications ("Ready to 
 Status: **first version, compiled and unit-tested, not yet run against a real Mac or on a real phone.** See
 "What's verified" below before relying on it.
 
-The release branch now includes the shared scan-platform, caliper-card and long-vernier starter catalog,
+The release branch now includes the shared scan-platform and long-vernier starter catalog,
 with fresh projects created by the companion. Imported projects retain all plates and per-plate completion;
 choose a plate to print or reprint it, and import multiple original files into one project. Active and uncertain
 prints lock plate selection. A print sheet retains its original plate identity so a change on another client

@@ -17,7 +17,7 @@ for file in "${files[@]}"; do printf 'synthetic build-context sentinel\n' > "$fi
 docker build --platform linux/amd64 -f deploy/companion/Dockerfile \
   --target context-audit --output "type=local,dest=$tmp/context" .
 test -f "$tmp/context/services/companion/package.json" # positive control
-test -f "$tmp/context/packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/caliper/caliper-2colour.3mf"
+test -f "$tmp/context/packages/CounterpartKit/Sources/CounterpartKit/Resources/Starters/vernier.png"
 for file in "${files[@]}"; do test ! -e "$tmp/context/$file"; done
 echo 'Dockerfile-specific ignore excluded all four sentinels from build context'
 docker build --platform linux/amd64 -t "$image" -f deploy/companion/Dockerfile .
@@ -28,8 +28,8 @@ import {starterProject, STARTER_ASSETS} from '/app/services/companion/dist/start
 import {join} from 'node:path';
 const forbidden = new Set(['.env.sentinel', 'SENTINEL', 'packaging-sentinel.usdz', 'KEY-SENTINEL.pem']);
 assert.ok(existsSync('/app/services/companion/dist/server-cli.js'));
-for (const id of ['scan-platform', 'caliper-card', 'long-vernier-caliper']) assert.equal(starterProject(id).id, id);
-assert.ok(existsSync(join(STARTER_ASSETS, starterProject('caliper-card').model)));
+for (const id of ['scan-platform', 'long-vernier-caliper']) assert.equal(starterProject(id).id, id);
+assert.ok(existsSync(join(STARTER_ASSETS, 'catalog.json')));
 for (const root of ['/app', '/opt', '/data']) {
   for (const entry of readdirSync(root, {recursive: true, withFileTypes: true})) {
     assert.ok(!forbidden.has(entry.name), `Sentinel leaked into image: ${entry.name}`);
