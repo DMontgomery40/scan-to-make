@@ -252,7 +252,17 @@ test('a kit split between the cache and Downloads is used before any worker runs
 // pins are the kit by its counts, kept under the model id, the mismatch logged once; a repeat tap never downloads.
 test('a republished kit (no file matches the pins) is kept once, logged once, and never downloaded again',async t=>{
  const entry={...pinnedCatalog('long-vernier-caliper'),sha256:['a'.repeat(64),'b'.repeat(64)]};
- for(const route of ['downloaded','arrived']){
+ // Codex on #372: files that only arrived can't tell two caliper variants from the caliper and its gauge; only a
+ // set the worker reports downloaded (it chose the profiles from the request) is a republished kit.
+ {
+  const {service}=await setup(t,async(_input,root)=>{
+   const made=await downloaded(root,[['Vernier 150mm COLOR-03.3mf',COLOR],['Vernier 220mm COLOR-03.3mf',GAUGE]]);
+   return {status:'needs_file',reason:'other',summary:'Couldn’t confirm.',arrived:made.files};
+  },{starter:id=>id===entry.id?entry:pinnedCatalog(id)});
+  const {value:o}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+  assert.equal(o.state,'failed','arrivals alone are no republished kit');
+ }
+ for(const route of ['downloaded']){
   const {service,asked,root}=await setup(t,async(_input,root)=>{
    const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-03.3mf',COLOR],['DEPTH+GAUGE+150mm+COLOR-03.3mf',GAUGE]]);
    return route==='downloaded'?made:{status:'needs_file',reason:'other',summary:'Couldn’t confirm.',arrived:made.files};
@@ -313,6 +323,34 @@ test('with Downloads refused, a cached kit is still Ready, and a waiting project
  await logged(async()=>{await again.service.list();await new Promise(r=>setTimeout(r,50));});
  const {value:r2}=await logged(()=>again.service.settled(w2.id));
  assert.equal(r2.state,'ready','listing the projects resumes it too');assert.equal(again.asked.length,1);
+});
+// Nov 6, bb9da63c: a scan-platform project made before the kit rule held the raw STL, Ready with no plates, and adding the
+// starter again only reopened it. Now adding it again gets the designer's kit into the same project.
+test('adding a starter again replaces an old project’s raw STL with the designer’s kit, in the same project',async t=>{
+ const stl=Buffer.alloc(134);stl.writeUInt32LE(1,80);
+ let worker='raw';
+ const {service,store,asked}=await setup(t,async(_input,root)=>worker==='raw'?downloaded(root,[['全3D打印360°摄影台.stl',stl]]):rig(root));
+ // The old project: made from the link, as a pasted model, then marked as the starter (as projects from before #369 are).
+ const old=await service.create('Print this','published','https://makerworld.com/en/models/1531561');
+ await service.start(old.id);
+ const raw=await service.settled(old.id);assert.equal(raw.state,'ready');assert.equal(raw.files.receipts[0].name,'全3D打印360°摄影台.stl');
+ await store.update(old.id,o=>({...o,starterId:'scan-platform',title:'3D scan platform'}));
+ worker='kit';
+ const {value:again,lines}=await logged(async()=>service.settled((await service.addStarter('scan-platform')).id));
+ assert.equal(again.id,old.id,'the same project');assert.equal(again.title,'3D scan platform');
+ assert.equal(again.state,'ready');assert.equal(again.files.receipts.length,1);assert.match(again.files.receipts[0].name,/\.3mf$/);
+ assert.equal(publicObject(again).plates.length,6);assert.equal(asked.length,2,'one pass for the kit');
+ assert.match(lines.join('\n'),/holds 全3D打印360°摄影台\.stl \(0 plates\), not the designer’s kit; getting the kit/);
+ // A project that already has its kit is just reopened: no pass.
+ const {value:same}=await logged(()=>service.addStarter('scan-platform'));
+ assert.equal(same.id,old.id);assert.equal(asked.length,2);
+ // A caliper project with only one of its two files gets the kit from the cache or a pass, too.
+ const half=await setup(t,async(_input,root)=>caliper(root));
+ const c=await half.service.create('Print this','published','https://makerworld.com/en/models/198362');
+ await half.service.addModelFile(c.id,'Vernier 150mm.3mf',COLOR);
+ await half.store.update(c.id,o=>({...o,starterId:'long-vernier-caliper'}));
+ const {value:full}=await logged(async()=>half.service.settled((await half.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(full.id,c.id);assert.equal(full.files.receipts.length,2);
 });
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],

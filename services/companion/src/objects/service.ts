@@ -573,6 +573,9 @@ export class ObjectService {
       if (!starter) throw new InvalidStateError('Choose one of the starter projects.');
       const existing = (await this.#deps.store.list()).find(o => o.starterId === starterId);
       // A starter waiting only for Downloads access goes on by itself once macOS allows it (Codex on #372).
+      // A starter project made before its kit rule (Nov 6, bb9da63c: the rig as one raw STL, Ready with no plates) gets
+      // the designer's kit when the starter is added again: cache, then Downloads, then one worker pass.
+      if (existing && this.#staleKit(existing, starter)) return this.#refetchStarter(existing.id);
       if (existing) return await this.#resumeDownloads(existing) ?? this.get(existing.id);
       const store = this.#deps.store;
       const created = await store.create(starter.instructions, 'published');
@@ -2288,7 +2291,7 @@ export class ObjectService {
     if (result.status !== 'downloaded' && !(result.status === 'failed' && result.run?.stopReason === 'cancelled')) {
       const object = await store.get(id), starter = object.starterId ? this.#starter(object.starterId) : undefined;
       const files = starter ? await this.#starterFiles(starter, result.arrived ?? []) : [];
-      const kit = starter ? this.#kit(starter, files)?.files : undefined;
+      const kit = starter ? this.#kit(starter, files, 'arrived')?.files : undefined;
       if (starter && kit) {
         console.error(`published pass: project ${id} took the designer’s ${kit.length} file${kit.length === 1 ? '' : 's'} from Downloads (the worker reported ${result.status}): ${kit.map(file => basename(file)).join(', ')}`);
         return this.#keepPublished(id, kit, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(credit ? {credit} : {})});
@@ -2370,12 +2373,15 @@ export class ObjectService {
    * designer has republished: the designer's files make the kit by those counts, so a hash change never means a
    * download on every tap (parent, Nov 6: "at most once per computer"). Part of the pinned kit with another file is no kit.
    */
-  #kit(starter: StarterProject, files: {path: string; sha256: string; plates: number}[]): {files: string[]; republished?: true} | undefined {
+  #kit(starter: StarterProject, files: {path: string; sha256: string; plates: number}[], republished: 'chosen' | 'arrived' = 'chosen'): {files: string[]; republished?: true} | undefined {
     const pins = starter.sha256 ?? [];
     if (pins.length) {
       const kit = pins.map(sha256 => files.find(file => file.sha256 === sha256));
       if (kit.every(Boolean)) return {files: kit.map(file => file!.path)};
       if (files.some(file => pins.includes(file.sha256))) return undefined;
+      // A republished set counts only when it was chosen, by the worker that names its downloads or by the person: files
+      // that merely arrived can't tell two caliper variants from the caliper and its gauge (Codex on #372).
+      if (republished === 'arrived') return undefined;
     }
     const plates = files.reduce((sum, file) => sum + file.plates, 0);
     if (files.length < starter.files || plates < (starter.plates ?? 0)) return undefined;
@@ -2393,6 +2399,21 @@ export class ObjectService {
     return this.#starterDownloads(starter, [...kept, ...pinned, ...extra]);
   }
   #starter(id: string) { return (this.#deps.starter ?? bundledStarter)(id); }
+  /** Whether a starter project's kept files aren't its kit: a file that isn't a 3MF, too few files, or too few plates. */
+  #staleKit(object: StmObject, starter: StarterProject): boolean {
+    const receipts = object.files?.receipts;
+    if (!receipts?.length || !['ready', 'failed', 'printed', 'confirmed'].includes(object.state) || object.print?.uncertain) return false;
+    const plates = receipts.reduce((sum, receipt) => sum + receipt.plates.length, 0);
+    return receipts.some(receipt => extname(receipt.name).toLowerCase() !== '.3mf') || receipts.length < starter.files || plates < (starter.plates ?? 0);
+  }
+  /** The designer's kit replaces a starter project's wrong files; the project, its title, credit and messages stay. */
+  async #refetchStarter(id: string): Promise<StmObject> {
+    const before = await this.#deps.store.get(id);
+    console.error(`starter ${before.starterId}: project ${id} holds ${(before.files?.receipts ?? []).map(receipt => `${receipt.name} (${receipt.plates.length} plates)`).join(', ')}, not the designer’s kit; getting the kit`);
+    await this.#deps.store.update(id, o => ({...o, state: 'new', current: undefined, files: undefined, publishedSelection: undefined, ask: undefined, question: undefined,
+      failure: undefined, progress: undefined, print: undefined, printConfirmation: undefined}));
+    return this.start(id);
+  }
   #downloads() { return this.#deps.downloads ?? join(homedir(), 'Downloads'); }
   #downloadsDeniedLogged = false;
   /** Starts again a project whose only open question is the Downloads-access one, once macOS allows the folder. */
