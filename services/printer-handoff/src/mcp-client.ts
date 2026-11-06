@@ -295,9 +295,10 @@ export class PrinterMcpClient {
     }
     // A printer refusal names itself with a stable code in the MCP's structured error (both MCPs, src/refusal.ts):
     // keep the actionable refusal instead of inventing uncertainty. The app never reads the words (PRD §8.0).
+    // printer-upload-failed: the file never reached the printer and no command was sent (bambu-printer-mcp 1.1.74).
     if (result.isError && name === 'print_3mf') {
       const code = (result.structuredContent as {code?: unknown} | undefined)?.code;
-      if (code === 'printer-command-rejected' || code === 'printer-not-ready') fail(code, undefined, failureDetail(result, this.#config));
+      if (code === 'printer-command-rejected' || code === 'printer-not-ready' || code === 'printer-upload-failed') fail(code, undefined, failureDetail(result, this.#config));
     }
     // Unstructured tool errors can include a lost post-dispatch acknowledgement.
     // A declined confirmation is known not to dispatch; other ambiguous results

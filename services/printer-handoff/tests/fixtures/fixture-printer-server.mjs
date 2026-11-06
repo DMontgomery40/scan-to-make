@@ -239,6 +239,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     // As bambu-printer-mcp 1.1.57 / mcp-3d-printer-server 1.2.31 return a refusal: the words plus a stable code.
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'preflight-error') return {isError:true, content:[{type:'text',text:'Error: Printer state FAILED is not safely idle.'}],
       structuredContent:{status:'error', retryable:false, suggestion:'Fix the printer state first.', message:'Printer state FAILED is not safely idle.', tool:name, code:'printer-not-ready'}};
+    // As bambu-printer-mcp 1.1.74 reports an upload that failed before any print command was sent.
+    if (process.env.HANDOFF_FIXTURE_DISPATCH === 'upload-error') return {isError:true, content:[{type:'text',text:'Error: The print file did not reach the printer (Timeout (data socket)). No print was started.'}],
+      structuredContent:{status:'error', retryable:true, message:'The print file did not reach the printer (Timeout (data socket)). No print was started.', tool:name, code:'printer-upload-failed'}};
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'preflight-error-wording') return {isError:true, content:[{type:'text',text:'Printer state FAILED is not safely idle.'}]};
     await confirmPrint();
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'crash') process.exit(9);

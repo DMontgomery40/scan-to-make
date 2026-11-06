@@ -504,6 +504,20 @@ test('a known pre-dispatch printer refusal preserves its reason without claiming
   });
 });
 
+test('an upload that never reached the printer is a certain non-start, not an uncertain print', async t => {
+  const f = await setup(t, {dispatch:'upload-error'});
+  const store = new HandoffBundleStore(join(f.root, 'upload'));
+  const bundle = await store.create({stl, prompt: 'fixture', backend: 'bambu-printer-mcp', selection});
+  await assert.rejects(f.runner.runBundle(store, bundle.id, {print: true}), error => {
+    assert.equal(error.code, 'printer-upload-failed');
+    assert.match(error.detail, /did not reach the printer/);
+    return true;
+  });
+  const manifest = await store.read(bundle.id);
+  assert.equal(manifest.status, 'failed', 'a retry is allowed: nothing reached the printer');
+  assert.equal(manifest.failure, 'printer-upload-failed');
+});
+
 test('the refusal is read from the code, never the words: an MCP without the code is not trusted as a refusal', async t => {
   const f = await setup(t, {dispatch:'preflight-error-wording'});
   await assert.rejects(f.runner.run({stlPath:f.stlPath}), error => {
