@@ -54,6 +54,21 @@ test('create, list and get an object', async t => {
   assert.deepEqual(scopes, ['captures:import', 'projects:read', 'projects:read']);
 });
 
+// Nov 6: refusals were invisible (the companion's output went nowhere) and the apps couldn't tell a sentence for the
+// person from a bare code. Each refusal is logged with its status and code; `sentence` marks the person's words.
+test('a refusal written for the person says so (sentence), a bare code doesn\'t, and both are logged', async t => {
+  const {call} = await fixture(t);
+  const logged = [], original = console.error; console.error = (...args) => logged.push(args.join(' ')); t.after(() => { console.error = original; });
+  const id = (await call('POST', '/v1/objects', {instructions: 'A hook.'})).json.object.id;
+  const refused = await call('POST', `/v1/objects/${id}/print`, {});
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.error.sentence, refused.json.error.message);
+  assert.ok(refused.json.error.sentence.endsWith('.'));
+  const missing = await call('GET', `/v1/objects/${id}/nowhere`);
+  assert.equal(missing.status, 404); assert.equal(missing.json.error.sentence, undefined, 'a bare code is not a sentence');
+  assert.ok(logged.some(line => line.includes(`/v1/objects/${id}/print`) && line.includes('409')), logged.join('\n'));
+  assert.ok(logged.some(line => line.includes('404') && line.includes('not-found')), logged.join('\n'));
+});
 test('retained reconstruction failures stop asserting user error without rewriting stored history', async t => {
   const {call, store, service} = await fixture(t);
   const object = await service.create();

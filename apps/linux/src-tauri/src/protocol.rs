@@ -105,8 +105,10 @@ pub fn deadline(method: &str, params: &Value) -> u64 {
 pub fn decode(bytes: &[u8], id: &str) -> Result<Value, String> {
     let envelope: Value =
         serde_json::from_slice(bytes).map_err(|_| "The companion returned an invalid reply.")?;
+    // An answer before the request was read (`id: null`, the companion's `busy`) can only be a refusal.
+    let unread = envelope["id"].is_null() && envelope.get("error").is_some() && envelope.get("result").is_none();
     if envelope["v"] != 1
-        || envelope["id"] != id
+        || (envelope["id"] != id && !unread)
         || envelope.get("result").is_some() == envelope.get("error").is_some()
     {
         return Err("The companion reply did not match this request.".into());
@@ -203,6 +205,12 @@ mod tests {
             decode(br#"{"v":1,"id":"one","result":{"ok":true}}"#, "one").unwrap()["ok"],
             true
         );
+        // Nov 6: past its connection limit the companion answers before reading the request (no id); its sentence shows.
+        assert_eq!(
+            decode(br#"{"v":1,"id":null,"error":{"code":"busy","message":"Your Mac is answering too many requests at once. Try again in a moment."}}"#, "one").unwrap_err(),
+            "Your Mac is answering too many requests at once. Try again in a moment."
+        );
+        assert!(decode(br#"{"v":1,"id":null,"result":{}}"#, "one").is_err());
     }
     #[test]
     fn permits_independent_confirmation_deadlines() {

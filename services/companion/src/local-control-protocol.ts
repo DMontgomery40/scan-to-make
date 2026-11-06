@@ -6,15 +6,19 @@ import {ReconstructionAnswerSchema} from '@scan-to-make/contracts/reconstruction
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+/** Plain sentences the apps show as they are (Nov 6); a refusal with its own sentence replaces these. */
 const messages = {
-  'invalid-request': 'Invalid local control request',
-  'unsupported-version': 'Unsupported local control version',
-  'not-found': 'The requested item is no longer available',
-  conflict: 'The requested operation conflicts with current state',
-  unavailable: 'The requested capability is unavailable',
-  internal: 'The local control operation failed',
+  'invalid-request': 'Update Counterpart on this Mac, then try again.',
+  'unsupported-version': 'Update Counterpart on this Mac, then try again.',
+  'not-found': 'This one is no longer on your Mac.',
+  conflict: 'That can’t be done right now.',
+  unavailable: 'That isn’t available on your Mac right now.',
+  internal: 'Something went wrong on your Mac.',
   // KAN-223: Bambu Studio refused the slice; the message is Studio's own words.
   'slicer-error': 'Bambu Studio could not slice this model',
+  // Nov 6: a request past its deadline, or past the connection limit, is answered, never dropped without a word.
+  'timed-out': 'Your Mac took too long to answer. It may still finish; this page updates when it does.',
+  busy: 'Your Mac is answering too many requests at once. Try again in a moment.',
 } as const;
 export class ControlFailure extends Error {
   /** `detail` replaces the generic sentence when the refusal has a plain one of its own. */

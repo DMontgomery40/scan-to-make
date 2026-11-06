@@ -126,6 +126,8 @@ class CompanionClient(
                     CompanionException("no-camera", "This printer has no camera Counterpart can use.")
                 reply.status == 404 && (newer || code == "method-not-allowed") -> CompanionException.unsupported
                 reply.status == 405 -> CompanionException.unsupported
+                // The computer's own sentence, whatever the status, when it says it's written for the person (Nov 6).
+                !error?.get("sentence").str.isNullOrBlank() -> CompanionException(code ?: "refused", error?.get("sentence").str!!)
                 reply.status == 404 -> CompanionException("not-found", "This is no longer on your computer.")
                 reply.status == 409 -> CompanionException("conflict", message ?: "Wait until the current step finishes.")
                 reply.status == 503 -> CompanionException("unavailable", if (path.endsWith("/camera.jpg")) "The printer's camera isn't answering right now."

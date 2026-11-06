@@ -522,16 +522,22 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
         }
         return send(response, 200, {object: publicObject(object)});
       } catch (error) {
-        if (error instanceof PrinterSetupError) return send(response, error.code === 'conflict' ? 409 : error.code === 'invalid' ? 400 : error.code === 'not-found' ? 404 : 503, {error: {code: error.code === 'invalid' ? 'invalid-request' : error.code, message: error.message}});
-        if (error instanceof ControlFailure) return send(response, error.code === 'conflict' ? 409 : error.code === 'invalid-request' ? 400 : 503, {error: {code: error.code, message: error.message}});
-        if (error instanceof HttpFailure) return send(response, error.status, {error: {code: error.code, message: error.message}});
-        if (error instanceof ObjectNotFoundError) return send(response, 404, {error: {code: 'not-found', message: 'Object not found'}});
-        if (error instanceof InvalidAnswerError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
-        if (error instanceof InvalidStateError) return send(response, 409, {error: {code: 'invalid-state', message: error.message}});
-        if (error instanceof InvalidCaptureManifestError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
-        if (error instanceof InvalidCaptureCameraError) return send(response, 400, {error: {code: 'invalid-request', message: error.message}});
-        if (error instanceof CameraUnavailableError) return send(response, error.reason === 'unreachable' ? 503 : 404, {error: {code: error.reason === 'not-supported' ? 'not-supported' : error.reason === 'no-camera' ? 'not-found' : 'unavailable', message: error.message}});
-        if (error instanceof Error && error.message === 'Invalid file name') return send(response, 400, {error: {code: 'invalid-name', message: error.message}});
+        // Every refusal is logged with its status and code (Nov 6: a refusal nobody could see). `sentence` marks a
+        // message written for the person, which the apps show as it is.
+        const refuse = (status: number, code: string, message: string, sentence = false) => {
+          console.error(`http ${request.method} ${url.pathname} refused: ${status} ${code}: ${message}`);
+          return send(response, status, {error: {code, message, ...(sentence ? {sentence: message} : {})}});
+        };
+        if (error instanceof PrinterSetupError) return refuse(error.code === 'conflict' ? 409 : error.code === 'invalid' ? 400 : error.code === 'not-found' ? 404 : 503, error.code === 'invalid' ? 'invalid-request' : error.code, error.message, true);
+        if (error instanceof ControlFailure) return refuse(error.code === 'conflict' ? 409 : error.code === 'invalid-request' ? 400 : 503, error.code, error.message, error.code !== 'internal');
+        if (error instanceof HttpFailure) return refuse(error.status, error.code, error.message);
+        if (error instanceof ObjectNotFoundError) return refuse(404, 'not-found', 'Object not found');
+        if (error instanceof InvalidAnswerError) return refuse(400, 'invalid-request', error.message, true);
+        if (error instanceof InvalidStateError) return refuse(409, 'invalid-state', error.message, true);
+        if (error instanceof InvalidCaptureManifestError) return refuse(400, 'invalid-request', error.message);
+        if (error instanceof InvalidCaptureCameraError) return refuse(400, 'invalid-request', error.message);
+        if (error instanceof CameraUnavailableError) return refuse(error.reason === 'unreachable' ? 503 : 404, error.reason === 'not-supported' ? 'not-supported' : error.reason === 'no-camera' ? 'not-found' : 'unavailable', error.message);
+        if (error instanceof Error && error.message === 'Invalid file name') return refuse(400, 'invalid-name', error.message);
         throw error;
       }
     },

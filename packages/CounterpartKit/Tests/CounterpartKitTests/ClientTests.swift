@@ -486,6 +486,14 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertTrue(unpaired.needsPairing)
         let camera = try await refusal(503, path: "/v1/objects/\(id)/camera.jpg")
         XCTAssertEqual(camera.message, "The printer's camera isn't answering right now.")
+        // Nov 6: the Mac's own sentence is shown whatever the status, once it says it's written for the person.
+        for (status, code) in [(400, "invalid-request"), (503, "unavailable"), (404, "not-found"), (500, "internal")] {
+            let said = try await refusal(status, ["error": ["code": code, "message": "Update bambu-printer-mcp in Settings → Printers.",
+                                                            "sentence": "Update bambu-printer-mcp in Settings → Printers."]])
+            XCTAssertEqual(said.message, "Update bambu-printer-mcp in Settings → Printers.", "\(status)")
+        }
+        let words = try await refusal(400, ["error": ["code": "invalid-request", "message": "invalid-request"]])
+        XCTAssertEqual(words.message, "Your Mac didn't accept that. Update Counterpart on your Mac, then try again.", "a bare code is never shown")
         let unreachable = FakeTransport { _, _ in throw TransportError("timeout") }
         do { _ = try await client(unreachable, record: v2Record()).get(id); XCTFail() }
         catch { XCTAssertTrue((error as? CompanionError)?.isUnreachable == true) }

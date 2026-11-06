@@ -658,6 +658,29 @@ private func project(_ item: [String: Any]) throws -> Project {
         }
     }
 
+    /// Nov 6: David's starter project said "Something went wrong on your Mac." whatever the companion said; the
+    /// companion had closed the request without an answer. The Mac shows the companion's own sentence.
+    func testARefusalSaysTheCompanionsOwnSentence() async {
+        for (code, message) in [("unavailable", "Update bambu-printer-mcp in Settings → Printers."), ("invalid-request", "Choose a whole number of copies."),
+                                ("timed-out", "Your Mac took too long to answer. It may still finish; this page updates when it does."),
+                                ("busy", "Your Mac is answering too many requests at once. Try again in a moment."),
+                                ("slicer-error", "Bambu Studio couldn’t slice this model: a part is off the plate."), ("not-found", "That file is no longer in Downloads.")] {
+            XCTAssertEqual(ObjectsModel.sentence(for: ControlRemoteError(code: code, message: message)), message, code)
+        }
+        // An older companion's words for developers still read as plain sentences, and `internal` never shows its text.
+        XCTAssertEqual(ObjectsModel.sentence(for: ControlRemoteError(code: "unavailable", message: "The requested capability is unavailable")), "That isn’t available on your Mac right now.")
+        XCTAssertEqual(ObjectsModel.sentence(for: ControlRemoteError(code: "internal", message: "stack trace")), "Something went wrong on your Mac.")
+        // No answer at all: the work may still have happened (David's file was added; the page then showed it Ready).
+        XCTAssertEqual(ObjectsModel.sentence(for: ControlClientError.invalidResponse), "Your Mac didn’t answer. It may still have done it: this page shows what it did.")
+        let companion = FakeObjects()
+        await companion.set([item("a", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        await companion.failActions(with: ControlRemoteError(code: "unavailable", message: "Update bambu-printer-mcp in Settings → Printers."))
+        _ = await model.perform(.print, on: "a")
+        XCTAssertEqual(model.problem, .init(id: "a", text: "Update bambu-printer-mcp in Settings → Printers."))
+    }
+
     func testDeleteRemovesTheObjectAndShowsTheNextOne() async {
         let companion = FakeObjects()
         await companion.set([item("a", "ready"), item("b", "printed"), item("c", "failed")])
