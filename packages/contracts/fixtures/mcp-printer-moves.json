@@ -1,0 +1,96 @@
+{
+  "packages": [
+    {
+      "package": "bambu-printer-mcp",
+      "label": "bambu-printer-mcp",
+      "description": "Bambu Lab printers",
+      "installed": true,
+      "version": "1.1.69",
+      "latestVersion": "1.1.69",
+      "appMcpId": "mcp-48ef5a6a983b42fc",
+      "uses": [
+        {
+          "destinationId": "current",
+          "printerId": "current",
+          "printer": "Bambu Lab P1S",
+          "mcpId": "mcp-0bf7779c72a243f2",
+          "kind": "app",
+          "path": "/Users/ada/Library/Application Support/Scan to Make/printers/bambu-1.1.46",
+          "version": "1.1.65",
+          "canMove": true,
+          "managed": false,
+          "words": "Bambu Lab P1S uses Counterpart’s older copy at ~/Library/Application Support/Scan to Make/printers/bambu-1.1.46 (1.1.65), older than Counterpart’s copy (1.1.69)."
+        }
+      ],
+      "moves": [
+        {
+          "mcpId": "mcp-0bf7779c72a243f2",
+          "title": "Move Bambu Lab P1S (bambu-printer-mcp, Counterpart’s older copy at ~/Library/Application Support/Scan to Make/printers/bambu-1.1.46) to Counterpart’s updated copy"
+        }
+      ],
+      "appCopy": {
+        "kind": "app",
+        "path": "/Users/ada/Library/Application Support/Scan to Make/printers/bambu",
+        "version": "1.1.69"
+      },
+      "installs": [
+        {
+          "kind": "app",
+          "path": "/Users/ada/Library/Application Support/Scan to Make/printers/bambu",
+          "version": "1.1.69"
+        },
+        {
+          "kind": "app",
+          "path": "/Users/ada/Library/Application Support/Scan to Make/printers/bambu-1.1.46",
+          "version": "1.1.65"
+        }
+      ]
+    },
+    {
+      "package": "mcp-3d-printer-server",
+      "label": "mcp-3D-printer-server",
+      "description": "Prusa, Klipper, OctoPrint, Duet, Repetier, Creality — and Bambu",
+      "installed": true,
+      "version": "1.2.50",
+      "latestVersion": "1.2.50",
+      "appMcpId": "mcp-5be13374a64448f0",
+      "uses": [
+        {
+          "destinationId": "counterpart-a07c6f7d-5399-4d71-94e4-07824c4d1b82",
+          "printerId": "current",
+          "printer": "Bambu Lab P1S",
+          "mcpId": "mcp-1b78b4cdc93d85d2",
+          "kind": "checkout",
+          "path": "/Users/ada/mcp-3D-printer-server",
+          "version": "1.2.25",
+          "canMove": true,
+          "managed": false,
+          "words": "Bambu Lab P1S uses your copy at ~/mcp-3D-printer-server (1.2.25), older than Counterpart’s copy (1.2.50)."
+        }
+      ],
+      "moves": [
+        {
+          "mcpId": "mcp-1b78b4cdc93d85d2",
+          "title": "Move Bambu Lab P1S (mcp-3D-printer-server, your copy at ~/mcp-3D-printer-server) to Counterpart’s updated copy"
+        }
+      ],
+      "appCopy": {
+        "kind": "app",
+        "path": "/Users/ada/Library/Application Support/Scan to Make/printers/generic",
+        "version": "1.2.50"
+      },
+      "installs": [
+        {
+          "kind": "app",
+          "path": "/Users/ada/Library/Application Support/Scan to Make/printers/generic",
+          "version": "1.2.50"
+        },
+        {
+          "kind": "checkout",
+          "path": "/Users/ada/mcp-3D-printer-server",
+          "version": "1.2.25"
+        }
+      ]
+    }
+  ]
+}

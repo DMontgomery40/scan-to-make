@@ -9,6 +9,7 @@ import type {McpUpdate} from './mcp-updates.js';
 import type {PrinterCatalog} from '../objects/printers.js';
 import {envOf, field, kindFor, modelForSerial, names, readMcpSetup, readSetupCache, setupOptions, writeSetupCache, type McpSetup, type SetupKind, type SetupOptions} from './mcp-setup.js';
 import type {PrintGate} from './print-gate.js';
+import {newerVersion} from './directory.js';
 import {changeProfiles, findBambuRoute, newProfileId, readProfiles, readsRouteSettings, settingsGap, type RouteSource, type SavedProfile} from './profiles.js';
 
 /**
@@ -20,6 +21,15 @@ export const MCP_PACKAGES: readonly {package: PrinterBackend; label: string; des
   {package: 'mcp-3d-printer-server', label: 'mcp-3D-printer-server', description: 'Prusa, Klipper, OctoPrint, Duet, Repetier, Creality — and Bambu'},
 ];
 const PACKAGES = new Set<string>(MCP_PACKAGES.map(item => item.package));
+const under = (path: string, root: string) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
+/** Which copy a profile runs, in Settings' words. Counterpart's other copies (an earlier `bambu-1.1.46`) are named as such. */
+function copyWords(install: ResolvedMcpInstall, path: string | undefined, managed: boolean, home: (path: string) => string): string {
+  if (managed) return 'Counterpart’s copy';
+  if (install.type === 'app') return `Counterpart’s older copy at ${home(path ?? '')}`;
+  if (install.type === 'npx') return `npx ${install.spec}`;
+  if (install.type === 'unresolved') return 'a copy Counterpart can’t place';
+  return path ? `your copy at ${home(path)}` : 'your copy';
+}
 
 /** A built copy of either MCP in a folder of its own (a clone or an unpacked package), found on this Mac. */
 export interface FoundFolder {dir: string; package: PrinterBackend; version?: string; hasEnv: boolean}
@@ -80,8 +90,15 @@ export interface McpPackageView {
   /** The selected runnable copy first, so its displayed location and version describe the same install. */
   installs: PackageInstall[];
   appCopy?: PackageInstall;
-  uses: {destinationId: string; printerId: string; printer: string; mcpId: string; kind: string; path?: string; version?: string; canMove: boolean}[];
+  uses: McpUse[];
+  /** One Move per install a printer could leave for Counterpart's copy, in the order the uses are listed, each named by its printers, MCP and copy. */
+  moves: {mcpId: string; title: string}[];
 }
+/**
+ * A printer profile on a package. `managed`: it runs Counterpart's own copy (`<appPrinters>/bambu` or `/generic`).
+ * `words` says which copy and version in full, including when that copy is older than Counterpart's.
+ */
+export interface McpUse {destinationId: string; printerId: string; printer: string; mcpId: string; kind: string; path?: string; version?: string; canMove: boolean; managed: boolean; words: string}
 
 // KAN-163's checks: a literal host (no scheme, path, port or credentials), a Bambu serial, a port.
 const HOST = /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/;
@@ -157,7 +174,8 @@ export interface PrinterSetupDeps {
   configs(): {id: string; config: PrinterHandoffConfig}[];
   effective?(id: string, config: PrinterHandoffConfig): PrinterHandoffConfig;
   download?(pkg: PrinterBackend): Promise<McpUpdate>;
-  latestVersion?(pkg: PrinterBackend, options?: {view?: boolean}): string | undefined;
+  /** The published version; Settings may wait briefly for a check it starts (McpUpdater.latestVersionSettled). */
+  latestVersion?(pkg: PrinterBackend, options?: {view?: boolean}): string | undefined | Promise<string | undefined>;
   /** Copies in folders of their own (findMcpFolders). */
   folders?(): Promise<FoundFolder[]>;
   /** Directory listing, for the app's earlier copies (`<appPrinters>/bambu-1.1.46`). */
@@ -256,6 +274,9 @@ export class PrinterSetup {
     for (const folder of await (this.deps.folders?.() ?? Promise.resolve([]))) {
       add(folder.package, `checkout:${folder.dir}`, {kind: 'folder', path: folder.dir, ...(folder.version ? {version: folder.version} : {})});
     }
+    const latest = new Map(await Promise.all(MCP_PACKAGES.map(async item =>
+      [item.package, await Promise.resolve(this.deps.latestVersion?.(item.package, {view: true})).catch(() => undefined)] as const)));
+    const home = (path: string) => under(path, env.home) ? `~${path.slice(env.home.length)}` : path;
     return MCP_PACKAGES.map(item => {
       const found = [...installs.get(item.package)!.values()];
       // Match #entry: the managed copy wins, then the first other runnable copy. A development
@@ -273,19 +294,30 @@ export class PrinterSetup {
       const appVersion = installedVersion(own, env);
       const appCopy: PackageInstall | undefined = env.exists(own.entry!) ? {kind: 'app', path: own.prefix, ...(appVersion ? {version: appVersion} : {})} : undefined;
       const catalog = this.deps.catalog?.();
-      const uses = this.deps.configs().filter(entry => entry.config.backend === item.package).map(({id, config}) => {
+      const uses = this.deps.configs().filter(entry => entry.config.backend === item.package).map(({id, config}): McpUse => {
         const effective = this.deps.effective?.(id, config) ?? config;
         const install = resolveMcpInstall(effective, env);
         const path = install.type === 'checkout' ? install.dir : install.type === 'app' || install.type === 'global' ? install.prefix
           : install.type === 'npx' ? install.spec : undefined;
         const version = install.type === 'npx' ? undefined : installedVersion(install, env);
         const printer = catalog?.destinations.find(destination => destination.id === catalog.canonical(id))?.name ?? id;
+        const managed = install.type === 'app' && install.prefix === own.prefix;
         return {destinationId: id, printerId: catalog?.canonical(id) ?? id, printer, mcpId: mcpIdFor(resolveMcpInstall(config, env), config), kind: install.type,
-          ...(path ? {path} : {}), ...(version ? {version} : {}), canMove: install.type !== 'app' || install.prefix !== own.prefix};
+          ...(path ? {path} : {}), ...(version ? {version} : {}), canMove: !managed, managed,
+          words: `${printer} uses ${copyWords(install, path, managed, home)} (${version ?? 'version unknown'})`
+            + (!managed && version && appVersion && newerVersion(appVersion, version) ? `, older than Counterpart’s copy (${appVersion}).` : '.')};
       });
-      const latestVersion = this.deps.latestVersion?.(item.package, {view: true});
+      // In the order the uses are listed: two Moves for one printer (one per MCP profile) read differently and in screen order.
+      const moves = [...new Set(uses.filter(use => use.canMove).map(use => use.mcpId))].map(mcpId => {
+        const on = uses.filter(use => use.mcpId === mcpId), first = on[0]!;
+        const printers = [...new Set(on.map(use => use.printer))].join(', ');
+        const from = first.kind === 'app' ? `Counterpart’s older copy at ${home(first.path ?? '')}` : first.kind === 'npx' ? `npx ${first.path ?? item.label}`
+          : first.path ? `your copy at ${home(first.path)}` : 'your copy';
+        return {mcpId, title: `Move ${printers} (${item.label}, ${from}) to Counterpart’s updated copy`};
+      });
+      const latestVersion = latest.get(item.package);
       return {...item, installed: !!selected, ...(version ? {version} : {}), ...(latestVersion ? {latestVersion} : {}),
-        appMcpId: appMcpId(item.package, env), uses, ...(appCopy ? {appCopy} : {}), installs: selected ? [selected, ...found.filter(install => install !== selected)] : found};
+        appMcpId: appMcpId(item.package, env), uses, moves, ...(appCopy ? {appCopy} : {}), installs: selected ? [selected, ...found.filter(install => install !== selected)] : found};
     });
   }
 

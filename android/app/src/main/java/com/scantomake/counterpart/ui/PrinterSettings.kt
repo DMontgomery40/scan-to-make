@@ -14,6 +14,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.scantomake.counterpart.api.McpUpdate
@@ -149,16 +154,29 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         packages?.filter { pkg -> pkg.uses.any { it.printerId == printerId } }?.forEach { pkg ->
-            Text(pkg.label, fontSize = 14.sp)
+          // One group per MCP: TalkBack reads its heading first, and its Move and Update buttons stay inside it.
+          Column(Modifier.fillMaxWidth().testTag("mcp-package-${pkg.`package`}").semantics { isTraversalGroup = true },
+              verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(pkg.label, fontSize = 14.sp, modifier = Modifier.semantics { heading() })
             pkg.appCopy?.let { Text("Counterpart’s copy ${it.version ?: "version unknown"}", fontSize = 12.sp) }
             pkg.uses.filter { it.printerId == printerId }.forEach { Text(it.words, fontSize = 12.sp) }
             if (capabilities.contains("mcpUpdates")) {
-                pkg.moveIds.filter { id -> pkg.uses.any { it.printerId == printerId && it.mcpId == id } }.forEach { id ->
-                    SecondaryButton(pkg.moveTitle(id), Modifier.fillMaxWidth(), enabled = busy == null && readProblem == null) { update(id, true) }
+                // In the order the uses above are listed, each titled by its printers, MCP and copy.
+                pkg.moves.filter { move -> pkg.uses.any { it.printerId == printerId && it.mcpId == move.mcpId } }.forEach { move ->
+                    SecondaryButton(move.title, Modifier.fillMaxWidth(), enabled = busy == null && readProblem == null) { update(move.mcpId, true) }
                 }
-                if (pkg.appCopy != null) SecondaryButton("Update Counterpart’s copy", Modifier.fillMaxWidth(), enabled = busy == null && readProblem == null) { update(pkg.appMcpId, false) }
+                if (pkg.appCopy != null) SecondaryButton("Update Counterpart’s copy", Modifier.fillMaxWidth()
+                    .semantics { contentDescription = "Update Counterpart’s copy of ${pkg.label}" }, enabled = busy == null && readProblem == null) { update(pkg.appMcpId, false) }
             }
+            // An update or Move started on another phone, the Mac or Linux: its events show here too (#357's deferred P2).
+            (pkg.uses.filter { it.printerId == printerId }.map { it.mcpId } + pkg.appMcpId).distinct()
+                .filter { id -> attempts[id]?.printerId != printerId }
+                .mapNotNull { id -> events[id] }.forEach { event ->
+                    Text(event.body.takeIf { it.isNotBlank() } ?: event.title, fontSize = 12.sp,
+                        color = if (event.type.endsWith("failed")) Palette.failed else Palette.secondary)
+                }
             Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.", color = Palette.secondary, fontSize = 12.sp)
+          }
         }
         // Events are authoritative even when the accepted mutation's HTTP reply never arrived.
         attempts.values.filter { it.printerId == printerId }.forEach { attempt ->

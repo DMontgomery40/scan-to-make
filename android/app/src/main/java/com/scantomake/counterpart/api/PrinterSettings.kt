@@ -2,6 +2,7 @@ package com.scantomake.counterpart.api
 
 import com.scantomake.counterpart.core.WireJson
 import com.scantomake.counterpart.core.jsonOf
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -63,17 +64,34 @@ suspend fun CompanionClient.updatePrinterMcp(mcpId: String, fresh: Boolean = fal
 
 
 @Serializable
-data class McpPackageCopies(val `package`: String, val label: String, val appMcpId: String, val appCopy: Copy? = null, val uses: List<Usage>) {
+data class McpPackageCopies(val `package`: String, val label: String, val appMcpId: String, val appCopy: Copy? = null, val uses: List<Usage>,
+    /** The companion's Moves, in the order the uses are listed (absent from a companion before Nov 6). */
+    @SerialName("moves") val listedMoves: List<Move>? = null) {
     @Serializable data class Copy(val version: String? = null)
     @Serializable data class Usage(val destinationId: String, val printerId: String, val printer: String, val mcpId: String,
-        val kind: String, val path: String? = null, val version: String? = null, val canMove: Boolean) {
+        val kind: String, val path: String? = null, val version: String? = null, val canMove: Boolean,
+        /** It runs Counterpart's own copy; a companion before Nov 6 doesn't say (its canMove does). */
+        val managed: Boolean? = null,
+        /** The companion's sentence: which copy, its version, and whether it's older than Counterpart's. */
+        @SerialName("words") val sentence: String? = null) {
         val words: String get() {
-            val source = if (kind == "app") "Counterpart’s copy" else "your copy" + (path?.let { " at $it" } ?: "")
+            if (sentence != null) return sentence
+            val place = path?.let { " at $it" } ?: ""
+            val source = if (managed ?: !canMove) "Counterpart’s copy" else if (kind == "app") "Counterpart’s older copy$place" else "your copy$place"
             return "$printer uses $source (${version ?: "version unknown"})."
         }
     }
-    val moveIds: List<String> get() = uses.filter { it.canMove }.map { it.mcpId }.distinct().sorted()
-    fun moveTitle(id: String) = "Move " + uses.filter { it.mcpId == id }.map { it.printer }.distinct().sorted().joinToString(", ") + " to Counterpart’s updated copy"
+    /** One Move to Counterpart's updated copy, named by its printers, MCP and the copy they leave. */
+    @Serializable data class Move(val mcpId: String, val title: String)
+    /** In the order the uses are listed (never by id), each titled so two Moves for one printer read apart. */
+    val moves: List<Move> get() = listedMoves ?: uses.filter { it.canMove }.map { it.mcpId }.distinct().map { id ->
+        val on = uses.filter { it.mcpId == id }
+        val first = on.first()
+        val from = if (first.kind == "app") "Counterpart’s older copy" + (first.path?.let { " at $it" } ?: "") else first.path?.let { "your copy at $it" } ?: "your copy"
+        Move(id, "Move " + on.map { it.printer }.distinct().joinToString(", ") + " ($label, $from) to Counterpart’s updated copy")
+    }
+    val moveIds: List<String> get() = moves.map { it.mcpId }
+    fun moveTitle(id: String) = moves.firstOrNull { it.mcpId == id }?.title ?: "Move to Counterpart’s updated copy"
 }
 @Serializable private data class McpCopiesReply(val packages: List<McpPackageCopies>)
 suspend fun CompanionClient.mcpCopies(): List<McpPackageCopies> =

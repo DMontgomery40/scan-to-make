@@ -324,19 +324,25 @@ struct MCPCopiesView: View {
                         Text(use.words).font(.footnote).fixedSize(horizontal: false, vertical: true)
                     }
                     if store.macCapabilities.contains("mcpUpdates") {
-                        ForEach(package.moveIDs.filter { id in printerId == nil || package.uses.contains { $0.printerId == printerId && $0.mcpId == id } }, id: \.self) { id in
-                            Button(package.moveTitle(id)) { Task { await update(id, fresh: true, moveTitle: package.moveTitle(id)) } }
-                                .disabled(working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[id]?.isRunning == true)
-                                .accessibilityIdentifier("mcp-move-" + id)
-                            if store.attemptedMcpMoves[id] == nil { progress(id) }
+                        // In the order the uses above are listed, each titled by its printers, MCP and copy.
+                        ForEach(package.moves.filter { move in printerId == nil || package.uses.contains { $0.printerId == printerId && $0.mcpId == move.mcpId } }, id: \.mcpId) { move in
+                            Button(move.title) { Task { await update(move.mcpId, fresh: true, moveTitle: move.title) } }
+                                .disabled(working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[move.mcpId]?.isRunning == true)
+                                .accessibilityIdentifier("mcp-move-" + move.mcpId)
+                            if store.attemptedMcpMoves[move.mcpId] == nil { progress(move.mcpId) }
                         }
                         if package.appCopy != nil {
                             Button("Update Counterpart’s copy") { Task { await update(package.appMcpId, fresh: false) } }
                                 .disabled(working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[package.appMcpId]?.isRunning == true)
+                                .accessibilityLabel("Update Counterpart’s copy of \(package.label)")
                             progress(package.appMcpId)
                         }
                     }
                 }
+                // One container per MCP: VoiceOver reads its name first, and its buttons belong to it.
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(package.label)
+                .accessibilityIdentifier("mcp-package-" + package.package)
             }
             ForEach(store.attemptedMcpMoves.keys.sorted(), id: \.self) { id in
                 VStack(alignment: .leading, spacing: 4) {
