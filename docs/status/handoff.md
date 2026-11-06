@@ -37,7 +37,12 @@ Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 
    - Android and Linux show updates and Moves started on another client (#357's deferred P2).
 
    #377 routes `fusion_mcp_status` through the companion's resolved route (the copy Settings → Printers runs) and reads its structured result. Both MCPs report `activeDesign` (bambu-printer-mcp 1.1.76, mcp-3d-printer-server 1.2.56), and #384 deletes the interim open-design read, the last wording the app matched here. The item is done once those versions are installed on the Mac through Update and #384 merges. `authorized_keys` still names `printers/bambu-1.1.46`. It is no longer used once the P1S is moved, and Counterpart doesn't edit it.
-9. The rest of the PRD's not-accepted list (§0).
+9. **OctoPrint (Nov 6).**
+   - **What's in the MCP:** mcp-3d-printer-server 1.2.51 adds approval in OctoPrint (`octoprint_request_api_key`), `connect_printer` with PSU Control power-on, `octoprint.disconnected` in progress, HTTPS and sub-path `PRINTER_HOST`, plain G-code from Prusa binary configs, and a trimmed file list. 1.2.55 marks OctoPrint's address `input: "url"`.
+   - **What's in the app:** Add printer on the Mac and Linux shows the MCP's "Approve in OctoPrint" (#386, `printers.obtain`) and accepts a web address where the MCP's field takes one (#389).
+   - **Evidence:** OctoPrint 1.11.8 and 2.1-dev Virtual Printers in Docker, directly and behind an nginx sub-path, through the MCP over stdio. No physical printer, and no installed-app run yet.
+   - **Follow-ups:** (a) The catalog identifies a web address by what's configured (URL plus `PRINTER_PORT`), so one printer typed in two spellings may be listed twice. Merging those needs the MCP to report its normalized endpoint in counterpart/1 (Codex P1 on #389). (b) Bonjour discovery ignores OctoPrint's TXT `path` (sub-path installs). (c) Layer progress (DisplayLayerProgress, or G-code offsets), Cancelobject, Spoolman and thumbnails were researched and not built.
+10. The rest of the PRD's not-accepted list (§0).
 
 **Waiting on David:** TestFlight 2.0 (4) in App Store Connect (group, Beta App Review, Notify Testers; see the TestFlight row). Every physical print; he starts them ("do not reprint anything on your own EVER"). Next: redo the caliper card (`1f1c5515`) in the app and print it (copy of a designer's 3MF, fixed and installed Nov 5, PRD §0), and the Bambu Cloud print (item 3). The phone's "Connected" in Settings was seen on device Nov 4 (old item 4.3, done).
 
