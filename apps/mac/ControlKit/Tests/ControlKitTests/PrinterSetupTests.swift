@@ -1,6 +1,7 @@
 import XCTest
 import Foundation
 @testable import ControlKit
+import CounterpartKit
 
 final class PrinterSetupTests: XCTestCase {
     func testCatalogResolvesRecordedAliasesFromTheWireAndKeepsOtherPrintersSeparate() throws {
