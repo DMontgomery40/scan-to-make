@@ -2,7 +2,7 @@ import {execFile} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {existsSync} from 'node:fs';
 import {copyFile, mkdir, readFile} from 'node:fs/promises';
-import {basename, join, resolve} from 'node:path';
+import {basename, extname, join, resolve} from 'node:path';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 
@@ -73,7 +73,11 @@ export async function prepareTouchupPass(input: {root: string; objectId: string;
   for (const folder of [scanDir, photosDir, checkpointsDir]) await mkdir(folder, {recursive: true});
   const scanPaths: string[] = [];
   for (const file of input.scan) {
-    const target = join(scanDir, basename(file));
+    // Inputs from different folders can share a name (a designer's model.3mf and the working current/model.3mf):
+    // each keeps its own copy.
+    const name = basename(file), stem = name.slice(0, name.length - extname(name).length);
+    let target = join(scanDir, name);
+    for (let n = 2; scanPaths.includes(target); n++) target = join(scanDir, `${stem}-${n}${extname(name)}`);
     await copyFile(file, target);
     scanPaths.push(target);
   }

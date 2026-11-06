@@ -256,13 +256,14 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
     ...(input.onProgress ? {onProgress: input.onProgress} : {}),
     ...(input.signal ? {signal: input.signal} : {}),
   });
-  if (input.designerCopy && (result.status === 'done' || result.status === 'unchanged')) {
+  // Whatever the pass's status: a model a capped, failed or close-up pass saved still becomes the current model.
+  if (input.designerCopy && (result.model || result.parts)) {
     const problem = await designerEditProblem(input.handoff, pass.scanPaths.at(-1)!, result.parts,
       {...(deps.client ? {client: deps.client} : {}), ...(input.signal ? {signal: input.signal} : {})});
     if (problem) {
-      // Nothing from this pass becomes the model: a failed result with a model would be kept as "the last saved version".
+      // Nothing from this pass becomes the model. A pass that failed or asks for a close-up keeps its own ending.
       const {parts: _rebuilt, partColours: _colours, model: _mesh, ...rest} = result;
-      return {...rest, status: 'failed', reason: problem, passDir: pass.dir};
+      return {...rest, ...(rest.status === 'failed' || rest.status === 'needs_closeup' ? {} : {status: 'failed', reason: problem}), passDir: pass.dir};
     }
   }
   return {...result, passDir: pass.dir};
