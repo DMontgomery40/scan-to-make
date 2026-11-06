@@ -82,7 +82,7 @@ class CompanionClient(
                     if (m("/healthz")) return "generation:health"
                     if (m("/v1/events") || m("/v1/settings") || m("/v1/devices")) return "projects:read"
                     if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
-                    if (m("$one/(filaments|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
+                    if (m("$one/(filaments|colour-mapping|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                 }
                 "PATCH" -> {
@@ -309,6 +309,7 @@ class CompanionClient(
 
     suspend fun printers(): PrinterCatalog = WireJson.decodeFromJsonElement(request("GET", "/v1/objects/printers"))
     suspend fun filaments(id: String): List<PrinterFilament> = request("GET", "/v1/objects/$id/filaments").opt<List<PrinterFilament>>("filaments") ?: emptyList()
+    suspend fun colourMapping(id: String): ColourMapping = WireJson.decodeFromJsonElement(request("GET", "/v1/objects/$id/colour-mapping"))
     suspend fun selectPrinter(id: String, destinationId: String) = one(request("POST", "/v1/objects/$id/printer", jsonOf("destinationId" to destinationId)))
 
     /**

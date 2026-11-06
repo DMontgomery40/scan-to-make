@@ -1,6 +1,8 @@
 package com.scantomake.counterpart
 
+import com.scantomake.counterpart.api.ColourMapping
 import com.scantomake.counterpart.api.CompanionClient
+import com.scantomake.counterpart.api.ModelColourFilament
 import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.CounterpartEvent
 import com.scantomake.counterpart.api.EventsPage
@@ -226,6 +228,18 @@ class CompanionClientTests {
         val named = PrinterFilament(1, "#FEC600", "PLA", "Sunflower Yellow PLA Basic", "GFA00", "x", label = "A2")
         assertEquals("A2", named.slotLabel)
         assertEquals("Sunflower Yellow PLA Basic", named.spoolName)
+        assertEquals("A2 · Sunflower Yellow PLA Basic", named.title)
+        // A multi-colour model's rows: the printer MCP's proposal and note, its feeds, and per-part spools sent with Print.
+        val ext = PrinterFilament(254, "#FFFFFF", "PLA", "White PLA", "GFA00", "x", label = "External", feed = "external")
+        val mapping = ColourMapping(listOf(ModelColourFilament(1, "body", "#000000", "PLA", slot = 1, verdict = "closest", note = "Black isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic.")),
+            listOf(named.copy(feed = "ams"), ext), "v1")
+        assertEquals(mapOf(1 to 1), mapping.proposedSlots)
+        assertEquals("Black isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic.", mapping.note(mapping.filaments[0], mapOf(1 to 1)))
+        assertEquals(null, mapping.note(mapping.filaments[0], mapOf(1 to 254)))
+        assertEquals(false, mapping.mixesFeeds(mapOf(1 to 254)))
+        val body = PrintChoice(spools = mapping.spools(mapOf(1 to 254)), modelVersion = "v1").body
+        assertEquals("v1", (body["filamentsModelVersion"] as JsonPrimitive).content)
+        assertEquals(null, body["filament"])
     }
 
     @Test fun theEstimateSlicesExactlyWhatPrintSendsAndPrintSendsOnlyTheSliceWhosePicturesWereShown() = runBlocking {

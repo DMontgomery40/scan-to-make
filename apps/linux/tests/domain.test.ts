@@ -321,3 +321,33 @@ test("a designer's file starts at its own settings, never the saved quality and 
   assert.deepEqual(startingChoices(unknown), settings.printDefaults, "an MCP that doesn't say: the saved defaults, as before");
   assert.equal(designerSettingsWords(unknown, "standard", "standard"), undefined);
 });
+
+test("a multi-colour model's rows: the MCP's proposal, its note, mixed feeds, and the spools Estimate and Print send", async () => {
+  const { proposedSlots, chosenSpools, mixesFeeds, partNote, spoolTitle } = await import("../src/domain.ts");
+  const tray = (slot: number, label: string, name: string, colour: string, material: string, feed: string) =>
+    ({ slot, label, name, colour, material, filamentId: "GFA00", destinationId: "p1s", feed });
+  const mapping = {
+    filaments: [
+      { index: 1, name: "body", colour: "#000000", material: "PLA", slot: 0, verdict: "same-colour" },
+      { index: 2, name: "markings", colour: "#FFFFFF", material: "PLA", slot: 1, verdict: "closest",
+        note: "White isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic." },
+    ],
+    trays: [tray(0, "A1", "Black PLA Basic", "#000000", "PLA", "ams"), tray(1, "A2", "Sunflower Yellow PLA Basic", "#FEC600", "PLA", "ams"),
+      tray(2, "A3", "Translucent Teal PETG Translucent", "#77EDD7", "PETG", "ams"), tray(254, "External", "White PLA", "#FFFFFF", "PLA", "external")],
+    modelVersion: "v1",
+  };
+  const slots = proposedSlots(mapping);
+  assert.deepEqual(slots, { 1: 0, 2: 1 });
+  assert.equal(partNote(mapping, mapping.filaments[1], slots), "White isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic.");
+  assert.equal(partNote(mapping, mapping.filaments[1], { 1: 0, 2: 2 }), "Prints in PETG, not PLA.", "the person's own choice, said plainly");
+  assert.equal(mixesFeeds(mapping, { 1: 0, 2: 254 }), true);
+  assert.equal(mixesFeeds(mapping, slots), false);
+  assert.equal(spoolTitle(mapping.trays[1]), "A2 · Sunflower Yellow PLA Basic");
+  assert.equal(chosenSpools(mapping, { 1: 0 }), undefined, "every part needs a spool");
+  const spools = chosenSpools(mapping, { 1: 254, 2: 254 })!;
+  const request = estimateRequest("p", { destinationId: "p1s", quality: "standard", strength: "standard", pauseBeforeLayers: [], spools, modelVersion: "v1" });
+  assert.ok("filaments" in request);
+  assert.deepEqual(request.filaments.map((f) => f.slot), [254, 254]);
+  assert.equal("filamentsModelVersion" in request && request.filamentsModelVersion, "v1");
+  assert.equal("filament" in request, false, "per-part spools, never one spool for the whole model");
+});

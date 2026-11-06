@@ -300,12 +300,16 @@ data class PrinterCatalog(val destinations: List<PrinterDestination> = emptyList
 data class PrinterFilament(val slot: Int, val colour: String = "#888888", val material: String = "", val name: String = "",
                            val filamentId: String = "", val destinationId: String = "", val suggested: Boolean? = null,
                            /** Where the spool sits, in the printer MCP's own words. */
-                           val label: String? = null) {
+                           val label: String? = null,
+                           /** Which spools can feed one print together, as the printer MCP groups them. */
+                           val feed: String? = null) {
     val isExternal: Boolean get() = slot >= 254
     /** The printer MCP's label for the spool; its material from an older Mac that doesn't send one. */
     val slotLabel: String get() = label ?: material
     /** The spool as a person reads it: the printer MCP's name ("Sunflower Yellow PLA Basic") once it sends a label. */
     val spoolName: String get() = if (label != null) name else "$material $displayName"
+    /** "A2 · Sunflower Yellow PLA Basic", both the printer MCP's; the material and name from an older computer. */
+    val title: String get() = label?.let { "$it · $name" } ?: spoolName
     val displayName: String get() {
         var text = name.replace(Regex("""\s*#[0-9a-fA-F]{6,8}\s*$"""), "").trim()
         val suffix = " $material"
@@ -314,6 +318,32 @@ data class PrinterFilament(val slot: Int, val colour: String = "#888888", val ma
     }
     fun toJson(): JsonObject = JsonObject(mapOf("slot" to JsonPrimitive(slot), "colour" to JsonPrimitive(colour), "material" to JsonPrimitive(material),
         "name" to JsonPrimitive(name), "filamentId" to JsonPrimitive(filamentId), "destinationId" to JsonPrimitive(destinationId)))
+}
+
+/** One part of a multi-colour model with the spool the printer MCP proposes for it (`GET /v1/objects/<id>/colour-mapping`). */
+@Serializable
+data class ModelColourFilament(val index: Int, val name: String? = null, val colour: String? = null, val material: String? = null,
+                               val slot: Int? = null, val verdict: String? = null, val note: String? = null)
+
+/** A multi-colour model's parts and the printer's spools: which spool each part prints from, as the printer MCP proposes. */
+@Serializable
+data class ColourMapping(val filaments: List<ModelColourFilament> = emptyList(), val trays: List<PrinterFilament> = emptyList(),
+                         val modelVersion: String? = null) {
+    /** The MCP's proposal per part (part index → slot): where the sheet starts. */
+    val proposedSlots: Map<Int, Int> get() = filaments.mapNotNull { f -> f.slot?.let { f.index to it } }.toMap()
+    /** The chosen spool for every part, in the model's order; null until every part has one. */
+    fun spools(slots: Map<Int, Int>): List<PrinterFilament>? {
+        val chosen = filaments.map { f -> trays.firstOrNull { it.slot == slots[f.index] } }
+        return if (filaments.isNotEmpty() && chosen.all { it != null }) chosen.filterNotNull() else null
+    }
+    /** The chosen spools come from more than one of the MCP's feeds: one print feeds from one. */
+    fun mixesFeeds(slots: Map<Int, Int>): Boolean = slots.values.mapNotNull { slot -> trays.firstOrNull { it.slot == slot }?.feed }.toSet().size > 1
+    /** What the person should know about a part's spool: the MCP's note while its proposal stands. */
+    fun note(part: ModelColourFilament, slots: Map<Int, Int>): String? {
+        if (slots[part.index] == part.slot && part.note != null) return part.note
+        val tray = trays.firstOrNull { it.slot == slots[part.index] } ?: return null
+        return if (part.material != null && !tray.material.equals(part.material, ignoreCase = true)) "Prints in ${tray.material}, not ${part.material}." else null
+    }
 }
 
 /** `POST /v1/objects/<id>/estimate`. */
@@ -356,7 +386,9 @@ sealed class PrintColour {
 /** What the print sheet sends with Print (CounterpartKit `PrintChoice.body`). */
 data class PrintChoice(val colour: PrintColour? = null, val quality: PrintQuality = PrintQuality.Standard,
                        val strength: PrintStrength = PrintStrength.Standard, val checked: Boolean = false, val copies: Int? = null,
-                       val pauseBeforeLayers: List<Int> = emptyList(), val sliceSha256: String? = null) {
+                       val pauseBeforeLayers: List<Int> = emptyList(), val sliceSha256: String? = null,
+                       /** A multi-colour model: one spool per part, in the model's order, and the model version they were chosen for. */
+                       val spools: List<PrinterFilament>? = null, val modelVersion: String? = null) {
     /** The estimate of these exact choices (no `checked`, no slice yet): it slices the file Print then sends. */
     fun estimateBody(destinationId: String?): JsonObject =
         JsonObject(body - "checked" - "sliceSha256" + listOfNotNull(destinationId?.let { "destinationId" to JsonPrimitive(it) }))
@@ -364,7 +396,10 @@ data class PrintChoice(val colour: PrintColour? = null, val quality: PrintQualit
     val body: JsonObject get() {
         val json = LinkedHashMap<String, JsonElement>()
         json["checked"] = JsonPrimitive(checked)
-        when (colour) {
+        if (spools != null) {
+            json["filaments"] = kotlinx.serialization.json.JsonArray(spools.map { it.toJson() })
+            modelVersion?.let { json["filamentsModelVersion"] = JsonPrimitive(it) }
+        } else when (colour) {
             is PrintColour.Tray -> json["filament"] = colour.filament.toJson()
             PrintColour.Auto -> json["colour"] = JsonObject(mapOf("auto" to JsonPrimitive(true)))
             PrintColour.External -> json["colour"] = JsonObject(mapOf("external" to JsonPrimitive(true)))

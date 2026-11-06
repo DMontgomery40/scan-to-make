@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { call } from "./bridge";
 import {
   activePrint,
+  chosenSpools,
+  mixesFeeds,
+  partNote,
+  proposedSlots,
+  spoolTitle,
   duration,
   estimateRequest,
   freezePlate,
@@ -14,7 +19,7 @@ import {
   designerSettingsWords,
 } from "./domain";
 import { Action, Modal } from "./ui";
-import type { Estimate, Filament, Printer, Project } from "./types";
+import type { ColourMapping, Estimate, Filament, Printer, Project } from "./types";
 export function PrintSheet({
   project,
   printers,
@@ -48,6 +53,11 @@ export function PrintSheet({
     initial.pauseBeforeLayers?.join(", ") ?? "",
   );
   const [filaments, setFilaments] = useState<Filament[]>([]);
+  // A multi-colour model: each part's spool, as the printer MCP proposes it (`objects.colourMapping`).
+  const [mapping, setMapping] = useState<ColourMapping>();
+  const [mappingSlots, setMappingSlots] = useState<Record<number, number>>({});
+  // Until the mapping answers, nothing slices: an estimate without its per-part spools would print one colour.
+  const [mappingLoaded, setMappingLoaded] = useState(false);
   const [slot, setSlot] = useState("");
   const [material, setMaterial] = useState("");
   const [estimate, setEstimate] = useState<Estimate>();
@@ -64,7 +74,24 @@ export function PrintSheet({
     let live = true;
     setFilaments([]);
     setSlot("");
+    setMapping(undefined);
+    setMappingSlots({});
+    setMappingLoaded(false);
     setEstimate(undefined);
+    if (destination)
+      void call<ColourMapping>("objects.colourMapping", { id: project.id }).then(
+        (r) => {
+          if (live && r.filaments.length) {
+            setMapping(r);
+            setMappingSlots(proposedSlots(r));
+          }
+          if (live) setMappingLoaded(true);
+        },
+        (e) => {
+          // A refusal (such as "Update bambu-printer-mcp…") is shown and holds Print: it never prints one colour instead.
+          if (live) setError(String(e));
+        },
+      );
     if (destination)
       void call<{ filaments: Filament[] }>("objects.filaments", {
         id: project.id,
@@ -118,8 +145,9 @@ export function PrintSheet({
       quality,
       strength,
       copies,
-      filament: filaments.find((f) => String(f.slot) === slot),
-      material: material || undefined,
+      ...(mapping
+        ? { spools: chosenSpools(mapping, mappingSlots), modelVersion: mapping.modelVersion }
+        : { filament: filaments.find((f) => String(f.slot) === slot), material: material || undefined }),
       pauseBeforeLayers,
     },
     {
@@ -170,6 +198,9 @@ export function PrintSheet({
     !changing &&
     !stale &&
     !(offers("layerPauses") && pausesProblem) &&
+    mappingLoaded &&
+    // A multi-colour model prints only with a spool for every part, from one feed.
+    !(mapping && (!chosenSpools(mapping, mappingSlots) || mixesFeeds(mapping, mappingSlots))) &&
     (!offers("copies") ||
       (Number.isInteger(copies) && copies >= 1 && copies <= 64));
   useEffect(() => {
@@ -310,6 +341,38 @@ export function PrintSheet({
               onChange={(e) => setCopies(Number(e.target.value))}
             />
           </label>
+          {mapping && (
+            <fieldset className="field">
+              <legend>Colours</legend>
+              {mapping.filaments.map((part) => (
+                <label className="field" key={part.index}>
+                  <span>
+                    <span className="swatch" style={{ backgroundColor: part.colour ?? "#808080" }} />{" "}
+                    {part.name ?? `Part ${part.index}`}
+                  </span>
+                  <select
+                    aria-label={`Spool for ${part.name ?? `part ${part.index}`}`}
+                    value={mappingSlots[part.index] ?? ""}
+                    onChange={(e) =>
+                      setMappingSlots((s) => ({ ...s, [part.index]: Number(e.target.value) }))
+                    }
+                  >
+                    {mappingSlots[part.index] === undefined && <option value="">Choose a spool</option>}
+                    {mapping.trays.map((t) => (
+                      <option key={t.slot} value={t.slot}>
+                        {spoolTitle(t)}
+                      </option>
+                    ))}
+                  </select>
+                  {partNote(mapping, part, mappingSlots) && <small>{partNote(mapping, part, mappingSlots)}</small>}
+                </label>
+              ))}
+              {mixesFeeds(mapping, mappingSlots) && (
+                <p className="hint">One print feeds from one source: put every colour on AMS spools, or every colour on the external spool.</p>
+              )}
+            </fieldset>
+          )}
+          {!mapping && (<>
           <label className="field">
             Loaded filament
             <select value={slot} onChange={(e) => setSlot(e.target.value)}>
@@ -345,6 +408,7 @@ export function PrintSheet({
               </select>
             </label>
           )}
+          </>)}
           <label className="field">
             Pause before layers
             <input

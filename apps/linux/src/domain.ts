@@ -312,6 +312,9 @@ export interface PrintChoices {
   filament?: Filament;
   material?: string;
   pauseBeforeLayers: number[];
+  /** A multi-colour model: one spool per part, in the model's order, and the model version they were chosen for. */
+  spools?: Filament[];
+  modelVersion?: string;
 }
 /**
  * Only what this printer's MCP offers is sent, as the Mac sheet does: a saved "fine" on a printer without the quality
@@ -349,11 +352,13 @@ export function estimateRequest(id: string, c: PrintChoices) {
     quality: c.quality,
     strength: c.strength,
     ...(c.copies !== undefined ? { copies: c.copies } : {}),
-    ...(c.filament
-      ? { filament: c.filament }
-      : c.material
-        ? { colour: { material: c.material } }
-        : {}),
+    ...(c.spools?.length
+      ? { filaments: c.spools, filamentsModelVersion: c.modelVersion }
+      : c.filament
+        ? { filament: c.filament }
+        : c.material
+          ? { colour: { material: c.material } }
+          : {}),
     ...(c.pauseBeforeLayers.length
       ? { pauseBeforeLayers: c.pauseBeforeLayers }
       : {}),
@@ -417,4 +422,55 @@ export function designerSettingsWords(project: Pick<Project, "current">, quality
   return quality === "standard" && strength === "standard"
     ? "Prints with the designer’s settings saved in this file."
     : "Changes the designer’s settings saved in this file.";
+}
+
+type Mapping = import("./types").ColourMapping;
+/** The printer MCP's proposal per part (part index → spool slot): where the sheet starts. */
+export function proposedSlots(mapping: Mapping): Record<number, number> {
+  return Object.fromEntries(
+    mapping.filaments.flatMap((f) =>
+      f.slot === undefined ? [] : [[f.index, f.slot]],
+    ),
+  );
+}
+/** The chosen spool for every part, in the model's order; undefined until every part has one. */
+export function chosenSpools(
+  mapping: Mapping,
+  slots: Record<number, number>,
+): import("./types").Filament[] | undefined {
+  const spools = mapping.filaments.map((f) =>
+    mapping.trays.find((t) => t.slot === slots[f.index]),
+  );
+  return mapping.filaments.length && spools.every((t) => t)
+    ? (spools as import("./types").Filament[])
+    : undefined;
+}
+/** The chosen spools come from more than one of the MCP's feeds: one print feeds from one. */
+export function mixesFeeds(
+  mapping: Mapping,
+  slots: Record<number, number>,
+): boolean {
+  const feeds = new Set(
+    Object.values(slots).flatMap((slot) => {
+      const feed = mapping.trays.find((t) => t.slot === slot)?.feed;
+      return feed ? [feed] : [];
+    }),
+  );
+  return feeds.size > 1;
+}
+/** What the person should know about a part's spool: the MCP's note while its proposal stands. */
+export function partNote(
+  mapping: Mapping,
+  part: Mapping["filaments"][number],
+  slots: Record<number, number>,
+): string | undefined {
+  if (slots[part.index] === part.slot && part.note) return part.note;
+  const tray = mapping.trays.find((t) => t.slot === slots[part.index]);
+  if (tray && part.material && tray.material.toUpperCase() !== part.material.toUpperCase())
+    return `Prints in ${tray.material}, not ${part.material}.`;
+  return undefined;
+}
+/** A spool as a person reads it: the MCP's label and name ("A2 · Sunflower Yellow PLA Basic"). */
+export function spoolTitle(f: import("./types").Filament): string {
+  return f.label ? `${f.label} · ${f.name}` : `${f.material} · ${f.name || f.colour}`;
 }
