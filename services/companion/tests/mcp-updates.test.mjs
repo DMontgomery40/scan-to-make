@@ -555,7 +555,7 @@ test('updates wait for admitted design passes, their queue, and helper shutdown 
   let runs = 0, stopping = false;
   const service = new ObjectService({store: new ObjectStore(join(root, 'objects')), handoff: profile, printGate: gate, claudePath: '/c',
     runTouchup: input => runTouchup(input, {
-      lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), ensureBlender: async () => {}, resetScene: async () => {}, client: () => ({connect: async () => {}, hasTool: () => false, close: async () => {}}),
+      lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), ensureBlender: async () => {}, resetScene: async () => {}, client: () => ({connect: async () => {}, hasTool: () => false, close: async () => {}}), guidance: async () => ({design: 'Plan the print.', slicing: 'Its slicer orients it.'}), 
       run: async () => { runs++; await (runs === 1 ? first.promise : second.promise); return {status: 'failed', reason: 'test result', renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 0}}; },
       stopBlender: async () => { stopping = true; await cleanup.promise; },
     }),

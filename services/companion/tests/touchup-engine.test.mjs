@@ -190,7 +190,7 @@ test('design passes hold Fusion across processes from opening the document to th
   let ran = false;
   const pass = runTouchup({root, objectId: 'obj', scan: [], photos: [], handoff, claudePath: '/c', instructions: 'A hook', kind: 'fit'}, {
     fusionLockPath, lockPath: join(mkdtempSync(join(tmpdir(), 'touchup-engine-lock2-')), 'blender.lock'),
-    client: fusion.client, prepare: args => prepareTouchupPass(args),
+    client: fusion.client, prepare: args => prepareTouchupPass(args), guidance: async () => ({design: 'Plan the print.', slicing: 'Its slicer orients it.'}), 
     run: async (inv, p) => { ran = true; return {status: 'done', model: join(p.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
   });
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -245,7 +245,7 @@ for (const outcome of [
     fusion_mcp_call: args => args.document_id === outcome.closeFailure ? error('close refused') : text({}),
   });
   const result = await runTouchup({root, objectId: 'o', scan: [], photos: [], instructions: 'A small box', handoff, claudePath: '/claude', kind: 'fit'}, {
-    client: fusion.client, fusionLockPath: join(root, 'fusion.lock'),
+    client: fusion.client, fusionLockPath: join(root, 'fusion.lock'), guidance: async () => ({design: 'Plan the print.', slicing: 'Its slicer orients it.'}), 
     run: async (_inv, pass) => {
       const f3d = join(pass.outDir, 'touched.f3d');
       if (outcome.archive) await writeFile(f3d, outcome.archive === 'empty' ? '' : outcome.archive);

@@ -25,6 +25,7 @@ function recorder(log, runDelayMs = 0) {
     resetScene: async () => { log.push('resetScene'); },
     stopBlender: async () => { log.push('stopBlender'); },
     client: () => ({}),
+    guidance: async () => ({design: 'Plan the print.', slicing: 'Its slicer orients it.'}), 
     prepare: async args => { log.push('prepare'); return prepareTouchupPass(args); },
     run: async (inv, pass) => { log.push('run:start'); await new Promise(r => setTimeout(r, runDelayMs)); log.push('run:end'); return {...done(pass), inv}; },
   };
