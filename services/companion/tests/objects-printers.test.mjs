@@ -59,14 +59,10 @@ test('two OctoPrints behind one reverse proxy at different sub-paths stay two pr
   assert.deepEqual(configured.map(item => item.name).sort(), ['Printer A', 'Printer B'], 'printer-b is its own printer; the two printer-a entries are one');
   assert.ok(configured.every(item => item.address === 'pi.lan'), 'shown by host, told apart by path');
 
-  // At the server's root, a web address is its host and port: the same printer as a host-and-port profile.
-  const plain = {command: process.execPath, args: ['/opt/mcp-3d-printer-server/dist/index.js'], env: {PRINTER_TYPE: 'octoprint', PRINTER_HOST: 'pi.lan', PRINTER_PORT: '5000', API_KEY: 'k'}};
-  const rooted = await f.put('mcp-root.json', {mcpServers: {'By port': plain, 'By URL': octo('http://pi.lan:5000/'), 'Other port': octo('http://pi.lan:5001')}});
-  const same = await loadPrinterCatalog(current, {...f.options([rooted]), placeholderEntryPoint: entry});
-  assert.deepEqual(same.destinations.filter(item => item.id !== 'current').map(item => item.name).sort(), ['By port', 'Other port']);
-  // A sub-path URL without a port of its own takes PRINTER_PORT too, as the MCP does: two ports are two printers.
+  // The configured PRINTER_PORT is part of a web address's identity as written: two ports are two printers. The MCP's
+  // own port rules (defaults, which one wins) aren't repeated in the app, so differently spelled addresses aren't merged.
   const withPort = (port) => ({...octo('http://pi.lan/octoprint'), env: {...octo('http://pi.lan/octoprint').env, PRINTER_PORT: port}});
-  const ported = await f.put('mcp-ports.json', {mcpServers: {'On 5000': withPort('5000'), 'On 5001': withPort('5001'), 'Explicit 5000': octo('http://pi.lan:5000/octoprint/')}});
+  const ported = await f.put('mcp-ports.json', {mcpServers: {'On 5000': withPort('5000'), 'On 5001': withPort('5001'), 'On 5000 again': withPort('5000')}});
   const ports = await loadPrinterCatalog(current, {...f.options([ported]), placeholderEntryPoint: entry});
   assert.deepEqual(ports.destinations.filter(item => item.id !== 'current').map(item => item.name).sort(), ['On 5000', 'On 5001']);
 });

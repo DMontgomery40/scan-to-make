@@ -149,21 +149,17 @@ function publicAddress(value?: string): string | undefined {
 }
 
 /**
- * A web address's identity: scheme, host (lowercased, with its port) and path, without a trailing slash. Two
- * OctoPrints behind one reverse proxy at different sub-paths (`https://pi.lan/printer-a/`, `…/printer-b/`) are two
- * printers (Codex review on #389).
+ * A web address's identity: exactly what is configured, normalized only as a URL is (scheme, lowercased host with
+ * its own port, path without a trailing slash), plus PRINTER_PORT as written. Two OctoPrints behind one reverse proxy
+ * at different sub-paths, or on different ports, stay two printers (Codex review on #389). How the MCP turns these
+ * into an endpoint (default ports, which port wins) is the MCP's rule and is not repeated here (AGENTS.md), so one
+ * printer configured in two spellings may be listed twice: a duplicate, never one printer standing in for another.
  */
 function webIdentity(value: string | undefined, port: string): string | undefined {
   if (!value?.includes('://')) return undefined;
   try {
     const url = new URL(value);
-    const path = url.pathname.replace(/\/+$/, '');
-    // A web address at the server's root is the same printer as its host and port (`http://pi.lan:5000/` is
-    // `pi.lan` on 5000): one key for both (Codex review on #389). The MCP adds PRINTER_PORT to any URL without a port
-    // of its own unless it is 80 or 443, with or without a path, so the key does too.
-    const extra = !url.port && port && port !== '80' && port !== '443' ? `:${port}` : '';
-    if (!path) return `host:${url.host.toLowerCase()}${extra}`;
-    return `url:${url.protocol}//${url.host.toLowerCase()}${extra}${path}`;
+    return `url:${url.protocol}//${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, '')}${port ? `|${port}` : ''}`;
   } catch { return undefined; }
 }
 
