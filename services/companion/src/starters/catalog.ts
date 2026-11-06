@@ -7,6 +7,8 @@ export const STARTER_ASSETS = fileURLToPath(new URL('../../../../packages/Counte
 export interface StarterProject {
   id: string; title: string; summary: string; instructions: string; designer: string; site: string;
   url: string; licence: string; source: 'makerworld';
+  /** How many distinct designer files make the project ready: the caliper and its depth gauge are two. */
+  files: number;
 }
 export function starterProject(id: string): StarterProject | undefined {
   const catalog = JSON.parse(readFileSync(join(STARTER_ASSETS, 'catalog.json'), 'utf8')) as StarterProject[];

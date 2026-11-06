@@ -65,17 +65,83 @@ test('a starter gets the designer’s own files and is ready to print, with ever
  assert.match(asked[1].request,/six plates/);
  await assert.rejects(service.addStarter('../caliper-card'),/starter/i);
 });
-test('a starter that can’t be downloaded says so in one sentence, and Try Again gets it',async t=>{
+/** What the companion wrote to its error log (logs/companion-error.log on the Mac) while `run` ran. */
+async function logged(run){
+ const lines=[],error=console.error;console.error=(...args)=>lines.push(args.join(' '));
+ try{return {value:await run(),lines};}finally{console.error=error;}
+}
+test('a starter that MakerWorld’s sign-in stops says so once, on the page left open, and Try Again gets it',async t=>{
  let signedIn=false;
- const {service,asked}=await setup(t,async(_input,root)=>signedIn?caliper(root):{status:'needs_file',summary:'MakerWorld wants a sign-in.'});
- const first=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ const {service,asked}=await setup(t,async(_input,root)=>signedIn?caliper(root):{status:'needs_file',reason:'not_signed_in',summary:'MakerWorld shows Sign in.',
+  run:{toolCalls:4,seconds:12,exitCode:0,sessionId:'s-1',chrome:true}});
+ const {value:first,lines}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
  assert.equal(first.state,'failed');assert.equal(first.ask,undefined,'nothing to download by hand');
- assert.equal(first.failure,'Counterpart couldn’t download the designer’s files from MakerWorld. Sign in to MakerWorld in Chrome on this computer, then try again.');
+ assert.equal(first.failure,'Counterpart couldn’t download the designer’s files because MakerWorld isn’t signed in. Sign in to MakerWorld on the page Counterpart left open in your browser, then try again.');
+ assert.equal(lines.length,1);assert.match(lines[0],new RegExp(`project ${first.id}.*reason not_signed_in.*worker session s-1: MakerWorld shows Sign in\\.`));
  assert.equal((await service.addStarter('long-vernier-caliper')).id,first.id,'tapping it again opens the same project');
  signedIn=true;
  await service.start(first.id);
  const done=await service.settled(first.id);
  assert.equal(done.state,'ready');assert.equal(done.failure,undefined);assert.equal(asked.length,2);
+});
+// Nov 6, project e95f31ea: Chrome was signed in (MakerWorld signed the download for David's account), but its file
+// server answered 503 and nothing reached Downloads. The worker said so; the project said "Sign in", and logged nothing.
+for (const [reason,summary] of [['site_error','MakerWorld’s file server returned 503 errors when I tried to download.'],
+ ['download_not_saved','I clicked Download 3MF, but no file reached ~/Downloads.'],[undefined,'Something on the page stopped me.']])
+ test(`a starter that isn’t signed-out says what the worker saw, never "Sign in" (${reason ?? 'no reason given'})`,async t=>{
+  const {service}=await setup(t,async()=>({status:'needs_file',...(reason?{reason}:{}),summary,run:{toolCalls:30,seconds:165,exitCode:0,sessionId:'s-2',chrome:true}}));
+  const {value:o,lines}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+  assert.equal(o.state,'failed');assert.equal(o.ask,undefined);
+  assert.equal(o.failure,`Counterpart couldn’t download the designer’s files from MakerWorld. ${summary} Try again.`);
+  assert.doesNotMatch(o.failure,/sign in/i);assert.ok(!o.failure.includes('\n'));
+  assert.equal(o.passes.at(-1).summary,o.failure);
+  assert.equal(lines.length,1,'the real cause is in the companion log');
+  assert.match(lines[0],/published pass did not get the file: project .*status needs_file, reason .*tool calls 30, 165 s, exit 0, worker session s-2/);
+  assert.ok(lines[0].includes(summary));
+ });
+// Nov 6, e95f31ea: both 150 mm profiles reached ~/Downloads at 21:06–21:08 (one three times over), the worker's own
+// check missed them and answered needs_file, and the project said "Sign in". The companion's own pickup takes them.
+test('a starter takes the designer’s files that arrived in Downloads during its pass, whatever the worker concluded',async t=>{
+ let files;
+ const {service}=await setup(t,async(_input,root)=>{
+  const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1'])],
+   ['Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1'])],
+   ['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf',model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1'])]]);
+  files=made.files;
+  return {status:'needs_file',reason:'site_error',summary:'The file server answered 503.',arrived:files,run:{toolCalls:30,seconds:165,exitCode:0}};
+ });
+ const {value:o,lines}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+ assert.equal(o.state,'ready');assert.equal(o.failure,undefined);
+ assert.equal(o.files.receipts.length,2,'a repeat click’s identical copy is one file');
+ assert.deepEqual(o.files.receipts.map(r=>r.name),['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf','DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf']);
+ assert.equal(o.credit.designer,'3D Print Masters Hub');assert.equal(publicObject(o).plates.length,2);
+ assert.match(lines.join('\n'),/took 2 of the designer’s files from Downloads \(the worker reported needs_file\)/);
+});
+test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
+ for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
+  ['one of two files',[['Vernier Caliper Ruler 150mm COLOR.3mf','Vernier Caliper Ruler - Two Lengths']]],
+  ['not a model',[['broken.3mf',null]]]]){
+  const {service}=await setup(t,async(_input,root)=>{
+   const made=await downloaded(root,names.map(([name,title])=>[name,title===null?Buffer.from('PK-not-a-3mf'):title.includes('Somebody')
+    ?Buffer.from(zipSync({'[Content_Types].xml':strToU8('<Types/>'),'3D/3dmodel.model':strToU8(`<model><metadata name="Title">${title}</metadata><metadata name="Designer">Somebody</metadata><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>`)}))
+    :model(title,['Plate 1'])]));
+   return {status:'needs_file',reason:'download_not_saved',summary:'Nothing arrived.',arrived:made.files};
+  });
+  const {value:o}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+  assert.equal(o.state,'failed',label);assert.equal(o.files,undefined,label);
+  assert.equal(o.failure,'Counterpart couldn’t download the designer’s files from MakerWorld. Nothing arrived. Try again.',label);
+ }
+});
+test('every published pass that ends without the file logs why: a worker failure, a thrown pass, a starter with no worker',async t=>{
+ const failing=await setup(t,async()=>({status:'failed',reason:'Claude Code couldn’t start: spawn EACCES',run:{toolCalls:0,seconds:0,exitCode:null}}));
+ const a=await logged(async()=>failing.service.settled((await failing.service.addStarter('scan-platform')).id));
+ assert.equal(a.value.failure,'Claude Code couldn’t start: spawn EACCES');assert.match(a.lines.join('\n'),/status failed.*exit none: Claude Code couldn’t start: spawn EACCES/);
+ const throwing=await setup(t,async()=>{throw new Error('The selected AI worker could not start. Check its login or API key in Settings.');});
+ const b=await logged(async()=>throwing.service.settled((await throwing.service.addStarter('scan-platform')).id));
+ assert.equal(b.value.state,'failed');assert.match(b.lines.join('\n'),new RegExp(`pass failed: project ${b.value.id}.*could not start`));
+ const off=await setup(t,undefined,{modelAccess:{projectWorker:()=>{throw new Error('AI is off. Choose a provider in AI Settings.');}}});
+ const c=await logged(()=>off.service.addStarter('long-vernier-caliper'));
+ assert.equal(c.value.state,'needs-closeup');assert.match(c.lines.join('\n'),/starter long-vernier-caliper: no download pass for project .*AI is off/);
 });
 test('with no browser to download with (Linux), a starter asks for the designer’s files instead of a sign-in',async t=>{
  const {service}=await setup(t,async()=>({status:'needs_file',browser:false}));

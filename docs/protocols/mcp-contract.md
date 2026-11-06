@@ -73,6 +73,7 @@ Snake_case names the same sources use for something else.
 
 | Names | What |
 |---|---|
-| `agent_message` `command_execution` `mcp_tool_call` `response_item` `turn_context` `structured_output` `tool_use` `tool_use_id` `tool_result` `tool_call_id` `is_error` `total_cost_usd` `input_schema` `max_tokens` `media_type` `image_url` `fetch_url` `read_file` `view_image` `web_search` `messages` `role` `content` `system` `tools` `model` `name` `description` `data` `result` | Claude Code, Codex and model-API stream, message and tool shapes |
+| `agent_message` `command_execution` `mcp_tool_call` `response_item` `turn_context` `structured_output` `tool_use` `tool_use_id` `tool_result` `tool_call_id` `is_error` `total_cost_usd` `session_id` `input_schema` `max_tokens` `media_type` `image_url` `fetch_url` `read_file` `view_image` `web_search` `messages` `role` `content` `system` `tools` `model` `name` `description` `data` `result` | Claude Code, Codex and model-API stream, message and tool shapes |
 | `needs_closeup` `needs_file` `scale_to_reference` `target_mm` | the design pass's own outcome and the app's scan cleanup |
+| `not_signed_in` `download_not_saved` `site_error` `not_found` | why the published-model worker didn't get the designer's file (PRD §8.11) |
 | `mcp_servers` `authorized_keys` `node_modules` | config files and install folders |

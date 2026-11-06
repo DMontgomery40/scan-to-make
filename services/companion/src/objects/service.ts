@@ -564,7 +564,8 @@ export class ObjectService {
         // published-model pass a pasted link runs (PRD §8.11) gets the designer's own files with the person's own
         // MakerWorld sign-in. Never bundled: the MakerWorld Standard Digital File License doesn't allow re-hosting.
         try { return await this.start(created.id); }
-        catch {
+        catch (error) {
+          console.error(`starter ${starterId}: no download pass for project ${created.id}: ${this.#publicText(error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').slice(0, 400)}`);
           // No worker to download with (AI is off, or its settings are unavailable): the project stays, and the person
           // adds the designer's files, as a pasted link asks when they can't be fetched.
           const ask = {id: randomUUID(), type: 'file' as const,
@@ -2182,6 +2183,20 @@ export class ObjectService {
       : {...p, endedAtMs: now, status, stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), ...(summary ? {summary: this.#publicText(summary)} : {})});
     const credit = result.model ? {url: result.model.url, site: result.model.site, title: result.model.title, ...(result.model.designer ? {designer: result.model.designer} : {}),
       ...(result.model.licence ? {licence: result.model.licence} : {})} : undefined;
+    // A starter whose files reached ~/Downloads while the pass ran is ready, whatever the worker concluded (Nov 6,
+    // e95f31ea: both 150 mm profiles were in Downloads at 21:08, the worker's own check missed them, and the project
+    // said "Sign in"). PRD §8.11 step 2.2: a matching download is used at once.
+    if (result.status !== 'downloaded' && result.arrived?.length && !(result.status === 'failed' && result.run?.stopReason === 'cancelled')) {
+      const object = await store.get(id), starter = object.starterId ? starterProject(object.starterId) : undefined;
+      const picked = starter ? await this.#starterDownloads(starter, result.arrived) : [];
+      if (starter && picked.length >= starter.files) {
+        console.error(`published pass: project ${id} took ${picked.length} of the designer’s files from Downloads (the worker reported ${result.status}): ${picked.map(file => basename(file)).join(', ')}`);
+        return this.#keepPublished(id, picked, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(credit ? {credit} : {})});
+      }
+    }
+    // Every published pass that doesn't bring the file back logs why, with what finds its transcript (Nov 6:
+    // a starter said "Sign in" while the browser was signed in, and the log had nothing).
+    if (result.status !== 'downloaded') this.#logPublished(id, startedAtMs, result);
     if (result.status === 'failed') {
       const message = this.#publicText(result.reason);
       const updated = await store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined, ...(credit ? {credit} : {}), passes: endPass(o, 'failed', message)}));
@@ -2193,8 +2208,13 @@ export class ObjectService {
       if (object.starterId && result.browser !== false) {
         // A starter has nothing for the person to choose or download by hand: one sentence and Try Again.
         // With no browser to download with (Linux, no Chrome extension), it asks for the files as any link does.
+        // Only a site that showed the worker signed out asks for a sign-in, once, on the page it left open in Chrome
+        // (Chrome keeps it). Any other miss says what the worker saw: a server error is not a sign-in.
         const site = object.credit?.site ?? 'MakerWorld';
-        const message = `Counterpart couldn’t download the designer’s files from ${site}. Sign in to ${site} in Chrome on this computer, then try again.`;
+        const seen = result.summary ? this.#publicText(result.summary).replace(/\s+/g, ' ').trim().slice(0, 400) : '';
+        const message = result.reason === 'not_signed_in'
+          ? `Counterpart couldn’t download the designer’s files because ${site} isn’t signed in. Sign in to ${site} on the page Counterpart left open in your browser, then try again.`
+          : `Counterpart couldn’t download the designer’s files from ${site}.${seen ? ` ${seen}` : ''} Try again.`;
         const updated = await store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined, ask: undefined, passes: endPass(o, 'failed', message)}));
         await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: message}});
         return this.#changed(updated);
@@ -2213,6 +2233,33 @@ export class ObjectService {
     }
     const summary = [result.summary, result.profile ? `Profile: ${result.profile}.` : undefined].filter(Boolean).join(' ');
     return this.#keepPublished(id, result.files, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(summary ? {summary} : {}), ...(credit ? {credit} : {})});
+  }
+
+  /**
+   * The arrived files a starter can take: model files whose own metadata names the catalog's designer, one per
+   * distinct file (repeat clicks save byte-identical copies). Anything else that arrived is left alone.
+   */
+  async #starterDownloads(starter: NonNullable<ReturnType<typeof starterProject>>, arrived: string[]): Promise<string[]> {
+    const picked: string[] = [], seen = new Set<string>();
+    for (const file of arrived) {
+      try {
+        const metadata = inspectModelFile(await readModelFile(file), extname(file).toLowerCase() === '.stl' ? 'stl' : '3mf');
+        if (metadata.designer !== starter.designer || seen.has(metadata.sha256)) continue;
+        seen.add(metadata.sha256); picked.push(file);
+      } catch { /* not a model this starter can use */ }
+    }
+    return picked;
+  }
+
+  /** One companion-log line per published pass that ended without the file: the real cause, never only the sentence shown. */
+  #logPublished(id: string, startedAtMs: number, result: Exclude<PublishedResult, {status: 'downloaded'}>) {
+    const run = result.run;
+    const facts = [`project ${id}`, `pass ${new Date(startedAtMs).toISOString()}`, `status ${result.status}`,
+      ...(result.status === 'needs_file' ? [`reason ${result.reason ?? 'unknown'}`, `browser ${result.browser === false ? 'none' : 'chrome'}`] : []),
+      ...(run ? [`tool calls ${run.toolCalls}`, `${run.seconds} s`, `exit ${run.exitCode ?? 'none'}`, ...(run.stopReason ? [`stopped: ${run.stopReason}`] : []),
+        ...(run.sessionId ? [`worker session ${run.sessionId}`] : [])] : [])];
+    const said = result.status === 'failed' ? result.reason : result.summary ?? '(no summary)';
+    console.error(`published pass did not get the file: ${facts.join(', ')}: ${this.#publicText(said).replace(/\s+/g, ' ').slice(0, 600)}`);
   }
 
   /** The designer's file becomes the project's model, exactly as published: original/<name> and current/model.<ext>. */
@@ -2549,6 +2596,7 @@ export class ObjectService {
 
   async #fail(id: string, startedAtMs: number, error: unknown): Promise<StmObject> {
     const message = this.#publicText(error instanceof Error ? error.message : String(error));
+    console.error(`pass failed: project ${id}, pass ${new Date(startedAtMs).toISOString()}: ${message.replace(/\s+/g, ' ').slice(0, 600)}`);
     const now = Date.now();
     const updated = await this.#deps.store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined,
       passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: 'failed',
