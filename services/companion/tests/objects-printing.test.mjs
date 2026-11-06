@@ -591,6 +591,11 @@ test("the first estimate waits for the own-settings answer; an MCP that can't an
   runner.ownProcess = async () => { asks++; await new Promise(resolve => setTimeout(resolve, 30)); return answer(); };
   await multipart(f, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
   await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
+  // The session connects for the question, and only then does the directory know the MCP's version (Codex on #336).
+  let known = null;
+  const capabilities = f.deps.printers.capabilities.bind(f.deps.printers);
+  f.deps.printers.capabilities = id => known ? {...capabilities(id), server: {name: 'bambu-printer-mcp', version: known}} : capabilities(id);
+  answer = () => { known = '1.1.65'; return true; };
   const first = await f.service.estimate(f.object.id, {});
   const {quality, strength} = f.runs.filter(run => run.estimate).at(-1).estimate.slicer;
   assert.deepEqual({quality, strength}, {quality: undefined, strength: undefined}, 'the first slice already keeps the designer\'s settings');

@@ -112,10 +112,9 @@ class HomeLayoutTests {
 
     /** Nov 5, caliper card 1f1c5515: the print sheet says a designer's file prints with its own settings (PRD §6.1). */
     @Test fun aDesignersFileSaysItPrintsWithItsOwnSettings() {
-        val designer = requireNotNull(Project.decode(WireJson.parseToJsonElement(
-            """{"id":"d","title":"Caliper card copy","state":"ready","createdAtMs":1,"updatedAtMs":2,
-               "current":{"model":"current/model.3mf","renders":[],"ownSettings":true,"ownSettingsFor":"current"}}"""
-        ).jsonObject))
+        // The companion's project for a designer's copy, as packages/contracts/fixtures/designer-own-settings.json has it.
+        val designer = requireNotNull(Project.decode(WireJson.parseToJsonElement(contractFixture("designer-own-settings.json").readText()).jsonObject))
+        assertEquals(true, designer.current?.ownSettings)
         assertEquals("Prints with the designer’s settings saved in this file.",
             designerSettingsWords(designer, PrintQuality.Standard, PrintStrength.Standard))
         assertEquals("Changes the designer’s settings saved in this file.",

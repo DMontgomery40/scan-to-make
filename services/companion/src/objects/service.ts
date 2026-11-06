@@ -594,7 +594,7 @@ export class ObjectService {
   readonly #ownSettingsAsked = new Map<string, boolean | 'unsupported'>();
   readonly #ownSettingsAsking = new Map<string, Promise<void>>();
   /** The model file's identity for these answers: a new pass writes a new current/model.3mf under the same name. */
-  async #ownSettingsKey(object: StmObject, destinationId: string | undefined): Promise<{key: string; modelPath: string; destinationId: string | undefined} | undefined> {
+  async #ownSettingsKey(object: StmObject, destinationId: string | undefined): Promise<{key: string; file: string; modelPath: string; destinationId: string | undefined} | undefined> {
     const current = object.current;
     if (!current || !isMultipart(object) || object.publishedSelection?.sliced) return undefined;
     const modelPath = join(this.#deps.store.dir(object.id), current.model);
@@ -602,7 +602,8 @@ export class ObjectService {
     if (!file) return undefined;
     // The running MCP's version too: after an update (Settings → Printers) its answer is asked for again.
     const server = destinationId ? this.#deps.printers?.capabilities(destinationId)?.server?.version ?? null : null;
-    return {key: JSON.stringify([object.id, current.model, file.mtimeMs, file.size, destinationId ?? null, server]), modelPath, destinationId};
+    const identity = [object.id, current.model, file.mtimeMs, file.size, destinationId ?? null];
+    return {key: JSON.stringify([...identity, server]), file: JSON.stringify(identity), modelPath, destinationId};
   }
   /** That printer's MCP can't say whether this project's 3MF prints with its own settings: an older MCP to update. */
   async #ownSettingsUnsupported(object: StmObject, destinationId: string | undefined): Promise<boolean> {
@@ -629,15 +630,15 @@ export class ObjectService {
     return (async () => {
       const asked = await this.#ownSettingsKey(object, destinationId);
       if (!asked) return;
-      const {key, modelPath} = asked;
+      const {key, file, modelPath} = asked;
       const pending = this.#ownSettingsAsking.get(key);
       if (pending) return pending;
-      const asking = this.#ownSettingsAnswer(object, key, modelPath, destinationId).finally(() => this.#ownSettingsAsking.delete(key));
+      const asking = this.#ownSettingsAnswer(object, key, file, modelPath, destinationId).finally(() => this.#ownSettingsAsking.delete(key));
       this.#ownSettingsAsking.set(key, asking);
       return asking;
     })();
   }
-  async #ownSettingsAnswer(object: StmObject, key: string, modelPath: string, destinationId: string | undefined): Promise<void> {
+  async #ownSettingsAnswer(object: StmObject, key: string, file: string, modelPath: string, destinationId: string | undefined): Promise<void> {
     const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
     const ask = services?.runner.ownProcess;
     if (!ask) return;
@@ -648,12 +649,15 @@ export class ObjectService {
         own = await ask.call(services.runner, {modelPath, ...(services.selection ? {selection: services.selection} : {}),
           ...(Object.keys(designedSupports(object)).length ? {slicer: designedSupports(object)} : {}), signal: AbortSignal.timeout(60_000)});
         this.#ownSettingsAsked.set(key, own);
+        // Connecting for the question can tell the directory the MCP's version: the answer is that version's too.
+        const after = await this.#ownSettingsKey(object, destinationId);
+        if (after && after.file === file) this.#ownSettingsAsked.set(after.key, own);
       }
       // Kept on the project only for its own printer; another printer's answer stays this run's (`#ownSettingsOn`).
       if (own === 'unsupported' || destinationId !== this.#destinationId(object)) return;
       // The answer is for the file that was asked about: a pass that replaced it since gets its own question.
       const now = await this.#ownSettingsKey(await this.#deps.store.get(object.id), destinationId);
-      if (now?.key !== key) return;
+      if (now?.file !== file) return;
       let changed = false;
       const answer = own;
       const updated = await this.#deps.store.update(object.id, o => {

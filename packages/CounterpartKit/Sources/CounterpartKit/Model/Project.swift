@@ -46,17 +46,22 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// Saved defaults replace print history as a whole: an absent colour means use the printer profile.
     /// Legacy quality/strength/copies can follow the model, but a historical tray belongs to one printer.
-    /// A file that prints with its own settings starts at Standard quality and strength, which send nothing: its layer
-    /// height, walls and infill print as the designer set them, never as the last print's choice (Nov 5).
     public func resolvedPrintDefaults(destinationId: String?) -> PrintSettings {
-        var resolved: PrintSettings
-        if let saved = settings?.printDefaults { resolved = saved } else {
-            resolved = print?.settings ?? PrintSettings()
-            let previousPrinter = print?.destinationId ?? print?.destination?.id
-            if destinationId == nil || previousPrinter != destinationId { resolved.colour = nil }
-        }
-        if printsWithOwnSettings { resolved.quality = nil; resolved.strength = nil }
-        return resolved
+        if let saved = settings?.printDefaults { return saved }
+        var previous = print?.settings ?? PrintSettings()
+        let previousPrinter = print?.destinationId ?? print?.destination?.id
+        if destinationId == nil || previousPrinter != destinationId { previous.colour = nil }
+        return previous
+    }
+
+    /// Where a print sheet starts: the resolved defaults, except that a file that prints with its own settings starts
+    /// at Standard quality and strength, which send nothing, so its layer height, walls and infill print as the
+    /// designer set them, never as the last print's or saved choice (Nov 5). Project Settings keeps showing and saving
+    /// the saved defaults themselves (`resolvedPrintDefaults`).
+    public func printSheetStart(destinationId: String?) -> PrintSettings {
+        var start = resolvedPrintDefaults(destinationId: destinationId)
+        if printsWithOwnSettings { start.quality = nil; start.strength = nil }
+        return start
     }
 
     public var id: String

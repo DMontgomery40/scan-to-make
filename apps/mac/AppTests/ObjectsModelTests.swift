@@ -583,13 +583,14 @@ private func project(_ item: [String: Any]) throws -> Project {
         let model = ObjectsModel(companion: companion)
         await model.refresh()
         let copy = try XCTUnwrap(model.objects.first { $0.id == "d" })
-        let start = PrintSettings(saved: copy.resolvedPrintDefaults(destinationId: "current"))
+        let start = PrintSettings(saved: copy.printSheetStart(destinationId: "current"))
         XCTAssertEqual(start.quality, .standard, "never the saved Fine")
         XCTAssertEqual(start.strength, .standard, "never the saved Strong")
         XCTAssertEqual(copy.designerSettingsWords(quality: start.quality.rawValue, strength: start.strength.rawValue),
                        "Prints with the designer’s settings saved in this file.")
         let other = try XCTUnwrap(model.objects.first { $0.id == "m" })
-        XCTAssertEqual(PrintSettings(saved: other.resolvedPrintDefaults(destinationId: "current")).strength, .strong, "any other file keeps its saved defaults")
+        XCTAssertEqual(PrintSettings(saved: copy.resolvedPrintDefaults(destinationId: "current")).strength, .strong, "Project Settings keeps the saved defaults")
+        XCTAssertEqual(PrintSettings(saved: other.printSheetStart(destinationId: "current")).strength, .strong, "any other file keeps its saved defaults")
         XCTAssertNil(other.designerSettingsWords(quality: "standard", strength: "standard"))
     }
 

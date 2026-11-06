@@ -620,7 +620,7 @@ struct PrintSheet: View {
         // A printer whose MCP was changed since has another id; the project's choice follows it.
         destinationId = store.catalog?.listed(saved) ?? saved
         // Print another: the last print's quality and strength again (its printer is the project's).
-        if let last = project?.resolvedPrintDefaults(destinationId: destinationId) {
+        if let last = project?.printSheetStart(destinationId: destinationId) {
             quality = last.quality.flatMap(PrintQuality.init(rawValue:)) ?? quality
             strength = last.strength.flatMap(PrintStrength.init(rawValue:)) ?? strength
             copies = last.copies

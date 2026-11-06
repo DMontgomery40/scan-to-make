@@ -44,7 +44,7 @@ struct PrintSheet: View {
     init(opened: Project, model: ObjectsModel) {
         self.opened = opened
         _model = ObservedObject(wrappedValue: model)
-        let last = PrintSettings(saved: opened.resolvedPrintDefaults(destinationId: opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId))
+        let last = PrintSettings(saved: opened.printSheetStart(destinationId: opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId))
         _quality = State(initialValue: last.quality)
         _strength = State(initialValue: last.strength)
         _copies = State(initialValue: last.copies ?? 1)

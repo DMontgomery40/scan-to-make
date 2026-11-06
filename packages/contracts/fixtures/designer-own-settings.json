@@ -1,0 +1,12 @@
+{
+  "id": "d",
+  "title": "Caliper card copy",
+  "kind": "copy",
+  "state": "ready",
+  "createdAtMs": 1,
+  "updatedAtMs": 2,
+  "photos": [],
+  "passes": [],
+  "current": {"model": "current/model.3mf", "renders": [], "ownSettings": true, "ownSettingsFor": "current"},
+  "settings": {"printDefaults": {"quality": "fine", "strength": "strong"}}
+}

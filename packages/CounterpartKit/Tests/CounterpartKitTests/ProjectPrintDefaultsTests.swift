@@ -32,15 +32,17 @@ final class ProjectPrintDefaultsTests: XCTestCase {
         let file: [String: Any] = ["model": "current/model.3mf", "renders": [], "ownSettings": true]
         let designer = project(["print": history, "current": file])
         XCTAssertTrue(designer.printsWithOwnSettings)
-        let defaults = designer.resolvedPrintDefaults(destinationId: "old-printer")
+        let defaults = designer.printSheetStart(destinationId: "old-printer")
         XCTAssertNil(defaults.quality, "the last print's Fine never carries over")
         XCTAssertNil(defaults.strength, "the last print's Strong never carries over")
         XCTAssertEqual(defaults.copies, 2, "copies and the spool still follow the last print")
         XCTAssertEqual(defaults.colour, .object(["amsSlot": .number(3)]))
         let saved = project(["settings": ["printDefaults": ["quality": "draft", "strength": "max"]], "current": file])
-        XCTAssertEqual(saved.resolvedPrintDefaults(destinationId: nil), PrintSettings(), "saved defaults don't override the designer either")
+        XCTAssertEqual(saved.printSheetStart(destinationId: nil), PrintSettings(), "saved defaults don't override the designer either")
+        XCTAssertEqual(saved.resolvedPrintDefaults(destinationId: nil), PrintSettings(quality: "draft", strength: "max"),
+                       "Project Settings still shows and keeps the saved defaults themselves")
         var unknown = file; unknown["ownSettings"] = nil
-        XCTAssertEqual(project(["print": history, "current": unknown]).resolvedPrintDefaults(destinationId: "old-printer").strength, "strong",
+        XCTAssertEqual(project(["print": history, "current": unknown]).printSheetStart(destinationId: "old-printer").strength, "strong",
                        "an MCP that doesn't say: the last print's settings, as before")
         XCTAssertEqual(designer.designerSettingsWords(quality: "standard", strength: "standard"), "Prints with the designer’s settings saved in this file.")
         XCTAssertEqual(designer.designerSettingsWords(quality: "standard", strength: "strong"), "Changes the designer’s settings saved in this file.")
