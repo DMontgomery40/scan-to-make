@@ -85,6 +85,14 @@ export interface ProcessAndPrintInput {
   signal?: AbortSignal;
 }
 
+/** `counterpart_propose_filaments` arguments (docs/protocols/mcp-contract.md). */
+export interface FilamentProposalInput {
+  filaments: {index: number; name?: string; colour?: string; material?: string}[];
+  painted?: {index: number; colour?: string; material?: string; prints?: boolean}[];
+  chosen?: {index: number; slot: number; colour?: string; material?: string; filamentId?: string}[];
+  sliced?: boolean;
+}
+
 function fail(code: string): never { throw new PrinterMcpError(code); }
 
 /** Bare, phone-safe failure code for a bundle manifest; never a message or path. */
@@ -270,6 +278,24 @@ export class PrinterHandoffRunner {
       if (!session.hasTool('get_printer_filaments')) fail('filament-inventory-unavailable');
       const selection = this.#config.selection;
       return resultValue(await call(session, 'get_printer_filaments', {
+        bambu_model: selection?.model,
+        nozzle_diameter: selection?.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
+      }, {...(signal ? {signal} : {}), failFast: shared}));
+    });
+  }
+
+  /**
+   * The MCP's per-part spool proposal (`counterpart_propose_filaments`): which loaded spool prints each of the
+   * model's colours, with the MCP's own words for each spool and part; with `chosen`, the person's spools checked
+   * against what is loaded now and the full mapping. An MCP without the tool fails `filament-proposal-unavailable`.
+   */
+  async proposeFilaments(input: FilamentProposalInput, signal?: AbortSignal): Promise<unknown> {
+    return this.#use(async (session, shared) => {
+      await session.connect({...(signal ? {signal} : {}), failFast: shared});
+      if (!session.hasTool('counterpart_propose_filaments')) fail('filament-proposal-unavailable');
+      const selection = this.#config.selection;
+      return resultValue(await call(session, 'counterpart_propose_filaments', {
+        ...input,
         bambu_model: selection?.model,
         nozzle_diameter: selection?.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
       }, {...(signal ? {signal} : {}), failFast: shared}));

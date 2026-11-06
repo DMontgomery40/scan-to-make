@@ -316,8 +316,8 @@ export function PrintSheet({
               <option value="">Use printer profile</option>
               {filaments.map((f) => (
                 <option key={f.slot} value={f.slot}>
-                  {f.slot >= 254 ? "External spool" : `Slot ${f.slot + 1}`} ·{" "}
-                  {f.material} · {f.name || f.colour}
+                  {/* The printer MCP's words: "A2 · Sunflower Yellow PLA Basic". */}
+                  {f.label ? `${f.label} · ${f.name}` : `${f.material} · ${f.name || f.colour}`}
                 </option>
               ))}
             </select>

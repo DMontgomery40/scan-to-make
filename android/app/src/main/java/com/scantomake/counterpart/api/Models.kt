@@ -298,9 +298,14 @@ data class PrinterCatalog(val destinations: List<PrinterDestination> = emptyList
 /** A spool the printer reports (`GET /v1/objects/<id>/filaments`). */
 @Serializable
 data class PrinterFilament(val slot: Int, val colour: String = "#888888", val material: String = "", val name: String = "",
-                           val filamentId: String = "", val destinationId: String = "", val suggested: Boolean? = null) {
+                           val filamentId: String = "", val destinationId: String = "", val suggested: Boolean? = null,
+                           /** Where the spool sits, in the printer MCP's own words. */
+                           val label: String? = null) {
     val isExternal: Boolean get() = slot >= 254
-    val slotLabel: String get() = if (isExternal) "Ext" else "A${slot + 1}"
+    /** The printer MCP's label for the spool; its material from an older Mac that doesn't send one. */
+    val slotLabel: String get() = label ?: material
+    /** The spool as a person reads it: the printer MCP's name ("Sunflower Yellow PLA Basic") once it sends a label. */
+    val spoolName: String get() = if (label != null) name else "$material $displayName"
     val displayName: String get() {
         var text = name.replace(Regex("""\s*#[0-9a-fA-F]{6,8}\s*$"""), "").trim()
         val suffix = " $material"

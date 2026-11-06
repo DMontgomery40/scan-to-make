@@ -1057,7 +1057,7 @@ private struct PhoneProjectSettings: View {
         var filamentProblem: String?
         do {
             colours = try await store.mac.filaments(id).map { spool in
-                .init(id: String(spool.slot), name: "\(spool.isExternal ? "External" : "A\(spool.slot + 1)") · \(spool.material) \(spool.name)",
+                .init(id: String(spool.slot), name: spool.title,
                     value: .object(spool.isExternal ? ["external": .bool(true)] : ["amsSlot": .number(Double(spool.slot))]))
             }
             if !colours.isEmpty { colours.insert(.init(id: "auto", name: "Suggested spool", value: .object(["auto": .bool(true)])), at: 0) }

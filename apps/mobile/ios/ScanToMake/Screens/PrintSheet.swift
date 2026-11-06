@@ -243,7 +243,7 @@ struct PrintSheet: View {
                     HStack(spacing: 12) {
                         SpoolDot(color: chosen.color, size: 34)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("\(chosen.slotLabel) · \(chosen.material) \(chosen.displayName)").font(.body.weight(.medium))
+                            Text(chosen.title).font(.body.weight(.medium))
                             Text([Format.grams(estimate?.grams), chosen.suggested == true ? "suggested by your Mac" : nil].compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
@@ -266,7 +266,7 @@ struct PrintSheet: View {
                     HStack(spacing: 12) {
                         SpoolDot(color: loaded.color, size: 34)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("Uses the loaded filament: \(loaded.material) \(loaded.displayName)").font(.body.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+                            Text("Uses the loaded filament: \(loaded.spoolName)").font(.body.weight(.medium)).fixedSize(horizontal: false, vertical: true)
                             if let grams = Format.grams(estimate?.grams) { Text(grams).font(.caption).foregroundStyle(.secondary) }
                         }
                     }
@@ -297,11 +297,8 @@ struct PrintSheet: View {
     /// The mapping choices as a task key, so editing a spool re-slices the estimate with it.
     private var mappingSignature: String { mappingSlots.keys.sorted().map { "\($0):\(mappingSlots[$0] ?? -1)" }.joined(separator: ",") }
 
-    /// AMS trays and the external spool can't feed one print together (the companion refuses the mix).
-    private var mixedFeedSources: Bool {
-        let external = mappingSlots.values.map { $0 >= 254 }
-        return external.contains(true) && external.contains(false)
-    }
+    /// The chosen spools come from more than one of the MCP's feeds (it refuses the mix).
+    private var mixedFeedSources: Bool { mapping?.mixesFeeds(slots: mappingSlots) ?? false }
 
     /// The chosen spools in filament order, when every colour has one: what Print sends.
     private var chosenSpoolPerColour: [PrinterFilament]? { mapping?.spools(slots: mappingSlots) }
@@ -375,24 +372,16 @@ struct PrintSheet: View {
                 && $0.colour != nil && $0.colour?.caseInsensitiveCompare(filament.colour ?? "") != .orderedSame }) {
             return "Shares this spool with \(other.name ?? "Part \(other.index)") — both parts print this colour."
         }
+        // The printer MCP's own words while its proposal stands; the person's other choice in another material, said plainly.
+        if let note = mapping?.note(filament, slots: mappingSlots) { return note }
         if let material = filament.material, tray.material.caseInsensitiveCompare(material) != .orderedSame {
-            return "Closest colour loaded; prints in \(tray.material), not \(material)."
-        }
-        if mappingSlots[filament.index] == filament.slot, let distance = filament.distance, distance > 0.08 {
-            return "Closest colour loaded."
+            return "Prints in \(tray.material), not \(material)."
         }
         return nil
     }
 
-    /// "A1 · PLA Bambu PLA Basic": AMS units are lettered A–D, four trays each (slot 4 is B1); AMS-HT units
-    /// report from 128 (the Mac's spool names).
-    private static func spoolName(_ filament: PrinterFilament) -> String {
-        let place = filament.slot == 255 ? "External 2"
-            : filament.isExternal ? "External"
-            : filament.slot >= 128 ? "AMS-HT \(String(UnicodeScalar(65 + min(filament.slot - 128, 25))!))"
-            : "\(String(UnicodeScalar(65 + min(filament.slot / 4, 25))!))\(filament.slot % 4 + 1)"
-        return "\(place) · \(filament.material) \(filament.displayName)"
-    }
+    /// "A2 · Sunflower Yellow PLA Basic", in the printer MCP's words.
+    private static func spoolName(_ filament: PrinterFilament) -> String { filament.title }
 
     @ViewBuilder private var settingsSection: some View {
         let offersQuality = printer?.offersQuality ?? false, offersStrength = printer?.offersStrength ?? false
@@ -823,7 +812,7 @@ struct SpoolPickerRow: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(spool.slotLabel), \(spool.material) \(spool.displayName)")
+                .accessibilityLabel("\(spool.slotLabel), \(spool.spoolName)")
                 .accessibilityAddTraits(selected == spool.slot ? .isSelected : [])
             }
         }

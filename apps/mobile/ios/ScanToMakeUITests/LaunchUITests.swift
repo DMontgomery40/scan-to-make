@@ -110,10 +110,11 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Colors"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["body"].exists)
         XCTAssertTrue(app.staticTexts["letters"].exists)
-        XCTAssertTrue(app.staticTexts["Closest colour loaded."].exists, "the loose yellow match is said out loud")
+        XCTAssertTrue(app.staticTexts["#FFD200 isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic."].exists,
+                      "the printer MCP's own words for the loose yellow match")
         let lettersSpool = app.buttons["Spool for letters"]
         XCTAssertTrue(lettersSpool.exists)
-        XCTAssertEqual(lettersSpool.value as? String, "A2 · PLA Yellow")
+        XCTAssertEqual(lettersSpool.value as? String, "A2 · Sunflower Yellow PLA Basic", "the MCP's label and spool name")
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Open Counterpart on your Mac")).firstMatch.exists,
                        "no trip to the Mac to choose a spool for a colour")
         XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["print-now"])], timeout: 10), .completed,

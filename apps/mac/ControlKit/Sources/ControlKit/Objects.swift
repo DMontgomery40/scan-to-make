@@ -6,14 +6,21 @@ public struct PrinterFilament: Codable, Sendable, Identifiable, Equatable {
     public let colour: String, material: String, name: String, filamentId: String, destinationId: String
     /// The one tray the companion preselects, matching the profile's material (`printSettings`).
     public let suggested: Bool?
+    /// Where the spool sits and which spools feed one print together, in the printer MCP's own words.
+    public let label: String?, feed: String?
     public var id: Int { slot }
     /// Slots 254 and 255 are the external spool on a Bambu printer.
     public var external: Bool { slot >= 254 }
-    public init(slot: Int, colour: String, material: String, name: String, filamentId: String, destinationId: String, suggested: Bool? = nil) {
+    /// "<label> · <name>", both the printer MCP's (its name already says the material); from an older companion, material and name.
+    public var title: String { label.map { "\($0) · \(name)" } ?? "\(material) \(name)" }
+    public init(slot: Int, colour: String, material: String, name: String, filamentId: String, destinationId: String, suggested: Bool? = nil,
+                label: String? = nil, feed: String? = nil) {
         self.slot = slot; self.colour = colour; self.material = material; self.name = name
-        self.filamentId = filamentId; self.destinationId = destinationId; self.suggested = suggested
+        self.filamentId = filamentId; self.destinationId = destinationId; self.suggested = suggested; self.label = label; self.feed = feed
     }
+    // label and feed are display: Print sends a tray back with only the identity the companion checks.
     private enum CodingKeys: String, CodingKey { case slot, colour, material, name, filamentId, destinationId }
+    private enum DisplayKeys: String, CodingKey { case label, feed }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         slot = try values.decode(Int.self, forKey: .slot)
@@ -23,6 +30,9 @@ public struct PrinterFilament: Codable, Sendable, Identifiable, Equatable {
         filamentId = try values.decode(String.self, forKey: .filamentId)
         destinationId = try values.decode(String.self, forKey: .destinationId)
         suggested = try? decoder.container(keyedBy: SuggestedKey.self).decodeIfPresent(Bool.self, forKey: .suggested)
+        let display = try? decoder.container(keyedBy: DisplayKeys.self)
+        label = try? display?.decodeIfPresent(String.self, forKey: .label)
+        feed = try? display?.decodeIfPresent(String.self, forKey: .feed)
     }
     private enum SuggestedKey: String, CodingKey { case suggested }
 }
@@ -42,11 +52,15 @@ public struct ModelColourFilament: Codable, Sendable, Identifiable, Equatable {
     public let materialMismatch: Bool?
     /// No colour was known: the suggestion is only a starting point.
     public let guessed: Bool?
+    /// The printer MCP's verdict on its proposal (`same-colour`, `closest`, `no-colour`, `none`) and what the person should know.
+    public let verdict: String?
+    public let note: String?
     public var id: Int { index }
     public init(index: Int, name: String? = nil, colour: String? = nil, material: String? = nil, slot: Int? = nil,
-                distance: Double? = nil, materialMismatch: Bool? = nil, guessed: Bool? = nil) {
+                distance: Double? = nil, materialMismatch: Bool? = nil, guessed: Bool? = nil, verdict: String? = nil, note: String? = nil) {
         self.index = index; self.name = name; self.colour = colour; self.material = material
         self.slot = slot; self.distance = distance; self.materialMismatch = materialMismatch; self.guessed = guessed
+        self.verdict = verdict; self.note = note
     }
 }
 
@@ -69,10 +83,13 @@ public struct ColourMapping: Codable, Sendable, Equatable {
         let choices = filaments.compactMap { filament in trays.first { $0.slot == slots[filament.index] } }
         return choices.count == filaments.count ? choices : nil
     }
-    /// AMS trays and the external spool (slot 254+) can't feed one print together; the companion refuses the mix.
-    public static func mixesFeedSources(slots: [Int: Int]) -> Bool {
-        let external = slots.values.map { $0 >= 254 }
-        return external.contains(true) && external.contains(false)
+    /// The chosen spools come from more than one feed (the printer MCP's `feed`): one print feeds from one.
+    public func mixesFeeds(slots: [Int: Int]) -> Bool {
+        Set(slots.values.compactMap { slot in trays.first { $0.slot == slot }?.feed }).count > 1
+    }
+    /// The MCP's note for a row while the person keeps its proposed spool.
+    public func note(_ filament: ModelColourFilament, slots: [Int: Int]) -> String? {
+        slots[filament.index] == filament.slot ? filament.note : nil
     }
 }
 

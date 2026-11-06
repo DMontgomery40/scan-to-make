@@ -221,7 +221,7 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                         val selected = (colour as? PrintColour.Tray)?.filament?.slot == f.slot || (colour == PrintColour.Auto && f.suggested == true)
                         Column(Modifier.clickable(enabled = !working) { colour = PrintColour.Tray(f) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(Modifier.size(36.dp).clip(CircleShape).background(hexColor(f.colour)).border(3.dp, if (selected) Palette.filament else Color.White.copy(alpha = 0.25f), CircleShape))
-                            Text(f.slotLabel, fontSize = 11.sp); Text(f.material, fontSize = 11.sp, color = Palette.secondary)
+                            Text(f.slotLabel, fontSize = 11.sp); Text(if (f.label != null) f.name else f.material, fontSize = 11.sp, color = Palette.secondary)
                         }
                     }
                 }

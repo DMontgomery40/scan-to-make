@@ -193,15 +193,15 @@ actor FixtureObjects: ObjectsCompanion {
     }
     func printers() async throws -> PrinterCatalog { catalog }
     func filaments(_ id: String) async throws -> [PrinterFilament] {
-        [PrinterFilament(slot: 0, colour: "#141414", material: "PLA", name: "Black", filamentId: "GFA00", destinationId: "p1s", suggested: true),
-         PrinterFilament(slot: 1, colour: "#FAC71A", material: "PLA", name: "Yellow", filamentId: "GFA01", destinationId: "p1s"),
-         PrinterFilament(slot: 2, colour: "#BFEADB", material: "PETG", name: "Translucent", filamentId: "GFG00", destinationId: "p1s"),
-         PrinterFilament(slot: 3, colour: "#6B7385", material: "PLA", name: "Blue Grey", filamentId: "GFA02", destinationId: "p1s")]
+        [PrinterFilament(slot: 0, colour: "#141414", material: "PLA", name: "Black PLA Basic", filamentId: "GFA00", destinationId: "p1s", suggested: true, label: "A1", feed: "ams"),
+         PrinterFilament(slot: 1, colour: "#FAC71A", material: "PLA", name: "Sunflower Yellow PLA Basic", filamentId: "GFA01", destinationId: "p1s", label: "A2", feed: "ams"),
+         PrinterFilament(slot: 2, colour: "#BFEADB", material: "PETG", name: "Translucent Teal PETG Translucent", filamentId: "GFG00", destinationId: "p1s", label: "A3", feed: "ams"),
+         PrinterFilament(slot: 3, colour: "#6B7385", material: "PLA", name: "Blue Gray PLA Basic", filamentId: "GFA02", destinationId: "p1s", label: "A4", feed: "ams")]
     }
     func colourMapping(_ id: String) async throws -> ColourMapping {
         ColourMapping(filaments: [
-            ModelColourFilament(index: 1, name: "body", colour: "#111111", material: "PLA", slot: 0, distance: 0.01),
-            ModelColourFilament(index: 2, name: "letters", colour: "#FFD200", material: "PLA", slot: 1, distance: 0.03),
+            ModelColourFilament(index: 1, name: "body", colour: "#111111", material: "PLA", slot: 0, distance: 0.01, verdict: "same-colour"),
+            ModelColourFilament(index: 2, name: "letters", colour: "#FFD200", material: "PLA", slot: 1, distance: 0.03, verdict: "same-colour"),
         ], trays: try await filaments(id))
     }
     func print(_ id: String, checked: Bool, settings: PrintSettings, filaments: [PrinterFilament], modelVersion: String?, expectedPlate: String?) async throws -> Project { try change(id, ["state": "printing"]) }
