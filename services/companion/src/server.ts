@@ -43,7 +43,7 @@ async function phoneSetupCall(setup:NonNullable<PhoneSetup>,method:PhoneSetupMet
     case 'discover':{
       if(!setup.discover)throw unavailable();
       const found=await setup.discover();
-      discoveredFolders.clear();
+      // Kept, not replaced: another paired device's discovery never takes back a folder this one was shown.
       for(const candidate of found.found)if(candidate.folder)discoveredFolders.add(candidate.folder);
       // Each MCP's name as people see it, so the phones never map package names themselves.
       const {MCP_PACKAGES}=await import('./printing/setup.js');
@@ -246,7 +246,7 @@ export async function startCompanionServer(
   const printHandoffRoutes=options.printHandoff?createPrintHandoffRoutes(options.printHandoff):undefined;
   const objectRoutes=options.objects?createObjectRoutes(options.objects,options.printerSetup?{printerSetup:options.printerSetup}:{}):undefined;
   const eventRoutes=options.events?createEventRoutes(options.events):undefined;
-  /** Folders the last phone discovery listed: a phone may add only one of these (a paired device never names a path itself). */
+  /** Folders any phone discovery listed while the companion runs: a phone may add only one of these (a paired device never names a path itself). */
   const discoveredFolders=new Set<string>();
   let authority = '';
   const handler: RequestListener = async (request, response) => {

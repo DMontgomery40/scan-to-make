@@ -205,9 +205,13 @@ test('a paired phone adds a printer through the same discover, check, obtain and
   assert.deepEqual((await f.call('/v1/printers/setup/obtain', 'POST', {...octo, session: pending.body.session})).body, answers.obtainApproved);
   // A found folder adds as it does on the Mac; a path the phone names itself never reaches the setup.
   assert.equal((await f.call('/v1/printers/setup/add', 'POST', {printer: {folder}})).status, 200);
+  // A second device's discovery, which no longer lists it, never takes back the folder the first was shown.
+  f.setup.discover = async () => answers.discover;
+  assert.equal((await f.call('/v1/printers/setup/discover', 'POST', {})).status, 200);
+  assert.equal((await f.call('/v1/printers/setup/add', 'POST', {printer: {folder}})).status, 200);
   assert.equal((await f.call('/v1/printers/setup/add', 'POST', {printer: {folder: '/tmp/elsewhere'}})).status, 400);
   assert.equal((await f.call('/v1/printers/setup/check', 'POST', {printer: {folder: '/tmp/elsewhere'}})).status, 400);
-  assert.deepEqual(seen.map(([name]) => name), ['discover', 'check', 'add', 'obtain', 'obtain', 'add']);
+  assert.deepEqual(seen.map(([name]) => name), ['discover', 'check', 'add', 'obtain', 'obtain', 'add', 'add']);
   assert.deepEqual(seen[1][1], p1s, 'the Mac\'s PrinterFormSchema parses it');
 });
 
