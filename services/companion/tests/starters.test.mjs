@@ -138,6 +138,17 @@ test('a pickup is the starter’s whole kit: never two other calipers of the des
  const {value:rigProject}=await logged(async()=>rig.service.settled((await rig.service.addStarter('scan-platform')).id));
  assert.equal(rigProject.state,'failed');assert.equal(rigProject.files,undefined);
 });
+test('a set the worker or the person chose that isn’t the whole kit is never replayed from the cache',async t=>{
+ // The worker reports two same-designer calipers, not the pinned caliper and gauge: Ready as before, but not a cached kit.
+ const {service,asked,root}=await setup(t,async(_input,root)=>downloaded(root,[['Vernier 150mm COLOR.3mf',COLOR],
+  ['Vernier 220mm COLOR.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1','Plate 2'])]]));
+ const first=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(first.state,'ready');assert.equal(asked.length,1);
+ assert.ok(!(await readdir(join(root,'starters','makerworld-198362'))).includes('kit.json'));
+ await service.delete(first.id);
+ const again=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(asked.length,2,'no cache hit: the worker runs again');assert.equal(again.state,'ready');
+});
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
   ['one of two files',[['Vernier Caliper Ruler 150mm COLOR.3mf','Vernier Caliper Ruler - Two Lengths']]],

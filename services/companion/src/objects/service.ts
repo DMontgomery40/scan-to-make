@@ -2409,8 +2409,12 @@ export class ObjectService {
         : {...p, endedAtMs: now, status: 'done', stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), ...(summary ? {summary} : {})})}));
     // A starter that is ready keeps the kit it accepted, once per computer: Try Again and a second tap never download it.
     const starter = object.starterId ? this.#starter(object.starterId) : undefined;
-    if (starter && updated.state === 'ready')
-      await this.#cacheStarter(starter, receipts.map(receipt => join(dir, receipt.path)), receipts.map(receipt => receipt.sha256));
+    // Only a whole kit (#kit) is recorded as one: a worker's or the person's partial or wrong set is kept as files, never replayed.
+    if (starter && updated.state === 'ready') {
+      const files = await this.#starterDownloads(starter, receipts.map(receipt => join(dir, receipt.path)));
+      const kit = this.#kit(starter, files);
+      await this.#cacheStarter(starter, files.map(file => file.path), kit ? files.filter(file => kit.includes(file.path)).map(file => file.sha256) : undefined);
+    }
     await this.#emit({id: randomUUID(), type: ask ? 'pass.ask' : 'pass.ready', projectId: id, ...(ask ? {data: {askId: ask.id}, detail: {question: ask.question}} : {})});
     return this.#changed(updated);
   }
