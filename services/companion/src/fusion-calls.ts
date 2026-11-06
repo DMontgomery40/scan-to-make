@@ -15,8 +15,12 @@ export function fusionCalls(running: () => PrinterHandoffConfig, client: (config
   const ask = async (mcp: Client, tool: string, args: Record<string, unknown>, signal: AbortSignal) => {
     let result;
     // PrinterMcpClient throws a tool's error result (`tool-failed`, the MCP's diagnostic in `detail`): it is the answer.
+    // A request that didn't complete (`incomplete`: the connection closed, a timeout) is no answer, and still throws.
     try { result = await mcp.callTool(tool, args, {signal}); }
-    catch (error) { if (error instanceof PrinterMcpError && error.code === 'tool-failed') return {error: error.detail ?? `${tool} failed.`}; throw error; }
+    catch (error) {
+      if (error instanceof PrinterMcpError && error.code === 'tool-failed' && !error.incomplete) return {error: error.detail ?? `${tool} failed.`};
+      throw error;
+    }
     if (result.isError) return {error: toolErrorText(result)};
     return {result: toolResultJson<Record<string, unknown>>(result)};
   };

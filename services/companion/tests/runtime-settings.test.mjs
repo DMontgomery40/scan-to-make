@@ -191,6 +191,12 @@ test('fusion.status asks the printer MCP as the companion runs it (with its Move
   const noDesign=fusionCalls(()=>profile,config=>({...client(config),callTool:async name=>{calls.push([name]);
     if(name==='fusion_mcp_call')throw new Refused('tool-failed',undefined,'Error: NO_ACTIVE_DESIGN');return reply;}}));
   assert.deepEqual((await noDesign.fusionStatus()).design,{isError:true,text:'Error: NO_ACTIVE_DESIGN'});
+  // The real client's shape for a connection that closed mid-read (Codex P2 on #377): tool-failed, incomplete. Not an answer.
+  const lost=Object.assign(new Refused('tool-failed',undefined,'connection closed'),{incomplete:true});
+  const closing=fusionCalls(()=>profile,config=>({...client(config),callTool:async name=>{if(name==='fusion_mcp_call')throw lost;return reply;}}));
+  await assert.rejects(closing.fusionStatus(),error=>error===lost,'the interim read');
+  const closingStatus=fusionCalls(()=>profile,config=>({...client(config),callTool:async()=>{throw lost;}}));
+  await assert.rejects(closingStatus.fusionStatus(),error=>error===lost,'the status call itself');
   // An MCP that reports activeDesign is never read again; neither is a Fusion that isn't connected.
   reply={structuredContent:{...today,activeDesign:true},content:[{type:'text',text:'{}'}]};calls.length=0;
   assert.equal('design' in await dispatch('fusion.status',{}),false);
