@@ -182,6 +182,14 @@ test('fusion.status asks the printer MCP as the companion runs it (with its Move
   assert.equal(started[1].command,'/node','Set Up and its check run the same copy');
   reply={isError:true,content:[{type:'text',text:'Fusion MCP timed out during connect.'}]};
   assert.deepEqual(await dispatch('fusion.status',{}),{status:null,server:'bambu-printer-mcp',error:'Fusion MCP timed out during connect.'});
+  // The real client throws an error result (Codex P2 on #377): its diagnostic is still the answer, for both calls.
+  const {PrinterMcpError}=await import('@scan-to-make/printer-handoff');
+  reply=null;const thrown=new PrinterMcpError('tool-failed',undefined,'Fusion MCP timed out during discovery.');
+  const throwing=fusionCalls(()=>profile,config=>({...client(config),callTool:async()=>{throw thrown;}}));
+  assert.deepEqual(await throwing.fusionStatus(),{status:null,server:'bambu-printer-mcp',error:'Fusion MCP timed out during discovery.'});
+  assert.deepEqual(await throwing.fusionSetup(false),{setup:null,server:'bambu-printer-mcp',error:'Fusion MCP timed out during discovery.'});
+  const broken=fusionCalls(()=>profile,config=>({...client(config),callTool:async()=>{throw new PrinterMcpError('connection-lost');}}));
+  await assert.rejects(broken.fusionStatus(),{code:'connection-lost'},'a lost connection is not an answer');
   tools=[];
   assert.deepEqual(await dispatch('fusion.status',{}),{status:null,server:'bambu-printer-mcp'},'an MCP without the tool: the Mac says Update it');
   await assert.rejects(dispatch('fusion.status',{launch:false}),'nothing is passed through');

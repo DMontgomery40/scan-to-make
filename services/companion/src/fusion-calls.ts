@@ -1,4 +1,4 @@
-import {PrinterMcpClient, toolResultJson, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
+import {PrinterMcpClient, PrinterMcpError, toolResultJson, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {toolErrorText} from './touchup/blender.js';
 import {mcpPackageName} from './printing/print-settings.js';
 
@@ -16,7 +16,10 @@ export function fusionCalls(running: () => PrinterHandoffConfig, client: (config
     try {
       await mcp.connect(signal);
       if (!mcp.hasTool(tool)) return {result: null, server};
-      const result = await mcp.callTool(tool, args, {signal});
+      let result;
+      // PrinterMcpClient throws a tool's error result (`tool-failed`, the MCP's diagnostic in `detail`): it is the answer.
+      try { result = await mcp.callTool(tool, args, {signal}); }
+      catch (error) { if (error instanceof PrinterMcpError && error.code === 'tool-failed') return {result: null, server, error: error.detail ?? `${tool} failed.`}; throw error; }
       if (result.isError) return {result: null, server, error: toolErrorText(result)};
       return {result: toolResultJson<Record<string, unknown>>(result), server};
     } finally { await mcp.close().catch(() => {}); }
