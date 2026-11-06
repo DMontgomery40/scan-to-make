@@ -144,7 +144,7 @@ enum FusionSetup {
         /// The printer MCP has no Fusion bridge (no `fusion_mcp_status`): `server` is the MCP to update.
         case noBridge(server: String)
         /// Fusion answers, but the MCP doesn't say whether a design is open (no `activeDesign`: older than bambu-printer-mcp
-        /// 1.1.74 / mcp-3d-printer-server 1.2.54): never success, the MCP needs updating (Codex P1 on #377).
+        /// 1.1.76 / mcp-3d-printer-server 1.2.56): never success, the MCP needs updating (Codex P1 on #377).
         case designUnknown(server: String)
         case notConnected(String)
         case unreachable(String)
