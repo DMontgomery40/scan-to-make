@@ -82,7 +82,7 @@ data class Project(
      *  ("Check print result") and never locks the others (David, Nov 6: "i can see them but i can't click on them"). */
     val canSelectPlate: Boolean get() = !plates.isNullOrEmpty() && state != State.Printing && state != State.TouchingUp
     /** Print asks "I checked the printer" first: the last send, or the chosen plate's, may have reached it (the companion's rule). */
-    val printNeedsCheck: Boolean get() = print?.uncertain == true || selectedPlate?.status in setOf("unknown", "sent")
+    val printNeedsCheck: Boolean get() = print?.uncertain == true || selectedPlate?.uncertain == true
     /** Terminal reports take precedence over stale progress while the project transition arrives. */
     val printEnded: Boolean get() = print?.live?.state in setOf("finished", "failed", "cancelled") ||
         print?.monitor?.phase == "ended" || state in setOf(State.Printed, State.Confirmed, State.Failed) ||

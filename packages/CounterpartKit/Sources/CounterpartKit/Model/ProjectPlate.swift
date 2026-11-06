@@ -13,6 +13,9 @@ public struct ProjectPlate: Codable, Equatable, Identifiable, Sendable {
     public var status: String
     public var printId: String?
     public var completedAtMs: Double?
+    /// Its last send may have reached the printer: printing it again asks "I checked the printer". A cancelled or
+    /// refused send can read "unknown" too, but it was never sent, so it doesn't ask.
+    public var uncertain: Bool?
 
     public var statusText: String {
         switch status {
@@ -40,6 +43,6 @@ extension Project {
     /// Print asks "I checked the printer" first: the last send of this project, or of the chosen plate, may have reached
     /// it. The companion refuses that print without the check on the same rule.
     public var printNeedsCheck: Bool {
-        print?.uncertain == true || ["unknown", "sent"].contains(selectedPlate?.status ?? "")
+        print?.uncertain == true || selectedPlate?.uncertain == true
     }
 }

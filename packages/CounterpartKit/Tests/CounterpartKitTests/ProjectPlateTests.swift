@@ -14,30 +14,30 @@ final class ProjectPlateTests: XCTestCase {
         XCTAssertFalse(busy.canSelectPlate)
     }
     /// David, Nov 6: "i can't select which plate to print in the app i can see them but i can't click on them". Plate 1's
-    /// start timed out (print.uncertain), and that locked all six plates. The doubt stays on plate 1 alone.
+    /// start timed out (print.uncertain), and that locked all six plates. The doubt stays on plate 1 alone. The projects
+    /// are the shared fixture the companion's own tests check (packages/contracts/fixtures/six-plate-unconfirmed.json).
     func testAnUnconfirmedSendLeavesEveryPlateChoosableAndOnlyItsPlateAsksForACheck() throws {
-        let rows = (0..<6).map { i in #"{"id":"h:\#(i)","fileIndex":0,"plateIndex":\#(i),"name":"P\#(i + 1)","fileName":"rig.3mf","selected":\#(i == 0),"sliced":false,"status":"\#(i == 0 ? "unknown" : "not-printed")"}"# }
-        let json = #"{"id":"p","createdAtMs":1,"updatedAtMs":2,"state":"failed","kind":"published","current":{"model":"original/rig.3mf","renders":[]},"print":{"bundleId":"b","uncertain":true},"plates":[\#(rows.joined(separator: ","))]}"#
-        var project = try JSONDecoder().decode(Project.self, from: Data(json.utf8))
-        XCTAssertTrue(project.canSelectPlate)
-        XCTAssertTrue(project.printNeedsCheck)
-        XCTAssertEqual(project.plates?.first?.statusText, "Check print result")
-        // Another plate chosen: the companion drops the print record and keeps plate 1 "unknown".
-        project.print = nil; project.state = .ready
-        for i in project.plates!.indices { project.plates![i].selected = i == 3 }
-        XCTAssertTrue(project.canSelectPlate)
-        XCTAssertFalse(project.printNeedsCheck)
-        XCTAssertFalse(ProjectWords(project).actions.contains(.printChecked))
-        // Back on plate 1: Print asks again, in words about that plate.
-        for i in project.plates!.indices { project.plates![i].selected = i == 0 }
-        XCTAssertTrue(project.printNeedsCheck)
-        XCTAssertTrue(ProjectWords(project).actions.contains(.printChecked))
-        XCTAssertTrue(project.uncertainPrintWords.contains("P1"))
-        // A send it could not follow is the same, and a printing project still locks the plates.
-        project.plates![0].status = "sent"
-        XCTAssertTrue(project.printNeedsCheck)
-        project.state = .printing
-        XCTAssertFalse(project.canSelectPlate)
+        struct Rig: Decodable { let unconfirmed, switched, back, cancelled: Project }
+        let rig = try JSONDecoder().decode(Rig.self, from: Data(contentsOf: repoRoot.appending(path: "packages/contracts/fixtures/six-plate-unconfirmed.json")))
+        XCTAssertTrue(rig.unconfirmed.canSelectPlate)
+        XCTAssertTrue(rig.unconfirmed.printNeedsCheck)
+        XCTAssertEqual(rig.unconfirmed.plates?.first?.statusText, "Check print result")
+        XCTAssertTrue(ProjectWords(rig.unconfirmed).actions.contains(.printChecked))
+        // Plate 4 chosen: it prints without the check, and every plate stays choosable.
+        XCTAssertTrue(rig.switched.canSelectPlate)
+        XCTAssertEqual(rig.switched.selectedPlate?.name, "Background Board")
+        XCTAssertFalse(rig.switched.printNeedsCheck)
+        XCTAssertFalse(ProjectWords(rig.switched).actions.contains(.printChecked))
+        // Back on Screws: Print asks again, in words about that plate.
+        XCTAssertTrue(rig.back.printNeedsCheck)
+        XCTAssertTrue(ProjectWords(rig.back).actions.contains(.printChecked))
+        XCTAssertTrue(rig.back.uncertainPrintWords.contains("Screws"))
+        // A send cancelled before anything went out reads "unknown" too, but never asks (Codex on #380).
+        XCTAssertEqual(rig.cancelled.plates?.first?.status, "unknown")
+        XCTAssertFalse(rig.cancelled.printNeedsCheck)
+        // A running print still locks the plates.
+        var printing = rig.switched; printing.state = .printing
+        XCTAssertFalse(printing.canSelectPlate)
     }
     func testPlateSelectionUsesCaptureImportPermission() {
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/00000000-0000-4000-8000-000000000001/plate-selection"), "captures:import")

@@ -6,6 +6,9 @@ export interface PlateProgress {
   printId?: string;
   completedAtMs?: number;
   acknowledgedAtMs?: number;
+  /** The send may have reached the printer (`print.uncertain`): printing this plate again asks "I checked the printer".
+   *  A cancelled or refused send also reads "unknown" when it has no end state, but it was never sent, so it isn't this. */
+  uncertain?: true;
 }
 export interface ProjectPlate extends PlateProgress {
   id: string; fileIndex: number; plateIndex: number; name: string; fileName: string;
@@ -39,7 +42,8 @@ export function retainedPlateProgress(object: StmObject): Record<string, PlatePr
     : object.state === 'failed' ? 'failed' : 'unknown';
   const ended = print.monitor?.endedAt ? Date.parse(print.monitor.endedAt) : object.updatedAtMs;
   const completedAtMs = previous?.completedAtMs ?? (status === 'printed' ? (Number.isFinite(ended) ? ended : object.updatedAtMs) : undefined);
-  saved[key(plate)] = {status, ...(print.printId ? {printId: print.printId} : {}), ...(completedAtMs !== undefined ? {completedAtMs} : {})};
+  saved[key(plate)] = {status, ...(print.printId ? {printId: print.printId} : {}), ...(completedAtMs !== undefined ? {completedAtMs} : {}),
+    ...(print.uncertain && !active ? {uncertain: true as const} : {})};
   return saved;
 }
 
@@ -72,9 +76,7 @@ export function acknowledgePlate(object: StmObject, status: 'printed' | 'not-pri
 
 /** A plate whose last send may have reached the printer: printing it again needs the person to check the printer first. */
 export function plateNeedsPrinterCheck(object: StmObject): boolean {
-  if (object.print?.uncertain) return true;
-  const status = projectPlates(object).find(plate => plate.selected)?.status;
-  return status === 'unknown' || status === 'sent';
+  return !!object.print?.uncertain || projectPlates(object).find(plate => plate.selected)?.uncertain === true;
 }
 
 export function selectingPlate(object: StmObject, fileIndex: number, plateIndex: number): StmObject {

@@ -26,7 +26,10 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.isSelected
 import com.scantomake.counterpart.ui.ProjectPlates
-import com.scantomake.counterpart.core.toJson
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasAnyAncestor
@@ -332,30 +335,31 @@ class HomeLayoutTests {
         assertEquals("nothing is sliced while the colours are unread", emptyList<String>(), transport!!.paths.filter { it.endsWith("/estimate") })
     }
 
-    /** David's six-plate rig on Nov 6: plate 1's start couldn't be confirmed. `selected` is the chosen plate. */
-    private fun rig(selected: Int, unconfirmed: Boolean): Map<String, Any> {
-        val names = listOf("Screws", "Photography Platform", "Main Framework", "Background Board", "Phone Holder", "Lifting Parts for Platform")
-        val plates = names.mapIndexed { i, name -> mapOf("id" to "ab:$i", "fileIndex" to 0, "plateIndex" to i, "name" to name, "fileName" to "rig.3mf",
-            "selected" to (i == selected), "sliced" to false, "status" to if (i == 0) "unknown" else "not-printed") }
-        return mapOf("id" to PROJECT, "title" to "3D scan platform", "instructions" to "The rig", "state" to if (unconfirmed) "failed" else "ready",
-            "createdAtMs" to 1, "updatedAtMs" to 2, "kind" to "published", "printerDestinationId" to "p1s", "plates" to plates,
-            "current" to mapOf("model" to "original/rig.3mf", "renders" to emptyList<String>())) +
-            (if (unconfirmed) mapOf("print" to mapOf("bundleId" to "b", "uncertain" to true)) else emptyMap())
+    /** David's six-plate rig on Nov 6, from the shared fixture the companion's own tests check: plate 1's start timed out
+     *  ("unconfirmed"), then another plate was chosen ("switched", with `selected` the plate chosen). */
+    private val sixPlates by lazy { WireJson.parseToJsonElement(contractFixture("six-plate-unconfirmed.json").readText()).jsonObject }
+    private fun rig(selected: Int, unconfirmed: Boolean): JsonObject {
+        val project = sixPlates[if (unconfirmed) "unconfirmed" else "switched"]!!.jsonObject
+        val plates = JsonArray(project["plates"]!!.jsonArray.map { plate ->
+            JsonObject(plate.jsonObject + ("selected" to JsonPrimitive(plate.jsonObject["plateIndex"].toString().toInt() == selected))) })
+        return JsonObject(project + mapOf("id" to JsonPrimitive(PROJECT), "printerDestinationId" to JsonPrimitive("p1s"), "plates" to plates))
     }
 
     /** David, Nov 6: "i can't select which plate to print in the app i can see them but i can't click on them". On the
      *  project, every plate stays a button after an unconfirmed start; only plate 1 says to check its result. */
     @Test fun everyPlateStaysChoosableOnTheProjectAfterAnUnconfirmedStart() {
-        val unconfirmed = requireNotNull(Project.decode(toJson(rig(0, true)).jsonObject))
+        val unconfirmed = requireNotNull(Project.decode(rig(0, true)))
         assertEquals(true, unconfirmed.canSelectPlate)
         assertEquals(true, unconfirmed.printNeedsCheck)
-        assertEquals(false, requireNotNull(Project.decode(toJson(rig(3, false)).jsonObject)).printNeedsCheck)
+        assertEquals(false, requireNotNull(Project.decode(rig(3, false))).printNeedsCheck)
         compose.setContent { WithApp { ProjectPlates(unconfirmed, busy = false, select = {}, print = {}) } }
         assertEquals(5, compose.onAllNodes(hasText("Select")).fetchSemanticsNodes().size)
         compose.onAllNodes(hasText("Select")).assertAll(isEnabled())
         assertEquals(6, compose.onAllNodes(hasText("Print…")).fetchSemanticsNodes().size)
         compose.onAllNodes(hasText("Print…")).assertAll(isEnabled())
         compose.onNodeWithText("Check print result").assertExists()
+        // A send cancelled before anything went out reads "unknown" too, but never asks (Codex on #380).
+        assertEquals(false, requireNotNull(Project.decode(sixPlates["cancelled"]!!.jsonObject)).printNeedsCheck)
     }
 
     /** The same rig in Print: its plate row changes the plate, re-reads that plate's colours, and only plate 1 asks for the check. */
@@ -366,7 +370,7 @@ class HomeLayoutTests {
         val fake = FakeTransport { request, _ -> when {
             request.url.endsWith("/v1/objects/$PROJECT/plate-selection") -> {
                 selected = WireJson.parseToJsonElement(String(request.body!!)).jsonObject["plateIndex"].toString().toInt()
-                json(200, mapOf("object" to rig(selected, false)))
+                HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to rig(selected, false)))).toByteArray())
             }
             request.url.endsWith("/v1/objects/$PROJECT/colour-mapping") -> { synchronized(mappingAsks) { mappingAsks.add(selected) }; json(200, mapOf("filaments" to emptyList<Any>(), "trays" to emptyList<Any>())) }
             request.url.endsWith("/v1/objects/$PROJECT/filaments") -> json(200, mapOf("filaments" to emptyList<Any>()))
@@ -374,7 +378,7 @@ class HomeLayoutTests {
         } }
         app.pairing = PairingClient(app.pairingStore, fake)
         app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
-        state.projects.value = listOf(requireNotNull(Project.decode(toJson(rig(0, true)).jsonObject)))
+        state.projects.value = listOf(requireNotNull(Project.decode(rig(0, true))))
         state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1s", "Bambu Lab P1S", backend = "bambu-printer-mcp")), "p1s")
         compose.setContent { WithApp { PrintSheetScreen(PROJECT, close = {}, printing = {}) } }
         try { compose.waitUntil(5_000) { synchronized(mappingAsks) { mappingAsks.isNotEmpty() } } }

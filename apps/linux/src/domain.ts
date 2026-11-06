@@ -212,8 +212,7 @@ export const canSelectPlate = (p: Project) =>
   !!p.plates?.length && p.state !== "printing" && p.state !== "touching-up";
 /** Print asks "I checked the printer" first: the last send, or the chosen plate's, may have reached it (the companion's rule). */
 export const printNeedsCheck = (p: Project) =>
-  !!p.print?.uncertain ||
-  ["unknown", "sent"].includes(p.plates?.find((x) => x.selected)?.status ?? "");
+  !!p.print?.uncertain || p.plates?.find((x) => x.selected)?.uncertain === true;
 export const duration = (seconds?: number) =>
   seconds === undefined
     ? "Time unavailable"

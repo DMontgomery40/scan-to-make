@@ -10,6 +10,8 @@ export interface Plate {
   selected: boolean;
   sliced: boolean;
   status: string;
+  /** Its last send may have reached the printer: printing it again asks "I checked the printer". */
+  uncertain?: boolean;
 }
 export interface Field {
   name: string;

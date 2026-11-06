@@ -1,0 +1,361 @@
+{
+ "about": "David's six-plate scan rig (project 7f1a9e33, Nov 6) as the companion serves it: plate 1's start timed out (print.uncertain), then plate 4 was chosen, then plate 1 again; and a send that was cancelled before anything went out. Every plate stays choosable; only a plate whose send may have reached the printer (plates[].uncertain) asks \"I checked the printer\". services/companion/tests/published.test.mjs checks these against the companion's own output.",
+ "unconfirmed": {
+  "id": "7f1a9e33-84b7-46ca-94c3-df97d74b0526",
+  "title": "3D scan platform",
+  "kind": "published",
+  "createdAtMs": 1,
+  "updatedAtMs": 2,
+  "photos": [],
+  "passes": [],
+  "messages": [],
+  "current": {
+   "model": "original/3D scan platform.3mf",
+   "renders": []
+  },
+  "state": "failed",
+  "failure": "Printer service: Error: Timed out waiting for a fresh MQTT safety report with observed printer identity, state and errors; cached status cannot authorize an operation. Counterpart could not confirm a print start. Check the printer before trying again.",
+  "print": {
+   "bundleId": "b0e3629e-2fd4-44ee-8508-916ae8c53eed",
+   "printId": "0805b2db-7bbd-4686-bfa5-180d49a87b38",
+   "plate": {
+    "sha256": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219",
+    "plateIndex": 0
+   },
+   "destination": {
+    "id": "current",
+    "name": "Bambu Lab P1S"
+   },
+   "destinationId": "current",
+   "uncertain": true
+  },
+  "publishedSelection": {
+   "fileIndex": 0,
+   "plateIndex": 0,
+   "sliced": false
+  },
+  "plates": [
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:0",
+    "fileIndex": 0,
+    "plateIndex": 0,
+    "name": "Screws",
+    "fileName": "3D scan platform.3mf",
+    "selected": true,
+    "sliced": false,
+    "status": "unknown",
+    "printId": "0805b2db-7bbd-4686-bfa5-180d49a87b38",
+    "uncertain": true
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:1",
+    "fileIndex": 0,
+    "plateIndex": 1,
+    "name": "Photography Platform",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:2",
+    "fileIndex": 0,
+    "plateIndex": 2,
+    "name": "Main Framework",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:3",
+    "fileIndex": 0,
+    "plateIndex": 3,
+    "name": "Background Board",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:4",
+    "fileIndex": 0,
+    "plateIndex": 4,
+    "name": "Phone Holder",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:5",
+    "fileIndex": 0,
+    "plateIndex": 5,
+    "name": "Lifting Parts for Platform",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   }
+  ]
+ },
+ "switched": {
+  "id": "7f1a9e33-84b7-46ca-94c3-df97d74b0526",
+  "title": "3D scan platform",
+  "kind": "published",
+  "createdAtMs": 1,
+  "updatedAtMs": 2,
+  "photos": [],
+  "passes": [],
+  "messages": [],
+  "current": {
+   "model": "original/3D scan platform.3mf",
+   "renders": []
+  },
+  "state": "ready",
+  "publishedSelection": {
+   "fileIndex": 0,
+   "plateIndex": 3,
+   "sliced": false
+  },
+  "plates": [
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:0",
+    "fileIndex": 0,
+    "plateIndex": 0,
+    "name": "Screws",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "unknown",
+    "printId": "0805b2db-7bbd-4686-bfa5-180d49a87b38",
+    "uncertain": true
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:1",
+    "fileIndex": 0,
+    "plateIndex": 1,
+    "name": "Photography Platform",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:2",
+    "fileIndex": 0,
+    "plateIndex": 2,
+    "name": "Main Framework",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:3",
+    "fileIndex": 0,
+    "plateIndex": 3,
+    "name": "Background Board",
+    "fileName": "3D scan platform.3mf",
+    "selected": true,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:4",
+    "fileIndex": 0,
+    "plateIndex": 4,
+    "name": "Phone Holder",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:5",
+    "fileIndex": 0,
+    "plateIndex": 5,
+    "name": "Lifting Parts for Platform",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   }
+  ]
+ },
+ "back": {
+  "id": "7f1a9e33-84b7-46ca-94c3-df97d74b0526",
+  "title": "3D scan platform",
+  "kind": "published",
+  "createdAtMs": 1,
+  "updatedAtMs": 2,
+  "photos": [],
+  "passes": [],
+  "messages": [],
+  "current": {
+   "model": "original/3D scan platform.3mf",
+   "renders": []
+  },
+  "state": "ready",
+  "publishedSelection": {
+   "fileIndex": 0,
+   "plateIndex": 0,
+   "sliced": false
+  },
+  "plates": [
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:0",
+    "fileIndex": 0,
+    "plateIndex": 0,
+    "name": "Screws",
+    "fileName": "3D scan platform.3mf",
+    "selected": true,
+    "sliced": false,
+    "status": "unknown",
+    "printId": "0805b2db-7bbd-4686-bfa5-180d49a87b38",
+    "uncertain": true
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:1",
+    "fileIndex": 0,
+    "plateIndex": 1,
+    "name": "Photography Platform",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:2",
+    "fileIndex": 0,
+    "plateIndex": 2,
+    "name": "Main Framework",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:3",
+    "fileIndex": 0,
+    "plateIndex": 3,
+    "name": "Background Board",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:4",
+    "fileIndex": 0,
+    "plateIndex": 4,
+    "name": "Phone Holder",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:5",
+    "fileIndex": 0,
+    "plateIndex": 5,
+    "name": "Lifting Parts for Platform",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   }
+  ]
+ },
+ "cancelled": {
+  "id": "7f1a9e33-84b7-46ca-94c3-df97d74b0526",
+  "title": "3D scan platform",
+  "kind": "published",
+  "createdAtMs": 1,
+  "updatedAtMs": 2,
+  "photos": [],
+  "passes": [],
+  "messages": [],
+  "current": {
+   "model": "original/3D scan platform.3mf",
+   "renders": []
+  },
+  "state": "ready",
+  "publishedSelection": {
+   "fileIndex": 0,
+   "plateIndex": 0,
+   "sliced": false
+  },
+  "print": {
+   "bundleId": "c",
+   "printId": "c1",
+   "plate": {
+    "sha256": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219",
+    "plateIndex": 0
+   }
+  },
+  "plates": [
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:0",
+    "fileIndex": 0,
+    "plateIndex": 0,
+    "name": "Screws",
+    "fileName": "3D scan platform.3mf",
+    "selected": true,
+    "sliced": false,
+    "status": "unknown",
+    "printId": "c1"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:1",
+    "fileIndex": 0,
+    "plateIndex": 1,
+    "name": "Photography Platform",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:2",
+    "fileIndex": 0,
+    "plateIndex": 2,
+    "name": "Main Framework",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:3",
+    "fileIndex": 0,
+    "plateIndex": 3,
+    "name": "Background Board",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:4",
+    "fileIndex": 0,
+    "plateIndex": 4,
+    "name": "Phone Holder",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   },
+   {
+    "id": "483a2e4b6ea8487a2f9331e6d27ecd2d1eed2161391624c2daae2c9f684f8219:5",
+    "fileIndex": 0,
+    "plateIndex": 5,
+    "name": "Lifting Parts for Platform",
+    "fileName": "3D scan platform.3mf",
+    "selected": false,
+    "sliced": false,
+    "status": "not-printed"
+   }
+  ]
+ }
+}

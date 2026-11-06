@@ -209,24 +209,25 @@ private func project(_ item: [String: Any]) throws -> Project {
     /// plate stays choosable with projects present, and only the plate that may have started asks for the printer check.
     func testEveryPlateStaysChoosableAfterAnUnconfirmedStartWithProjectsPresent() async throws {
         let companion = FakeObjects()
-        let sha = String(repeating: "ab", count: 32)
-        let names = ["Screws", "Photography Platform", "Main Framework", "Background Board", "Phone Holder", "Lifting Parts for Platform"]
-        let plates: [[String: Any]] = names.enumerated().map { i, name in
-            ["id": "\(sha):\(i)", "fileIndex": 0, "plateIndex": i, "name": name, "fileName": "rig.3mf", "selected": i == 0,
-             "sliced": false, "status": i == 0 ? "unknown" : "not-printed"]
-        }
-        await companion.set([item("caliper", "ready"), item("rig", "failed", ["kind": "published", "plates": plates,
-            "print": ["bundleId": "b", "uncertain": true], "failure": "Counterpart could not confirm a print start."])])
+        // The shared fixture the companion's own tests check: David's rig after plate 1's start timed out.
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/six-plate-unconfirmed.json"))) as? [String: Any])
+        let unconfirmed = try XCTUnwrap(fixture["unconfirmed"] as? [String: Any])
+        let id = try XCTUnwrap(unconfirmed["id"] as? String)
+        let names = try XCTUnwrap(unconfirmed["plates"] as? [[String: Any]]).compactMap { $0["name"] as? String }
+        XCTAssertEqual(names.count, 6)
+        await companion.set([item("caliper", "ready"), unconfirmed.merging(["directory": "/tmp/rig"]) { $1 }])
         let model = ObjectsModel(companion: companion)
         await model.refresh()
-        var rig = try XCTUnwrap(model.objects.first { $0.id == "rig" })
+        var rig = try XCTUnwrap(model.objects.first { $0.id == id })
         XCTAssertTrue(rig.canSelectPlate, "the plates stay buttons you can press")
         XCTAssertTrue(rig.printNeedsCheck)
         for (i, name) in names.enumerated().reversed() {
             let plate = try XCTUnwrap(rig.plates?[i])
-            let chose = await model.selectPlate("rig", plate: plate)
+            let chose = await model.selectPlate(id, plate: plate)
             XCTAssertTrue(chose)
-            rig = try XCTUnwrap(model.objects.first { $0.id == "rig" })
+            rig = try XCTUnwrap(model.objects.first { $0.id == id })
             XCTAssertEqual(rig.selectedPlate?.name, name)
             XCTAssertTrue(rig.canSelectPlate)
             XCTAssertEqual(rig.printNeedsCheck, i == 0, "only Screws, which may have started, asks for the check")
