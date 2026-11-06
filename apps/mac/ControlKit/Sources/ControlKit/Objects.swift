@@ -133,13 +133,15 @@ public struct PrintEstimate: Decodable, Sendable, Equatable {
     public let sliceSha256: String?
     /// The printer MCP's pictures of that file's G-code: what will print. Absent when the MCP can't draw them.
     public let preview: PrintPreview?
+    /// The installed printer MCP can't say whether this 3MF prints with its own settings: the companion's words to update it.
+    public let ownSettingsUpdate: String?
 
     public init(destinationId: String, quality: String, strength: String, seconds: Double? = nil, grams: Double? = nil, layers: Int? = nil,
                 layerHeightMm: Double? = nil, infillPercent: Double? = nil, wallLoops: Int? = nil, slicerWarning: String? = nil,
-                sliceSha256: String? = nil, preview: PrintPreview? = nil) {
+                sliceSha256: String? = nil, preview: PrintPreview? = nil, ownSettingsUpdate: String? = nil) {
         self.destinationId = destinationId; self.quality = quality; self.strength = strength; self.seconds = seconds; self.grams = grams
         self.layers = layers; self.layerHeightMm = layerHeightMm; self.infillPercent = infillPercent; self.wallLoops = wallLoops
-        self.slicerWarning = slicerWarning; self.sliceSha256 = sliceSha256; self.preview = preview
+        self.slicerWarning = slicerWarning; self.sliceSha256 = sliceSha256; self.preview = preview; self.ownSettingsUpdate = ownSettingsUpdate
     }
 }
 

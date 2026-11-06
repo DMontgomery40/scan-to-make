@@ -115,7 +115,15 @@ export interface StmObject {
     supports?: import('../touchup/runner.js').TouchupSupports;
     engine?: DesignEngine;
     /** A Fusion pass keeps its parametric design for the next "Ask for changes" (PRD §8.9). */
-    design?: {f3d: string; parameters?: string}};
+    design?: {f3d: string; parameters?: string};
+    /**
+     * This 3MF prints with the settings it carries (a designer's project), as the project's printer MCP says
+     * (get_slice_settings own_process): the print sheet starts at the file's own settings and sends no quality or
+     * strength the person didn't choose. Absent until the MCP has been asked, or when it doesn't say.
+     */
+    ownSettings?: boolean;
+    /** Whose answer `ownSettings` is: the destination and its MCP's version (`current@1.1.65`); another printer or an updated MCP asks again. */
+    ownSettingsFor?: string};
   question?: {closeup: string};
   /** The printer MCP's original question. Only an explicit answer to this ID can approve it. */
   printConfirmation?: ObjectPrintConfirmation;

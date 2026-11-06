@@ -23,6 +23,27 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         current?.model.lowercased().hasSuffix(".3mf") == true
     }
 
+    /// The model prints with the settings its file carries (a designer's 3MF), as its printer's MCP says.
+    public var printsWithOwnSettings: Bool { current?.ownSettings == true }
+
+    /// The print sheet's line under Quality and Strength for a designer's file (Nov 5); nil for any other file.
+    /// `quality`/`strength` are the wire values (`standard` sends nothing, so the file's own settings print).
+    public func designerSettingsWords(quality: String, strength: String) -> String? {
+        guard printsWithOwnSettings else { return nil }
+        return quality == "standard" && strength == "standard"
+            ? "Prints with the designer’s settings saved in this file."
+            : "Changes the designer’s settings saved in this file."
+    }
+
+    /// Why a print sheet waits for "I checked the printer": the last print of this project may have reached it.
+    public var uncertainPrintWords: String {
+        let printer = print?.destination?.name ?? "the printer"
+        if let job = print?.printerStatus?.job, !job.isEmpty {
+            return "Counterpart couldn’t tell whether the last print reached \(printer). It last reported “\(job)”. Check the printer before printing this again."
+        }
+        return "Counterpart couldn’t tell whether the last print reached \(printer). Check the printer before printing this again."
+    }
+
     /// Saved defaults replace print history as a whole: an absent colour means use the printer profile.
     /// Legacy quality/strength/copies can follow the model, but a historical tray belongs to one printer.
     public func resolvedPrintDefaults(destinationId: String?) -> PrintSettings {
@@ -31,6 +52,16 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         let previousPrinter = print?.destinationId ?? print?.destination?.id
         if destinationId == nil || previousPrinter != destinationId { previous.colour = nil }
         return previous
+    }
+
+    /// Where a print sheet starts: the resolved defaults, except that a file that prints with its own settings starts
+    /// at Standard quality and strength, which send nothing, so its layer height, walls and infill print as the
+    /// designer set them, never as the last print's or saved choice (Nov 5). Project Settings keeps showing and saving
+    /// the saved defaults themselves (`resolvedPrintDefaults`).
+    public func printSheetStart(destinationId: String?) -> PrintSettings {
+        var start = resolvedPrintDefaults(destinationId: destinationId)
+        if printsWithOwnSettings { start.quality = nil; start.strength = nil }
+        return start
     }
 
     public var id: String
@@ -333,10 +364,13 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var changes: [Change]?
         /// blender or fusion
         public var engine: String?
-        public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil) {
-            self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes
+        /// This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. Nil until asked,
+        /// or when the MCP doesn't say.
+        public var ownSettings: Bool?
+        public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil, ownSettings: Bool? = nil) {
+            self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes; self.ownSettings = ownSettings
         }
-        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine }
+        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings }
         /// A malformed optional (say, `changes`) is left out; the model and renders still show.
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -346,6 +380,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? nil
             changes = (try? c.decodeIfPresent([Change].self, forKey: .changes)) ?? nil
             engine = (try? c.decodeIfPresent(String.self, forKey: .engine)) ?? nil
+            ownSettings = (try? c.decodeIfPresent(Bool.self, forKey: .ownSettings)) ?? nil
         }
     }
 
@@ -702,6 +737,8 @@ public struct SliceEstimate: Codable, Equatable, Sendable {
     public var sliceSha256: String?
     /// The printer MCP's pictures of that file's G-code: what will print. Absent when the MCP can't draw them.
     public var preview: PrintPreviewImages?
+    /// The installed printer MCP can't say whether this 3MF prints with its own settings: the companion's words to update it.
+    public var ownSettingsUpdate: String?
 }
 
 /// What will print, drawn by the printer MCP from the exact sliced G-code (never a thumbnail or a design render).

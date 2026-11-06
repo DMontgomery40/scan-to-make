@@ -154,6 +154,8 @@ export interface Project {
     sizeMm?: number[];
     summary?: string;
     changes?: { tag: string; text: string }[];
+    /** This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. */
+    ownSettings?: boolean;
   };
   files?: { original: string[] };
   plates?: Plate[];
@@ -246,6 +248,8 @@ export interface Estimate {
     }[];
     mmPerPixel?: number;
   };
+  /** The installed printer MCP can't say whether this 3MF prints with its own settings: update it. */
+  ownSettingsUpdate?: string;
 }
 export interface HostStatus {
   configured: boolean;

@@ -525,6 +525,164 @@ test('an estimate slices exactly as Print would, is shared by identical requests
   assert.equal((await dispatch('objects.estimate', {id: f.object.id, quality: 'fine'})).grams, 19.2);
 });
 
+test("a designer's 3MF prints with its own settings: the last print's quality and strength never carry over (Nov 5)", async t => {
+  // Nov 5, caliper card 1f1c5515: "It shouldn't have changed a single thing about the physical print, just a cosmetic
+  // bit of logo". Whether the file carries its own settings is the printer MCP's to say (get_slice_settings own_process).
+  const f = await setup(t, {sliceArgs: true});
+  const runner = f.deps.print.services.runner, asked = [];
+  let own = true;
+  runner.ownProcess = async input => { asked.push(input.modelPath); return own; };
+  await multipart(f, {bytes: twoPart3mf({layer_height: '0.16', sparse_infill_density: '100%', wall_loops: '2'}), kind: 'copy'});
+  // The last print (or a saved default) asked for Draft and Strong.
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
+  assert.equal((await f.service.get(f.object.id)).current.ownSettings, undefined, 'not asked yet');
+  await f.service.list();
+  const listed = await until(async () => (await f.service.get(f.object.id)).current.ownSettings === true ? f.service.get(f.object.id) : undefined);
+  assert.equal(listed.current.ownSettings, true);
+  assert.deepEqual(asked, [join(f.store.dir(f.object.id), 'current', 'model.3mf')], 'the project file itself, asked once');
+  assert.ok(f.events.some(e => e.type === 'project.updated' && e.projectId === f.object.id && e.data.keys.includes('current')), 'the sheets hear it');
+  await f.service.list();
+  assert.equal(asked.length, 1, 'once per file');
+  // A sheet that names nothing slices the file's own settings: no layer height, wall or infill override.
+  const estimate = await f.service.estimate(f.object.id, {});
+  assert.equal(estimate.quality, 'standard');
+  assert.equal(estimate.strength, 'standard');
+  const sliced = f.runs.find(run => run.estimate).estimate.slicer ?? {};
+  for (const key of ['quality', 'strength', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity']) assert.equal(sliced[key], undefined, key);
+  // A choice the person makes still applies.
+  await f.service.estimate(f.object.id, {quality: 'fine'});
+  assert.equal(f.runs.filter(run => run.estimate).at(-1).estimate.slicer.quality, 'fine');
+  // A new file is asked again; an MCP that doesn't say leaves it unknown and the saved defaults apply as before.
+  own = undefined;
+  await writeFile(join(f.store.dir(f.object.id), 'current', 'model.3mf'), twoPart3mf());
+  await f.store.update(f.object.id, o => ({...o, current: {model: 'current/model.3mf', renders: []}}));
+  await f.service.list();
+  await until(() => asked.length === 2);
+  assert.equal((await f.service.get(f.object.id)).current.ownSettings, undefined);
+  await f.service.estimate(f.object.id, {});
+  const {quality, strength} = f.runs.filter(run => run.estimate).at(-1).estimate.slicer;
+  assert.deepEqual({quality, strength}, {quality: 'draft', strength: 'strong'}, "an MCP that doesn't say: today's behaviour");
+});
+
+test("the own-settings answer belongs to its printer, and another plate of the same file keeps it", async t => {
+  const f = await setup(t, {sliceArgs: true});
+  const runner = f.deps.print.services.runner, asked = [];
+  runner.ownProcess = async input => { asked.push(input.modelPath); return true; };
+  await multipart(f, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
+  await f.service.list();
+  await until(async () => (await f.service.get(f.object.id)).current.ownSettings === true);
+  const mine = (await f.service.get(f.object.id)).current.ownSettingsFor;
+  assert.match(mine, /^current(@|$)/, 'this printer, with its MCP version');
+  // An answer recorded for another printer is not this printer's: the estimate settles this printer's first (from
+  // what it already knows about this file, without asking again), and slices with it.
+  await f.store.update(f.object.id, o => ({...o, current: {...o.current, ownSettingsFor: 'garage'}}));
+  await f.service.estimate(f.object.id, {});
+  assert.equal((await f.service.get(f.object.id)).current.ownSettingsFor, mine);
+  const {quality} = f.runs.filter(run => run.estimate).at(-1).estimate.slicer;
+  assert.equal(quality, undefined, 'this printer\'s answer, settled before the slice, keeps the designer\'s settings');
+  assert.equal(asked.length, 1, 'the answer for this file and printer is remembered, not asked again');
+  // Updating the MCP (Settings → Printers) may change its decision: the updated MCP is asked again (Codex on #336).
+  const capabilities = f.deps.printers.capabilities.bind(f.deps.printers);
+  f.deps.printers.capabilities = id => ({...capabilities(id), server: {name: 'bambu-printer-mcp', version: '9.9.9'}});
+  await f.service.estimate(f.object.id, {});
+  assert.equal(asked.length, 2, 'the updated MCP is asked');
+  assert.equal((await f.service.get(f.object.id)).current.ownSettingsFor, 'current@9.9.9');
+});
+
+test("the first estimate waits for the own-settings answer; an MCP that can't answer says to update it; a failure or a replaced file is asked again", async t => {
+  // Codex on #336: a slice made before the answer used saved Draft/Strong, then Print (with the answer) refused it.
+  const f = await setup(t, {sliceArgs: true});
+  const runner = f.deps.print.services.runner;
+  let answer = () => true, asks = 0;
+  runner.ownProcess = async () => { asks++; await new Promise(resolve => setTimeout(resolve, 30)); return answer(); };
+  await multipart(f, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
+  // The session connects for the question, and only then does the directory know the MCP's version (Codex on #336).
+  let known = null;
+  const capabilities = f.deps.printers.capabilities.bind(f.deps.printers);
+  f.deps.printers.capabilities = id => known ? {...capabilities(id), server: {name: 'bambu-printer-mcp', version: known}} : capabilities(id);
+  answer = () => { known = '1.1.65'; return true; };
+  const first = await f.service.estimate(f.object.id, {});
+  const {quality, strength} = f.runs.filter(run => run.estimate).at(-1).estimate.slicer;
+  assert.deepEqual({quality, strength}, {quality: undefined, strength: undefined}, 'the first slice already keeps the designer\'s settings');
+  assert.equal(first.ownSettingsUpdate, undefined);
+  // An MCP that can't answer: today's behaviour, plus the sheet's line to update it; nothing is recorded.
+  const g = await setup(t, {sliceArgs: true});
+  g.deps.print.services.runner.ownProcess = async () => 'unsupported';
+  await multipart(g, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  let version = '1.1.61';
+  g.deps.printers.capabilities = () => ({server: {name: 'bambu-printer-mcp', version}});
+  const old = await g.service.estimate(g.object.id, {});
+  assert.equal(old.ownSettingsUpdate, "Update bambu-printer-mcp in Settings → Printers so Counterpart can keep a designer's settings for this file.");
+  assert.equal((await g.service.get(g.object.id)).current.ownSettings, undefined);
+  // After the person updates the MCP, its answer is asked for again, not the old one's 'unsupported'.
+  version = '1.1.65';
+  g.deps.print.services.runner.ownProcess = async () => true;
+  const updated = await g.service.estimate(g.object.id, {});
+  assert.equal(updated.ownSettingsUpdate, undefined);
+  assert.equal((await g.service.get(g.object.id)).current.ownSettings, true);
+  // A failed call is asked again, never recorded as an answer.
+  const h = await setup(t, {sliceArgs: true});
+  let fail = true, calls = 0;
+  h.deps.print.services.runner.ownProcess = async () => { calls++; if (fail) throw new Error('printer service unreachable'); return true; };
+  await multipart(h, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await h.service.estimate(h.object.id, {});
+  assert.equal((await h.service.get(h.object.id)).current.ownSettings, undefined);
+  fail = false;
+  await h.service.estimate(h.object.id, {});
+  assert.equal(calls, 2);
+  assert.equal((await h.service.get(h.object.id)).current.ownSettings, true);
+  // A pass that replaces the file while the question is out: the old file's answer is not written onto the new one.
+  const k = await setup(t, {sliceArgs: true});
+  let release;
+  k.deps.print.services.runner.ownProcess = () => new Promise(resolve => { release = resolve; });
+  await multipart(k, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await k.service.list();
+  await until(() => release);
+  await writeFile(join(k.store.dir(k.object.id), 'current', 'model.3mf'), Buffer.concat([twoPart3mf(), Buffer.from(' ')]));
+  release(true);
+  await flush();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal((await k.service.get(k.object.id)).current.ownSettings, undefined, 'the replaced file is asked about itself');
+});
+
+test("an estimate for another printer asks that printer's MCP about the designer's settings, and keeps the saved printer's answer", async t => {
+  // Codex on #336: the question, the defaults and the update notice all follow the printer this slice is for.
+  const f = await setup(t, {sliceArgs: true});
+  const base = f.deps.print.services;
+  base.runner.ownProcess = async () => 'unsupported';
+  const otherRunner = {...base.runner, ownProcess: async () => true,
+    estimate: async input => { f.runs.push({estimate: input, other: true}); return {estimate: {seconds: 60, grams: 1}, settings: {layers: 10}}; }};
+  f.deps.print.destinations.set('other', {...base, runner: otherRunner});
+  f.deps.printerCatalog.canonical = id => ['current', 'other'].includes(id) ? id : undefined;
+  const capabilities = f.directory.capabilities.bind(f.directory);
+  f.directory.capabilities = id => capabilities(id === 'other' ? 'current' : id);
+  await multipart(f, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
+  const other = await f.service.estimate(f.object.id, {destinationId: 'other'});
+  const {quality} = f.runs.filter(run => run.other).at(-1).estimate.slicer ?? {};
+  assert.equal(quality, undefined, "the other printer's MCP keeps the designer's settings");
+  assert.equal(other.ownSettingsUpdate, undefined, "no update notice for a printer whose MCP answers");
+  assert.equal((await f.service.get(f.object.id)).current.ownSettings, undefined, "the project's own printer's answer isn't replaced");
+  const saved = await f.service.estimate(f.object.id, {});
+  assert.match(saved.ownSettingsUpdate, /Update bambu-printer-mcp/, "the saved printer's MCP can't answer: its notice");
+});
+
+test('another plate of the same file keeps its own-settings answer; another file clears it', async () => {
+  const {selectingPlate} = await import('../dist/objects/plates.js');
+  const receipt = (sha256, path) => ({sha256, path, name: path, plates: [{index: 0, name: 'A', sliced: false}, {index: 1, name: 'B', sliced: false}]});
+  const object = {id: 'p', kind: 'published', state: 'ready', photos: [], passes: [], files: {original: [], receipts: [receipt('a', 'original/a.3mf'), receipt('b', 'original/b.3mf')]},
+    publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: false},
+    current: {model: 'original/a.3mf', renders: [], ownSettings: true, ownSettingsFor: 'current'}};
+  const samefile = selectingPlate(object, 0, 1);
+  assert.equal(samefile.current.ownSettings, true);
+  assert.equal(samefile.current.ownSettingsFor, 'current');
+  const other = selectingPlate(object, 1, 0);
+  assert.equal(other.current.ownSettings, undefined);
+  assert.equal(other.current.ownSettingsFor, undefined);
+});
+
 test('pause, resume and stop go through the printer\'s mutex and relay its own confirmation to the project', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)]});
   await f.service.print(f.object.id);

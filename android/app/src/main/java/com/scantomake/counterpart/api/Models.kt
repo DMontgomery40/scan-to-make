@@ -120,7 +120,9 @@ data class Project(
         val estimate: Estimate? = null, val engine: String? = null,
     ) { val currentStage: Stage? get() = stages?.lastOrNull { it.endedAtMs == null } }
     @Serializable data class Result(val model: String, val renders: List<String> = emptyList(), val sizeMm: List<Double>? = null,
-                                    val summary: String? = null, val changes: List<Change>? = null, val engine: String? = null)
+                                    val summary: String? = null, val changes: List<Change>? = null, val engine: String? = null,
+                                    /** This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. */
+                                    val ownSettings: Boolean? = null)
     @Serializable data class Question(val closeup: String? = null)
     @Serializable data class Region(val x: Double, val y: Double, val width: Double, val height: Double)
     @Serializable data class Ask(
@@ -316,7 +318,9 @@ data class SliceEstimate(val destinationId: String = "", val quality: String = "
                          // What the printer MCP actually sliced with: the app never guesses slicer numbers (PRD §8.0).
                          val layerHeightMm: Double? = null, val wallLoops: Int? = null, val infillPercent: Double? = null,
                          // The sliced file this estimate made, and the printer MCP's pictures of that exact file (Nov 5).
-                         val sliceSha256: String? = null, val preview: SlicePreview? = null) {
+                         val sliceSha256: String? = null, val preview: SlicePreview? = null,
+                         // The installed printer MCP can't say whether this 3MF prints with its own settings: update it.
+                         val ownSettingsUpdate: String? = null) {
     /** The slice Print may send: only one whose pictures are of that exact file. */
     val shownSlice: String? get() = sliceSha256?.takeIf { sha -> preview?.sha256 == sha && preview.views.isNotEmpty() }
 }

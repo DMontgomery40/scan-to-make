@@ -51,6 +51,15 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        // A copy of a designer's 3MF whose printer MCP says it prints with its own settings, saved at Fine/Strong
+        // (Nov 5, caliper card 1f1c5515): the sheet must start at Standard and say it prints the designer's settings.
+        if set == "designer" {
+            let now = now.timeIntervalSince1970 * 1000
+            return [["id": ids.mic, "createdAtMs": now - 120_000, "updatedAtMs": now, "state": "ready",
+                "title": "Caliper card copy", "kind": "copy", "scan": "scan.3mf", "photos": [], "messages": [], "passes": [],
+                "current": ["model": "current/model.3mf", "renders": [], "ownSettings": true, "ownSettingsFor": "current"],
+                "settings": ["printDefaults": ["quality": "fine", "strength": "strong"]]]]
+        }
         if set == "plates" {
             let now = now.timeIntervalSince1970 * 1000
             let sha = String(repeating: "ab", count: 32)

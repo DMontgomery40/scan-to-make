@@ -10,6 +10,8 @@ import {
   parseLayers,
   printRequest,
   shownSlice,
+  startingChoices,
+  designerSettingsWords,
 } from "./domain";
 import { Action, Modal } from "./ui";
 import type { Estimate, Filament, Printer, Project } from "./types";
@@ -26,13 +28,21 @@ export function PrintSheet({
 }) {
   const frozen = useRef(freezePlate(project)).current;
   const frozenModel = useRef(project.current?.model).current;
-  const initial =
-    project.settings?.printDefaults ?? project.preferences?.printDefaults ?? {};
+  const initial = startingChoices(project);
   const [destination, setDestination] = useState(
     project.printerDestinationId ?? "",
   );
   const [quality, setQuality] = useState(initial.quality ?? "standard");
   const [strength, setStrength] = useState(initial.strength ?? "standard");
+  // Chosen in this sheet; until then a designer's file starts at its own settings, even when the MCP's answer
+  // arrives after the sheet opened (as on the Mac and iPhone).
+  const [qualityPicked, setQualityPicked] = useState(false);
+  const [strengthPicked, setStrengthPicked] = useState(false);
+  const ownSettings = project.current?.ownSettings === true;
+  useEffect(() => {
+    if (ownSettings && !qualityPicked) setQuality("standard");
+    if (ownSettings && !strengthPicked) setStrength("standard");
+  }, [ownSettings, qualityPicked, strengthPicked]);
   const [copies, setCopies] = useState(initial.copies ?? 1);
   const [pauses, setPauses] = useState(
     initial.pauseBeforeLayers?.join(", ") ?? "",
@@ -259,7 +269,10 @@ export function PrintSheet({
               <select
                 disabled={caps?.quality !== true}
                 value={quality}
-                onChange={(e) => setQuality(e.target.value)}
+                onChange={(e) => {
+                  setQuality(e.target.value);
+                  setQualityPicked(true);
+                }}
               >
                 <option value="draft">Draft</option>
                 <option value="standard">Standard</option>
@@ -271,7 +284,10 @@ export function PrintSheet({
               <select
                 disabled={caps?.strength !== true}
                 value={strength}
-                onChange={(e) => setStrength(e.target.value)}
+                onChange={(e) => {
+                  setStrength(e.target.value);
+                  setStrengthPicked(true);
+                }}
               >
                 <option value="standard">Standard</option>
                 <option value="strong">Strong</option>
@@ -279,6 +295,10 @@ export function PrintSheet({
               </select>
             </label>
           </div>
+          {designerSettingsWords(project, quality, strength) && (
+            <p className="hint">{designerSettingsWords(project, quality, strength)}</p>
+          )}
+          {estimate?.ownSettingsUpdate && <p className="hint">{estimate.ownSettingsUpdate}</p>}
           <label className="field">
             Copies
             <input

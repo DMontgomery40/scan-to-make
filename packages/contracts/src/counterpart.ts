@@ -204,6 +204,8 @@ export const PrintEstimateSchema = z.strictObject({
   copies: z.number().int().min(1).max(64).optional(),
   /** Bambu Studio's own warning on this slice, verbatim (KAN-223), e.g. a floating cantilever. Print asks before sending. */
   slicerWarning: text(2000).optional(),
+  /** The installed printer MCP can't say whether this 3MF prints with its own settings: update it, in its own words. */
+  ownSettingsUpdate: text(500).optional(),
   slicedAt: iso,
   /** The SHA-256 of this estimate's sliced file. Print sends it as `sliceSha256` and prints exactly that file. */
   sliceSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),

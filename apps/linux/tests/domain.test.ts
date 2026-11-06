@@ -13,6 +13,8 @@ import {
   startersShown,
   normalizeQuestion,
   validateAnswer,
+  startingChoices,
+  designerSettingsWords,
 } from "../src/domain.ts";
 import type { Project, ReconstructionReview } from "../src/types.ts";
 import {
@@ -307,4 +309,15 @@ test("an accepted MCP move explains that it is waiting for the print", async () 
   const {mcpMoveNotice} = await import("../src/domain.ts");
   const reply = JSON.parse(await readFile(new URL("../../../packages/contracts/fixtures/mcp-update-waiting.json", import.meta.url), "utf8"));
   assert.equal(mcpMoveNotice(reply), "Moves to Counterpart’s updated copy after the current print.");
+});
+
+test("a designer's file starts at its own settings, never the saved quality and strength (Nov 5)", () => {
+  const settings = { printDefaults: { quality: "draft", strength: "strong", copies: 2 } };
+  const designer = { settings, current: { model: "current/model.3mf", renders: [], ownSettings: true } } as unknown as Project;
+  assert.deepEqual(startingChoices(designer), { copies: 2 });
+  assert.equal(designerSettingsWords(designer, "standard", "standard"), "Prints with the designer’s settings saved in this file.");
+  assert.equal(designerSettingsWords(designer, "fine", "standard"), "Changes the designer’s settings saved in this file.");
+  const unknown = { settings, current: { model: "current/model.3mf", renders: [] } } as unknown as Project;
+  assert.deepEqual(startingChoices(unknown), settings.printDefaults, "an MCP that doesn't say: the saved defaults, as before");
+  assert.equal(designerSettingsWords(unknown, "standard", "standard"), undefined);
 });

@@ -24,6 +24,9 @@ struct PrintSheet: View {
     @State private var mappingState = Loading.idle
     @State private var quality = PrintSettings.Quality.standard
     @State private var strength = PrintSettings.Strength.standard
+    /// The person chose Quality / Strength in this sheet; until then each starts at a designer's file's own settings.
+    @State private var qualityPicked = false
+    @State private var strengthPicked = false
     @State private var copies = 1
     /// The person changed Copies; until then the printer profile's own count applies.
     @State private var copiesPicked = false
@@ -41,7 +44,7 @@ struct PrintSheet: View {
     init(opened: Project, model: ObjectsModel) {
         self.opened = opened
         _model = ObservedObject(wrappedValue: model)
-        let last = PrintSettings(saved: opened.resolvedPrintDefaults(destinationId: opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId))
+        let last = PrintSettings(saved: opened.printSheetStart(destinationId: opened.printerDestinationId ?? model.printerCatalog?.defaultDestinationId))
         _quality = State(initialValue: last.quality)
         _strength = State(initialValue: last.strength)
         _copies = State(initialValue: last.copies ?? 1)
@@ -78,24 +81,26 @@ struct PrintSheet: View {
                     if published { multiColours } else { colours }
                     if slicedOriginal { Text("Uses the quality, strength and copies saved in this sliced file. Share an editable 3MF to change them.").font(.callout) } else {
                     Text("Quality").font(.headline)
-                    Picker("Quality", selection: $quality) {
+                    Picker("Quality", selection: Binding(get: { quality }, set: { quality = $0; qualityPicked = true })) {
                         Text("Draft").tag(PrintSettings.Quality.draft)
                         Text("Standard").tag(PrintSettings.Quality.standard)
                         Text("Fine").tag(PrintSettings.Quality.fine)
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersQuality)
                     Text("Strength").font(.headline)
-                    Picker("Strength", selection: $strength) {
+                    Picker("Strength", selection: Binding(get: { strength }, set: { strength = $0; strengthPicked = true })) {
                         Text("Standard").tag(PrintSettings.Strength.standard)
                         Text("Strong").tag(PrintSettings.Strength.strong)
                         Text("Max").tag(PrintSettings.Strength.max)
                     }
                     .pickerStyle(.segmented).labelsHidden().disabled(!offersStrength)
-                    if offersCopies {
-                        Stepper(value: Binding(get: { copies }, set: { copies = $0; copiesPicked = true }), in: 1...64) {
-                            Text(copiesPicked ? "Copies: \(copies)" : "Copies: as the printer profile says").font(.headline)
-                        }
+                    if let words = object.designerSettingsWords(quality: quality.rawValue, strength: strength.rawValue) {
+                        Text(words).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
+                    if estimateState == .done, let update = estimate?.ownSettingsUpdate {
+                        Text(update).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if offersCopies { copiesRow }
                     if !offersCopies, object.settings?.printDefaults?.copies != nil { Text("This printer uses one copy.").font(.caption).foregroundStyle(.secondary) }
                     }
                     if offersPauses { pauseRows }
@@ -103,6 +108,9 @@ struct PrintSheet: View {
                 }
             }
             if uncertain {
+                // Why Print waits (Nov 2–3 review: the toggle blocked Print and nothing said why).
+                Label { Text(object.uncertainPrintWords).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: "exclamationmark.triangle.fill") }
+                    .font(.callout).foregroundStyle(.orange)
                 Toggle("I checked the printer: it isn’t already printing this.", isOn: $checked)
             }
             // Bambu Studio's own warning on this slice, word for word (KAN-224). Print stays on: the run asks
@@ -128,6 +136,11 @@ struct PrintSheet: View {
         .frame(width: 720)
         .tint(.filament)
         .task(id: "\(printer?.id ?? "")|\(object.current?.model ?? "")|\(modelVersion)") { await loadFilaments() }
+        // The MCP's answer can arrive while the sheet is open: a designer's file then starts at its own settings.
+        .onChange(of: object.printsWithOwnSettings) { _, own in
+            if own && !qualityPicked { quality = .standard }
+            if own && !strengthPicked { strength = .standard }
+        }
         // The model's version too: a correction rewrites the same current/model.stl, and a refusal of the old one
         // must not hold Print for the new one. The chosen spools too: they change what the estimate slices.
         .task(id: "\(printer?.id ?? "")|\(quality)|\(strength)|\(copiesPicked ? copies : 0)|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)|\(mappingSignature)|\(String(describing: colour))|\(offersPauses ? Array(Set(pauses)).sorted() : [])") { await loadEstimate() }
@@ -361,6 +374,22 @@ struct PrintSheet: View {
         if settingsServed, let printer, printer.capabilities?.quality == false || printer.capabilities?.strength == false,
            let update = printer.capabilities?.update {
             Text(update.message).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Copies: the printer profile's count until the person chooses one, then a stepper that reads what it sends.
+    @ViewBuilder private var copiesRow: some View {
+        if copiesPicked {
+            HStack {
+                Stepper(value: $copies, in: 1...64) { Text("Copies: \(copies)").font(.headline) }
+                    .accessibilityValue("\(copies)")
+                Button("Use the profile’s count") { copiesPicked = false; copies = 1 }.buttonStyle(.link)
+            }
+        } else {
+            HStack {
+                Text("Copies: as the printer profile says").font(.headline)
+                Button("Choose") { copies = 1; copiesPicked = true }.buttonStyle(.link)
+            }
         }
     }
 

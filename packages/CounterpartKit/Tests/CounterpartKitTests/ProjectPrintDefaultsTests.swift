@@ -26,6 +26,38 @@ final class ProjectPrintDefaultsTests: XCTestCase {
         XCTAssertNil(legacy.resolvedPrintDefaults(destinationId: nil).colour, "an unknown default printer is not a match")
     }
 
+    /// Nov 5, caliper card 1f1c5515: "It shouldn't have changed a single thing about the physical print". A file whose
+    /// printer MCP says it prints with its own settings (a designer's 3MF) starts at Standard, which sends nothing.
+    func testADesignersFileStartsAtItsOwnSettingsNotTheLastPrints() {
+        let file: [String: Any] = ["model": "current/model.3mf", "renders": [], "ownSettings": true]
+        let designer = project(["print": history, "current": file])
+        XCTAssertTrue(designer.printsWithOwnSettings)
+        let defaults = designer.printSheetStart(destinationId: "old-printer")
+        XCTAssertNil(defaults.quality, "the last print's Fine never carries over")
+        XCTAssertNil(defaults.strength, "the last print's Strong never carries over")
+        XCTAssertEqual(defaults.copies, 2, "copies and the spool still follow the last print")
+        XCTAssertEqual(defaults.colour, .object(["amsSlot": .number(3)]))
+        let saved = project(["settings": ["printDefaults": ["quality": "draft", "strength": "max"]], "current": file])
+        XCTAssertEqual(saved.printSheetStart(destinationId: nil), PrintSettings(), "saved defaults don't override the designer either")
+        XCTAssertEqual(saved.resolvedPrintDefaults(destinationId: nil), PrintSettings(quality: "draft", strength: "max"),
+                       "Project Settings still shows and keeps the saved defaults themselves")
+        var unknown = file; unknown["ownSettings"] = nil
+        XCTAssertEqual(project(["print": history, "current": unknown]).printSheetStart(destinationId: "old-printer").strength, "strong",
+                       "an MCP that doesn't say: the last print's settings, as before")
+        XCTAssertEqual(designer.designerSettingsWords(quality: "standard", strength: "standard"), "Prints with the designer’s settings saved in this file.")
+        XCTAssertEqual(designer.designerSettingsWords(quality: "standard", strength: "strong"), "Changes the designer’s settings saved in this file.")
+        XCTAssertNil(project(["print": history, "current": unknown]).designerSettingsWords(quality: "standard", strength: "standard"))
+    }
+
+    /// Nov 2–3 review: "I checked the printer" held Print and nothing said why.
+    func testAnUncertainPrintSaysWhyPrintWaits() {
+        var last = history; last["uncertain"] = true; last["destination"] = ["id": "old-printer", "name": "P1S"]
+        XCTAssertEqual(project(["print": last]).uncertainPrintWords,
+                       "Counterpart couldn’t tell whether the last print reached P1S. Check the printer before printing this again.")
+        last["printerStatus"] = ["state": "RUNNING", "job": "caliper-card", "checkedAtMs": 1]
+        XCTAssertTrue(project(["print": last]).uncertainPrintWords.contains("It last reported “caliper-card”."))
+    }
+
     func testLegacyDestinationRecordAndExplicitSavedColourRemainUsable() {
         var old = history; old["destinationId"] = nil; old["destination"] = ["id": "old-printer", "name": "Old printer"]
         XCTAssertNotNil(project(["print": old]).resolvedPrintDefaults(destinationId: "old-printer").colour)

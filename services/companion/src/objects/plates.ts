@@ -77,7 +77,9 @@ export function selectingPlate(object: StmObject, fileIndex: number, plateIndex:
   return {...object, state: 'ready', plateProgress: retainedPlateProgress(object),
     print: undefined, printConfirmation: undefined, failure: undefined, progress: undefined,
     outcome: undefined, completion: undefined,
-    current: {...object.current, model: file.path, renders: plate.thumbnail ? [plate.thumbnail] : []},
+    // Another file: whether it carries its own settings is asked again (ownSettings). Another plate of the same file keeps it.
+    current: {...object.current, model: file.path, renders: plate.thumbnail ? [plate.thumbnail] : [],
+      ...(file.path !== object.current.model ? {ownSettings: undefined, ownSettingsFor: undefined} : {})},
     ...(file.credit ? {credit: file.credit} : {}), files: {...object.files!, current: file.path},
     publishedSelection: {fileIndex, plateIndex, sliced: plate.sliced},
     ...(object.ask?.type === 'choice' && object.ask.status === 'open' ? {ask: {...object.ask, status: 'answered', choices: [`${fileIndex}:${plateIndex}`]}} : {}),

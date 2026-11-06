@@ -160,6 +160,20 @@ export function dispatchIdentity(printed: unknown, slicedPath: string): Dispatch
   return {...(taskId && taskId !== '0' ? {taskId} : {}), ...(jobName ? {jobName} : {}), ...(fileBase ? {fileBase} : {})};
 }
 
+/**
+ * The slicer a run uses. A 3MF already owns its per-part filaments and its process: the config's global defaults for
+ * them apply only when the request names them, so they never collapse a designer's file.
+ */
+function runSlicer(configured: PrinterSlicer | undefined, requested: PrinterSlicer | undefined, threeMf: boolean): PrinterSlicer {
+  const slicer: PrinterSlicer = {...configured, ...requested};
+  if (threeMf) {
+    for (const key of ['loadFilaments', 'filamentProfile', 'filamentColours', 'templateName', 'quality', 'strength', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType'] as const) {
+      if (requested?.[key] === undefined) delete slicer[key];
+    }
+  }
+  return slicer;
+}
+
 export class PrinterHandoffRunner {
   readonly #config: PrinterHandoffConfig;
   readonly #relay?: ElicitationRelay;
@@ -212,6 +226,36 @@ export class PrinterHandoffRunner {
     const {estimate, settings} = slicedFacts(inspection?.result);
     return {...(estimate ? {estimate} : {}), settings, ...(slicerWarning ? {slicerWarning} : {}),
       sliced: {bytes: sliced, extension, sha256, ...(slicerWarning ? {slicerWarning} : {})}, ...(preview ? {preview} : {}), previewSupported};
+  }
+
+  /**
+   * Whether this 3MF prints with the process it carries (a designer's project), as the MCP says: get_slice_settings'
+   * `own_process`, asked with the slice arguments Print's own slice gets (`runSlicer`, then slice_stl's names), so the
+   * MCP decides which of them replace or change the file's process (PRD §8.0). `unsupported` when this MCP can't
+   * answer (no get_slice_settings, no own_process, or one of those arguments missing): an older MCP the person
+   * updates. A failed call throws; nothing here reads an MCP's errors.
+   */
+  async ownProcess(input: {modelPath: string; selection?: PrinterSelection; slicer?: Pick<PrinterSlicer, 'enableSupport' | 'supportType'>; signal?: AbortSignal}): Promise<boolean | 'unsupported'> {
+    // Print's slicer for this file, with the design's own supports as Print sends them (`input.slicer`).
+    const slicer = runSlicer(this.#config.slicer, input.slicer, extname(input.modelPath).toLowerCase() === '.3mf');
+    const selection: PrinterSelection = {...this.#config.selection, ...input.selection};
+    // The config's own values, under the names slice_stl takes (as sliceArgs in run), passed through as they are.
+    const sliceArgs: Record<string, unknown> = Object.fromEntries(Object.entries({slicer_type: slicer.type, bambu_model: selection.model,
+      nozzle_diameter: selection.nozzleDiameterMm === undefined ? undefined : String(selection.nozzleDiameterMm),
+      slicer_profile: slicer.profile, template_name: slicer.templateName, layer_height: slicer.layerHeightMm, wall_loops: slicer.wallLoops,
+      sparse_infill_density: slicer.sparseInfillDensity, quality: slicer.quality, strength: slicer.strength,
+      enable_support: slicer.enableSupport, support_type: slicer.supportType}).filter(([, value]) => value !== undefined));
+    return this.#use(async (session, shared) => {
+      const options = {...(input.signal ? {signal: input.signal} : {}), failFast: shared};
+      await session.connect(options);
+      if (!session.hasTool('get_slice_settings')) return 'unsupported';
+      // An MCP that can't take one of them would answer for another slice than Print's.
+      const properties = session.getTool('get_slice_settings').inputSchema.properties ?? {};
+      if (Object.keys(sliceArgs).some(key => !['slicer_type', 'bambu_model', 'nozzle_diameter'].includes(key) && !Object.hasOwn(properties, key))) return 'unsupported';
+      const reply = resultValue(await call(session, 'get_slice_settings', {source_path: input.modelPath, ...sliceArgs}, options));
+      const own = reply && typeof reply === 'object' ? (reply as {own_process?: unknown}).own_process : undefined;
+      return typeof own === 'boolean' ? own : 'unsupported';
+    });
   }
 
   /** Connects and lists the server's tools without calling one (a one-shot session then disconnects). */
@@ -318,18 +362,12 @@ export class PrinterHandoffRunner {
 
   async #run(session: PrinterSession, shared: boolean, input: PrintRunInput): Promise<PrintRunResult> {
     const selection: PrinterSelection = {...this.#config.selection, ...input.selection};
-    const slicer: PrinterSlicer = {...this.#config.slicer, ...input.slicer};
     const threeMf = extname(input.stlPath).toLowerCase() === '.3mf';
+    const slicer = runSlicer(this.#config.slicer, input.slicer, threeMf);
     const model = threeMf ? inspectModelFile(await readFile(input.stlPath), '3mf') : undefined;
     const plate = model?.plates.find(item => item.index === (selection.plateIndex ?? 0));
     if (threeMf && !plate) throw new PrinterMcpError('invalid-plate', undefined, 'Choose a plate contained in this model.');
     const alreadySliced = plate?.sliced === true;
-    // A 3MF already owns its per-part filaments and profile. Global STL defaults must not collapse them.
-    if (threeMf) {
-      for (const key of ['loadFilaments', 'filamentProfile', 'filamentColours', 'templateName', 'quality', 'strength', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType'] as const) {
-        if (input.slicer?.[key] === undefined) delete slicer[key];
-      }
-    }
     if (alreadySliced && slicer.pauseAtLayers?.length)
       throw new PrinterMcpError('published-sliced-settings', undefined, 'This file is already sliced, so its layer pauses are the ones it was sliced with. Share the designer’s editable 3MF to add a pause.');
     if (alreadySliced && ((slicer.repetitions ?? 1) !== 1 || ['quality', 'strength', 'layerHeightMm', 'wallLoops', 'sparseInfillDensity', 'enableSupport', 'supportType', 'loadFilaments', 'filamentProfile', 'filamentColours', 'templateName'].some(key => Object.hasOwn(input.slicer ?? {}, key))))
