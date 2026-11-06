@@ -635,6 +635,28 @@ test("the first estimate waits for the own-settings answer; an MCP that can't an
   assert.equal((await k.service.get(k.object.id)).current.ownSettings, undefined, 'the replaced file is asked about itself');
 });
 
+test("an estimate for another printer asks that printer's MCP about the designer's settings, and keeps the saved printer's answer", async t => {
+  // Codex on #336: the question, the defaults and the update notice all follow the printer this slice is for.
+  const f = await setup(t, {sliceArgs: true});
+  const base = f.deps.print.services;
+  base.runner.ownProcess = async () => 'unsupported';
+  const otherRunner = {...base.runner, ownProcess: async () => true,
+    estimate: async input => { f.runs.push({estimate: input, other: true}); return {estimate: {seconds: 60, grams: 1}, settings: {layers: 10}}; }};
+  f.deps.print.destinations.set('other', {...base, runner: otherRunner});
+  f.deps.printerCatalog.canonical = id => ['current', 'other'].includes(id) ? id : undefined;
+  const capabilities = f.directory.capabilities.bind(f.directory);
+  f.directory.capabilities = id => capabilities(id === 'other' ? 'current' : id);
+  await multipart(f, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.3mf', preferences: {printDefaults: {quality: 'draft', strength: 'strong'}}}));
+  const other = await f.service.estimate(f.object.id, {destinationId: 'other'});
+  const {quality} = f.runs.filter(run => run.other).at(-1).estimate.slicer ?? {};
+  assert.equal(quality, undefined, "the other printer's MCP keeps the designer's settings");
+  assert.equal(other.ownSettingsUpdate, undefined, "no update notice for a printer whose MCP answers");
+  assert.equal((await f.service.get(f.object.id)).current.ownSettings, undefined, "the project's own printer's answer isn't replaced");
+  const saved = await f.service.estimate(f.object.id, {});
+  assert.match(saved.ownSettingsUpdate, /Update bambu-printer-mcp/, "the saved printer's MCP can't answer: its notice");
+});
+
 test('another plate of the same file keeps its own-settings answer; another file clears it', async () => {
   const {selectingPlate} = await import('../dist/objects/plates.js');
   const receipt = (sha256, path) => ({sha256, path, name: path, plates: [{index: 0, name: 'A', sliced: false}, {index: 1, name: 'B', sliced: false}]});
