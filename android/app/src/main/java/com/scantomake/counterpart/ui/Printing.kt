@@ -61,6 +61,7 @@ import com.scantomake.counterpart.api.PrintQuality
 import com.scantomake.counterpart.api.PrintPauses
 import com.scantomake.counterpart.api.PrintStrength
 import com.scantomake.counterpart.api.PrinterFilament
+import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectAction
 import com.scantomake.counterpart.api.ProjectWords
 import com.scantomake.counterpart.api.SliceEstimate
