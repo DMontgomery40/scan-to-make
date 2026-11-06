@@ -130,4 +130,43 @@
       sections.forEach(section => observer.observe(section));
     }
   }
+
+  // Compare: on phones, one card per tool, built from the table so the two never disagree.
+  const cmp = $('.cmp');
+  if (cmp) {
+    const heads = $$('thead th', cmp).slice(1);
+    const cards = document.createElement('ul');
+    cards.className = 'cmp-cards';
+    heads.forEach((head, i) => {
+      const card = document.createElement('li');
+      card.className = `cmp-card glass${head.classList.contains('us') ? ' us' : ''}`;
+      const title = document.createElement('h3');
+      title.innerHTML = head.innerHTML;
+      card.append(title);
+      for (const group of $$('tbody', cmp)) {
+        const [label, ...rows] = $$('tr', group);
+        const name = document.createElement('p');
+        name.className = 'grp';
+        name.textContent = label.querySelector('th').textContent;
+        const list = document.createElement('dl');
+        for (const row of rows) {
+          const line = document.createElement('div');
+          const term = document.createElement('dt');
+          term.textContent = row.querySelector('th').textContent;
+          const value = document.createElement('dd');
+          const cell = row.querySelectorAll('td')[i];
+          const note = cell.querySelector('small');
+          if (note) value.append(note.cloneNode(true));
+          value.append(cell.querySelector('.mk').cloneNode(true));
+          line.append(term, value);
+          list.append(line);
+        }
+        card.append(name, list);
+      }
+      cards.append(card);
+    });
+    const wrap = cmp.closest('.cmp-wrap');
+    wrap.after(cards);
+    wrap.parentElement.classList.add('js-cards');
+  }
 })();
