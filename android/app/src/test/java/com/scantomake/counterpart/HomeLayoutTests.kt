@@ -226,6 +226,10 @@ class HomeLayoutTests {
         compose.onNodeWithTag("add-printer-secret").performScrollTo().performTextInput("12345678")
         compose.onNodeWithTag("add-printer-check").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("add-printer-connected")).fetchSemanticsNodes().isNotEmpty() }
+        // Check went out to the companion (printers.check) with the filled-in form and the typed code.
+        val checked = WireJson.parseToJsonElement(String(transport.calls.single { it.request.url.endsWith("/v1/printers/setup/check") }.request.body!!)).jsonObject["printer"]!!.jsonObject
+        assertEquals("192.168.1.42", (checked["host"] as JsonPrimitive).content)
+        assertEquals("12345678", (checked["secret"] as JsonPrimitive).content)
         compose.onNodeWithTag("add-printer-add").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("Added.")).fetchSemanticsNodes().isNotEmpty() }
         val sent = transport.calls.filter { it.request.url.endsWith("/v1/printers/setup/add") }.single()

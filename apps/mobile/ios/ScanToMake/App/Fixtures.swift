@@ -343,7 +343,13 @@ struct FixtureTransport: HTTPTransport {
             let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
             switch path.dropFirst("/v1/printers/setup/".count) {
             case "discover": return json(answers["discover"] ?? [:])
-            case "check": return json(answers["check"] ?? [:])
+            case "check":
+                // Check answers "Connected" only for the form the sheet filled in: discovery's address and the typed code.
+                let printer = body["printer"] as? [String: Any] ?? [:]
+                guard printer["folder"] != nil || (!(printer["host"] as? String ?? "").isEmpty && !(printer["secret"] as? String ?? "").isEmpty) else {
+                    return json(["error": ["code": "invalid-request", "message": "incomplete form", "sentence": "Enter the access code."]], 400)
+                }
+                return json(answers["check"] ?? [:])
             case "obtain": return json(answers[body["session"] == nil ? "obtainPending" : "obtainApproved"] ?? [:])
             case "add":
                 // The companion refuses a form without the key its MCP requires; so does this fixture.
