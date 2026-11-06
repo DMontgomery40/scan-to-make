@@ -123,7 +123,7 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `liveActivity.tokens` | `{}` | `{pushToStart: [{deviceId, token, updatedAt}], activities: [{printId, deviceId, token, updatedAt}]}` | PR 3 |
 | `devices.list` | `{}` | as above, each device also with `model?` (the phone's `X-Scan-Device-Model`), `lastSeenAt?` (ms of its last authenticated request) and `legacy?: true` (below) | PR 3 for `model` and `lastSeenAt`, PR 5 for `legacy` |
 
-**Deadlines.** Every connection still carries one request. Its deadline is 10 s, except `events.wait` (its `timeoutMs` plus 5 s), `objects.estimate` (180 s, because it slices) and the printer methods whose rows give their own. A camera read gives up after 10 s.
+**Deadlines.** Every connection still carries one request. Its deadline is 10 s, except `events.wait` (its `timeoutMs` plus 5 s), `objects.estimate` (630 s: its slice may take 600 s, after the plates, settings and spools are read) and the printer methods whose rows give their own. A camera read gives up after 10 s.
 
 **`objects.addFile`.** `path` is an absolute path on this Mac: the companion reads the file itself because requests are capped at 64 KiB. It must be a regular file (a symlink is followed), and its extension and first bytes must agree.
 

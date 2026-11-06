@@ -362,7 +362,8 @@ public final class CompanionClient: @unchecked Sendable {
         if let copies { json["copies"] = max(1, copies) }
         if !filaments.isEmpty { json["filaments"] = filaments.map(\.jsonObject) }
         if let filamentsModelVersion { json["filamentsModelVersion"] = filamentsModelVersion }
-        return try await request("POST", "/v1/objects/\(id)/estimate", json: json, as: SliceEstimate.self, timeout: 170)
+        // The companion may slice for 600 s (630 s with what it reads first): wait a little longer than that.
+        return try await request("POST", "/v1/objects/\(id)/estimate", json: json, as: SliceEstimate.self, timeout: 640)
     }
     /// Starts preparing the print. The printer MCP still asks its own confirmation.
     public func print(_ id: String, choice: PrintChoice, overrideDefaults: Bool = false, expectedPlate: String? = nil) async throws -> Project {

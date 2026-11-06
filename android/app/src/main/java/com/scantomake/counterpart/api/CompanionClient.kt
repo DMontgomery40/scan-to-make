@@ -65,6 +65,8 @@ class CompanionClient(
     val deviceName: String? = deviceName?.takeIf { it.length <= 80 }?.let(::encodeURIComponent)
 
     companion object {
+        /** The companion may slice an estimate for 600 s (630 s with what it reads first): wait a little longer. */
+        const val ESTIMATE_TIMEOUT_MS = 640_000
         const val JSON_LIMIT = 4 * 1024 * 1024
         const val SCAN_LIMIT = 64 * 1024 * 1024
         const val PHOTO_LIMIT = 25 * 1024 * 1024
@@ -318,7 +320,7 @@ class CompanionClient(
      * of that file. Print then sends its `sliceSha256`. Can take up to 150 s.
      */
     suspend fun estimate(id: String, destinationId: String?, choice: PrintChoice): SliceEstimate =
-        WireJson.decodeFromJsonElement(request("POST", "/v1/objects/$id/estimate", choice.estimateBody(destinationId), timeoutMs = 170_000))
+        WireJson.decodeFromJsonElement(request("POST", "/v1/objects/$id/estimate", choice.estimateBody(destinationId), timeoutMs = ESTIMATE_TIMEOUT_MS))
 
     /** Starts preparing the print. The printer MCP still asks its own confirmation. */
     suspend fun print(id: String, choice: PrintChoice, expectedPlate: String? = null): Project {

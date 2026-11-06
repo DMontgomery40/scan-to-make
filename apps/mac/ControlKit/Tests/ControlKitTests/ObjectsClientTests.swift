@@ -376,7 +376,7 @@ final class ObjectsClientTests: XCTestCase {
     }
 
     func testRepliesAreAwaitedAsLongAsTheCompanionMayTake() {
-        XCTAssertEqual(ControlClient.timeout(for: "objects.estimate"), 190, "the companion slices for up to 180 s")
+        XCTAssertEqual(ControlClient.timeout(for: "objects.estimate"), 640, "the companion slices for up to 630 s")
         XCTAssertEqual(ControlClient.timeout(for: "objects.addFile"), 130, "the companion keeps a model file for up to 120 s")
         for action in [PrintControl.pause, .resume, .cancel] {
             XCTAssertEqual(ControlClient.timeout(for: action.method), 740, "\(action.method) waits up to 730 s on the companion (the printer's question)")
