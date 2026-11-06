@@ -66,6 +66,18 @@ for (const [name, colours] of [['light', light], ['dark', dark]]) {
     const value = ratio(colours[text], colours[ground]);
     if (value < 4.5) fail(`${name}: ${text} on ${ground} is ${value.toFixed(2)}:1`);
   }
+  // The Compare table's tinted Counterpart column holds text too.
+  for (const text of ['ink', 'ink-soft', 'orange-ink']) {
+    const value = ratio(colours[text], colours['orange-wash']);
+    if (value < 4.5) fail(`${name}: ${text} on orange-wash is ${value.toFixed(2)}:1`);
+  }
+  // Its yes / partly / no marks are graphics: 3:1 against the page and the sheet, and the check against its disc.
+  for (const mark of ['yes', 'partly', 'no']) for (const ground of ['bed', 'sheet', 'orange-wash']) {
+    const value = ratio(colours[mark], colours[ground]);
+    if (value < 3) fail(`${name}: the ${mark} mark on ${ground} is ${value.toFixed(2)}:1`);
+  }
+  const glyph = ratio(colours['yes-glyph'], colours['yes']);
+  if (glyph < 3) fail(`${name}: the check on the yes mark is ${glyph.toFixed(2)}:1`);
   const button = ratio('#ffffff', colours['button']);
   if (button < 4.5) fail(`${name}: white on the orange button is ${button.toFixed(2)}:1`);
 }
