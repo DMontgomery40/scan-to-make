@@ -556,13 +556,18 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["starter-add"].waitForNonExistence(timeout: 5))
     }
 
-    func testPrinterCopiesAndExplicitMoveAreReachableWithProjects() throws {
+    func testPrinterCopiesAndExplicitMoveAreReachableWithProjects() throws { try checkCopyMove(completes: false) }
+
+    func testCompletedPrinterMoveKeepsItsResultAfterItsButtonDisappears() throws { try checkCopyMove(completes: true) }
+
+    private func checkCopyMove(completes: Bool) throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        for name in ["mcp-profile-copies.json", "mcp-update-waiting.json"] {
+        let files = ["mcp-profile-copies.json", "mcp-update-waiting.json"] + (completes ? ["mcp-profile-copies-moved.json", "mcp-copy-update-events.json"] : [])
+        for name in files {
             try FileManager.default.copyItem(at: root.appendingPathComponent("packages/contracts/fixtures/" + name), to: folder.appendingPathComponent(name))
         }
         let app = XCUIApplication()
@@ -577,7 +582,13 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Counterpart’s copy 1.2.45"].exists)
         XCTAssertTrue(app.staticTexts["Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25)."].exists)
         move.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "after the current print")).firstMatch.waitForExistence(timeout: 5))
+        if completes {
+            XCTAssertTrue(app.staticTexts["Bambu Lab P1S uses Counterpart’s copy (1.2.45)."].waitForExistence(timeout: 5))
+            XCTAssertTrue(move.waitForNonExistence(timeout: 5), "the completed move is no longer offered")
+            XCTAssertTrue(app.staticTexts["Updated to 1.2.45"].waitForExistence(timeout: 5), "completion remains under the original MCP ID")
+        } else {
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "after the current print")).firstMatch.waitForExistence(timeout: 5))
+        }
     }
 
     func testStartersStayReachableWithProjects() {

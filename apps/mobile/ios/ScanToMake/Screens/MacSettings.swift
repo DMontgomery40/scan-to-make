@@ -311,6 +311,8 @@ struct MCPCopiesView: View {
     var printerId: String? = nil
     @State private var working: String?
     @State private var problem: String?
+    /// A completed move leaves the available actions, but its events keep the original MCP ID.
+    @State private var attemptedMoves: [String: String] = [:]
     private var packages: [MCPPackageCopies] {
         (store.mcpCopies ?? []).filter { package in printerId == nil || package.uses.contains { $0.printerId == printerId } }
     }
@@ -325,10 +327,10 @@ struct MCPCopiesView: View {
                     }
                     if store.macCapabilities.contains("mcpUpdates") {
                         ForEach(package.moveIDs.filter { id in printerId == nil || package.uses.contains { $0.printerId == printerId && $0.mcpId == id } }, id: \.self) { id in
-                            Button(package.moveTitle(id)) { Task { await update(id, fresh: true) } }
+                            Button(package.moveTitle(id)) { Task { await update(id, fresh: true, moveTitle: package.moveTitle(id)) } }
                                 .disabled(working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[id]?.isRunning == true)
                                 .accessibilityIdentifier("mcp-move-" + id)
-                            progress(id)
+                            if attemptedMoves[id] == nil { progress(id) }
                         }
                         if package.appCopy != nil {
                             Button("Update Counterpart’s copy") { Task { await update(package.appMcpId, fresh: false) } }
@@ -336,6 +338,12 @@ struct MCPCopiesView: View {
                             progress(package.appMcpId)
                         }
                     }
+                }
+            }
+            ForEach(attemptedMoves.keys.sorted(), id: \.self) { id in
+                VStack(alignment: .leading, spacing: 4) {
+                    if let title = attemptedMoves[id] { Text(title).font(.caption).foregroundStyle(.secondary) }
+                    progress(id)
                 }
             }
             if !packages.isEmpty { Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.").font(.caption).foregroundStyle(.secondary) }
@@ -348,9 +356,10 @@ struct MCPCopiesView: View {
     @ViewBuilder private func progress(_ id: String) -> some View {
         if let progress = store.mcpUpdates[id] { Text(progress.words).font(.caption) }
     }
-    private func update(_ id: String, fresh: Bool) async {
+    private func update(_ id: String, fresh: Bool, moveTitle: String? = nil) async {
         guard working == nil else { return }
         working = id; problem = nil
+        if let moveTitle { attemptedMoves[id] = moveTitle }
         defer { working = nil }
         do { store.mcpUpdates[id] = MCPUpdateProgress(try await store.mac.client.updateMCP(id, fresh: fresh)); await store.loadMCPCopies() }
         catch let failure as CompanionError { problem = failure.message }
