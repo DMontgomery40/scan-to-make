@@ -2501,7 +2501,15 @@ export class ObjectService {
   async #keepPublished(id: string, files: string[], info: {startedAtMs?: number; now?: number; model?: PublishedModel; summary?: string; credit?: StmObject['credit']}): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(id), now = info.now ?? Date.now();
     const object = await store.get(id);
-
+    // Every starter file passes here (a worker's download, a pickup, the cache, the person's file): a starter is its
+    // print profile's 3MF, never the raw model. Other published models keep their STL (R24-002).
+    const starterHere = object.starterId ? this.#starter(object.starterId) : undefined;
+    if (starterHere) {
+      const raw = files.filter(file => extname(file).toLowerCase() !== '.3mf');
+      if (raw.length) console.error(`starter ${starterHere.id}: project ${id} left out the raw model, not the print profile: ${raw.map(file => basename(file)).join(', ')}`);
+      files = files.filter(file => extname(file).toLowerCase() === '.3mf');
+      if (!files.length) throw new InvalidFileError(starterRawModel(starterHere));
+    }
     const originals = [...(object.files?.original ?? [])];
     const receipts = [...(object.files?.receipts ?? [])];
     await mkdir(join(dir, 'original'), {recursive: true});

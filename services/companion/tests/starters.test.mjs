@@ -167,7 +167,7 @@ test('a starter’s file Ask wants the print profile’s 3MF by its button, and 
  assert.equal(o.state,'needs-closeup');assert.deepEqual(o.ask.accepts,['3mf']);
  assert.equal(o.ask.question,'On MakerWorld, open 3d scan platform, choose the designer’s print profile and press Download 3MF, then add that 3MF here. Not the raw model files (STL or a zip): they don’t have the designer’s plates.');
  const raw='That’s the raw model from MakerWorld, without the designer’s plates. On the model’s page, choose the designer’s print profile and press Download 3MF, then add that 3MF.';
- const stl=Buffer.alloc(184);stl.writeUInt32LE(1,80);
+ const stl=Buffer.alloc(134);stl.writeUInt32LE(1,80);
  await assert.rejects(service.addModelFile(o.id,'全3D打印360°摄影台.stl',stl),{message:raw});
  await assert.rejects(service.addModelFile(o.id,'全3D打印360°摄影台.zip',Buffer.from(zipSync({'a.stl':stl}))),{message:raw});
  assert.equal((await service.get(o.id)).state,'needs-closeup','nothing quietly accepted');
@@ -178,9 +178,27 @@ test('a starter’s file Ask wants the print profile’s 3MF by its button, and 
  const asked=await logged(()=>off.service.addStarter('scan-platform'));
  assert.deepEqual(asked.value.ask.accepts,['3mf']);assert.match(asked.value.ask.question,/press Download 3MF/);
 });
+// R24-002: the worker reporting the raw model "downloaded" went around the pickup's 3MF rule and made the rig Ready.
+test('a raw-model STL the worker reports downloaded is never a starter’s files; a pasted link still keeps its STL',async t=>{
+ const stl=Buffer.alloc(134);stl.writeUInt32LE(1,80);
+ const {service}=await setup(t,async(_input,root)=>downloaded(root,[['全3D打印360°摄影台.stl',stl]]));
+ const {value:o,lines}=await logged(async()=>service.settled((await service.addStarter('scan-platform')).id));
+ assert.equal(o.state,'failed');assert.equal(o.files,undefined);
+ assert.equal(o.failure,'That’s the raw model from MakerWorld, without the designer’s plates. On the model’s page, choose the designer’s print profile and press Download 3MF, then add that 3MF.');
+ assert.match(lines.join('\n'),/left out the raw model, not the print profile: 全3D打印360°摄影台\.stl/);
+ // With the 3MF beside it, only the 3MF is kept.
+ const both=await setup(t,async(_input,root)=>downloaded(root,[['全3D打印360°摄影台.stl',stl],['360 scan platform full kit.3mf',model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears','Feet'])]]));
+ const {value:kit}=await logged(async()=>both.service.settled((await both.service.addStarter('scan-platform')).id));
+ assert.equal(kit.state,'ready');assert.deepEqual(kit.files.receipts.map(r=>r.name),['360 scan platform full kit.3mf']);
+ const pasted=await setup(t,async(_input,root)=>downloaded(root,[['bracket.stl',stl]]));
+ const link=await pasted.service.create('Print this','published','https://makerworld.com/en/models/42');
+ await pasted.service.start(link.id);
+ const p=await pasted.service.settled(link.id);
+ assert.equal(p.state,'ready');assert.equal(p.files.receipts[0].name,'bracket.stl');
+});
 test('a raw-model download that arrived is never a starter’s files',async t=>{
  const {service}=await setup(t,async(_input,root)=>{
-  const stl=Buffer.alloc(184);stl.writeUInt32LE(1,80);
+  const stl=Buffer.alloc(134);stl.writeUInt32LE(1,80);
   const made=await downloaded(root,[['全3D打印360°摄影台.stl',stl]]);
   return {status:'needs_file',reason:'other',summary:'Only the raw model was offered.',arrived:made.files};
  });
