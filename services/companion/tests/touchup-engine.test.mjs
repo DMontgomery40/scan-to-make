@@ -5,7 +5,7 @@ import {mkdtempSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
-import {runTouchup, chooseEngine, printerDesignGuidance, slicingGuidanceUnavailable} from '../dist/touchup/touchup.js';
+import {runTouchup, chooseEngine, printerDesignGuidance, slicingGuidanceUnavailable, slicingGuidanceUnreachable} from '../dist/touchup/touchup.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {systemRules, TOUCHUP_SYSTEM_RULES, TOUCHUP_RESULT_SCHEMA, buildTouchupInvocation} from '../dist/touchup/invocation.js';
 import {runTouchupWorker} from '../dist/touchup/runner.js';
@@ -48,7 +48,7 @@ test('a pass doesn\'t start when the printer MCP serves no fdm_slicing: Update i
     fusionLockPath: join(mkdtempSync(join(tmpdir(), 'touchup-engine-fusion-')), 'fusion.lock'),
     ensureBlender: async () => {}, resetScene: async () => {}, client: fusion.client,
     prepare: args => prepareTouchupPass(args),
-    guidance: async () => guidance,
+    guidance: async () => { log.push('guidance'); return typeof guidance === 'function' ? guidance() : guidance; },
     run: async (inv, pass) => { log.push('run'); return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
   });
   // An MCP older than fdm_slicing: the slicer facts the app no longer carries would be missing, so nothing runs.
@@ -56,12 +56,22 @@ test('a pass doesn\'t start when the printer MCP serves no fdm_slicing: Update i
   assert.equal(older.status, 'failed');
   assert.equal(older.reason, slicingGuidanceUnavailable('bambu-printer-mcp'));
   assert.match(older.reason, /^Update bambu-printer-mcp in Settings → Printers/);
-  assert.deepEqual(log, [], 'the worker never started');
+  assert.deepEqual(log, ['guidance'], 'the worker never started');
   assert.equal(slicingGuidanceUnavailable('mcp-3d-printer-server').startsWith('Update mcp-3D-printer-server in Settings → Printers'), true);
-  // An MCP that couldn't be reached gives no guidance at all; the pass runs and reaches the MCP itself.
+  // An MCP that couldn't be reached gives no guidance: one more try, then the pass refuses rather than design
+  // without the slicer rules (R24-003). The words say it's a connection problem, not an old MCP.
+  log.length = 0;
   const unreachable = await runTouchup(base, deps(undefined));
-  assert.equal(unreachable.status, 'done');
-  assert.deepEqual(log, ['run']);
+  assert.equal(unreachable.status, 'failed');
+  assert.equal(unreachable.reason, slicingGuidanceUnreachable('bambu-printer-mcp'));
+  assert.doesNotMatch(unreachable.reason, /^Update /);
+  assert.deepEqual(log, ['guidance', 'guidance'], 'tried twice, and the worker never started');
+  // A blip: the second try answers, so the pass runs with the guidance.
+  log.length = 0;
+  let calls = 0;
+  const blip = await runTouchup(base, deps(() => (++calls === 1 ? undefined : {design: 'Plan the print.', slicing: 'Its slicer orients it.'})));
+  assert.equal(blip.status, 'done');
+  assert.deepEqual(log, ['guidance', 'guidance', 'run']);
 });
 
 test('copies always use Blender; a design uses Fusion only when it is connected and a new design opens', async () => {

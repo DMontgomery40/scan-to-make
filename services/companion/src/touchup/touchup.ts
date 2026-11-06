@@ -112,6 +112,11 @@ export function slicingGuidanceUnavailable(backend: string): string {
   return `Update ${mcpPackageName(backend)} in Settings → Printers so Counterpart can plan how this prints. Nothing was changed.`;
 }
 
+/** The pass's refusal when the printer MCP couldn't be reached for its guidance: a connection problem, not an old MCP. */
+export function slicingGuidanceUnreachable(backend: string): string {
+  return `Counterpart couldn't reach ${mcpPackageName(backend)} to plan how this prints. Check it in Settings → Printers, then try again. Nothing was changed.`;
+}
+
 /**
  * The printer MCP's manufacturing and slicing guidance. Undefined when the MCP couldn't be reached; an MCP that
  * answers without fdm_slicing is refused by the pass (slicingGuidanceUnavailable).
@@ -254,10 +259,15 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   // Older CLI callers use a note plus a single STL for a revision. The object
   // service supplies the explicit flag, including false for failed first passes.
   const currentModel = input.currentModel ?? (input.note !== undefined && input.scan.length === 1 && input.scan[0]!.toLowerCase().endsWith('.stl'));
-  const guidance = await (deps.guidance ?? printerDesignGuidance)(input.handoff, input.signal);
-  // PRD §8.0 #10: how the slicer orients, supports and checks a slice comes only from the MCP. An MCP that answers
-  // without fdm_slicing predates it: the pass doesn't start without that guidance.
-  if (guidance && !guidance.slicing?.trim()) {
+  const fetchGuidance = deps.guidance ?? printerDesignGuidance;
+  // A connection blip gets one more try; the pass never starts without the MCP's guidance.
+  const guidance = await fetchGuidance(input.handoff, input.signal) ?? await fetchGuidance(input.handoff, input.signal);
+  // PRD §8.0 #10: how the slicer orients, supports and checks a slice comes only from the MCP. An MCP that couldn't
+  // be reached, or that answers without fdm_slicing (it predates it), means the pass doesn't start.
+  if (!guidance) {
+    return {status: 'failed', reason: slicingGuidanceUnreachable(input.handoff.backend), renders: [], checkpoints: [], stats: {seconds: 0, toolCalls: 0}, passDir: pass.dir};
+  }
+  if (!guidance.slicing?.trim()) {
     return {status: 'failed', reason: slicingGuidanceUnavailable(input.handoff.backend), renders: [], checkpoints: [], stats: {seconds: 0, toolCalls: 0}, passDir: pass.dir};
   }
   input.onStage?.('working', choice.engine);
