@@ -180,29 +180,16 @@ test('fusion.status asks the printer MCP as the companion runs it (with its Move
   assert.deepEqual(answer,{status:reply.structuredContent,server:'bambu-printer-mcp'});
   await dispatch('fusion.setup',{install:false});
   assert.equal(started[1].command,'/node','Set Up and its check run the same copy');
-  // Today's MCPs (no activeDesign): one interim read of the open design, its answer passed on as `design`, unread here.
-  tools=['fusion_mcp_status','fusion_mcp_setup','fusion_mcp_call'];
-  const today={configured:true,connected:true,addinReachable:true,fusionRunning:true,tools:[]};
-  reply={structuredContent:today,content:[{type:'text',text:'{}'}]};calls.length=0;
-  assert.deepEqual(await dispatch('fusion.status',{}),{status:today,server:'bambu-printer-mcp',design:{isError:false}});
-  assert.deepEqual(calls.map(c=>c[0]),['fusion_mcp_status','fusion_mcp_call']);
-  assert.deepEqual(calls[1][1],{tool_name:'get_parameters',arguments:{},timeout_ms:20_000},'a read that changes nothing');
+  // The real client's shape for a connection that closed mid-call (Codex P2 on #377): tool-failed, incomplete. Not an answer.
   const {PrinterMcpError:Refused}=await import('@scan-to-make/printer-handoff');
-  const noDesign=fusionCalls(()=>profile,config=>({...client(config),callTool:async name=>{calls.push([name]);
-    if(name==='fusion_mcp_call')throw new Refused('tool-failed',undefined,'Error: NO_ACTIVE_DESIGN');return reply;}}));
-  assert.deepEqual((await noDesign.fusionStatus()).design,{isError:true,text:'Error: NO_ACTIVE_DESIGN'});
-  // The real client's shape for a connection that closed mid-read (Codex P2 on #377): tool-failed, incomplete. Not an answer.
   const lost=Object.assign(new Refused('tool-failed',undefined,'connection closed'),{incomplete:true});
-  const closing=fusionCalls(()=>profile,config=>({...client(config),callTool:async name=>{if(name==='fusion_mcp_call')throw lost;return reply;}}));
-  await assert.rejects(closing.fusionStatus(),error=>error===lost,'the interim read');
   const closingStatus=fusionCalls(()=>profile,config=>({...client(config),callTool:async()=>{throw lost;}}));
   await assert.rejects(closingStatus.fusionStatus(),error=>error===lost,'the status call itself');
-  // An MCP that reports activeDesign is never read again; neither is a Fusion that isn't connected.
-  reply={structuredContent:{...today,activeDesign:true},content:[{type:'text',text:'{}'}]};calls.length=0;
+  // The MCP says whether a design is open (activeDesign); the companion never reads the design itself.
+  tools=['fusion_mcp_status','fusion_mcp_setup','fusion_mcp_call'];
+  reply={structuredContent:{configured:true,connected:true,addinReachable:true,fusionRunning:true,tools:[]},content:[{type:'text',text:'{}'}]};calls.length=0;
   assert.equal('design' in await dispatch('fusion.status',{}),false);
-  reply={structuredContent:{...today,connected:false},content:[{type:'text',text:'{}'}]};
-  assert.equal('design' in await dispatch('fusion.status',{}),false);
-  assert.deepEqual(calls.map(c=>c[0]),['fusion_mcp_status','fusion_mcp_status']);
+  assert.deepEqual(calls.map(c=>c[0]),['fusion_mcp_status']);
   tools=['fusion_mcp_status','fusion_mcp_setup'];
   reply={structuredContent:{configured:true,connected:true,addinReachable:true,fusionRunning:true,activeDesign:false,tools:[]},content:[{type:'text',text:'{}'}]};
   reply={isError:true,content:[{type:'text',text:'Fusion MCP timed out during connect.'}]};
