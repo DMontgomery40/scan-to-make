@@ -205,6 +205,28 @@ test('a starter’s kit is made up from what is kept, what is pinned in Download
  const {value:made}=await logged(async()=>b.service.settled((await b.service.addStarter('long-vernier-caliper')).id));
  assert.equal(made.state,'ready');assert.equal(b.asked.length,1);assert.equal(made.files.receipts.length,2);
 });
+test('a kit split between the cache and Downloads is used before any worker runs, AI on or off',async t=>{
+ let pass=0;
+ const {service,asked,root}=await setup(t,async(_input,root)=>{
+  pass++;const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',COLOR]]);
+  return {status:'needs_file',reason:'site_error',summary:'The gauge answered 503.',arrived:made.files};
+ });
+ const {value:first}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+ assert.equal(first.state,'failed');assert.equal(asked.length,1);
+ // The person downloads the gauge; the caliper's original download is gone, but the cache kept it.
+ await rm(join(root,'Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),{force:true});
+ await mkdir(join(root,'Downloads'),{recursive:true});await writeFile(join(root,'Downloads','DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),GAUGE);
+ const {value:retried}=await logged(()=>service.start(first.id));
+ assert.equal(retried.state,'ready');assert.equal(asked.length,1,'no second pass');
+ // With no new arrival, a pass's recovery still assembles the kit from what is on hand.
+ const other=await setup(t,async()=>({status:'needs_file',reason:'other',summary:'Nothing.'}));
+ const {value:none}=await logged(async()=>other.service.settled((await other.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(none.state,'failed');
+ await mkdir(join(other.root,'Downloads'),{recursive:true});
+ for(const [name,bytes] of [['c.3mf',COLOR],['g.3mf',GAUGE]])await writeFile(join(other.root,'Downloads',name),bytes);
+ const {value:off}=await logged(()=>other.service.start(none.id));
+ assert.equal(off.state,'ready');assert.equal(other.asked.length,1);
+});
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
   ['one of two files',[['Vernier Caliper Ruler 150mm COLOR.3mf','Vernier Caliper Ruler - Two Lengths']]],

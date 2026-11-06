@@ -2212,9 +2212,9 @@ export class ObjectService {
     // A starter whose files reached ~/Downloads while the pass ran is ready, whatever the worker concluded (Nov 6,
     // e95f31ea: both 150 mm profiles were in Downloads at 21:08, the worker's own check missed them, and the project
     // said "Sign in"). PRD §8.11 step 2.2: a matching download is used at once.
-    if (result.status !== 'downloaded' && result.arrived?.length && !(result.status === 'failed' && result.run?.stopReason === 'cancelled')) {
+    if (result.status !== 'downloaded' && !(result.status === 'failed' && result.run?.stopReason === 'cancelled')) {
       const object = await store.get(id), starter = object.starterId ? this.#starter(object.starterId) : undefined;
-      const files = starter ? await this.#starterFiles(starter, result.arrived) : [];
+      const files = starter ? await this.#starterFiles(starter, result.arrived ?? []) : [];
       const kit = starter ? this.#kit(starter, files) : undefined;
       if (starter && kit) {
         console.error(`published pass: project ${id} took the designer’s ${kit.length} file${kit.length === 1 ? '' : 's'} from Downloads (the worker reported ${result.status}): ${kit.map(file => basename(file)).join(', ')}`);
@@ -2342,11 +2342,13 @@ export class ObjectService {
    * where only the catalog's pinned files count (a starter with none pinned isn't looked for there).
    */
   async #starterOnDisk(starter: StarterProject): Promise<{files: string[]; from: 'cache' | 'Downloads'} | undefined> {
+    // ('Downloads' when any of it comes from there or from the cache's kept fragments.)
     const cached = await this.#cachedKit(starter);
     if (cached) return {files: cached, from: 'cache'};
     if (!starter.sha256?.length) return undefined;
-    const downloads = this.#kit(starter, await this.#starterDownloads(starter, await this.#modelFiles(this.#deps.downloads ?? join(homedir(), 'Downloads'), 0)));
-    return downloads ? {files: downloads, from: 'Downloads'} : undefined;
+    // Pinned files, wherever they are kept: the cache's fragments and ~/Downloads together (Codex on #369).
+    const kit = this.#kit(starter, await this.#starterFiles(starter, []));
+    return kit ? {files: kit, from: 'Downloads'} : undefined;
   }
   /** Keeps a starter's designer files once per computer (and, with `kit`, which of them make it ready), so Try Again and a second tap never download them again. */
   async #cacheStarter(starter: StarterProject, files: string[], kit?: string[]) {
