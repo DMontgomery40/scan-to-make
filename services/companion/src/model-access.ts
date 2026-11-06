@@ -93,7 +93,8 @@ export class ModelAccessService {
   projectWorker():ProjectWorker {
     const choice = structuredClone(this.record.choice);
     if (choice.kind === 'none') throw new ControlFailure('unavailable','AI is off. Choose an AI provider in Settings before starting a model job.');
-    return async (inv,options) => {
+    // Only Claude Code takes the invocation's own arguments, `--chrome` among them; API, endpoint and Codex workers don't.
+    return Object.assign(async (inv: Parameters<ProjectWorker>[0], options: Parameters<ProjectWorker>[1]): Promise<WorkerRun> => {
       options.signal?.throwIfAborted();
       const dir = await mkdtemp(join(tmpdir(),'stm-project-worker-'));
       try {
@@ -106,7 +107,7 @@ export class ModelAccessService {
         if (!run || typeof run.toolCalls !== 'number' || typeof run.seconds !== 'number') throw new Error('Invalid model worker response');
         return {...run,publicText:(text:string)=>publicTouchupText(text,inv.redactionEnv)};
       } finally { await rm(dir,{recursive:true,force:true}); }
-    };
+    }, {browser: choice.kind === 'claude-code'});
   }
   cleanupSnapshot() {
     const choice = structuredClone(this.record.choice);

@@ -40,6 +40,11 @@ test('the production pass says when it had no browser to download with (a starte
    {chrome:()=>chrome,downloads,spawn:spawnAnswer({status:'needs_file',summary:'Not signed in.'})});
   assert.equal(got.status,'needs_file');assert.equal(got.browser,chrome);
  }
+ // An API or endpoint worker can't drive Chrome even when its extension is set up: it isn't offered it, and says so.
+ let args;
+ const apiWorker=Object.assign(async inv=>{args=inv.args;return {toolCalls:0,stderrTail:'',exitCode:0,seconds:0,publicText:x=>x,resultEvent:{type:'result',structured_output:{status:'needs_file',summary:'Not signed in.'}}};},{browser:false});
+ const api=await defaultRunPublished({worker:apiWorker,root:join(f.root,'passes-api'),photos:[],request:'Print this',link:{url:LINK,site:'MakerWorld'},claudePath:'/c',startedAtMs:Date.now()},{chrome:()=>true,downloads});
+ assert.equal(api.status,'needs_file');assert.equal(api.browser,false);assert.ok(!args.includes('--chrome'));
 });
 test('old Downloads names require confirmation; escapes and symlinks never establish identity',async t=>{
  const f=await setup(t),downloads=join(f.root,'Downloads');await mkdir(downloads);const path=join(downloads,'caliper.3mf');await writeFile(path,model());const yesterday=new Date(Date.now()-86400000);await utimes(path,yesterday,yesterday);await symlink(path,join(downloads,'alias.3mf'));

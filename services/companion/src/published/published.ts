@@ -174,7 +174,8 @@ export interface PublishedPassInput {
 export async function defaultRunPublished(input: PublishedPassInput, deps: {chrome?: () => boolean; downloads?: string; spawn?: typeof import('node:child_process').spawn} = {}): Promise<PublishedResult> {
   const pass = await prepareTouchupPass({root: input.root, objectId: 'pass', scan: [], photos: input.photos, requirePhotos: false});
   input.onStage?.('working');
-  const chrome = (deps.chrome ?? chromeAvailable)();
+  // The browser only when Chrome's extension is set up and the selected worker can drive it (Claude Code).
+  const chrome = (deps.chrome ?? chromeAvailable)() && input.worker?.browser !== false;
   const inv = buildPublishedInvocation({pass, claudePath: input.claudePath, request: input.request, link: input.link, chrome});
   inv.worker = input.worker;
   const result = await runPublishedWorker(inv, pass, input.link, {startedAtMs: input.startedAtMs, ...(deps.downloads ? {downloads: deps.downloads} : {}),
