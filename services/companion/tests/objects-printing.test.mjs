@@ -329,6 +329,33 @@ test('the colour rows are the MCP’s filaments for the chosen plate, and an MCP
   await assert.rejects(g.service.colourMapping(g.object.id), /Update bambu-printer-mcp in Settings → Printers to choose colours for this plate/);
 });
 
+// R24-004: when a part's mesh is too large for the MCP to read its painting, the MCP lists every declared filament
+// for that plate and says `filaments_complete: false`. The sheet offers every one of those rows (a spare row, never
+// a missing one), and Print maps each to a spool: none is dropped for being unlikely.
+test('a plate the MCP marks incomplete keeps every filament it lists as a row, and Print maps them all', async t => {
+  const {zipSync, strToU8} = fflate();
+  const bytes = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/model_settings.config': strToU8('<config><object id="3"><metadata key="name" value="Scan"/><metadata key="extruder" value="1"/></object></config>')}));
+  const every = [{index: 1, colour: '#111111', material: 'PLA', name: 'scan'}, {index: 2, colour: '#FFD200', material: 'PLA', name: 'scan'}, {index: 3, colour: '#EEEEEE', material: 'PLA', name: 'scan'}];
+  const f = await setup(t, {reports: [status('RUNNING', 10)]});
+  await multipart(f, {bytes, kind: 'published', publishedSelection: {fileIndex: 0, plateIndex: 0, sliced: false}});
+  // As list_3mf_plates answers it, through the companion's own reading of the MCP's result.
+  const {modelPlatesFrom} = await import('@scan-to-make/printer-handoff');
+  const answer = modelPlatesFrom({plates: [{index: 0, name: 'Plate 1', objects: ['Scan'], sliced: false, filaments: every, filaments_complete: false}],
+    project_filaments: every.map(({name: _name, ...filament}) => filament)});
+  assert.ok(answer, 'an incomplete plate is still an answer');
+  f.deps.print.services.runner.modelPlates = async () => answer;
+  const mapping = await f.service.colourMapping(f.object.id);
+  assert.deepEqual(mapping.filaments.map(x => x.index), [1, 2, 3], 'every listed filament is a row');
+  await f.service.print(f.object.id);
+  await f.approve();
+  await f.service.settled(f.object.id);
+  const run = f.runs.at(-1);
+  assert.equal(run.selection.amsMapping.length, 3);
+  assert.ok(run.selection.amsMapping.every(slot => slot >= 0), 'each listed filament gets a tray: none dropped');
+});
+
 test('spool choices for a 3MF whose filaments cannot be read are refused, never dropped', async t => {
   const {zipSync, strToU8} = fflate();
   const bare = Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
