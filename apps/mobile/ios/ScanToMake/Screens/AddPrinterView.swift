@@ -97,7 +97,7 @@ private struct AddPrinterCandidateRow: View {
             if candidate.added {
                 Text("Added").font(.subheadline).foregroundStyle(.secondary)
             } else if let folder = candidate.folder {
-                if candidate.needsModel {
+                if candidate.needsModel(model.options) {
                     Picker("Model", selection: Binding(get: { model.folderModels[candidate.id] ?? "" }, set: { model.folderModels[candidate.id] = $0.isEmpty ? nil : $0 })) {
                         Text("Model…").tag("")
                         ForEach(model.options?.models[candidate.backend] ?? []) { Text($0.label).tag($0.value) }
@@ -105,11 +105,11 @@ private struct AddPrinterCandidateRow: View {
                     .labelsHidden().fixedSize()
                 }
                 Button(model.saving == candidate.id ? "Adding…" : "Add") {
-                    var value = PrinterForm(folder: folder); value.model = model.folderModels[candidate.id] ?? candidate.fill?["BAMBU_MODEL"]
+                    var value = PrinterForm(folder: folder); value.model = model.folderModels[candidate.id] ?? candidate.filledModel(model.options)
                     Task { await model.save(value, id: candidate.id, added: added) }
                 }
                 .buttonStyle(.glassProminent)
-                .disabled(model.saving != nil || (candidate.needsModel && model.folderModels[candidate.id] == nil))
+                .disabled(model.saving != nil || (candidate.needsModel(model.options) && model.folderModels[candidate.id] == nil))
                 .accessibilityIdentifier("add-printer-folder-\(candidate.id)")
             } else {
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)

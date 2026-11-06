@@ -190,7 +190,7 @@ fun AddPrinterScreen(back: () -> Unit, added: () -> Unit) {
                     discovery?.found?.forEach { candidate ->
                         CandidateCard(candidate, options, folderModels[candidate.id], { folderModels[candidate.id] = it }, saving,
                             setUp = { start(prefilledForm(candidate)) },
-                            addFolder = { save(PrinterForm(folder = candidate.folder, model = folderModels[candidate.id] ?: candidate.fill?.get("BAMBU_MODEL")), candidate.id) })
+                            addFolder = { save(PrinterForm(folder = candidate.folder, model = folderModels[candidate.id] ?: candidate.filledModel(options)), candidate.id) })
                     }
                     if (discovery?.network == "unavailable") Text("Your computer couldn't listen for printers on this network (another app may be using it). Enter the address instead.", color = Palette.secondary, fontSize = 12.sp)
                     problem?.let { Text(it, color = Palette.needsYou, fontSize = 13.sp) }
@@ -223,9 +223,9 @@ private fun CandidateCard(candidate: PrinterCandidate, options: PrinterSetupOpti
             Text(listOfNotNull(candidate.host, label(candidate.backend), candidate.folder).joinToString(" · "), color = Palette.secondary, fontSize = 13.sp)
             if (candidate.folder != null && !candidate.added) {
                 candidate.missing?.takeIf { it.isNotEmpty() }?.let { Text("Its settings lack ${it.joinToString(", ")}.", color = Palette.secondary, fontSize = 12.sp) }
-                if (candidate.needsModel) ChoiceField("Model", chosenModel, options?.models?.get(candidate.backend).orEmpty().map { it.value to it.label }, chooseModel, "add-printer-folder-model")
+                if (candidate.needsModel(options)) ChoiceField("Model", chosenModel, options?.models?.get(candidate.backend).orEmpty().map { it.value to it.label }, chooseModel, "add-printer-folder-model")
                 PrimaryButton(if (saving == candidate.id) "Adding…" else "Add", Modifier.fillMaxWidth().testTag("add-printer-folder-${candidate.id}"),
-                    enabled = saving == null && (!candidate.needsModel || chosenModel != null), onClick = addFolder)
+                    enabled = saving == null && (!candidate.needsModel(options) || chosenModel != null), onClick = addFolder)
             }
         }
     }
