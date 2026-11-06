@@ -34,8 +34,6 @@ import com.scantomake.counterpart.pairing.PairingStore
 import com.scantomake.counterpart.ui.HomeScreen
 import com.scantomake.counterpart.ui.SettingsScreen
 import com.scantomake.counterpart.ui.PrintSheetScreen
-import com.scantomake.counterpart.api.PrinterCatalog
-import com.scantomake.counterpart.api.PrinterDestination
 import com.scantomake.counterpart.ui.designerSettingsWords
 import com.scantomake.counterpart.net.HttpReply
 import kotlinx.coroutines.cancel
