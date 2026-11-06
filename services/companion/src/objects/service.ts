@@ -2187,7 +2187,7 @@ export class ObjectService {
     // A starter's files already kept on this computer are never downloaded again: the worker gets only what's missing.
     const starter = object.starterId ? this.#starter(object.starterId) : undefined;
     const kept = starter ? await this.#starterDownloads(starter, await this.#modelFiles(this.#starterCacheDir(starter), 1)) : [];
-    const keptNote = kept.length ? `Already on this computer, so don't download these again: ${kept.map(file => basename(file)).join(', ')}. Download only the other file${starter!.files - kept.length === 1 ? '' : 's'}.` : undefined;
+    const keptNote = kept.length ? `Already on this computer, so don't download these again: ${kept.map(file => basename(file.path)).join(', ')}. Download only the other file${starter!.files - kept.length === 1 ? '' : 's'}.` : undefined;
     const request = [object.instructions?.trim(), note?.trim(), keptNote].filter(Boolean).join('\n\n');
     const run = this.#deps.runPublished ?? (input => defaultRunPublished(input));
     return run({worker, root: join(this.dir(object.id), 'passes'), photos, request, link, claudePath: this.#deps.claudePath,
@@ -2208,13 +2208,14 @@ export class ObjectService {
     if (result.status !== 'downloaded' && result.arrived?.length && !(result.status === 'failed' && result.run?.stopReason === 'cancelled')) {
       const object = await store.get(id), starter = object.starterId ? this.#starter(object.starterId) : undefined;
       const kept = starter ? await this.#modelFiles(this.#starterCacheDir(starter), 1) : [];
-      const picked = starter ? await this.#starterDownloads(starter, [...kept, ...result.arrived]) : [];
-      // Even part of a kit is kept, so a later pass never downloads what already arrived.
-      if (starter && picked.length < starter.files) await this.#cacheStarter(starter, picked);
-      if (starter && picked.length >= starter.files) {
-        console.error(`published pass: project ${id} took ${picked.length} of the designer’s files from Downloads (the worker reported ${result.status}): ${picked.map(file => basename(file)).join(', ')}`);
-        return this.#keepPublished(id, picked, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(credit ? {credit} : {})});
+      const files = starter ? await this.#starterDownloads(starter, [...kept, ...result.arrived]) : [];
+      const kit = starter ? this.#kit(starter, files) : undefined;
+      if (starter && kit) {
+        console.error(`published pass: project ${id} took the designer’s ${kit.length} file${kit.length === 1 ? '' : 's'} from Downloads (the worker reported ${result.status}): ${kit.map(file => basename(file)).join(', ')}`);
+        return this.#keepPublished(id, kit, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(credit ? {credit} : {})});
       }
+      // Even part of a kit is kept (only the catalog's own files, when it pins them), so a later pass never downloads it again.
+      if (starter) await this.#cacheStarter(starter, files.filter(file => !starter.sha256?.length || starter.sha256.includes(file.sha256)).map(file => file.path));
     }
     // Every published pass that doesn't bring the file back logs why, with what finds its transcript (Nov 6:
     // a starter said "Sign in" while the browser was signed in, and the log had nothing).
@@ -2257,28 +2258,37 @@ export class ObjectService {
     return this.#keepPublished(id, result.files, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(summary ? {summary} : {}), ...(credit ? {credit} : {})});
   }
 
-  /**
-   * The files a starter can take: model files whose own metadata names the catalog's designer, one per distinct file
-   * (repeat clicks save byte-identical copies), and, when `pinned`, only the catalog's own published files.
-   */
-  async #starterDownloads(starter: StarterProject, files: string[], pinned = false): Promise<string[]> {
-    const picked: string[] = [], seen = new Set<string>();
-    for (const file of files) {
+  /** The designer's own files among `files`: metadata names the catalog's designer, one per sha256 (repeat clicks copy). */
+  async #starterDownloads(starter: StarterProject, files: string[]): Promise<{path: string; sha256: string; plates: number}[]> {
+    const picked: {path: string; sha256: string; plates: number}[] = [];
+    for (const path of files) {
       try {
-        const metadata = inspectModelFile(await readModelFile(file), extname(file).toLowerCase() === '.stl' ? 'stl' : '3mf');
-        if (metadata.designer !== starter.designer || seen.has(metadata.sha256)) continue;
-        if (pinned && !starter.sha256?.includes(metadata.sha256)) continue;
-        seen.add(metadata.sha256); picked.push(file);
+        const metadata = inspectModelFile(await readModelFile(path), extname(path).toLowerCase() === '.stl' ? 'stl' : '3mf');
+        if (metadata.designer !== starter.designer || picked.some(file => file.sha256 === metadata.sha256)) continue;
+        picked.push({path, sha256: metadata.sha256, plates: Math.max(1, metadata.plates.length)});
       } catch { /* not a model this starter can use */ }
     }
     return picked;
+  }
+  /**
+   * The complete kit among a starter's files, or nothing: every one of the catalog's pinned files when it pins them
+   * (two calipers of other lengths never stand in for the caliper and its gauge), else the catalog's file and plate
+   * counts (the rig's full kit has six plates, never a part of it).
+   */
+  #kit(starter: StarterProject, files: {path: string; sha256: string; plates: number}[]): string[] | undefined {
+    if (starter.sha256?.length) {
+      const kit = starter.sha256.map(sha256 => files.find(file => file.sha256 === sha256));
+      return kit.every(Boolean) ? kit.map(file => file!.path) : undefined;
+    }
+    const plates = files.reduce((sum, file) => sum + file.plates, 0);
+    return files.length >= starter.files && plates >= (starter.plates ?? 0) ? files.map(file => file.path) : undefined;
   }
 
   #starter(id: string) { return (this.#deps.starter ?? bundledStarter)(id); }
   #starterCacheDir(starter: StarterProject) {
     return join(this.#deps.starterCache ?? join(dirname(this.#deps.store.root), 'starters'), starterModelId(starter));
   }
-  /** A model file in a folder, one level down (the cache keeps each file in a folder named by its sha256). */
+  /** Model files in a folder, `depth` levels down (the cache keeps each file in a folder named by its sha256). */
   async #modelFiles(folder: string, depth: number): Promise<string[]> {
     const out: string[] = [];
     for (const entry of await readdir(folder, {withFileTypes: true}).catch(() => [])) {
@@ -2289,25 +2299,35 @@ export class ObjectService {
     }
     return out.sort();
   }
+  /** The kit a starter's project accepted, as kept in its cache (kit.json names each file by sha256), when all of it is there. */
+  async #cachedKit(starter: StarterProject): Promise<string[] | undefined> {
+    const root = this.#starterCacheDir(starter);
+    const kit = await readFile(join(root, 'kit.json'), 'utf8').then(text => JSON.parse(text) as {sha256?: unknown}, () => undefined);
+    const wanted = Array.isArray(kit?.sha256) ? kit.sha256.filter((value): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)) : [];
+    if (!wanted.length) return undefined;
+    const files = await this.#starterDownloads(starter, await this.#modelFiles(root, 1));
+    const found = wanted.map(sha256 => files.find(file => file.sha256 === sha256));
+    return found.every(Boolean) ? found.map(file => file!.path) : undefined;
+  }
   /**
-   * Everything a starter needs that is already on this computer: its cache first, then ~/Downloads, where a file
-   * counts only when its metadata names the designer and, for a starter whose files are pinned, its sha256 is one of them.
+   * Everything a starter needs that is already on this computer: the kit kept in its cache first, then ~/Downloads,
+   * where only the catalog's pinned files count (a starter with none pinned isn't looked for there).
    */
   async #starterOnDisk(starter: StarterProject): Promise<{files: string[]; from: 'cache' | 'Downloads'} | undefined> {
-    const cached = await this.#starterDownloads(starter, await this.#modelFiles(this.#starterCacheDir(starter), 1));
-    if (cached.length >= starter.files) return {files: cached, from: 'cache'};
+    const cached = await this.#cachedKit(starter);
+    if (cached) return {files: cached, from: 'cache'};
     if (!starter.sha256?.length) return undefined;
-    const downloads = await this.#starterDownloads(starter, await this.#modelFiles(this.#deps.downloads ?? join(homedir(), 'Downloads'), 0), true);
-    return downloads.length >= starter.files ? {files: downloads, from: 'Downloads'} : undefined;
+    const downloads = this.#kit(starter, await this.#starterDownloads(starter, await this.#modelFiles(this.#deps.downloads ?? join(homedir(), 'Downloads'), 0)));
+    return downloads ? {files: downloads, from: 'Downloads'} : undefined;
   }
-  /** Keeps a starter's designer files once per computer, so Try Again and a second tap never download them again. */
-  async #cacheStarter(starter: StarterProject, files: string[]) {
+  /** Keeps a starter's designer files once per computer (and, with `kit`, which of them make it ready), so Try Again and a second tap never download them again. */
+  async #cacheStarter(starter: StarterProject, files: string[], kit?: string[]) {
     const root = this.#starterCacheDir(starter);
     for (const file of files) {
       try {
         const bytes = await readModelFile(file);
         const sha256 = inspectModelFile(bytes, extname(file).toLowerCase() === '.stl' ? 'stl' : '3mf').sha256;
-        const folder = join(root, sha256), target = join(folder, basename(file));
+        const folder = join(root, sha256), target = join(folder, basename(file).replace(/^[0-9a-f]{64}-/, ''));
         if (await stat(target).then(() => true, () => false)) continue;
         await mkdir(folder, {recursive: true, mode: 0o700});
         const temporary = join(folder, `.incoming-${randomUUID()}`);
@@ -2316,6 +2336,11 @@ export class ObjectService {
       } catch (error) {
         console.error(`starter ${starter.id}: couldn’t keep ${basename(file)} in its cache: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+    if (kit?.length) {
+      const temporary = join(root, `.kit-${randomUUID()}`);
+      try { await mkdir(root, {recursive: true, mode: 0o700}); await writeFile(temporary, JSON.stringify({sha256: kit}), {mode: 0o600}); await rename(temporary, join(root, 'kit.json')); }
+      catch (error) { await rm(temporary, {force: true}); console.error(`starter ${starter.id}: couldn’t record its kit: ${error instanceof Error ? error.message : String(error)}`); }
     }
   }
 
@@ -2334,8 +2359,7 @@ export class ObjectService {
   async #keepPublished(id: string, files: string[], info: {startedAtMs?: number; now?: number; model?: PublishedModel; summary?: string; credit?: StmObject['credit']}): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(id), now = info.now ?? Date.now();
     const object = await store.get(id);
-    const starter = object.starterId ? this.#starter(object.starterId) : undefined;
-    if (starter) await this.#cacheStarter(starter, await this.#starterDownloads(starter, files));
+
     const originals = [...(object.files?.original ?? [])];
     const receipts = [...(object.files?.receipts ?? [])];
     await mkdir(join(dir, 'original'), {recursive: true});
@@ -2383,6 +2407,10 @@ export class ObjectService {
       ...(ask ? {ask} : o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
       passes: info.startedAtMs === undefined ? o.passes : o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== info.startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})}
         : {...p, endedAtMs: now, status: 'done', stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), ...(summary ? {summary} : {})})}));
+    // A starter that is ready keeps the kit it accepted, once per computer: Try Again and a second tap never download it.
+    const starter = object.starterId ? this.#starter(object.starterId) : undefined;
+    if (starter && updated.state === 'ready')
+      await this.#cacheStarter(starter, receipts.map(receipt => join(dir, receipt.path)), receipts.map(receipt => receipt.sha256));
     await this.#emit({id: randomUUID(), type: ask ? 'pass.ask' : 'pass.ready', projectId: id, ...(ask ? {data: {askId: ask.id}, detail: {question: ask.question}} : {})});
     return this.#changed(updated);
   }

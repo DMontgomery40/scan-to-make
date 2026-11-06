@@ -9,6 +9,8 @@ export interface StarterProject {
   url: string; licence: string; source: 'makerworld';
   /** How many distinct designer files make the project ready: the caliper and its depth gauge are two. */
   files: number;
+  /** How many plates the kit has in all, when the catalog says (the rig's full kit is six), so part of it never counts. */
+  plates?: number;
   /** The designer's files as published, when known: a file already in ~/Downloads is used only when it is one of these. */
   sha256?: string[];
 }

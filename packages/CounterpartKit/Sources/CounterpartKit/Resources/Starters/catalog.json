@@ -14,7 +14,8 @@
     "imageCredit": "Kass 3D · model preview via WAT3D",
     "detail": "6 plates · assembly required",
     "source": "makerworld",
-    "files": 1
+    "files": 1,
+    "plates": 6
   },
   {
     "id": "long-vernier-caliper",

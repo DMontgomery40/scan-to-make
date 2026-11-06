@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,rm,readFile,readdir,writeFile} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -16,10 +17,15 @@ const model=(title,plates)=>Buffer.from(zipSync({'[Content_Types].xml':strToU8('
  '3D/3dmodel.model':strToU8(`<model><metadata name="Title">${title}</metadata><metadata name="Designer">${title.includes('scan')?'Kass 3D':'3D Print Masters Hub'}</metadata><metadata name="License">Standard Digital File License</metadata><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>`),
  'Metadata/model_settings.config':strToU8(`<config>${plates.map((name,i)=>`<plate><metadata key="plater_id" value="${i+1}"/><metadata key="plater_name" value="${name}"/></plate>`).join('')}</config>`)}));
 
+/** The caliper's two published files, made once (a zip's bytes carry its time), and the catalog pinning them as the real one does. */
+const COLOR=model('Vernier Caliper Ruler - Two Lengths',['Plate 1']),GAUGE=model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1']);
+const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+const CATALOG=JSON.parse(readFileSync(join(STARTER_ASSETS,'catalog.json'),'utf8'));
+const pinnedCatalog=id=>{const entry=CATALOG.find(item=>item.id===id);return entry?.id==='long-vernier-caliper'?{...entry,sha256:[sha(COLOR),sha(GAUGE)]}:entry;};
 /** The published-model worker (PRD §8.11), faked: what it was asked, and the files it "downloaded". */
 async function setup(t,answer=async()=>({status:'needs_file'}),extra={}) {
  const root=await mkdtemp(join(tmpdir(),'starters-')),store=new ObjectStore(join(root,'objects')),asked=[];
- extra={downloads:join(root,'Downloads'),...extra};
+ extra={downloads:join(root,'Downloads'),starter:pinnedCatalog,...extra};
  const runPublished=async input=>{asked.push(input);return answer(input,root);};
  const service=new ObjectService({store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},
   printGate:{updating:()=>false,hold:()=>()=>{}},runPublished,runTouchup:async()=>{throw Error('a starter entered the design pass');},titleFor:async()=>'Generated',...extra});
@@ -31,8 +37,7 @@ async function downloaded(root,files){
  for(const [name,bytes] of files){const path=join(root,name);await writeFile(path,bytes);paths.push(path);}
  return {status:'downloaded',files:paths,summary:'Got the designer’s files.'};
 }
-const caliper=root=>downloaded(root,[['Vernier Caliper Ruler 150mm COLOR.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1'])],
- ['DEPTH GAUGE for Vernier Caliper Ruler 150mm.3mf',model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1'])]]);
+const caliper=root=>downloaded(root,[['Vernier Caliper Ruler 150mm COLOR.3mf',COLOR],['DEPTH GAUGE for Vernier Caliper Ruler 150mm.3mf',GAUGE]]);
 const rig=root=>downloaded(root,[['360 scan platform full kit.3mf',model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears','Feet'])]]);
 
 test('no bundled starter: every starter is a real designer\'s model, never one the app made up (Nov 5)',async t=>{
@@ -106,9 +111,8 @@ for (const [reason,summary] of [['site_error','MakerWorld’s file server return
 test('a starter takes the designer’s files that arrived in Downloads during its pass, whatever the worker concluded',async t=>{
  let files;
  const {service}=await setup(t,async(_input,root)=>{
-  const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1'])],
-   ['Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1'])],
-   ['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf',model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1'])]]);
+  const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',COLOR],['Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf',COLOR],
+   ['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf',GAUGE]]);
   files=made.files;
   return {status:'needs_file',reason:'site_error',summary:'The file server answered 503.',arrived:files,run:{toolCalls:30,seconds:165,exitCode:0}};
  });
@@ -117,7 +121,22 @@ test('a starter takes the designer’s files that arrived in Downloads during it
  assert.equal(o.files.receipts.length,2,'a repeat click’s identical copy is one file');
  assert.deepEqual(o.files.receipts.map(r=>r.name),['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf','DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf']);
  assert.equal(o.credit.designer,'3D Print Masters Hub');assert.equal(publicObject(o).plates.length,2);
- assert.match(lines.join('\n'),/took 2 of the designer’s files from Downloads \(the worker reported needs_file\)/);
+ assert.match(lines.join('\n'),/took the designer’s 2 files from Downloads \(the worker reported needs_file\)/);
+});
+// Codex on #369: two calipers of other lengths from the same designer, or part of the rig, are not the starter.
+test('a pickup is the starter’s whole kit: never two other calipers of the designer’s, never part of the rig',async t=>{
+ const {service}=await setup(t,async(_input,root)=>{
+  const made=await downloaded(root,[['Vernier 150mm COLOR.3mf',COLOR],['Vernier 220mm COLOR.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1','Plate 2'])]]);
+  return {status:'needs_file',reason:'site_error',summary:'The gauge answered 503.',arrived:made.files};
+ });
+ const {value:caliperProject}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+ assert.equal(caliperProject.state,'failed');assert.equal(caliperProject.files,undefined);
+ const rig=await setup(t,async(_input,root)=>{
+  const made=await downloaded(root,[['360 scan platform base.3mf',model('360 scan platform',['Base','Turntable'])]]);
+  return {status:'needs_file',reason:'site_error',summary:'Only the base.',arrived:made.files};
+ });
+ const {value:rigProject}=await logged(async()=>rig.service.settled((await rig.service.addStarter('scan-platform')).id));
+ assert.equal(rigProject.state,'failed');assert.equal(rigProject.files,undefined);
 });
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
@@ -147,17 +166,15 @@ test('a starter whose files are in its cache opens Ready with no worker run, on 
  assert.equal(again.credit.url,'https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths');
  assert.match(lines.join('\n'),/already on this computer \(cache\), no download/);
  // The cache is keyed by MakerWorld's model id, beside the projects.
- assert.equal((await readdir(join(root,'starters','makerworld-198362'))).length,2);
+ assert.deepEqual((await readdir(join(root,'starters','makerworld-198362'))).sort(),[sha(COLOR),sha(GAUGE),'kit.json'].sort());
  // Try Again on a failed starter takes the cache too.
  await store.update(again.id,o=>({...o,state:'failed',failure:'x',current:undefined,files:undefined}));
  const retried=await service.settled((await service.start(again.id)).id);
  assert.equal(retried.state,'ready');assert.equal(asked.length,1,'never downloaded again');
 });
 test('a starter whose pinned files are already in Downloads opens Ready with no worker run; other files there never count',async t=>{
- const color=model('Vernier Caliper Ruler - Two Lengths',['Plate 1']),gauge=model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1']);
- const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
- const entry={...JSON.parse(await readFile(join(STARTER_ASSETS,'catalog.json'),'utf8')).find(item=>item.id==='long-vernier-caliper'),sha256:[sha(color),sha(gauge)]};
- const {service,asked,root}=await setup(t,async(_input,root)=>caliper(root),{starter:id=>id===entry.id?entry:undefined});
+ const color=COLOR,gauge=GAUGE;
+ const {service,asked,root}=await setup(t,async(_input,root)=>caliper(root));
  await mkdir(join(root,'Downloads'));
  // Only one pinned file, plus a same-designer file that isn't one of them: not enough, so the worker runs.
  await writeFile(join(root,'Downloads','Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),color);
@@ -175,10 +192,10 @@ test('Try Again after a pickup never downloads again: what arrived is kept, even
  let pass=0;
  const {service,asked}=await setup(t,async(_input,root)=>{
   pass++;
-  if(pass===1){const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1'])]]);
+  if(pass===1){const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',COLOR]]);
    return {status:'needs_file',reason:'site_error',summary:'The depth gauge’s file answered 503.',arrived:made.files};}
   assert.match(_input.request,/Already on this computer, so don't download these again: Vernier\+Caliper\+Ruler\+150mm\+COLOR-02\.3mf\. Download only the other file\./);
-  const made=await downloaded(root,[['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1'])]]);
+  const made=await downloaded(root,[['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',GAUGE]]);
   return {status:'needs_file',reason:'download_not_saved',summary:'Only the gauge.',arrived:made.files};
  });
  const {value:first}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
