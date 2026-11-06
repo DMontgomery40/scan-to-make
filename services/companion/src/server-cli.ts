@@ -16,7 +16,7 @@ import { computerName, discoverAddresses, localHostName, macDisplayName } from '
 import { RemoteAuthStore } from './remote-auth.js';
 import { createPrintHandoffServices, type PrintHandoffServices } from './print-handoff-http.js';
 import { remoteDestinationsFor } from './remote-mcp-http.js';
-import { PrinterMcpClient, PrinterSessionPool, readPrinterHandoffConfig } from '@scan-to-make/printer-handoff';
+import { PrinterMcpClient, PrinterSessionPool, readPrinterHandoffConfig, toolResultJson } from '@scan-to-make/printer-handoff';
 import { PrinterDirectory } from './printing/directory.js';
 import { CameraFrames } from './printing/camera.js';
 import { CompanionSettingsStore } from './settings.js';
@@ -41,9 +41,9 @@ import {generateTitle} from './objects/title.js';
 import {PassTimings} from './touchup/stages.js';
 import {printerStlSize} from './objects/stl-size.js';
 import {runTouchup, acquireBlenderLock} from './touchup/touchup.js';
-import {readBlenderAddonStatus, listening, BLENDER_MCP_PORT} from './touchup/blender.js';
-import {BlenderAddonRepair} from './touchup/addon-repair.js';
-import {ConfiguredAddonInstaller} from './touchup/addon-installer.js';
+import {toolErrorText} from './touchup/blender.js';
+import {BlenderAddonRepair, BlenderSetupUnavailableError, type BlenderSetupReport} from './touchup/addon-repair.js';
+import {mcpPackageName} from './printing/print-settings.js';
 import {loadPrinterCatalog,type PrinterCatalog} from './objects/printers.js';
 import {PrinterSetup,findMcpFolders} from './printing/setup.js';
 import {homedir} from 'node:os';
@@ -219,17 +219,34 @@ if(handoffConfig&&printHandoff&&captureDirectory){
   const service=objects, directory=printerDirectory!;
   printerBusy=async id=>await service.printerBusy(id)||await directory.printing(id);
   await mcpUpdates!.applyOverrides();
-  const addonInstaller=new ConfiguredAddonInstaller(()=>runningHandoff()!,hostEnvironment(dataRoot));
-  blenderAddon=new BlenderAddonRepair({gate:printGate,workRoot:dataRoot,listening:()=>listening(BLENDER_MCP_PORT),
-    inspect:version=>addonInstaller.inspect(version),stage:directory=>addonInstaller.stage(directory),
+  // The printer MCP checks and replaces the add-on (blender_mcp_setup); the companion keeps the gate and the lock.
+  blenderAddon=new BlenderAddonRepair({gate:printGate,
     lock:()=>acquireBlenderLock(undefined,{signal:AbortSignal.timeout(10_000)}),
-    probe:async()=>{
-      const client=new PrinterMcpClient(runningHandoff()!);
-      const signal=AbortSignal.timeout(15_000);
-      try{await client.connect(signal);return await readBlenderAddonStatus(client,signal);}finally{await client.close().catch(()=>{});}
+    setup:async update=>{
+      const config=runningHandoff()!, client=new PrinterMcpClient(config);
+      const signal=AbortSignal.timeout(update?180_000:90_000);
+      try{
+        await client.connect(signal);
+        if(!client.hasTool('blender_mcp_setup'))throw new BlenderSetupUnavailableError(mcpPackageName(config.backend));
+        const result=await client.callTool('blender_mcp_setup',update?{update:true}:{},{signal});
+        if(result.isError)throw new Error(toolErrorText(result));
+        return toolResultJson<BlenderSetupReport>(result);
+      }finally{await client.close().catch(()=>{});}
     }});
   await objects.resume();
 }
+/** fusion_mcp_setup on the printer MCP as it runs (with its Update override); the Mac renders the answer. */
+const fusionSetup=handoffConfig===undefined?undefined:async(install:boolean)=>{
+  const config=runningHandoff()!, server=mcpPackageName(config.backend), client=new PrinterMcpClient(config);
+  const signal=AbortSignal.timeout(install?300_000:90_000);
+  try{
+    await client.connect(signal);
+    if(!client.hasTool('fusion_mcp_setup'))return {setup:null,server};
+    const result=await client.callTool('fusion_mcp_setup',install?{install:true}:{},{signal});
+    if(result.isError)return {setup:null,server,error:toolErrorText(result)};
+    return {setup:toolResultJson<Record<string,unknown>>(result),server};
+  }finally{await client.close().catch(()=>{});}
+};
 // The objects setup applies saved MCP overrides itself; otherwise apply them here, so every session (the phone's and
 // `/v1/mcp`'s) starts the version an Update chose.
 if(mcpUpdates){if(!objects)await mcpUpdates.applyOverrides();mcpUpdates.start();}
@@ -300,6 +317,7 @@ try {
       ...(mcpUpdates ? {mcpUpdates} : {}),
       ...(printerSetup ? {printerSetup} : {}),
   ...(blenderAddon ? {blenderAddon} : {}),
+      ...(fusionSetup ? {fusionSetup} : {}),
       // With every address answering, the Mac's QR is a v2 link from the live list.
       ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,
         ...(macName ? {name:instanceName(macName)} : {})})} : {}),

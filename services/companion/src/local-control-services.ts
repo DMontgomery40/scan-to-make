@@ -49,6 +49,8 @@ export interface ControlServices {
   liveActivityTokens?: import('./devices/live-activity-tokens.js').LiveActivityTokenStore;
   presence?: import('./devices/presence.js').DevicePresence;
   blenderAddon?: import('./touchup/addon-repair.js').BlenderAddonRepair;
+  /** fusion_mcp_setup on the printer MCP as the companion runs it (with its Update override): the Mac's Fusion Set Up. */
+  fusionSetup?: (install: boolean) => Promise<{setup: Record<string, unknown> | null; server: string; error?: string}>;
   mcpUpdates?: import('./printing/mcp-updates.js').McpUpdater;
   /** Settings → Printers: both MCPs (Download), finding and adding printers. Present without a printer. */
   printerSetup?: import('./printing/setup.js').PrinterSetup;
@@ -247,6 +249,10 @@ export function createControlDispatcher(services: ControlServices) {
           if (!auth.allowsLogin(login)) throw new ControlFailure('invalid-request');
           // The invitation JSON keeps its v1 fields; with the server's v2 details the QR is a v2 link.
           return await auth.createPairing(login,undefined,services.pairingLink?.());
+        }
+        case 'fusion.setup': {
+          if (!services.fusionSetup) throw new ControlFailure('unavailable');
+          return await services.fusionSetup(parameters[method].parse(raw).install);
         }
         case 'fusion.report': case 'fusion.claimSetup': case 'fusion.setupDone': {
           if (!services.runtimeSettings) throw new ControlFailure('unavailable');

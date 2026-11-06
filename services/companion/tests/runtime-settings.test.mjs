@@ -144,6 +144,19 @@ test('real server and local socket bridge preserve CAS, permissions and Mac-only
   assert.match((await request('/v1/settings')).body.settings.fusion.message,/Open Fusion/);
 });
 
+test('fusion.setup asks the printer MCP the companion runs, and passes its answer to the Mac as it is',async()=>{
+  const {createControlDispatcher}=await import('../dist/local-control-services.js');
+  const asked=[];
+  const fusionSetup=async install=>{asked.push(install);return {setup:{fusion:{installed:true,path:'/Applications/Autodesk Fusion.app'},ready:install},server:'bambu-printer-mcp'};};
+  const dispatch=createControlDispatcher({auth:{},companionVersion:'test',fusionSetup});
+  assert.deepEqual(await dispatch('fusion.setup',{install:false}),{setup:{fusion:{installed:true,path:'/Applications/Autodesk Fusion.app'},ready:false},server:'bambu-printer-mcp'});
+  assert.equal((await dispatch('fusion.setup',{install:true})).setup.ready,true);
+  assert.deepEqual(asked,[false,true]);
+  await assert.rejects(dispatch('fusion.setup',{}),'install is required');
+  await assert.rejects(dispatch('fusion.setup',{install:true,command:'/bin/sh'}),'nothing else is passed through');
+  await assert.rejects(createControlDispatcher({auth:{},companionVersion:'test'})('fusion.setup',{install:false}),{code:'unavailable'});
+});
+
 test('a lost Fusion claim reply can be replayed only by the same claimant until expiry',async t=>{
   const {service,advance}=await fixture(t);
   const owner=randomUUID(),other=randomUUID();

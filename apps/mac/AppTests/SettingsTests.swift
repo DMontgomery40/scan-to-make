@@ -1,74 +1,35 @@
 import XCTest
+#if canImport(ControlKit)
+import ControlKit
+#endif
 
 final class FusionSetupTests: XCTestCase {
-    private let env = """
-    PRINTER_HOST=192.168.1.20
-    BAMBU_TOKEN=secret
-    BLENDER_MCP_COMMAND=/opt/homebrew/bin/uvx
-    BLENDER_MCP_ARGS=["blender-mcp"]
-    TEMP_DIR=./temp
-
-    """
-
-    func testSetUpWritesTheFiveSettingsRightAfterBlendersAndKeepsEveryOtherLine() {
-        let merged = FusionSetup.merge(env:env)
-        let lines = merged.components(separatedBy:"\n")
-        let blender = lines.firstIndex { $0.hasPrefix("BLENDER_MCP_ARGS=") }!
-        XCTAssertEqual(Array(lines[(blender + 1)...(blender + 5)]).map { $0.components(separatedBy:"=")[0] },
-                       ["FUSION_MCP_COMMAND", "FUSION_MCP_ARGS", "FUSION_MCP_TIMEOUT_MS", "FUSION_MCP_HOST", "FUSION_MCP_PORT"])
-        XCTAssertTrue(merged.contains("FUSION_MCP_COMMAND=/opt/homebrew/bin/uvx\n"), "the same uvx the Blender bridge uses")
-        XCTAssertTrue(merged.contains("FUSION_MCP_ARGS=[\"--from\",\"git+https://github.com/DMontgomery40/fusion360-mcp-server@86a3016a5a5b\",\"fusion360-mcp-server\",\"--mode\",\"socket\"]\n"))
-        XCTAssertTrue(merged.contains("FUSION_MCP_PORT=9877\n"), "off Blender's 9876")
-        for line in env.components(separatedBy:"\n") where !line.isEmpty { XCTAssertTrue(lines.contains(line), line) }
-        XCTAssertTrue(FusionSetup.isConfigured(env:merged))
-        XCTAssertFalse(FusionSetup.isConfigured(env:env))
+    /// fusion_mcp_setup's structured result, as the printer MCP sends it in its text content.
+    func testTheMCPsSetupAnswerIsRead() throws {
+        let text = #"{"platform":"darwin","supported":true,"fusion":{"installed":true,"path":"/Applications/Autodesk Fusion.app"},"ready":true,"installed":{"addin":"already-current","port_agent":"installed","env":"written"}}"#
+        let setup = try FusionSetup.Setup.from(MCPCall.Reply(isError: false, text: text, server: "bambu-printer-mcp"))
+        XCTAssertEqual(setup, FusionSetup.Setup(fusionInstalled: true, fusionPath: "/Applications/Autodesk Fusion.app", ready: true, env: "written", server: "bambu-printer-mcp"))
+        let missing = try FusionSetup.Setup.from(MCPCall.Reply(isError: false, text: #"{"fusion":{"installed":false,"path":null},"ready":false}"#))
+        XCTAssertFalse(missing.fusionInstalled)
+        XCTAssertNil(missing.fusionPath)
+        XCTAssertThrowsError(try FusionSetup.Setup.from(MCPCall.Reply(isError: true, text: "The downloaded add-in didn't match the pinned version, so nothing was installed."))) {
+            XCTAssertEqual(($0 as? FusionSetup.Failure)?.errorDescription, "Fusion setup didn't finish: The downloaded add-in didn't match the pinned version, so nothing was installed.")
+        }
+        XCTAssertThrowsError(try FusionSetup.Setup.from(MCPCall.Reply(isError: false, text: "not json")))
     }
 
-    func testSetUpTwiceChangesNothingAndReplacesAnOlderBlock() {
-        let once = FusionSetup.merge(env:env)
-        XCTAssertEqual(FusionSetup.merge(env:once), once)
-        let stale = env + "FUSION_MCP_COMMAND=old\nFUSION_MCP_PORT=9876\n"
-        let fixed = FusionSetup.merge(env:stale)
-        XCTAssertFalse(fixed.contains("FUSION_MCP_COMMAND=old"))
-        XCTAssertEqual(fixed.components(separatedBy:"FUSION_MCP_PORT=").count, 2, "one port line")
-        XCTAssertEqual(FusionSetup.merge(env:"A=1"), "A=1\n\nFUSION_MCP_COMMAND=uvx\n" + FusionSetup.settings(blenderCommand:nil).dropFirst().map { "\($0.0)=\($0.1)" }.joined(separator:"\n") + "\n",
-                       "without Blender's settings the block goes at the end, with plain uvx")
-    }
-
-    func testOnlyThePinnedAddInFilesPassVerification() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("fusion-verify-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at:folder) }
-        try FileManager.default.createDirectory(at:folder.appendingPathComponent("server"), withIntermediateDirectories:true)
-        try Data("not the add-in".utf8).write(to:folder.appendingPathComponent("Fusion360MCP.py"))
-        XCTAssertThrowsError(try FusionSetup.verify(folder))
-        XCTAssertEqual(FusionSetup.addinFiles.count, 10)
-        XCTAssertEqual(FusionSetup.commit.count, 40)
-        XCTAssertTrue(FusionSetup.commit.hasPrefix(FusionSetup.shortCommit))
-    }
-
-    func testCodexPrinterServersAreReadFromItsTOML() {
-        let toml = """
-        model = "gpt-6"
-        [mcp_servers.bambu]
-        command = "node"
-        args = ["/Users/me/bambu-printer-mcp/dist/index.js", "--stdio"]
-        cwd = "/Users/me/bambu-printer-mcp"
-        [mcp_servers.bambu.env]
-        BAMBU_TOKEN = "x"
-        [mcp_servers.other]
-        command = 'uvx'
-        """
-        let servers = FusionSetup.codexServers(toml)
-        XCTAssertEqual(servers.map(\.name), ["bambu", "other"])
-        XCTAssertEqual(servers[0].cwd, "/Users/me/bambu-printer-mcp")
-        XCTAssertEqual(servers[0].args, ["/Users/me/bambu-printer-mcp/dist/index.js", "--stdio"])
-        XCTAssertEqual(servers[1].command, "uvx")
-    }
-
-    func testThePortAgentSetsTheVariableAtLogin() {
-        let plist = FusionSetup.portAgentPlist
-        XCTAssertEqual(plist["ProgramArguments"] as? [String], ["/bin/launchctl", "setenv", "FUSION_MCP_PORT", "9877"])
-        XCTAssertEqual(plist["RunAtLoad"] as? Bool, true)
+    /// The companion runs fusion_mcp_setup on the printer MCP as it runs it (its Update override included).
+    func testTheCompanionsAnswerBecomesTheMCPsReply() throws {
+        let answer = FusionSetupReply(setup: .object(["fusion": .object(["installed": .bool(true), "path": .string("/A.app")]), "ready": .bool(true)]), server: "bambu-printer-mcp")
+        let reply = try FusionSetup.Steps.reply(from: answer)
+        XCTAssertEqual(try FusionSetup.Setup.from(reply), FusionSetup.Setup(fusionInstalled: true, fusionPath: "/A.app", ready: true, env: nil, server: "bambu-printer-mcp"))
+        XCTAssertEqual(try FusionSetup.Steps.reply(from: FusionSetupReply(setup: nil, server: "bambu-printer-mcp", error: "macOS only")),
+                       MCPCall.Reply(isError: true, text: "macOS only", server: "bambu-printer-mcp"))
+        for name in ["bambu-printer-mcp", "mcp-3D-printer-server"] {
+            XCTAssertThrowsError(try FusionSetup.Steps.reply(from: FusionSetupReply(setup: nil, server: name))) {
+                XCTAssertEqual(($0 as? FusionSetup.Failure)?.errorDescription, "Update \(name) in Settings → Printers so it can set up Fusion, then press Set Up again.")
+            }
+        }
     }
 }
 
