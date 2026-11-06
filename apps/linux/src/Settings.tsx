@@ -128,7 +128,7 @@ export function Settings({
                 Open guide
               </Action>
               <p>
-                Scan rig by Kass 3D. Long vernier caliper by 3D Print Masters
+                Scan rig by Kass 3D. Vernier caliper by 3D Print Masters
                 Hub. Their original files and licenses stay with their model
                 pages.
               </p>

@@ -29,6 +29,13 @@ test('all five choices survive restart with private metadata and no connected cl
  assert(!JSON.stringify(JSON.parse(await readFile(join(root,'model-access.json'),'utf8'))).includes('connected'));
 });
 
+test('only the Claude Code worker can drive the person’s browser (a published download uses --chrome)',async t=>{
+ const {service}=await fixture(t);
+ for(const [choice,browser] of [[{kind:'claude-code'},true],[{kind:'codex-cli'},false],[api(),false],[{kind:'endpoint',url:'http://127.0.0.1:1234/v1',model:'local',keychainRef:randomUUID()},false]]){
+  await service.set(service.get().revision,choice);
+  assert.equal(service.projectWorker().browser,browser,choice.kind);
+ }
+});
 test('CAS serializes simultaneous edits; input/snapshot mutation cannot change stored choice',async t=>{
  const {service}=await fixture(t);const revision=service.get().revision,choice=api();
  const first=service.set(revision,choice),second=service.set(revision,{kind:'codex-cli'});

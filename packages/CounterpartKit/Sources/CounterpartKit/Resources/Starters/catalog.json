@@ -4,7 +4,7 @@
     "title": "3D scan platform",
     "subtitle": "A steady orbit around your object",
     "summary": "Build Kass 3D’s camera rig, clamp your phone to the arm, and move it around the object for a steady scan.",
-    "instructions": "Download the original full kit print profile from Kass 3D’s model page. Keep all six plates together in this project. Print each plate, then follow the designer’s assembly instructions. Choose the A1 mini version if you need the smaller parts. Keep the object still and move the phone slowly around it.",
+    "instructions": "Get Kass 3D’s full kit print profile from its MakerWorld page: the designer’s own 3MF with all six plates, kept together in this project. Print each plate, then follow the designer’s assembly instructions. Keep the object still and move the phone slowly around it.",
     "designer": "Kass 3D",
     "site": "MakerWorld",
     "url": "https://makerworld.com/en/models/1531561",
@@ -17,18 +17,18 @@
   },
   {
     "id": "long-vernier-caliper",
-    "title": "Long vernier caliper",
+    "title": "Vernier caliper with depth gauge",
     "subtitle": "Measure larger parts and depths",
-    "summary": "The long two-colour vernier caliper by 3D Print Masters Hub, together with its optional depth gauge.",
-    "instructions": "Choose the 220 mm LONG colour profile and the matching optional DEPTH GAUGE profile on the designer’s page. Import both original 3MF files into this project. Print the body, slider and depth gauge, then assemble them using the designer’s instructions. Keep the original scale and geometry unchanged, and check measurements against a known ruler.",
+    "summary": "The two-colour vernier caliper by 3D Print Masters Hub, in its 150 mm length, with its depth gauge.",
+    "instructions": "Get the designer’s 150 mm colour print profile and the matching 150 mm DEPTH GAUGE profile from MakerWorld: both original 3MF files, kept together in this project. If the depth gauge is only offered for the 220 mm version, get the 220 mm caliper and its depth gauge instead. Print the body, slider and depth gauge, assemble them as the designer shows, and check measurements against a known ruler.",
     "designer": "3D Print Masters Hub",
     "site": "MakerWorld",
-    "url": "https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths#profileId-232006",
+    "url": "https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths",
     "licence": "MakerWorld Standard Digital File License",
     "symbol": "ruler.fill",
     "image": "vernier.png",
     "imageCredit": "3D Print Masters Hub · original print-profile preview",
-    "detail": "Long version + depth gauge",
+    "detail": "150 mm + depth gauge",
     "source": "makerworld"
   }
 ]

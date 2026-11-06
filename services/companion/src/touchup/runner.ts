@@ -147,7 +147,9 @@ export interface WorkerRun {
   resultEvent?: ResultEvent; worker?: TouchupResult['worker']; toolCalls: number; stopReason?: string; stderrTail: string;
   exitCode: number | null; error?: NodeJS.ErrnoException; seconds: number; publicText: (text: string) => string;
 }
-export type ProjectWorker = (inv: TouchupInvocation, opts: {timeoutMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal}) => Promise<WorkerRun>;
+export type ProjectWorker = ((inv: TouchupInvocation, opts: {timeoutMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal}) => Promise<WorkerRun>)
+  /** false when this worker can't drive the person's browser (`--chrome`): only Claude Code can. */
+  & {browser?: boolean};
 
 export async function runClaudeWorker(inv: TouchupInvocation, opts: {
   spawn?: typeof nodeSpawn; timeoutMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
