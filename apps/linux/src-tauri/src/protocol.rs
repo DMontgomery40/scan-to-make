@@ -24,6 +24,7 @@ pub fn allowed(method: &str) -> bool {
             | "objects.passActivity"
             | "objects.printers"
             | "objects.filaments"
+            | "objects.colourMapping"
             | "objects.selectPrinter"
             | "objects.selectPlate"
             | "objects.answerAsk"

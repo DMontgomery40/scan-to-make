@@ -225,7 +225,25 @@ export interface Filament {
   destinationId: string;
   /** Where the spool sits, in the printer MCP's own words. */
   label?: string;
+  /** Which spools can feed one print together, as the printer MCP groups them. */
+  feed?: string;
   suggested?: boolean;
+}
+/** `objects.colourMapping`: a multi-colour model's parts, and the spool the printer MCP proposes for each. */
+export interface ColourMapping {
+  filaments: {
+    index: number;
+    name?: string;
+    colour?: string;
+    material?: string;
+    /** The MCP's proposed spool; absent when nothing can print this colour. */
+    slot?: number;
+    verdict?: string;
+    /** What the person should know about the proposal, in the MCP's words. */
+    note?: string;
+  }[];
+  trays: Filament[];
+  modelVersion?: string;
 }
 export interface Estimate {
   destinationId: string;

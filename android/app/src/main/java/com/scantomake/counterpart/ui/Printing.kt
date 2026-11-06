@@ -56,6 +56,7 @@ import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.Format
 import com.scantomake.counterpart.api.Iso
 import com.scantomake.counterpart.api.PrintChoice
+import com.scantomake.counterpart.api.ColourMapping
 import com.scantomake.counterpart.api.PrintColour
 import com.scantomake.counterpart.api.PrintQuality
 import com.scantomake.counterpart.api.PrintPauses
@@ -100,6 +101,14 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     var pauseText by remember { mutableStateOf("") }
     var filaments by remember { mutableStateOf<List<PrinterFilament>?>(null) }
     var colour by remember { mutableStateOf<PrintColour?>(null) }
+    // A multi-colour model: each part's spool, as the printer MCP proposes it.
+    var mapping by remember { mutableStateOf<ColourMapping?>(null) }
+    var mappingSlots by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
+    // Until the mapping answers, nothing slices: an estimate without its per-part spools would print one colour.
+    var mappingLoaded by remember { mutableStateOf(false) }
+    // Why the colours couldn't be read (the companion's own words, such as "Update bambu-printer-mcp…"); Try Again asks again.
+    var mappingProblem by remember { mutableStateOf<String?>(null) }
+    var mappingAttempt by remember { mutableStateOf(0) }
     var estimate by remember { mutableStateOf<SliceEstimate?>(null) }
     var estimating by remember { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
@@ -121,8 +130,13 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     // Every choice Print makes: the estimate slices exactly these, and Print sends that file (Nov 5). Pauses are
     // checked against the layer count only at Print, so a new count never re-slices.
     val estimatePauses = if (offersPauses) PrintPauses.parse(pauseText, null) else emptyList()
-    val estimateChoice = PrintChoice(colour, selectedQuality, selectedStrength, copies = selectedCopies, pauseBeforeLayers = estimatePauses ?: emptyList())
-    val readyToSlice = destinationId != null && !selectingPrinter && printerProblem == null && filaments != null && estimatePauses != null
+    val partSpools = mapping?.spools(mappingSlots)
+    val mixedFeeds = mapping?.mixesFeeds(mappingSlots) == true
+    val estimateChoice = PrintChoice(if (mapping != null) null else colour, selectedQuality, selectedStrength, copies = selectedCopies,
+        pauseBeforeLayers = estimatePauses ?: emptyList(), spools = partSpools, modelVersion = mapping?.modelVersion)
+    // A multi-colour model slices only with a spool for every part, from one feed.
+    val readyToSlice = destinationId != null && !selectingPrinter && printerProblem == null && filaments != null && estimatePauses != null &&
+        mappingLoaded && (mapping == null || (partSpools != null && !mixedFeeds))
     val shownSlice = estimate?.shownSlice?.takeIf { !estimating }
 
     LaunchedEffect(Unit) { if (catalog == null) state.loadPrinters() }
@@ -140,6 +154,19 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
             colour = list.firstOrNull { it.suggested == true }?.let { PrintColour.Auto }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (_: Exception) { filaments = emptyList() }
+    }
+    // The colours, once the printer is chosen: until they answer, nothing slices or prints. A failure stays a failure
+    // (the companion's own words, or the connection) with Try Again: a multi-colour model never prints its colours unseen.
+    LaunchedEffect(destinationId, mappingAttempt, selectingPrinter || printerProblem != null) {
+        mapping = null; mappingSlots = emptyMap(); mappingLoaded = false; mappingProblem = null
+        if (destinationId == null || selectingPrinter || printerProblem != null) return@LaunchedEffect
+        try {
+            val loaded = app.companion.colourMapping(id)
+            if (loaded.filaments.isNotEmpty()) { mapping = loaded; mappingSlots = loaded.proposedSlots }
+            mappingLoaded = true
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: CompanionException) { mappingProblem = e.message }
+        catch (_: Exception) { mappingProblem = "Couldn’t read this model’s colours. Check the connection, then try again." }
     }
     LaunchedEffect(estimateChoice.estimateBody(destinationId).toString(), readyToSlice, project.mediaVersion, project.selectedPlate?.id) {
         estimate = null; sliceRefusal = null; estimating = readyToSlice
@@ -211,9 +238,44 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                     ?: "Enter up to 16 whole layer numbers from 2 to 100000, separated by commas.", color = Palette.failed, fontSize = 12.sp)
             }
 
-            SectionTitle("Filament")
+            val parts = mapping
+            if (parts != null) {
+                SectionTitle("Colours")
+                parts.filaments.forEach { part ->
+                    var open by remember(part.index) { mutableStateOf(false) }
+                    val chosen = parts.trays.firstOrNull { it.slot == mappingSlots[part.index] }
+                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // A faint ring, so a black part or spool still shows on the dark sheet (emulator check, #365).
+                            Box(Modifier.size(22.dp).clip(CircleShape).background(hexColor(part.colour ?: "#808080")).border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape))
+                            Text(part.name ?: "Part ${part.index}", Modifier.weight(1f), maxLines = 1)
+                            Box {
+                                Row(Modifier.clickable(enabled = !working) { open = true }.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    chosen?.let { Box(Modifier.size(18.dp).clip(CircleShape).background(hexColor(it.colour)).border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)) }
+                                    Text("  " + (chosen?.title ?: "Choose a spool"), fontSize = 14.sp)
+                                }
+                                androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                                    parts.trays.forEach { tray ->
+                                        androidx.compose.material3.DropdownMenuItem(text = { Text(tray.title) },
+                                            onClick = { mappingSlots = mappingSlots + (part.index to tray.slot); open = false })
+                                    }
+                                }
+                            }
+                        }
+                        parts.note(part, mappingSlots)?.let { Text(it, color = Palette.secondary, fontSize = 12.sp, modifier = Modifier.padding(start = 32.dp)) }
+                    }
+                }
+                if (mixedFeeds) Text("One print feeds from one source: put every colour on AMS spools, or every colour on the external spool.",
+                    color = Palette.needsYou, fontSize = 12.sp)
+            }
+            mappingProblem?.let { words ->
+                SectionTitle("Colours")
+                Text(words, color = Palette.failed, fontSize = 13.sp)
+                Text("Try Again", color = Palette.filament, modifier = Modifier.clickable(enabled = !working) { mappingAttempt++ }.padding(vertical = 6.dp))
+            }
+            if (parts == null) SectionTitle("Filament")
             val list = filaments
-            when {
+            if (parts == null) when {
                 list == null -> Text("Asking the printer what's loaded…", color = Palette.secondary)
                 list.isEmpty() -> Text("The printer's own setting is used.", color = Palette.secondary)
                 else -> Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -254,8 +316,8 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
             working = true; problem = null
             scope.launch {
                 try {
-                    state.show(app.companion.print(id, PrintChoice(colour, selectedQuality, selectedStrength, checked, selectedCopies,
-                        pauseBeforeLayers = pauseLayers ?: emptyList(), sliceSha256 = shownSlice), expectedPlate))
+                    state.show(app.companion.print(id, PrintChoice(if (mapping != null) null else colour, selectedQuality, selectedStrength, checked, selectedCopies,
+                        pauseBeforeLayers = pauseLayers ?: emptyList(), sliceSha256 = shownSlice, spools = partSpools, modelVersion = mapping?.modelVersion), expectedPlate))
                     printing()
                 } catch (e: CompanionException) { problem = e.message } catch (e: Exception) { problem = CompanionException.unreachable.message } finally { working = false }
             }

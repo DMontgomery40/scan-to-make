@@ -23,6 +23,9 @@ import com.scantomake.counterpart.pairing.PairingClient
 import com.scantomake.counterpart.pairing.PairingStore
 import com.scantomake.counterpart.ui.HomeScreen
 import com.scantomake.counterpart.ui.SettingsScreen
+import com.scantomake.counterpart.ui.PrintSheetScreen
+import com.scantomake.counterpart.api.PrinterCatalog
+import com.scantomake.counterpart.api.PrinterDestination
 import com.scantomake.counterpart.ui.designerSettingsWords
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.jsonObject
@@ -120,5 +123,55 @@ class HomeLayoutTests {
         assertEquals("Changes the designer’s settings saved in this file.",
             designerSettingsWords(designer, PrintQuality.Fine, PrintStrength.Standard))
         assertNull(designerSettingsWords(project("p", "Mic mount", "ready"), PrintQuality.Standard, PrintStrength.Standard))
+    }
+
+    /**
+     * PRD §6.1 / §8.0 item 7: a multi-colour model's print sheet shows one row per part, each on the printer MCP's proposed
+     * spool in its words, with its note (#365, the Android side of #341's rows).
+     */
+    private val PROJECT = "1f1c5515-0000-4000-8000-000000000365"
+    private fun multiColourSheet(mapping: (String) -> FakeTransport) {
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = mapping(PROJECT)
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(requireNotNull(Project.decode(WireJson.parseToJsonElement(
+            """{"id":"$PROJECT","title":"Caliper card","instructions":"A card","state":"ready","createdAtMs":1,"updatedAtMs":2,"printerDestinationId":"p1s"}""").jsonObject)))
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1s", "Bambu Lab P1S", backend = "bambu-printer-mcp")), "p1s")
+        compose.setContent { WithApp { PrintSheetScreen(PROJECT, close = {}, printing = {}) } }
+    }
+
+    @Test fun aMultiColourModelShowsEachPartsSpoolAsTheMcpProposesIt() {
+        val tray = { slot: Int, label: String, name: String, colour: String ->
+            mapOf("slot" to slot, "colour" to colour, "material" to "PLA", "name" to name, "filamentId" to "GFA00", "destinationId" to "p1s", "label" to label, "feed" to "ams") }
+        multiColourSheet { id -> FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id/colour-mapping") -> json(200, mapOf(
+                "filaments" to listOf(mapOf("index" to 1, "name" to "body", "colour" to "#000000", "material" to "PLA", "slot" to 0, "verdict" to "same-colour"),
+                    mapOf("index" to 2, "name" to "markings", "colour" to "#FFFFFF", "material" to "PLA", "slot" to 1, "verdict" to "closest",
+                        "note" to "White isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic.")),
+                "trays" to listOf(tray(0, "A1", "Black PLA Basic", "#000000"), tray(1, "A2", "Sunflower Yellow PLA Basic", "#FEC600")), "modelVersion" to "v1"))
+            request.url.endsWith("/v1/objects/$id/filaments") -> json(200, mapOf("filaments" to emptyList<Any>()))
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } } }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("markings")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Colours").assertExists()
+        compose.onNodeWithText("body").assertExists()
+        compose.onNodeWithText("  A1 · Black PLA Basic").assertExists()
+        compose.onNodeWithText("  A2 · Sunflower Yellow PLA Basic").assertExists()
+        compose.onNodeWithText("White isn’t loaded. Closest loaded: A2 Sunflower Yellow PLA Basic.").assertExists()
+    }
+
+    @Test fun colourMappingThatFailsHoldsPrintAndSaysWhy() {
+        var transport: FakeTransport? = null
+        multiColourSheet { id -> FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id/colour-mapping") ->
+                json(409, mapOf("error" to mapOf("code" to "invalid-state", "message" to "Update bambu-printer-mcp in Settings → Printers so Counterpart can match each colour to a loaded spool. Nothing was sent to the printer.")))
+            request.url.endsWith("/v1/objects/$id/filaments") -> json(200, mapOf("filaments" to emptyList<Any>()))
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }.also { transport = it } }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Try Again")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Update bambu-printer-mcp in Settings → Printers so Counterpart can match each colour to a loaded spool. Nothing was sent to the printer.").assertExists()
+        compose.waitForIdle()
+        assertEquals("nothing is sliced while the colours are unread", emptyList<String>(), transport!!.paths.filter { it.endsWith("/estimate") })
     }
 }
