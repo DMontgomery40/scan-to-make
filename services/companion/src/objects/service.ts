@@ -605,7 +605,9 @@ export class ObjectService {
     const modelPath = join(this.#deps.store.dir(object.id), current.model);
     const file = await stat(modelPath).catch(() => undefined);
     if (!file) return undefined;
-    return {key: JSON.stringify([object.id, current.model, file.mtimeMs, file.size, destinationId ?? null]), modelPath, destinationId};
+    // The running MCP's version too: after an update (Settings → Printers) its answer is asked for again.
+    const server = destinationId ? this.#deps.printers?.capabilities(destinationId)?.server?.version ?? null : null;
+    return {key: JSON.stringify([object.id, current.model, file.mtimeMs, file.size, destinationId ?? null, server]), modelPath, destinationId};
   }
   /** This project's printer MCP can't say whether its 3MF prints with its own settings: an older MCP to update. */
   async #ownSettingsUnsupported(object: StmObject): Promise<boolean> {

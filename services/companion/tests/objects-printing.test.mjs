@@ -599,9 +599,17 @@ test("the first estimate waits for the own-settings answer; an MCP that can't an
   const g = await setup(t, {sliceArgs: true});
   g.deps.print.services.runner.ownProcess = async () => 'unsupported';
   await multipart(g, {bytes: twoPart3mf({layer_height: '0.16'}), kind: 'copy'});
+  let version = '1.1.61';
+  g.deps.printers.capabilities = () => ({server: {name: 'bambu-printer-mcp', version}});
   const old = await g.service.estimate(g.object.id, {});
   assert.equal(old.ownSettingsUpdate, "Update bambu-printer-mcp in Settings → Printers so Counterpart can keep a designer's settings for this file.");
   assert.equal((await g.service.get(g.object.id)).current.ownSettings, undefined);
+  // After the person updates the MCP, its answer is asked for again, not the old one's 'unsupported'.
+  version = '1.1.65';
+  g.deps.print.services.runner.ownProcess = async () => true;
+  const updated = await g.service.estimate(g.object.id, {});
+  assert.equal(updated.ownSettingsUpdate, undefined);
+  assert.equal((await g.service.get(g.object.id)).current.ownSettings, true);
   // A failed call is asked again, never recorded as an answer.
   const h = await setup(t, {sliceArgs: true});
   let fail = true, calls = 0;
