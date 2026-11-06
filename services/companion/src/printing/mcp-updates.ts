@@ -1,4 +1,4 @@
-import {execFile, type ExecFileOptionsWithStringEncoding} from 'node:child_process';
+import {spawn, type ChildProcess} from 'node:child_process';
 import {mkdir, readFile, rename, rm as fsRm, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {dirname, join} from 'node:path';
@@ -90,34 +90,43 @@ export class McpOverrides {
 }
 
 /**
- * Runs a command to completion, or until its deadline. The command runs in its own process group, and at the deadline
- * the whole group is stopped: npm's install scripts are grandchildren that can hold its output open, and execFile only
- * answers when that output closes. The answer never waits past the deadline (or the command's own exit) plus
- * KILL_GRACE_MS, whatever the group does.
+ * Runs a command to completion, or until its deadline. The command is spawned as its own process group (execFile
+ * doesn't pass `detached` on to spawn), and at the deadline the whole group is stopped: npm's install scripts are
+ * grandchildren that can hold its output open, and an answer that waits for that output never comes. The answer never
+ * waits past the deadline (or the command's own exit) plus KILL_GRACE_MS, whatever the group does.
  */
 export const runCommand: CommandRunner = (command, args, options) => new Promise(resolve => {
-  let settled = false, partial = '';
+  const limit = 16 * 1024 * 1024;
+  let settled = false, output = '', bytes = 0, exitCode: number | null | undefined;
+  let child: ChildProcess;
+  // Never after the answer: a finished group's id may belong to another process group by then.
+  const group = (signal: NodeJS.Signals) => { try { if (child?.pid && !settled) process.kill(-child.pid, signal); } catch { /* already gone */ } };
   const finish = (value: {code: number; output: string}) => {
     if (settled) return;
+    group('SIGKILL'); // whatever it started and left running goes with it
     settled = true; clearTimeout(stop); clearTimeout(abandon); resolve(value);
   };
-  // `detached` (passed through to spawn, which execFile's types leave out) makes the command its own process group.
-  const spawnOptions = {cwd: options.cwd, env: options.env, maxBuffer: 16 * 1024 * 1024, encoding: 'utf8', detached: true} as ExecFileOptionsWithStringEncoding;
-  const child = execFile(command, args, spawnOptions, (error, stdout, stderr) => {
-    const code = error ? (typeof (error as {code?: unknown}).code === 'number' ? (error as {code: number}).code : 1) : 0;
-    finish({code, output: `${stdout ?? ''}${stderr ?? ''}${error && code !== 0 && !stderr ? String(error.message) : ''}`});
-  });
-  child.stdout?.on('data', chunk => { partial += chunk; });
-  child.stderr?.on('data', chunk => { partial += chunk; });
+  const late = () => `${output}${output && !output.endsWith('\n') ? '\n' : ''}${command.split('/').at(-1)} didn't finish within ${Math.round(options.timeoutMs / 1000)} seconds, so Counterpart stopped it.`;
+  const stop = setTimeout(() => { group('SIGTERM'); setTimeout(() => group('SIGKILL'), KILL_GRACE_MS / 2).unref?.(); }, options.timeoutMs);
+  const abandon = setTimeout(() => finish({code: 124, output: late()}), options.timeoutMs + KILL_GRACE_MS);
+  try {
+    child = spawn(command, args, {cwd: options.cwd, env: options.env, detached: true, stdio: ['ignore', 'pipe', 'pipe']});
+  } catch (error) { finish({code: 1, output: String((error as Error).message)}); return; }
+  const take = (chunk: Buffer) => {
+    bytes += chunk.length;
+    if (bytes > limit) { finish({code: 1, output: `${output}\nThe output was larger than 16 MB, so Counterpart stopped ${command.split('/').at(-1)}.`}); return; }
+    output += chunk.toString('utf8');
+  };
+  child.stdout!.on('data', take);
+  child.stderr!.on('data', take);
+  child.once('error', error => finish({code: 1, output: `${output}${String(error.message)}`}));
+  // Every pipe closed: the usual answer.
+  child.once('close', (code, signal) => finish(code !== null ? {code, output} : {code: 1, output: `${output}${command.split('/').at(-1)} was stopped (${signal}).`}));
   // Exited, but something it started still holds its output: answer with its own exit code once the grace is over.
   child.once('exit', code => {
-    setTimeout(() => { if (settled) return; group('SIGKILL'); finish({code: code ?? 1, output: partial}); }, KILL_GRACE_MS).unref?.();
+    exitCode = code;
+    setTimeout(() => finish({code: exitCode ?? 1, output}), KILL_GRACE_MS).unref?.();
   });
-  // Never after the answer: a finished group's id may belong to another process group by then.
-  const group = (signal: NodeJS.Signals) => { try { if (child.pid && !settled) process.kill(-child.pid, signal); } catch { /* already gone */ } };
-  const late = () => `${partial}${partial && !partial.endsWith('\n') ? '\n' : ''}${command.split('/').at(-1)} didn't finish within ${Math.round(options.timeoutMs / 1000)} seconds, so Counterpart stopped it.`;
-  const stop = setTimeout(() => { group('SIGTERM'); setTimeout(() => group('SIGKILL'), KILL_GRACE_MS / 2).unref?.(); }, options.timeoutMs);
-  const abandon = setTimeout(() => { group('SIGKILL'); finish({code: 124, output: late()}); }, options.timeoutMs + KILL_GRACE_MS);
 });
 
 /** `work`'s answer, or `late()`'s when it hasn't settled within `ms`. Work that settles afterwards is ignored. */
@@ -132,8 +141,8 @@ function within<T>(work: Promise<T>, ms: number, late: () => T | Promise<T>): Pr
 const RESTORE_FAILED = "The previous version couldn't be put back, so these printers may not start their MCP. Install a fresh copy from Update.";
 const NO_PRINTERS = (pkg: string) => `No printer uses this MCP any more (it was removed), so Counterpart stopped updating ${pkg}.`;
 const BUSY_UNKNOWN = (pkg: string) => `Counterpart couldn't check whether a print is running, so it didn't update ${pkg}. Try Update again.`;
-const NOT_STARTED = (pkg: string, seconds: number) =>
-  `The updated ${pkg} didn't start within ${seconds} seconds, so Counterpart put the previous version back. Try Update again.`;
+const NOT_STARTED_BACK = ', so Counterpart put the previous version back. Try Update again.';
+const NOT_STARTED = (pkg: string, seconds: number) => `The updated ${pkg} didn't start within ${seconds} seconds${NOT_STARTED_BACK}`;
 const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.length <= LOG_TAIL_BYTES ? text : bytes.subarray(bytes.length - LOG_TAIL_BYTES).toString('utf8').replace(/^�+/, ''); };
 const newer = newerVersion;
 
@@ -566,7 +575,7 @@ export class McpUpdater {
       const stuck = () => { throw Object.assign(new Error('MCP start timed out'), {sentence: NOT_STARTED(pkg, Math.round(startMs / 1000))}); };
       for (const member of members) {
         const session = this.#deps.session(member.id);
-        if (session) await within(session.restart(this.#deps.overrides.apply(member.config, this.#override(member.id, member.config))), startMs, stuck);
+        if (session) await within(session.restart(this.#deps.overrides.apply(member.config, this.#override(member.id, member.config)), {signal: AbortSignal.timeout(startMs)}), startMs, stuck);
       }
       // Every printer on these files starts the new version before the previous one is removed: one that can't
       // start it puts everything back.
@@ -586,10 +595,17 @@ export class McpUpdater {
         restoreFailed = true;
         sentence = [sentence, failure?.sentence ?? "Counterpart couldn't put the previous version back."].filter(Boolean).join(' ');
       });
+      const startMs = this.#deps.startTimeoutMs ?? MCP_START_MS;
       for (const member of members) {
         await this.#deps.overrides.set(member.id, previous.get(member.id), member.config).catch(() => undefined);
         const session = this.#deps.session(member.id);
-        if (session) await within(session.restart(this.#deps.overrides.apply(member.config, previous.get(member.id))), this.#deps.startTimeoutMs ?? MCP_START_MS, () => undefined).catch(() => undefined);
+        // A printer whose MCP couldn't be switched back in time may still run the new version: never say it was put back.
+        if (session) await within(session.restart(this.#deps.overrides.apply(member.config, previous.get(member.id)), {signal: AbortSignal.timeout(startMs)}), startMs, () => {
+          throw new Error('restart timed out');
+        }).catch(() => {
+          if (!restoreFailed) sentence = [sentence?.replace(NOT_STARTED_BACK, '.'), "Counterpart couldn't switch this printer's MCP back in time."].filter(Boolean).join(' ');
+          restoreFailed = true;
+        });
       }
       this.#active.delete(mcpId);
       await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)),

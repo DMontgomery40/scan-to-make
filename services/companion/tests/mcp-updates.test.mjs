@@ -240,17 +240,29 @@ test('an update waiting for a print installs the version that is newest when the
 // "every await on an MCP or npm child gets a bounded time, and a stuck one shows a sentence instead of a spinner"
 test('an updated MCP that never restarts or connects ends the update with a sentence and the previous version back', async t => {
   const live = `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp`;
-  for (const stuck of ['restart', 'connect']) {
+  for (const stuck of ['restart', 'connect', 'rollback']) {
     const forever = new Promise(() => undefined);
     const f = await updater(t, {profile: bambu('/x/node', [`${live}/dist/index.js`]), files: {[`${live}/package.json`]: pkgJson('1.1.46')}, startTimeoutMs: 40,
       session: (id, restarts) => ({
-        restart: async config => { restarts.push({id, ...config}); if (stuck === 'restart' && restarts.length === 1) return forever; },
-        connect: async () => stuck === 'connect' ? forever : {server: {version: '1.1.50'}},
+        // The session's own restart deadline ends a held restart with `cancelled`; these never end at all.
+        restart: async (config, options) => {
+          restarts.push({id, ...config});
+          if ((stuck === 'restart' && restarts.length === 1) || (stuck === 'rollback' && restarts.length > 2)) return forever;
+          assert.ok(options?.signal, 'every restart in an update has a deadline');
+        },
+        connect: async () => stuck !== 'restart' ? forever : {server: {version: '1.1.50'}},
       })});
     assert.equal((await f.updates.update(f.mcpId)).state, 'started');
     await f.done();
     const failed = f.events.at(-1);
     assert.equal(failed.type, 'mcp.update.failed', stuck);
+    if (stuck === 'rollback') {
+      // Switching back timed out too: the printer may still run the new version, so it never says it was put back.
+      assert.doesNotMatch(failed.data.log, /put the previous version back\./);
+      assert.match(failed.data.log, /didn't start within \d+ seconds\. Counterpart couldn't switch this printer's MCP back in time\./);
+      assert.equal(failed.reason, "The previous version couldn't be put back, so these printers may not start their MCP. Install a fresh copy from Update.");
+      continue;
+    }
     assert.match(failed.data.log, /The updated bambu-printer-mcp didn't start within \d+ seconds, so Counterpart put the previous version back\./, stuck);
     assert.ok(f.moves.some(([kind, , to]) => kind === 'rename' && to === live), `${stuck}: the previous copy is put back`);
     assert.equal((await f.updates.update(f.mcpId)).state, 'started', `${stuck}: nothing stays reserved; the next Update is a new one`);
@@ -279,14 +291,19 @@ test('a command whose child keeps its output open still answers by its deadline,
   const {runCommand} = await import('../dist/printing/mcp-updates.js');
   // npm exits, but a postinstall grandchild still holds stdout: execFile alone would wait for the grandchild.
   const started = Date.now();
-  const exited = await runCommand('/bin/sh', ['-c', 'echo installed; (sleep 30) & exit 0'], {env: process.env, timeoutMs: 60_000});
+  const exited = await runCommand('/bin/sh', ['-c', 'echo installed; (sleep 30) & echo "left:$!"; exit 0'], {env: process.env, timeoutMs: 60_000});
   assert.equal(exited.code, 0);
   assert.match(exited.output, /installed/);
   assert.ok(Date.now() - started < 15_000, 'answers within the grace after its own exit');
+  const left = Number(exited.output.match(/left:(\d+)/)[1]);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.throws(() => process.kill(left, 0), {code: 'ESRCH'}, 'what it left running is stopped with it');
   // A command that never exits answers at its deadline with a sentence, its group stopped.
-  const hung = await runCommand('/bin/sh', ['-c', 'echo looking; sleep 30'], {env: process.env, timeoutMs: 200});
+  const hung = await runCommand('/bin/sh', ['-c', 'echo "looking:$$"; sleep 30'], {env: process.env, timeoutMs: 200});
   assert.notEqual(hung.code, 0);
   assert.match(hung.output, /looking/);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.throws(() => process.kill(Number(hung.output.match(/looking:(\d+)/)[1]), 0), {code: 'ESRCH'}, 'stopped at its deadline');
   assert.ok(Date.now() - started < 30_000);
 });
 

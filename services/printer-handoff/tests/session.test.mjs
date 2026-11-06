@@ -298,6 +298,30 @@ test('restart lets a running print call finish, then the next call starts the MC
   await assert.rejects(session.restart(), /session-closed/);
 });
 
+// Nov 6: an MCP update's restart could wait forever behind a stuck call, or on an MCP whose close hangs, and then
+// switch the session to the version that was being put back. With a deadline, a restart either changes the session
+// in time or changes nothing and says so.
+/** A deadline that keeps the test running until it fires (AbortSignal.timeout's timer doesn't). */
+const deadline = ms => { const controller = new AbortController(); setTimeout(() => controller.abort(), ms); return controller.signal; };
+test('a restart with a deadline never waits forever: a held session is left as it was, a hung close is left behind', async () => {
+  let release;
+  const {clients, factory} = fakes({gate: name => name === 'print_3mf' ? new Promise(resolve => { release = resolve; }) : undefined});
+  const session = new PrinterSession('p1s', config, {clientFactory: factory});
+  const printing = session.call('print_3mf', {});
+  await until(() => release);
+  await assert.rejects(session.restart({...config, process: {command: '/opt/new/mcp'}}, {signal: deadline(20)}), /cancelled/);
+  assert.equal(session.config.process.command, '/usr/bin/true', 'nothing changed');
+  release(); await printing;
+  // The MCP's close never finishes: the restart still ends by its deadline, with the new config in place.
+  clients[0].close = () => new Promise(() => undefined);
+  await session.restart({...config, process: {command: '/opt/previous/mcp'}}, {signal: deadline(20)});
+  assert.equal(session.config.process.command, '/opt/previous/mcp');
+  await session.call('get_printer_status', {});
+  assert.equal(clients.at(-1).command, '/opt/previous/mcp', 'the next call starts the config the restart set');
+  await session.restart(undefined, {signal: deadline(1000)});
+  await session.close();
+});
+
 test('each restart advances the session generation, so answers kept from the old MCP are told apart', async t => {
   const {factory} = fakes();
   const session = new PrinterSession('p1s', config, {clientFactory: factory});

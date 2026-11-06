@@ -272,19 +272,34 @@ export class PrinterSession {
    * PRD §8.10: after an update, the next call starts the MCP afresh (optionally with a new process config).
    * Waits for the mutex, so no mutating call is cut off; the session stays usable and keeps its holders.
    */
-  async restart(config?: PrinterHandoffConfig): Promise<void> {
+  async restart(config?: PrinterHandoffConfig, options: {signal?: AbortSignal} = {}): Promise<void> {
     if (this.#closed) throw new PrinterMcpError('session-closed');
-    const unlock = await this.#lock();
+    // With a signal (an MCP update's deadline): a call still holding the session past it ends this restart with
+    // `cancelled`, and nothing is changed, so whoever asked can say so instead of waiting on it (Nov 6).
+    const unlock = await this.#lock(options.signal);
     try {
-      await this.#connecting?.catch(() => undefined);
+      await this.#settled(this.#connecting?.catch(() => undefined), options.signal);
       if (config) this.#config = structuredClone(config);
       this.#generation += 1;
       const client = this.#client;
       this.#client = undefined;
       this.#failures = 0;
       this.#retryAt = 0;
-      await client?.close().catch(() => undefined);
+      // The previous MCP is already set aside: one whose close hangs never keeps the next config from running.
+      await this.#settled(client?.close().catch(() => undefined), options.signal);
     } finally { unlock(); }
+  }
+
+  /** Waits for `work`, or only until `signal` aborts (the work goes on unobserved). */
+  async #settled(work: Promise<unknown> | undefined, signal?: AbortSignal): Promise<void> {
+    if (!work) return;
+    if (!signal) { await work; return; }
+    if (signal.aborted) return;
+    await new Promise<void>(resolve => {
+      const done = () => { signal.removeEventListener('abort', done); resolve(); };
+      signal.addEventListener('abort', done, {once: true});
+      work.then(done, done);
+    });
   }
 
   async close(): Promise<void> {
