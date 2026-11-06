@@ -2214,8 +2214,7 @@ export class ObjectService {
     // said "Sign in"). PRD §8.11 step 2.2: a matching download is used at once.
     if (result.status !== 'downloaded' && result.arrived?.length && !(result.status === 'failed' && result.run?.stopReason === 'cancelled')) {
       const object = await store.get(id), starter = object.starterId ? this.#starter(object.starterId) : undefined;
-      const kept = starter ? await this.#modelFiles(this.#starterCacheDir(starter), 1) : [];
-      const files = starter ? await this.#starterDownloads(starter, [...kept, ...result.arrived]) : [];
+      const files = starter ? await this.#starterFiles(starter, result.arrived) : [];
       const kit = starter ? this.#kit(starter, files) : undefined;
       if (starter && kit) {
         console.error(`published pass: project ${id} took the designer’s ${kit.length} file${kit.length === 1 ? '' : 's'} from Downloads (the worker reported ${result.status}): ${kit.map(file => basename(file)).join(', ')}`);
@@ -2264,7 +2263,15 @@ export class ObjectService {
       return this.#changed(updated);
     }
     const summary = [result.summary, result.profile ? `Profile: ${result.profile}.` : undefined].filter(Boolean).join(' ');
-    return this.#keepPublished(id, result.files, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(summary ? {summary} : {}), ...(credit ? {credit} : {})});
+    // A starter's worker may have downloaded only what was missing (Codex on #369): its kept part comes with it.
+    const object = await store.get(id), starter = object.starterId ? this.#starter(object.starterId) : undefined;
+    let files = result.files;
+    if (starter) {
+      const all = await this.#starterFiles(starter, result.files);
+      const kit = this.#kit(starter, all);
+      files = kit ?? [...new Set([...all.map(file => file.path), ...result.files])];
+    }
+    return this.#keepPublished(id, files, {startedAtMs, now, ...(result.model ? {model: result.model} : {}), ...(summary ? {summary} : {}), ...(credit ? {credit} : {})});
   }
 
   /** The designer's own files among `files`: metadata names the catalog's designer, one per sha256 (repeat clicks copy). */
@@ -2295,6 +2302,16 @@ export class ObjectService {
     return files.length >= starter.files && plates >= (starter.plates ?? 0) ? files.map(file => file.path) : undefined;
   }
 
+  /**
+   * A starter's files on hand to make up its kit with `extra`: what its cache keeps, and, when the catalog pins its files,
+   * any pinned one in ~/Downloads however long it has been there (its sha256 proves what it is). Codex on #369.
+   */
+  async #starterFiles(starter: StarterProject, extra: string[]) {
+    const kept = await this.#modelFiles(this.#starterCacheDir(starter), 1);
+    const pinned = starter.sha256?.length ? (await this.#starterDownloads(starter, await this.#modelFiles(this.#deps.downloads ?? join(homedir(), 'Downloads'), 0)))
+      .filter(file => starter.sha256!.includes(file.sha256)).map(file => file.path) : [];
+    return this.#starterDownloads(starter, [...kept, ...pinned, ...extra]);
+  }
   #starter(id: string) { return (this.#deps.starter ?? bundledStarter)(id); }
   #starterCacheDir(starter: StarterProject) {
     return join(this.#deps.starterCache ?? join(dirname(this.#deps.store.root), 'starters'), starterModelId(starter));

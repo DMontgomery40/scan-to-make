@@ -184,6 +184,27 @@ test('a raw-model download that arrived is never a starter’s files',async t=>{
  const {value:o}=await logged(async()=>service.settled((await service.addStarter('scan-platform')).id));
  assert.equal(o.state,'failed');assert.equal(o.files,undefined);
 });
+// Codex on #369: a retry that downloads only the missing file brings the kept part with it, and a pinned file already in
+// Downloads before the pass makes up the kit with one that arrives during it.
+test('a starter’s kit is made up from what is kept, what is pinned in Downloads, and what the pass brought',async t=>{
+ let pass=0;
+ const a=await setup(t,async(_input,root)=>{
+  pass++;
+  if(pass===1){const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',COLOR]]);return {status:'needs_file',reason:'site_error',summary:'The gauge answered 503.',arrived:made.files};}
+  return downloaded(root,[['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',GAUGE]]);
+ });
+ const {value:first}=await logged(async()=>a.service.settled((await a.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(first.state,'failed');
+ const second=await a.service.settled((await a.service.start(first.id)).id);
+ assert.equal(second.state,'ready');assert.deepEqual(second.files.receipts.map(r=>r.sha256).sort(),[sha(COLOR),sha(GAUGE)].sort(),'the kept caliper and the new gauge');
+ const b=await setup(t,async(_input,root)=>{
+  const made=await downloaded(root,[['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',GAUGE]]);
+  return {status:'needs_file',reason:'download_not_saved',summary:'Nothing arrived.',arrived:made.files};
+ });
+ await mkdir(join(b.root,'Downloads'));await writeFile(join(b.root,'Downloads','Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),COLOR);
+ const {value:made}=await logged(async()=>b.service.settled((await b.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(made.state,'ready');assert.equal(b.asked.length,1);assert.equal(made.files.receipts.length,2);
+});
 test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
  for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
   ['one of two files',[['Vernier Caliper Ruler 150mm COLOR.3mf','Vernier Caliper Ruler - Two Lengths']]],
