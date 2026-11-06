@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {mcpPlates} from './support/shown-print.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {mkdtemp, mkdir, readFile, writeFile, symlink} from 'node:fs/promises';
@@ -11,7 +12,7 @@ import {createControlDispatcher} from '../dist/local-control-services.js';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function fixture(t, {denied = [], reconstruct, reportsCompletion, camera, printers, printerCatalog} = {}) {
+async function fixture(t, {denied = [], reconstruct, reportsCompletion, camera, printers, printerCatalog, print} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'objects-http-'));
   const store = new ObjectStore(join(root, 'objects'));
   const inputs = [];
@@ -22,7 +23,7 @@ async function fixture(t, {denied = [], reconstruct, reportsCompletion, camera, 
     return {status: 'done', summary: 'Fixed.', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir: join(root, 'pass')};
   };
   const events = [];
-  const service = new ObjectService({store, runTouchup, reportsCompletion, camera, printers, printerCatalog, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
+  const service = new ObjectService({store, runTouchup, reportsCompletion, camera, printers, printerCatalog, ...(print ? {print} : {}), stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
     events: {emit: async draft => { events.push(draft); }}});
   const routes = createObjectRoutes(service);
   const scopes = [], devices = [];
@@ -829,7 +830,8 @@ test('duplicate inherits historical colour only for the same effective printer',
 });
 
 test('phone plate selection stays authorized and exposes all retained plates', async t => {
-  const f=await fixture(t);
+  // A printer whose MCP lists the file's plates (list_3mf_plates).
+  const f=await fixture(t, {print: {services: {runner: {backend: 'bambu-printer-mcp', modelPlates: mcpPlates, runBundle: async () => { throw Error('unused'); }}}}});
   const {createRequire}=await import('node:module');
   const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
   const bytes=Buffer.from(zipSync({'[Content_Types].xml':strToU8('<Types/>'),
