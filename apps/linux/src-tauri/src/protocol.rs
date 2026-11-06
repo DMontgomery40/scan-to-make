@@ -85,6 +85,8 @@ pub fn deadline(method: &str, params: &Value) -> u64 {
     match method {
         "objects.correct" | "printers.route" => 27_000,
         "objects.estimate" => 182_000,
+        // A model file of up to 64 MB is read, hashed and kept: 120 s on the companion (Nov 6).
+        "objects.addFile" => 122_000,
         "printers.updateMcp" | "printers.installMcp" | "printers.discover" => 17_000,
         "printers.check" => 62_000,
         "printers.add" | "printers.remove" | "printers.chooseMcp" | "printers.completeSettings" => {
@@ -215,6 +217,7 @@ mod tests {
     #[test]
     fn permits_independent_confirmation_deadlines() {
         assert_eq!(deadline("objects.pausePrint", &json!({})), 132000);
+        assert_eq!(deadline("objects.addFile", &json!({})), 122000, "an import outlives the companion's 120 s, never 12 s");
         assert_eq!(deadline("confirmations.answer", &json!({})), 12000);
         assert_eq!(deadline("events.wait", &json!({"timeoutMs":999999})), 32000);
     }
