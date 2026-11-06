@@ -46,6 +46,20 @@ test('the first configured printer becomes default instead of the empty host ins
   assert.equal(catalog.defaultDestinationId, catalog.destinations[0].id);
 });
 
+test('two OctoPrints behind one reverse proxy at different sub-paths stay two printers; the same address is one (Codex review on #389)', async t => {
+  const f = await fixture(t);
+  const entry = join(f.home, 'printers/generic/lib/node_modules/mcp-3d-printer-server/dist/index.js');
+  const current = {backend: 'mcp-3d-printer-server', process: {command: process.execPath, args: [entry]}};
+  const octo = (host) => ({command: process.execPath, args: ['/opt/mcp-3d-printer-server/dist/index.js'], env: {PRINTER_TYPE: 'octoprint', PRINTER_HOST: host, API_KEY: 'k'}});
+  const source = await f.put('mcp.json', {mcpServers: {
+    'Printer A': octo('https://pi.lan/printer-a/'), 'Printer B': octo('https://pi.lan/printer-b'), 'Printer A again': octo('https://PI.lan/printer-a'),
+  }});
+  const catalog = await loadPrinterCatalog(current, {...f.options([source]), placeholderEntryPoint: entry});
+  const configured = catalog.destinations.filter(item => item.id !== 'current');
+  assert.deepEqual(configured.map(item => item.name).sort(), ['Printer A', 'Printer B'], 'printer-b is its own printer; the two printer-a entries are one');
+  assert.ok(configured.every(item => item.address === 'pi.lan'), 'shown by host, told apart by path');
+});
+
 test('placeholder detection preserves customized local configurations and remote SSH printers', async t => {
   const f = await fixture(t);
   const entry = join(f.home, 'printers/bambu/lib/node_modules/bambu-printer-mcp/dist/index.js');
