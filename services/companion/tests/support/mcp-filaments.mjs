@@ -1,6 +1,7 @@
 // The printer MCP's counterpart_propose_filaments for test runners that fake get_printer_filaments: the real MCP
 // proposal (a verbatim fixture copy) over the runner's own inventory, read at call time so a test can swap spools.
 import {proposeFilaments} from '../fixtures/mcp-propose-filaments.mjs';
+import {mcpPlates} from './shown-print.mjs';
 
 /** The fake inventory as the MCP's proposal trays (bambu-printer-mcp `trays`, or mcp-3D-printer-server `slots`). */
 function proposalTrays(inventory) {
@@ -20,6 +21,8 @@ function proposalTrays(inventory) {
 
 /** Gives a runner with a fake `filaments` the MCP's proposal tool, unless the test fakes that too. */
 export function proposingRunner(runner) {
+  // The MCP lists each plate's filaments (list_3mf_plates): the stand-in reads them as the MCPs do.
+  if (runner.filaments && !runner.modelPlates) runner.modelPlates = mcpPlates;
   if (runner.filaments && !runner.proposeFilaments)
     // A method, so a copy of the runner with other spools ({...runner, filaments}) proposes from its own.
     runner.proposeFilaments = async function (input) { return proposeFilaments({...input, trays: proposalTrays(await this.filaments())}); };

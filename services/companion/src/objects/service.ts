@@ -6,14 +6,14 @@ import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {basename, dirname, extname, isAbsolute, join} from 'node:path';
-import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, modelDeclaredFilaments, modelFilamentSlotCount, modelFilaments, modelHasPainting, modelPlateFilaments, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
+import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, type McpModelPlates, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession, type FilamentProposalInput} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {defaultRunPublished, folderAccess, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
-import {filamentProposalUnavailable, ownSettingsUnavailable, previewUnavailable, sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
+import {filamentProposalUnavailable, plateFilamentsUnavailable, ownSettingsUnavailable, previewUnavailable, sliceOverrides, settingsUnsupported} from '../printing/print-settings.js';
 import type {RuntimeSettings} from '../runtime-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
@@ -360,6 +360,8 @@ export class ObjectService {
   readonly #cancelledPrints = new Set<string>();
   /** Projects whose print the person stopped to make the design again in colour: that pass starts once the print ends. */
   readonly #remakes = new Set<string>();
+  /** list_3mf_plates answers by printer, MCP and model bytes: the print sheet and Print read the same file often. */
+  readonly #listedPlates = new Map<string, McpModelPlates>();
   /** Per-print spool rechecks, run again when the printer's confirmation is accepted (it can wait minutes). */
   readonly #dispatchRechecks = new Map<string, () => Promise<void>>();
   /** Why a recheck declined a print, kept so the settled project still explains itself. */
@@ -850,27 +852,25 @@ export class ObjectService {
   }
 
   /**
-   * The current 3MF's filaments with the colour each belongs in, its declared
-   * slot count, and a version of the model bytes: the file's own assignments
-   * (published files carry colours) for the selected plate, overlaid with what
-   * the design pass declared (a designed 3MF carries filaments but no colours).
-   * Declared colours match file filaments by part name first, then by position
-   * when the counts agree — several parts may share one filament.
+   * The current 3MF's filaments for the selected plate, and only those, as the printer MCP lists them
+   * (`list_3mf_plates` `filaments`, worked out as Bambu Studio does: PRD §8.0), overlaid with what the design pass
+   * declared (a designed 3MF carries filaments but no colours); the project's declared filament count (slice_stl
+   * takes one profile per declared filament); and a version of the model bytes and that answer. Declared colours
+   * match file filaments by part name first, then by position when the counts agree.
    */
-  async #modelData(object: StmObject): Promise<{filaments: ModelFilament[]; slots: number; version: string; declaredSlots: ModelFilament[]; plateUsed?: Set<number>}> {
+  async #modelData(object: StmObject, override?: {destinationId?: string}): Promise<{filaments: ModelFilament[]; slots: number; version: string}> {
     const bytes = isMultipart(object) && object.current ? await this.#modelBytes(object).catch(() => Buffer.alloc(0)) : Buffer.alloc(0);
-    // The plate and the declared colours are part of the version: choices made for one
-    // plate (or before a colour-only redesign of a byte-identical 3MF) must not validate.
-    const version = createHash('sha256').update(bytes)
-      .update(`|plate:${object.publishedSelection?.plateIndex ?? 0}|declared:${JSON.stringify(object.current?.filaments ?? [])}`).digest('hex');
-    if (!bytes.length) return {filaments: [], slots: 0, version, declaredSlots: []};
-    const declaredSlots = modelDeclaredFilaments(bytes);
     const plateIndex = object.publishedSelection?.plateIndex ?? 0;
-    const plateList = modelPlateFilaments(bytes, plateIndex);
-    const plateUsed = plateList ? new Set(plateList) : undefined;
-    const fromFile = modelFilaments(bytes, plateIndex);
-    const declared = object.current!.filaments ?? [];
-    if (!fromFile.length) return {filaments: declared.map((entry, i) => ({index: i + 1, ...entry})), slots: declared.length, version, declaredSlots, plateUsed};
+    const listed = bytes.length ? await this.#plateFilaments(object, bytes, override) : undefined;
+    const plate = listed?.plates.find(item => item.index === plateIndex);
+    // The plate, the MCP's answer and the declared colours are part of the version: choices made for one plate
+    // (or before a colour-only redesign of a byte-identical 3MF) must not validate.
+    const version = createHash('sha256').update(bytes)
+      .update(`|plate:${plateIndex}|filaments:${JSON.stringify(plate?.filaments ?? [])}|declared:${JSON.stringify(object.current?.filaments ?? [])}`).digest('hex');
+    const fromFile: ModelFilament[] = (plate?.filaments ?? []).map(({filamentId: _id, ...filament}) => filament);
+    const declared = object.current?.filaments ?? [];
+    const slots = Math.max(listed?.projectFilaments?.length ?? 0, ...fromFile.map(filament => filament.index));
+    if (!fromFile.length) return {filaments: [], slots: 0, version};
     // Name matching only where the name is unique on both sides; duplicates fall back to position.
     const count = (values: (string | undefined)[]) => values.reduce((map, name) => name ? map.set(name.trim().toLowerCase(), (map.get(name.trim().toLowerCase()) ?? 0) + 1) : map, new Map<string, number>());
     const declaredCounts = count(declared.map(entry => entry.name)), fileCounts = count(fromFile.map(filament => filament.name));
@@ -884,16 +884,31 @@ export class ObjectService {
         ...((filament.colour ?? declaredEntry?.colour) ? {colour: filament.colour ?? declaredEntry!.colour} : {}),
         ...((filament.material ?? declaredEntry?.material) ? {material: filament.material ?? declaredEntry!.material} : {})};
     });
-    // Painted regions print with filaments no part names. When the file carries
-    // painting (and no authoritative plate list already named them), every other
-    // declared slot is a colour of the model too — visible and editable in the
-    // sheet, not silently auto-assigned. Without painting they are unused presets.
-    if (!plateUsed && modelHasPainting(bytes)) {
-      const known = new Set(filaments.map(filament => filament.index));
-      for (const slot of declaredSlots) if (!known.has(slot.index)) filaments.push({...slot});
-      filaments.sort((a, b) => a.index - b.index);
+    return {filaments, slots, version};
+  }
+
+  /**
+   * The model's plates with their filaments from the MCP the project prints with (`list_3mf_plates`, no pictures).
+   * Undefined when there is no printer MCP to ask; an MCP that lists no filaments per plate is one to update.
+   */
+  async #plateFilaments(object: StmObject, bytes: Buffer, override?: {destinationId?: string}): Promise<McpModelPlates | undefined> {
+    const destinationId = override ? override.destinationId : this.#destinationId(object);
+    const services = destinationId ? this.#deps.print?.destinations?.get(destinationId) : this.#deps.print?.services;
+    const runner = services?.runner;
+    if (!runner?.modelPlates || !object.current) return undefined;
+    const key = `${destinationId ?? ''}|${runner.backend}|${createHash('sha256').update(bytes).digest('hex')}`;
+    const kept = this.#listedPlates.get(key);
+    if (kept) return kept;
+    let listed: McpModelPlates;
+    try { listed = await runner.modelPlates({modelPath: join(this.#deps.store.dir(object.id), object.current.model), thumbnails: false, signal: AbortSignal.timeout(60_000)}); }
+    catch (error) {
+      if (error instanceof PrinterMcpError && error.code === 'plates-unsupported') throw new McpUpdateNeeded(plateFilamentsUnavailable(runner.backend));
+      throw new InvalidStateError('Couldn’t read this model’s plates. Check your printer service in Settings → Printers and try again.');
     }
-    return {filaments, slots: Math.max(modelFilamentSlotCount(bytes), ...filaments.map(filament => filament.index)), version, declaredSlots, plateUsed};
+    if (listed.plates.some(plate => !plate.filaments)) throw new McpUpdateNeeded(plateFilamentsUnavailable(runner.backend));
+    this.#listedPlates.set(key, listed);
+    if (this.#listedPlates.size > 32) this.#listedPlates.delete(this.#listedPlates.keys().next().value!);
+    return listed;
   }
 
   /** Whether this object's printer reports AMS trays at all (the gate `liveFilaments` applies). */
@@ -962,7 +977,7 @@ export class ObjectService {
    */
   async #multipartColour(object: StmObject, options: PrintOptions, selection: PrinterSelection | undefined,
       _backend: PrinterHandoffConfig['backend'], destinationOverride?: {destinationId?: string}): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]} | undefined> {
-    const {filaments: model, slots, version, declaredSlots, plateUsed} = await this.#modelData(object);
+    const {filaments: model, slots, version} = await this.#modelData(object, destinationOverride);
     // Explicit choices are validated even when this model's filaments can't be read:
     // falling back to the MCP's defaults would silently drop the person's spools.
     if (options.filaments && (options.filamentsModelVersion !== version || !model.length))
@@ -975,13 +990,9 @@ export class ObjectService {
     if (options.filaments && options.filaments.length !== model.length)
       throw new InvalidStateError('Choose a spool for every colour in this model, then try again.');
     const sliced = !!object.publishedSelection?.sliced;
-    const known = new Set(model.map(filament => filament.index));
-    // Slots no part names (painted regions) the MCP maps too; one the selected plate never uses can't block it.
-    const painted = declaredSlots.filter(slot => !known.has(slot.index) && slot.index <= slots)
-      .map(slot => ({...proposalFilament(slot), ...(plateUsed ? {prints: plateUsed.has(slot.index)} : {})}));
     let result: {proposal: FilamentProposal; destinationId: string};
     try {
-      result = await this.#proposal(object, {filaments: model.map(proposalFilament), ...(painted.length ? {painted} : {}), sliced,
+      result = await this.#proposal(object, {filaments: model.map(proposalFilament), sliced,
         ...(options.filaments ? {chosen: options.filaments.map((choice, i) => ({index: model[i]!.index, slot: choice.slot, colour: choice.colour, material: choice.material, filamentId: choice.filamentId}))} : {})},
         destinationOverride);
     } catch (error) {
@@ -1002,9 +1013,10 @@ export class ObjectService {
     const first = byIndex.get(model[0]!.index);
     if (!first || model.some(filament => !byIndex.has(filament.index)))
       throw new InvalidStateError('The printer service returned an incomplete spool mapping. Reopen the print sheet and try again.');
-    // One entry per declared slot, used or not: slicing requires exactly that many profiles.
+    // Slicing takes one profile per declared filament, used or not; the printer is sent a tray only for the
+    // filaments this plate prints and -1 for the rest, as Bambu Studio sends it (the MCP's to apply, PRD §8.0).
     const at = (index: number) => byIndex.get(index) ?? first;
-    const amsMapping = Array.from({length: slots}, (_, i) => at(i + 1).slot);
+    const amsMapping = Array.from({length: slots}, (_, i) => byIndex.get(i + 1)?.slot ?? -1);
     const feeds = new Map(proposal.trays.map(tray => [tray.slot, tray.feed]));
     // Every spool in the final mapping is rechecked at dispatch, painted slots included.
     const allTrays = [...new Map([...byIndex.values()].map(tray => [tray.slot, tray])).values()];
@@ -1878,7 +1890,10 @@ export class ObjectService {
         if (extname(name).toLowerCase() !== '.3mf') continue;
         const info = await stat(join(out, name)).catch(() => undefined);
         if (!info?.isFile() || info.size > 64 * 1024 * 1024) continue;
-        const filaments = modelFilaments(await readFile(join(out, name)).catch(() => Buffer.alloc(0)));
+        // Which filaments its parts print with is the MCP's to say (list_3mf_plates, PRD §8.0); without one, no ask.
+        const services = this.#destinationId(object) ? this.#deps.print?.destinations?.get(this.#destinationId(object)!) : this.#deps.print?.services;
+        const listed = await services?.runner.modelPlates?.({modelPath: join(out, name), thumbnails: false, signal: AbortSignal.timeout(60_000)}).catch(() => undefined);
+        const filaments = listed?.plates.flatMap(plate => plate.filaments ?? []) ?? [];
         if (new Set(filaments.map(filament => filament.index)).size > 1
           || new Set(filaments.flatMap(filament => filament.colour ? [filament.colour] : [])).size > 1) return true;
       }

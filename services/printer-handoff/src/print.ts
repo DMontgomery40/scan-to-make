@@ -282,11 +282,11 @@ export class PrinterHandoffRunner {
    * A 3MF's plates as the MCP lists them before slicing (`list_3mf_plates`), with each plate's own picture. An MCP
    * without the tool is one to update: `plates-unsupported`, saying so. Counterpart reads no plate metadata itself.
    */
-  async modelPlates(input: {modelPath: string; signal?: AbortSignal}): Promise<McpModelPlates> {
+  async modelPlates(input: {modelPath: string; signal?: AbortSignal; thumbnails?: boolean}): Promise<McpModelPlates> {
     return this.#use(async (session, shared) => {
       const options = {...(input.signal ? {signal: input.signal} : {}), failFast: shared};
       await session.connect(options);
-      return listPlates(session, input.modelPath, this.#config.backend, options, true);
+      return listPlates(session, input.modelPath, this.#config.backend, options, input.thumbnails !== false);
     });
   }
 

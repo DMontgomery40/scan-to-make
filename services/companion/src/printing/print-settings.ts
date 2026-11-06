@@ -28,6 +28,11 @@ export function settingsUnsupported(backend: keyof typeof PACKAGE_NAMES, setting
 }
 
 /** The sentence when the installed MCP can't propose each colour's spool (counterpart_propose_filaments). */
+/** An MCP that doesn't list each plate's own filaments (list_3mf_plates `filaments`): it needs its update (PRD §8.0). */
+export function plateFilamentsUnavailable(backend: keyof typeof PACKAGE_NAMES): string {
+  return `Update ${PACKAGE_NAMES[backend]} in Settings → Printers to choose colours for this plate. Nothing was sent to the printer.`;
+}
+
 export function filamentProposalUnavailable(backend: keyof typeof PACKAGE_NAMES): string {
   return `Update ${PACKAGE_NAMES[backend]} in Settings → Printers so Counterpart can match each colour to a loaded spool. Nothing was sent to the printer.`;
 }
