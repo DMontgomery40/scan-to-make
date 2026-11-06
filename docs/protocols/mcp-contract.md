@@ -21,7 +21,7 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `fusion_mcp_status` `fusion_mcp_call` `fusion_mcp_new_design` `fusion_mcp_export` | the Fusion bridge |
 | `blender_mcp_setup` | the Blender add-on's check and update (`update`), done by the MCP (moved, **§8.0 #11**) |
 | `fusion_mcp_setup` | the Mac's Design with Fusion: the MCP finds Fusion and installs the add-in, its port login item and its own settings (`install`); the companion passes its result to the Mac as it is (moved, **§8.0 #11**) |
-| `fdm_design` | the MCPs' design prompt |
+| `fdm_design` `fdm_slicing` | the MCPs' design prompts, added to every design pass as served: how to design for FDM, and how the configured slicer orients a model, generates supports and checks a choice with a checkpoint slice. The app's own rules name no slicer (PRD §8.0 #10, moved) |
 
 ## Tool arguments
 

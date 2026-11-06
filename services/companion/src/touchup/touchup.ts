@@ -6,10 +6,11 @@ import {dirname, join} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlender} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
-import {buildTouchupInvocation, type DesignEngine, type TouchupInvocation} from './invocation.js';
+import {buildTouchupInvocation, type DesignEngine, type DesignGuidance, type TouchupInvocation} from './invocation.js';
 import {toolErrorText} from './blender.js';
 import {runTouchupWorker, type TouchupProgress, type TouchupResult} from './runner.js';
 import {DESIGNER_FILE_REBUILT, designerEditProblem} from './designer-file.js';
+import {mcpPackageName} from '../printing/print-settings.js';
 
 export interface TouchupInput {
   worker?: import('./runner.js').ProjectWorker;
@@ -51,8 +52,8 @@ export interface TouchupDeps {
   stopBlender?: typeof stopOwnedBlender;
   client?: (handoff: PrinterHandoffConfig) => Pick<PrinterMcpClient, 'connect' | 'callTool' | 'close' | 'hasTool' | 'getTool'>;
   prepare?: typeof prepareTouchupPass;
-  /** The printer MCP's own design guidance for this pass (its `fdm_design` prompt), if it serves one. */
-  guidance?: (handoff: PrinterHandoffConfig, signal?: AbortSignal) => Promise<string | undefined>;
+  /** The printer MCP's own design and slicing guidance for this pass (its `fdm_design` and `fdm_slicing` prompts), if it serves them. */
+  guidance?: (handoff: PrinterHandoffConfig, signal?: AbortSignal) => Promise<DesignGuidance | undefined>;
   run?: (inv: TouchupInvocation, pass: TouchupPass, opts: Parameters<typeof runTouchupWorker>[2]) => Promise<TouchupResult>;
   lockPath?: string;
   fusionLockPath?: string;
@@ -106,12 +107,23 @@ export async function acquireBlenderLock(lockPath = BLENDER_LOCK_PATH, opts: {po
   }
 }
 
-/** The printer MCP owns the manufacturing guidance; an MCP without it just gives the pass none. */
-export async function printerDesignGuidance(handoff: PrinterHandoffConfig, signal?: AbortSignal): Promise<string | undefined> {
+/** The pass's refusal when the installed MCP serves no fdm_slicing prompt. */
+export function slicingGuidanceUnavailable(backend: string): string {
+  return `Update ${mcpPackageName(backend)} in Settings → Printers so Counterpart can plan how this prints. Nothing was changed.`;
+}
+
+/**
+ * The printer MCP's manufacturing and slicing guidance. Undefined when the MCP couldn't be reached; an MCP that
+ * answers without fdm_slicing is refused by the pass (slicingGuidanceUnavailable).
+ */
+export async function printerDesignGuidance(handoff: PrinterHandoffConfig, signal?: AbortSignal): Promise<DesignGuidance | undefined> {
   const client = new PrinterMcpClient(handoff);
   try {
     await client.connect(signal);
-    return await client.prompt('fdm_design', signal ? {signal} : {});
+    const options = signal ? {signal} : {};
+    const design = await client.prompt('fdm_design', options);
+    const slicing = await client.prompt('fdm_slicing', options);
+    return {...(design ? {design} : {}), ...(slicing ? {slicing} : {})};
   } catch (error) {
     if (signal?.aborted) throw error;
     return undefined;
@@ -243,6 +255,11 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   // service supplies the explicit flag, including false for failed first passes.
   const currentModel = input.currentModel ?? (input.note !== undefined && input.scan.length === 1 && input.scan[0]!.toLowerCase().endsWith('.stl'));
   const guidance = await (deps.guidance ?? printerDesignGuidance)(input.handoff, input.signal);
+  // PRD §8.0 #10: how the slicer orients, supports and checks a slice comes only from the MCP. An MCP that answers
+  // without fdm_slicing predates it: the pass doesn't start without that guidance.
+  if (guidance && !guidance.slicing?.trim()) {
+    return {status: 'failed', reason: slicingGuidanceUnavailable(input.handoff.backend), renders: [], checkpoints: [], stats: {seconds: 0, toolCalls: 0}, passDir: pass.dir};
+  }
   input.onStage?.('working', choice.engine);
   const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
     ...(input.designerCopy ? {designerCopy: true} : {}),
