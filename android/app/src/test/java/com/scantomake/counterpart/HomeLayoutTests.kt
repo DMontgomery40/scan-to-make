@@ -120,7 +120,9 @@ class HomeLayoutTests {
 
     @Test fun printerSoftwareShowsEventsEvenWhenTheMoveReplyIsLost() = printerSoftwareMove(true)
 
-    private fun printerSoftwareMove(lostReply: Boolean) {
+    @Test fun printerSoftwareKeepsWaitingMoveCompletionAfterReturningHome() = printerSoftwareMove(false, navigateHome = true)
+
+    private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false) {
         val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
         app.pairingStore.save(v2Record(), false)
         val transport = FakeTransport { request, _ ->
@@ -164,6 +166,15 @@ class HomeLayoutTests {
             }
         } else {
             compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates after the current print or design finishes.")).fetchSemanticsNodes().isNotEmpty() }
+        }
+        if (navigateHome) {
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.onNodeWithContentDescription("Printers").assertExists()
+            val done = WireJson.parseToJsonElement(contractFixture("mcp-copy-update-events.json").readText()).jsonArray
+                .map { requireNotNull(CounterpartEvent.decode(it.jsonObject)) }.first { it.type.endsWith("done") }
+            compose.runOnIdle { state.mcpUpdateEvents.value = mapOf(requireNotNull(done.data?.mcpId) to done) }
+            compose.onNodeWithContentDescription("Printers").performClick()
+            compose.onNodeWithText(done.body).assertExists()
         }
         val moves = transport.calls.filter { it.request.url.endsWith("/update") }
         org.junit.Assert.assertEquals(1, moves.size)

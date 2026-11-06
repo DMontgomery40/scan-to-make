@@ -45,6 +45,9 @@ class AppState(private val app: Counterpart) {
     val mcpCopies = MutableStateFlow<List<com.scantomake.counterpart.api.McpPackageCopies>?>(null)
     val mcpCopiesProblem = MutableStateFlow<String?>(null)
     val mcpUpdateEvents = MutableStateFlow<Map<String, CounterpartEvent>>(emptyMap())
+    data class McpUpdateAttempt(val mcpId: String, val eventFloor: Int)
+    // Keep the original operation ID when its screen leaves composition or the copy mapping changes.
+    val mcpUpdateAttempts = MutableStateFlow<Map<String, McpUpdateAttempt>>(emptyMap())
     /** A project to open, from a notification tap. */
     val route = MutableStateFlow<String?>(null)
     /** A `scantomake://pair` link waiting for the pairing screen. */
@@ -123,6 +126,7 @@ class AppState(private val app: Counterpart) {
         following?.cancel(); following = null
         projects.value = emptyList(); loaded.value = false; error.value = null; catalog.value = null; reachable.value = null
         capabilities.value = emptySet(); eventsSupported.value = null; sendFailures.value = emptyMap()
+        mcpUpdateAttempts.value = emptyMap()
         mcpUpdateEvents.value = emptyMap(); mcpCopies.value = null; mcpCopiesProblem.value = null
     }
 

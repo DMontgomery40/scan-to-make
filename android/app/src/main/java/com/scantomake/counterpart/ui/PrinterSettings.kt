@@ -124,14 +124,15 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
     val events by state.mcpUpdateEvents.collectAsState()
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf<String?>(null) }
-    var attemptedId by remember { mutableStateOf<String?>(null) }
+    val attempts by state.mcpUpdateAttempts.collectAsState()
     var result by remember { mutableStateOf<McpUpdate?>(null) }
     var problem by remember { mutableStateOf<String?>(null) }
-    var eventFloor by remember { mutableStateOf(-1) }
     LaunchedEffect(printerId) { state.loadCapabilities(); state.loadMcpCopies() }
     fun update(id: String, fresh: Boolean) {
         if (busy != null) return
-        busy = id; attemptedId = id; problem = null; result = null; eventFloor = events[id]?.seq ?: -1
+        busy = id; problem = null; result = null
+        state.mcpUpdateAttempts.value = state.mcpUpdateAttempts.value +
+            (printerId to AppState.McpUpdateAttempt(id, events[id]?.seq ?: -1))
         scope.launch {
             try { result = Counterpart.instance.companion.updatePrinterMcp(id, fresh); state.loadMcpCopies() }
             catch (e: CancellationException) { throw e }
@@ -153,7 +154,8 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
             Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.", color = Palette.secondary, fontSize = 12.sp)
         }
         // Events are authoritative even when the accepted mutation's HTTP reply never arrived.
-        val event = attemptedId?.let { events[it] }?.takeIf { it.seq > eventFloor }
+        val attempt = attempts[printerId]
+        val event = attempt?.let { events[it.mcpId]?.takeIf { event -> event.seq > it.eventFloor } }
         val words = event?.body?.takeIf { it.isNotBlank() } ?: event?.title ?: result?.words
         words?.let { Text(it, fontSize = 12.sp) }
         ((if (event == null) problem else null) ?: readProblem)?.let { Text(it, color = Palette.failed, fontSize = 12.sp) }
