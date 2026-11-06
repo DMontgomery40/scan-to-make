@@ -12,7 +12,7 @@ import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {publicObject} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
-import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished} from '../dist/published/published.js';
+import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished,arrivedDuring,chromeAvailable} from '../dist/published/published.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {showing, showingRunner, shownSlice} from './support/shown-print.mjs';
 const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
@@ -39,12 +39,40 @@ test('the production pass says when it had no browser to download with (a starte
   const got=await defaultRunPublished({root:join(f.root,`passes-${chrome}`),photos:[],request:'Print this',link:{url:LINK,site:'MakerWorld'},claudePath:'/c',startedAtMs:Date.now()},
    {chrome:()=>chrome,downloads,spawn:spawnAnswer({status:'needs_file',summary:'Not signed in.'})});
   assert.equal(got.status,'needs_file');assert.equal(got.browser,chrome);
+  assert.equal(got.reason,'other','no structured reason is never read as a sign-in');assert.equal(got.run.chrome,chrome);
  }
+ // The worker's own structured reason comes through, with what finds its transcript; prose is never parsed for it.
+ const why=await defaultRunPublished({root:join(f.root,'passes-why'),photos:[],request:'Print this',link:{url:LINK,site:'MakerWorld'},claudePath:'/c',startedAtMs:Date.now()},
+  {chrome:()=>true,downloads,spawn:()=>{const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();setImmediate(()=>{
+   child.stdout.end(JSON.stringify({type:'result',session_id:'abc-123',structured_output:{status:'needs_file',reason:'site_error',summary:'The file server answered 503.'}})+'\n');setImmediate(()=>child.emit('close',0));});return child;}});
+ assert.equal(why.reason,'site_error');assert.equal(why.summary,'The file server answered 503.');assert.equal(why.run.sessionId,'abc-123');assert.equal(why.run.exitCode,0);
+ const odd=await defaultRunPublished({root:join(f.root,'passes-odd'),photos:[],request:'Print this',link:{url:LINK,site:'MakerWorld'},claudePath:'/c',startedAtMs:Date.now()},
+  {chrome:()=>true,downloads,spawn:spawnAnswer({status:'needs_file',reason:'cookies_please',summary:'x'})});
+ assert.equal(odd.reason,'other');
  // An API or endpoint worker can't drive Chrome even when its extension is set up: it isn't offered it, and says so.
  let args;
  const apiWorker=Object.assign(async inv=>{args=inv.args;return {toolCalls:0,stderrTail:'',exitCode:0,seconds:0,publicText:x=>x,resultEvent:{type:'result',structured_output:{status:'needs_file',summary:'Not signed in.'}}};},{browser:false});
  const api=await defaultRunPublished({worker:apiWorker,root:join(f.root,'passes-api'),photos:[],request:'Print this',link:{url:LINK,site:'MakerWorld'},claudePath:'/c',startedAtMs:Date.now()},{chrome:()=>true,downloads});
  assert.equal(api.status,'needs_file');assert.equal(api.browser,false);assert.ok(!args.includes('--chrome'));
+});
+test('the companion lists every model file that arrived during the pass itself; hidden browser temp files and earlier ones never count',async t=>{
+ const f=await setup(t),downloads=join(f.root,'Downloads');await mkdir(downloads);
+ await writeFile(join(downloads,'before.3mf'),model());
+ await new Promise(r=>setTimeout(r,30));
+ const startedAtMs=Date.now();
+ const pass=await prepareTouchupPass({root:join(f.root,'passes'),objectId:'p',scan:[],photos:[],requirePhotos:false});
+ // The worker "clicks Download" (the file lands under the site's own name) and then says it couldn't find it.
+ const spawn=()=>{const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();setImmediate(async()=>{
+  await writeFile(join(downloads,'Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),model());await writeFile(join(downloads,'.com.brave.Browser.52WYTj'),model());
+  await writeFile(join(downloads,'notes.txt'),'x');
+  child.stdout.end(JSON.stringify({type:'result',structured_output:{status:'needs_file',reason:'download_not_saved',summary:'Nothing arrived.'}})+'\n');setImmediate(()=>child.emit('close',0));});return child;};
+ const got=await runPublishedWorker({command:'/c',args:[],env:{},cwd:pass.dir,mcpConfigPath:'',mcpConfig:{mcpServers:{}}},pass,{url:LINK,site:'MakerWorld'},{downloads,spawn,startedAtMs});
+ assert.equal(got.status,'needs_file');assert.deepEqual(got.arrived,[join(downloads,'Vernier+Caliper+Ruler+150mm+COLOR-02.3mf')]);
+ assert.deepEqual(await arrivedDuring([downloads],startedAtMs,startedAtMs-1),[],'nothing arrives in an empty window');
+ // The extension may run in Chrome or another Chromium browser (David's is Brave): any of their hosts counts.
+ await mkdir(join(f.root,'brave'));await writeFile(join(f.root,'brave','host.json'),'{}');
+ assert.equal(chromeAvailable([join(f.root,'chrome','host.json'),join(f.root,'brave','host.json')]),true);
+ assert.equal(chromeAvailable([join(f.root,'chrome','host.json')]),false);
 });
 test('old Downloads names require confirmation; escapes and symlinks never establish identity',async t=>{
  const f=await setup(t),downloads=join(f.root,'Downloads');await mkdir(downloads);const path=join(downloads,'caliper.3mf');await writeFile(path,model());const yesterday=new Date(Date.now()-86400000);await utimes(path,yesterday,yesterday);await symlink(path,join(downloads,'alias.3mf'));
@@ -52,6 +80,7 @@ test('old Downloads names require confirmation; escapes and symlinks never estab
  const pass=await prepareTouchupPass({root:join(f.root,'passes'),objectId:'p',scan:[],photos:[],requirePhotos:false});
  const got=await runPublishedWorker({command:'/c',args:[],env:{},cwd:pass.dir,mcpConfigPath:'',mcpConfig:{mcpServers:{}}},pass,{url:LINK,site:'MakerWorld'},{downloads,spawn:spawnAnswer({status:'downloaded',summary:'Got file',download:{files:['caliper.3mf']}})});
  assert.equal(got.status,'needs_file');assert.equal(got.candidate,path);
+ assert.equal(got.reason,'download_not_saved','it said downloaded, but no fresh file arrived');
 });
 test('link retrieves or asks; explicit file preserves bytes, hash and embedded credit',async t=>{
  const f=await setup(t),object=await f.service.create('Print this','published',LINK);await f.service.start(object.id);const asking=await f.service.settled(object.id);assert.equal(asking.ask.type,'file');assert.equal(f.holds(),0);

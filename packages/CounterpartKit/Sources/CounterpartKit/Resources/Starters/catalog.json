@@ -13,7 +13,9 @@
     "imageURL": "https://shop.wat3d.co.uk/wp-content/uploads/2026/06/2025-06-19_b222c56471356-600x450.png",
     "imageCredit": "Kass 3D · model preview via WAT3D",
     "detail": "6 plates · assembly required",
-    "source": "makerworld"
+    "source": "makerworld",
+    "files": 1,
+    "plates": 6
   },
   {
     "id": "long-vernier-caliper",
@@ -29,6 +31,8 @@
     "image": "vernier.png",
     "imageCredit": "3D Print Masters Hub · original print-profile preview",
     "detail": "150 mm + depth gauge",
-    "source": "makerworld"
+    "source": "makerworld",
+    "files": 2,
+    "sha256": ["f3a30ef247a4d1778e075b834c81d027933a0c3f10d53d6d71695e1ca160077e", "95554a2bf390fd6cdfa5fa1c27087945799e633dfdbebb38091befa7864c58aa"]
   }
 ]

@@ -63,6 +63,7 @@ export interface ResultEvent {
   is_error?: boolean;
   result?: string;
   total_cost_usd?: number;
+  session_id?: string;
   structured_output?: {status?: string; closeup?: string; summary?: string; title?: string; changes?: unknown; ask?: unknown; parts?: unknown};
 }
 

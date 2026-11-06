@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,rm,readFile,readdir,writeFile} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
@@ -15,9 +17,15 @@ const model=(title,plates)=>Buffer.from(zipSync({'[Content_Types].xml':strToU8('
  '3D/3dmodel.model':strToU8(`<model><metadata name="Title">${title}</metadata><metadata name="Designer">${title.includes('scan')?'Kass 3D':'3D Print Masters Hub'}</metadata><metadata name="License">Standard Digital File License</metadata><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>`),
  'Metadata/model_settings.config':strToU8(`<config>${plates.map((name,i)=>`<plate><metadata key="plater_id" value="${i+1}"/><metadata key="plater_name" value="${name}"/></plate>`).join('')}</config>`)}));
 
+/** The caliper's two published files, made once (a zip's bytes carry its time), and the catalog pinning them as the real one does. */
+const COLOR=model('Vernier Caliper Ruler - Two Lengths',['Plate 1']),GAUGE=model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1']);
+const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+const CATALOG=JSON.parse(readFileSync(join(STARTER_ASSETS,'catalog.json'),'utf8'));
+const pinnedCatalog=id=>{const entry=CATALOG.find(item=>item.id===id);return entry?.id==='long-vernier-caliper'?{...entry,sha256:[sha(COLOR),sha(GAUGE)]}:entry;};
 /** The published-model worker (PRD §8.11), faked: what it was asked, and the files it "downloaded". */
 async function setup(t,answer=async()=>({status:'needs_file'}),extra={}) {
  const root=await mkdtemp(join(tmpdir(),'starters-')),store=new ObjectStore(join(root,'objects')),asked=[];
+ extra={downloads:join(root,'Downloads'),starter:pinnedCatalog,...extra};
  const runPublished=async input=>{asked.push(input);return answer(input,root);};
  const service=new ObjectService({store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},
   printGate:{updating:()=>false,hold:()=>()=>{}},runPublished,runTouchup:async()=>{throw Error('a starter entered the design pass');},titleFor:async()=>'Generated',...extra});
@@ -29,8 +37,7 @@ async function downloaded(root,files){
  for(const [name,bytes] of files){const path=join(root,name);await writeFile(path,bytes);paths.push(path);}
  return {status:'downloaded',files:paths,summary:'Got the designer’s files.'};
 }
-const caliper=root=>downloaded(root,[['Vernier Caliper Ruler 150mm COLOR.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1'])],
- ['DEPTH GAUGE for Vernier Caliper Ruler 150mm.3mf',model('DEPTH GAUGE for Vernier Caliper Ruler',['Plate 1'])]]);
+const caliper=root=>downloaded(root,[['Vernier Caliper Ruler 150mm COLOR.3mf',COLOR],['DEPTH GAUGE for Vernier Caliper Ruler 150mm.3mf',GAUGE]]);
 const rig=root=>downloaded(root,[['360 scan platform full kit.3mf',model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears','Feet'])]]);
 
 test('no bundled starter: every starter is a real designer\'s model, never one the app made up (Nov 5)',async t=>{
@@ -65,17 +72,240 @@ test('a starter gets the designer’s own files and is ready to print, with ever
  assert.match(asked[1].request,/six plates/);
  await assert.rejects(service.addStarter('../caliper-card'),/starter/i);
 });
-test('a starter that can’t be downloaded says so in one sentence, and Try Again gets it',async t=>{
+/** What the companion wrote to its error log (logs/companion-error.log on the Mac) while `run` ran. */
+async function logged(run){
+ const lines=[],error=console.error;console.error=(...args)=>lines.push(args.join(' '));
+ try{return {value:await run(),lines};}finally{console.error=error;}
+}
+test('a starter that MakerWorld’s sign-in stops says so once, on the page left open, and Try Again gets it',async t=>{
  let signedIn=false;
- const {service,asked}=await setup(t,async(_input,root)=>signedIn?caliper(root):{status:'needs_file',summary:'MakerWorld wants a sign-in.'});
- const first=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ const {service,asked}=await setup(t,async(_input,root)=>signedIn?caliper(root):{status:'needs_file',reason:'not_signed_in',summary:'MakerWorld shows Sign in.',
+  run:{toolCalls:4,seconds:12,exitCode:0,sessionId:'s-1',chrome:true}});
+ const {value:first,lines}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
  assert.equal(first.state,'failed');assert.equal(first.ask,undefined,'nothing to download by hand');
- assert.equal(first.failure,'Counterpart couldn’t download the designer’s files from MakerWorld. Sign in to MakerWorld in Chrome on this computer, then try again.');
+ assert.equal(first.failure,'Counterpart couldn’t download the designer’s files because MakerWorld isn’t signed in. Sign in to MakerWorld on the page Counterpart left open in your browser, then try again.');
+ assert.equal(lines.length,1);assert.match(lines[0],new RegExp(`project ${first.id}.*reason not_signed_in.*worker session s-1: MakerWorld shows Sign in\\.`));
  assert.equal((await service.addStarter('long-vernier-caliper')).id,first.id,'tapping it again opens the same project');
  signedIn=true;
  await service.start(first.id);
  const done=await service.settled(first.id);
  assert.equal(done.state,'ready');assert.equal(done.failure,undefined);assert.equal(asked.length,2);
+});
+// Nov 6, project e95f31ea: Chrome was signed in (MakerWorld signed the download for David's account), but its file
+// server answered 503 and nothing reached Downloads. The worker said so; the project said "Sign in", and logged nothing.
+for (const [reason,summary] of [['site_error','MakerWorld’s file server returned 503 errors when I tried to download.'],
+ ['download_not_saved','I clicked Download 3MF, but no file reached ~/Downloads.'],[undefined,'Something on the page stopped me.']])
+ test(`a starter that isn’t signed-out says what the worker saw, never "Sign in" (${reason ?? 'no reason given'})`,async t=>{
+  const {service}=await setup(t,async()=>({status:'needs_file',...(reason?{reason}:{}),summary,run:{toolCalls:30,seconds:165,exitCode:0,sessionId:'s-2',chrome:true}}));
+  const {value:o,lines}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+  assert.equal(o.state,'failed');assert.equal(o.ask,undefined);
+  assert.equal(o.failure,`Counterpart couldn’t download the designer’s files from MakerWorld. ${summary} Try again.`);
+  assert.doesNotMatch(o.failure,/sign in/i);assert.ok(!o.failure.includes('\n'));
+  assert.equal(o.passes.at(-1).summary,o.failure);
+  assert.equal(lines.length,1,'the real cause is in the companion log');
+  assert.match(lines[0],/published pass did not get the file: project .*status needs_file, reason .*tool calls 30, 165 s, exit 0, worker session s-2/);
+  assert.ok(lines[0].includes(summary));
+ });
+// Nov 6, e95f31ea: both 150 mm profiles reached ~/Downloads at 21:06–21:08 (one three times over), the worker's own
+// check missed them and answered needs_file, and the project said "Sign in". The companion's own pickup takes them.
+test('a starter takes the designer’s files that arrived in Downloads during its pass, whatever the worker concluded',async t=>{
+ let files;
+ const {service}=await setup(t,async(_input,root)=>{
+  const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',COLOR],['Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf',COLOR],
+   ['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf',GAUGE]]);
+  files=made.files;
+  return {status:'needs_file',reason:'site_error',summary:'The file server answered 503.',arrived:files,run:{toolCalls:30,seconds:165,exitCode:0}};
+ });
+ const {value:o,lines}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+ assert.equal(o.state,'ready');assert.equal(o.failure,undefined);
+ assert.equal(o.files.receipts.length,2,'a repeat click’s identical copy is one file');
+ assert.deepEqual(o.files.receipts.map(r=>r.name),['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf','DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf']);
+ assert.equal(o.credit.designer,'3D Print Masters Hub');assert.equal(publicObject(o).plates.length,2);
+ assert.match(lines.join('\n'),/took the designer’s 2 files from Downloads \(the worker reported needs_file\)/);
+});
+// Codex on #369: two calipers of other lengths from the same designer, or part of the rig, are not the starter.
+test('a pickup is the starter’s whole kit: never two other calipers of the designer’s, never part of the rig',async t=>{
+ const {service}=await setup(t,async(_input,root)=>{
+  const made=await downloaded(root,[['Vernier 150mm COLOR.3mf',COLOR],['Vernier 220mm COLOR.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1','Plate 2'])]]);
+  return {status:'needs_file',reason:'site_error',summary:'The gauge answered 503.',arrived:made.files};
+ });
+ const {value:caliperProject}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+ assert.equal(caliperProject.state,'failed');assert.equal(caliperProject.files,undefined);
+ const rig=await setup(t,async(_input,root)=>{
+  const made=await downloaded(root,[['360 scan platform base.3mf',model('360 scan platform',['Base','Turntable'])]]);
+  return {status:'needs_file',reason:'site_error',summary:'Only the base.',arrived:made.files};
+ });
+ const {value:rigProject}=await logged(async()=>rig.service.settled((await rig.service.addStarter('scan-platform')).id));
+ assert.equal(rigProject.state,'failed');assert.equal(rigProject.files,undefined);
+});
+test('a set the worker or the person chose that isn’t the whole kit is never replayed from the cache',async t=>{
+ // The worker reports two same-designer calipers, not the pinned caliper and gauge: Ready as before, but not a cached kit.
+ const {service,asked,root}=await setup(t,async(_input,root)=>downloaded(root,[['Vernier 150mm COLOR.3mf',COLOR],
+  ['Vernier 220mm COLOR.3mf',model('Vernier Caliper Ruler - Two Lengths',['Plate 1','Plate 2'])]]));
+ const first=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(first.state,'ready');assert.equal(asked.length,1);
+ assert.ok(!(await readdir(join(root,'starters','makerworld-198362'))).includes('kit.json'));
+ await service.delete(first.id);
+ const again=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(asked.length,2,'no cache hit: the worker runs again');assert.equal(again.state,'ready');
+});
+// Nov 6, bb9da63c: the scan platform got MakerWorld's raw-model zip (one 850×521 mm STL of all six plates baked into one
+// mesh), and the file Ask accepted it. A starter is the designer's full-kit print profile: one 3MF, six plates.
+test('the scan platform is one 3MF with its six plates',async t=>{
+ const {service}=await setup(t,async(_input,root)=>rig(root));
+ const o=await service.settled((await service.addStarter('scan-platform')).id);
+ assert.equal(o.state,'ready');assert.equal(o.files.receipts.length,1);assert.match(o.files.receipts[0].name,/\.3mf$/);
+ assert.equal(o.files.receipts[0].plates.length,6);assert.equal(publicObject(o).plates.length,6);
+ assert.equal(o.ask,undefined,'no "which plate?" question');
+});
+test('a starter’s file Ask wants the print profile’s 3MF by its button, and a raw STL or zip handed in says what it is',async t=>{
+ const {service}=await setup(t,async()=>({status:'needs_file',browser:false}));
+ const o=await service.settled((await service.addStarter('scan-platform')).id);
+ assert.equal(o.state,'needs-closeup');assert.deepEqual(o.ask.accepts,['3mf']);
+ assert.equal(o.ask.question,'On MakerWorld, open 3d scan platform, choose the designer’s print profile and press Download 3MF, then add that 3MF here. Not the raw model files (STL or a zip): they don’t have the designer’s plates.');
+ const raw='That’s the raw model from MakerWorld, without the designer’s plates. On the model’s page, choose the designer’s print profile and press Download 3MF, then add that 3MF.';
+ const stl=Buffer.alloc(184);stl.writeUInt32LE(1,80);
+ await assert.rejects(service.addModelFile(o.id,'全3D打印360°摄影台.stl',stl),{message:raw});
+ await assert.rejects(service.addModelFile(o.id,'全3D打印360°摄影台.zip',Buffer.from(zipSync({'a.stl':stl}))),{message:raw});
+ assert.equal((await service.get(o.id)).state,'needs-closeup','nothing quietly accepted');
+ const done=await service.addModelFile(o.id,'360 scan platform full kit.3mf',model('360 scan platform',['Base','Turntable','Arm','Clamp','Gears','Feet']));
+ assert.equal(done.state,'ready');assert.equal(publicObject(done).plates.length,6);
+ // AI off asks the same way.
+ const off=await setup(t,undefined,{modelAccess:{projectWorker:()=>{throw new Error('AI is off.');}}});
+ const asked=await logged(()=>off.service.addStarter('scan-platform'));
+ assert.deepEqual(asked.value.ask.accepts,['3mf']);assert.match(asked.value.ask.question,/press Download 3MF/);
+});
+test('a raw-model download that arrived is never a starter’s files',async t=>{
+ const {service}=await setup(t,async(_input,root)=>{
+  const stl=Buffer.alloc(184);stl.writeUInt32LE(1,80);
+  const made=await downloaded(root,[['全3D打印360°摄影台.stl',stl]]);
+  return {status:'needs_file',reason:'other',summary:'Only the raw model was offered.',arrived:made.files};
+ });
+ const {value:o}=await logged(async()=>service.settled((await service.addStarter('scan-platform')).id));
+ assert.equal(o.state,'failed');assert.equal(o.files,undefined);
+});
+// Codex on #369: a retry that downloads only the missing file brings the kept part with it, and a pinned file already in
+// Downloads before the pass makes up the kit with one that arrives during it.
+test('a starter’s kit is made up from what is kept, what is pinned in Downloads, and what the pass brought',async t=>{
+ let pass=0;
+ const a=await setup(t,async(_input,root)=>{
+  pass++;
+  if(pass===1){const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',COLOR]]);return {status:'needs_file',reason:'site_error',summary:'The gauge answered 503.',arrived:made.files};}
+  return downloaded(root,[['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',GAUGE]]);
+ });
+ const {value:first}=await logged(async()=>a.service.settled((await a.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(first.state,'failed');
+ const second=await a.service.settled((await a.service.start(first.id)).id);
+ assert.equal(second.state,'ready');assert.deepEqual(second.files.receipts.map(r=>r.sha256).sort(),[sha(COLOR),sha(GAUGE)].sort(),'the kept caliper and the new gauge');
+ const b=await setup(t,async(_input,root)=>{
+  const made=await downloaded(root,[['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',GAUGE]]);
+  return {status:'needs_file',reason:'download_not_saved',summary:'Nothing arrived.',arrived:made.files};
+ });
+ await mkdir(join(b.root,'Downloads'));await writeFile(join(b.root,'Downloads','Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),COLOR);
+ const {value:made}=await logged(async()=>b.service.settled((await b.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(made.state,'ready');assert.equal(b.asked.length,1);assert.equal(made.files.receipts.length,2);
+});
+test('a kit split between the cache and Downloads is used before any worker runs, AI on or off',async t=>{
+ let pass=0;
+ const {service,asked,root}=await setup(t,async(_input,root)=>{
+  pass++;const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',COLOR]]);
+  return {status:'needs_file',reason:'site_error',summary:'The gauge answered 503.',arrived:made.files};
+ });
+ const {value:first}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+ assert.equal(first.state,'failed');assert.equal(asked.length,1);
+ // The person downloads the gauge; the caliper's original download is gone, but the cache kept it.
+ await rm(join(root,'Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),{force:true});
+ await mkdir(join(root,'Downloads'),{recursive:true});await writeFile(join(root,'Downloads','DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),GAUGE);
+ const {value:retried}=await logged(()=>service.start(first.id));
+ assert.equal(retried.state,'ready');assert.equal(asked.length,1,'no second pass');
+ // With no new arrival, a pass's recovery still assembles the kit from what is on hand.
+ const other=await setup(t,async()=>({status:'needs_file',reason:'other',summary:'Nothing.'}));
+ const {value:none}=await logged(async()=>other.service.settled((await other.service.addStarter('long-vernier-caliper')).id));
+ assert.equal(none.state,'failed');
+ await mkdir(join(other.root,'Downloads'),{recursive:true});
+ for(const [name,bytes] of [['c.3mf',COLOR],['g.3mf',GAUGE]])await writeFile(join(other.root,'Downloads',name),bytes);
+ const {value:off}=await logged(()=>other.service.start(none.id));
+ assert.equal(off.state,'ready');assert.equal(other.asked.length,1);
+});
+test('a starter never takes a download that isn’t the designer’s, nor half a kit',async t=>{
+ for(const [label,names] of [['another designer',[['caliper.3mf','Somebody else’s caliper']]],
+  ['one of two files',[['Vernier Caliper Ruler 150mm COLOR.3mf','Vernier Caliper Ruler - Two Lengths']]],
+  ['not a model',[['broken.3mf',null]]]]){
+  const {service}=await setup(t,async(_input,root)=>{
+   const made=await downloaded(root,names.map(([name,title])=>[name,title===null?Buffer.from('PK-not-a-3mf'):title.includes('Somebody')
+    ?Buffer.from(zipSync({'[Content_Types].xml':strToU8('<Types/>'),'3D/3dmodel.model':strToU8(`<model><metadata name="Title">${title}</metadata><metadata name="Designer">Somebody</metadata><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>`)}))
+    :model(title,['Plate 1'])]));
+   return {status:'needs_file',reason:'download_not_saved',summary:'Nothing arrived.',arrived:made.files};
+  });
+  const {value:o}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+  assert.equal(o.state,'failed',label);assert.equal(o.files,undefined,label);
+  assert.equal(o.failure,'Counterpart couldn’t download the designer’s files from MakerWorld. Nothing arrived. Try again.',label);
+ }
+});
+// Parent, Nov 6 (after "you've downloaded the models from bambu 10 fucking times"): a starter downloads its files at
+// most once per computer. The cache, then ~/Downloads, before any browser work.
+test('a starter whose files are in its cache opens Ready with no worker run, on a second tap and on Try Again',async t=>{
+ const {service,store,asked,root}=await setup(t,async(_input,root)=>caliper(root));
+ const first=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(first.state,'ready');assert.equal(asked.length,1,'one download, the first time');
+ await service.delete(first.id);
+ const {value:again,lines}=await logged(()=>service.addStarter('long-vernier-caliper'));
+ assert.notEqual(again.id,first.id);assert.equal(again.state,'ready');assert.equal(again.files.receipts.length,2);
+ assert.deepEqual(again.files.receipts.map(r=>r.sha256).sort(),first.files.receipts.map(r=>r.sha256).sort());
+ assert.equal(again.credit.url,'https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths');
+ assert.match(lines.join('\n'),/already on this computer \(cache\), no download/);
+ // The cache is keyed by MakerWorld's model id, beside the projects.
+ assert.deepEqual((await readdir(join(root,'starters','makerworld-198362'))).sort(),[sha(COLOR),sha(GAUGE),'kit.json'].sort());
+ // Try Again on a failed starter takes the cache too.
+ await store.update(again.id,o=>({...o,state:'failed',failure:'x',current:undefined,files:undefined}));
+ const retried=await service.settled((await service.start(again.id)).id);
+ assert.equal(retried.state,'ready');assert.equal(asked.length,1,'never downloaded again');
+});
+test('a starter whose pinned files are already in Downloads opens Ready with no worker run; other files there never count',async t=>{
+ const color=COLOR,gauge=GAUGE;
+ const {service,asked,root}=await setup(t,async(_input,root)=>caliper(root));
+ await mkdir(join(root,'Downloads'));
+ // Only one pinned file, plus a same-designer file that isn't one of them: not enough, so the worker runs.
+ await writeFile(join(root,'Downloads','Vernier+Caliper+Ruler+150mm+COLOR-02.3mf'),color);
+ await writeFile(join(root,'Downloads','Some other caliper.3mf'),model('Vernier Caliper Ruler - Two Lengths',['A','B']));
+ const partial=await service.settled((await service.addStarter('long-vernier-caliper')).id);
+ assert.equal(asked.length,1);await service.delete(partial.id);
+ await rm(join(root,'starters'),{recursive:true,force:true});
+ await writeFile(join(root,'Downloads','DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02 (1).3mf'),gauge);
+ const {value:o,lines}=await logged(()=>service.addStarter('long-vernier-caliper'));
+ assert.equal(o.state,'ready');assert.equal(asked.length,1,'no worker run when Downloads already has them');
+ assert.deepEqual(o.files.receipts.map(r=>r.sha256).sort(),[sha(color),sha(gauge)].sort());
+ assert.match(lines.join('\n'),/already on this computer \(Downloads\), no download/);
+});
+test('Try Again after a pickup never downloads again: what arrived is kept, even part of a kit',async t=>{
+ let pass=0;
+ const {service,asked}=await setup(t,async(_input,root)=>{
+  pass++;
+  if(pass===1){const made=await downloaded(root,[['Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',COLOR]]);
+   return {status:'needs_file',reason:'site_error',summary:'The depth gauge’s file answered 503.',arrived:made.files};}
+  assert.match(_input.request,/Already on this computer, so don't download these again: Vernier\+Caliper\+Ruler\+150mm\+COLOR-02\.3mf\. Download only the other file\./);
+  const made=await downloaded(root,[['DEPTH+GAUGE+for+Vernier+Caliper+Ruler+150mm+COLOR-02.3mf',GAUGE]]);
+  return {status:'needs_file',reason:'download_not_saved',summary:'Only the gauge.',arrived:made.files};
+ });
+ const {value:first}=await logged(async()=>service.settled((await service.addStarter('long-vernier-caliper')).id));
+ assert.equal(first.state,'failed','half a kit is not ready');
+ const {value:second}=await logged(async()=>service.settled((await service.start(first.id)).id));
+ assert.equal(second.state,'ready','the kept colour file and the new gauge make the kit');assert.equal(second.files.receipts.length,2);
+ assert.equal(asked.length,2);
+ await service.delete(second.id);
+ const third=await service.addStarter('long-vernier-caliper');
+ assert.equal(third.state,'ready');assert.equal(asked.length,2,'a pickup is never downloaded again');
+});
+test('every published pass that ends without the file logs why: a worker failure, a thrown pass, a starter with no worker',async t=>{
+ const failing=await setup(t,async()=>({status:'failed',reason:'Claude Code couldn’t start: spawn EACCES',run:{toolCalls:0,seconds:0,exitCode:null}}));
+ const a=await logged(async()=>failing.service.settled((await failing.service.addStarter('scan-platform')).id));
+ assert.equal(a.value.failure,'Claude Code couldn’t start: spawn EACCES');assert.match(a.lines.join('\n'),/status failed.*exit none: Claude Code couldn’t start: spawn EACCES/);
+ const throwing=await setup(t,async()=>{throw new Error('The selected AI worker could not start. Check its login or API key in Settings.');});
+ const b=await logged(async()=>throwing.service.settled((await throwing.service.addStarter('scan-platform')).id));
+ assert.equal(b.value.state,'failed');assert.match(b.lines.join('\n'),new RegExp(`pass failed: project ${b.value.id}.*could not start`));
+ const off=await setup(t,undefined,{modelAccess:{projectWorker:()=>{throw new Error('AI is off. Choose a provider in AI Settings.');}}});
+ const c=await logged(()=>off.service.addStarter('long-vernier-caliper'));
+ assert.equal(c.value.state,'needs-closeup');assert.match(c.lines.join('\n'),/starter long-vernier-caliper: no download pass for project .*AI is off/);
 });
 test('with no browser to download with (Linux), a starter asks for the designer’s files instead of a sign-in',async t=>{
  const {service}=await setup(t,async()=>({status:'needs_file',browser:false}));
