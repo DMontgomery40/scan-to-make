@@ -560,7 +560,9 @@ final class LayoutParityUITests: XCTestCase {
 
     func testCompletedPrinterMoveKeepsItsResultAfterItsButtonDisappears() throws { try checkCopyMove(completes: true) }
 
-    private func checkCopyMove(completes: Bool) throws {
+    func testPrinterMoveCompletionSurvivesDismissingPrinters() throws { try checkCopyMove(completes: true, reopen: true) }
+
+    private func checkCopyMove(completes: Bool, reopen: Bool = false) throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -582,6 +584,11 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Counterpart’s copy 1.2.45"].exists)
         XCTAssertTrue(app.staticTexts["Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25)."].exists)
         move.tap()
+        if reopen {
+            app.buttons["Done"].tap()
+            XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 5))
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
+        }
         if completes {
             XCTAssertTrue(app.staticTexts["Bambu Lab P1S uses Counterpart’s copy (1.2.45)."].waitForExistence(timeout: 5))
             XCTAssertTrue(move.waitForNonExistence(timeout: 5), "the completed move is no longer offered")

@@ -30,6 +30,7 @@ import CounterpartKit
     var mcpCopies: [MCPPackageCopies]?
     var mcpCopiesProblem: String?
     var mcpUpdates: [String: MCPUpdateProgress] = [:]
+    var attemptedMcpMoves: [String: String] = [:]
     /// What each printer last reported loaded, from a print sheet (the Mac reports spools per project).
     var spools: [String: [PrinterFilament]] = [:]
     /// The Mac serves `/v1/events`; false after it answered "not supported".
@@ -237,7 +238,7 @@ import CounterpartKit
     /// Clears everything read from the previous Mac.
     func reset() {
         reads.reset()
-        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; mcpCopies = nil; mcpCopiesProblem = nil
+        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
         sendFailures = [:]
     }
 

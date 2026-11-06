@@ -311,8 +311,6 @@ struct MCPCopiesView: View {
     var printerId: String? = nil
     @State private var working: String?
     @State private var problem: String?
-    /// A completed move leaves the available actions, but its events keep the original MCP ID.
-    @State private var attemptedMoves: [String: String] = [:]
     private var packages: [MCPPackageCopies] {
         (store.mcpCopies ?? []).filter { package in printerId == nil || package.uses.contains { $0.printerId == printerId } }
     }
@@ -330,7 +328,7 @@ struct MCPCopiesView: View {
                             Button(package.moveTitle(id)) { Task { await update(id, fresh: true, moveTitle: package.moveTitle(id)) } }
                                 .disabled(working != nil || store.mcpCopiesProblem != nil || store.mcpUpdates[id]?.isRunning == true)
                                 .accessibilityIdentifier("mcp-move-" + id)
-                            if attemptedMoves[id] == nil { progress(id) }
+                            if store.attemptedMcpMoves[id] == nil { progress(id) }
                         }
                         if package.appCopy != nil {
                             Button("Update Counterpart’s copy") { Task { await update(package.appMcpId, fresh: false) } }
@@ -340,9 +338,9 @@ struct MCPCopiesView: View {
                     }
                 }
             }
-            ForEach(attemptedMoves.keys.sorted(), id: \.self) { id in
+            ForEach(store.attemptedMcpMoves.keys.sorted(), id: \.self) { id in
                 VStack(alignment: .leading, spacing: 4) {
-                    if let title = attemptedMoves[id] { Text(title).font(.caption).foregroundStyle(.secondary) }
+                    if let title = store.attemptedMcpMoves[id] { Text(title).font(.caption).foregroundStyle(.secondary) }
                     progress(id)
                 }
             }
@@ -359,7 +357,7 @@ struct MCPCopiesView: View {
     private func update(_ id: String, fresh: Bool, moveTitle: String? = nil) async {
         guard working == nil else { return }
         working = id; problem = nil
-        if let moveTitle { attemptedMoves[id] = moveTitle }
+        if let moveTitle { store.attemptedMcpMoves[id] = moveTitle }
         defer { working = nil }
         do { store.mcpUpdates[id] = MCPUpdateProgress(try await store.mac.client.updateMCP(id, fresh: fresh)); await store.loadMCPCopies() }
         catch let failure as CompanionError { problem = failure.message }
