@@ -125,6 +125,24 @@ public struct FusionSetupReply: Decodable, Sendable, Equatable {
     public init(setup: JSONValue?, server: String, error: String? = nil) { self.setup = setup; self.server = server; self.error = error }
 }
 
+/// `fusion.status`: `fusion_mcp_status {launch: true}` on the printer MCP as the companion runs it. `status` is the tool's
+/// structured result as the MCP gave it; nil when the MCP has no such tool (`error` set when the call itself failed).
+public struct FusionStatusReply: Decodable, Sendable, Equatable {
+    /// Until both MCPs report `activeDesign`: the companion's read of the open design's parameters, for an MCP without it.
+    public struct Design: Decodable, Sendable, Equatable {
+        public let isError: Bool
+        public let text: String?
+        public init(isError: Bool, text: String? = nil) { self.isError = isError; self.text = text }
+    }
+    public let status: JSONValue?
+    public let server: String
+    public let error: String?
+    public let design: Design?
+    public init(status: JSONValue?, server: String, error: String? = nil, design: Design? = nil) {
+        self.status = status; self.server = server; self.error = error; self.design = design
+    }
+}
+
 public extension ControlClient {
     /// Holds up to `timeoutMs` for events after `after` (`capabilities.events`). Use a client whose own deadline is
     /// longer than `timeoutMs`; the companion keeps this connection open for `timeoutMs` plus 5 s.
@@ -173,6 +191,8 @@ public extension ControlClient {
     func fusionSetup(install: Bool) async throws -> FusionSetupReply {
         try await call("fusion.setup", ["install": .bool(install)])
     }
+    /// Use a client whose deadline covers the companion's 160 s (it may start Fusion and wait for its add-in).
+    func fusionStatus() async throws -> FusionStatusReply { try await call("fusion.status", [:]) }
     func fusionSetupDone(requestId: String, ok: Bool, message: String?) async throws {
         struct Reply: Decodable {}
         var params: [String: JSONValue] = ["requestId": .string(requestId), "ok": .bool(ok)]

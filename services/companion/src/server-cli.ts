@@ -2,6 +2,7 @@ import {reportsCompletion} from './objects/completion-intent.js';
 import { randomUUID } from 'node:crypto';
 import {ModelSizeStore} from './model-size.js';
 import {createModelSizeRunner,installedBambuProcess} from './model-size-runner.js';
+import {fusionCalls} from './fusion-calls.js';
 import {readFile} from 'node:fs/promises';
 import {ScanProcessingStore,createScanCleanupRunner} from './scan-processing.js';
 import {dirname,isAbsolute,join} from 'node:path';
@@ -240,18 +241,8 @@ if(handoffConfig&&printHandoff&&captureDirectory){
     }});
   await objects.resume();
 }
-/** fusion_mcp_setup on the printer MCP as it runs (with its Update override); the Mac renders the answer. */
-const fusionSetup=handoffConfig===undefined?undefined:async(install:boolean)=>{
-  const config=runningHandoff()!, server=mcpPackageName(config.backend), client=new PrinterMcpClient(config);
-  const signal=AbortSignal.timeout(install?300_000:90_000);
-  try{
-    await client.connect(signal);
-    if(!client.hasTool('fusion_mcp_setup'))return {setup:null,server};
-    const result=await client.callTool('fusion_mcp_setup',install?{install:true}:{},{signal});
-    if(result.isError)return {setup:null,server,error:toolErrorText(result)};
-    return {setup:toolResultJson<Record<string,unknown>>(result),server};
-  }finally{await client.close().catch(()=>{});}
-};
+// fusion_mcp_setup and fusion_mcp_status on the printer MCP as it runs (with its Update override); the Mac renders the answers.
+const {fusionSetup,fusionStatus}=handoffConfig===undefined?{fusionSetup:undefined,fusionStatus:undefined}:fusionCalls(()=>runningHandoff()!);
 // The objects setup applies saved MCP overrides itself; otherwise apply them here, so every session (the phone's and
 // `/v1/mcp`'s) starts the version an Update chose.
 if(mcpUpdates){if(!objects)await mcpUpdates.applyOverrides();mcpUpdates.start();}
@@ -323,6 +314,7 @@ try {
       ...(printerSetup ? {printerSetup} : {}),
   ...(blenderAddon ? {blenderAddon} : {}),
       ...(fusionSetup ? {fusionSetup} : {}),
+      ...(fusionStatus ? {fusionStatus} : {}),
       // With every address answering, the Mac's QR is a v2 link from the live list.
       ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,
         ...(macName ? {name:instanceName(macName)} : {})})} : {}),

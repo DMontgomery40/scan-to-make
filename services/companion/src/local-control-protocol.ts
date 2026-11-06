@@ -117,6 +117,7 @@ export const parameters = {
   'fusion.claimSetup': z.strictObject({claimantId:z.uuid()}),
   'fusion.setupDone': z.strictObject({requestId:z.uuid(), ok:z.boolean(), message:z.string().max(500).optional()}),
   'fusion.setup': z.strictObject({install:z.boolean()}),
+  'fusion.status': empty,
   'settings.get': empty,
   'settings.set': CompanionSettingsPatchSchema,
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([

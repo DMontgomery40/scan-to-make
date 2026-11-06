@@ -36,7 +36,7 @@ Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 
    - one accessibility container per MCP on every client;
    - Android and Linux show updates and Moves started on another client (#357's deferred P2).
 
-   `fusion_mcp_status` runs through the companion's resolved route and is read from its structured result in #377. Left: add `activeDesign` to `fusion_mcp_status` in both MCPs, so "Open a design in Fusion first" is detected again. Until then the app reads a connected Fusion as connected. `authorized_keys` still names `printers/bambu-1.1.46`. It is no longer used once the P1S is moved, and Counterpart doesn't edit it.
+   #377 routes `fusion_mcp_status` through the companion's resolved route (the copy Settings → Printers runs) and reads its structured result. Left: both MCPs add `activeDesign` (whether a design is open) to `fusion_mcp_status`, publish, and install through Update. Then delete the interim open-design read (`fusion-calls.ts` `design`, and the Mac's refusal match in `FusionSetup.Status.from`), the last wording the app matches here. `authorized_keys` still names `printers/bambu-1.1.46`. It is no longer used once the P1S is moved, and Counterpart doesn't edit it.
 9. The rest of the PRD's not-accepted list (§0).
 
 **Waiting on David:** every physical print; he starts them ("do not reprint anything on your own EVER"). Next: redo the caliper card (`1f1c5515`) in the app and print it (copy of a designer's 3MF, fixed and installed Nov 5, PRD §0), and the Bambu Cloud print (item 3). The phone's "Connected" in Settings was seen on device Nov 4 (old item 4.3, done).
