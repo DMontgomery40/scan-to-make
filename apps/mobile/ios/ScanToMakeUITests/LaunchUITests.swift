@@ -615,7 +615,8 @@ final class LayoutParityUITests: XCTestCase {
         secret.tap(); secret.typeText("12345678")
         XCTAssertTrue(add.isEnabled)
         let check = app.buttons["add-printer-check"]
-        reveal(check, in: app.collectionViews.firstMatch)
+        // The sheet's own form: on the iPad the sidebar behind it is a collection view too.
+        reveal(check, in: app.collectionViews.containing(.button, identifier: "add-printer-check").firstMatch)
         check.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Connected")).firstMatch.waitForExistence(timeout: 10))
         add.tap()
@@ -659,7 +660,7 @@ final class LayoutParityUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
         let add = app.buttons["add-printer"]
         XCTAssertTrue(add.waitForExistence(timeout: 10), app.debugDescription)
-        reveal(add, in: app.collectionViews.firstMatch)
+        reveal(add, in: app.collectionViews.containing(.button, identifier: "add-printer").firstMatch)
         add.tap()
         return app
     }
