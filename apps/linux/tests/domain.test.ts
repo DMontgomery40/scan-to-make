@@ -351,3 +351,17 @@ test("a multi-colour model's rows: the MCP's proposal, its note, mixed feeds, an
   assert.equal("filamentsModelVersion" in request && request.filamentsModelVersion, "v1");
   assert.equal("filament" in request, false, "per-part spools, never one spool for the whole model");
 });
+
+test("software results retain a waiting move when another MCP updates", async () => {
+  const {readFile} = await import("node:fs/promises");
+  const {mcpUpdateNotices} = await import("../src/domain.ts");
+  const events = JSON.parse(await readFile(new URL("../../../packages/contracts/fixtures/mcp-copy-update-events.json", import.meta.url), "utf8"));
+  const pkg = JSON.parse(await readFile(new URL("../../../packages/contracts/fixtures/mcp-profile-copies.json", import.meta.url), "utf8"));
+  const move = events[1];
+  const update = {...events[2], data: {...events[2].data, mcpId: pkg.appMcpId}};
+  const completed = mcpUpdateNotices({}, [move]);
+  const later = mcpUpdateNotices(completed, [update]);
+  assert.equal(later[move.data.mcpId], `${move.title} ${move.body}`);
+  assert.equal(later[update.data.mcpId], `${update.title} ${update.body}`);
+  assert.deepEqual(mcpUpdateNotices({}, [move, update]), later);
+});

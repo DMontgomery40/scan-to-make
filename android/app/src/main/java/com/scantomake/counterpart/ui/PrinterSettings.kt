@@ -122,21 +122,28 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
     val readProblem by state.mcpCopiesProblem.collectAsState()
     val capabilities by state.capabilities.collectAsState()
     val events by state.mcpUpdateEvents.collectAsState()
-    val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf<String?>(null) }
     val attempts by state.mcpUpdateAttempts.collectAsState()
-    var result by remember { mutableStateOf<McpUpdate?>(null) }
-    var problem by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(printerId) { state.loadCapabilities(); state.loadMcpCopies() }
     fun update(id: String, fresh: Boolean) {
         if (busy != null) return
-        busy = id; problem = null; result = null
-        state.mcpUpdateAttempts.value = state.mcpUpdateAttempts.value +
-            (printerId to AppState.McpUpdateAttempt(id, events[id]?.seq ?: -1))
-        scope.launch {
-            try { result = Counterpart.instance.companion.updatePrinterMcp(id, fresh); state.loadMcpCopies() }
+        busy = id
+        val attempt = AppState.McpUpdateAttempt(printerId, id, events[id]?.seq ?: -1)
+        state.mcpUpdateAttempts.value = state.mcpUpdateAttempts.value + (id to attempt)
+        state.scope.launch {
+            try {
+                val result = Counterpart.instance.companion.updatePrinterMcp(id, fresh)
+                if (state.mcpUpdateAttempts.value[id] === attempt) {
+                    state.mcpUpdateAttempts.value = state.mcpUpdateAttempts.value + (id to attempt.copy(result = result))
+                    state.loadMcpCopies()
+                }
+            }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { problem = e.message ?: "Couldn’t update the printer software." }
+            catch (e: Exception) {
+                if (state.mcpUpdateAttempts.value[id] === attempt)
+                    state.mcpUpdateAttempts.value = state.mcpUpdateAttempts.value +
+                        (id to attempt.copy(problem = e.message ?: "Couldn’t update the printer software."))
+            }
             finally { busy = null }
         }
     }
@@ -154,11 +161,13 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
             Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.", color = Palette.secondary, fontSize = 12.sp)
         }
         // Events are authoritative even when the accepted mutation's HTTP reply never arrived.
-        val attempt = attempts[printerId]
-        val event = attempt?.let { events[it.mcpId]?.takeIf { event -> event.seq > it.eventFloor } }
-        val words = event?.body?.takeIf { it.isNotBlank() } ?: event?.title ?: result?.words
-        words?.let { Text(it, fontSize = 12.sp) }
-        ((if (event == null) problem else null) ?: readProblem)?.let { Text(it, color = Palette.failed, fontSize = 12.sp) }
+        attempts.values.filter { it.printerId == printerId }.forEach { attempt ->
+            val event = events[attempt.mcpId]?.takeIf { it.seq > attempt.eventFloor }
+            val words = event?.body?.takeIf { it.isNotBlank() } ?: event?.title ?: attempt.result?.words
+            words?.let { Text(it, fontSize = 12.sp) }
+            if (event == null) attempt.problem?.let { Text(it, color = Palette.failed, fontSize = 12.sp) }
+        }
+        readProblem?.let { Text(it, color = Palette.failed, fontSize = 12.sp) }
         if (!capabilities.contains("mcpCopies")) Text("Update Counterpart on your computer to see each printer’s software copy.", color = Palette.secondary, fontSize = 12.sp)
     }
 }

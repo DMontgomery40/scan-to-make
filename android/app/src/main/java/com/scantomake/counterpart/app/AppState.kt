@@ -45,7 +45,8 @@ class AppState(private val app: Counterpart) {
     val mcpCopies = MutableStateFlow<List<com.scantomake.counterpart.api.McpPackageCopies>?>(null)
     val mcpCopiesProblem = MutableStateFlow<String?>(null)
     val mcpUpdateEvents = MutableStateFlow<Map<String, CounterpartEvent>>(emptyMap())
-    data class McpUpdateAttempt(val mcpId: String, val eventFloor: Int)
+    data class McpUpdateAttempt(val printerId: String, val mcpId: String, val eventFloor: Int,
+        val result: com.scantomake.counterpart.api.McpUpdate? = null, val problem: String? = null)
     // Keep the original operation ID when its screen leaves composition or the copy mapping changes.
     val mcpUpdateAttempts = MutableStateFlow<Map<String, McpUpdateAttempt>>(emptyMap())
     /** A project to open, from a notification tap. */

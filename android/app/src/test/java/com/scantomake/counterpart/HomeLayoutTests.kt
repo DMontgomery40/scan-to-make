@@ -120,7 +120,9 @@ class HomeLayoutTests {
 
     @Test fun printerSoftwareKeepsWaitingMoveCompletionAfterReturningHome() = printerSoftwareMove(false, navigateHome = true)
 
-    private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false) {
+    @Test fun printerSoftwareRetainsWaitingMoveWhenAnotherUpdateStarts() = printerSoftwareMove(false, secondUpdate = true)
+
+    private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false, secondUpdate: Boolean = false) {
         val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
         app.pairingStore.save(v2Record(), false)
         val transport = FakeTransport { request, _ ->
@@ -165,6 +167,14 @@ class HomeLayoutTests {
         } else {
             compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates after the current print or design finishes.")).fetchSemanticsNodes().isNotEmpty() }
         }
+        if (secondUpdate) {
+            compose.onNodeWithText("Update Counterpart’s copy").performScrollTo().performClick()
+            compose.waitUntil(5_000) { transport.calls.count { it.request.url.endsWith("/update") } == 2 }
+            val done = WireJson.parseToJsonElement(contractFixture("mcp-copy-update-events.json").readText()).jsonArray
+                .map { requireNotNull(CounterpartEvent.decode(it.jsonObject)) }.first { it.type.endsWith("done") }
+            compose.runOnIdle { state.mcpUpdateEvents.value = mapOf(requireNotNull(done.data?.mcpId) to done) }
+            compose.onNodeWithText(done.body).assertExists()
+        }
         if (navigateHome) {
             compose.onNodeWithContentDescription("Back").performClick()
             compose.onNodeWithContentDescription("Printers").assertExists()
@@ -175,9 +185,9 @@ class HomeLayoutTests {
             compose.onNodeWithText(done.body).assertExists()
         }
         val moves = transport.calls.filter { it.request.url.endsWith("/update") }
-        org.junit.Assert.assertEquals(1, moves.size)
-        org.junit.Assert.assertTrue(moves.single().request.url.endsWith("/mcp-0000000000000002/update"))
-        org.junit.Assert.assertEquals("{\"fresh\":true}", String(moves.single().request.body!!))
+        org.junit.Assert.assertEquals(if (secondUpdate) 2 else 1, moves.size)
+        org.junit.Assert.assertTrue(moves.first().request.url.endsWith("/mcp-0000000000000002/update"))
+        org.junit.Assert.assertEquals("{\"fresh\":true}", String(moves.first().request.body!!))
         org.junit.Assert.assertEquals(listOf("mcp-0000000000000002"), pkg.moveIds)
         org.junit.Assert.assertEquals("projects:read", CompanionClient.scope("GET", "/v1/printers/mcps"))
     }

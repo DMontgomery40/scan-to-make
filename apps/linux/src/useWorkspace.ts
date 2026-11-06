@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { call } from "./bridge";
-import { ReadOrder, newerProject } from "./domain";
+import { ReadOrder, newerProject, mcpUpdateNotices } from "./domain";
 import type { Project, Printer, RawQuestion } from "./types";
 export function useWorkspace(enabled: boolean) {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -8,7 +8,16 @@ export function useWorkspace(enabled: boolean) {
   const [questions, setQuestions] = useState<RawQuestion[]>([]);
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
-  const [eventNotice, setEventNotice] = useState("");
+  const [mcpReplies, setMcpReplies] = useState<Record<string, string>>({});
+  const [mcpEvents, setMcpEvents] = useState<Record<string, string>>({});
+  const mcpNotices = {...mcpReplies, ...mcpEvents};
+  const eventNotice = Object.values(mcpEvents).join(" ");
+  const recordMcpNotice = (id: string, words: string, begins = false) => {
+    if (begins) setMcpEvents(old => {
+      const next = {...old}; delete next[id]; return next;
+    });
+    setMcpReplies(old => ({...old, [id]: words}));
+  };
   const [jobs, setJobs] = useState<
     {
       kind: string;
@@ -113,7 +122,7 @@ export function useWorkspace(enabled: boolean) {
         try {
           const page = await call<{
             next: number;
-            events: { type: string; title: string; body: string }[];
+            events: { type: string; title: string; body: string; data?: {mcpId?: string} }[];
             reset?: boolean;
             truncated?: boolean;
           }>("events.wait", {
@@ -126,10 +135,7 @@ export function useWorkspace(enabled: boolean) {
           if (page.events.length || page.reset || page.truncated) {
             await refresh();
             await confirmations();
-            const update = page.events.findLast((e) =>
-              e.type.startsWith("mcp.update."),
-            );
-            if (update) setEventNotice(`${update.title} ${update.body}`);
+            setMcpEvents(old => mcpUpdateNotices(old, page.events));
           }
         } catch {
           if (live) {
@@ -162,6 +168,8 @@ export function useWorkspace(enabled: boolean) {
     error,
     connected,
     eventNotice,
+    mcpNotices,
+    recordMcpNotice,
     jobs,
     refresh,
     apply,

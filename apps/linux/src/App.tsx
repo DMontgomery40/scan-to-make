@@ -420,6 +420,8 @@ export function App() {
       {settings && (
         <Settings
           printers={workspace.printers}
+          mcpNotices={workspace.mcpNotices}
+          recordMcpNotice={workspace.recordMcpNotice}
           onClose={() => {
             setSettings(false);
             void readHost();

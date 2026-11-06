@@ -81,11 +81,15 @@ export function Settings({
   onClose,
   onRefresh,
   onPair,
+  mcpNotices,
+  recordMcpNotice,
 }: {
   printers: Printer[];
   onClose: () => void;
   onRefresh: () => Promise<void>;
   onPair: () => Promise<void>;
+  mcpNotices: Record<string, string>;
+  recordMcpNotice: (id: string, words: string, begins?: boolean) => void;
 }) {
   const [tab, setTab] = useState("Printers");
   return (
@@ -107,7 +111,7 @@ export function Settings({
         <section>
           {tab === "General" && <General />}
           {tab === "Printers" && (
-            <Printers printers={printers} onRefresh={onRefresh} />
+            <Printers printers={printers} onRefresh={onRefresh} notices={mcpNotices} setNotice={recordMcpNotice} />
           )}{" "}
           {tab === "Model access" && <Models />}
           {tab === "Devices" && <Devices onPair={onPair} />}{" "}
@@ -600,15 +604,18 @@ function Devices({ onPair }: { onPair: () => Promise<void> }) {
 function Printers({
   printers,
   onRefresh,
+  notices,
+  setNotice,
 }: {
   printers: Printer[];
   onRefresh: () => Promise<void>;
+  notices: Record<string, string>;
+  setNotice: (id: string, words: string, begins?: boolean) => void;
 }) {
   const [packages, setPackages] = useState<McpPackage[]>([]);
   const [options, setOptions] = useState<SetupOptions>();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const refresh = async () => {
     const r = await call<{ packages: McpPackage[]; options: SetupOptions }>(
       "printers.mcps",
@@ -673,11 +680,12 @@ function Printers({
             <div key={mcpId}>
               <Action
                 run={async () => {
+                  setNotice(mcpId, "Requesting move…", true);
                   const result = await call<{ update: {state: string; found?: string} }>(
                     "printers.updateMcp",
                     { mcpId, fresh: true },
                   );
-                  setNotice(mcpMoveNotice(result));
+                  setNotice(mcpId, mcpMoveNotice(result));
                   await refresh();
                 }}
               >
@@ -697,10 +705,12 @@ function Printers({
           <div className="actions">
             <Action
               run={async () => {
+                setNotice(pkg.appMcpId, "Checking download…", true);
                 const r = await call<{
                   update?: { state: string; found?: string };
                 }>("printers.installMcp", { package: pkg.package });
                 setNotice(
+                    pkg.appMcpId,
                   r.update?.found ?? r.update?.state ?? "Already installed.",
                 );
                 await refresh();
@@ -711,12 +721,14 @@ function Printers({
             {pkg.installed && (
               <Action
                 run={async () => {
+                  setNotice(pkg.appMcpId, "Requesting update…", true);
                   const r = await call<{
                     update?: { state: string; found?: string };
                     state?: string;
                     found?: string;
                   }>("printers.updateMcp", { mcpId: pkg.appMcpId });
                   setNotice(
+                    pkg.appMcpId,
                     r.update?.found ??
                       r.found ??
                       r.update?.state ??
@@ -732,11 +744,9 @@ function Printers({
           </div>
         </section>
       ))}
-      {notice && (
-        <p role="status" className="notice">
-          {notice}
-        </p>
-      )}
+      {Object.entries(notices).map(([id, notice]) => (
+        <p role="status" className="notice" key={id}>{notice}</p>
+      ))}
       {error && <p className="error">{error}</p>}
       {adding && (
         <AddPrinter

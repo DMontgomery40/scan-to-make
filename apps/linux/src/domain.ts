@@ -474,3 +474,12 @@ export function partNote(
 export function spoolTitle(f: import("./types").Filament): string {
   return f.label ? `${f.label} · ${f.name}` : `${f.material} · ${f.name || f.colour}`;
 }
+
+/** Keep the latest software result for every MCP operation. */
+export function mcpUpdateNotices(previous: Record<string, string>, events: {type: string; title: string; body: string; data?: {mcpId?: string}}[]): Record<string, string> {
+  const next = {...previous};
+  for (const event of events) {
+    if (event.type.startsWith("mcp.update.")) next[event.data?.mcpId ?? event.type] = `${event.title} ${event.body}`;
+  }
+  return next;
+}
