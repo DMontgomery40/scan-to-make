@@ -18,6 +18,8 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `bambu_network_bridge_status` | Bambu network bridge readiness (setup) |
 | `blender_mcp_status` `blender_mcp_call` `execute_blender_code` `get_addon_status` | the Blender bridge |
 | `fusion_mcp_status` `fusion_mcp_call` `fusion_mcp_new_design` `fusion_mcp_export` | the Fusion bridge |
+| `blender_mcp_setup` | the Blender add-on's check and update (`update`), done by the MCP (moved, **§8.0 #11**) |
+| `fusion_mcp_setup` | the Mac's Design with Fusion: the MCP finds Fusion and installs the add-in, its port login item and its own settings (`install`); the companion passes its result to the Mac as it is (moved, **§8.0 #11**) |
 | `fdm_design` | the MCPs' design prompt |
 
 ## Tool arguments
@@ -43,7 +45,8 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `tool_name` `user_prompt` `arguments` `code` | `blender_mcp_call` |
 | `launch` | `fusion_mcp_status` |
 | `document_id` `source_f3d` `bind_document` `close_document` `document_binding` | Fusion document binding |
-| `addon_version` `after_install` `blender_version` `protocol_version` `expected_protocol_version` `up_to_date` | Blender add-on install and repair, **§8.0 #11** |
+| `addon_version` `after_install` `blender_version` `protocol_version` `expected_protocol_version` `up_to_date` | the running Blender add-on's `get_addon_status`, read before a cleanup pass and inside `blender_mcp_setup`'s `live` |
+| `expected_protocol` `live_error` `target_problem` | `blender_mcp_setup`'s result, with `supported`, `reason`, `listening`, `live`, `target`, `current`, `replaced` and `message`: the app shows the MCP's `message` as it is when it can't check or update the add-on, derives its Settings states from the booleans, and keeps the print gate and the helper lock |
 
 ## Remote devices (`/v1/mcp`)
 

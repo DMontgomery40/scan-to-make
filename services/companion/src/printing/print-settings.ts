@@ -15,6 +15,8 @@ export function sliceOverrides(settings: Pick<PrintSettings, 'quality' | 'streng
 }
 
 const PACKAGE_NAMES = {'bambu-printer-mcp': 'bambu-printer-mcp', 'mcp-3d-printer-server': 'mcp-3D-printer-server'} as const;
+/** The printer MCP's name as people see it in Settings → Printers. */
+export function mcpPackageName(backend: string): string { return PACKAGE_NAMES[backend as keyof typeof PACKAGE_NAMES] ?? backend; }
 /** The sentence for a quality or strength the installed MCP can't apply. */
 export function settingsUnsupported(backend: keyof typeof PACKAGE_NAMES, settings: Pick<PrintSettings, 'quality' | 'strength' | 'copies' | 'pauseBeforeLayers'> & {supports?: boolean}): string {
   const what = [settings.quality && settings.quality !== 'standard' ? 'quality' : undefined, settings.strength && settings.strength !== 'standard' ? 'strength' : undefined,

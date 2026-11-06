@@ -117,6 +117,14 @@ public struct LiveActivityTokens: Codable, Sendable, Equatable {
     public init(pushToStart: [PushToStart] = [], activities: [Activity] = []) { self.pushToStart = pushToStart; self.activities = activities }
 }
 
+/// The companion's answer to `fusion.setup`.
+public struct FusionSetupReply: Decodable, Sendable, Equatable {
+    public let setup: JSONValue?
+    public let server: String
+    public let error: String?
+    public init(setup: JSONValue?, server: String, error: String? = nil) { self.setup = setup; self.server = server; self.error = error }
+}
+
 public extension ControlClient {
     /// Holds up to `timeoutMs` for events after `after` (`capabilities.events`). Use a client whose own deadline is
     /// longer than `timeoutMs`; the companion keeps this connection open for `timeoutMs` plus 5 s.
@@ -159,6 +167,11 @@ public extension ControlClient {
         struct Reply: Decodable { let requestId: String? }
         let reply: Reply = try await call("fusion.claimSetup", ["claimantId": .string(claimantId)])
         return reply.requestId
+    }
+    /// `fusion_mcp_setup` on the printer MCP as the companion runs it (with its Update override). `setup` is the MCP's
+    /// result as it sent it; nil without `error` when that MCP has no such tool (`server` names it). `install` installs.
+    func fusionSetup(install: Bool) async throws -> FusionSetupReply {
+        try await call("fusion.setup", ["install": .bool(install)])
     }
     func fusionSetupDone(requestId: String, ok: Bool, message: String?) async throws {
         struct Reply: Decodable {}

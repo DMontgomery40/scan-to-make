@@ -1,8 +1,8 @@
 import XCTest
 import Darwin
 
-/// Settings → AI → Design with Fusion → Set Up (PRD §8.9), end to end on fixtures: a printer MCP reached through the
-/// SSH stopgap, a fake add-in, a fake launchctl and a fake Fusion behind a fake printer MCP. Nothing on this Mac changes.
+/// Settings → AI → Design with Fusion → Set Up (PRD §8.9), on fixtures: a fake printer MCP that answers
+/// fusion_mcp_setup and a fake Fusion behind it. The MCP owns the install (PRD §8.0 item 11). Nothing on this Mac changes.
 final class FusionSetUpFlowTests: XCTestCase {
     private var root: URL!
     override func setUpWithError() throws {
@@ -18,66 +18,37 @@ final class FusionSetUpFlowTests: XCTestCase {
         return url
     }
 
-    /// The stopgap's shape: ssh to 127.0.0.1 with a key whose forced command `cd`s to the MCP's checkout.
-    private func stopgap() throws -> (state: URL, home: URL, mcp: URL) {
-        let home = root.appendingPathComponent("home", isDirectory: true)
-        let mcp = root.appendingPathComponent("home/bambu printer mcp", isDirectory: true)
-        let identity = home.appendingPathComponent(".ssh/printer_ed25519").path
-        _ = try write("ssh-ed25519 AAAAC3FAKEKEYBODY counterpart\n", "home/.ssh/printer_ed25519.pub")
-        _ = try write("ssh-ed25519 AAAAOTHER someone\n"
-                      + "from=\"127.0.0.1,::1\",restrict,command=\"cd '\(mcp.path)' && MCP_TRANSPORT=stdio exec node dist/index.js\" ssh-ed25519 AAAAC3FAKEKEYBODY counterpart\n",
-                      "home/.ssh/authorized_keys")
-        _ = try write("PRINTER_HOST=192.168.1.20\nBLENDER_MCP_COMMAND=/opt/homebrew/bin/uvx\nBLENDER_MCP_ARGS=[\"blender-mcp\"]\nTEMP_DIR=./temp\n",
-                      "home/bambu printer mcp/.env")
-        // ssh itself starts somewhere else: that folder's .env is not the one the MCP reads.
-        _ = try write("WRONG=1\n", "elsewhere/.env")
-        let handoff: [String: Any] = ["process": ["command": "/usr/bin/ssh", "cwd": root.appendingPathComponent("elsewhere").path,
-                                                  "args": ["-T", "-i", identity, "-o", "BatchMode=yes", "me@127.0.0.1"]]]
-        let state = root.appendingPathComponent("state", isDirectory: true)
-        try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
-        try JSONSerialization.data(withJSONObject: handoff).write(to: state.appendingPathComponent("printer-handoff.json"))
-        return (state, home, mcp)
-    }
+    private let ready = #"{"platform":"darwin","supported":true,"fusion":{"installed":true,"path":"/Applications/Autodesk Fusion.app"},"ready":true,"installed":{"addin":"installed","port_agent":"installed","env":"written"}}"#
 
-    func testTheStopgapsForcedCommandNamesTheEnvFile() throws {
-        let (state, home, mcp) = try stopgap()
-        XCTAssertEqual(FusionSetup.envFiles(state: state, home: home).map(\.path), [mcp.appendingPathComponent(".env").path],
-                       "the forced command's folder, not where ssh starts")
-        XCTAssertEqual(FusionSetup.forcedCommandFolder(
-            authorizedKeys: "restrict,command=\"cd /Users/d/bambu-printer-mcp && MCP_TRANSPORT=stdio exec node x\" ssh-ed25519 KEY c", keyBody: "KEY"),
-            "/Users/d/bambu-printer-mcp")
-        XCTAssertNil(FusionSetup.forcedCommandFolder(authorizedKeys: "ssh-ed25519 KEY c", keyBody: "KEY"), "no forced command")
-    }
-
-    func testSetUpInstallsTheAddinTheSettingsAndThePortThenAsksFusion() async throws {
-        let (state, home, mcp) = try stopgap()
-        let addin = try write("{\n  \"runOnStartup\": false\n}\n", "addin/Fusion360MCP.manifest").deletingLastPathComponent()
-        _ = try write("# the add-in\n", "addin/Fusion360MCP.py")
-        let addins = root.appendingPathComponent("AddIns", isDirectory: true)
-        let agent = root.appendingPathComponent("LaunchAgents/\(FusionSetup.portAgentLabel).plist")
-        var calls: [[String]] = []
-        let steps = FusionSetup.Steps(home: home, addinsFolder: addins, portAgent: agent, withAddin: { use in try use(addin) },
-                                      launchctl: { calls.append($0); return true }, status: { .connected })
-        let report = try await FusionSetup.install(state: state, steps: steps)
-
-        let manifest = try String(contentsOf: addins.appendingPathComponent("Fusion360MCP/Fusion360MCP.manifest"), encoding: .utf8)
-        XCTAssertTrue(manifest.contains("\"runOnStartup\": true"), "the add-in runs when Fusion starts")
-        let env = try String(contentsOf: mcp.appendingPathComponent(".env"), encoding: .utf8)
-        let lines = env.components(separatedBy: "\n")
-        let blender = try XCTUnwrap(lines.lastIndex { $0.hasPrefix("BLENDER_MCP_") })
-        XCTAssertEqual(lines[blender + 1], "FUSION_MCP_COMMAND=/opt/homebrew/bin/uvx", "right after Blender's, with Blender's uvx")
-        XCTAssertTrue(lines.contains("FUSION_MCP_PORT=9877"))
-        XCTAssertTrue(lines.contains("PRINTER_HOST=192.168.1.20"), "every other line kept")
-        let backups = try FileManager.default.contentsOfDirectory(atPath: mcp.path).filter { $0.hasPrefix(".env.bak-") }
-        XCTAssertEqual(backups.count, 1, "a copy of the file first")
-        let plist = try XCTUnwrap(NSDictionary(contentsOf: agent))
-        XCTAssertEqual(plist["ProgramArguments"] as? [String], ["/bin/launchctl", "setenv", "FUSION_MCP_PORT", "9877"])
-        XCTAssertTrue(calls.contains { $0.first == "bootstrap" && $0.last == agent.path })
-        XCTAssertTrue(calls.contains(["setenv", "FUSION_MCP_PORT", "9877"]))
-        XCTAssertEqual(report.envFiles.map(\.path), [mcp.appendingPathComponent(".env").path])
+    func testSetUpAsksThePrinterMCPToInstallThenAsksFusion() async throws {
+        var asked: [Bool] = []
+        let steps = FusionSetup.Steps(setup: { install in asked.append(install); return MCPCall.Reply(isError: false, text: self.ready, server: "bambu-printer-mcp") },
+                                      status: { .connected })
+        let report = try await FusionSetup.install(steps: steps)
+        XCTAssertEqual(asked, [true], "one install, by the printer MCP")
+        XCTAssertTrue(report.setup.ready)
+        XCTAssertEqual(report.setup.env, "written")
         XCTAssertEqual(report.status, .connected)
-        let untouched = try String(contentsOf: root.appendingPathComponent("elsewhere/.env"), encoding: .utf8)
-        XCTAssertEqual(untouched, "WRONG=1\n")
+        let checked = try await FusionSetup.check(steps: steps)
+        XCTAssertEqual(asked, [true, false], "a check installs nothing")
+        XCTAssertTrue(checked.fusionInstalled)
+    }
+
+    func testSetUpStopsWhenTheMCPCantInstallOrHasNoEnvFile() async throws {
+        var statusAsked = false
+        let refused = FusionSetup.Steps(setup: { _ in MCPCall.Reply(isError: true, text: "Fusion setup installs on macOS only.") }, status: { statusAsked = true; return .connected })
+        do { _ = try await FusionSetup.install(steps: refused); XCTFail("it refused") }
+        catch let failure as FusionSetup.Failure { XCTAssertEqual(failure, .setup("Fusion setup installs on macOS only.")) }
+        // Not ready after installing: the MCP says what is missing, and that is what the person reads.
+        let words = "This server has no .env file to add its Fusion settings to: add FUSION_MCP_COMMAND and FUSION_MCP_ARGS to its configuration."
+        let notReady = FusionSetup.Steps(setup: { _ in MCPCall.Reply(isError: false, text: #"{"fusion":{"installed":true,"path":"/A.app"},"ready":false,"message":""# + words + #"","installed":{"addin":"installed","port_agent":"installed","env":"a-new-outcome"}}"#) },
+                                      status: { statusAsked = true; return .connected })
+        do { _ = try await FusionSetup.install(steps: notReady); XCTFail("not ready") }
+        catch let failure as FusionSetup.Failure { XCTAssertEqual(failure, .notReady(words)); XCTAssertEqual(failure.errorDescription, words) }
+        let older = FusionSetup.Steps(setup: { _ in nil }, status: { statusAsked = true; return .connected })
+        do { _ = try await FusionSetup.install(steps: older); XCTFail("no setup tool") }
+        catch let failure as FusionSetup.Failure { XCTAssertEqual(failure, .noSetupTool(server: "your printer MCP")) }
+        XCTAssertFalse(statusAsked, "Fusion isn't asked until its setup finished")
     }
 
     func testFusionsAnswerIsSaidPlainly() {
@@ -129,6 +100,16 @@ final class FusionSetUpFlowTests: XCTestCase {
         let older = MCPCall(command: try fakeMCP(tools: ["print_3mf"]).path, args: [], env: ["FAKE_REPLY": reply])
         let none = try await older.callTool("fusion_mcp_status", arguments: [:], timeout: 10)
         XCTAssertNil(none, "a printer MCP without the Fusion bridge")
+    }
+
+    func testTheSetupCallTalksToThePrinterMCPOverStdio() async throws {
+        let text = ready.replacingOccurrences(of: "\"", with: "\\\"")
+        let reply = #"{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":""# + text + #""}]}}"#
+        let call = MCPCall(command: try fakeMCP(tools: ["fusion_mcp_setup"]).path, args: [], env: ["FAKE_REPLY": reply])
+        let received = try await call.callTool("fusion_mcp_setup", arguments: ["install": true], timeout: 10)
+        let answer = try XCTUnwrap(received)
+        XCTAssertEqual(try FusionSetup.Setup.from(answer).ready, true)
+        XCTAssertEqual(answer.server, "fake")
     }
 
     func testAStatusCallThatNeverAnswersTimesOut() async throws {

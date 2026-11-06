@@ -1,392 +1,142 @@
 import Foundation
+#if canImport(ControlKit)
+import ControlKit
+#endif
 import AppKit
-import CryptoKit
 import Darwin
 
-/// Settings → AI → Design with Fusion (PRD §8.9). Counterpart never ships or requires Fusion. Set Up:
-/// 1. installs the Faust Machines add-in at the pinned commit into the user's own Fusion, set to run on startup;
-/// 2. adds the five `FUSION_MCP_*` settings next to `BLENDER_MCP_*` in the printer MCP's own env file;
-/// 3. installs a login LaunchAgent that runs `launchctl setenv FUSION_MCP_PORT 9877` (and runs it once now), because
-///    Blender's MCP add-on holds 9876 and a Fusion opened from the Dock never sees the env file.
+/// Settings → AI → Design with Fusion (PRD §8.9). Counterpart never ships or requires Fusion. The printer MCP owns
+/// Fusion's setup (`fusion_mcp_setup`, PRD §8.0 item 11): it finds Fusion, installs the Fusion360MCP add-in at the
+/// commit it pins (checking every file), the login item that gives Fusion `FUSION_MCP_PORT`, and its own
+/// `FUSION_MCP_*` settings. This app asks it, renders the answer and then asks Fusion itself (`fusion_mcp_status`).
 enum FusionSetup {
-    // Reviewed document-binding fork while the upstream change is under review.
-    static let repository = "DMontgomery40/fusion360-mcp-server"
-    static let commit = "86a3016a5a5b4a705228acc2f3b75aff7dcfd758"
-    static let shortCommit = "86a3016a5a5b"
-    /// Off Blender's 9876. Both the server and the add-in read `FUSION_MCP_PORT`.
+    /// The add-in's port, off Blender's 9876, for the ping that tells "reopen Fusion" from "update the MCP".
     static let port = "9877"
-    static let portAgentLabel = "com.scantomake.mac.fusion-port"
     /// Autodesk's page for Fusion's free personal-use download.
     static let download = URL(string: "https://www.autodesk.com/products/fusion-360/personal")!
-    static var portAgent: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(portAgentLabel).plist")
-    }
-    static var archive: URL { URL(string: "https://codeload.github.com/\(repository)/tar.gz/\(commit)")! }
 
-    /// SHA-256 of every file in the add-in at the pinned commit. Set Up refuses anything else.
-    static let addinFiles: [String: String] = [
-        "Fusion360MCP.manifest": "28b50ab54dcc962fba726d1490dafd8d6ff7a78e31bb5011644a68c3f1788afa",
-        "Fusion360MCP.py": "f91c44c6ccaa324d7be6ce6bf4fa08d2dceb0dfec599c066e3835f7442a489a5",
-        "server/__init__.py": "cfb2ec371f493b437d1029f82a167ff933e59d7660a0b534e7e840a3d84669de",
-        "server/command_handler.py": "5f95aa7f2b58ef1458747b29af8eb63598108f22ed4521f0702e2dda91969b19",
-        "server/document_scope.py": "2687d370a1a40531c248232e0b1a7c65bbf92c269938e7cb368a78d098c529be",
-        "server/event_bridge.py": "a3a8d55a9267e252b5add0e7261fa4f7f216921b265815e5a2451d0dc3246a72",
-        "server/hints.py": "981e89c0032223de1c02ef937b3522280c0328933f07ab89912ff522f4544822",
-        "server/hole_geometry.py": "872ef1c7d34a21e49e277517cf413322c609fac47e2e64d2c1ed9580af31d25c",
-        "server/parameter_units.py": "1fe5bbf505cecc19902c2720d5d53e12944bb61f182c3c0348e971849afa5c00",
-        "server/socket_server.py": "758419b11142b9a5068dbc9f1cf339c3d79fc6d5ab77736f4463f8499d053b4d",
-    ]
+    /// What `fusion_mcp_setup` reported.
+    struct Setup: Equatable {
+        var fusionInstalled: Bool
+        var fusionPath: String?
+        /// The add-in is at the MCP's pin and runs on startup, the login item is loaded and the bridge is configured.
+        var ready: Bool
+        /// install: what it did with this MCP's settings, as the MCP names it (shown, never matched).
+        var env: String?
+        /// When not ready: what is missing, in the MCP's words.
+        var message: String? = nil
+        /// The MCP's name from `initialize`.
+        var server: String?
 
-    static var addinsFolder: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns", isDirectory: true)
-    }
-    static var addinFolder: URL { addinsFolder.appendingPathComponent("Fusion360MCP", isDirectory: true) }
-
-    // MARK: Finding Fusion
-
-    /// The installed Fusion app, if any: by bundle id, then the usual places the Autodesk installer uses.
-    static func installedFusion() -> URL? {
-        for id in ["com.autodesk.fusion360", "com.autodesk.mas.fusion360"] {
-            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) { return url }
+        /// From the tool's structured result (its JSON text).
+        static func from(_ reply: MCPCall.Reply) throws -> Setup {
+            guard !reply.isError else { throw Failure.setup(reply.text) }
+            guard let value = (try? JSONSerialization.jsonObject(with: Data(reply.text.utf8))) as? [String: Any],
+                  let fusion = value["fusion"] as? [String: Any], let ready = value["ready"] as? Bool else { throw Failure.setup("") }
+            return Setup(fusionInstalled: fusion["installed"] as? Bool ?? false, fusionPath: fusion["path"] as? String, ready: ready,
+                         env: (value["installed"] as? [String: Any])?["env"] as? String,
+                         message: value["message"] as? String, server: reply.server)
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        // Autodesk's own installer keeps Fusion under webdeploy, with a stable link to the current build.
-        let places = [home.appendingPathComponent("Library/Application Support/Autodesk/webdeploy/production/Autodesk Fusion.app").path,
-                      "/Applications/Autodesk Fusion.app", "/Applications/Autodesk Fusion 360.app",
-                      home.appendingPathComponent("Applications/Autodesk Fusion.app").path,
-                      home.appendingPathComponent("Applications/Autodesk Fusion 360.app").path]
-        return places.map(URL.init(fileURLWithPath:)).first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
-    // MARK: The env file
-
-    /// The five settings (PRD §8.9). The command is the same `uvx` the Blender bridge already uses, when it names one.
-    static func settings(blenderCommand: String?) -> [(String, String)] {
-        let uvx = blenderCommand.flatMap { $0.hasSuffix("/uvx") || $0 == "uvx" ? $0 : nil } ?? "uvx"
-        let args = "[\"--from\",\"git+https://github.com/\(repository)@\(shortCommit)\",\"fusion360-mcp-server\",\"--mode\",\"socket\"]"
-        return [("FUSION_MCP_COMMAND", uvx), ("FUSION_MCP_ARGS", args), ("FUSION_MCP_TIMEOUT_MS", "180000"), ("FUSION_MCP_HOST", "localhost"),
-                ("FUSION_MCP_PORT", port)]
-    }
-
-    /// The env file with the Fusion settings in it: replaced where they already are, else right after the last
-    /// `BLENDER_MCP_*` line, else at the end. Running it twice gives the same file; every other line is kept as is.
-    static func merge(env text: String) -> String {
-        var lines = text.components(separatedBy: "\n")
-        let trailingNewline = text.hasSuffix("\n")
-        if trailingNewline { lines.removeLast() }
-        let blenderCommand = lines.compactMap { line -> String? in
-            let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
-            guard parts.count == 2, parts[0].trimmingCharacters(in: .whitespaces) == "BLENDER_MCP_COMMAND" else { return nil }
-            return parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
-        }.last
-        let wanted = settings(blenderCommand: blenderCommand)
-        func key(_ line: String) -> String? {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.hasPrefix("#"), let equals = trimmed.firstIndex(of: "=") else { return nil }
-            return trimmed[..<equals].replacingOccurrences(of: "export ", with: "").trimmingCharacters(in: .whitespaces)
-        }
-        lines.removeAll { key($0).map { $0.hasPrefix("FUSION_MCP_") } ?? false }
-        let block = wanted.map { "\($0.0)=\($0.1)" }
-        if let last = lines.lastIndex(where: { key($0)?.hasPrefix("BLENDER_MCP_") == true }) {
-            lines.insert(contentsOf: block, at: last + 1)
-        } else {
-            if let tail = lines.last, !tail.isEmpty { lines.append("") }
-            lines.append(contentsOf: block)
-        }
-        return lines.joined(separator: "\n") + "\n"
-    }
-
-    static func isConfigured(env text: String) -> Bool {
-        text.components(separatedBy: "\n").contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("FUSION_MCP_COMMAND=") }
-    }
-
-    /// The printer MCPs' own env files: `.env` in the working directory each printer MCP the user's configs start
-    /// runs in, the ones that already hold the Blender bridge's settings first.
-    static func envFiles(state: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [URL] {
-        var folders: [URL] = []
-        func add(cwd: String?, command: String?, args: [String]) {
-            let text = ([command ?? ""] + args).joined(separator: " ").lowercased()
-            guard text.contains("bambu-printer-mcp") || text.contains("3d-printer") || text.contains("printer-mcp") || cwd != nil else { return }
-            // dotenv reads `.env` from the process's working directory, so only an explicit `cwd` names the file the MCP
-            // actually loads. Without one, Set Up says it couldn't find the file rather than writing one that isn't read.
-            if let cwd, !cwd.isEmpty { folders.append(URL(fileURLWithPath: (cwd as NSString).expandingTildeInPath, isDirectory: true)) }
-        }
-        // The Mac app's own printer configuration.
-        if let data = try? Data(contentsOf: state.appendingPathComponent("printer-handoff.json")),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let process = json["process"] as? [String: Any] {
-            // Reached through `ssh` to this Mac (the Local Network stopgap), the MCP runs where the key's forced command
-            // `cd`s to, not where ssh starts.
-            add(cwd: forcedCommandFolder(process: process, home: home) ?? process["cwd"] as? String,
-                command: process["command"] as? String, args: process["args"] as? [String] ?? [])
-        }
-        // The same client configs the companion reads printers from (services/companion/src/objects/printers.ts):
-        // Claude Code, Claude Desktop, Cursor and Codemode keep MCP servers under `mcpServers`; Codex in TOML.
-        var queue = [".claude.json", "Library/Application Support/Claude/claude_desktop_config.json", ".cursor/mcp.json",
-                     ".codex/mcp/codemode-servers.json", ".claude-desktop/mcp/codemode-servers.json",
-                     ".config/codemode-mcp/codemode-mcp-temp/codemode-config.json"].map { home.appendingPathComponent($0) }
-        var visited: Set<String> = []
-        while let file = queue.first {
-            queue.removeFirst()
-            guard visited.insert(file.standardizedFileURL.path).inserted, visited.count < 64,
-                  let data = try? Data(contentsOf: file), let json = try? JSONSerialization.jsonObject(with: data) else { continue }
-            // Codemode's wrapper lists more config folders, each with its own .mcp.json.
-            if let directories = (json as? [String: Any])?["configDirectories"] as? [String] {
-                queue += directories.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true).appendingPathComponent(".mcp.json") }
-            }
-            func walk(_ value: Any) {
-                if let object = value as? [String: Any] {
-                    for (name, inner) in object {
-                        if name == "mcpServers", let servers = inner as? [String: Any] {
-                            for (serverName, server) in servers {
-                                guard let server = server as? [String: Any] else { continue }
-                                let args = server["args"] as? [String] ?? []
-                                let named = serverName.lowercased().contains("printer") || serverName.lowercased().contains("bambu")
-                                if named || (server["command"] as? String ?? "").contains("printer") || args.contains(where: { $0.contains("printer") }) {
-                                    add(cwd: server["cwd"] as? String, command: server["command"] as? String, args: args)
-                                }
-                            }
-                        } else { walk(inner) }
-                    }
-                } else if let array = value as? [Any] { array.forEach(walk) }
-            }
-            walk(json)
-        }
-        if let toml = try? String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8) {
-            for server in codexServers(toml) where server.name.lowercased().contains("printer") || server.name.lowercased().contains("bambu")
-                || (server.command ?? "").contains("printer") || server.args.contains(where: { $0.contains("printer") }) {
-                add(cwd: server.cwd, command: server.command, args: server.args)
-            }
-        }
-        let candidates = Array(Set(folders.map { $0.standardizedFileURL.appendingPathComponent(".env") }))
-            .filter { FileManager.default.isReadableFile(atPath: $0.path) }
-        func blender(_ url: URL) -> Bool { ((try? String(contentsOf: url, encoding: .utf8)) ?? "").contains("BLENDER_MCP_") }
-        // Every printer MCP gets the settings; the ones that already bridge Blender come first.
-        return candidates.sorted { (blender($0) ? 0 : 1, $0.path) < (blender($1) ? 0 : 1, $1.path) }
-    }
-
-    /// The folder a printer MCP reached with `ssh` to this Mac runs in: the `cd <folder> &&` that starts the forced
-    /// command on the key it uses (`~/.ssh/authorized_keys`, read only). Nil for any other command.
-    static func forcedCommandFolder(process: [String: Any], home: URL) -> String? {
-        guard let command = process["command"] as? String, (command as NSString).lastPathComponent == "ssh" else { return nil }
-        let args = process["args"] as? [String] ?? []
-        let host = args.last.map { $0.split(separator: "@").last.map(String.init) ?? $0 } ?? ""
-        guard ["127.0.0.1", "localhost", "::1"].contains(host), let flag = args.firstIndex(of: "-i"), flag + 1 < args.count else { return nil }
-        let identity = (args[flag + 1] as NSString).expandingTildeInPath
-        guard let publicKey = try? String(contentsOfFile: identity + ".pub", encoding: .utf8),
-              let body = publicKey.split(separator: " ").dropFirst().first,
-              let keys = try? String(contentsOf: home.appendingPathComponent(".ssh/authorized_keys"), encoding: .utf8) else { return nil }
-        return forcedCommandFolder(authorizedKeys: keys, keyBody: String(body))
-    }
-
-    static func forcedCommandFolder(authorizedKeys: String, keyBody: String) -> String? {
-        for line in authorizedKeys.split(separator: "\n") where line.contains(" \(keyBody)") {
-            guard let start = line.range(of: "command=\"") else { continue }
-            var command = "", escaped = false
-            for character in line[start.upperBound...] {
-                if escaped { command.append(character); escaped = false }
-                else if character == "\\" { escaped = true }
-                else if character == "\"" { break }
-                else { command.append(character) }
-            }
-            let trimmed = command.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("cd ") else { return nil }
-            let rest = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
-            if let quote = rest.first, quote == "'" || quote == "\"" {
-                let body = rest.dropFirst()
-                return body.firstIndex(of: quote).map { String(body[..<$0]) }
-            }
-            return rest.split(separator: " ").first.map(String.init).map { ($0 as NSString).expandingTildeInPath }
-        }
-        return nil
-    }
-
-    /// Codex's `[mcp_servers.<name>]` tables: just `command`, `args` and `cwd`, enough to find the server's `.env`.
-    static func codexServers(_ toml: String) -> [(name: String, command: String?, args: [String], cwd: String?)] {
-        var servers: [(name: String, command: String?, args: [String], cwd: String?)] = []
-        var current: (name: String, command: String?, args: [String], cwd: String?)?
-        func string(_ value: Substring) -> String? {
-            let trimmed = value.trimmingCharacters(in: .whitespaces)
-            guard trimmed.count >= 2, let quote = trimmed.first, quote == "\"" || quote == "'", trimmed.last == quote else { return nil }
-            return String(trimmed.dropFirst().dropLast())
-        }
-        for raw in toml.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("[") {
-                if let current { servers.append(current) }
-                current = nil
-                let header = line.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
-                if header.hasPrefix("mcp_servers."), !header.dropFirst("mcp_servers.".count).contains(".") {
-                    current = (String(header.dropFirst("mcp_servers.".count)).trimmingCharacters(in: CharacterSet(charactersIn: "\"")), nil, [], nil)
-                }
-                continue
-            }
-            guard current != nil, let equals = line.firstIndex(of: "=") else { continue }
-            let key = line[..<equals].trimmingCharacters(in: .whitespaces)
-            let value = line[line.index(after: equals)...]
-            switch key {
-            case "command": current?.command = string(value)
-            case "cwd": current?.cwd = string(value)
-            case "args":
-                let inner = value.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-                current?.args = inner.split(separator: ",").compactMap { string($0) }
-            default: break
-            }
-        }
-        if let current { servers.append(current) }
-        return servers
-    }
-
-    // MARK: Set Up
-
-    enum Failure: LocalizedError {
-        case download, verify, noEnvFile, busy, write(String)
+    enum Failure: LocalizedError, Equatable {
+        case busy, noPrinterMCP, noSetupTool(server: String), notReady(String?), setup(String)
         var errorDescription: String? {
             switch self {
             case .busy: return "Fusion setup is already running on this Mac."
-            case .download: return "The Fusion add-in couldn’t be downloaded. Check the internet connection and try again."
-            case .verify: return "The downloaded add-in didn’t match the pinned version, so nothing was installed."
-            case .noEnvFile: return "Counterpart couldn’t find your printer MCP’s .env file. Add the FUSION_MCP settings there by hand."
-            case .write(let file): return "Counterpart couldn’t write \(file)."
+            case .noPrinterMCP: return "There's no printer MCP set up in Counterpart yet."
+            case .noSetupTool(let server): return "Update \(server) in Settings → Printers so it can set up Fusion, then press Set Up again."
+            case .notReady(let message): return message ?? "Fusion isn't set up yet. Check your printer MCP's Fusion setup on your Mac."
+            case .setup(let reason): return reason.isEmpty ? "Fusion setup didn't finish." : "Fusion setup didn't finish: \(reason)"
             }
         }
     }
 
-    /// Where Set Up writes and what it runs. Tests swap in folders, a fake add-in, a fake launchctl and a fake MCP.
+    /// The printer MCP the companion uses (printer-handoff.json's process), started fresh so it reads its current settings.
+    static func printerMCP(state: URL) -> MCPCall? {
+        guard let data = try? Data(contentsOf: state.appendingPathComponent("printer-handoff.json")),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let process = json["process"] as? [String: Any],
+              let command = process["command"] as? String else { return nil }
+        return MCPCall.appOwned(command: command, args: process["args"] as? [String] ?? [], cwd: process["cwd"] as? String,
+                                env: process["env"] as? [String: String] ?? [:])
+    }
+
+    /// Where Set Up goes. Tests swap in a fake printer MCP and a fake Fusion.
     struct Steps {
-        var home: URL
-        var addinsFolder: URL
-        var portAgent: URL
-        /// Hands the verified add-in folder to `use` (the download is removed afterwards).
-        var withAddin: (_ use: (URL) throws -> Void) async throws -> Void
-        var launchctl: ([String]) -> Bool
+        /// `fusion_mcp_setup` (`install` installs what is missing); nil when the MCP has no such tool.
+        var setup: (_ install: Bool) async throws -> MCPCall.Reply?
         /// `fusion_mcp_status {launch: true}` on the printer MCP, started fresh so it reads the new settings.
         var status: () async -> Status
 
-        @MainActor static func live(state: URL) -> Steps {
-            Steps(home: FileManager.default.homeDirectoryForCurrentUser, addinsFolder: FusionSetup.addinsFolder, portAgent: FusionSetup.portAgent,
-                  withAddin: FusionSetup.downloadAddin, launchctl: FusionSetup.launchctl,
-                  status: { await FusionSetup.checkStatus(state: state) })
+        /// Through the companion, which runs the printer MCP as Settings → Printers last updated it.
+        static func live(state: URL, socket: String) -> Steps {
+            Steps(setup: { install in
+                return try reply(from: try await ControlClient(socketPath: socket, timeout: install ? 330 : 100).fusionSetup(install: install))
+            }, status: { await FusionSetup.checkStatus(state: state) })
+        }
+
+        /// The companion's answer as the MCP's reply; an MCP without the tool is named in the update message.
+        static func reply(from answer: FusionSetupReply) throws -> MCPCall.Reply {
+            if let error = answer.error { return MCPCall.Reply(isError: true, text: error, server: answer.server) }
+            guard let setup = answer.setup else { throw Failure.noSetupTool(server: answer.server) }
+            return MCPCall.Reply(isError: false, text: String(decoding: try JSONEncoder().encode(setup), as: UTF8.self), server: answer.server)
         }
     }
 
     /// What Set Up did, and what Fusion said when the printer MCP asked it.
     struct Report: Equatable {
-        var envFiles: [URL]
+        var setup: Setup
         var status: Status
     }
 
-    /// Downloads the pinned add-in, checks every file, installs it set to run on startup, adds the settings to each
-    /// printer MCP env file (keeping a copy of each file next to it first), installs the login item that sets
-    /// `FUSION_MCP_PORT`, then asks the printer MCP for `fusion_mcp_status {launch: true}`.
+    /// The printer MCP's answer to "is Fusion set up?". It is read at most every ten minutes unless forced: each read
+    /// starts the printer MCP.
+    @MainActor private static var checked: (at: Date, setup: Setup)?
+    @MainActor private static var attempted: Date?
+    @MainActor private static var observing: Task<Void, Never>?
+    @MainActor static func check(state: URL, socket: String, force: Bool = false) async throws -> Setup {
+        if !force, let checked, Date().timeIntervalSince(checked.at) < 600 { return checked.setup }
+        attempted = Date()
+        let setup = try await check(steps: .live(state: state, socket: socket))
+        checked = (Date(), setup)
+        return setup
+    }
+    /// The latest answer, without waiting for one: the phone's report runs on the event path, and a printer MCP that
+    /// starts slowly must never hold it up. A check older than ten minutes, or a failed attempt that long ago, starts
+    /// another in the background; nil until the first answer.
+    @MainActor static func latest(state: URL, socket: String) -> Setup? {
+        let due = attempted.map { Date().timeIntervalSince($0) >= 600 } ?? true
+        if due, observing == nil {
+            attempted = Date()
+            observing = Task { @MainActor in
+                _ = try? await check(state: state, socket: socket, force: true)
+                observing = nil
+            }
+        }
+        return checked?.setup
+    }
+    static func check(steps: Steps) async throws -> Setup {
+        guard let reply = try await steps.setup(false) else { throw Failure.noSetupTool(server: "your printer MCP") }
+        return try Setup.from(reply)
+    }
+
+    /// Asks the printer MCP to install what Fusion's bridge is missing, then asks Fusion itself.
     @MainActor private static var installing = false
-    @MainActor static func install(state: URL) async throws -> Report {
+    @MainActor static func install(state: URL, socket: String) async throws -> Report {
         guard !installing else { throw Failure.busy }
         installing = true
-        defer { installing = false }
-        return try await install(state: state, steps: .live(state: state))
+        defer { installing = false; checked = nil; attempted = nil }
+        return try await install(steps: .live(state: state, socket: socket))
     }
 
-    static func install(state: URL, steps: Steps) async throws -> Report {
-        let envs = envFiles(state: state, home: steps.home)
-        guard !envs.isEmpty else { throw Failure.noEnvFile }
-        try await steps.withAddin { addon in try install(addon: addon, into: steps.addinsFolder) }
-        var changed: [URL] = []
-        for env in envs {
-            guard let text = try? String(contentsOf: env, encoding: .utf8) else { continue }
-            let merged = merge(env: text)
-            guard merged != text else { changed.append(env); continue }
-            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
-            let backup = env.deletingLastPathComponent().appendingPathComponent(".env.bak-\(stamp)-counterpart")
-            do {
-                try FileManager.default.copyItem(at: env, to: backup)
-                try merged.write(to: env, atomically: true, encoding: .utf8)
-                changed.append(env)
-            } catch { throw Failure.write(env.path) }
+    static func install(steps: Steps) async throws -> Report {
+        guard let reply = try await steps.setup(true) else {
+            throw Failure.noSetupTool(server: "your printer MCP")
         }
-        try installPortAgent(at: steps.portAgent, launchctl: steps.launchctl)
-        return Report(envFiles: changed, status: await steps.status())
-    }
-
-    /// The pinned add-in, downloaded and checked file by file.
-    static func downloadAddin(_ use: (URL) throws -> Void) async throws {
-        let work = FileManager.default.temporaryDirectory.appendingPathComponent("counterpart-fusion-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: work) }
-        let tarball = work.appendingPathComponent("addin.tar.gz")
-        do {
-            let (data, response) = try await URLSession.shared.data(from: archive)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw Failure.download }
-            try data.write(to: tarball)
-        } catch { throw Failure.download }
-        let tar = Process()
-        tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-        tar.arguments = ["-xzf", tarball.path, "-C", work.path]
-        try tar.run(); tar.waitUntilExit()
-        let addon = work.appendingPathComponent("fusion360-mcp-server-\(commit)/addon", isDirectory: true)
-        try verify(addon)
-        try use(addon)
-    }
-
-    /// The login agent's property list: one `launchctl setenv` at login, so Fusion gets the port however it's opened.
-    static var portAgentPlist: [String: Any] {
-        ["Label": portAgentLabel, "ProgramArguments": ["/bin/launchctl", "setenv", "FUSION_MCP_PORT", port], "RunAtLoad": true]
-    }
-
-    /// Writes the agent, loads it in this login session, and sets the variable now.
-    static func installPortAgent(at portAgent: URL, launchctl: ([String]) -> Bool) throws {
-        let data = try PropertyListSerialization.data(fromPropertyList: portAgentPlist, format: .xml, options: 0)
-        try FileManager.default.createDirectory(at: portAgent.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: portAgent, options: .atomic)
-        let domain = "gui/\(getuid())"
-        _ = launchctl(["bootout", "\(domain)/\(portAgentLabel)"]) // a previous copy, if any
-        guard launchctl(["bootstrap", domain, portAgent.path]), launchctl(["setenv", "FUSION_MCP_PORT", port]) else {
-            throw Failure.write(portAgent.path)
-        }
-    }
-
-    @discardableResult static func launchctl(_ arguments: [String]) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return false }
-        process.waitUntilExit()
-        return process.terminationStatus == 0
-    }
-
-    /// Every file present and exactly the pinned bytes; nothing more.
-    static func verify(_ addon: URL) throws {
-        var found: [String] = []
-        let enumerator = FileManager.default.enumerator(at: addon, includingPropertiesForKeys: [.isRegularFileKey])
-        while let file = enumerator?.nextObject() as? URL {
-            guard (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-            let relative = String(file.standardizedFileURL.path.dropFirst(addon.standardizedFileURL.path.count + 1))
-            guard let expected = addinFiles[relative], let data = try? Data(contentsOf: file),
-                  SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == expected else { throw Failure.verify }
-            found.append(relative)
-        }
-        guard Set(found) == Set(addinFiles.keys) else { throw Failure.verify }
-    }
-
-    /// Copies the add-in into Fusion's AddIns folder with `runOnStartup` on, replacing an older copy of it.
-    static func install(addon: URL, into addinsFolder: URL) throws {
-        let addinFolder = addinsFolder.appendingPathComponent("Fusion360MCP", isDirectory: true)
-        try FileManager.default.createDirectory(at: addinsFolder, withIntermediateDirectories: true)
-        if FileManager.default.fileExists(atPath: addinFolder.path) { try FileManager.default.removeItem(at: addinFolder) }
-        try FileManager.default.copyItem(at: addon, to: addinFolder)
-        let manifest = addinFolder.appendingPathComponent("Fusion360MCP.manifest")
-        let text = try String(contentsOf: manifest, encoding: .utf8)
-        try text.replacingOccurrences(of: "\"runOnStartup\": false", with: "\"runOnStartup\": true").write(to: manifest, atomically: true, encoding: .utf8)
-    }
-
-    /// The add-in and the port agent are in place and every printer MCP env file has the settings.
-    static func isSetUp(state: URL) -> Bool {
-        FileManager.default.fileExists(atPath: addinFolder.appendingPathComponent("Fusion360MCP.py").path)
-            && FileManager.default.fileExists(atPath: portAgent.path)
-            && { let files = envFiles(state: state)
-                 return !files.isEmpty && files.allSatisfy { ((try? String(contentsOf: $0, encoding: .utf8)) ?? "").contains("FUSION_MCP_COMMAND=") } }()
+        let setup = try Setup.from(reply)
+        // What is still missing comes in the MCP's own words; the app never reads its codes.
+        guard setup.ready else { throw Failure.notReady(setup.message) }
+        return Report(setup: setup, status: await steps.status())
     }
 
     // MARK: Is it working?
@@ -461,13 +211,7 @@ enum FusionSetup {
     /// Starts the printer MCP the companion uses (printer-handoff.json's process, fresh, so it reads the new settings)
     /// and asks it once.
     static func checkStatus(state: URL) async -> Status {
-        guard let data = try? Data(contentsOf: state.appendingPathComponent("printer-handoff.json")),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let process = json["process"] as? [String: Any],
-              let command = process["command"] as? String else {
-            return .unreachable("there's no printer MCP set up in Counterpart yet.")
-        }
-        let call = MCPCall.appOwned(command: command, args: process["args"] as? [String] ?? [], cwd: process["cwd"] as? String,
-                                    env: process["env"] as? [String: String] ?? [:])
+        guard let call = printerMCP(state: state) else { return .unreachable("there's no printer MCP set up in Counterpart yet.") }
         do {
             // Connected on Fusion's Home tab still can't make the first design (#12): a read of the open design's
             // parameters, which changes nothing, says whether one is open.

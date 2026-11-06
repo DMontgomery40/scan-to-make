@@ -21,15 +21,19 @@ import ControlKit
     private lazy var phoneFusion = PhoneFusionSetup(
         report: { [weak self] in
             guard let self else { return }
-            let installed = FusionSetup.installedFusion() != nil
-            let running = NSWorkspace.shared.runningApplications.contains { ["com.autodesk.fusion360", "com.autodesk.mas.fusion360"].contains($0.bundleIdentifier ?? "") }
-            try await ControlClient(socketPath: self.socket).reportFusion(installed: installed,
-                configured: FusionSetup.isSetUp(state: Installation(bundle: .main).state), running: running)
+            // The printer MCP finds Fusion and says whether it is set up (fusion_mcp_setup), checked in the background so
+            // this report never waits on it; nothing is reported before the first answer. Running is that app open here.
+            guard let setup = FusionSetup.latest(state: Installation(bundle: .main).state, socket: self.socket) else { return }
+            let running = setup.fusionPath.map { path in
+                NSWorkspace.shared.runningApplications.contains { $0.bundleURL?.standardizedFileURL.path == URL(fileURLWithPath: path).standardizedFileURL.path }
+            } ?? false
+            try await ControlClient(socketPath: self.socket).reportFusion(installed: setup.fusionInstalled, configured: setup.ready, running: running)
         },
         claim: { [weak self] claimant in guard let self else { return nil }; return try await ControlClient(socketPath: self.socket).claimFusionSetup(claimantId: claimant) },
-        install: {
+        install: { [weak self] in
+            guard let self else { return (false, "Fusion setup did not finish. Check Counterpart on your Mac, then try again.") }
             do {
-                let result = try await FusionSetup.install(state: Installation(bundle: .main).state)
+                let result = try await FusionSetup.install(state: Installation(bundle: .main).state, socket: self.socket)
                 return (result.status.ok, result.status.phoneMessage)
             } catch { return (false, "Fusion setup did not finish. Check Counterpart on your Mac, then try again.") }
         },

@@ -604,7 +604,7 @@ struct AISettings: View {
     @AppStorage("ai.lastTestSeconds") private var lastTestSeconds: Double = 0
     @State private var testStarted: Date?
 
-    enum FusionState: Equatable { case checking, notInstalled, found, settingUp, setUp }
+    enum FusionState: Equatable { case checking, notInstalled, found, settingUp, setUp, unchecked }
 
     private var choice: ModelAccessChoice { model.snapshot?.choice ?? .none }
 
@@ -650,6 +650,7 @@ struct AISettings: View {
                             }
                         case .found, .settingUp: Label("Fusion found", systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(Color.okGreen)
                         case .setUp: Label("Fusion is set up", systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(Color.okGreen)
+                        case .unchecked: Label("Couldn't check Fusion", systemImage:"questionmark.circle").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     Spacer()
@@ -658,7 +659,7 @@ struct AISettings: View {
                         Text("Setting up and starting Fusion…").font(.caption).foregroundStyle(.secondary)
                     }
                     Button(fusion == .setUp ? "Set Up Again…" : "Set Up…") { setUpFusion() }
-                        .buttonStyle(.glassProminent).disabled(fusion != .found && fusion != .setUp)
+                        .buttonStyle(.glassProminent).disabled(fusion != .found && fusion != .setUp && fusion != .unchecked)
                 }
                 Text(fusion == .notInstalled
                      ? "Install Autodesk Fusion if you want to use it for new designs. You can also design with Blender."
@@ -737,22 +738,31 @@ struct AISettings: View {
         if DesignFixtures.assets != nil { fusion = DesignFixtures.screen == "settings-ai-nofusion" ? .notInstalled : .found; return }
         #endif
         let state = Installation(bundle:.main).state
-        if FusionSetup.installedFusion() == nil { fusion = .notInstalled }
-        else { fusion = FusionSetup.isSetUp(state:state) ? .setUp : .found }
+        // The printer MCP finds Fusion and says whether its bridge is set up (fusion_mcp_setup).
+        Task {
+            do {
+                let setup = try await FusionSetup.check(state:state, socket:ModelAccessModel.socketPath(for: Installation(bundle: .main)), force:true)
+                fusion = !setup.fusionInstalled ? .notInstalled : setup.ready ? .setUp : .found
+            } catch {
+                fusion = .unchecked
+                fusionProblem = error.localizedDescription
+            }
+        }
     }
 
     private func setUpFusion() {
+        let before = fusion
         fusion = .settingUp
         fusionProblem = nil
         let state = Installation(bundle:.main).state
         Task {
             do {
-                let report = try await FusionSetup.install(state:state)
+                let report = try await FusionSetup.install(state:state, socket:ModelAccessModel.socketPath(for: Installation(bundle: .main)))
                 fusion = .setUp
                 fusionProblem = nil
                 fusionStatus = report.status
             } catch {
-                fusion = .found
+                fusion = before
                 fusionProblem = error.localizedDescription
             }
         }
