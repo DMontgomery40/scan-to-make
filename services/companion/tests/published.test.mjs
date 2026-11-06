@@ -317,3 +317,21 @@ test('plates are listed through the chosen printer’s MCP, not the startup one'
  await f.service.estimate(object.id,{destinationId:'p1s'});
  assert.equal(asked.length,1);assert.equal((await f.service.get(object.id)).files.receipts[0].plates.length,6);
 });
+// Codex on #370: an unlisted 3MF that isn't the one being printed never blocks another file's estimate.
+test('an unlisted 3MF that isn’t selected doesn’t block the selected STL’s estimate',async t=>{
+ const update='Update bambu-printer-mcp in Settings → Printers to show this file’s plates.';
+ const runner={backend:'bambu-printer-mcp',modelPlates:async()=>{throw new PrinterMcpError('plates-unsupported',undefined,update);},
+  estimate:async()=>({estimate:{seconds:90},settings:{}}),runBundle:async()=>{throw Error('unused');}};
+ const f=await setup(t,undefined,{print:{services:{runner,selection:{model:'p1s'}}}});
+ const object=await f.service.create('Print this','published',LINK);
+ await f.service.addModelFile(object.id,'kit.3mf',kit());
+ const stl=Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n');
+ const both=await f.service.addModelFile(object.id,'part.stl',stl);
+ const stlIndex=both.files.receipts.findIndex(receipt=>receipt.format==='stl');
+ if(both.ask?.status==='open')await f.service.answerAsk(object.id,both.ask.id,[`${stlIndex}:0`]);else await f.service.selectPlate(object.id,stlIndex,0);
+ assert.equal((await f.service.estimate(object.id)).seconds,90);
+ assert.equal((await f.service.get(object.id)).files.receipts.find(receipt=>receipt.format==='3mf').platesListed,false,'still pending');
+ // Selecting the 3MF needs its plates: the MCP to update says so.
+ await f.service.selectPlate(object.id,both.files.receipts.findIndex(receipt=>receipt.format==='3mf'),0);
+ await assert.rejects(f.service.estimate(object.id),{message:update});
+});

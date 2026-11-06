@@ -1950,7 +1950,8 @@ export class ObjectService {
     const dir = this.#deps.store.dir(id);
     const listed = new Map<string, ModelFileInfo['plates']>();
     for (const receipt of pending) {
-      const plates = await this.#mcpPlates(dir, receipt.path, receipt.sha256, {needed: true, destinationId: destinationId ?? this.#destinationId(object)});
+      // Only the file being printed needs its plates now; another one stays pending if this MCP can't list it.
+      const plates = await this.#mcpPlates(dir, receipt.path, receipt.sha256, {needed: receipt.path === object.current?.model, destinationId: destinationId ?? this.#destinationId(object)});
       if (plates) listed.set(receipt.sha256, plates);
     }
     if (!listed.size) return;
