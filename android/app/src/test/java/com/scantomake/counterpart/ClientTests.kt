@@ -1,5 +1,6 @@
 package com.scantomake.counterpart
 
+import com.scantomake.counterpart.api.withSerial
 import com.scantomake.counterpart.api.ColourMapping
 import com.scantomake.counterpart.api.CompanionClient
 import com.scantomake.counterpart.api.ModelColourFilament
@@ -486,5 +487,33 @@ class PrinterCandidateModelTests {
         org.junit.Assert.assertEquals("p1s", candidate(listOf("PRINTER_MODEL"), mapOf("PRINTER_MODEL" to "p1s")).filledModel(renamed))
         org.junit.Assert.assertFalse("another missing setting isn't a model", candidate(listOf("PRINTER_HOST")).needsModel(renamed))
         org.junit.Assert.assertFalse("no fields from the MCP: no guess", candidate(listOf("PRINTER_MODEL")).needsModel(null))
+    }
+}
+
+/** Codex on #392: a model the serial named follows a corrected serial; a model the person chose stays. */
+class PrinterFormSerialTests {
+    private val options = com.scantomake.counterpart.api.PrinterSetupOptions(
+        types = listOf(com.scantomake.counterpart.api.PrinterSetupOptions.PrinterType("bambu", "Bambu Lab", listOf("bambu-printer-mcp"), serial = true)),
+        models = mapOf("bambu-printer-mcp" to listOf(com.scantomake.counterpart.api.PrinterSetupOptions.Choice("p1s", "P1S"), com.scantomake.counterpart.api.PrinterSetupOptions.Choice("p1p", "P1P"))),
+        serialModels = mapOf("01P" to "p1s", "01S" to "p1p"))
+
+    @org.junit.Test fun aCorrectedSerialPicksItsModelAgain() {
+        var form = com.scantomake.counterpart.api.PrinterForm().withSerial("01P00A", options)
+        org.junit.Assert.assertEquals("p1s", form.model)
+        form = form.withSerial("01S00A", options)
+        org.junit.Assert.assertEquals("the corrected serial names another model", "p1p", form.model)
+        form = form.withSerial("XYZ", options)
+        org.junit.Assert.assertNull("a serial the MCP doesn't know leaves the model to choose", form.model)
+    }
+
+    @org.junit.Test fun aModelThePersonChoseStays() {
+        val form = com.scantomake.counterpart.api.PrinterForm(model = "p1p").withSerial("01P00A", options)
+        org.junit.Assert.assertEquals("p1p", form.model)
+    }
+
+    @org.junit.Test fun discoveryLabelsComeFromTheCompanion() {
+        val found = com.scantomake.counterpart.api.PrinterDiscovery(labels = mapOf("mcp-3d-printer-server" to "mcp-3D-printer-server"))
+        org.junit.Assert.assertEquals("mcp-3D-printer-server", found.label("mcp-3d-printer-server"))
+        org.junit.Assert.assertEquals("an MCP the companion didn't name keeps its own name", "some-new-mcp", found.label("some-new-mcp"))
     }
 }

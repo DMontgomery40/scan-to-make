@@ -586,7 +586,11 @@
     "port": "80",
     "added": false
    }
-  ]
+  ],
+  "labels": {
+   "bambu-printer-mcp": "bambu-printer-mcp",
+   "mcp-3d-printer-server": "mcp-3D-printer-server"
+  }
  },
  "check": {
   "check": {

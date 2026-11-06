@@ -195,6 +195,7 @@ test('a paired phone adds a printer through the same discover, check, obtain and
   const found = await f.call('/v1/printers/setup/discover', 'POST', {});
   assert.equal(found.status, 200);
   assert.deepEqual(found.body.options, answers.discover.options, 'the MCPs\' own fields reach the phone unchanged');
+  assert.deepEqual(found.body.labels, answers.discover.labels, 'each MCP\'s name as people see it, from the companion');
   const p1s = {backend: 'bambu-printer-mcp', printerType: 'bambu', host: '192.168.1.42', serial: '01P00A451601106', model: 'p1s', secret: '12345678'};
   assert.deepEqual((await f.call('/v1/printers/setup/check', 'POST', {printer: p1s})).body, answers.check);
   assert.deepEqual((await f.call('/v1/printers/setup/add', 'POST', {printer: p1s})).body, answers.add);

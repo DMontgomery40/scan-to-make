@@ -121,11 +121,29 @@ public extension PrinterCandidate {
     func filledModel(_ options: PrinterSetupOptions?) -> String? { modelSetting(options).flatMap { fill?[$0] } }
 }
 
+public extension PrinterForm {
+    /// Types the serial number. The serial names the model (the MCP's own table) unless the person chose one, so a
+    /// corrected serial picks again. `inferred` says whether the current model came from discovery or the serial; the
+    /// result says whether the model now does.
+    mutating func setSerial(_ value: String, options: PrinterSetupOptions?, inferred: Bool) -> Bool {
+        serial = value
+        guard model == nil || inferred else { return false }
+        let models = options?.models[backend] ?? []
+        let named = options?.model(forSerial: value).flatMap { found in models.contains { $0.value == found } ? found : nil }
+        if named != nil || inferred { model = named }
+        return named != nil
+    }
+}
+
 public struct PrinterDiscovery: Decodable, Sendable, Equatable {
     public let found: [PrinterCandidate]
     /// `unavailable` when this Mac couldn't listen for Bambu printers (another app may hold the port).
     public let network: String
     public let options: PrinterSetupOptions
+    /// Each MCP's name as people see it, from the companion (the phones' `/v1/printers/setup/discover`); nil over the socket.
+    public let labels: [String: String]?
+    /// An MCP's name: the companion's, else its package name as it is.
+    public func label(_ backend: String) -> String { labels?[backend] ?? backend }
 }
 
 /// What Check and Add send: a found folder, or the form's fields. `secret` is the access code or API key.

@@ -64,6 +64,7 @@ import com.scantomake.counterpart.api.checkPrinter
 import com.scantomake.counterpart.api.discoverPrinters
 import com.scantomake.counterpart.api.obtainControl
 import com.scantomake.counterpart.api.obtainUntilAnswered
+import com.scantomake.counterpart.api.withSerial
 import com.scantomake.counterpart.app.Counterpart
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -157,7 +158,7 @@ fun AddPrinterScreen(back: () -> Unit, added: () -> Unit) {
                     }
                     PrimaryButton("Done", Modifier.fillMaxWidth().testTag("add-printer-done")) { back() }
                 }
-                editing != null && options != null -> PrinterFormFields(editing, options, prefilled, ::edit, obtaining,
+                editing != null && options != null -> PrinterFormFields(editing, options, discovery!!::label, prefilled, ::edit, obtaining,
                     startObtaining = { field ->
                         stopObtaining()
                         val asked = editing
@@ -188,7 +189,7 @@ fun AddPrinterScreen(back: () -> Unit, added: () -> Unit) {
                         Text("Looking for printers…", color = Palette.secondary)
                     } else if (discovery?.found.isNullOrEmpty()) Text("No printers found on your computer's network.", color = Palette.secondary)
                     discovery?.found?.forEach { candidate ->
-                        CandidateCard(candidate, options, folderModels[candidate.id], { folderModels[candidate.id] = it }, saving,
+                        CandidateCard(candidate, options, discovery!!::label, folderModels[candidate.id], { folderModels[candidate.id] = it }, saving,
                             setUp = { start(prefilledForm(candidate)) },
                             addFolder = { save(PrinterForm(folder = candidate.folder, model = folderModels[candidate.id] ?: candidate.filledModel(options)), candidate.id) })
                     }
@@ -205,12 +206,11 @@ fun AddPrinterScreen(back: () -> Unit, added: () -> Unit) {
 }
 
 private fun prefilledForm(candidate: PrinterCandidate) = PrinterForm(backend = candidate.backend, printerType = candidate.printerType, host = candidate.host ?: "",
-    port = candidate.port, serial = candidate.serial ?: "", model = candidate.model, name = candidate.name)
+    port = candidate.port, serial = candidate.serial ?: "", model = candidate.model, name = candidate.name, modelInferred = candidate.model != null)
 
-private fun label(backend: String) = if (backend == "bambu-printer-mcp") "bambu-printer-mcp" else "mcp-3D-printer-server"
 
 @Composable
-private fun CandidateCard(candidate: PrinterCandidate, options: PrinterSetupOptions?, chosenModel: String?, chooseModel: (String) -> Unit,
+private fun CandidateCard(candidate: PrinterCandidate, options: PrinterSetupOptions?, label: (String) -> String, chosenModel: String?, chooseModel: (String) -> Unit,
                           saving: String?, setUp: () -> Unit, addFolder: () -> Unit) {
     val tappable = !candidate.added && candidate.folder == null
     GlassCard(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).then(if (tappable) Modifier.clickable(onClick = setUp).testTag("add-printer-found-${candidate.id}") else Modifier)) {
@@ -233,7 +233,7 @@ private fun CandidateCard(candidate: PrinterCandidate, options: PrinterSetupOpti
 
 /** The chosen MCP's own fields, in its words. Only what discovery couldn't fill is left to type. */
 @Composable
-private fun PrinterFormFields(form: PrinterForm, options: PrinterSetupOptions, prefilled: Boolean, edit: (PrinterForm) -> Unit,
+private fun PrinterFormFields(form: PrinterForm, options: PrinterSetupOptions, label: (String) -> String, prefilled: Boolean, edit: (PrinterForm) -> Unit,
                               obtaining: ObtainStep?, startObtaining: (String) -> Unit, check: PrinterCheckResult?, checking: Boolean,
                               saving: String?, problem: String?, runCheck: () -> Unit, add: () -> Unit) {
     val context = LocalContext.current
@@ -245,17 +245,13 @@ private fun PrinterFormFields(form: PrinterForm, options: PrinterSetupOptions, p
     SectionTitle("Printer")
     if (prefilled) Text("Filled in from what ${label(form.backend)} found on the network.", color = Palette.secondary, fontSize = 12.sp)
     ChoiceField("Brand", form.printerType, options.types.map { it.printerType to it.label }, { value ->
-        edit(form.copy(printerType = value, backend = options.type(value)?.backends?.firstOrNull() ?: form.backend, model = null, slicer = null))
+        edit(form.copy(printerType = value, backend = options.type(value)?.backends?.firstOrNull() ?: form.backend, model = null, slicer = null, modelInferred = false))
     }, "add-printer-brand")
-    if (type?.serial == true) ChoiceField(type.field("model")?.label ?: "Model", form.model, models.map { it.value to it.label }, { edit(form.copy(model = it)) }, "add-printer-model")
+    if (type?.serial == true) ChoiceField(type.field("model")?.label ?: "Model", form.model, models.map { it.value to it.label }, { edit(form.copy(model = it, modelInferred = false)) }, "add-printer-model")
     TextSetting("host", type?.field("host")?.label ?: "Address", form.host, type?.field("host")?.hint,
         if (type?.field("host")?.input == "url") KeyboardType.Uri else KeyboardType.Ascii) { edit(form.copy(host = it)) }
     if (type?.field("port") != null) TextSetting("port", type.field("port")!!.label, form.port ?: "", type.field("port")!!.hint, KeyboardType.Number) { edit(form.copy(port = it.ifEmpty { null })) }
-    if (type?.serial == true) TextSetting("serial", type.field("serial")?.label ?: "Serial number", form.serial, type.field("serial")?.hint, KeyboardType.Ascii, KeyboardCapitalization.Characters) { value ->
-        // The serial names the model (the MCP's own table), unless one was chosen.
-        val named = options.model(value)?.takeIf { form.model == null && models.any { m -> m.value == it } }
-        edit(form.copy(serial = value, model = form.model ?: named))
-    }
+    if (type?.serial == true) TextSetting("serial", type.field("serial")?.label ?: "Serial number", form.serial, type.field("serial")?.hint, KeyboardType.Ascii, KeyboardCapitalization.Characters) { value -> edit(form.withSerial(value, options)) }
     type?.secret?.let { secret ->
         OutlinedTextField(form.secret, { edit(form.copy(secret = it)) }, Modifier.fillMaxWidth().testTag("add-printer-secret"),
             label = { Text(secret.label + if (secret.required) "" else " (optional)") }, singleLine = true,
@@ -275,7 +271,7 @@ private fun PrinterFormFields(form: PrinterForm, options: PrinterSetupOptions, p
         }
     }
     type?.backends?.takeIf { it.size > 1 }?.let { backends ->
-        ChoiceField("Printer MCP", form.backend, backends.map { it to label(it) }, { edit(form.copy(backend = it, model = null, slicer = null)) }, "add-printer-mcp")
+        ChoiceField("Printer MCP", form.backend, backends.map { it to label(it) }, { edit(form.copy(backend = it, model = null, slicer = null, modelInferred = false)) }, "add-printer-mcp")
         Text("Counterpart sends this printer's prints through this MCP.", color = Palette.secondary, fontSize = 12.sp)
     }
     options.slicer?.get(form.backend)?.let { slicer ->
