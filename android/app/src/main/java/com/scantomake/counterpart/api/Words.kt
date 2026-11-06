@@ -181,7 +181,7 @@ class ProjectWords(project: Project, sending: Boolean = false, printerName: Stri
     }
 
     init {
-        val made = if (project.current == null) emptyList() else listOf(if (project.print?.uncertain == true) ProjectAction.PrintChecked else ProjectAction.Print, ProjectAction.Correct)
+        val made = if (project.current == null) emptyList() else listOf(if (project.printNeedsCheck) ProjectAction.PrintChecked else ProjectAction.Print, ProjectAction.Correct)
         val again = if (project.current == null) emptyList() else listOf(ProjectAction.Print, ProjectAction.Correct)
         var s: String
         var b: Boolean

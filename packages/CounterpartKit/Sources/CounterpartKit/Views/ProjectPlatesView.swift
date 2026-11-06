@@ -56,10 +56,41 @@ public struct ProjectPlatesView<Thumbnail: View>: View {
             }
             .disabled(busy || !project.canSelectPlate)
             if !project.canSelectPlate {
-                Text(project.print?.uncertain == true ? "Check the current print on your printer before changing plates." : "Choose another plate when this step finishes.")
+                Text("Choose another plate when this step finishes.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// The plate a Print sheet prints, and the way to change it there (David, Nov 6: the sheet opened on plate 1 and he
+/// couldn't switch it). Choosing selects that plate in the companion; the estimate, pictures and colours follow it.
+@available(iOS 26.0, macOS 26.0, *)
+public struct ProjectPlatePicker: View {
+    let project: Project
+    let busy: Bool
+    let select: (ProjectPlate) -> Void
+
+    public init(project: Project, busy: Bool, select: @escaping (ProjectPlate) -> Void) {
+        self.project = project; self.busy = busy; self.select = select
+    }
+    public var body: some View {
+        let plates = project.plates ?? []
+        let manyFiles = Set(plates.map(\.fileIndex)).count > 1
+        Picker(selection: Binding(get: { project.selectedPlate?.id ?? "" }, set: { id in
+            if let plate = plates.first(where: { $0.id == id }), !plate.selected { select(plate) }
+        })) {
+            ForEach(plates) { plate in
+                Text(manyFiles ? "\(plate.name) · \(plate.fileName)" : plate.name).tag(plate.id)
+            }
+        } label: {
+            Label("Plate", systemImage: "square.stack.3d.up")
+        }
+        .pickerStyle(.menu)
+        .disabled(busy || !project.canSelectPlate)
+        .accessibilityLabel("Plate")
+        .accessibilityValue(project.selectedPlate.map { "\($0.name), \($0.statusText)" } ?? "None")
+        .accessibilityIdentifier("print-sheet-plate")
     }
 }
 #endif

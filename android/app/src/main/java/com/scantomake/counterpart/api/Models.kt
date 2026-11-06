@@ -78,7 +78,11 @@ data class Project(
     val selectedPlate: ProjectPlate? get() = plates?.firstOrNull { it.selected }
     val slicedOriginal: Boolean get() = selectedPlate?.sliced ?: (raw["publishedSelection"].obj?.get("sliced").bool == true)
     val completedPlateCount: Int get() = plates?.count { it.completedAtMs != null } ?: 0
-    val canSelectPlate: Boolean get() = !plates.isNullOrEmpty() && state != State.Printing && state != State.TouchingUp && print?.uncertain != true
+    /** Any plate can be chosen except while a step runs. A send Counterpart couldn't confirm stays on its own plate
+     *  ("Check print result") and never locks the others (David, Nov 6: "i can see them but i can't click on them"). */
+    val canSelectPlate: Boolean get() = !plates.isNullOrEmpty() && state != State.Printing && state != State.TouchingUp
+    /** Print asks "I checked the printer" first: the last send, or the chosen plate's, may have reached it (the companion's rule). */
+    val printNeedsCheck: Boolean get() = print?.uncertain == true || selectedPlate?.uncertain == true
     /** Terminal reports take precedence over stale progress while the project transition arrives. */
     val printEnded: Boolean get() = print?.live?.state in setOf("finished", "failed", "cancelled") ||
         print?.monitor?.phase == "ended" || state in setOf(State.Printed, State.Confirmed, State.Failed) ||

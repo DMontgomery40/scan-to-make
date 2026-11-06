@@ -231,7 +231,7 @@ test('plate completion survives switching and restart; failed reprint does not e
  assert.equal(failed.plates.filter(p=>p.completedAtMs).length,1);
 });
 
-test('active or uncertain print locks plate changes; cancelling does not complete the plate', async t => {
+test('an active print locks plate changes; cancelling does not complete the plate', async t => {
  const f=await setup(t), object=await f.service.create('Platform','published',LINK);
  const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Platform',6));
  await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
@@ -242,8 +242,64 @@ test('active or uncertain print locks plate changes; cancelling does not complet
  const cancelled=publicObject(await f.service.selectPlate(object.id,0,1));
  assert.equal(cancelled.plates[0].status,'cancelled');
  assert.equal(cancelled.plates[0].completedAtMs,undefined);
- await f.store.update(object.id,o=>({...o,state:'sent',print:{bundleId:'x',uncertain:true}}));
- await assert.rejects(f.service.selectPlate(object.id,0,2),/printer/i);
+ await f.service.selectPlate(object.id,0,1);
+});
+
+// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
+// on them". Plate 1's Print timed out waiting for the printer's MQTT report, so the companion kept it uncertain, and that
+// locked every other plate. The doubt belongs to the plate that was sent: the others stay choosable and printable (the
+// printer MCP refuses a start unless a fresh report shows the printer idle), and only that plate asks for a check again.
+const NOT_CONFIRMED=/may already be printing/i;
+// The shared fixture every client reads (packages/contracts/fixtures/six-plate-unconfirmed.json): checked here against
+// what the companion itself serves, so the clients' tests and the companion can't drift apart.
+const SIX_PLATES=JSON.parse(await readFile(new URL('../../../packages/contracts/fixtures/six-plate-unconfirmed.json',import.meta.url),'utf8'));
+const plateView=o=>({state:o.state,uncertain:o.print?.uncertain===true,
+ plates:o.plates.map(p=>({fileIndex:p.fileIndex,plateIndex:p.plateIndex,selected:p.selected,status:p.status,uncertain:p.uncertain===true}))});
+const notConfirmRefusal=e=>{assert.doesNotMatch(String(e?.message??e),NOT_CONFIRMED);return true;};
+for(const [name,end] of [['a timed-out start','failed'],['a send it could not follow','sent']])
+test(`after ${name} on one plate, the other plates stay choosable; only that plate asks for a printer check`, async t => {
+ const f=await setup(t), object=await f.service.create('Scan rig','published',LINK);
+ const imported=await f.service.addModelFile(object.id,'rig.3mf',model('Scan rig',6));
+ await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
+ const sha=imported.files.receipts[0].sha256;
+ await f.store.update(object.id,o=>({...o,state:end,failure:end==='failed'?'Printer service: Error: Timed out waiting for a fresh MQTT safety report':undefined,
+  print:{bundleId:'b',printId:'p',uncertain:true,plate:{sha256:sha,plateIndex:0},...(end==='sent'?{monitor:{phase:'ended',endState:'sent'}}:{})}}));
+ assert.equal(publicObject(await f.service.get(object.id)).plates[0].status,end==='sent'?'sent':'unknown');
+ if(end==='failed'){
+  assert.deepEqual(plateView(publicObject(await f.service.get(object.id))),plateView(SIX_PLATES.unconfirmed));
+  assert.deepEqual(plateView(publicObject(await f.service.selectPlate(object.id,0,3))),plateView(SIX_PLATES.switched));
+  assert.deepEqual(plateView(publicObject(await f.service.selectPlate(object.id,0,0))),plateView(SIX_PLATES.back));
+ }
+ for(const plateIndex of [3,5,1]){
+  const moved=publicObject(await f.service.selectPlate(object.id,0,plateIndex));
+  assert.equal(moved.plates[plateIndex].selected,true);
+  assert.equal(moved.plates[0].status,end==='sent'?'sent':'unknown');
+  await assert.rejects(f.service.print(object.id,{expectedPlate:moved.plates[plateIndex].id}),notConfirmRefusal);
+ }
+ // Back on the plate that may have started: Print asks for the check, and the check lets it through.
+ const back=publicObject(await f.service.selectPlate(object.id,0,0));
+ await assert.rejects(f.service.print(object.id,{expectedPlate:back.plates[0].id}),NOT_CONFIRMED);
+ await assert.rejects(f.service.print(object.id,{expectedPlate:back.plates[0].id,checked:true}),notConfirmRefusal);
+ // Status → Not Printed settles it as well as Printed does: the person looked and nothing started.
+ const settled=publicObject(await f.service.setStatus(object.id,'not-printed'));
+ assert.equal(settled.plates[0].status,'not-printed');
+ assert.equal(settled.print?.uncertain,undefined);
+ await assert.rejects(f.service.print(object.id,{expectedPlate:settled.plates[0].id}),notConfirmRefusal);
+});
+
+// Codex on #380: a send that was cancelled before anything went out (a declined print confirmation, or the MCP's
+// print-choice "Not printed.") returns to Ready with its print record and no end state. It reads "unknown", but it was
+// never sent, so Print doesn't ask for the printer check.
+for(const [name,failure] of [['a cancelled confirmation',undefined],['a print-choice refusal','Not printed.']])
+test(`${name} never asks for the printer check`, async t => {
+ const f=await setup(t), object=await f.service.create('Scan rig','published',LINK);
+ const imported=await f.service.addModelFile(object.id,'rig.3mf',model('Scan rig',6));
+ await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
+ const sha=imported.files.receipts[0].sha256;
+ await f.store.update(object.id,o=>({...o,state:'ready',...(failure?{failure}:{}),print:{bundleId:'c',printId:'c1',plate:{sha256:sha,plateIndex:0}}}));
+ const shown=publicObject(await f.service.get(object.id));
+ assert.deepEqual(plateView(shown),plateView(SIX_PLATES.cancelled));
+ await assert.rejects(f.service.print(object.id,{expectedPlate:shown.plates[0].id}),notConfirmRefusal);
 });
 
 test('a stale sheet cannot dispatch the plate another client selected', async t => {

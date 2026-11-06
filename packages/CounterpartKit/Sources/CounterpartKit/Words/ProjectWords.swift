@@ -172,7 +172,7 @@ public struct ProjectWords: Equatable, Sendable {
         title = Self.title(project)
         size = project.current?.sizeMm.flatMap(Format.size)
         phase = Self.phase(project, sending: sending)
-        let made: [ProjectAction] = project.current == nil ? [] : [project.print?.uncertain == true ? .printChecked : .print, .correct]
+        let made: [ProjectAction] = project.current == nil ? [] : [project.printNeedsCheck ? .printChecked : .print, .correct]
         var line: String
         // Done: print another any time, with no uncertain-print check (it printed, and it works).
         let again: [ProjectAction] = project.current == nil ? [] : [.print, .correct]

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { artifact, call, importFiles, openLink, openProject } from "./bridge";
-import { activePrint, duration, words } from "./domain";
+import { activePrint, canSelectPlate, duration, words } from "./domain";
 import { Picture, Stage } from "./Stage";
 import { Question } from "./Question";
 import { PrintSheet } from "./PrintSheet";
@@ -299,7 +299,9 @@ export function ProjectView({
                   <button
                     key={plate.id}
                     className={plate.selected ? "plate selected" : "plate"}
-                    disabled={activePrint(p)}
+                    disabled={!canSelectPlate(p)}
+                    aria-pressed={plate.selected}
+                    aria-label={`${plate.name}, ${plate.status}${plate.selected ? ", selected" : ""}`}
                     onClick={() =>
                       void mutate("objects.selectPlate", {
                         id: p.id,
@@ -320,7 +322,8 @@ export function ProjectView({
                 ))}
               </div>
               <Action
-                disabled={activePrint(p)}
+                // Marking it settles a send Counterpart couldn't confirm, so only a running print holds it.
+                disabled={p.state === "printing"}
                 run={() =>
                   mutate("objects.settings.set", {
                     id: p.id,
@@ -371,7 +374,6 @@ export function ProjectView({
               disabled={
                 !p.current ||
                 active ||
-                !!p.print?.uncertain ||
                 !!p.reconstructionReview ||
                 p.ask?.status === "open"
               }

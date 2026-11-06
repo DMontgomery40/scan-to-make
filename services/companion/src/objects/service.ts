@@ -1,5 +1,5 @@
 import {starterModelId, starterProject as bundledStarter, type StarterProject} from '../starters/catalog.js';
-import {acknowledgePlate, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
+import {acknowledgePlate, plateNeedsPrinterCheck, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
 import {copyFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {homedir, tmpdir} from 'node:os';
@@ -551,14 +551,14 @@ export class ObjectService {
         rest.pendingFollowup = undefined; rest.pendingMessageId = undefined;
       }
       if (status !== 'works' && rest.completion) rest.completion = {...rest.completion, undone: true};
-      // A person saying it printed (or works) settles a print Counterpart couldn't follow.
+      // A person saying it printed (or works, or that nothing started) settles a print Counterpart couldn't follow.
       const settled = o.print?.uncertain ? {print: {...o.print, uncertain: undefined}} : {};
       switch (status) {
         // Hide from Home: the project keeps its status (Done stays Done) and gets it back when unhidden.
         case 'works': return {...rest, ...settled, state: o.state === 'printing' ? o.state : 'confirmed', outcome: 'works'};
         case 'printed': return {...rest, ...settled, state: 'printed'};
         // Without a model, only the flags clear: a draft stays a draft.
-        case 'not-printed': return {...rest, ...(o.current ? {state: 'ready' as const} : {})};
+        case 'not-printed': return {...rest, ...settled, ...(o.current ? {state: 'ready' as const} : {})};
         case 'needs-changes': return {...rest, outcome: 'needs-changes', ...(o.state === 'confirmed' ? {state: 'printed' as const} : {})};
       }
     });
@@ -1379,7 +1379,7 @@ export class ObjectService {
     return this.#gate(id, async () => {
       const object = await this.get(id);
       if (object.state === 'printing' || object.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
-      if (object.print?.uncertain) throw new InvalidStateError('Check the current print on your printer before changing plates.');
+      // An uncertain send stays on its own plate (plateProgress keeps it "unknown"); the others stay choosable (Nov 6).
       if (!Number.isSafeInteger(fileIndex) || !Number.isSafeInteger(plateIndex) || !projectPlates(object).some(p => p.fileIndex === fileIndex && p.plateIndex === plateIndex))
         throw new InvalidStateError('Choose a plate in this model.');
       return this.#changed(await this.#deps.store.update(id, o => selectingPlate(o, fileIndex, plateIndex)));
@@ -1400,7 +1400,7 @@ export class ObjectService {
     if (object.ask?.status === 'open' && object.ask.type === 'choice') throw new InvalidStateError('Choose the model’s file and plate before printing.');
     this.#publishedSettings(object, options);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
-    if (object.print?.uncertain && !options.checked) throw new InvalidStateError("The printer may already be printing this. Check the printer, then print again if it isn't.");
+    if (plateNeedsPrinterCheck(object) && !options.checked) throw new InvalidStateError("The printer may already be printing this. Check the printer, then print again if it isn't.");
     if (options.filament && options.colour) throw new InvalidStateError('Choose one colour.');
     const configured = this.#deps.print;
     if (!configured) throw new InvalidStateError('Printing is not set up on this Mac.');

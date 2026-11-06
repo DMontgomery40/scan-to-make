@@ -90,9 +90,11 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     val catalog by state.catalog.collectAsState()
     val capabilities by state.capabilities.collectAsState()
     val project = projects.firstOrNull { it.id == id } ?: return
-    // Keep the exact plate the person opened; the server also checks this at dispatch.
-    val expectedPlate = remember(id) { project.selectedPlate?.id }
-    val plateChanged = project.selectedPlate?.id != expectedPlate
+    // The plate this sheet prints: the one it opened on, or one chosen in it. Another device changing it is caught
+    // here and by the server at dispatch.
+    var expectedPlate by remember(id) { mutableStateOf(project.selectedPlate?.id) }
+    var choosingPlate by remember { mutableStateOf(false) }
+    val plateChanged = !choosingPlate && project.selectedPlate?.id != expectedPlate
     var destinationId by remember { mutableStateOf(project.printerDestinationId ?: catalog?.defaultDestinationId) }
     var quality by remember { mutableStateOf(PrintQuality.Standard) }
     var strength by remember { mutableStateOf(PrintStrength.Standard) }
@@ -140,7 +142,10 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     val shownSlice = estimate?.shownSlice?.takeIf { !estimating }
 
     LaunchedEffect(Unit) { if (catalog == null) state.loadPrinters() }
-    LaunchedEffect(destinationId) {
+    // "I checked" was about the plate it was ticked for.
+    LaunchedEffect(project.selectedPlate?.id) { checked = false }
+    // The plate too: each plate of a 3MF has its own colours, and the sheet can change plates (Nov 6).
+    LaunchedEffect(destinationId, project.selectedPlate?.id) {
         filaments = null; colour = null; selectingPrinter = true; printerProblem = null
         try {
             if (destinationId != null && destinationId != project.printerDestinationId) state.show(app.companion.selectPrinter(id, destinationId!!))
@@ -157,7 +162,7 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     }
     // The colours, once the printer is chosen: until they answer, nothing slices or prints. A failure stays a failure
     // (the companion's own words, or the connection) with Try Again: a multi-colour model never prints its colours unseen.
-    LaunchedEffect(destinationId, mappingAttempt, selectingPrinter || printerProblem != null) {
+    LaunchedEffect(destinationId, mappingAttempt, selectingPrinter || printerProblem != null, project.selectedPlate?.id) {
         mapping = null; mappingSlots = emptyMap(); mappingLoaded = false; mappingProblem = null
         if (destinationId == null || selectingPrinter || printerProblem != null) return@LaunchedEffect
         try {
@@ -189,7 +194,16 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SectionTitle("Printer")
-            project.selectedPlate?.let { Text(it.name, fontWeight = FontWeight.SemiBold) }
+            if ((project.plates?.size ?: 0) > 1) PrintSheetPlates(project, busy = working || choosingPlate) { plate ->
+                choosingPlate = true; problem = null
+                scope.launch {
+                    try {
+                        val next = app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex)
+                        expectedPlate = next.selectedPlate?.id
+                        state.show(next)
+                    } catch (e: CompanionException) { problem = e.message } catch (e: Exception) { problem = CompanionException.unreachable.message } finally { choosingPlate = false }
+                }
+            } else project.selectedPlate?.let { Text(it.name, fontWeight = FontWeight.SemiBold) }
             if (plateChanged) Text("The selected plate changed. Close this sheet and open Print again.", color = Palette.needsYou)
             catalog?.destinations?.forEach { d ->
                 val selected = d.id == (destinationId ?: catalog?.defaultDestinationId)
@@ -304,14 +318,14 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
             }
             if (uncertain) Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked, { checked = it })
-                Text("The last print may have reached the printer. I checked: it isn't printing this.", fontSize = 14.sp)
+                Text("The last send of this plate may have reached the printer. I checked: it isn't printing this.", fontSize = 14.sp)
             }
             problem?.let { Text(it, color = Palette.failed) }
             printerProblem?.let { Text(it, color = Palette.failed) }
             sliceRefusal?.let { Text(it, color = Palette.failed) }
         }
         PrimaryButton(if (working) "Sending to the printer…" else "Print", Modifier.fillMaxWidth().padding(16.dp),
-            enabled = !working && !selectingPrinter && printerProblem == null && destination != null && !plateChanged &&
+            enabled = !working && !choosingPlate && !selectingPrinter && printerProblem == null && destination != null && !plateChanged &&
                 pauseLayers != null && sliceRefusal == null && shownSlice != null && (!uncertain || checked), icon = CIcons.Printer) {
             working = true; problem = null
             scope.launch {

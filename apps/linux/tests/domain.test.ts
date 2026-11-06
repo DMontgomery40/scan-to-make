@@ -17,6 +17,8 @@ import {
   startingChoices,
   designerSettingsWords,
   slicerControls,
+  canSelectPlate,
+  printNeedsCheck,
 } from "../src/domain.ts";
 import type { Project, ReconstructionReview } from "../src/types.ts";
 import {
@@ -50,6 +52,25 @@ test("a print sheet rejects a changed plate and never adopts it", () => {
     ),
   );
   assert.equal(frozen, "a:1");
+});
+// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
+// on them". Plate 1's start couldn't be confirmed; every plate stays choosable, on the project and in Print, and only
+// the plate that may have started asks for the printer check.
+test("after an unconfirmed start every plate stays choosable, and only its plate asks for a printer check", () => {
+  // The shared fixture the companion's own tests check: David's rig after plate 1's start timed out.
+  const rig = JSON.parse(
+    readFileSync(new URL("../../../packages/contracts/fixtures/six-plate-unconfirmed.json", import.meta.url), "utf8"),
+  ) as Record<"unconfirmed" | "switched" | "back" | "cancelled", Project>;
+  assert.equal(canSelectPlate(rig.unconfirmed), true);
+  assert.equal(printNeedsCheck(rig.unconfirmed), true);
+  assert.equal(canSelectPlate(rig.switched), true);
+  assert.equal(printNeedsCheck(rig.switched), false, "another plate prints without the check");
+  assert.equal(printNeedsCheck(rig.back), true, "back on plate 1 it asks again");
+  assert.equal(printNeedsCheck(rig.cancelled), false, "a cancelled send was never sent (Codex on #380)");
+  assert.equal(canSelectPlate({ ...rig.switched, state: "printing" }), false);
+  const choices = { destinationId: "p1s", quality: "standard", strength: "standard", pauseBeforeLayers: [] } as Parameters<typeof printRequest>[1];
+  assert.equal(printRequest("p", choices, "sha", rig.back.plates![0].id, true).checked, true);
+  assert.equal("checked" in printRequest("p", choices, "sha", rig.switched.plates![3].id, false), false);
 });
 test("read issued before a mutation cannot overwrite its result", () => {
   const order = new ReadOrder();

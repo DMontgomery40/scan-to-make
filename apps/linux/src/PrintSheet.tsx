@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { call } from "./bridge";
 import {
-  activePrint,
+  canSelectPlate,
   chosenSpools,
   mixesFeeds,
   partNote,
@@ -13,6 +13,7 @@ import {
   offeredChoices,
   guardPlate,
   parseLayers,
+  printNeedsCheck,
   printRequest,
   shownSlice,
   startingChoices,
@@ -31,8 +32,33 @@ export function PrintSheet({
   apply: (p: Project) => void;
   onClose: () => void;
 }) {
-  const frozen = useRef(freezePlate(project)).current;
-  const frozenModel = useRef(project.current?.model).current;
+  // The plate this sheet prints: the one it opened on, or one chosen in it (Nov 6). Another device changing it makes
+  // the sheet stale, and the companion checks it again at dispatch.
+  const [frozen, setFrozen] = useState(() => freezePlate(project));
+  const [frozenModel, setFrozenModel] = useState(() => project.current?.model);
+  const [choosingPlate, setChoosingPlate] = useState(false);
+  const [checked, setChecked] = useState(false);
+  useEffect(() => setChecked(false), [frozen]);
+  const choosePlate = async (id: string) => {
+    const next = project.plates?.find((p) => p.id === id);
+    if (!next || next.selected) return;
+    setChoosingPlate(true);
+    setError("");
+    try {
+      const { object } = await call<{ object: Project }>("objects.selectPlate", {
+        id: project.id,
+        fileIndex: next.fileIndex,
+        plateIndex: next.plateIndex,
+      });
+      setFrozen(freezePlate(object));
+      setFrozenModel(object.current?.model);
+      apply(object);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChoosingPlate(false);
+    }
+  };
   const initial = startingChoices(project);
   const [destination, setDestination] = useState(
     project.printerDestinationId ?? "",
@@ -97,7 +123,8 @@ export function PrintSheet({
     return () => {
       live = false;
     };
-  }, [project.id, destination, mappingAttempt]);
+    // The plate too: each plate of a 3MF has its own colours.
+  }, [project.id, destination, mappingAttempt, frozen]);
   useEffect(() => {
     let live = true;
     setFilaments([]);
@@ -178,9 +205,9 @@ export function PrintSheet({
     guardPlate(object, frozen);
     if (object.current?.model !== frozenModel)
       throw new Error("The model changed. Reopen Print and review it.");
-    if (activePrint(object))
+    if (object.state === "printing")
       throw new Error(
-        "This project already has an active or uncertain print. Review its status first.",
+        "This project already has an active print. Review its status first.",
       );
     if (object.printerDestinationId !== destination)
       throw new Error("The printer changed on another device. Reopen Print.");
@@ -213,6 +240,7 @@ export function PrintSheet({
   const ready =
     !!destination &&
     !changing &&
+    !choosingPlate &&
     !stale &&
     !(offers("layerPauses") && pausesProblem) &&
     mappingLoaded &&
@@ -273,7 +301,27 @@ export function PrintSheet({
               <p>Nothing to show yet.</p>
             )}
           </section>
-          <h4>{plate?.name ?? project.title}</h4>
+          {(project.plates?.length ?? 0) > 1 ? (
+            <label className="field">
+              Plate
+              <select
+                value={frozen ?? ""}
+                disabled={choosingPlate || !canSelectPlate(project)}
+                onChange={(e) => void choosePlate(e.target.value)}
+              >
+                {project.plates!.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {new Set(project.plates!.map((x) => x.fileIndex)).size > 1
+                      ? ` · ${p.fileName}`
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <h4>{plate?.name ?? project.title}</h4>
+          )}
           {plate && (
             <small>
               {plate.fileName} · {plate.status}
@@ -471,11 +519,28 @@ export function PrintSheet({
           {error}
         </p>
       )}
+      {printNeedsCheck(project) && (
+        <label className="notice">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => setChecked(e.target.checked)}
+          />{" "}
+          Counterpart couldn’t tell whether the last send of this plate reached
+          the printer. I checked: it isn’t already printing this.
+        </label>
+      )}
       <div className="dialog-actions">
         <button onClick={onClose}>Cancel</button>
         <Action
           className="primary"
-          disabled={!ready || estimating || !shown || activePrint(project)}
+          disabled={
+            !ready ||
+            estimating ||
+            !shown ||
+            project.state === "printing" ||
+            (printNeedsCheck(project) && !checked)
+          }
           onError={setError}
           run={async () => {
             await ensureCurrent();
@@ -484,7 +549,7 @@ export function PrintSheet({
               throw new Error("Open Print to see what will print.");
             const result = await call<{ object: Project }>(
               "objects.print",
-              printRequest(project.id, choices, shown, frozen),
+              printRequest(project.id, choices, shown, frozen, printNeedsCheck(project) && checked),
             );
             apply(result.object);
             onClose();

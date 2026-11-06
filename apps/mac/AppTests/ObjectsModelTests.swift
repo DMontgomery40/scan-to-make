@@ -117,6 +117,14 @@ private actor FakeObjects: ObjectsCompanion {
         return try change(id, "confirmation:\(confirmationId):\(answer.action.rawValue)", ["printConfirmation":NSNull()])
     }
     func start(_ id: String) async throws -> Project { try change(id, "start", ["state": "touching-up"]) }
+    /// As the companion does: the chosen plate is selected, and a send it couldn't confirm stays on its own plate.
+    func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
+        guard let index = items.firstIndex(where: { $0["id"] as? String == id }) else { throw ControlRemoteError(code:"not-found", message:"gone") }
+        let plates = (items[index]["plates"] as? [[String: Any]] ?? []).map { plate in
+            plate.merging(["selected": plate["fileIndex"] as? Int == fileIndex && plate["plateIndex"] as? Int == plateIndex]) { $1 }
+        }
+        return try change(id, "plate:\(fileIndex):\(plateIndex)", ["plates": plates, "print": NSNull(), "failure": NSNull(), "state": "ready"])
+    }
     func delete(_ id: String) async throws {
         calls.append("delete:\(id)")
         if let actionError { throw actionError }
@@ -194,6 +202,38 @@ private func project(_ item: [String: Any]) throws -> Project {
         await companion.set([])
         await model.refresh()
         XCTAssertTrue(model.projects(forPrinter: "here").isEmpty)
+    }
+
+    /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
+    /// on them". Plate 1's start couldn't be confirmed (`print.uncertain`), which disabled every plate on the Mac. Every
+    /// plate stays choosable with projects present, and only the plate that may have started asks for the printer check.
+    func testEveryPlateStaysChoosableAfterAnUnconfirmedStartWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        // The shared fixture the companion's own tests check: David's rig after plate 1's start timed out.
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/six-plate-unconfirmed.json"))) as? [String: Any])
+        let unconfirmed = try XCTUnwrap(fixture["unconfirmed"] as? [String: Any])
+        let id = try XCTUnwrap(unconfirmed["id"] as? String)
+        let names = try XCTUnwrap(unconfirmed["plates"] as? [[String: Any]]).compactMap { $0["name"] as? String }
+        XCTAssertEqual(names.count, 6)
+        await companion.set([item("caliper", "ready"), unconfirmed.merging(["directory": "/tmp/rig"]) { $1 }])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        var rig = try XCTUnwrap(model.objects.first { $0.id == id })
+        XCTAssertTrue(rig.canSelectPlate, "the plates stay buttons you can press")
+        XCTAssertTrue(rig.printNeedsCheck)
+        for (i, name) in names.enumerated().reversed() {
+            let plate = try XCTUnwrap(rig.plates?[i])
+            let chose = await model.selectPlate(id, plate: plate)
+            XCTAssertTrue(chose)
+            rig = try XCTUnwrap(model.objects.first { $0.id == id })
+            XCTAssertEqual(rig.selectedPlate?.name, name)
+            XCTAssertTrue(rig.canSelectPlate)
+            XCTAssertEqual(rig.printNeedsCheck, i == 0, "only Screws, which may have started, asks for the check")
+        }
+        let calls = await companion.calls
+        XCTAssertEqual(calls.filter { $0.hasPrefix("plate:") }, ["plate:0:5", "plate:0:4", "plate:0:3", "plate:0:2", "plate:0:1", "plate:0:0"])
     }
 
     /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and

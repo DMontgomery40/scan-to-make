@@ -62,7 +62,7 @@ struct PrintSheet: View {
     private var settled: Bool { filamentState != .loading && !(published && mappingState == .loading) }
     private var settingsServed: Bool { model.capabilities?.printSettings == true }
     private var words: ObjectWords { object.words }
-    private var uncertain: Bool { object.print?.uncertain == true }
+    private var uncertain: Bool { object.printNeedsCheck }
     private var chosen: PrinterFilament? { filaments.first { $0.slot == slot } }
     /// The current model's file version (a correction rewrites the same file), or the project's when it can't be read.
     private var modelVersion: Double { object.modelURL.map { FileVersion.of($0, else: object.updatedAtMs) } ?? object.updatedAtMs }
@@ -70,8 +70,11 @@ struct PrintSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Print \(words.title)").font(.title2.bold())
-            if let plate = object.selectedPlate, (object.plates?.count ?? 0) > 1 {
-                Label(plate.name, systemImage: "square.stack.3d.up").font(.headline)
+            if (object.plates?.count ?? 0) > 1 {
+                ProjectPlatePicker(project: object, busy: model.working.contains(object.id)) { plate in
+                    Task { await model.selectPlate(object.id, plate: plate) }
+                }
+                .font(.headline).fixedSize()
             }
             printers
             HStack(alignment: .top, spacing: 16) {
@@ -137,7 +140,10 @@ struct PrintSheet: View {
         .padding(24)
         .frame(width: 720)
         .tint(.filament)
-        .task(id: "\(printer?.id ?? "")|\(object.current?.model ?? "")|\(modelVersion)") { await loadFilaments() }
+        // The plate too: each plate of a 3MF has its own colours, and the sheet can change plates (Nov 6).
+        .task(id: "\(printer?.id ?? "")|\(object.current?.model ?? "")|\(object.selectedPlate?.id ?? "")|\(modelVersion)") { await loadFilaments() }
+        // "I checked the printer" was about the plate it was ticked for.
+        .onChange(of: object.selectedPlate?.id) { checked = false }
         // The MCP's answer can arrive while the sheet is open: a designer's file then starts at its own settings.
         .onChange(of: object.printsWithOwnSettings) { _, own in
             if own && !qualityPicked { quality = .standard }

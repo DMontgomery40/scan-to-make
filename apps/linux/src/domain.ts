@@ -203,6 +203,16 @@ export const words = (p: Project) =>
   p.state;
 export const activePrint = (p: Project) =>
   p.state === "printing" || !!p.print?.uncertain;
+/**
+ * Any plate can be chosen except while a step runs. A send Counterpart couldn't confirm stays on its own plate ("unknown")
+ * and never locks the others (David, Nov 6: "i can't select which plate to print in the app i can see them but i can't
+ * click on them").
+ */
+export const canSelectPlate = (p: Project) =>
+  !!p.plates?.length && p.state !== "printing" && p.state !== "touching-up";
+/** Print asks "I checked the printer" first: the last send, or the chosen plate's, may have reached it (the companion's rule). */
+export const printNeedsCheck = (p: Project) =>
+  !!p.print?.uncertain || p.plates?.find((x) => x.selected)?.uncertain === true;
 export const duration = (seconds?: number) =>
   seconds === undefined
     ? "Time unavailable"
@@ -371,11 +381,13 @@ export function printRequest(
   c: PrintChoices,
   sliceSha256: string,
   expectedPlate?: string,
+  checked?: boolean,
 ) {
   const { destinationId: _destination, ...choices } = estimateRequest(id, c);
   return {
     ...choices,
     ...(expectedPlate ? { expectedPlate } : {}),
+    ...(checked ? { checked: true } : {}),
     sliceSha256,
   };
 }

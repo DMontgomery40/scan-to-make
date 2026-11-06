@@ -37,6 +37,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// Why a print sheet waits for "I checked the printer": the last print of this project may have reached it.
     public var uncertainPrintWords: String {
+        if print?.uncertain != true, let plate = selectedPlate {
+            return "Counterpart couldn’t tell whether \(plate.name) reached the printer when it was last sent. Check the printer before printing it again."
+        }
         let printer = print?.destination?.name ?? "the printer"
         if let job = print?.printerStatus?.job, !job.isEmpty {
             return "Counterpart couldn’t tell whether the last print reached \(printer). It last reported “\(job)”. Check the printer before printing this again."
