@@ -100,3 +100,28 @@ final class PrinterSetupClientTests: XCTestCase {
         XCTAssertNil(CompanionClient.scope("POST", "/v1/printers/setup/install"))
     }
 }
+
+/// Codex on #392: a found folder's missing model is the MCP's own declared model setting, never a variable name the app knows.
+final class PrinterCandidateModelTests: XCTestCase {
+    private func options(modelEnv: String) throws -> PrinterSetupOptions {
+        try JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
+        {"types":[{"printerType":"bambu","label":"Bambu Lab","backends":["bambu-printer-mcp"],"serial":true,
+          "fields":[{"name":"model","env":"\(modelEnv)","label":"Model","required":true}]}],"models":{}}
+        """.utf8))
+    }
+    private func candidate(missing: [String], fill: [String: String] = [:]) throws -> PrinterCandidate {
+        let data = try JSONSerialization.data(withJSONObject: ["id": "folder:/x", "source": "folder", "name": "P1S", "backend": "bambu-printer-mcp",
+                                                               "printerType": "bambu", "folder": "/x", "added": false, "missing": missing, "fill": fill])
+        return try JSONDecoder().decode(PrinterCandidate.self, from: data)
+    }
+
+    func testTheModelSettingIsWhateverTheMCPDeclares() throws {
+        let renamed = try options(modelEnv: "PRINTER_MODEL")
+        XCTAssertTrue(try candidate(missing: ["PRINTER_MODEL"]).needsModel(renamed), "the MCP's own name asks for a model")
+        XCTAssertFalse(try candidate(missing: ["BAMBU_MODEL"]).needsModel(renamed), "a name the MCP doesn't declare isn't its model")
+        XCTAssertFalse(try candidate(missing: ["PRINTER_MODEL"], fill: ["PRINTER_MODEL": "p1s"]).needsModel(renamed), "Counterpart filled it")
+        XCTAssertEqual(try candidate(missing: ["PRINTER_MODEL"], fill: ["PRINTER_MODEL": "p1s"]).filledModel(renamed), "p1s")
+        XCTAssertFalse(try candidate(missing: ["PRINTER_HOST"]).needsModel(renamed), "another missing setting isn't a model")
+        XCTAssertFalse(try candidate(missing: ["PRINTER_MODEL"]).needsModel(nil), "no fields from the MCP: no guess")
+    }
+}

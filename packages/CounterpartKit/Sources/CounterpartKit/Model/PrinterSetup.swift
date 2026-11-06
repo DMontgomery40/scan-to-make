@@ -107,6 +107,20 @@ public struct PrinterCandidate: Decodable, Sendable, Equatable, Identifiable {
     public var needsModel: Bool { missing?.contains("BAMBU_MODEL") == true && fill?["BAMBU_MODEL"] == nil }
 }
 
+public extension PrinterCandidate {
+    /// The `.env` variable its MCP declares for the printer's model (`counterpart_setup_fields`), never a name the app knows.
+    func modelSetting(_ options: PrinterSetupOptions?) -> String? {
+        options?.types.first { $0.printerType == printerType }?.field("model")?.env
+    }
+    /// Its MCP needs a model Counterpart couldn't tell, by the MCP's own model field: the phone asks.
+    func needsModel(_ options: PrinterSetupOptions?) -> Bool {
+        guard let setting = modelSetting(options) else { return false }
+        return missing?.contains(setting) == true && fill?[setting] == nil
+    }
+    /// The model Add fills for it, when Counterpart could tell.
+    func filledModel(_ options: PrinterSetupOptions?) -> String? { modelSetting(options).flatMap { fill?[$0] } }
+}
+
 public struct PrinterDiscovery: Decodable, Sendable, Equatable {
     public let found: [PrinterCandidate]
     /// `unavailable` when this Mac couldn't listen for Bambu printers (another app may hold the port).

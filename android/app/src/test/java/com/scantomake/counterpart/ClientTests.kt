@@ -469,3 +469,22 @@ class WordsTests {
         assertEquals("Fast", c.fields[1].displayName("b"))
     }
 }
+
+/** Codex on #392: a found folder's missing model is the MCP's own declared model setting, never a variable name the app knows. */
+class PrinterCandidateModelTests {
+    private fun options(modelEnv: String) = com.scantomake.counterpart.api.PrinterSetupOptions(types = listOf(
+        com.scantomake.counterpart.api.PrinterSetupOptions.PrinterType("bambu", "Bambu Lab", listOf("bambu-printer-mcp"), serial = true,
+            fields = listOf(com.scantomake.counterpart.api.PrinterSetupOptions.Field("model", modelEnv, "Model", required = true)))))
+    private fun candidate(missing: List<String>, fill: Map<String, String> = emptyMap()) = com.scantomake.counterpart.api.PrinterCandidate(
+        "folder:/x", "folder", "P1S", "bambu-printer-mcp", "bambu", folder = "/x", missing = missing, fill = fill)
+
+    @org.junit.Test fun theModelSettingIsWhateverTheMcpDeclares() {
+        val renamed = options("PRINTER_MODEL")
+        org.junit.Assert.assertTrue("the MCP's own name asks for a model", candidate(listOf("PRINTER_MODEL")).needsModel(renamed))
+        org.junit.Assert.assertFalse("a name the MCP doesn't declare isn't its model", candidate(listOf("BAMBU_MODEL")).needsModel(renamed))
+        org.junit.Assert.assertFalse("Counterpart filled it", candidate(listOf("PRINTER_MODEL"), mapOf("PRINTER_MODEL" to "p1s")).needsModel(renamed))
+        org.junit.Assert.assertEquals("p1s", candidate(listOf("PRINTER_MODEL"), mapOf("PRINTER_MODEL" to "p1s")).filledModel(renamed))
+        org.junit.Assert.assertFalse("another missing setting isn't a model", candidate(listOf("PRINTER_HOST")).needsModel(renamed))
+        org.junit.Assert.assertFalse("no fields from the MCP: no guess", candidate(listOf("PRINTER_MODEL")).needsModel(null))
+    }
+}

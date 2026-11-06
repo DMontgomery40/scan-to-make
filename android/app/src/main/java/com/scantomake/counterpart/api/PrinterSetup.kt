@@ -49,7 +49,12 @@ data class PrinterCandidate(val id: String, val source: String, val name: String
                             val model: String? = null, val host: String? = null, val port: String? = null, val serial: String? = null,
                             val folder: String? = null, val added: Boolean = false, val missing: List<String>? = null,
                             val fill: Map<String, String>? = null) {
-    val needsModel: Boolean get() = missing?.contains("BAMBU_MODEL") == true && fill?.get("BAMBU_MODEL") == null
+    /** The `.env` variable its MCP declares for the printer's model (`counterpart_setup_fields`), never a name the app knows. */
+    fun modelSetting(options: PrinterSetupOptions?): String? = options?.type(printerType)?.field("model")?.env
+    /** Its MCP needs a model Counterpart couldn't tell, by the MCP's own model field: the phone asks. */
+    fun needsModel(options: PrinterSetupOptions?): Boolean = modelSetting(options)?.let { missing?.contains(it) == true && fill?.get(it) == null } ?: false
+    /** The model Add fills for it, when Counterpart could tell. */
+    fun filledModel(options: PrinterSetupOptions?): String? = modelSetting(options)?.let { fill?.get(it) }
 }
 
 @Serializable data class PrinterDiscovery(val found: List<PrinterCandidate> = emptyList(), val network: String = "complete", val options: PrinterSetupOptions = PrinterSetupOptions())
