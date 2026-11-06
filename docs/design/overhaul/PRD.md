@@ -26,7 +26,7 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | One native iPhone/iPad app, no React Native (§3) | Built; installed 2.0 (202611050845, main `0c967a58`) | — |
 | Mac app (§7) | Built; installed 202611050844 (main `0c967a58`) | full mockup parity; background memory budget remains open (Nov 5 measurements in §9.6) |
 | Pairing: QR, nearby code (§5.10) | Built; in daily use on Davica3 | — |
-| Automatic iCloud pairing (§5.10) | Built | Not accepted: fresh same-account enrolment |
+| Automatic iCloud pairing (§5.10) | Built. **Accepted on device Nov 5**: a fresh install on David's iPad Air (iPadOS 27.2, build 202611052142) connected to the Mac by itself because they share an iCloud account, with no code or Allow (David: "the ipad just connected cause they shared icloud"); the Mac recorded "iPad (FB25)" at 21:56:59Z | The companion doesn't record which path a device connected by (`pairedVia` says `lan`), so the Mac side can't prove it alone |
 | Home, search, title, grid, no fake controls (§5.1) | Built; Home checked on device Nov 2–3. Search stays above its filtered list and says how many projects match with Show All on Mac (#326), Android, iPhone/iPad and Linux (#329) | New search behavior: installed-app verification pending; stays connected for an hour (never "Mac isn't answering") |
 | Starter projects (§5.11) | Built on iPhone, iPad, Mac, Android, Linux; reachable with projects on every layout (§6.1) | Not accepted; rig original import and physical prints |
 | Scanning: walk-around, in hand, rig (§5.3, §11) | Built; a physical iPhone scan → Mac cleanup → model observed Nov 4 (Leatherman Wave+) | Not accepted: geometry, dimensions, print fitness; in-hand recorder defects (§11) |
@@ -434,7 +434,7 @@ Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications
 
 ### 5.10 First run and pairing
 
-**Status:** QR and nearby pairing built and in use. Automatic iCloud pairing (`POST /v1/pair/icloud`) is built; fresh same-account enrolment is not accepted.
+**Status:** QR and nearby pairing built and in use. Automatic iCloud pairing (`POST /v1/pair/icloud`) is built, and fresh same-account enrolment was accepted on David's iPad Air on Nov 5.
 
 Screenshots: `screens/phone-welcome.jpg`, `screens/phone-pair.jpg` and `screens/phone-notify.jpg`.
 
