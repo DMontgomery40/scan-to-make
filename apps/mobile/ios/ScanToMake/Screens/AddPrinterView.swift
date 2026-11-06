@@ -61,7 +61,7 @@ struct AddPrinterView: View {
                 .disabled(model.options?.types.isEmpty != false)
                 .accessibilityIdentifier("add-printer-manual")
         } footer: {
-            Text("Each printer MCP lists the printers it can drive and the settings it needs. \(store.macName ?? "Your Mac") keeps them in that MCP’s settings; nothing stays on this phone.")
+            Text("Each printer MCP lists the printers it can drive and the settings it needs. \(store.macName ?? "Your Mac") keeps them in that MCP’s own settings.")
         }
     }
 }
@@ -129,10 +129,15 @@ private struct AddPrinterForm: View {
     private var type: PrinterSetupOptions.PrinterType? { model.type }
 
     var body: some View {
-        Form {
-            if let done = model.done { AddPrinterDone(words: done) } else { printer; mcp; slicer; checkSection }
+        ScrollViewReader { proxy in
+            Form {
+                if let done = model.done { AddPrinterDone(words: done) } else { printer; mcp; slicer; checkSection }
+            }
+            .accessibilityIdentifier("add-printer-form")
+            // Check's answer comes into view, even in the iPad's shorter sheet.
+            .onChange(of: model.check) { _, check in if check != nil { withAnimation { proxy.scrollTo("add-printer-check-result", anchor: .bottom) } } }
+            .onChange(of: model.problem) { _, problem in if problem != nil { withAnimation { proxy.scrollTo("add-printer-check-result", anchor: .bottom) } } }
         }
-        .accessibilityIdentifier("add-printer-form")
         .navigationTitle(model.form.name ?? type?.label ?? "Printer")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -288,6 +293,7 @@ private struct AddPrinterForm: View {
                       systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             }
             if let problem = model.problem { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+            Color.clear.frame(height: 1).listRowBackground(Color.clear).id("add-printer-check-result").accessibilityHidden(true)
         } footer: {
             if model.check?.reached != true && !model.checking {
                 Text(model.formReady
