@@ -219,7 +219,7 @@ test('phone Add printer needs printing and settings, refuses what the Mac would 
     assert.equal((await f.call('/v1/printers/setup/discover', 'POST', {}, credential)).status, 403);
   assert.equal((await f.call('/v1/printers/setup/discover')).status, 405);
   for (const [path, body] of [['check', {printer: {backend: 'bambu-printer-mcp', printerType: 'bambu', host: 'h', port: '0'}}],
-    ['add', {printer: {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'http://x/'}}], ['add', {}],
+    ['add', {printer: {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: ''}}], ['add', {}],
     ['obtain', {backend: 'mcp-3d-printer-server', printerType: 'octoprint', host: 'octopi.local', field: 'secret', session: 'nope'}],
     ['discover', {extra: true}]])
     assert.equal((await f.call('/v1/printers/setup/' + path, 'POST', body)).status, 400, path);

@@ -165,9 +165,11 @@ private struct AddPrinterForm: View {
                     ForEach(model.models) { Text($0.label).tag($0.value) }
                 }
             }
-            field("host", label: type?.field("host")?.label ?? "Address") {
-                TextField(type?.field("host")?.label ?? "Address", text: $model.form.host, prompt: Text("192.168.1.20"))
-                    .keyboardType(type?.field("host")?.input == "url" ? .URL : .asciiCapable)
+            // The Mac's own address field (`AddressField`, #389): the MCP's hint, and a web address where its host field takes one.
+            let address = AddressField(options: model.options, printerType: model.form.printerType)
+            field("host", label: type?.field("host")?.label ?? "Address", hint: address.hint) {
+                TextField(type?.field("host")?.label ?? "Address", text: $model.form.host, prompt: Text(address.prompt))
+                    .keyboardType(type?.address?.url == true ? .URL : .asciiCapable)
             }
             if type?.field("port") != nil {
                 field("port", label: type?.field("port")?.label ?? "Port") {
@@ -201,14 +203,14 @@ private struct AddPrinterForm: View {
     }
 
     /// A labelled text field (the MCP's label, so a filled-in value still says what it is), with the MCP's hint under it.
-    @ViewBuilder private func field<Content: View>(_ name: String, label: String, @ViewBuilder content: () -> Content) -> some View {
+    @ViewBuilder private func field<Content: View>(_ name: String, label: String, hint: String? = nil, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             LabeledContent(label) {
                 content().multilineTextAlignment(.trailing)
                     .textInputAutocapitalization(name == "serial" ? .characters : .never).autocorrectionDisabled()
                     .accessibilityIdentifier("add-printer-\(name)")
             }
-            if let hint = type?.field(name)?.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
+            if let hint = hint ?? type?.field(name)?.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
         }
     }
 

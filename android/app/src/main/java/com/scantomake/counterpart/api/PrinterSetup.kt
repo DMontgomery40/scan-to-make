@@ -30,8 +30,11 @@ data class PrinterSetupOptions(val types: List<PrinterType> = emptyList(), val m
     }
     @Serializable data class Update(val `package`: String, val message: String)
     /** A brand or host software, and the MCPs that can reach it (the default first). */
+    /** The address field in the MCP's words; `url` when it also takes a web address (https://…, a sub-path; #389). */
+    @Serializable data class Address(val hint: String? = null, val url: Boolean? = null)
     @Serializable data class PrinterType(val printerType: String, val label: String, val backends: List<String> = emptyList(),
-                                         val serial: Boolean = false, val secret: Secret? = null, val fields: List<Field>? = null) {
+                                         val serial: Boolean = false, val secret: Secret? = null, val address: Address? = null,
+                                         val fields: List<Field>? = null) {
         fun field(name: String) = fields?.firstOrNull { it.name == name }
     }
     /** The model a typed serial number names, by the MCP's own table (its prefixes are all one length). */
@@ -129,6 +132,14 @@ fun PrinterForm.withSerial(value: String, options: PrinterSetupOptions): Printer
     if (model != null && !modelInferred) return copy(serial = value)
     val named = options.model(value)?.takeIf { m -> options.models[backend].orEmpty().any { it.value == m } }
     return copy(serial = value, model = named ?: if (modelInferred) null else model, modelInferred = named != null)
+}
+
+/** The address field: the MCP's hint, and a prompt that offers a web address only where the MCP takes one. Port of CounterpartKit `AddressField`. */
+data class AddressField(val hint: String?, val prompt: String, val url: Boolean)
+fun addressField(options: PrinterSetupOptions?, printerType: String): AddressField {
+    val address = options?.type(printerType)?.address
+    val url = address?.url == true
+    return AddressField(address?.hint, if (url) "192.168.1.20, printer.local or https://…" else "192.168.1.20 or printer.local", url)
 }
 
 /** The key or access code the chosen MCP can fetch for the person (`obtain`): its button's words, or null. */
