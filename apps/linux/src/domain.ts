@@ -431,14 +431,14 @@ export function mcpPackageIds(pkg: import("./types").McpPackage): string[] {
 
 /**
  * What Update's answer says, in words: never the bare state (Nov 6: "waiting" was shown as is). Waiting for a print
- * is a sentence, not progress; the mcp.update.* events carry it on from there.
+ * Counterpart's own work is a sentence, not progress; the mcp.update.* events carry it on from there.
  */
 export function mcpUpdateNotice(reply: {update?: {state: string; toVersion?: string; found?: string}; state?: string; toVersion?: string; found?: string}): string {
   const update = reply.update ?? (reply.state ? {state: reply.state, toVersion: reply.toVersion, found: reply.found} : undefined);
   if (!update) return "Update requested.";
   if (update.found) return update.found;
   switch (update.state) {
-    case "waiting": return "Updates after the current print.";
+    case "waiting": return "Updates as soon as Counterpart finishes its work on this printer.";
     case "current": return "Already the newest version.";
     case "started": return update.toVersion ? `Updating to ${update.toVersion}…` : "Updating…";
     default: return "Update requested.";
@@ -448,7 +448,7 @@ export function mcpUpdateNotice(reply: {update?: {state: string; toVersion?: str
 export function mcpMoveNotice(reply: {update: {state: string; found?: string}}): string {
   const update = reply.update;
   if (update.found) return update.found;
-  if (update.state === "waiting") return "Moves to Counterpart’s updated copy after the current print.";
+  if (update.state === "waiting") return "Moves to Counterpart’s updated copy as soon as Counterpart finishes its work on this printer.";
   if (update.state === "current") return "Already using the current copy.";
   return "Moving to Counterpart’s updated copy…";
 }

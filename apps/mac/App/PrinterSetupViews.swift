@@ -14,6 +14,8 @@ import ControlKit
     /// The companion has `printers.mcps` and the setup methods (`capabilities.printerSetup`).
     @Published private(set) var available = false
     @Published private(set) var packages: [PrinterMcpPackage] = []
+    /// The list couldn't be read just now: said under the MCPs, with Try Again, never a silently shorter list.
+    @Published private(set) var problem: String?
     /// The MCPs' own choices (models by package), for Complete Settings.
     @Published private(set) var options: PrinterSetupOptions?
     func models(_ backend: String) -> [PrinterSetupOptions.Model] { options?.models[backend] ?? [] }
@@ -30,9 +32,21 @@ import ControlKit
         #endif
         guard let status = try? await Self.client(for:"status.get").status() else { return }
         available = status.capabilities.printerSetup
-        guard available, let state = try? await Self.client(for:"printers.mcps").printerSetupState() else { return }
+        guard available else { return }
+        // Read twice before saying it couldn't: a busy Mac may miss the first deadline (Nov 6, 14:43).
+        var answer: (packages: [PrinterMcpPackage], options: PrinterSetupOptions?)?
+        for attempt in 0..<2 where answer == nil {
+            if attempt > 0 { try? await Task.sleep(for:.seconds(1)) }
+            answer = try? await Self.client(for:"printers.mcps").printerSetupState()
+        }
+        guard let state = answer else {
+            problem = "Counterpart couldn’t list the printer MCPs just now. Try Again in a moment."
+            return
+        }
+        problem = nil
         if packages != state.packages { packages = state.packages }
         if options != state.options { options = state.options }
+        PrinterUpdates.shared.settle(state.packages)
     }
 
     /// Download: the companion installs only that package; `mcp.update.*` events carry the progress.
@@ -151,7 +165,7 @@ struct McpPackageRow: View {
 extension PrinterSetupModel {
     /// The package for an MCP name, when the companion listed it.
     func package(_ backend: String) -> PrinterMcpPackage? { packages.first { $0.package == backend } }
-    static func label(_ backend: String) -> String { backend == "bambu-printer-mcp" ? "bambu-printer-mcp" : "mcp-3D-printer-server" }
+    static func label(_ backend: String) -> String { PrinterMCP.label(backend) }
     static func words(_ error: Error, otherwise: String) -> String {
         if let error = error as? ControlRemoteError, !error.message.isEmpty { return error.message }
         return otherwise

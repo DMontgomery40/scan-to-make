@@ -405,6 +405,13 @@ struct PrintersSettings: View {
                                       Task { await updates.update(id, fresh:true, socket:ModelAccessModel.socketPath(for:Installation(bundle:.main))); await setup.refresh() }
                                   } : nil)
                 }
+                if let problem = setup.problem {
+                    HStack {
+                        Text(problem).font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Try Again") { Task { await setup.refresh() } }
+                    }
+                }
                 if PrinterMCP.list(printers).isEmpty && unusedPackages.isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
             } header: { Text("Printer MCPs") } footer: {
                 if setup.available {

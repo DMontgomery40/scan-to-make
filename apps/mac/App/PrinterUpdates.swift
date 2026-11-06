@@ -8,7 +8,7 @@ import ControlKit
 /// Mac shows what `printers.updateMcp` answers and what the `mcp.update.*` events say after it.
 enum McpUpdateStatus: Equatable, Sendable {
     case updating(from: String?, to: String?)
-    /// A print on that printer is being prepared or watched: it updates after it.
+    /// Counterpart is sending, slicing or designing on that MCP: it updates as soon as that finishes (never for the printer's own print).
     case waiting
     case updated(version: String?)
     /// Already the newest version.
@@ -22,8 +22,8 @@ enum McpUpdateStatus: Equatable, Sendable {
 
     /// Update can't be pressed again: one is running, or waits for the current print.
     var busy: Bool { if case .updating = self { return true }; return self == .waiting }
-    /// Work under way now, shown with a spinner. Waiting for a print isn't: a print can take hours, so the row says
-    /// "Updates after the current print." without one (Nov 6: "mcps won't update they just spin forever").
+    /// Work under way now, shown with a spinner. Waiting for Counterpart's own send, slice or design to finish is a
+    /// sentence alone (Nov 6: "mcps won't update they just spin forever").
     var spinning: Bool { if case .updating = self { return true }; return false }
 
     /// The line under the MCP's name.
@@ -31,7 +31,7 @@ enum McpUpdateStatus: Equatable, Sendable {
         switch self {
         case .updating(_, let to?): return "Updating to \(to)…"
         case .updating: return "Updating…"
-        case .waiting: return "Updates after the current print."
+        case .waiting: return "Updates as soon as Counterpart finishes its work on this printer."
         case .updated(let version?): return "Updated to \(version)."
         case .updated: return "Updated."
         case .current: return "Already the newest version."
@@ -70,6 +70,16 @@ enum McpUpdateStatus: Equatable, Sendable {
     @Published private(set) var status: [String: McpUpdateStatus] = [:]
 
     func set(_ mcpId: String, _ status: McpUpdateStatus?) { self.status[mcpId] = status }
+
+    /// The companion's list, read again: an install that is already the newest version isn't waiting or updating any
+    /// more, whatever this app last heard (an update replaced while the companion restarted sends no event for it).
+    func settle(_ packages: [PrinterMcpPackage]) {
+        for package in packages where package.installed && !package.offersUpdate && package.latestVersion != nil {
+            for id in [package.appMcpId] + (package.uses ?? []).map(\.mcpId) {
+                switch status[id] { case .waiting?, .updating?: status[id] = nil; default: break }
+            }
+        }
+    }
 
     /// An `mcp.update.*` event. Returns whether it finished one (so the printers are read again for the new version).
     @discardableResult func apply(_ event: CounterpartEvent) -> Bool {
@@ -125,16 +135,31 @@ struct PrinterMCP: Identifiable, Equatable {
 
     static func == (a: PrinterMCP, b: PrinterMCP) -> Bool { a.id == b.id && a.printers == b.printers }
 
+    /// A printer MCP's name as people know it, from its package.
+    static func label(_ backend: String) -> String { backend == "bambu-printer-mcp" ? "bambu-printer-mcp" : "mcp-3D-printer-server" }
+
     static func list(_ printers: [PrinterDestination]) -> [PrinterMCP] {
         // One row per install: by `mcpId` when the companion names it, so two installs never share a row (or an Update).
         let grouped = Dictionary(grouping:printers) { $0.mcpId ?? "\($0.mcpName)|\($0.origin ?? "")|\($0.capabilities?.server?.version ?? "")" }
-        return grouped.values.map { members in
+        let rows = grouped.values.map { members in
             let first = members[0]
             return PrinterMCP(name:first.mcpName, version:first.capabilities?.server?.version, origin:first.origin, printers:members.map(\.name),
                               update:members.compactMap { $0.capabilities?.update }.first, missing:first.capabilities?.missing ?? [],
                               mcpId:members.compactMap(\.mcpId).first)
         }
-        .sorted { $0.name == $1.name ? ($0.origin ?? "") < ($1.origin ?? "") : $0.name < $1.name }
+        // A printer set up in both MCPs is listed once, under the MCP its prints go through; the other MCP still gets
+        // its row (Nov 6: "now i only see one to update and missing the other one").
+        let shown = Set(rows.map { $0.name.lowercased() })
+        var others: [String: [String]] = [:]
+        for printer in printers {
+            for choice in printer.mcps ?? [] where choice.backend != printer.backend && !shown.contains(choice.backend.lowercased()) {
+                others[choice.backend, default: []].append(printer.name)
+            }
+        }
+        let more = others.map { backend, names in
+            PrinterMCP(name:label(backend), version:nil, origin:nil, printers:names, update:nil, missing:[], mcpId:nil)
+        }
+        return (rows + more).sorted { $0.name == $1.name ? ($0.origin ?? "") < ($1.origin ?? "") : $0.name < $1.name }
     }
 
     /// Where its config lives, as people know it.

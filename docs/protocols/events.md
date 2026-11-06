@@ -63,7 +63,7 @@ type CounterpartEvent = {
 | `project.updated` | A project's Status, or whether it's hidden from Home, changed on either device (PR 8a, 8b); or a print failed in a way that may have reached the printer, so it isn't called "didn't start" | *Title* | "Project updated" | none | `data.keys`: what changed, `["status"]`, `["archived"]` or `["print"]` (read the project: its `failure` says what happened) |
 | `project.deleted` | A project and its files were deleted, from either device | *Title* (as it was before deleting) | "Project deleted" | none | `data.by`: the phone's device id, or `mac` for the Mac app |
 | `mcp.update.started` | Update began running for an MCP install (PR 6) | "Updating *package*" | "*from* to *to*" | none | |
-| `mcp.update.waiting` | Update is waiting for a print on that printer to end | "*package* updates after the current print" | "*from* to *to*" | none | |
+| `mcp.update.waiting` | Update is waiting, up to a minute, for Counterpart's own send, slice or design on that MCP (never the printer's print) | "*package* updates as soon as Counterpart finishes with this printer" | "*from* to *to*" | none | |
 | `mcp.update.done` | The new version is installed and its sessions reopened | "Updated *package* to *version*" | "Your printers use it now." | passive | |
 | `mcp.update.failed` | Update failed; the old version stays in use | "Couldn't update *package*" | "*from* is still in use. Try again, or install a fresh copy." | active | |
 

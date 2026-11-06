@@ -320,7 +320,7 @@ struct MCPUpdateProgress: Equatable {
         let versions = [fromVersion, toVersion].compactMap { $0 }.joined(separator: " → ")
         switch state {
         case "started": return "Updating" + (versions.isEmpty ? "…" : " \(versions)…")
-        case "waiting": return "Updates after the current print"
+        case "waiting": return "Updates as soon as Counterpart finishes its work on this printer"
         case "done": return "Updated" + (toVersion.map { " to \($0)" } ?? "")
         case "current": return "Already the latest version"
         case "unresolved": return "Counterpart couldn't tell how this is installed" + (found.map { " (found \($0))" } ?? "") + "."

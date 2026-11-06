@@ -78,7 +78,7 @@ import Darwin
         XCTAssertEqual(updates.status["bambu"]?.words, "Updating to 1.5.0…")
         XCTAssertTrue(updates.status["bambu"]?.busy == true)
         XCTAssertFalse(updates.apply(try event("mcp.update.waiting", #"{"mcpId":"bambu"}"#)))
-        XCTAssertEqual(updates.status["bambu"]?.words, "Updates after the current print.")
+        XCTAssertEqual(updates.status["bambu"]?.words, "Updates as soon as Counterpart finishes its work on this printer.")
         XCTAssertTrue(updates.apply(try event("mcp.update.done", #"{"mcpId":"bambu","toVersion":"1.5.0"}"#)), "a finished update reads the printers again")
         XCTAssertEqual(updates.status["bambu"]?.words, "Updated to 1.5.0.")
         XCTAssertFalse(updates.apply(try event("mcp.update.failed", #"{"mcpId":"generic","log":"npm ERR! 404"}"#)))
@@ -100,13 +100,46 @@ import Darwin
         XCTAssertNil((request["params"] as? [String: Any])?["fresh"], "Update, not a fresh copy")
         let status = try XCTUnwrap(updates.status["mcp-c9d06fd7c405328e"])
         XCTAssertEqual(status, .waiting)
-        XCTAssertEqual(status.words, "Updates after the current print.")
+        XCTAssertEqual(status.words, "Updates as soon as Counterpart finishes its work on this printer.")
         XCTAssertFalse(status.spinning, "a print can take hours: waiting never spins")
         XCTAssertTrue(status.busy, "Update isn't offered again while it waits")
         XCTAssertTrue(McpUpdateStatus.updating(from: "1.1.73", to: "1.1.76").spinning, "an update under way does")
         for finished in [McpUpdateStatus.updated(version: "1.1.76"), .current, .failed(log: nil), .problem("x"), .unresolved(found: "x")] {
             XCTAssertFalse(finished.spinning, "\(finished)")
         }
+    }
+
+    /// Nov 6, David: "now i only see one to update and missing the other one". printers.mcps timed out once, and the
+    /// rows fell back to the printer list, where a P1S set up in both MCPs is one printer: mcp-3D-printer-server had no row.
+    func testEveryMcpAPrinterIsSetUpInHasARowEvenWhenTheMcpListCantBeRead() {
+        let p1s = PrinterDestination(id: "current", name: "Bambu Lab P1S", backend: "bambu-printer-mcp",
+                                     capabilities: PrinterCapabilities(server: .init(name: "bambu-printer-mcp", version: "1.1.73"),
+                                                                       update: .init(message: "", package: "bambu-printer-mcp", command: nil, latestVersion: "1.1.76")),
+                                     mcpId: "mcp-812bcaf2d1ff2948",
+                                     mcps: [.init(backend: "bambu-printer-mcp", destinationId: "current"),
+                                            .init(backend: "mcp-3d-printer-server", destinationId: "counterpart-a07c6f7d")])
+        let rows = PrinterMCP.list([p1s])
+        XCTAssertEqual(rows.map(\.name), ["bambu-printer-mcp", "mcp-3D-printer-server"])
+        XCTAssertTrue(rows[0].updateAvailable, "the MCP prints go through keeps its Update")
+        XCTAssertEqual(rows[1].printers, ["Bambu Lab P1S"])
+        let alone = PrinterDestination(id: "a1", name: "A1", backend: "bambu-printer-mcp", mcpId: "m",
+                                       mcps: [.init(backend: "bambu-printer-mcp", destinationId: "a1")])
+        XCTAssertEqual(PrinterMCP.list([alone]).count, 1, "a printer in one MCP lists just that one")
+    }
+
+    /// The companion restarted with both MCPs current, and no event said so: reading the list again ends the stale state.
+    func testReadingTheMcpListAgainEndsAWaitOrUpdateThatIsAlreadyCurrent() {
+        let updates = PrinterUpdates()
+        updates.set("app-bambu", .waiting); updates.set("use-bambu", .updating(from: "1.1.73", to: "1.1.76"))
+        updates.set("app-generic", .waiting); updates.set("failed", .failed(log: "x"))
+        let current = PrinterMcpPackage(package: "bambu-printer-mcp", label: "bambu-printer-mcp", description: "d", installed: true,
+                                        version: "1.1.76", latestVersion: "1.1.76", appMcpId: "app-bambu")
+        let behind = PrinterMcpPackage(package: "mcp-3d-printer-server", label: "mcp-3D-printer-server", description: "d", installed: true,
+                                       version: "1.2.53", latestVersion: "1.2.56", appMcpId: "app-generic")
+        updates.settle([current, behind])
+        XCTAssertNil(updates.status["app-bambu"])
+        XCTAssertEqual(updates.status["app-generic"], .waiting, "one that still has an update to make keeps its state")
+        XCTAssertEqual(updates.status["failed"], .failed(log: "x"))
     }
 
     func testTheAnswerSaysWhetherItStartedWaitsOrNeedsAFreshCopy() {

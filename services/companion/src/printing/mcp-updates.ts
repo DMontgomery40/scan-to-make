@@ -16,7 +16,9 @@ export const LATEST_EVERY_MS = 24 * 60 * 60_000;
 export const LATEST_ON_VIEW_MS = 5 * 60_000;
 /** When npm is slow to answer Update, a check this recent stands in for it. */
 const RECENT_ANSWER_MS = 60 * 60_000;
-export const WAIT_POLL_MS = 15_000;
+export const WAIT_POLL_MS = 1000;
+/** How long an update waits for Counterpart's own send, slice or design on that MCP to finish, before it gives up. */
+export const IN_FLIGHT_WAIT_MS = 60_000;
 export const LOG_TAIL_BYTES = 4096;
 /** How long Update waits for npm before answering (the Mac app's control requests give up after 10 s). */
 export const LOOKUP_TIMEOUT_MS = 7000;
@@ -131,6 +133,15 @@ export const runCommand: CommandRunner = (command, args, options) => new Promise
   });
 });
 
+/**
+ * What may hold an MCP update back: Counterpart's own work on that printer's MCP now (a send, a slice, a design pass,
+ * each held in PrintGate), never the printer's state. David, Nov 6: "the printer being busy has nothing to do with a
+ * update for an mcp, and also, that print has nothing to do with counterpart right now it was printed by studio".
+ */
+export function inFlight(gate: Pick<PrintGate, 'held'>, canonical?: (id: string) => string | undefined): (destinationId: string) => Promise<boolean> {
+  return async id => gate.held(id) || gate.held(canonical?.(id) ?? id);
+}
+
 /** `work`'s answer, or `late()`'s when it hasn't settled within `ms`. Work that settles afterwards is ignored. */
 function within<T>(work: Promise<T>, ms: number, late: () => T | Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -142,7 +153,9 @@ function within<T>(work: Promise<T>, ms: number, late: () => T | Promise<T>): Pr
 
 const RESTORE_FAILED = "The previous version couldn't be put back, so these printers may not start their MCP. Install a fresh copy from Update.";
 const NO_PRINTERS = (pkg: string) => `No printer uses this MCP any more (it was removed), so Counterpart stopped updating ${pkg}.`;
-const BUSY_UNKNOWN = (pkg: string) => `Counterpart couldn't check whether a print is running, so it didn't update ${pkg}. Try Update again.`;
+const BUSY_UNKNOWN = (pkg: string) => `Counterpart couldn't check whether it is sending to this printer, so it didn't update ${pkg}. Try Update again.`;
+const STILL_BUSY = (pkg: string, seconds: number) =>
+  `Counterpart was still sending, slicing or designing for this printer after ${seconds} seconds, so it didn't update ${pkg}. Try Update again when that finishes.`;
 const NOT_STARTED_BACK = ', so Counterpart put the previous version back. Try Update again.';
 const NOT_STARTED = (pkg: string, seconds: number) => `The updated ${pkg} didn't start within ${seconds} seconds${NOT_STARTED_BACK}`;
 const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.length <= LOG_TAIL_BYTES ? text : bytes.subarray(bytes.length - LOG_TAIL_BYTES).toString('utf8').replace(/^�+/, ''); };
@@ -156,7 +169,7 @@ export interface McpUpdaterDeps {
   env: InstallEnvironment;
   overrides: McpOverrides;
   session(destinationId: string): PrinterSession | undefined;
-  /** A print being prepared or monitored on this printer. */
+  /** Counterpart work in flight on this printer's MCP now (a send, a slice, a design pass). Never the printer's state. */
   busy(destinationId: string): Promise<boolean>;
   /** The version the running MCP reports (capabilities.server.version), when it has connected. */
   runningVersion(destinationId: string): string | undefined;
@@ -168,6 +181,8 @@ export interface McpUpdaterDeps {
   path?: string;
   /** How often a waiting update looks again (WAIT_POLL_MS). */
   waitPollMs?: number;
+  /** How long it waits for Counterpart's work in flight (IN_FLIGHT_WAIT_MS). */
+  inFlightWaitMs?: number;
   lookupTimeoutMs?: number;
   /** How long an updated MCP may take to restart and connect (MCP_START_MS). */
   startTimeoutMs?: number;
@@ -455,19 +470,26 @@ export class McpUpdater {
     return true;
   }
 
+  /** Waits, briefly, for Counterpart's own work on this MCP (a send, a slice, a design) to finish; never for the printer. */
   async #waitThenRun(mcpId: string, options: {fresh?: boolean}, latest: string, pkg: string): Promise<void> {
+    const limit = this.#deps.inFlightWaitMs ?? IN_FLIGHT_WAIT_MS, until = this.#now() + limit;
+    let why = BUSY_UNKNOWN(pkg);
     try {
-      do await new Promise(resolve => { const timer = setTimeout(resolve, this.#deps.waitPollMs ?? WAIT_POLL_MS); timer.unref?.(); });
-      while (!await this.#claim(mcpId, options));
+      let claimed = false;
+      do {
+        await new Promise(resolve => { const timer = setTimeout(resolve, this.#deps.waitPollMs ?? WAIT_POLL_MS); timer.unref?.(); });
+        claimed = await this.#claim(mcpId, options);
+      } while (!claimed && this.#now() < until);
+      if (!claimed) { why = STILL_BUSY(pkg, Math.round(limit / 1000)); throw new Error('still busy'); }
     } catch {
       // Nothing ran and nothing is held: the update ends, saying why.
       const update = this.#active.get(mcpId);
       this.#active.delete(mcpId);
-      if (update) await this.#emit('mcp.update.failed', pkg, update, BUSY_UNKNOWN(pkg));
+      if (update) await this.#emit('mcp.update.failed', pkg, update, why);
       return;
     }
     const update = this.#active.get(mcpId);
-    // npm is asked again now: the print may have taken hours, and a newer version may be out since Update was pressed.
+    // npm is asked again now: a newer version may be out since Update was pressed.
     const now = await this.#latestNow(pkg, update?.toVersion && newer(update.toVersion, latest) ? update.toVersion : latest);
     if (update) { update.state = 'started'; update.toVersion = now; }
     await this.#perform(mcpId, options, now, pkg);

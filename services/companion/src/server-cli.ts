@@ -26,7 +26,7 @@ import { projectTitle, sizeText } from './events/words.js';
 import { LiveActivityTokenStore } from './devices/live-activity-tokens.js';
 import { DevicePresence } from './devices/presence.js';
 import { pruneLegacyDevices } from './devices/legacy.js';
-import { McpOverrides, McpUpdater } from './printing/mcp-updates.js';
+import { McpOverrides, McpUpdater, inFlight } from './printing/mcp-updates.js';
 import { PrintGate } from './printing/print-gate.js';
 import { hostEnvironment } from './printing/mcp-install.js';
 import { IcloudEnrolment } from './icloud-enrolment.js';
@@ -145,8 +145,10 @@ if(remoteAuth)mcpUpdates=new McpUpdater({
     }
     return services.get(id)?.runner.session;
   },
-  // A project printing there, or the printer itself printing (the phone's handoff prints have no project).
-  busy:async id=>printerBusy?await printerBusy(id):false,
+  // Only Counterpart's own work on that MCP right now (a send, a slice, a design pass: PrintGate holds), never the
+  // printer's state. David, Nov 6: "the printer being busy has nothing to do with a update for an mcp, and also, that
+  // print has nothing to do with counterpart right now it was printed by studio". A running print lives on the printer.
+  busy:inFlight(printGate,id=>printerCatalog?.canonical(id)),
   runningVersion:id=>printerDirectory?.capabilities(id)?.server.version,node:process.execPath,gate:printGate,
   ...(eventLog&&projectlessEvents?{emit:async event=>{await eventLog.append({id:randomUUID(),type:event.type,data:event.data,detail:{package:mcpLabels[event.package]??event.package,...(event.reason?{reason:event.reason}:{})}});}}:{}),
 });
