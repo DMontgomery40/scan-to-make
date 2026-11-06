@@ -49,6 +49,7 @@
 		424EF33DB939FB08D89CAE79 /* ScanPasses-iPhone-FixedHeight-2.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = E8387F4BCF55830449FB51CA /* ScanPasses-iPhone-FixedHeight-2.mp4 */; };
 		4365BA8A690868D5B00F9159 /* AppDataModel+Orbit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BEA440CD42BB2FD917F9FEE /* AppDataModel+Orbit.swift */; };
 		43ED0BBAE889BCB9B1098C03 /* PrintSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F78441601D6F6ECA5D0E42 /* PrintSheet.swift */; };
+		451618A3C2377383F4895633 /* AddPrinterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E46B72D9936A00D3BCEB76B /* AddPrinterView.swift */; };
 		4DCD99C6397EA55B63AA5030 /* PrintActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586EDFD70C34B0EBC02B0A04 /* PrintActivityWidget.swift */; };
 		4DD922974705BF4C9D953A24 /* NativeCaptureDraftStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB6F1E4471FB2873747B61B6 /* NativeCaptureDraftStore.swift */; };
 		51F14113CD4A69CE351F9A52 /* BottomOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35448431D0EDF07FB21DAA88 /* BottomOverlayButtons.swift */; };
@@ -213,6 +214,7 @@
 		4843D51331A8EA5A180A6EEB /* CloudPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudPairingView.swift; sourceTree = "<group>"; };
 		4AA888917D0BB09DAE7339F2 /* HandheldCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandheldCapture.swift; sourceTree = "<group>"; };
 		4C0B9B093AA0DA530B8D30EE /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		4E46B72D9936A00D3BCEB76B /* AddPrinterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddPrinterView.swift; sourceTree = "<group>"; };
 		4FA017C87133CEB2F8143398 /* UntilProcessingCompleteFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UntilProcessingCompleteFilter.swift; sourceTree = "<group>"; };
 		510069BB85EC1645E845D872 /* PrintStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintStatus.swift; sourceTree = "<group>"; };
 		5279E748BC72D18A9AB6030A /* FindYourMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindYourMacView.swift; sourceTree = "<group>"; };
@@ -453,6 +455,7 @@
 		90590B10CDD3977003761A17 /* Screens */ = {
 			isa = PBXGroup;
 			children = (
+				4E46B72D9936A00D3BCEB76B /* AddPrinterView.swift */,
 				70A7D0DBA9EE3A73FD25D09F /* ConversationBubble.swift */,
 				CFEE621E7C7B88738E9C985B /* HomeView.swift */,
 				1AD28B8C6794C839BCDA98B9 /* MacSettings.swift */,
@@ -879,6 +882,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				451618A3C2377383F4895633 /* AddPrinterView.swift in Sources */,
 				8F26AFE65ED0BD6954AA6AFD /* AppModel.swift in Sources */,
 				FA61FDA2987122046286A377 /* CloudPairingView.swift in Sources */,
 				B1E297636604AF846BD0CF87 /* ConversationBubble.swift in Sources */,
