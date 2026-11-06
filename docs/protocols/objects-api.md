@@ -215,6 +215,20 @@ Bambu Studio's own verdict on the slice (KAN-223, when the MCP returns `slicer_r
 
 `missing` lists what this install's version lacks (not what the hardware lacks), and `update.message` says which update unlocks it, for example "Update mcp-3D-printer-server to see progress and camera." `update.command` is the package-manager command for how that MCP is installed (`["npm","install","-g","bambu-printer-mcp@latest"]` for a global npm install); it is absent for an `npx` profile and for a source checkout. It is kept for Copy Command; from PR 6 the Update button posts the update instead (below). `update.latestVersion` (PR 6) is the newest published version (`npm view <package> version`); from PR 6 `update` is also present, with "Update bambu-printer-mcp to 1.1.50.", when only a newer version exists.
 
+### Adding a printer from the phone (PRD §5.8, §6.1)
+
+Add printer… on the iPhone, iPad and Android calls the same companion methods as the Mac and Linux (`local-control.md`: `printers.discover`, `printers.check`, `printers.obtain`, `printers.add`, `printers.installMcp`), with the same parameter schemas and replies. Every route is `POST`, needs PRINT and SETTINGS (it writes an MCP's `.env`), and is advertised by `printerAdd` in `/healthz`.
+
+| Path | Body | Reply |
+|---|---|---|
+| `/v1/printers/setup/discover` | `{}` | `{found, network, options}`: printers the MCPs found, and every MCP's own setup fields (`counterpart_setup_fields`) |
+| `/v1/printers/setup/check` | `{printer}` | `{check}` |
+| `/v1/printers/setup/obtain` | `{backend, printerType, host, port?, field, session?}` | one `printers.obtain` step (`status`, `message`, `approveUrl?`, `value?`) |
+| `/v1/printers/setup/add` | `{printer}` | `{id, destinationId?, sameAs?}` |
+| `/v1/printers/setup/install` | `{package}` | `{installed, package}` or `{update}`; progress comes as `mcp.update.*` events |
+
+`printer` is `PrinterFormSchema`. A `{folder}` printer is accepted only when the last discovery from a phone listed that folder: a paired device never names a path on the computer itself. A refusal from the setup is `{error: {code, message}}` with its own sentence (400 `invalid-request`, 404, 409 `conflict`, 503 `unavailable`). The answers in `packages/contracts/fixtures/printer-setup-phone.json` are shared by the companion, iPhone and Android tests.
+
 ### Updating the printer MCPs (PR 6, PRD §8.10)
 
 | Method and path | Scope | Body | Reply |
