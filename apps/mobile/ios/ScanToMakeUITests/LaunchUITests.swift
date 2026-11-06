@@ -615,8 +615,8 @@ final class LayoutParityUITests: XCTestCase {
         secret.tap(); secret.typeText("12345678")
         XCTAssertTrue(add.isEnabled)
         let check = app.buttons["add-printer-check"]
-        // The sheet's own form: on the iPad the sidebar behind it is a collection view too.
-        reveal(check, in: app.collectionViews.containing(.button, identifier: "add-printer-check").firstMatch)
+        // The sheet's own form (its rows are made as they scroll in): on the iPad the sidebar behind it is a list too.
+        reveal(check, in: app.collectionViews["add-printer-form"])
         check.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Connected")).firstMatch.waitForExistence(timeout: 10))
         add.tap()
