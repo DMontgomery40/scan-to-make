@@ -159,13 +159,11 @@ function webIdentity(value: string | undefined, port: string): string | undefine
     const url = new URL(value);
     const path = url.pathname.replace(/\/+$/, '');
     // A web address at the server's root is the same printer as its host and port (`http://pi.lan:5000/` is
-    // `pi.lan` on 5000): one key for both (Codex review on #389). The MCP adds PRINTER_PORT to a URL without one
-    // unless it is 80 or 443.
-    if (!path) {
-      const extra = !url.port && port && port !== '80' && port !== '443' ? `:${port}` : '';
-      return `host:${url.host.toLowerCase()}${extra}`;
-    }
-    return `url:${url.protocol}//${url.host.toLowerCase()}${path}`;
+    // `pi.lan` on 5000): one key for both (Codex review on #389). The MCP adds PRINTER_PORT to any URL without a port
+    // of its own unless it is 80 or 443, with or without a path, so the key does too.
+    const extra = !url.port && port && port !== '80' && port !== '443' ? `:${port}` : '';
+    if (!path) return `host:${url.host.toLowerCase()}${extra}`;
+    return `url:${url.protocol}//${url.host.toLowerCase()}${extra}${path}`;
   } catch { return undefined; }
 }
 

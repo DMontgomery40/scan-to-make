@@ -64,6 +64,11 @@ test('two OctoPrints behind one reverse proxy at different sub-paths stay two pr
   const rooted = await f.put('mcp-root.json', {mcpServers: {'By port': plain, 'By URL': octo('http://pi.lan:5000/'), 'Other port': octo('http://pi.lan:5001')}});
   const same = await loadPrinterCatalog(current, {...f.options([rooted]), placeholderEntryPoint: entry});
   assert.deepEqual(same.destinations.filter(item => item.id !== 'current').map(item => item.name).sort(), ['By port', 'Other port']);
+  // A sub-path URL without a port of its own takes PRINTER_PORT too, as the MCP does: two ports are two printers.
+  const withPort = (port) => ({...octo('http://pi.lan/octoprint'), env: {...octo('http://pi.lan/octoprint').env, PRINTER_PORT: port}});
+  const ported = await f.put('mcp-ports.json', {mcpServers: {'On 5000': withPort('5000'), 'On 5001': withPort('5001'), 'Explicit 5000': octo('http://pi.lan:5000/octoprint/')}});
+  const ports = await loadPrinterCatalog(current, {...f.options([ported]), placeholderEntryPoint: entry});
+  assert.deepEqual(ports.destinations.filter(item => item.id !== 'current').map(item => item.name).sort(), ['On 5000', 'On 5001']);
 });
 
 test('placeholder detection preserves customized local configurations and remote SSH printers', async t => {
