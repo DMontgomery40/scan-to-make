@@ -190,11 +190,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const {inspectModelFile, modelPlatePreview} = await import('../../dist/model-file.js');
     const bytes = readFileSync(args.three_mf_path);
     const info = inspectModelFile(bytes, '3mf');
+    const {standInFilaments} = await import('../support/plate-filaments-stand-in.mjs');
+    const filaments = standInFilaments(bytes);
     const plates = info.plates.map(plate => {
       const png = args.include_thumbnails ? modelPlatePreview(bytes, plate.index) : undefined;
-      return {index: plate.index, name: plate.name, objects: plate.objects, sliced: plate.sliced, ...(png ? {thumbnail_png_base64: png.toString('base64')} : {})};
+      return {index: plate.index, name: plate.name, objects: plate.objects, sliced: plate.sliced, filaments: filaments.plates.get(plate.index + 1) ?? [], ...(png ? {thumbnail_png_base64: png.toString('base64')} : {})};
     });
-    const value = {plate_count: plates.length, plates, ...(info.title ? {title: info.title} : {}), ...(info.designer ? {designer: info.designer} : {})};
+    const value = {plate_count: plates.length, plates, project_filaments: filaments.project, ...(info.title ? {title: info.title} : {}), ...(info.designer ? {designer: info.designer} : {})};
     return {...text(value), structuredContent: value};
   }
   if (name === 'slice_stl') {

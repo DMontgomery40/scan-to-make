@@ -1,3 +1,4 @@
+import {standInFilaments} from '../../../printer-handoff/tests/support/plate-filaments-stand-in.mjs';
 // Print sends the sliced file the print sheet showed (Nov 5): an estimate's `sliceSha256`, drawn by the MCP's
 // inspect_print_file preview. These helpers let tests about other things print the way the sheet does.
 import {createHash} from 'node:crypto';
@@ -12,9 +13,10 @@ import {inspectModelFile, modelPlatePreview} from '@scan-to-make/printer-handoff
 export async function mcpPlates({modelPath}) {
   const bytes = await readFile(modelPath);
   const info = inspectModelFile(bytes, '3mf');
-  return {plates: info.plates.map(plate => {
+  const filaments = standInFilaments(bytes);
+  return {projectFilaments: filaments.project, plates: info.plates.map(plate => {
     const thumbnail = modelPlatePreview(bytes, plate.index);
-    return {index: plate.index, name: plate.name, objects: plate.objects, sliced: plate.sliced, ...(thumbnail ? {thumbnail} : {})};
+    return {index: plate.index, name: plate.name, objects: plate.objects, sliced: plate.sliced, filaments: filaments.plates.get(plate.index + 1) ?? [], ...(thumbnail ? {thumbnail} : {})};
   }), ...(info.title ? {title: info.title} : {}), ...(info.designer ? {designer: info.designer} : {})};
 }
 
@@ -66,6 +68,7 @@ export function showing(service) {
 /** list_3mf_plates as an MCP tool result, for fake sessions (thumbnails as base64, as the MCPs send them). */
 export async function mcpPlatesResult(threeMfPath) {
   const listed = await mcpPlates({modelPath: threeMfPath});
-  const value = {plate_count: listed.plates.length, ...listed, plates: listed.plates.map(({thumbnail, ...plate}) => ({...plate, ...(thumbnail ? {thumbnail_png_base64: thumbnail.toString('base64')} : {})}))};
+  const {projectFilaments, ...rest} = listed;
+  const value = {plate_count: listed.plates.length, ...rest, project_filaments: projectFilaments.map(({filamentId: _id, ...f}) => f), plates: listed.plates.map(({thumbnail, ...plate}) => ({...plate, ...(thumbnail ? {thumbnail_png_base64: thumbnail.toString('base64')} : {})}))};
   return {content: [{type: 'text', text: JSON.stringify(value)}], structuredContent: value};
 }

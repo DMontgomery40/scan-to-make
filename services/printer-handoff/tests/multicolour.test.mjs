@@ -5,7 +5,7 @@ import {mkdtemp, writeFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {zipSync, strToU8} from 'fflate';
-import {PrinterHandoffRunner, modelFilaments, modelFilamentSlotCount, modelHasPainting, modelPlateFilaments, printerHandoffConfigSchema} from '../dist/index.js';
+import {PrinterHandoffRunner, modelPlatesFrom, printerHandoffConfigSchema} from '../dist/index.js';
 
 const published = Buffer.from(zipSync({
   '[Content_Types].xml': strToU8('<Types/>'),
@@ -27,82 +27,20 @@ const designed = Buffer.from(zipSync({
     <part id="2" subtype="normal_part"><metadata key="name" value="letters"/><metadata key="extruder" value="2"/></part></object></config>`),
 }));
 
-test('a published 3MF names the filaments its parts use, with the designer’s colours and materials', () => {
-  assert.deepEqual(modelFilaments(published), [
-    {index: 1, name: 'body', colour: '#000000', material: 'PLA'},
-    {index: 3, name: 'letters', colour: '#FFFFFF', material: 'PETG'},
-  ]);
-});
-
-test('a designed multi-part 3MF (no project settings) still names its parts and filaments', () => {
-  assert.deepEqual(modelFilaments(designed), [
-    {index: 1, name: 'body'},
-    {index: 2, name: 'letters'},
-  ]);
-});
-
-test('the declared slot count counts unused filaments too, and a sliced plate names painted filaments', () => {
-  const {zipSync: zip, strToU8: text} = {zipSync, strToU8};
-  const sliced = Buffer.from(zip({
-    '[Content_Types].xml': text('<Types/>'),
-    '3D/3dmodel.model': text('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
-    'Metadata/project_settings.config': text(JSON.stringify({
-      filament_colour: ['#000000', '#FEC600', '#FFFFFF', '#0000FF'],
-      filament_type: ['PLA', 'PLA', 'PLA', 'PLA'],
-    })),
-    'Metadata/model_settings.config': text('<config><object id="3"><metadata key="name" value="Pick"/><metadata key="extruder" value="1"/>'
-      + '<part id="1" subtype="normal_part"><metadata key="name" value="body"/><metadata key="extruder" value="1"/></part>'
-      + '<part id="2" subtype="normal_part"><metadata key="name" value="other plate"/><metadata key="extruder" value="2"/></part></object></config>'),
-    // Plate 1 paints with filament 3 and never uses filament 2: positions are 0-based, and authoritative.
-    'Metadata/plate_1.json': text(JSON.stringify({filament_ids: [0, 2]})),
-  }));
-  assert.equal(modelFilamentSlotCount(sliced), 4);
-  assert.equal(modelFilamentSlotCount(designed), 0);
-  assert.deepEqual(modelFilaments(sliced).map(f => f.index), [1, 3]);
-  assert.equal(modelFilaments(sliced)[1].colour, '#FFFFFF');
-  // The plate's own list, on its own: authoritative when present, absent otherwise.
-  assert.deepEqual(modelPlateFilaments(sliced), [1, 3]);
-  assert.equal(modelPlateFilaments(designed), undefined);
-  assert.equal(modelPlateFilaments(Buffer.from('not a zip')), undefined);
-});
-
-test('painting is detected from the model XML', () => {
-  const painted = Buffer.from(zipSync({
-    '[Content_Types].xml': strToU8('<Types/>'),
-    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources><build><item objectid="1"/></build></model>'),
-  }));
-  assert.equal(modelHasPainting(painted), true);
-  // Studio keeps the mesh in component files under 3D/Objects/: painting there counts too.
-  const componentPainted = Buffer.from(zipSync({
-    '[Content_Types].xml': strToU8('<Types/>'),
-    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><components><component p:path="/3D/Objects/object_1.model" objectid="1"/></components></object></resources><build><item objectid="1"/></build></model>'),
-    '3D/Objects/object_1.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources></model>'),
-  }));
-  assert.equal(modelHasPainting(componentPainted), true);
-  // An oversized component ahead of a painted root spends no budget: root painting still counts,
-  // and a small painted component after the oversized one is still scanned. 49 MiB is past the
-  // whole 48 MiB component budget, so these fail if rejected entries are ever charged against it
-  // (at 33 MiB they passed on the pre-fix scan too — council R7 on #293).
-  const bigFirst = Buffer.from(zipSync({
-    '[Content_Types].xml': strToU8('<Types/>'),
-    '3D/Objects/big.model': new Uint8Array(49 * 1024 * 1024),
-    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources></model>'),
-  }));
-  assert.equal(modelHasPainting(bigFirst), true, 'root painting survives an oversized neighbour');
-  const bigThenPaintedComponent = Buffer.from(zipSync({
-    '[Content_Types].xml': strToU8('<Types/>'),
-    '3D/Objects/big.model': new Uint8Array(49 * 1024 * 1024),
-    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources></model>'),
-    '3D/Objects/object_1.model': strToU8('<model><resources><object id="1"><mesh><triangles><triangle v1="0" v2="1" v3="2" paint_color="8"/></triangles></mesh></object></resources></model>'),
-  }));
-  assert.equal(modelHasPainting(bigThenPaintedComponent), true, 'a rejected oversized component spends no budget');
-  assert.equal(modelHasPainting(designed), false);
-  assert.equal(modelHasPainting(Buffer.from('not a zip')), false);
-});
-
-test('unreadable bytes give no filaments rather than throwing', () => {
-  assert.deepEqual(modelFilaments(Buffer.from('not a zip')), []);
-  assert.deepEqual(modelFilaments(Buffer.alloc(0)), []);
+// Which filaments a plate prints is the MCP's to say (list_3mf_plates `filaments`, PRD §8.0): Counterpart reads no
+// project filament metadata itself. The answer is checked field by field; an MCP without it is older, not wrong.
+test('the MCP\u2019s per-plate filaments are read as it gives them, and a malformed list is no answer', () => {
+  const listed = modelPlatesFrom({plates: [
+    {index: 0, name: 'Screws', objects: [], sliced: false, filaments: [{index: 3, colour: '#ff0000', material: 'PLA', filament_id: 'GFA00', name: 'Gear'}]},
+    {index: 1, name: 'Board', objects: [], sliced: false, filaments: [{index: 2}]}],
+  project_filaments: [{index: 1, colour: '#5F6478'}, {index: 2}, {index: 3, colour: '#FF0000'}]});
+  assert.deepEqual(listed.plates.map(plate => plate.filaments), [[{index: 3, colour: '#FF0000', material: 'PLA', filamentId: 'GFA00', name: 'Gear'}], [{index: 2}]]);
+  assert.deepEqual(listed.projectFilaments.map(filament => filament.index), [1, 2, 3]);
+  const older = modelPlatesFrom({plates: [{index: 0, name: 'Plate 1', objects: [], sliced: false}]});
+  assert.equal(older.plates[0].filaments, undefined, 'an older MCP lists no filaments: Update, never a guess');
+  assert.equal(older.projectFilaments, undefined);
+  for (const filaments of [[{index: 0}], [{index: 65}], [{index: 1}, {index: 1}], 'all', [{index: 1.5}]])
+    assert.equal(modelPlatesFrom({plates: [{index: 0, name: 'P', objects: [], sliced: false, filaments}]}), undefined, JSON.stringify(filaments));
 });
 
 test('the slicer config takes one colour or a semicolon list, never prose', () => {
