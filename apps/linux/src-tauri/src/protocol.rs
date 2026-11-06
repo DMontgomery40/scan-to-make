@@ -85,7 +85,8 @@ pub fn deadline(method: &str, params: &Value) -> u64 {
     // Companion deadlines + two seconds to deliver its bounded reply. Never retry a write.
     match method {
         "objects.correct" | "printers.route" => 27_000,
-        "objects.estimate" => 182_000,
+        // Its slice may take 600 s on the companion (630 s with what it reads first).
+        "objects.estimate" => 632_000,
         // A model file of up to 64 MB is read, hashed and kept: 120 s on the companion (Nov 6).
         "objects.addFile" => 122_000,
         "printers.updateMcp" | "printers.installMcp" | "printers.discover" => 17_000,

@@ -707,6 +707,11 @@ test("Bambu Studio's slicing error blocks the print and keeps its own words", as
   const words = `${result.error_string}\n${result.sliced_plates[0].warning_message}`;
   assert.match(words, /^Failed slicing the model\. .*\nObject can't be printed for empty layer between 18\.2 and 24\.4\./s);
   const f = await setup(t, {slicerResult: 'orient-empty-layers'});
+  // The person reads the MCP's sentence; the slicer's own words (slicer_message) go to the companion's log, once per refusal.
+  const logged = [];
+  const error = console.error;
+  console.error = (...line) => { if (String(line[0]).startsWith('slicer refused')) logged.push(line.join(' ')); else error(...line); };
+  t.after(() => { console.error = error; });
   const store = new HandoffBundleStore(join(f.root, 'slicer-error'));
   const bundle = await store.create({stl, prompt: '', backend: 'bambu-printer-mcp', selection});
   await assert.rejects(f.runner.runBundle(store, bundle.id), error => {
@@ -722,6 +727,8 @@ test("Bambu Studio's slicing error blocks the print and keeps its own words", as
   assert.equal(f.seen.length, 0, 'nothing to confirm: there is no print');
   // The estimate refuses the same slice, so the print sheet never offers it.
   await assert.rejects(f.runner.estimate({stlPath: f.stlPath}), {code: 'slicer-error', detail: words});
+  const logLine = `slicer refused the slice: Studio: ${words.replace(/\s+/g, ' ').trim()}`;
+  assert.deepEqual(logged, [logLine, logLine], 'the print and the estimate each logged the slicer\'s words once');
 });
 
 test('a clean Bambu Studio slice goes straight to the printer\'s own confirmation, as before', async t => {
@@ -747,6 +754,8 @@ test("the slicer's verdict is read from the MCP's slicer_report, and an MCP that
   assert.equal(slicerReport({path: '/x.3mf'}), undefined);
   assert.deepEqual(slicerReport({slicer_report: {failed: false, plate_count: 2}}), {failed: false, plateCount: 2});
   assert.deepEqual(slicerReport({slicer_report: {failed: true, message: 'Failed slicing the model.'}}), {failed: true, message: 'Failed slicing the model.'});
+  assert.deepEqual(slicerReport({slicer_report: {failed: true, message: 'The slicer couldn\'t slice this model.', slicer_message: 'Failed slicing the model.'}}),
+    {failed: true, message: 'The slicer couldn\'t slice this model.', slicerMessage: 'Failed slicing the model.'}, 'the slicer\'s own words, for the log');
   assert.equal(slicerReport({slicer_report: {message: 'no verdict'}}), undefined, 'a report without its verdict is none');
   // Counterpart never reads result.json itself (PRD §8.0 item 9): an MCP from before slicer_report is refused, never trusted.
   assert.equal(lacksSlicerReport({path: '/x.3mf', slicer_result: {return_code: 0}}), true);

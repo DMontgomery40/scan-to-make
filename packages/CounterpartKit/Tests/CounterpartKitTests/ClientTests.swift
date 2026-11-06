@@ -213,9 +213,9 @@ final class CompanionClientTests: XCTestCase {
         _ = try await LongPollEventFeed(client: mac).page(after: 1, wait: 25, limit: 100)
         XCTAssertGreaterThan(fake.calls[1].request.timeoutInterval, 25)
         XCTAssertLessThanOrEqual(fake.calls[1].resourceTimeout, 50, "a stalled event poll must also end")
-        _ = try await mac.request("POST", "/v1/objects/0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11/estimate", as: SliceEstimate.self, timeout: 170)
-        XCTAssertEqual(fake.calls[2].request.timeoutInterval, 170, "slicing has its own longer deadline")
-        XCTAssertGreaterThanOrEqual(fake.calls[2].resourceTimeout, 180)
+        _ = try await mac.request("POST", "/v1/objects/0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11/estimate", as: SliceEstimate.self, timeout: 640)
+        XCTAssertEqual(fake.calls[2].request.timeoutInterval, 640, "slicing has its own longer deadline")
+        XCTAssertGreaterThanOrEqual(fake.calls[2].resourceTimeout, 640, "the whole reply may take as long as the slice")
         _ = try await mac.send("GET", "/v1/objects/0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11/model.stl", limit: CompanionClient.scanLimit)
         XCTAssertGreaterThanOrEqual(fake.calls[3].resourceTimeout, 180, "a large model download keeps its transfer budget")
     }

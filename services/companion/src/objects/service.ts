@@ -22,7 +22,7 @@ import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind,
 import type {DesignEngine} from '../touchup/invocation.js';
 import type {PrintHandoffServices} from '../print-handoff-http.js';
 import {InvalidAnswerError, printQuestion, validateAnswer, type ConfirmationValue} from './confirmation.js';
-import {InvalidStateError, SlicerRefusedError} from './errors.js';
+import {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './errors.js';
 import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
@@ -62,8 +62,15 @@ export const PHOTOS_PER_PASS = 24;
 const BEST_GUESS_NOTE = "Make your best guess for the parts you couldn't see in the photos, and carry on.";
 const UNCERTAIN = 'The printer may have started this print. Check the printer before printing again.';
 
-export {InvalidStateError, SlicerRefusedError} from './errors.js';
+export {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './errors.js';
 export {InvalidAnswerError} from './confirmation.js';
+
+/**
+ * How long one estimate's slice may take. Ten minutes, as long as any printer MCP tool call (printer-handoff's toolMs):
+ * Bambu Studio's CLI reports no progress while it slices, so a progress-aware limit can't be honest, and a big plate
+ * alone can take minutes. The Nov 6 Screws plate slices in 18 s alone; 150 s ran out only because four slices ran at once.
+ */
+export const ESTIMATE_TIMEOUT_MS = 600_000;
 
 export class InvalidCaptureManifestError extends Error {
   constructor() { super('Invalid capture manifest'); this.name = 'InvalidCaptureManifestError'; }
@@ -183,6 +190,8 @@ export interface ObjectServiceDeps {
   camera?: CameraFrames;
   /** Tests only. */
   monitorClock?: MonitorClock;
+  /** How long one estimate's slice may take (default ESTIMATE_TIMEOUT_MS); tests shorten it. */
+  estimateTimeoutMs?: number;
   /** This Mac's real stage durations, for pass estimates. */
   passTimings?: PassTimings;
   /** A short title for a request ("Mic mount"), best effort; the worker names it otherwise. */
@@ -1893,6 +1902,10 @@ export class ObjectService {
   }
 
   readonly #estimates2 = new Map<string, Promise<PrintEstimate>>();
+  /** Requests numbered as they arrive, the newest per project and printer, and each running slice's stop. */
+  #estimateSequence = 0;
+  readonly #estimateLatest = new Map<string, {sequence: number; key: string}>();
+  readonly #estimateSlices = new Map<string, AbortController>();
 
   /**
    * The sliced file a print sheet showed (its estimate and preview), kept so Print sends exactly it
@@ -1987,6 +2000,8 @@ export class ObjectService {
 
   /** Slices the current model with the print sheet's settings, exactly as Print would, and reads the estimate. Never prints. */
   async estimate(id: string, request: PrintOptions & {destinationId?: string} = {}): Promise<PrintEstimate> {
+    // The order requests arrived in: the steps below ask the MCP several things, so they can reach the slice out of order.
+    const sequence = ++this.#estimateSequence;
     // Whether the file prints with its own settings on the printer this slice is for is settled first, so this slice's
     // defaults are the ones Print uses (`printOptions`): an answer arriving later would change Print's recipe.
     const {destinationId: requested, ...choices} = request;
@@ -2019,6 +2034,20 @@ export class ObjectService {
     // The installed MCP's version too: an update can change what it slices and whether it draws previews.
     const server = destinationId ? this.#deps.printers?.capabilities(destinationId)?.server?.version ?? null : null;
     const key = JSON.stringify([id, createHash('sha256').update(model).digest('hex'), recipeId, server]);
+    // One estimate per project and printer: the sheet wants only its newest settings (Nov 6: opening Print started four
+    // slices of one plate at once, and each took several times as long). A newer request stops an older one's slice;
+    // an older one that arrives after a newer one is refused without slicing.
+    const slot = JSON.stringify([id, destinationId ?? 'current']);
+    const latest = this.#estimateLatest.get(slot);
+    if (latest && latest.sequence > sequence && latest.key !== key) throw new EstimateSupersededError();
+    if (!latest || latest.sequence < sequence) {
+      // The stopped slice leaves the shared cache at once: settings changed back to it start a new slice instead of
+      // joining the one being stopped (Codex on #375).
+      const stale = latest && latest.key !== key ? this.#estimateSlices.get(latest.key) : undefined;
+      if (stale) { stale.abort(); this.#estimateSlices.delete(latest!.key); this.#estimates2.delete(latest!.key); }
+      this.#estimateLatest.set(slot, {sequence, key});
+      if (this.#estimateLatest.size > 64) this.#estimateLatest.delete(this.#estimateLatest.keys().next().value!);
+    }
     let running = this.#estimates2.get(key);
     // A kept estimate whose sliced file is gone (only the last few are kept) is sliced again.
     if (running) {
@@ -2027,6 +2056,9 @@ export class ObjectService {
     }
     if (!running) {
       const runner = services.runner;
+      const superseded = new AbortController();
+      const timeout = AbortSignal.timeout(this.#deps.estimateTimeoutMs ?? ESTIMATE_TIMEOUT_MS);
+      this.#estimateSlices.set(key, superseded);
       running = (async () => {
         const work = await mkdtemp(join(tmpdir(), 'counterpart-estimate-'));
         try {
@@ -2034,7 +2066,7 @@ export class ObjectService {
           await writeFile(stlPath, model);
           const {estimate, settings, slicerWarning, sliced: slicedFile, preview, previewSupported} = await runner.estimate!({stlPath,
             ...(recipe.selected ? {selection: recipe.selected} : {}), ...(Object.keys(recipe.sliced).length ? {slicer: recipe.sliced} : {}),
-            signal: AbortSignal.timeout(150_000)});
+            signal: AbortSignal.any([superseded.signal, timeout])});
           return {destinationId: destinationId ?? 'current', quality, strength, ...(copies ? {copies} : {}),
             ...(estimate?.seconds !== undefined ? {seconds: estimate.seconds} : {}), ...(estimate?.grams !== undefined ? {grams: estimate.grams} : {}),
             ...(settings.layers !== undefined ? {layers: settings.layers} : {}), ...(settings.layerHeightMm !== undefined ? {layerHeightMm: settings.layerHeightMm} : {}),
@@ -2044,7 +2076,15 @@ export class ObjectService {
             ...(slicedFile ? {sliceSha256: await this.#keepShownSlice(id, slicedFile, {recipe: recipeId, previewed: !!preview, previewSupported: previewSupported !== false})} : {}),
             ...(preview ? {preview} : {}),
             slicedAt: new Date().toISOString()};
-        } finally { await rm(work, {recursive: true, force: true}).catch(() => undefined); }
+        } catch (error) {
+          // Which signal stopped it says why, in a sentence for the person; never the MCP client's own error text.
+          if (superseded.signal.aborted) throw new EstimateSupersededError();
+          if (timeout.aborted) throw new InvalidStateError('Slicing is taking longer than usual. Try again in a moment.');
+          throw error;
+        } finally {
+          if (this.#estimateSlices.get(key) === superseded) this.#estimateSlices.delete(key);
+          await rm(work, {recursive: true, force: true}).catch(() => undefined);
+        }
       })();
       this.#estimates2.set(key, running);
       // Failures aren't kept; a new model has a new key, so stale estimates are never served.
@@ -2055,9 +2095,14 @@ export class ObjectService {
     const update = await this.#ownSettingsUnsupported(object, sliceFor(object)) ? {ownSettingsUpdate: ownSettingsUnavailable(services.runner.backend)} : {};
     try { return {...structuredClone(await running), ...update}; }
     catch (error) {
+      // Already a sentence for the person: a newer estimate replaced this one, or the slice ran out of time.
+      if (error instanceof InvalidStateError) throw error;
       if (error instanceof PrinterMcpError && error.code === 'print-settings-unsupported') throw new InvalidStateError(settingsUnsupported(services.runner.backend, {quality, strength, supports: designedSupports(object).enableSupport !== undefined}));
       // Bambu Studio refused the slice: its own words, exactly what a Print of the same model fails with.
       if (error instanceof PrinterMcpError && ['slicer-error', 'copies-multiple-plates'].includes(error.code) && error.detail) throw new SlicerRefusedError(error.detail);
+      // A call that never finished (the MCP stopped answering or its connection closed) carries the MCP client's own
+      // error text: a person gets a sentence instead. A finished call's failure is the MCP's own answer.
+      if (error instanceof PrinterMcpError && error.incomplete) throw new InvalidStateError('The printer service stopped answering before the slice finished. Try again in a moment.');
       throw new InvalidStateError(error instanceof PrinterMcpError && error.detail ? `Couldn't slice it for an estimate: ${error.detail}` : "Couldn't slice it for an estimate. Check the printer service, then try again.");
     }
   }

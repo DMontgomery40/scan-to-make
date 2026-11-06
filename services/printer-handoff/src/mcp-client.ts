@@ -5,7 +5,7 @@ import {Ajv, type ValidateFunction} from 'ajv';
 import {appOwnedPrinterProcess} from './node-runtime.js';
 import {timeoutsFor, type PrinterHandoffConfig} from './config.js';
 import type {ElicitationContext, ElicitationRelay} from './elicitation.js';
-import {slicerReport} from './slicer-report.js';
+import {logSlicerRefusal, slicerReport} from './slicer-report.js';
 
 export class PrinterMcpError extends Error {
   readonly code: string;
@@ -306,7 +306,7 @@ export class PrinterMcpClient {
       && (result.isError || Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES)) fail('dispatch-uncertain', undefined, failureDetail(result, this.#config));
     // The slicer's own refusal, word for word, from the MCP's verdict on it (slicer_report).
     const refused = result.isError && name === 'slice_stl' ? slicerReport(result.structuredContent) : undefined;
-    if (refused?.failed) fail('slicer-error', undefined, refused.message);
+    if (refused?.failed) { logSlicerRefusal(refused); fail('slicer-error', undefined, refused.message); }
     if (result.isError) fail('tool-failed', undefined, failureDetail(result, this.#config));
     if (Buffer.byteLength(JSON.stringify(result)) > (options.largeResult ? MAX_FORWARDED_BYTES : MAX_RESULT_BYTES)) fail('result-limit');
     return structuredClone(result);

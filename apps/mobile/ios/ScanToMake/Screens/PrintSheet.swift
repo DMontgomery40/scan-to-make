@@ -121,7 +121,8 @@ struct PrintSheet: View {
             if !Fixtures.pauses.isEmpty { pauses = Fixtures.pauses; Fixtures.pauses = [] }
             #endif
         }
-        .task(id: estimateKey) { await refreshEstimate() }
+        // `settled` too: this starts again once the spools and mapping have answered.
+        .task(id: "\(estimateKey)|\(settled)") { await refreshEstimate() }
         // The printer's MCP can say while the sheet is open that this file prints with its own settings (Nov 5).
         .onChange(of: project?.printsWithOwnSettings == true) { _, own in
             if own && !qualityPicked { quality = .standard }
@@ -706,6 +707,12 @@ struct PrintSheet: View {
         guard !destinationId.isEmpty, project?.current != nil else { return }
         let key = estimateKey
         slice.start(key)
+        // One slice for what the sheet settles on (Nov 6: opening Print on the Mac started four slices of one plate,
+        // one per setting as it loaded). The spools and a multi-colour model's mapping change the slice, so wait for
+        // them; a quick run of changes (copies, pause layers) then slices once.
+        guard settled else { return }
+        try? await Task.sleep(for: .milliseconds(600))
+        guard !Task.isCancelled else { return }
         do {
             let next = try await store.mac.client.estimate(projectId, destinationId: destinationId,
                                                            quality: !slicedOriginal && printer?.offersQuality == true ? quality : .standard,
@@ -719,8 +726,15 @@ struct PrintSheet: View {
         } catch let failure as CompanionError {
             guard !Task.isCancelled, failure.code != "cancelled" else { return }
             if failure.isUnsupported { slice.unsupported(key) } else { slice.fail(key, failure.message) }
-        } catch {}
+        } catch {
+            // Any other failure still ends the wait: the sheet never stays on "Slicing…" forever.
+            guard !Task.isCancelled else { return }
+            slice.fail(key, CompanionError.unreachable.message)
+        }
     }
+
+    /// The printer's spools, and a multi-colour model's mapping to them, have answered: what Print would slice is known.
+    private var settled: Bool { busy != "load" && !(published && mappingState == .loading) }
 
     private func print() async {
         guard canPrint else { return }

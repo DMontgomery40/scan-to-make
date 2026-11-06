@@ -1429,3 +1429,84 @@ test('an MCP that cannot draw what will print is asked to update; nothing is sen
   await assert.rejects(f.service.printUnshown(f.object.id, {sliceSha256: shown.sliceSha256}), /Update bambu-printer-mcp in Settings → Printers so Counterpart can show you what will print/);
   assert.equal(f.runs.filter(run => run.id).length, 0);
 });
+
+// Nov 6, David's rig project: opening Print started four slices of one plate at once (each setting the sheet loaded
+// asked again). They took 86–199 s instead of 18 s, and the estimate gave up after 150 s with the MCP client's own text,
+// "MCP error -32001: TimeoutError: …". One estimate per project and printer now: a newer request stops the older slice.
+const slowEstimates = f => {
+  const slices = [];
+  f.deps.print.services.runner.estimate = input => new Promise((resolve, reject) => {
+    const slice = {input, finish: () => resolve({estimate: {seconds: 60, grams: 2}, settings: {}})};
+    slices.push(slice);
+    input.signal?.addEventListener('abort', () => reject(Object.assign(new PrinterMcpError('cancelled', input.signal.reason,
+      `MCP error -32001: ${input.signal.reason?.name ?? 'AbortError'}: The operation was aborted due to timeout`), {incomplete: true})), {once: true});
+  });
+  return slices;
+};
+
+test('a newer estimate for the same project and printer stops the older slice; the same settings share one slice', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)], sliceArgs: true});
+  const slices = slowEstimates(f);
+  const standard = f.service.estimate(f.object.id, {quality: 'standard'});
+  const again = f.service.estimate(f.object.id, {quality: 'standard'});
+  await until(() => slices.length === 1);
+  const fine = f.service.estimate(f.object.id, {quality: 'fine'});
+  // The older settings' slice is stopped (the MCP is told to cancel it), and its callers hear a plain sentence.
+  for (const older of [standard, again]) await assert.rejects(older, {name: 'EstimateSupersededError', message: 'A newer estimate replaced this one.'});
+  assert.equal(slices[0].input.signal.aborted, true);
+  await until(() => slices.length === 2);
+  assert.equal(slices.length, 2, 'one slice per settings: the duplicate request joined the first');
+  slices[1].finish();
+  assert.equal((await fine).seconds, 60);
+  // Once the newest estimate is done, the next change slices as usual and stops nothing.
+  const later = f.service.estimate(f.object.id, {quality: 'draft'});
+  await until(() => slices.length === 3);
+  slices[2].finish();
+  assert.equal((await later).seconds, 60);
+  assert.equal(slices.filter(slice => slice.input.signal.aborted).length, 1, 'only the superseded slice was stopped');
+});
+
+// Codex on #375: settings A, then B, then A again while A's slice is still stopping (an MCP takes a moment to stop
+// one). The newest A is the sheet's own request: it slices afresh instead of joining the stopping slice and failing.
+test('settings changed back while the old slice is still stopping slice again', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)], sliceArgs: true});
+  const slices = [];
+  f.deps.print.services.runner.estimate = input => new Promise((resolve, reject) => {
+    slices.push({input, finish: () => resolve({estimate: {seconds: 60, grams: 2}, settings: {}})});
+    // Stopping takes a while: the call ends 300 ms after it is cancelled.
+    input.signal?.addEventListener('abort', () => setTimeout(() => reject(Object.assign(new PrinterMcpError('cancelled'), {incomplete: true})), 300), {once: true});
+  });
+  const firstA = f.service.estimate(f.object.id, {quality: 'standard'});
+  firstA.catch(() => undefined);
+  await until(() => slices.length === 1);
+  const b = f.service.estimate(f.object.id, {quality: 'fine'});
+  b.catch(() => undefined);
+  await until(() => slices.length === 2);
+  assert.equal(slices[0].input.signal.aborted, true, 'A is stopping, not stopped');
+  const againA = f.service.estimate(f.object.id, {quality: 'standard'});
+  await until(() => slices.length === 3);
+  assert.equal(slices[1].input.signal.aborted, true, 'B is stopped for the newest A');
+  slices[2].finish();
+  assert.equal((await againA).seconds, 60);
+  await assert.rejects(firstA, {name: 'EstimateSupersededError'});
+  await assert.rejects(b, {name: 'EstimateSupersededError'});
+});
+
+test('an estimate that runs out of time, or whose MCP call never finishes, says so plainly, never in the MCP client’s words', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)], sliceArgs: true});
+  slowEstimates(f);
+  f.deps.estimateTimeoutMs = 50;
+  const timedOut = await f.service.estimate(f.object.id).then(() => undefined, error => error);
+  assert.ok(timedOut instanceof InvalidStateError);
+  assert.equal(timedOut.message, 'Slicing is taking longer than usual. Try again in a moment.');
+  // A call cut short some other way (the MCP closed its connection) keeps its client's text out of the sentence too.
+  f.deps.print.services.runner.estimate = async () => {
+    throw Object.assign(new PrinterMcpError('tool-failed', new Error('closed'), 'MCP error -32000: Connection closed'), {incomplete: true});
+  };
+  const closed = await f.service.estimate(f.object.id, {quality: 'fine'}).then(() => undefined, error => error);
+  assert.equal(closed.message, 'The printer service stopped answering before the slice finished. Try again in a moment.');
+  for (const error of [timedOut, closed]) assert.doesNotMatch(error.message, /MCP error|TimeoutError|AbortError|-320/);
+  // A finished call's failure is the MCP's own answer to a person, and still reaches them.
+  f.deps.print.services.runner.estimate = async () => { throw new PrinterMcpError('tool-failed', undefined, 'Update bambu-printer-mcp in Settings → Printers.'); };
+  await assert.rejects(f.service.estimate(f.object.id, {quality: 'draft'}), {message: "Couldn't slice it for an estimate: Update bambu-printer-mcp in Settings → Printers."});
+});

@@ -16,7 +16,9 @@ function verdict(result) {
   const failed = result.return_code !== 0;
   const words = [...new Set([...(failed && result.error_string ? [result.error_string] : []), ...warnings])].join('\n');
   const ids = new Set(plates.map(plate => plate.id).filter(id => Number.isSafeInteger(id) && id > 0));
-  return {failed, ...(words ? {message: words} : failed ? {message: `The slicer could not slice this model (return code ${result.return_code}).`} : {}), ...(!failed && ids.size ? {plate_count: ids.size} : {})};
+  // A refusal also keeps the slicer's own words in slicer_message (bambu-printer-mcp 1.1.69+), for the client's log.
+  return {failed, ...(words ? {message: words} : failed ? {message: `The slicer could not slice this model (return code ${result.return_code}).`} : {}),
+    ...(failed && words ? {slicer_message: `Studio: ${words}`} : {}), ...(!failed && ids.size ? {plate_count: ids.size} : {})};
 }
 function facts(bytes, plateIndex) {
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return {plate_count: 1, settings: {}};

@@ -43,7 +43,8 @@ export function methodDeadlineMs(method: ControlMethod, params: unknown): number
   if (method === 'objects.correct') return 25_000; // a completion classification is bounded to 20 s
   // A model file of up to 64 MB is read, hashed, inspected and kept twice (original and current).
   if (method === 'objects.addFile') return 120_000;
-  if (method === 'objects.estimate') return 180_000;
+  // Its slice may take ESTIMATE_TIMEOUT_MS (600 s); 30 s more for reading the plates, own settings and spools first.
+  if (method === 'objects.estimate') return 630_000;
   // npm lookup is bounded to 7 s, then admission waits at most 250 ms; longer printer checks continue under the update reservation.
   if (method === 'printers.updateMcp' || method === 'printers.installMcp' || method === 'printers.discover') return 15_000;
   // Check starts the MCP (up to 25 s), then status (20 s) and the camera (12 s).

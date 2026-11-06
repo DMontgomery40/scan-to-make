@@ -241,7 +241,7 @@ test('server CLI owns the control socket lifecycle without exposing admin method
 test('long methods get their own socket deadline; everything else keeps 10 s', async () => {
   const {methodDeadlineMs} = await import('../dist/local-control.js');
   assert.equal(methodDeadlineMs('objects.correct', {}), 25000);
-  assert.equal(methodDeadlineMs('objects.estimate', {}), 180000);
+  assert.equal(methodDeadlineMs('objects.estimate', {}), 630000, 'its slice may take 600 s, after reading what it slices');
   assert.equal(methodDeadlineMs('objects.cancelPrint', {}), 730000, 'the printer question window (10 min) plus 2 min, plus 10 s');
   assert.equal(methodDeadlineMs('objects.get', {}), undefined);
   // Nov 6: a 57 MB STL for a starter's file Ask outlived the 10 s deadline; the Mac got no answer at all.
