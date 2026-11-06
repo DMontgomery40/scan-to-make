@@ -237,7 +237,13 @@ export interface Estimate {
   /** The printer MCP's pictures of that exact file's G-code. Absent when the installed MCP can't draw them. */
   preview?: {
     sha256: string;
-    views: { name: string; label: string; png: string; width: number; height: number }[];
+    views: {
+      name: string;
+      label: string;
+      png: string;
+      width: number;
+      height: number;
+    }[];
     mmPerPixel?: number;
   };
 }
@@ -278,6 +284,16 @@ export interface SetupOptions {
   serialModels?: Record<string, string>;
 }
 export interface McpPackage {
+  appCopy?: { kind: string; path?: string; version?: string };
+  uses?: {
+    destinationId: string;
+    printer: string;
+    mcpId: string;
+    kind: string;
+    path?: string;
+    version?: string;
+    canMove: boolean;
+  }[];
   package: string;
   label: string;
   description: string;

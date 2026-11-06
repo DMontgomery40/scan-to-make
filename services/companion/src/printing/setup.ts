@@ -4,7 +4,7 @@ import {dirname, isAbsolute, join, normalize, sep} from 'node:path';
 import {parseEnv} from 'node:util';
 import {z} from 'zod';
 import {PrinterMcpClient, toolResultJson, type PrinterBackend, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
-import {appInstall, appMcpId, installedVersion, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
+import {appInstall, appMcpId, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
 import type {McpUpdate} from './mcp-updates.js';
 import type {PrinterCatalog} from '../objects/printers.js';
 import {discoverBambu, discoverBonjour, modelFromSerial, BAMBU_SERIAL_MODELS, BONJOUR_TYPES, type BambuAdvert, type BonjourService} from './discovery.js';
@@ -77,6 +77,8 @@ export interface McpPackageView {
   appMcpId: string;
   /** The selected runnable copy first, so its displayed location and version describe the same install. */
   installs: PackageInstall[];
+  appCopy?: PackageInstall;
+  uses: {destinationId: string; printer: string; mcpId: string; kind: string; path?: string; version?: string; canMove: boolean}[];
 }
 
 /**
@@ -270,9 +272,22 @@ export class PrinterSetup {
       const selected = found.find(install => install.kind === 'app' && install.path === own.prefix && localEntry(item.package, install, env))
         ?? found.find(install => localEntry(item.package, install, env));
       const version = selected?.version;
+      const appVersion = installedVersion(own, env);
+      const appCopy: PackageInstall | undefined = env.exists(own.entry!) ? {kind: 'app', path: own.prefix, ...(appVersion ? {version: appVersion} : {})} : undefined;
+      const catalog = this.deps.catalog?.();
+      const uses = this.deps.configs().filter(entry => entry.config.backend === item.package).map(({id, config}) => {
+        const effective = this.deps.effective?.(id, config) ?? config;
+        const install = resolveMcpInstall(effective, env);
+        const path = install.type === 'checkout' ? install.dir : install.type === 'app' || install.type === 'global' ? install.prefix
+          : install.type === 'npx' ? install.spec : undefined;
+        const version = install.type === 'npx' ? undefined : installedVersion(install, env);
+        const printer = catalog?.destinations.find(destination => destination.id === catalog.canonical(id))?.name ?? id;
+        return {destinationId: id, printer, mcpId: mcpIdFor(resolveMcpInstall(config, env), config), kind: install.type,
+          ...(path ? {path} : {}), ...(version ? {version} : {}), canMove: install.type !== 'app' || install.prefix !== own.prefix};
+      });
       const latestVersion = this.deps.latestVersion?.(item.package, {view: true});
       return {...item, installed: !!selected, ...(version ? {version} : {}), ...(latestVersion ? {latestVersion} : {}),
-        appMcpId: appMcpId(item.package, env), installs: selected ? [selected, ...found.filter(install => install !== selected)] : found};
+        appMcpId: appMcpId(item.package, env), uses, ...(appCopy ? {appCopy} : {}), installs: selected ? [selected, ...found.filter(install => install !== selected)] : found};
     }), options: setupOptions()};
   }
 

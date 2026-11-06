@@ -1,3 +1,4 @@
+import { mcpUsageWords, mcpMoveNotice } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -565,7 +566,9 @@ function Devices({ onPair }: { onPair: () => Promise<void> }) {
                 ? "Older pairing"
                 : deviceConnected(d)
                   ? "Connected"
-                  : d.lastSeenAt === undefined ? "Not seen yet" : `Last seen ${new Date(d.lastSeenAt).toLocaleString()}`}
+                  : d.lastSeenAt === undefined
+                    ? "Not seen yet"
+                    : `Last seen ${new Date(d.lastSeenAt).toLocaleString()}`}
             </small>
             <small>Paired {new Date(d.pairedAt).toLocaleDateString()}</small>
           </div>
@@ -654,6 +657,43 @@ function Printers({
               : "Not installed"}
             {pkg.latestVersion ? ` · Latest ${pkg.latestVersion}` : ""}
           </small>
+          {pkg.appCopy && (
+            <p>Counterpart’s copy {pkg.appCopy.version ?? "version unknown"}</p>
+          )}
+          {(pkg.uses ?? []).map((use) => (
+            <p key={use.destinationId}>{mcpUsageWords(use)}</p>
+          ))}
+          {[
+            ...new Set(
+              (pkg.uses ?? [])
+                .filter((use) => use.canMove)
+                .map((use) => use.mcpId),
+            ),
+          ].map((mcpId) => (
+            <div key={mcpId}>
+              <Action
+                run={async () => {
+                  const result = await call<{ update: {state: string; found?: string} }>(
+                    "printers.updateMcp",
+                    { mcpId, fresh: true },
+                  );
+                  setNotice(mcpMoveNotice(result));
+                  await refresh();
+                }}
+              >
+                Move{" "}
+                {(pkg.uses ?? [])
+                  .filter((use) => use.mcpId === mcpId)
+                  .map((use) => use.printer)
+                  .join(", ")}{" "}
+                to Counterpart’s updated copy
+              </Action>
+              <small>
+                Updates Counterpart’s copy and switches these profiles. Your
+                copy is left untouched.
+              </small>
+            </div>
+          ))}
           <div className="actions">
             <Action
               run={async () => {

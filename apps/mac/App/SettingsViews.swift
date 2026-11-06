@@ -392,15 +392,18 @@ struct PrintersSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                ForEach(PrinterMCP.list(printers)) { mcp in
+                ForEach(setup.packages.contains(where: { $0.uses != nil }) ? [] : PrinterMCP.list(printers)) { mcp in
                     MCPRow(mcp:mcp, companionUpdates:objects.capabilities?.mcpUpdates == true,
                            status:mcp.mcpId.flatMap { updates.status[$0] },
                            update:{ update(mcp, fresh:false) }, installFresh:{ update(mcp, fresh:true) })
                 }
                 // Both MCPs, always: one no printer uses yet shows where it is, or Download.
-                ForEach(unusedPackages) { package in
+                ForEach(setup.packages) { package in
                     McpPackageRow(package:package, status:updates.status[package.appMcpId], download:{ setup.download(package) },
-                                  update:objects.capabilities?.mcpUpdates == true ? { updateAppCopy(package) } : nil)
+                                  update:objects.capabilities?.mcpUpdates == true ? { updateAppCopy(package) } : nil,
+                                  move: objects.capabilities?.mcpUpdates == true ? { id in
+                                      Task { await updates.update(id, fresh:true, socket:ModelAccessModel.socketPath(for:Installation(bundle:.main))); await setup.refresh() }
+                                  } : nil)
                 }
                 if PrinterMCP.list(printers).isEmpty && unusedPackages.isEmpty { Text("None found yet.").foregroundStyle(.secondary) }
             } header: { Text("Printer MCPs") } footer: {
@@ -419,7 +422,7 @@ struct PrintersSettings: View {
         }
         .onChange(of:updates.status) { _, status in
             // A download that finished: read the packages (and printers) again.
-            if setup.packages.contains(where: { if case .updated = status[$0.appMcpId] { return true }; return false }) {
+            if status.values.contains(where: { if case .updated = $0 { return true }; return false }) {
                 Task { await setup.refresh(); await objects.refresh() }
             }
         }

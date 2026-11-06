@@ -379,3 +379,22 @@ export function shownSlice(estimate: Estimate | undefined) {
     ? sha
     : undefined;
 }
+
+/** The effective profile copy, never the package catalog's selected/default version. */
+export function mcpUsageWords(
+  use: NonNullable<import("./types").McpPackage["uses"]>[number],
+): string {
+  const source =
+    use.kind === "app"
+      ? "Counterpart’s copy"
+      : `your copy${use.path ? ` at ${use.path}` : ""}`;
+  return `${use.printer} uses ${source} (${use.version ?? "version unknown"}).`;
+}
+
+export function mcpMoveNotice(reply: {update: {state: string; found?: string}}): string {
+  const update = reply.update;
+  if (update.found) return update.found;
+  if (update.state === "waiting") return "Moves to Counterpart’s updated copy after the current print.";
+  if (update.state === "current") return "Already using the current copy.";
+  return "Moving to Counterpart’s updated copy…";
+}
