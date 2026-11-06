@@ -96,13 +96,13 @@ struct McpPackageRow: View {
                 ForEach(package.uses ?? []) { use in
                     Text(use.words).font(.caption).foregroundStyle(.secondary)
                 }
-                ForEach(Array(Set((package.uses ?? []).filter(\.canMove).map(\.mcpId))).sorted(), id: \.self) { id in
+                // In the order the uses above are listed, each titled by its printers, MCP and copy (two P1S profiles read apart).
+                ForEach(package.moves, id: \.mcpId) { item in
                     if let move {
-                        let names = (package.uses ?? []).filter { $0.mcpId == id }.map(\.printer).joined(separator:", ")
-                        Button("Move \(names) to Counterpart’s updated copy") { move(id) }
-                            .disabled(updates.status[id]?.busy == true)
+                        Button(item.title) { move(item.mcpId) }
+                            .disabled(updates.status[item.mcpId]?.busy == true)
                         Text("Updates Counterpart’s copy and switches these profiles. Your copy is left untouched.").font(.caption).foregroundStyle(.secondary)
-                        if let progress = updates.status[id] { Text(progress.words).font(.caption) }
+                        if let progress = updates.status[item.mcpId] { Text(progress.words).font(.caption) }
                     }
                 }
                 if let status { statusLine(status) }
@@ -118,14 +118,20 @@ struct McpPackageRow: View {
             if !package.installed {
                 Button(failed ? "Try Again" : "Download", action:download)
                     .buttonStyle(.glassProminent).disabled(busy || installedNow)
+                    .accessibilityLabel(failed ? "Try downloading \(package.label) again" : "Download \(package.label)")
                     .help("Installs the latest \(package.label) for Counterpart only. Nothing else changes.")
             } else if offersUpdate, let update {
                 // Only while busy: a finished install earlier in this session must not block the next version.
                 Button(failed ? "Try Again" : "Update", action:update)
                     .buttonStyle(.glassProminent).disabled(busy)
+                    .accessibilityLabel(package.updateLabel(failed:failed))
                     .help("Installs \(package.latestVersion ?? "the latest version") as Counterpart’s own copy. Other copies on this Mac are left as they are.")
             }
         }
+        // One container per MCP: VoiceOver reads its name first, and its Update and Move buttons belong to it.
+        .accessibilityElement(children:.contain)
+        .accessibilityLabel(package.label)
+        .accessibilityIdentifier("mcp-row-" + package.package)
     }
 
     private var failed: Bool { if case .failed = status { return true }; if case .problem = status { return true }; return false }

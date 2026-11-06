@@ -381,9 +381,12 @@ test('review fixes, round two: fresh copies lock their users, stale overrides dr
   holding();
   await f.done();
   assert.ok(f.restarts.some(entry => entry.id === 'a1'), 'the printer already on that copy restarts with the new files');
-  // An override made from an older profile is dropped when the profile changes.
-  await f.overrides.set('p1s', {command: '/node', args: [fresh]}, bambu('/opt/tools/old-wrapper.sh'));
+  // An npx pin made from an older profile is dropped when the profile changes; a Move to Counterpart's copy is not
+  // (it never falls back to the route the profile wraps: "Move … to Counterpart's updated copy", Nov 6).
+  await f.overrides.set('p1s', {command: '/opt/homebrew/bin/npx', args: ['-y', 'bambu-printer-mcp@1.1.50']}, bambu('/opt/tools/old-wrapper.sh'));
   assert.equal(f.updates.install('p1s').effective.process.command, '/opt/tools/printer-wrapper.sh');
+  await f.overrides.set('p1s', {command: '/node', args: [fresh]}, bambu('/opt/tools/old-wrapper.sh'));
+  assert.deepEqual(f.updates.install('p1s').effective.process.args, [fresh]);
   // npm's notice after the version doesn't hide it.
   const {McpUpdater, McpOverrides} = await import('../dist/printing/mcp-updates.js');
   const noisy = new McpUpdater({destinations: () => [], env: mac({'/opt/homebrew/bin/npm': ''}), overrides: new McpOverrides(join(tmpdir(), `o-${Date.now()}.json`)),
@@ -958,6 +961,126 @@ test('explicitly moving a checkout to Counterpart’s updated copy preserves the
   assert.deepEqual(effective.process.args, [`${APP}/printers/generic/lib/node_modules/${pkg}/dist/index.js`]);
   assert.equal(effective.process.cwd, dir);
   assert.equal(effective.process.env.PRINTER_HOST, '192.0.2.1');
+});
+
+test('Settings → Printers follow-up: a Move to Counterpart’s copy never falls back to the ssh forced command it replaced', async t => {
+  // David's P1S, Nov 6: ssh → authorized_keys command="… printers/bambu-1.1.46 …" (1.1.65), moved to Counterpart's copy.
+  const node = '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node';
+  const stale = `${APP}/printers/bambu-1.1.46`, own = `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp`;
+  const forced = `cd /Users/ada/bambu-printer-mcp && MCP_TRANSPORT=stdio TMPDIR='${APP}/printer-handoff/runtime-tmp' exec '${node}' '${stale}/lib/node_modules/bambu-printer-mcp/dist/index.js'`;
+  const files = {
+    [`${HOME}/.ssh/authorized_keys`]: `restrict,command="${forced.replace(/"/g, '\\"')}" ssh-ed25519 AAAAstopgap printer@mac\n`,
+    [`${HOME}/.ssh/printer_ed25519.pub`]: 'ssh-ed25519 AAAAstopgap printer@mac\n',
+    [`${stale}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.65'),
+    [`${own}/package.json`]: pkgJson('1.1.69'), [`${own}/dist/index.js`]: '',
+  };
+  const ssh = (...extra) => bambu('/usr/bin/ssh', ['-T', '-i', `${HOME}/.ssh/printer_ed25519`, '-o', 'BatchMode=yes', ...extra, 'ada@127.0.0.1'], {cwd: '/Users/ada/bambu-printer-mcp', env: {MCP_TRANSPORT: 'stdio'}});
+  let profile = ssh();
+  const f = await updater(t, {profiles: [{id: 'current', get config() { return profile; }}], latest: '1.1.69', files});
+  assert.equal(f.updates.install('current').install.prefix, stale);
+  await f.updates.update(f.updates.mcpId('current'), {fresh: true});
+  await f.done();
+  assert.equal(f.events.at(-1).type, 'mcp.update.done');
+  assert.deepEqual(f.updates.effective('current', profile).process.args, [`${own}/dist/index.js`]);
+  // The profile changes (here an ssh option; the Mac rewrites printer-handoff.json): the Move is made again from it.
+  profile = ssh('-o', 'IdentitiesOnly=yes');
+  const after = f.updates.effective('current', profile);
+  assert.equal(after.process.command, node);
+  assert.deepEqual(after.process.args, [`${own}/dist/index.js`], 'never the forced command\'s bambu-1.1.46');
+  assert.equal(after.process.cwd, '/Users/ada/bambu-printer-mcp');
+  assert.equal(after.process.env.TMPDIR, `${APP}/printer-handoff/runtime-tmp`, 'started the way the forced command started it');
+  assert.equal(f.updates.install('current').install.prefix, `${APP}/printers/bambu`);
+  // At start (and for a printer listed later) it is saved again for the changed profile and that session runs it.
+  f.restarts.length = 0;
+  await f.updates.applyOverrides();
+  assert.deepEqual(f.overrides.peek('current', profile).args, [`${own}/dist/index.js`]);
+  assert.deepEqual(f.restarts.map(entry => [entry.id, entry.process.args[0]]), [['current', `${own}/dist/index.js`]]);
+  // A changed MCP is a different package: the Move doesn't carry over to it.
+  assert.equal(f.updates.effective('current', {...profile, backend: 'mcp-3d-printer-server'}).process.command, '/usr/bin/ssh');
+});
+
+test('Settings → Printers follow-up: each Move names its printer, MCP and copy, in the order the uses are listed; an older copy says so', async () => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const bambuDir = `${HOME}/bambu-printer-mcp`, genericDir = `${HOME}/mcp-3D-printer-server`;
+  const stale = `${APP}/printers/bambu-1.1.46`, own = `${APP}/printers/bambu`;
+  const env = mac({
+    [`${stale}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.65'), [`${stale}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '',
+    [`${own}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.69'), [`${own}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '',
+    [`${genericDir}/.git/HEAD`]: 'x', [`${genericDir}/package.json`]: pkgJson('1.2.25', 'mcp-3d-printer-server'), [`${genericDir}/dist/index.js`]: '',
+    [`${bambuDir}/.git/HEAD`]: 'x', [`${bambuDir}/package.json`]: pkgJson('1.1.60'), [`${bambuDir}/dist/index.js`]: '',
+  });
+  const run = (entry, backend = 'bambu-printer-mcp') => ({backend, process: {command: '/node', args: [entry]}});
+  // Listed order: zz-current (the stale app copy), then aa-checkout. Sorting by id or mcpId must not reorder them.
+  const configs = [
+    {id: 'zz-current', config: run(`${stale}/lib/node_modules/bambu-printer-mcp/dist/index.js`)},
+    {id: 'aa-checkout', config: run(`${bambuDir}/dist/index.js`)},
+    {id: 'generic', config: run(`${genericDir}/dist/index.js`, 'mcp-3d-printer-server')},
+    {id: 'moved', config: run(`${own}/lib/node_modules/bambu-printer-mcp/dist/index.js`)},
+  ];
+  const setup = new PrinterSetup({env, configs: () => configs, list: () => ['bambu', 'bambu-1.1.46'],
+    catalog: () => ({canonical: () => 'p1s', destinations: [{id: 'p1s', name: 'Bambu Lab P1S'}]})});
+  const {packages} = await setup.mcps();
+  const card = packages.find(p => p.package === 'bambu-printer-mcp'), generic = packages.find(p => p.package === 'mcp-3d-printer-server');
+  assert.deepEqual(card.uses.map(use => use.words), [
+    'Bambu Lab P1S uses Counterpart’s older copy at ~/Library/Application Support/Scan to Make/printers/bambu-1.1.46 (1.1.65), older than Counterpart’s copy (1.1.69).',
+    'Bambu Lab P1S uses your copy at ~/bambu-printer-mcp (1.1.60), older than Counterpart’s copy (1.1.69).',
+    'Bambu Lab P1S uses Counterpart’s copy (1.1.69).',
+  ]);
+  assert.deepEqual(card.uses.map(use => use.managed), [false, false, true]);
+  assert.deepEqual(card.moves.map(move => move.mcpId), [card.uses[0].mcpId, card.uses[1].mcpId], 'screen order, not id order');
+  assert.deepEqual(card.moves.map(move => move.title), [
+    'Move Bambu Lab P1S (bambu-printer-mcp, Counterpart’s older copy at ~/Library/Application Support/Scan to Make/printers/bambu-1.1.46) to Counterpart’s updated copy',
+    'Move Bambu Lab P1S (bambu-printer-mcp, your copy at ~/bambu-printer-mcp) to Counterpart’s updated copy',
+  ]);
+  // The other MCP's profile for the same printer reads differently from both.
+  assert.deepEqual(generic.moves.map(move => move.title), ['Move Bambu Lab P1S (mcp-3D-printer-server, your copy at ~/mcp-3D-printer-server) to Counterpart’s updated copy']);
+  assert.equal(new Set([...card.moves, ...generic.moves].map(move => move.title)).size, 3);
+});
+
+/** David's P1S before its Moves (Nov 6): one profile on each MCP, both on an older copy. Shared with every client's tests. */
+async function twoProfileMoves() {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const stale = `${APP}/printers/bambu-1.1.46`, own = `${APP}/printers/bambu`, generic = `${APP}/printers/generic`, dir = `${HOME}/mcp-3D-printer-server`;
+  const env = mac({
+    [`${stale}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.65'), [`${stale}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '',
+    [`${own}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.69'), [`${own}/lib/node_modules/bambu-printer-mcp/dist/index.js`]: '',
+    [`${generic}/lib/node_modules/mcp-3d-printer-server/package.json`]: pkgJson('1.2.50', 'mcp-3d-printer-server'), [`${generic}/lib/node_modules/mcp-3d-printer-server/dist/index.js`]: '',
+    [`${dir}/.git/HEAD`]: 'x', [`${dir}/package.json`]: pkgJson('1.2.25', 'mcp-3d-printer-server'), [`${dir}/dist/index.js`]: '',
+  });
+  const configs = [
+    {id: 'current', config: {backend: 'bambu-printer-mcp', process: {command: '/node', args: [`${stale}/lib/node_modules/bambu-printer-mcp/dist/index.js`]}}},
+    {id: 'counterpart-a07c6f7d-5399-4d71-94e4-07824c4d1b82', config: {backend: 'mcp-3d-printer-server', process: {command: '/node', args: [`${dir}/dist/index.js`]}}},
+  ];
+  const setup = new PrinterSetup({env, configs: () => configs, list: () => ['bambu', 'bambu-1.1.46', 'generic'], latestVersion: pkg => pkg === 'bambu-printer-mcp' ? '1.1.69' : '1.2.50',
+    catalog: () => ({canonical: () => 'current', destinations: [{id: 'current', name: 'Bambu Lab P1S'}]})});
+  return (await setup.mcps()).packages;
+}
+
+test('Settings → Printers follow-up: the shared two-profile fixture is what the companion lists', async () => {
+  const {readFile, writeFile} = await import('node:fs/promises');
+  const path = new URL('../../../packages/contracts/fixtures/mcp-printer-moves.json', import.meta.url);
+  // WRITE_FIXTURES=1 writes it again after a deliberate change.
+  if (process.env.WRITE_FIXTURES === '1') await writeFile(path, JSON.stringify({packages: await twoProfileMoves()}, null, 2) + '\n');
+  assert.deepEqual(await twoProfileMoves(), JSON.parse(await readFile(path, 'utf8')).packages);
+});
+
+test('Settings → Printers follow-up: opening Settings waits briefly for the npm check it starts, so a new version shows on this visit', async t => {
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  let answer = '1.1.68', delay = 20;
+  const updates = new McpUpdater({destinations: () => [], env: mac({'/opt/homebrew/bin/npm': ''}), overrides: new McpOverrides(join(tmpdir(), `o-${Date.now()}.json`)),
+    session: () => undefined, busy: async () => false, runningVersion: () => undefined, node: '/n', path: '/nowhere',
+    run: async (_command, args) => { await new Promise(resolve => setTimeout(resolve, delay)); return {code: 0, output: `${answer}\n`}; }});
+  const setup = new PrinterSetup({env: mac(), configs: () => [], list: () => [], latestVersion: (pkg, options) => updates.latestVersionSettled(pkg, options)});
+  const first = (await setup.mcps()).packages.find(p => p.package === 'bambu-printer-mcp');
+  assert.equal(first.latestVersion, '1.1.68', 'the first visit already shows what npm said');
+  // A slow npm doesn't hold Settings past the wait: the last answer shows, and the check keeps going.
+  answer = '1.1.69'; delay = 200;
+  const started = Date.now();
+  assert.equal(await updates.latestVersionSettled('bambu-printer-mcp', {view: true, waitMs: 1}), '1.1.68');
+  assert.equal(await updates.latestVersionSettled('bambu-printer-mcp', {view: true, waitMs: 30}), '1.1.68', 'a check already running is not asked twice');
+  assert.ok(Date.now() - started < 150);
+  await updates.checkLatest('bambu-printer-mcp');
+  assert.equal(updates.latestVersion('bambu-printer-mcp'), '1.1.69');
 });
 
 test('updating the app copy finds overridden users and waits for their print before restarting them', async t => {

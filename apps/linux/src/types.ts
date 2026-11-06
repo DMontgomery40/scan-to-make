@@ -338,7 +338,13 @@ export interface McpPackage {
     path?: string;
     version?: string;
     canMove: boolean;
+    /** Runs Counterpart's own copy (absent from a companion before Nov 6). */
+    managed?: boolean;
+    /** The companion's sentence: which copy, its version, and whether it's older than Counterpart's. */
+    words?: string;
   }[];
+  /** The Moves in the order the uses are listed, each titled by its printers, MCP and copy (Nov 6). */
+  moves?: { mcpId: string; title: string }[];
   package: string;
   label: string;
   description: string;

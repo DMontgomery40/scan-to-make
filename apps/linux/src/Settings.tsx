@@ -1,4 +1,4 @@
-import { mcpUsageWords, mcpMoveNotice, slicerControls } from "./domain";
+import { mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, slicerControls } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -655,8 +655,9 @@ function Printers({
         camera and printer controls.
       </p>
       {packages.map((pkg) => (
-        <section className="package" key={pkg.package}>
-          <strong>{pkg.label}</strong>
+        // One group per MCP: a screen reader names it, and its Move and Update buttons and progress belong to it.
+        <section className="package" key={pkg.package} role="group" aria-labelledby={`mcp-${pkg.package}`}>
+          <strong id={`mcp-${pkg.package}`}>{pkg.label}</strong>
           <p>{pkg.description}</p>
           <small>
             {pkg.installed
@@ -670,13 +671,7 @@ function Printers({
           {(pkg.uses ?? []).map((use) => (
             <p key={use.destinationId}>{mcpUsageWords(use)}</p>
           ))}
-          {[
-            ...new Set(
-              (pkg.uses ?? [])
-                .filter((use) => use.canMove)
-                .map((use) => use.mcpId),
-            ),
-          ].map((mcpId) => (
+          {mcpMoves(pkg).map(({ mcpId, title }) => (
             <div key={mcpId}>
               <Action
                 run={async () => {
@@ -689,12 +684,7 @@ function Printers({
                   await refresh();
                 }}
               >
-                Move{" "}
-                {(pkg.uses ?? [])
-                  .filter((use) => use.mcpId === mcpId)
-                  .map((use) => use.printer)
-                  .join(", ")}{" "}
-                to Counterpart’s updated copy
+                {title}
               </Action>
               <small>
                 Updates Counterpart’s copy and switches these profiles. Your
@@ -720,6 +710,7 @@ function Printers({
             </Action>
             {pkg.installed && (
               <Action
+                label={`Update Counterpart’s copy of ${pkg.label}`}
                 run={async () => {
                   setNotice(pkg.appMcpId, "Requesting update…", true);
                   const r = await call<{
@@ -742,9 +733,13 @@ function Printers({
               </Action>
             )}
           </div>
+          {/* Whichever client started it (the Mac, a phone, this one): the events say where it is. */}
+          {mcpPackageIds(pkg).filter((id) => notices[id]).map((id) => (
+            <p role="status" className="notice" key={id}>{notices[id]}</p>
+          ))}
         </section>
       ))}
-      {Object.entries(notices).map(([id, notice]) => (
+      {Object.entries(notices).filter(([id]) => !packages.some((pkg) => mcpPackageIds(pkg).includes(id))).map(([id, notice]) => (
         <p role="status" className="notice" key={id}>{notice}</p>
       ))}
       {error && <p className="error">{error}</p>}

@@ -21,6 +21,11 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.hasContentDescription
+import kotlinx.serialization.json.decodeFromJsonElement
 import com.scantomake.counterpart.api.CompanionClient
 import com.scantomake.counterpart.api.PrintQuality
 import com.scantomake.counterpart.api.PrintStrength
@@ -152,8 +157,8 @@ class HomeLayoutTests {
         compose.onNodeWithContentDescription("Printers").performClick()
         compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
         compose.onNodeWithText("Bambu Lab P1S uses your copy at /home/ada/mcp-3D-printer-server (1.2.25).").assertExists()
-        compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").assertExists()
-        compose.onNodeWithText("Move Bambu Lab P1S to Counterpart’s updated copy").performScrollTo().performClick()
+        compose.onNodeWithText("Move Bambu Lab P1S (mcp-3D-printer-server, your copy at /home/ada/mcp-3D-printer-server) to Counterpart’s updated copy").assertExists()
+        compose.onNodeWithText("Move Bambu Lab P1S (mcp-3D-printer-server, your copy at /home/ada/mcp-3D-printer-server) to Counterpart’s updated copy").performScrollTo().performClick()
         if (lostReply) {
             val error = "Your computer isn't answering. Check it's on and awake, then try again."
             compose.waitUntil(5_000) { compose.onAllNodes(hasText(error)).fetchSemanticsNodes().isNotEmpty() }
@@ -190,6 +195,60 @@ class HomeLayoutTests {
         org.junit.Assert.assertEquals("{\"fresh\":true}", String(moves.first().request.body!!))
         org.junit.Assert.assertEquals(listOf("mcp-0000000000000002"), pkg.moveIds)
         org.junit.Assert.assertEquals("projects:read", CompanionClient.scope("GET", "/v1/printers/mcps"))
+    }
+
+    /** Settings → Printers follow-up (Nov 6): David's two P1S profiles each showed the same Move, ordered by id. */
+    @Test fun twoProfilesOfOnePrinterGetMovesThatReadApartInScreenOrderInsideTheirMcpGroup() {
+        val packages = printersWithMoves()
+        val titles = packages.flatMap { it.moves.map { move -> move.title } }
+        org.junit.Assert.assertEquals(2, titles.toSet().size)
+        for (pkg in packages) org.junit.Assert.assertEquals(pkg.uses.filter { it.canMove }.map { it.mcpId }, pkg.moveIds)
+        for ((pkg, title) in packages.zip(titles)) {
+            // Each Move sits in its MCP's group, under that MCP's heading.
+            compose.onNode(hasTestTag("mcp-package-${pkg.`package`}")).performScrollTo()
+            compose.onNode(hasText(title) and hasAnyAncestor(hasTestTag("mcp-package-${pkg.`package`}"))).assertExists()
+            compose.onNode(hasText(pkg.label) and isHeading() and hasAnyAncestor(hasTestTag("mcp-package-${pkg.`package`}"))).assertExists()
+            compose.onNode(hasContentDescription("Update Counterpart’s copy of ${pkg.label}") and hasAnyAncestor(hasTestTag("mcp-package-${pkg.`package`}"))).assertExists()
+        }
+        compose.onNodeWithText(packages[0].uses[0].words).assertExists()
+        org.junit.Assert.assertTrue(packages[0].uses[0].words.contains("older than Counterpart’s copy (1.1.69)"))
+    }
+
+    /** #357's deferred Codex P2: an update or Move started on another client shows here without a tap on this phone. */
+    @Test fun aMoveStartedOnAnotherClientShowsItsProgressAndResult() {
+        val packages = printersWithMoves()
+        val id = packages[1].moves.single().mcpId
+        for (type in listOf("mcp.update.started", "mcp.update.done")) {
+            val event = requireNotNull(CounterpartEvent.decode(WireJson.parseToJsonElement(
+                "{\"v\":1,\"seq\":${if (type.endsWith("done")) 8 else 7},\"id\":\"$type\",\"at\":\"2026-11-06T00:00:00Z\",\"type\":\"$type\",\"title\":\"t\",\"body\":\"$type on the Mac\",\"notify\":\"none\",\"data\":{\"mcpId\":\"$id\"}}").jsonObject))
+            compose.runOnIdle { state.mcpUpdateEvents.value = mapOf(id to event) }
+            compose.onNode(hasText("$type on the Mac") and hasAnyAncestor(hasTestTag("mcp-package-mcp-3d-printer-server"))).assertExists()
+        }
+        org.junit.Assert.assertTrue(state.mcpUpdateAttempts.value.isEmpty())
+    }
+
+    private fun printersWithMoves(): List<com.scantomake.counterpart.api.McpPackageCopies> {
+        val fixture = contractFixture("mcp-printer-moves.json").readText()
+        val packages = WireJson.parseToJsonElement(fixture).jsonObject["packages"]!!.jsonArray
+            .map { WireJson.decodeFromJsonElement<com.scantomake.counterpart.api.McpPackageCopies>(it) }
+        app.pairingStore.save(v2Record(), false)
+        val transport = FakeTransport { request, _ ->
+            when {
+                request.url.endsWith("/healthz") -> json(200, mapOf("status" to "ok", "capabilities" to mapOf("mcpCopies" to true, "mcpUpdates" to true)))
+                request.url.endsWith("/mcps") -> HttpReply(200, fixture.toByteArray())
+                else -> json(404, mapOf("error" to "not-found"))
+            }
+        }
+        app.pairing = PairingClient(app.pairingStore, transport)
+        app.companion = CompanionClient(app.pairing, transport, null, null, app.cacheDir)
+        state.projects.value = listOf(project("a", "Existing project", "ready"))
+        state.mcpCopies.value = packages
+        state.capabilities.value = setOf("mcpCopies", "mcpUpdates")
+        state.loaded.value = true
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination(id = "current", name = "Bambu Lab P1S", backend = "bambu-printer-mcp")), "current")
+        compose.setContent { WithApp { PrintersScreen(back = {}) } }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("mcp-package-mcp-3d-printer-server")).fetchSemanticsNodes().isNotEmpty() }
+        return packages
     }
 
     /** Settings has Help and Printers, as on iPhone, Mac and Linux; the print sheet sends people to Settings → Printers. */

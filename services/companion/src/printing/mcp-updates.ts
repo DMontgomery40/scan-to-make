@@ -21,6 +21,8 @@ export const LOG_TAIL_BYTES = 4096;
 export const LOOKUP_TIMEOUT_MS = 7000;
 /** Leave room inside the Mac's 10 s RPC deadline after the bounded npm lookup. */
 export const ADMISSION_CHECK_MS = 250;
+/** How long Settings → Printers waits for npm's answer when it opens (printers.mcps answers within the Mac's 15 s). */
+export const SETTINGS_WAIT_MS = 3000;
 
 export type McpUpdateStateName = 'started' | 'waiting' | 'current' | 'unresolved';
 export interface McpUpdate {mcpId: string; state: McpUpdateStateName; fromVersion?: string; toVersion?: string; found?: string}
@@ -52,6 +54,8 @@ export class McpOverrides {
     return this.#state;
   }
   async get(id: string) { return (await this.load())[id]; }
+  /** After load(): the saved override, whichever profile it was made from. */
+  saved(id: string): Override | undefined { return this.#state?.[id]; }
   /** After load(): the override for this destination, only while its profile is the one it was made from. */
   peek(id: string, config?: PrinterHandoffConfig): Override | undefined {
     const value = this.#state?.[id];
@@ -160,12 +164,33 @@ export class McpUpdater {
     const entry = this.#destinations().find(item => item.id === destinationId);
     if (!entry) return undefined;
     const mcpId = mcpIdFor(resolveMcpInstall(entry.config, this.#deps.env), entry.config);
-    const effective = this.#deps.overrides.apply(entry.config, this.#deps.overrides.peek(destinationId, entry.config));
+    const effective = this.#deps.overrides.apply(entry.config, this.#override(destinationId, entry.config));
     const install = resolveMcpInstall(effective, this.#deps.env);
     // What actually runs: two profiles moved to the same fresh copy share it, whatever their ids.
     return {mcpId, install, config: entry.config, effective, runs: mcpIdFor(install, effective)};
   }
   #destinations() { return this.#deps.catalog?.()?.entries() ?? this.#deps.destinations(); }
+  /**
+   * The override a destination runs with. An npx pin made from an earlier profile is dropped with that profile, but a
+   * Move to Counterpart's own copy never falls back: after the profile changes (its command, variables or directory),
+   * it is made again from the new profile, so the printer keeps running Counterpart's copy and never the route the
+   * profile wraps (an ssh forced command naming an older copy, Nov 6).
+   */
+  #override(destinationId: string, config: PrinterHandoffConfig): Override | undefined {
+    const kept = this.#deps.overrides.peek(destinationId, config);
+    if (kept) return kept;
+    const saved = this.#deps.overrides.saved(destinationId);
+    return saved && this.#movedToAppCopy(saved, config) ? this.#appCopyOverride(config) : undefined;
+  }
+  /** The override runs this package's own copy in Counterpart (what Move to Counterpart's updated copy saves). */
+  #movedToAppCopy(override: Override, config: PrinterHandoffConfig): boolean {
+    return override.args.includes(this.#freshInstall(config).entry!);
+  }
+  /** Counterpart's own copy, started the way this profile starts its MCP (its own variables and directory). */
+  #appCopyOverride(config: PrinterHandoffConfig): Override {
+    const via = resolveMcpInstall(config, this.#deps.env).via;
+    return {command: this.#deps.node, args: [this.#freshInstall(config).entry!], ...(via?.env ? {env: via.env} : {}), ...(via?.cwd ? {cwd: via.cwd} : {})};
+  }
   #gateIds(ids: string[]) {
     const catalog = this.#deps.catalog?.();
     return [...new Set(ids.flatMap(id => [id, catalog?.canonical(id) ?? id]))];
@@ -186,6 +211,19 @@ export class McpUpdater {
     const known = this.#latest.get(pkg);
     if (!known || this.#now() - known.atMs >= (options.view ? LATEST_ON_VIEW_MS : LATEST_EVERY_MS)) void this.checkLatest(pkg).catch(() => undefined);
     return known?.version;
+  }
+  /**
+   * As latestVersion, but Settings opening waits up to `waitMs` for the check it starts (or one already running), so a
+   * version published since the last check shows on this visit, not the next one. A slow npm leaves the last answer.
+   */
+  async latestVersionSettled(pkg: string, options: {view?: boolean; waitMs?: number} = {}): Promise<string | undefined> {
+    const known = this.latestVersion(pkg, options);
+    const pending = this.#latest.get(pkg)?.pending;
+    if (!pending) return known;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const answer = await Promise.race([pending.catch(() => undefined), new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), options.waitMs ?? SETTINGS_WAIT_MS); })])
+      .finally(() => clearTimeout(timer));
+    return answer ?? this.#latest.get(pkg)?.version ?? known;
   }
   /** `npm view <pkg> version`. */
   async checkLatest(pkg: string): Promise<string | undefined> {
@@ -218,21 +256,21 @@ export class McpUpdater {
   /** Loads saved overrides (npx version, fresh copy) and gives the sessions them, before they first connect. */
   /** A destination's profile as the companion runs it: with the override an update left, while that profile is unchanged. */
   effective(destinationId: string, config: PrinterHandoffConfig): PrinterHandoffConfig {
-    return this.#deps.overrides.apply(config, this.#deps.overrides.peek(destinationId, config));
+    return this.#deps.overrides.apply(config, this.#override(destinationId, config));
   }
   async applyOverrides(): Promise<void> {
     await this.#deps.overrides.load();
-    for (const entry of this.#destinations()) {
-      const found = this.install(entry.id);
-      if (found && this.#deps.overrides.peek(entry.id, entry.config)) await this.#deps.session(entry.id)?.restart(found.effective).catch(() => undefined);
-    }
+    for (const entry of this.#destinations()) await this.applyOverride(entry.id);
   }
 
   /** A destination listed after start (Add, a Printer MCP choice): its saved override, applied as at start. */
   async applyOverride(destinationId: string): Promise<void> {
     const entry = this.#destinations().find(item => item.id === destinationId);
-    const found = entry ? this.install(entry.id) : undefined;
-    if (entry && found && this.#deps.overrides.peek(entry.id, entry.config)) await this.#deps.session(entry.id)?.restart(found.effective).catch(() => undefined);
+    const override = entry ? this.#override(entry.id, entry.config) : undefined;
+    if (!entry || !override) return;
+    // A Move made again for a changed profile is saved for it, so the file says what runs.
+    if (!this.#deps.overrides.peek(entry.id, entry.config)) await this.#deps.overrides.set(entry.id, override, entry.config).catch(() => undefined);
+    await this.#deps.session(entry.id)?.restart(this.#deps.overrides.apply(entry.config, override)).catch(() => undefined);
   }
 
   /** `printers.updateMcp` / `POST /v1/printers/mcp/<mcpId>/update`. */
@@ -377,7 +415,7 @@ export class McpUpdater {
       if (update) await this.#emit('mcp.update.failed', pkg, update, NO_PRINTERS(pkg)).catch(() => undefined);
       return;
     }
-    const previous = new Map(members.map(member => [member.id, this.#deps.overrides.peek(member.id, member.config)]));
+    const previous = new Map(members.map(member => [member.id, this.#override(member.id, member.config)]));
     const own = members.filter(member => (member.mcpId === mcpId || member.runs === mcpId));
     let log = '';
     const run = async (label: string, command: string, args: string[], cwd: string | undefined, env: NodeJS.ProcessEnv) => {
@@ -442,13 +480,9 @@ export class McpUpdater {
       for (const member of own) {
         if (member.install.type === 'npx') await this.#deps.overrides.set(member.id, {command: member.effective.process.command,
           args: (member.effective.process.args ?? []).map(arg => arg === (member.install as {spec?: string}).spec ? `${pkg}@${latest}` : arg)}, member.config);
-        if (options.fresh && install.type === 'app') {
-          const via = resolveMcpInstall(member.config, this.#deps.env).via;
-          await this.#deps.overrides.set(member.id, {command: this.#deps.node, args: [install.entry!],
-            ...(via?.env ? {env: via.env} : {}), ...(via?.cwd ? {cwd: via.cwd} : {})}, member.config);
-        }
+        if (options.fresh && install.type === 'app') await this.#deps.overrides.set(member.id, this.#appCopyOverride(member.config), member.config);
       }
-      for (const member of members) await this.#deps.session(member.id)?.restart(this.#deps.overrides.apply(member.config, this.#deps.overrides.peek(member.id, member.config)));
+      for (const member of members) await this.#deps.session(member.id)?.restart(this.#deps.overrides.apply(member.config, this.#override(member.id, member.config)));
       // Every printer on these files starts the new version before the previous one is removed: one that can't
       // start it puts everything back.
       let catalog: Awaited<ReturnType<PrinterSession['connect']>> | undefined;

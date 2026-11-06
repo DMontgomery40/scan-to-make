@@ -661,13 +661,35 @@ public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
         public let path: String?
         public let version: String?
         public let canMove: Bool
+        /// It runs Counterpart's own copy. A companion from before Nov 6 doesn't say; its `canMove` does.
+        public let managed: Bool?
+        /// The companion's sentence: which copy, its version, and whether it's older than Counterpart's.
+        let sentence: String?
         public var id: String { destinationId }
+        enum CodingKeys: String, CodingKey { case destinationId, printer, mcpId, kind, path, version, canMove, managed, sentence = "words" }
         public var words: String {
-            let location = kind == "app" ? "Counterpart’s copy" : "your copy" + (path.map { " at " + ($0 as NSString).abbreviatingWithTildeInPath } ?? "")
+            if let sentence { return sentence }
+            let place = path.map { " at " + ($0 as NSString).abbreviatingWithTildeInPath } ?? ""
+            let location = managed ?? !canMove ? "Counterpart’s copy" : kind == "app" ? "Counterpart’s older copy" + place : "your copy" + place
             return "\(printer) uses \(location) (\(version ?? "version unknown"))."
         }
     }
+    /// One Move to Counterpart's updated copy, named by its printers, MCP and the copy they leave.
+    public struct Move: Decodable, Sendable, Equatable { public let mcpId: String; public let title: String }
     public let uses: [Usage]?
+    let listedMoves: [Move]?
+    /// The Moves in the order their printers are listed (never by id), each titled so it reads apart from the others.
+    public var moves: [Move] {
+        if let listedMoves { return listedMoves }
+        let uses = uses ?? []
+        var seen = Set<String>()
+        return uses.filter { $0.canMove && seen.insert($0.mcpId).inserted }.map { first in
+            let printers = uses.filter { $0.mcpId == first.mcpId }.map(\.printer).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+            let place = first.path.map { ($0 as NSString).abbreviatingWithTildeInPath }
+            let from = first.kind == "app" ? "Counterpart’s older copy" + (place.map { " at " + $0 } ?? "") : place.map { "your copy at " + $0 } ?? "your copy"
+            return Move(mcpId: first.mcpId, title: "Move \(printers.joined(separator: ", ")) (\(label), \(from)) to Counterpart’s updated copy")
+        }
+    }
     public let appCopy: Install?
     /// The npm package: `bambu-printer-mcp` or `mcp-3d-printer-server`.
     public let package: String
@@ -681,10 +703,12 @@ public struct PrinterMcpPackage: Decodable, Sendable, Equatable, Identifiable {
     public let appMcpId: String
     public let installs: [Install]
     public var id: String { package }
+    enum CodingKeys: String, CodingKey { case uses, appCopy, package, label, description, installed, version, latestVersion, appMcpId, installs, listedMoves = "moves" }
     public init(package: String, label: String, description: String, installed: Bool, version: String? = nil, latestVersion: String? = nil,
-                appMcpId: String, installs: [Install] = [], uses: [Usage]? = nil, appCopy: Install? = nil) {
+                appMcpId: String, installs: [Install] = [], uses: [Usage]? = nil, appCopy: Install? = nil, moves: [Move]? = nil) {
         self.package = package; self.label = label; self.description = description; self.installed = installed; self.version = version
         self.latestVersion = latestVersion; self.appMcpId = appMcpId; self.installs = installs; self.uses = uses; self.appCopy = appCopy
+        self.listedMoves = moves
     }
 }
 

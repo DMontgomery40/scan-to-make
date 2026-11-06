@@ -391,11 +391,30 @@ export function shownSlice(estimate: Estimate | undefined) {
 export function mcpUsageWords(
   use: NonNullable<import("./types").McpPackage["uses"]>[number],
 ): string {
-  const source =
-    use.kind === "app"
-      ? "Counterpart’s copy"
-      : `your copy${use.path ? ` at ${use.path}` : ""}`;
+  if (use.words) return use.words;
+  const place = use.path ? ` at ${use.path}` : "";
+  const source = (use.managed ?? !use.canMove)
+    ? "Counterpart’s copy"
+    : use.kind === "app" ? `Counterpart’s older copy${place}` : `your copy${place}`;
   return `${use.printer} uses ${source} (${use.version ?? "version unknown"}).`;
+}
+
+/** The Moves in the order the uses are listed (never by id), each titled so two Moves for one printer read apart. */
+export function mcpMoves(pkg: import("./types").McpPackage): { mcpId: string; title: string }[] {
+  if (pkg.moves) return pkg.moves;
+  const uses = pkg.uses ?? [];
+  return [...new Set(uses.filter((use) => use.canMove).map((use) => use.mcpId))].map((mcpId) => {
+    const on = uses.filter((use) => use.mcpId === mcpId), first = on[0]!;
+    const from = first.kind === "app"
+      ? `Counterpart’s older copy${first.path ? ` at ${first.path}` : ""}`
+      : first.path ? `your copy at ${first.path}` : "your copy";
+    return { mcpId, title: `Move ${[...new Set(on.map((use) => use.printer))].join(", ")} (${pkg.label}, ${from}) to Counterpart’s updated copy` };
+  });
+}
+
+/** The installs a package's notices belong to: its printers' and Counterpart's own copy. */
+export function mcpPackageIds(pkg: import("./types").McpPackage): string[] {
+  return [...new Set([...(pkg.uses ?? []).map((use) => use.mcpId), pkg.appMcpId])];
 }
 
 export function mcpMoveNotice(reply: {update: {state: string; found?: string}}): string {

@@ -306,6 +306,28 @@ test("MCP row shows the printer’s checkout separately from the app copy", asyn
   assert.equal(fixture.appCopy.version, "1.2.45");
 });
 
+test("Settings → Printers follow-up: two P1S profiles get Moves that read apart, in listed order; another client's update shows in its MCP's group", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { mcpMoves, mcpPackageIds, mcpUsageWords, mcpUpdateNotices } = await import("../src/domain.ts");
+  const { packages } = JSON.parse(await readFile(new URL("../../../packages/contracts/fixtures/mcp-printer-moves.json", import.meta.url), "utf8"));
+  const titles = packages.flatMap((pkg: any) => mcpMoves(pkg).map((move) => move.title));
+  assert.equal(new Set(titles).size, 2, "two P1S Moves never read the same");
+  for (const pkg of packages) assert.deepEqual(mcpMoves(pkg).map((move) => move.mcpId), pkg.uses.filter((use: any) => use.canMove).map((use: any) => use.mcpId));
+  assert.match(mcpUsageWords(packages[0].uses[0]), /older than Counterpart’s copy \(1\.1\.69\)/);
+  // A companion before Nov 6 (no moves, no words): listed order, not sorted ids, each naming its copy.
+  const older = {package: "bambu-printer-mcp", label: "bambu-printer-mcp", description: "", installed: true, appMcpId: "mcp-a", installs: [], uses: [
+    {destinationId: "z", printer: "Bambu Lab P1S", mcpId: "mcp-f", kind: "app", path: "/x/printers/bambu-1.1.46", version: "1.1.65", canMove: true},
+    {destinationId: "a", printer: "Bambu Lab P1S", mcpId: "mcp-0", kind: "checkout", path: "/x/bambu-printer-mcp", canMove: true}]};
+  assert.deepEqual(mcpMoves(older).map((move) => move.mcpId), ["mcp-f", "mcp-0"]);
+  assert.notEqual(mcpMoves(older)[0]!.title, mcpMoves(older)[1]!.title);
+  // An mcp.update.* event from any client is a notice under its package (the Move's install and Counterpart's copy).
+  const id = packages[1].moves[0].mcpId;
+  const notices = mcpUpdateNotices({}, [{type: "mcp.update.started", title: "Updating mcp-3D-printer-server", body: "1.2.25 to 1.2.50", data: {mcpId: id}}]);
+  assert.ok(mcpPackageIds(packages[1]).includes(id) && notices[id]);
+  assert.ok(mcpPackageIds(packages[1]).includes(packages[1].appMcpId));
+  assert.ok(!mcpPackageIds(packages[0]).includes(id), "never under the other MCP");
+});
+
 test("an accepted MCP move explains that it is waiting for the print", async () => {
   const {readFile} = await import("node:fs/promises");
   const {mcpMoveNotice} = await import("../src/domain.ts");

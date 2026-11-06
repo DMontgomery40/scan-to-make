@@ -44,12 +44,15 @@ export function Action({
   className = "",
   disabled = false,
   onError,
+  label,
 }: {
   children: ReactNode;
   run: () => Promise<unknown>;
   className?: string;
   disabled?: boolean;
   onError?: (e: string) => void;
+  /** The button's name for a screen reader, when its text alone is ambiguous outside its group. */
+  label?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -58,6 +61,7 @@ export function Action({
     <>
       <button
         className={className}
+        aria-label={label}
         disabled={busy || disabled}
         onClick={async () => {
           if (active.current) return;

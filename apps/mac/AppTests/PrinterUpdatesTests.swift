@@ -14,6 +14,39 @@ import XCTest
         XCTAssertNotEqual(use.mcpId, package.appMcpId)
     }
 
+    /// Settings → Printers follow-up (Nov 6): David's two P1S profiles each showed "Move Bambu Lab P1S to Counterpart's
+    /// updated copy", ordered by id. Each Move now names its MCP and copy, in the order the uses are listed, and a stale
+    /// copy (printers/bambu-1.1.46 behind ssh) says it's older than Counterpart's.
+    func testTwoProfilesOfOnePrinterGetMovesThatReadApartInScreenOrder() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        struct Reply: Decodable { let packages: [PrinterMcpPackage] }
+        let packages = try JSONDecoder().decode(Reply.self, from: Data(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/mcp-printer-moves.json"))).packages
+        let titles = packages.flatMap { $0.moves.map(\.title) }
+        XCTAssertEqual(titles.count, 2)
+        XCTAssertEqual(Set(titles).count, 2, "two P1S Moves never read the same")
+        XCTAssertTrue(titles[0].contains("bambu-printer-mcp") && titles[0].contains("bambu-1.1.46"), titles[0])
+        XCTAssertTrue(titles[1].contains("mcp-3D-printer-server") && titles[1].contains("~/mcp-3D-printer-server"), titles[1])
+        for package in packages { XCTAssertEqual(package.moves.map(\.mcpId), (package.uses ?? []).filter(\.canMove).map(\.mcpId)) }
+        let stale = try XCTUnwrap(packages.first?.uses?.first)
+        XCTAssertTrue(stale.words.contains("older than Counterpart’s copy (1.1.69)"), stale.words)
+        XCTAssertEqual(packages[0].updateLabel(failed: false), "Update bambu-printer-mcp to 1.1.69")
+    }
+
+    /// A companion from before Nov 6 sends no `moves` or `words`: the Mac names the MCP and copy itself, still in listed order.
+    func testAnOlderCompanionsMovesStillNameTheirCopyInListedOrder() throws {
+        let json = #"""
+        {"package":"bambu-printer-mcp","label":"bambu-printer-mcp","description":"d","installed":true,"appMcpId":"mcp-0000000000000000","installs":[],
+         "uses":[{"destinationId":"z","printer":"Bambu Lab P1S","mcpId":"mcp-ffff000000000000","kind":"app","path":"/x/printers/bambu-1.1.46","version":"1.1.65","canMove":true},
+                 {"destinationId":"a","printer":"Bambu Lab P1S","mcpId":"mcp-0000000000000001","kind":"checkout","path":"/x/bambu-printer-mcp","version":"1.1.60","canMove":true}]}
+        """#
+        let package = try JSONDecoder().decode(PrinterMcpPackage.self, from: Data(json.utf8))
+        XCTAssertEqual(package.moves.map(\.mcpId), ["mcp-ffff000000000000", "mcp-0000000000000001"], "listed order, not sorted ids")
+        XCTAssertEqual(package.moves.map(\.title), ["Move Bambu Lab P1S (bambu-printer-mcp, Counterpart’s older copy at /x/printers/bambu-1.1.46) to Counterpart’s updated copy",
+                                                     "Move Bambu Lab P1S (bambu-printer-mcp, your copy at /x/bambu-printer-mcp) to Counterpart’s updated copy"])
+        XCTAssertEqual(package.uses?.first?.words, "Bambu Lab P1S uses Counterpart’s older copy at /x/printers/bambu-1.1.46 (1.1.65).")
+    }
+
     private func event(_ type: String, _ data: String) throws -> CounterpartEvent {
         try JSONDecoder().decode(CounterpartEvent.self, from: Data(#"""
         {"seq":1,"id":"e","at":"2026-11-01T10:00:00Z","type":"\#(type)","title":"t","body":"b","notify":"passive","data":\#(data)}
