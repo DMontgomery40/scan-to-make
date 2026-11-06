@@ -159,8 +159,10 @@ figcaption b { color: var(--ink); font-weight: 600; }
 
 /* Hero */
 .hero { padding-block: 4.5rem 5rem; }
-.hero .wrap { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.3fr); gap: 3rem; align-items: center; }
+.hero .wrap { display: grid; grid-template-columns: minmax(0, 58rem); gap: 3rem; align-items: center; }
 .platforms-line { display: flex; flex-wrap: wrap; gap: .45rem; margin: 0 0 1.4rem; padding: 0; list-style: none; }
+.status { margin: 1.4rem 0 0; color: var(--ink-soft); font-size: .98rem; font-weight: 550; }
+.cant-buy { margin-top: 3rem; }
 .platforms-line li { max-width: none; }
 .stage { position: relative; margin: 0; padding-bottom: 8%; }
 .stage .mac { width: 100%; }
@@ -289,6 +291,26 @@ figcaption b { color: var(--ink); font-weight: 600; }
 .checks li b { color: var(--ink); font-weight: 600; }
 .checks li::before { content: ""; position: absolute; left: 0; top: .25rem; width: 1.1rem; height: 1.1rem; border-radius: 50%; background: var(--orange-wash); box-shadow: inset 0 0 0 5px var(--orange-wash), inset 0 0 0 10px var(--orange); }
 
+/* End to end: the chain, once, under the hero */
+.chain { padding-block: 0 1.5rem; }
+.chain ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: stretch; gap: .6rem; }
+.chain li { display: flex; align-items: center; gap: .6rem; max-width: none; }
+.chain .node { padding: .8rem 1.1rem; border-radius: 999px; font-weight: 600; font-size: .98rem; white-space: nowrap; }
+.chain .arrow { color: var(--orange-ink); font-weight: 700; }
+.chain p { margin: 1.1rem 0 0; color: var(--ink-soft); font-size: 1.05rem; max-width: 46rem; }
+.chain p b { color: var(--ink); }
+
+/* Comparison table */
+.cmp-wrap { padding: .5rem 1.4rem; overflow-x: auto; }
+.cmp { width: 100%; border-collapse: collapse; font-size: .95rem; min-width: 44rem; }
+.cmp th, .cmp td { text-align: left; vertical-align: top; padding: .8rem .8rem .8rem 0; border-bottom: 1px solid var(--rule); }
+.cmp tr:last-child th, .cmp tr:last-child td { border-bottom: 0; }
+.cmp thead th { color: var(--ink); font-weight: 650; font-size: .92rem; }
+.cmp tbody th { font-weight: 600; }
+.cmp td { color: var(--ink-soft); }
+.cmp .us { color: var(--ink); font-weight: 600; }
+.cmp-note { color: var(--ink-soft); font-size: .95rem; margin-top: 1rem; max-width: 52rem; }
+
 /* Requirements table */
 .req-wrap { padding: .5rem 1.4rem; overflow-x: auto; }
 .req { width: 100%; border-collapse: collapse; font-size: .98rem; }
@@ -334,6 +356,8 @@ figcaption b { color: var(--ink); font-weight: 600; }
 
 /* Help page */
 .help { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 3.5rem; padding-block: 2.5rem 4rem; }
+.toc-disclosure summary { cursor: pointer; font-weight: 600; padding: .6rem 0 .2rem; }
+@media (min-width: 981px) { .toc-disclosure summary { display: none; } }
 .help-side { position: sticky; top: 6rem; align-self: start; max-height: calc(100vh - 7rem); overflow: auto; padding: 1rem; }
 .search { width: 100%; padding: .6rem .9rem; border-radius: 999px; border: 1px solid var(--glass-rim); background: var(--sheet); color: var(--ink); font: inherit; font-size: .98rem; }
 .search:focus { outline: 2px solid var(--orange); outline-offset: 1px; }
@@ -359,6 +383,7 @@ figcaption b { color: var(--ink); font-weight: 600; }
 .nomatch { padding: 2rem 0; color: var(--ink-soft); }
 mark { background: var(--orange-wash); color: inherit; border-radius: 2px; padding: 0 .1em; }
 .page { padding-block: 3rem 4rem; }
+main.page { width: min(100% - 2.5rem, 60rem); }
 .page section { padding-block: 2.4rem; border-top: 1px solid var(--rule); }
 .page > section:first-of-type { border-top: 0; }
 
@@ -395,6 +420,9 @@ mark { background: var(--orange-wash); color: inherit; border-radius: 2px; paddi
   .masthead nav a.keep:not(.nav-cta):not([aria-current]) { display: inline-block; }
 }
 @media (max-width: 640px) {
+  .hero .wrap { gap: 1.75rem; }
+  .switch { border-radius: 20px; flex-wrap: nowrap; overflow-x: auto; max-width: 100%; }
+  .toc { columns: 2; }
   section { padding-block: 3.5rem; }
   .wrap { width: min(100% - 1.6rem, var(--wide)); }
   .hero { padding-top: 2.5rem; }
@@ -450,7 +478,7 @@ mark { background: var(--orange-wash); color: inherit; border-radius: 2px; paddi
 /* Start with these: the starter catalog's two designer projects */
 .starters { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
 .starters li { max-width: none; overflow: hidden; padding: 0; display: flex; flex-direction: column; }
-.starters img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #e9e9ec; }
+.starters img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: var(--sheet); }
 .starters li div { padding: 1.3rem 1.5rem 1.6rem; }
 .starters h3 { font-size: 1.5rem; margin-bottom: .2rem; }
 .starters .by { margin: 0 0 .7rem; font-weight: 600; color: var(--ink-soft); font-size: .95rem; }
