@@ -1466,6 +1466,32 @@ test('a newer estimate for the same project and printer stops the older slice; t
   assert.equal(slices.filter(slice => slice.input.signal.aborted).length, 1, 'only the superseded slice was stopped');
 });
 
+// Codex on #375: settings A, then B, then A again while A's slice is still stopping (an MCP takes a moment to stop
+// one). The newest A is the sheet's own request: it slices afresh instead of joining the stopping slice and failing.
+test('settings changed back while the old slice is still stopping slice again', async t => {
+  const f = await setup(t, {reports: [status('RUNNING', 10)], sliceArgs: true});
+  const slices = [];
+  f.deps.print.services.runner.estimate = input => new Promise((resolve, reject) => {
+    slices.push({input, finish: () => resolve({estimate: {seconds: 60, grams: 2}, settings: {}})});
+    // Stopping takes a while: the call ends 300 ms after it is cancelled.
+    input.signal?.addEventListener('abort', () => setTimeout(() => reject(Object.assign(new PrinterMcpError('cancelled'), {incomplete: true})), 300), {once: true});
+  });
+  const firstA = f.service.estimate(f.object.id, {quality: 'standard'});
+  firstA.catch(() => undefined);
+  await until(() => slices.length === 1);
+  const b = f.service.estimate(f.object.id, {quality: 'fine'});
+  b.catch(() => undefined);
+  await until(() => slices.length === 2);
+  assert.equal(slices[0].input.signal.aborted, true, 'A is stopping, not stopped');
+  const againA = f.service.estimate(f.object.id, {quality: 'standard'});
+  await until(() => slices.length === 3);
+  assert.equal(slices[1].input.signal.aborted, true, 'B is stopped for the newest A');
+  slices[2].finish();
+  assert.equal((await againA).seconds, 60);
+  await assert.rejects(firstA, {name: 'EstimateSupersededError'});
+  await assert.rejects(b, {name: 'EstimateSupersededError'});
+});
+
 test('an estimate that runs out of time, or whose MCP call never finishes, says so plainly, never in the MCP client’s words', async t => {
   const f = await setup(t, {reports: [status('RUNNING', 10)], sliceArgs: true});
   slowEstimates(f);

@@ -2041,7 +2041,10 @@ export class ObjectService {
     const latest = this.#estimateLatest.get(slot);
     if (latest && latest.sequence > sequence && latest.key !== key) throw new EstimateSupersededError();
     if (!latest || latest.sequence < sequence) {
-      if (latest && latest.key !== key) this.#estimateSlices.get(latest.key)?.abort();
+      // The stopped slice leaves the shared cache at once: settings changed back to it start a new slice instead of
+      // joining the one being stopped (Codex on #375).
+      const stale = latest && latest.key !== key ? this.#estimateSlices.get(latest.key) : undefined;
+      if (stale) { stale.abort(); this.#estimateSlices.delete(latest!.key); this.#estimates2.delete(latest!.key); }
       this.#estimateLatest.set(slot, {sequence, key});
       if (this.#estimateLatest.size > 64) this.#estimateLatest.delete(this.#estimateLatest.keys().next().value!);
     }
