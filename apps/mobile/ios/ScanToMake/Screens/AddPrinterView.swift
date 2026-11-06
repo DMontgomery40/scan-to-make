@@ -77,6 +77,7 @@ private struct AddPrinterCandidateRow: View {
             content.accessibilityElement(children: .contain)
         } else {
             Button { model.start(model.prefilled(candidate)) } label: { content }
+                .tint(.primary)
                 .accessibilityIdentifier("add-printer-found-\(candidate.id)")
         }
     }
@@ -158,27 +159,30 @@ private struct AddPrinterForm: View {
                     ForEach(model.models) { Text($0.label).tag($0.value) }
                 }
             }
-            field("host", fallback: "Address") {
-                TextField(type?.field("host")?.label ?? "Address", text: $model.form.host, prompt: Text("192.168.1.20 or printer.local"))
+            field("host", label: type?.field("host")?.label ?? "Address") {
+                TextField(type?.field("host")?.label ?? "Address", text: $model.form.host, prompt: Text("192.168.1.20"))
                     .keyboardType(type?.field("host")?.input == "url" ? .URL : .asciiCapable)
             }
             if type?.field("port") != nil {
-                field("port", fallback: "Port") {
+                field("port", label: type?.field("port")?.label ?? "Port") {
                     TextField(type?.field("port")?.label ?? "Port", text: Binding(get: { model.form.port ?? "" }, set: { model.form.port = $0.isEmpty ? nil : $0 }), prompt: Text("Default"))
                         .keyboardType(.numberPad)
                 }
             }
             if type?.serial == true {
-                field("serial", fallback: "Serial number") {
+                field("serial", label: type?.field("serial")?.label ?? "Serial number") {
                     TextField(type?.field("serial")?.label ?? "Serial number", text: Binding(get: { model.form.serial }, set: { model.type(serial: $0) }))
                         .textInputAutocapitalization(.characters)
                 }
             }
             if let secret = type?.secret {
                 VStack(alignment: .leading, spacing: 6) {
-                    SecureField(secret.label + (secret.required ? "" : " (optional)"), text: $model.form.secret)
-                        .focused($focused, equals: "secret")
-                        .accessibilityIdentifier("add-printer-secret")
+                    LabeledContent(secret.label) {
+                        SecureField(secret.label, text: $model.form.secret, prompt: Text(secret.required ? "Required" : "Optional"))
+                            .multilineTextAlignment(.trailing)
+                            .focused($focused, equals: "secret")
+                            .accessibilityIdentifier("add-printer-secret")
+                    }
                     if let hint = secret.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
                 }
                 if let obtain = ObtainControl(options: model.options, form: model.form) { obtainRow(obtain) }
@@ -188,11 +192,14 @@ private struct AddPrinterForm: View {
         }
     }
 
-    /// A text field with the MCP's hint under it.
-    @ViewBuilder private func field<Content: View>(_ name: String, fallback: String, @ViewBuilder content: () -> Content) -> some View {
+    /// A labelled text field (the MCP's label, so a filled-in value still says what it is), with the MCP's hint under it.
+    @ViewBuilder private func field<Content: View>(_ name: String, label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            content().textInputAutocapitalization(name == "serial" ? .characters : .never).autocorrectionDisabled()
-                .accessibilityIdentifier("add-printer-\(name)")
+            LabeledContent(label) {
+                content().multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(name == "serial" ? .characters : .never).autocorrectionDisabled()
+                    .accessibilityIdentifier("add-printer-\(name)")
+            }
             if let hint = type?.field(name)?.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
         }
     }
