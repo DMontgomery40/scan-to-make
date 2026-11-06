@@ -549,7 +549,7 @@ final class LayoutParityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "plates-unconfirmed",
                                "-CounterpartScreen", "ready"]
-        app.launchEnvironment["COUNTERPART_SIX_PLATES"] = rig
+        app.launchEnvironment["COUNTERPART_RIG_FIXTURE"] = rig
         app.launch()
         let second = app.buttons["select-plate-0-1"]
         XCTAssertTrue(second.waitForExistence(timeout: 20))

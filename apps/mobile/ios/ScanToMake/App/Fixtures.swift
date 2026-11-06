@@ -65,7 +65,7 @@ enum Fixtures {
         // "plates-unconfirmed" is David's rig on Nov 6, from the shared fixture the companion's tests check
         // (packages/contracts/fixtures/six-plate-unconfirmed.json, passed in by the UI test): plate 1's start timed out.
         // Its doubt stays on plate 1; every plate stays choosable, here and in the Print sheet.
-        if set == "plates-unconfirmed", let json = ProcessInfo.processInfo.environment["COUNTERPART_SIX_PLATES"],
+        if set == "plates-unconfirmed", let json = ProcessInfo.processInfo.environment["COUNTERPART_RIG_FIXTURE"],
            let rig = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
            var project = rig[plateChanged ? "switched" : "unconfirmed"] as? [String: Any] {
             project["id"] = ids.mic
