@@ -88,6 +88,8 @@ export interface PrinterToolCallOptions {
   /** Transparent MCP adapters preserve tool errors and media under the SDK's
    * transport frame limit, without applying printer-domain result semantics. */
   forwardResult?: boolean;
+  /** A read whose answer carries pictures (list_3mf_plates' plate images): bounded by the forwarding limit. */
+  largeResult?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
   dispatchSensitive?: boolean;
@@ -306,7 +308,7 @@ export class PrinterMcpClient {
     const refused = result.isError && name === 'slice_stl' ? slicerReport(result.structuredContent) : undefined;
     if (refused?.failed) fail('slicer-error', undefined, refused.message);
     if (result.isError) fail('tool-failed', undefined, failureDetail(result, this.#config));
-    if (Buffer.byteLength(JSON.stringify(result)) > MAX_RESULT_BYTES) fail('result-limit');
+    if (Buffer.byteLength(JSON.stringify(result)) > (options.largeResult ? MAX_FORWARDED_BYTES : MAX_RESULT_BYTES)) fail('result-limit');
     return structuredClone(result);
   }
 

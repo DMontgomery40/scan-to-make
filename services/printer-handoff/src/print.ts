@@ -117,12 +117,13 @@ function filtered(session: PrinterSession, name: string, args: Record<string, un
   return Object.fromEntries(Object.entries(clean).filter(([key]) => allowed.has(key)));
 }
 const DISPATCH_TOOLS = ['print_3mf', 'upload_gcode', 'process_and_print_stl'];
-interface CallOptions {signal?: AbortSignal; beforeDispatch?: () => Promise<void>; elicitationContext?: ElicitationContext; failFast?: boolean; onProgress?: (progress: McpProgress) => void}
+interface CallOptions {signal?: AbortSignal; beforeDispatch?: () => Promise<void>; elicitationContext?: ElicitationContext; failFast?: boolean; onProgress?: (progress: McpProgress) => void; largeResult?: boolean}
 /** `list_3mf_plates` on this session's MCP: its plates, or `plates-unsupported` (Update) when it has no such tool. */
-async function listPlates(session: PrinterSession, modelPath: string, backend: PrinterHandoffConfig['backend'], options: CallOptions = {}): Promise<McpModelPlates> {
+async function listPlates(session: PrinterSession, modelPath: string, backend: PrinterHandoffConfig['backend'], options: CallOptions = {}, thumbnails = false): Promise<McpModelPlates> {
   if (!session.hasTool('list_3mf_plates'))
     throw new PrinterMcpError('plates-unsupported', undefined, `Update ${packageLabel(backend)} in Settings → Printers to show this file’s plates.`);
-  const result = await call(session, 'list_3mf_plates', {three_mf_path: modelPath, include_thumbnails: true}, options);
+  // With every plate's picture the answer can pass the usual result limit: it is a read, bounded by the forwarding one.
+  const result = await call(session, 'list_3mf_plates', {three_mf_path: modelPath, include_thumbnails: thumbnails}, {...options, ...(thumbnails ? {largeResult: true} : {})});
   const plates = modelPlatesFrom(result.structuredContent);
   if (!plates) throw new PrinterMcpError('plates-unsupported', undefined, `Update ${packageLabel(backend)} in Settings → Printers to show this file’s plates.`);
   return plates;
@@ -136,6 +137,7 @@ async function call(session: PrinterSession, name: string, args: Record<string, 
     ...(options.elicitationContext ? {elicitationContext: options.elicitationContext} : {}),
     ...(options.failFast ? {failFast: true} : {}),
     ...(options.onProgress ? {onProgress: options.onProgress} : {}),
+    ...(options.largeResult ? {largeResult: true} : {}),
   });
 }
 function absolutePath(result: Parameters<typeof toolResultText>[0]): string {
@@ -284,7 +286,7 @@ export class PrinterHandoffRunner {
     return this.#use(async (session, shared) => {
       const options = {...(input.signal ? {signal: input.signal} : {}), failFast: shared};
       await session.connect(options);
-      return listPlates(session, input.modelPath, this.#config.backend, options);
+      return listPlates(session, input.modelPath, this.#config.backend, options, true);
     });
   }
 

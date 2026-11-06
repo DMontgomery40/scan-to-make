@@ -4,7 +4,7 @@ import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {zipSync, strToU8} from 'fflate';
+import {zipSync, unzipSync, strToU8} from 'fflate';
 import {
   HandoffBundleStore,
   DispatchedPrintError,
@@ -903,4 +903,21 @@ test('an MCP without list_3mf_plates is one to update, for listing and for print
   await assert.rejects(f.runner.modelPlates({modelPath: path}), update);
   await assert.rejects(f.runner.run({stlPath: path, selection: {plateIndex: 2}}), update);
   assert.ok(!(await f.calls()).some(call => ['slice_stl', 'print_3mf'].includes(call.tool)), 'nothing sliced or sent');
+});
+
+// Codex on #370: a kit's plate pictures can together pass the usual 1 MiB result limit. Listing them (a read) is
+// bounded by the forwarding limit instead, and the print path's plate check asks for no pictures at all.
+test('large plate pictures still list, and the print path checks the plate without pictures', async t => {
+  const f = await setup(t);
+  const big = Buffer.concat([PNG_1PX.subarray(0, 24), Buffer.alloc(300 * 1024, 7)]);
+  const entries = {...Object.fromEntries(Object.entries(unzipSync(sixPlates())))};
+  for (let n = 1; n <= 6; n++) entries[`Metadata/plate_${n}.png`] = new Uint8Array(big);
+  const path = join(f.root, 'kit.3mf');
+  await writeFile(path, Buffer.from(zipSync(entries)));
+  const listed = await f.runner.modelPlates({modelPath: path});
+  assert.equal(listed.plates.length, 6);
+  assert.ok(listed.plates.every(plate => plate.thumbnail?.length === big.length));
+  await f.runner.estimate({stlPath: path, selection: {plateIndex: 3}}).catch(() => undefined);
+  const lists = (await f.calls()).filter(call => call.tool === 'list_3mf_plates');
+  assert.deepEqual(lists.map(call => call.arguments.include_thumbnails), [true, false]);
 });
