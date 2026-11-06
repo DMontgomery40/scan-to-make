@@ -612,7 +612,8 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertFalse(add.isEnabled, "the access code is still needed")
         let secret = app.secureTextFields["add-printer-secret"]
         XCTAssertTrue(secret.exists)
-        secret.tap(); secret.typeText("12345678")
+        // Return puts the keyboard away, as a person would before checking.
+        secret.tap(); secret.typeText("12345678\n")
         XCTAssertTrue(add.isEnabled)
         let check = app.buttons["add-printer-check"]
         // The sheet's own form (its rows are made as they scroll in): on the iPad the sidebar behind it is a list too.
