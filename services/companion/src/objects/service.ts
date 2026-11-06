@@ -2404,7 +2404,9 @@ export class ObjectService {
     const receipts = object.files?.receipts;
     if (!receipts?.length || !['ready', 'failed', 'printed', 'confirmed'].includes(object.state) || object.print?.uncertain) return false;
     const plates = receipts.reduce((sum, receipt) => sum + receipt.plates.length, 0);
-    return receipts.some(receipt => extname(receipt.name).toLowerCase() !== '.3mf') || receipts.length < starter.files || plates < (starter.plates ?? 0);
+    // Plates the printer MCP hasn't listed yet are unknown, not missing (Codex on #372): only listed plates are counted.
+    const unlisted = receipts.some(receipt => receipt.platesListed === false);
+    return receipts.some(receipt => extname(receipt.name).toLowerCase() !== '.3mf') || receipts.length < starter.files || (!unlisted && plates < (starter.plates ?? 0));
   }
   /** The designer's kit replaces a starter project's wrong files; the project, its title, credit and messages stay. */
   async #refetchStarter(id: string): Promise<StmObject> {

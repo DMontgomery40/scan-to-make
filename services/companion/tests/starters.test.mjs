@@ -344,6 +344,10 @@ test('adding a starter again replaces an old project’s raw STL with the design
  // A project that already has its kit is just reopened: no pass.
  const {value:same}=await logged(()=>service.addStarter('scan-platform'));
  assert.equal(same.id,old.id);assert.equal(asked.length,2);
+ // Plates no printer MCP has listed yet are unknown, not missing: the kit is reopened, never replaced (Codex on #372).
+ await store.update(old.id,o=>({...o,files:{...o.files,receipts:o.files.receipts.map(r=>({...r,plates:[],platesListed:false}))}}));
+ const {value:unlisted}=await logged(()=>service.addStarter('scan-platform'));
+ assert.equal(unlisted.id,old.id);assert.equal(asked.length,2);assert.equal(unlisted.current?.model,same.current?.model);
  // A caliper project with only one of its two files gets the kit from the cache or a pass, too.
  const half=await setup(t,async(_input,root)=>caliper(root));
  const c=await half.service.create('Print this','published','https://makerworld.com/en/models/198362');
