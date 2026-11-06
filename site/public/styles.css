@@ -503,10 +503,6 @@ main.page { width: min(100% - 2.5rem, 60rem); }
 .wwp { grid-template-columns: minmax(0, 1fr) minmax(0, 15rem); align-items: start; }
 .wwp figure.tall .shot img { border-radius: 24px; }
 .facts { margin-top: 1.75rem; }
-.facts li.pic { grid-column: span 2; grid-row: span 2; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
-.facts li.pic img { width: 100%; flex: 1; min-height: 0; aspect-ratio: 1200 / 586; object-fit: cover; }
-.facts li.pic div { padding: 1.1rem 1.3rem 1.3rem; }
-@media (max-width: 980px) { .facts li.pic { grid-column: auto; grid-row: auto; } }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; counter-reset: step; }
 .steps li { counter-increment: step; padding: 1.25rem 1.35rem; max-width: none; }
 .steps li::before { content: counter(step); display: inline-grid; place-items: center; width: 1.9rem; height: 1.9rem; margin-bottom: .7rem; border-radius: 50%; background: var(--button); color: #fff; font-weight: 700; font-size: .9rem; }
@@ -536,3 +532,36 @@ main.page { width: min(100% - 2.5rem, 60rem); }
 
 .hero-photo { margin: 0; min-width: 0; }
 .hero-photo img { width: 100%; border-radius: 28px; box-shadow: var(--shadow); }
+
+/* Real captures: the hero's Print sheet + bed camera, Follow the print, What will print, Printers */
+.hero .wrap { grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); }
+.hero-stack { position: relative; margin: 0; padding-bottom: 5.5rem; min-width: 0; }
+.hero-stack .sheet img { width: 100%; height: auto; }
+.hero-stack .bed { position: absolute; left: -2.5rem; bottom: 2.4rem; width: 58%; }
+.hero-stack .bed img { width: 100%; height: auto; border: 3px solid var(--sheet); }
+.hero-stack figcaption { position: absolute; left: 58%; right: 0; bottom: 0; padding-left: 1.6rem; }
+.follow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+.follow img, .shots-row img { width: 100%; height: auto; }
+.shots-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; margin-top: .5rem; }
+@media (max-width: 980px) {
+  .hero .wrap { grid-template-columns: 1fr; }
+  .hero-stack { max-width: 40rem; }
+  .hero-stack .bed { left: -1rem; }
+  .shots-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .hero-stack { padding-bottom: 0; }
+  .hero-stack .bed { position: static; width: 100%; margin-top: 1rem; }
+  .hero-stack .bed img { border: 0; }
+  .hero-stack figcaption { position: static; padding: 0; }
+  .follow { grid-template-columns: 1fr 1fr; }
+  .follow figure:first-child { display: none; }
+}
+.shots-row.projects { grid-template-columns: minmax(0, 16.25rem) minmax(0, 1fr); margin-top: 1.5rem; align-items: center; }
+.wwp-shot { max-width: 42.5rem; margin-top: .5rem; }
+.wwp-shot img { width: 100%; height: auto; }
+@media (max-width: 640px) {
+  .shots-row.projects { grid-template-columns: 1fr; }
+  .shots-row.projects figure:first-child { max-width: 16.25rem; }
+}
+.wwp-shot.spools { max-width: 27.5rem; }

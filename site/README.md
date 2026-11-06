@@ -15,7 +15,7 @@ site/
 │   ├── 404.html
 │   ├── styles.css     light and dark palettes, glass surfaces; the orange is the app icon's
 │   ├── site.js        tabs, zoom, checklist, help search; every page works without it
-│   ├── screens/       real screens (see below) and PRD mockups from docs/design/overhaul/screens
+│   ├── screens/       real app and printer-camera captures (see below)
 │   └── icon-256.png, icon-512.png, favicon.png, apple-touch-icon.png   from the iOS app icon
 ├── check.mjs          static checks
 └── wrangler.jsonc
@@ -36,23 +36,24 @@ buttons, meets WCAG AA in both palettes.
 
 ## Keeping it true
 
-- **Screens.** A few UI-only images (pairing, printers, settings) come from `docs/design/overhaul/screens`. The rest are
-  real captures, from `~/scan-to-make-work/` on the Mac:
-  - `mac-what-will-print.jpg`: `mac-202611050844/print-sheet-what-will-print.png` (installed Mac app, Nov 5).
-  - `linux-what-will-print.jpg`: `android-linux-20261105/linux-caliper-preview-enabled.png`, Xvfb margin cropped
-    (agents-136 engineering check with a P1S, `linux-receipt.txt`). Never use `linux-add-printer.png`: it shows the
-    printer's address and serial.
-  - `android-home.jpg`: `android-linux-20261105/android-main745-search-show-all.png` (emulator paired with the Mac,
-    `android-main745-receipt.txt`).
-  - `iphone-print.jpg`: `phone-pickers-council/r3/device-print-pauses.png` (iPhone, development build, sample data).
-  - `iphone-printer.jpg`: `phone-pickers-council/r3/device-printer-connection.png` (same build).
-  - `android-what-will-print.jpg`: `android-linux-20261105/android-caliper-print.png`.
-  - `made/*.jpg`: the app's own renders (`current/renders/1_overview*.png`) of David's printed projects marked "It works"
-    (AirPods Max hanger `5158831c`, Vivi pick `a2bfa85a`, caliper card `1f1c5515`, mic mount `7f157a66`) and the
-    Leatherman Wave+ LiDAR scan `ba9346cd`, from `~/Library/Application Support/Scan to Make/capture/objects/` on the Mac.
-  Mockups that show sample objects (cable clip, crochet potato, sample mic mount) are not used; only UI-only mockups
-  (pairing, printers, settings) remain. Replace a real screen with a newer real one when the app changes; say on the
-  page what it is.
+- **Screens.** Every image in `screens/` is a real capture, cropped only (no edits), from `~/scan-to-make-work/` on the
+  Mac:
+  - `mac-print-sheet.webp`, `mac-what-will-print.webp`, `mac-printer-spools.webp`:
+    `site-captures-20261106/03-print-sheet-3d-scan-platform.png` (installed Mac app 202611061750, the 3D scan platform's
+    Photography Platform plate, P1S). Cropped above the sheet's last-print warning; the sidebar's device name is cut out.
+  - `mac-plates.webp`, `mac-projects.webp`: `site-captures-20261106/01-project-window-3d-scan-platform-as-found.png`
+    (same build). Cropped to the Plates strip and to the Ready/Done/Printed part of the list, leaving out the error
+    rows and the device name.
+  - `bed-screws-early|mid|done.webp`: the P1S camera printing the scan platform's Screws plate on Nov 6
+    (`rig-print-20261106/frame-04-printing-0115.jpg`, `frame-printing-0152.jpg`, `frame-printing-0246.jpg`; layers 25,
+    45 and 137 of 201 in `watch.log`). The `-640` files are the same frames scaled for the page; the full size opens on
+    click.
+  Window captures are taken with `screencapture -x -o -l <windowID>` from the Mac's own session, without bringing
+  Counterpart forward. Don't pair a Print sheet with a bed photo unless the sheet's colours match what printed. Replace a
+  screen with a newer real one when the app changes.
+- **`made/*.jpg`**: the app's own renders (`current/renders/1_overview*.png`) of David's printed projects marked "It
+  works" (Vivi pick `a2bfa85a`, mic mount `7f157a66`). No generated or stock pictures: every image is the app, the
+  printer's camera, or a real part.
 - **Written for people who print things.** Plain, confident product copy: no test-status notes, no "real screen" or
   "mockup" captions, no tool names, code, versions, paths or internals tables. Beta status is one line in Downloads.
   Claims still have to be true of what's on main (PRD §0).
