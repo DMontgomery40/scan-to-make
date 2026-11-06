@@ -58,6 +58,8 @@ export function PrintSheet({
   const [mappingSlots, setMappingSlots] = useState<Record<number, number>>({});
   // Until the mapping answers, nothing slices: an estimate without its per-part spools would print one colour.
   const [mappingLoaded, setMappingLoaded] = useState(false);
+  const [mappingProblem, setMappingProblem] = useState("");
+  const [mappingAttempt, setMappingAttempt] = useState(0);
   const [slot, setSlot] = useState("");
   const [material, setMaterial] = useState("");
   const [estimate, setEstimate] = useState<Estimate>();
@@ -70,14 +72,14 @@ export function PrintSheet({
   const plate = project.plates?.find((p) => p.id === frozen);
   const stale =
     freezePlate(project) !== frozen || project.current?.model !== frozenModel;
+  // The colours, once the printer is chosen: until they answer, nothing slices or prints. A failure stays a
+  // failure (the companion's own words) with Try Again, so a timeout or a since-updated MCP never strands the sheet.
   useEffect(() => {
     let live = true;
-    setFilaments([]);
-    setSlot("");
     setMapping(undefined);
     setMappingSlots({});
     setMappingLoaded(false);
-    setEstimate(undefined);
+    setMappingProblem("");
     if (destination)
       void call<ColourMapping>("objects.colourMapping", { id: project.id }).then(
         (r) => {
@@ -89,9 +91,18 @@ export function PrintSheet({
         },
         (e) => {
           // A refusal (such as "Update bambu-printer-mcp…") is shown and holds Print: it never prints one colour instead.
-          if (live) setError(String(e));
+          if (live) setMappingProblem(String(e));
         },
       );
+    return () => {
+      live = false;
+    };
+  }, [project.id, destination, mappingAttempt]);
+  useEffect(() => {
+    let live = true;
+    setFilaments([]);
+    setSlot("");
+    setEstimate(undefined);
     if (destination)
       void call<{ filaments: Filament[] }>("objects.filaments", {
         id: project.id,
@@ -439,6 +450,14 @@ export function PrintSheet({
         <p role="alert" className="error">
           The plate or model changed on another device. Close Print and review
           the current selection.
+        </p>
+      )}
+      {mappingProblem && (
+        <p role="alert" className="error">
+          {mappingProblem}{" "}
+          <button onClick={() => setMappingAttempt((n) => n + 1)}>
+            Try Again
+          </button>
         </p>
       )}
       {error && (
