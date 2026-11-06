@@ -298,6 +298,9 @@ test('a command whose child keeps its output open still answers by its deadline,
   const left = Number(exited.output.match(/left:(\d+)/)[1]);
   await new Promise(resolve => setTimeout(resolve, 100));
   assert.throws(() => process.kill(left, 0), {code: 'ESRCH'}, 'what it left running is stopped with it');
+  // A character split between two writes reads whole.
+  const split = await runCommand(process.execPath, ['-e', "const b = Buffer.from('€'); process.stdout.write(b.subarray(0, 1)); setTimeout(() => process.stdout.write(b.subarray(1)), 50)"], {env: process.env, timeoutMs: 10_000});
+  assert.equal(split.output, '€');
   // A command that never exits answers at its deadline with a sentence, its group stopped.
   const hung = await runCommand('/bin/sh', ['-c', 'echo "looking:$$"; sleep 30'], {env: process.env, timeoutMs: 200});
   assert.notEqual(hung.code, 0);

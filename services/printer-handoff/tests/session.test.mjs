@@ -322,6 +322,32 @@ test('a restart with a deadline never waits forever: a held session is left as i
   await session.close();
 });
 
+// Codex review, Nov 6: a restart that stopped waiting for a connection still opening let that connection, made from
+// the previous config, become the session's client afterwards: a switch back could end on the version it undid.
+test('a connection still opening when a restart gives up on it never becomes the client', async () => {
+  let open;
+  const made = [];
+  const factory = cfg => {
+    const client = {command: cfg.process.command, closed: false, catalog: undefined,
+      async connect() { if (made.length === 1) await new Promise(resolve => { open = resolve; }); client.catalog = {server: {name: 'fake', version: '1'}, tools: TOOLS}; return client.catalog; },
+      hasTool: () => true, getTool: name => TOOLS.find(tool => tool.name === name),
+      async callTool() { return {content: [{type: 'text', text: '{}'}]}; }, async close() { client.closed = true; }};
+    made.push(client);
+    return client;
+  };
+  const session = new PrinterSession('p1s', {...config, process: {command: '/new'}}, {clientFactory: factory});
+  const opening = session.connect().catch(error => error);
+  await until(() => open);
+  await session.restart({...config, process: {command: '/restored'}}, {signal: deadline(20)});
+  open();
+  assert.match(String((await opening).code ?? await opening), /cancelled/, 'whoever waited on it is told');
+  assert.equal(made[0].closed, true, 'the stale connection closes itself');
+  await session.call('get_printer_status', {});
+  assert.deepEqual(made.map(client => client.command), ['/new', '/restored']);
+  assert.equal(session.health().lastError, undefined, "a connection a restart replaced isn't a failure");
+  await session.close();
+});
+
 test('each restart advances the session generation, so answers kept from the old MCP are told apart', async t => {
   const {factory} = fakes();
   const session = new PrinterSession('p1s', config, {clientFactory: factory});

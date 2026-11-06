@@ -279,6 +279,9 @@ export class PrinterSession {
     const unlock = await this.#lock(options.signal);
     try {
       await this.#settled(this.#connecting?.catch(() => undefined), options.signal);
+      // An attempt still opening was made from the previous config: it closes itself when it opens (#ensure checks
+      // the generation), and the next call starts afresh with this one.
+      this.#connecting = undefined;
       if (config) this.#config = structuredClone(config);
       this.#generation += 1;
       const client = this.#client;
@@ -358,6 +361,7 @@ export class PrinterSession {
       if (this.#client) return this.#client;
       if (this.#connecting) return waitFor(this.#connecting);
     }
+    const generation = this.#generation;
     const attempt = (async () => {
       let client!: SessionClient;
       const factory: SessionClientFactory = this.#options.clientFactory ?? ((config, opts) => new PrinterMcpClient(config, opts));
@@ -365,6 +369,9 @@ export class PrinterSession {
       try {
         const catalog = await client.connect();
         if (this.#closed) { await client.close().catch(() => undefined); throw new PrinterMcpError('session-closed'); }
+        // A restart while it opened (an MCP update gave up waiting for it): it runs the previous config, so it never
+        // becomes the session's client (Nov 6 review: a switch back could otherwise end on the version it undid).
+        if (this.#generation !== generation) { await client.close().catch(() => undefined); throw new PrinterMcpError('cancelled'); }
         this.#client = client;
         this.#lastCatalog = catalog;
         this.#options.onConnect?.(catalog);
@@ -372,7 +379,7 @@ export class PrinterSession {
         queueMicrotask(() => this.#scheduleIdle());
         return client;
       } catch (error) {
-        if (!this.#closed) this.#failed((error as {code?: string}).code ?? 'connection-failed');
+        if (!this.#closed && this.#generation === generation) this.#failed((error as {code?: string}).code ?? 'connection-failed');
         throw error;
       }
     })();

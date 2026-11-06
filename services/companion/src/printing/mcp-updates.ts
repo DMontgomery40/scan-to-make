@@ -1,4 +1,5 @@
 import {spawn, type ChildProcess} from 'node:child_process';
+import {StringDecoder} from 'node:string_decoder';
 import {mkdir, readFile, rename, rm as fsRm, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {dirname, join} from 'node:path';
@@ -112,13 +113,14 @@ export const runCommand: CommandRunner = (command, args, options) => new Promise
   try {
     child = spawn(command, args, {cwd: options.cwd, env: options.env, detached: true, stdio: ['ignore', 'pipe', 'pipe']});
   } catch (error) { finish({code: 1, output: String((error as Error).message)}); return; }
-  const take = (chunk: Buffer) => {
+  // One decoder per stream: a character split between two chunks reads whole.
+  const take = (decoder: StringDecoder) => (chunk: Buffer) => {
     bytes += chunk.length;
     if (bytes > limit) { finish({code: 1, output: `${output}\nThe output was larger than 16 MB, so Counterpart stopped ${command.split('/').at(-1)}.`}); return; }
-    output += chunk.toString('utf8');
+    output += decoder.write(chunk);
   };
-  child.stdout!.on('data', take);
-  child.stderr!.on('data', take);
+  child.stdout!.on('data', take(new StringDecoder('utf8')));
+  child.stderr!.on('data', take(new StringDecoder('utf8')));
   child.once('error', error => finish({code: 1, output: `${output}${String(error.message)}`}));
   // Every pipe closed: the usual answer.
   child.once('close', (code, signal) => finish(code !== null ? {code, output} : {code: 1, output: `${output}${command.split('/').at(-1)} was stopped (${signal}).`}));
