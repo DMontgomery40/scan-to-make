@@ -501,7 +501,10 @@ test('unavailable or uncertain classification saves the note without changing th
     assert.match(reply.json.error.message, /message is saved/);
     if (index === 0) {
       assert.match(reply.json.error.message, /couldn't tell whether/, 'a real "unknown" answer is uncertainty');
-      assert.equal(logged.mock.callCount(), 0);
+      // Only the refusal itself is logged (Nov 6), never a "could not run" for a real answer.
+      const lines = logged.mock.calls.map(call => String(call.arguments[0]));
+      assert.deepEqual(lines.filter(line => !line.startsWith('http ')), []);
+      assert.ok(lines.some(line => line.includes('/corrections refused: 409')), lines.join('\n'));
     } else {
       // Nov 4: a check that couldn't run (here a timeout) used to read as "couldn't tell" and left no trace.
       assert.match(reply.json.error.message, /AI couldn't check .*\(it took too long\)/);
