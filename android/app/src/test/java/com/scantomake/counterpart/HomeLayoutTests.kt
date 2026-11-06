@@ -343,13 +343,23 @@ class HomeLayoutTests {
             (if (unconfirmed) mapOf("print" to mapOf("bundleId" to "b", "uncertain" to true)) else emptyMap())
     }
 
-    /** David, Nov 6: "i can't select which plate to print in the app i can see them but i can't click on them". The plates
-     *  stay choosable after an unconfirmed start, on the project and inside Print, and the sheet follows the plate. */
-    @Test fun everyPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() {
+    /** David, Nov 6: "i can't select which plate to print in the app i can see them but i can't click on them". On the
+     *  project, every plate stays a button after an unconfirmed start; only plate 1 says to check its result. */
+    @Test fun everyPlateStaysChoosableOnTheProjectAfterAnUnconfirmedStart() {
         val unconfirmed = requireNotNull(Project.decode(toJson(rig(0, true)).jsonObject))
         assertEquals(true, unconfirmed.canSelectPlate)
         assertEquals(true, unconfirmed.printNeedsCheck)
         assertEquals(false, requireNotNull(Project.decode(toJson(rig(3, false)).jsonObject)).printNeedsCheck)
+        compose.setContent { WithApp { ProjectPlates(unconfirmed, busy = false, select = {}, print = {}) } }
+        assertEquals(5, compose.onAllNodes(hasText("Select")).fetchSemanticsNodes().size)
+        compose.onAllNodes(hasText("Select")).assertAll(isEnabled())
+        assertEquals(6, compose.onAllNodes(hasText("Print…")).fetchSemanticsNodes().size)
+        compose.onAllNodes(hasText("Print…")).assertAll(isEnabled())
+        compose.onNodeWithText("Check print result").assertExists()
+    }
+
+    /** The same rig in Print: its plate row changes the plate, re-reads that plate's colours, and only plate 1 asks for the check. */
+    @Test fun everyPlateStaysChoosableInPrintAfterAnUnconfirmedStart() {
         app.pairingStore.save(v2Record(ADDRESSES[0]), false)
         var selected = 0
         val mappingAsks = mutableListOf<Int>()
@@ -364,19 +374,11 @@ class HomeLayoutTests {
         } }
         app.pairing = PairingClient(app.pairingStore, fake)
         app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
-        state.projects.value = listOf(unconfirmed)
+        state.projects.value = listOf(requireNotNull(Project.decode(toJson(rig(0, true)).jsonObject)))
         state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1s", "Bambu Lab P1S", backend = "bambu-printer-mcp")), "p1s")
-        var screen by mutableStateOf("project")
-        compose.setContent { WithApp {
-            if (screen == "project") ProjectPlates(state.projects.value.first(), busy = false, select = {}, print = {})
-            else PrintSheetScreen(PROJECT, close = {}, printing = {})
-        } }
-        compose.onAllNodes(hasText("Select")).fetchSemanticsNodes().also { assertEquals(5, it.size) }
-        compose.onAllNodes(hasText("Select")).assertAll(isEnabled())
-        compose.onAllNodes(hasText("Print…")).assertAll(isEnabled())
-        compose.onNodeWithText("Check the current print on your printer before changing plates.").assertDoesNotExist()
-        screen = "sheet"
-        compose.waitUntil(5_000) { mappingAsks.isNotEmpty() }
+        compose.setContent { WithApp { PrintSheetScreen(PROJECT, close = {}, printing = {}) } }
+        try { compose.waitUntil(5_000) { synchronized(mappingAsks) { mappingAsks.isNotEmpty() } } }
+        catch (e: Throwable) { throw AssertionError("asked: ${fake.paths}", e) }
         compose.onNode(hasTestTag("print-sheet-plate-0-0")).assertIsSelected()
         compose.onNodeWithText("The last send of this plate may have reached the printer. I checked: it isn't printing this.").assertExists()
         compose.onNode(hasTestTag("print-sheet-plate-0-3")).assertIsEnabled().performScrollTo().performClick()
