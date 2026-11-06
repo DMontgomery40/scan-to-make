@@ -7,14 +7,14 @@ import {createRequire} from 'node:module';
 import {createHash} from 'node:crypto';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
-import {HandoffBundleStore,InMemoryElicitationRelay,PrinterHandoffRunner,inspectModelFile} from '@scan-to-make/printer-handoff';
+import {HandoffBundleStore,InMemoryElicitationRelay,PrinterHandoffRunner,PrinterMcpError,inspectModelFile} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {publicObject} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished,arrivedDuring,chromeAvailable} from '../dist/published/published.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
-import {showing, showingRunner, shownSlice} from './support/shown-print.mjs';
+import {mcpPlates, mcpPlatesResult, showing, showingRunner, shownSlice} from './support/shown-print.mjs';
 const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
 const LINK='https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths';
 const model=(title='Caliper',plates=1)=>Buffer.from(zipSync({'[Content_Types].xml':strToU8('<Types/>'),
@@ -23,7 +23,9 @@ const model=(title='Caliper',plates=1)=>Buffer.from(zipSync({'[Content_Types].xm
 async function setup(t,runPublished=async()=>({status:'needs_file'}),extra={}){
  const root=await mkdtemp(join(tmpdir(),'published-test-')),store=new ObjectStore(join(root,'objects')),events=[];let holds=0;
  const service=new ObjectService({store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/usr/bin/true'}},
- printGate:{updating:()=>false,hold:()=>{holds++;return()=>{holds--;};}},runPublished,runTouchup:async()=>{throw Error('published retrieval entered design');},events:{emit:async e=>events.push(e)},titleFor:async()=>'Generated',...extra});
+ printGate:{updating:()=>false,hold:()=>{holds++;return()=>{holds--;};}},runPublished,runTouchup:async()=>{throw Error('published retrieval entered design');},events:{emit:async e=>events.push(e)},titleFor:async()=>'Generated',
+  // A printer whose MCP lists a 3MF's plates (list_3mf_plates); a test that needs none passes print: undefined.
+  print:{services:{runner:{backend:'bambu-printer-mcp',modelPlates:mcpPlates,runBundle:async()=>{throw Error('unused');}}}},...extra});
  t.after(async()=>{await service.close();await rm(root,{recursive:true,force:true});});return{root,store,service,events,holds:()=>holds};
 }
 function spawnAnswer(answer){return()=>{const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();setImmediate(()=>{child.stdout.end(JSON.stringify({type:'result',structured_output:answer})+'\n');setImmediate(()=>child.emit('close',0));});return child;};}
@@ -115,7 +117,7 @@ test('a downloaded archive without geometry fails the pass instead of remaining 
 
 test('estimate cache distinguishes selected plates even for identical original files',async t=>{
  const seen=[];
- const runner={backend:'bambu-printer-mcp',estimate:async input=>{seen.push(input.selection.plateIndex);return{estimate:{seconds:(input.selection.plateIndex+1)*100},settings:{}};}};
+ const runner={backend:'bambu-printer-mcp',modelPlates:mcpPlates,estimate:async input=>{seen.push(input.selection.plateIndex);return{estimate:{seconds:(input.selection.plateIndex+1)*100},settings:{}};}};
  const f=await setup(t,undefined,{print:{services:{runner,selection:{model:'p1s'}}}});
  const ids=[];const bytes=model('Two plates',2);
  for(let plate=0;plate<2;plate++){
@@ -146,7 +148,7 @@ for (const extension of ['3mf','3MF']) test(`published ${extension} preserves mu
 
 test('duplicating a selected published plate preserves its original receipt and plate for the next handoff',async t=>{
  const selections=[];
- const f=await setup(t,undefined,{print:{services:{selection:{model:'p1s'},runner:{backend:'bambu-printer-mcp',estimate:async input=>{selections.push(input.selection);return{estimate:{seconds:100},settings:{}};}}}}});
+ const f=await setup(t,undefined,{print:{services:{selection:{model:'p1s'},runner:{backend:'bambu-printer-mcp',modelPlates:mcpPlates,estimate:async input=>{selections.push(input.selection);return{estimate:{seconds:100},settings:{}};}}}}});
  const source=await f.service.create('Print this','published',LINK);
  await f.service.addModelFile(source.id,'first.3mf',model('First'));
  const bytes=model('Selected second file',2),asking=await f.service.addModelFile(source.id,'second.3mf',bytes);
@@ -163,7 +165,8 @@ for (const action of ['estimate','print']) test(`pre-sliced original ${action} k
  const root=await mkdtemp(join(tmpdir(),'published-sliced-copy-')),store=new ObjectStore(join(root,'objects')),calls=[];
  const {unzipSync}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
  const entries=unzipSync(model());entries['Metadata/plate_1.gcode']=strToU8('; estimated printing time (normal mode) = 1m\nG1 X1');const bytes=Buffer.from(zipSync(entries));
- const session={hold:()=>()=>{},connect:async()=>({tools:[]}),config:{backend:'bambu-printer-mcp'},hasTool:name=>['inspect_print_file','print_3mf','counterpart_printer_info'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties:Object.fromEntries(['file_path','bambu_model','plate_index','three_mf_path','include_preview'].map(x=>[x,{}]))}}),call:async(name,args,opts)=>{
+ const session={hold:()=>()=>{},connect:async()=>({tools:[]}),config:{backend:'bambu-printer-mcp'},hasTool:name=>['inspect_print_file','print_3mf','counterpart_printer_info','list_3mf_plates'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties:Object.fromEntries(['file_path','bambu_model','plate_index','three_mf_path','include_preview','include_thumbnails'].map(x=>[x,{}]))}}),call:async(name,args,opts)=>{
+  if(name==='list_3mf_plates')return mcpPlatesResult(args.three_mf_path);
   // What bambu-printer-mcp answers for a P1S (counterpart/1).
   if(name==='counterpart_printer_info')return{content:[{type:'text',text:JSON.stringify({contract:'counterpart/1',server:{name:'bambu-printer-mcp',version:'1.1.61'},printer:{kind:'bambu',host:'h'},capabilities:{progress:true,layers:true,camera:'none',filaments:'ams',pause:true,resume:true,cancel:true,print3mf:true,gcode:true}})}]};
   calls.push({name,args});
@@ -262,4 +265,42 @@ test('explicit Printed acknowledges just the selected plate, including unmonitor
  assert.equal(elsewhere.plates.filter(p=>p.completedAtMs).length,2);
  const reset=publicObject(await f.service.setStatus(object.id,'not-printed'));
  assert.equal(reset.plates[1].status,'not-printed');assert.equal(reset.plates.filter(p=>p.completedAtMs).length,1);
+});
+
+// A designer's 3MF keeps its own plates (David, Nov 6: "if i download the 3d scanning rig ... and open it in bambu, it
+// just shows up as six plates. BEFORE slicing"). The plates and their pictures are the printer MCP's (list_3mf_plates).
+const PNG_1PX=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mNgYGAAAAAEAAHI6uv5AAAAAElFTkSuQmCC','base64');
+const kit=()=>{const {unzipSync}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');const entries=unzipSync(model('3D scan platform',6));for(let n=1;n<=6;n++)entries[`Metadata/plate_${n}.png`]=new Uint8Array(PNG_1PX);return Buffer.from(zipSync(entries));};
+test('a six-plate kit comes in as its six plates, with their pictures, from the printer MCP',async t=>{
+ const asked=[];const f=await setup(t,undefined,{print:{services:{runner:{backend:'bambu-printer-mcp',modelPlates:async input=>{asked.push(input.modelPath);return mcpPlates(input);},runBundle:async()=>{throw Error('unused');}}}}});
+ const object=await f.service.create('Print this','published',LINK);const done=await f.service.addModelFile(object.id,'kit.3mf',kit());
+ assert.equal(asked.length,1,'the MCP read the kept file');
+ assert.deepEqual(done.files.receipts[0].plates.map(p=>[p.index,p.name]),[0,1,2,3,4,5].map(i=>[i,`Size ${i+1}`]));
+ for(const plate of done.files.receipts[0].plates)assert.deepEqual(await readFile(join(f.service.dir(object.id),plate.thumbnail)),PNG_1PX);
+ assert.equal(publicObject(done).plates.length,6,'every plate in the plate list');
+ assert.equal(done.files.receipts[0].platesListed,undefined);
+});
+test('a 3MF kept with no printer MCP to read it gets its plates when one can',async t=>{
+ let reachable=false;const estimates=[];
+ const runner={backend:'bambu-printer-mcp',modelPlates:async input=>{if(!reachable)throw new PrinterMcpError('connect-failed');return mcpPlates(input);},
+  estimate:async input=>{estimates.push(input.selection?.plateIndex);return{estimate:{seconds:60},settings:{}};},runBundle:async()=>{throw Error('unused');}};
+ const f=await setup(t,undefined,{print:{services:{runner,selection:{model:'p1s'}}}});
+ const object=await f.service.create('Print this','published',LINK);const kept=await f.service.addModelFile(object.id,'kit.3mf',kit());
+ assert.equal(kept.state,'ready');assert.equal(kept.files.receipts[0].platesListed,false);assert.deepEqual(kept.files.receipts[0].plates,[]);
+ assert.equal(publicObject(kept).plates.length,1,'one row until the plates are listed');
+ reachable=true;
+ await f.service.estimate(object.id);
+ const listed=await f.service.get(object.id);
+ assert.equal(listed.files.receipts[0].platesListed,undefined);assert.equal(listed.files.receipts[0].plates.length,6);
+ assert.equal(publicObject(listed).plates.length,6);assert.deepEqual(listed.publishedSelection,{fileIndex:0,plateIndex:0,sliced:false});
+ assert.deepEqual(estimates,[0]);
+});
+test('a printer MCP without list_3mf_plates keeps the file and says to update it where the plates are needed',async t=>{
+ const update='Update bambu-printer-mcp in Settings → Printers to show this file’s plates.';
+ const runner={backend:'bambu-printer-mcp',modelPlates:async()=>{throw new PrinterMcpError('plates-unsupported',undefined,update);},
+  estimate:async()=>{throw Error('estimated without plates');},runBundle:async()=>{throw Error('unused');}};
+ const f=await setup(t,undefined,{print:{services:{runner,selection:{model:'p1s'}}}});
+ const object=await f.service.create('Print this','published',LINK);const kept=await f.service.addModelFile(object.id,'kit.3mf',kit());
+ assert.equal(kept.files.receipts[0].platesListed,false);
+ await assert.rejects(f.service.estimate(object.id),{message:update});
 });

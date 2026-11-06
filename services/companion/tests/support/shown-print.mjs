@@ -2,6 +2,21 @@
 // inspect_print_file preview. These helpers let tests about other things print the way the sheet does.
 import {createHash} from 'node:crypto';
 import {proposingRunner} from './mcp-filaments.mjs';
+import {readFile} from 'node:fs/promises';
+import {inspectModelFile, modelPlatePreview} from '@scan-to-make/printer-handoff';
+
+/**
+ * The printer MCP's list_3mf_plates, as a stand-in reads them (bambu-printer-mcp src/counterpart/model-plates.ts):
+ * the runner's modelPlates. Counterpart itself reads no plate metadata.
+ */
+export async function mcpPlates({modelPath}) {
+  const bytes = await readFile(modelPath);
+  const info = inspectModelFile(bytes, '3mf');
+  return {plates: info.plates.map(plate => {
+    const thumbnail = modelPlatePreview(bytes, plate.index);
+    return {index: plate.index, name: plate.name, objects: plate.objects, sliced: plate.sliced, ...(thumbnail ? {thumbnail} : {})};
+  }), ...(info.title ? {title: info.title} : {}), ...(info.designer ? {designer: info.designer} : {})};
+}
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mNgYGAAAAAEAAHI6uv5AAAAAElFTkSuQmCC', 'base64');
 
@@ -22,6 +37,8 @@ export function showingRunner(runner, {preview = true} = {}) {
   proposingRunner(runner);
   const estimate = runner.estimate;
   let n = 0;
+  // An MCP that lists a 3MF's plates (1.1.69+), unless the test gives its own, or none (`modelPlates: undefined`).
+  if (!Object.hasOwn(runner, 'modelPlates')) runner.modelPlates = mcpPlates;
   return Object.assign(runner, {estimate: async input => {
     const result = sheetOnly || !estimate ? {estimate: {seconds: 60, grams: 1}, settings: {}} : await estimate(input);
     const shown = shownSlice(`slice ${++n}`);
@@ -44,4 +61,11 @@ export function showing(service) {
     return print(id, {...options, sliceSha256: estimate.sliceSha256});
   };
   return service;
+}
+
+/** list_3mf_plates as an MCP tool result, for fake sessions (thumbnails as base64, as the MCPs send them). */
+export async function mcpPlatesResult(threeMfPath) {
+  const listed = await mcpPlates({modelPath: threeMfPath});
+  const value = {plate_count: listed.plates.length, ...listed, plates: listed.plates.map(({thumbnail, ...plate}) => ({...plate, ...(thumbnail ? {thumbnail_png_base64: thumbnail.toString('base64')} : {})}))};
+  return {content: [{type: 'text', text: JSON.stringify(value)}], structuredContent: value};
 }

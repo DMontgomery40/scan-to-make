@@ -82,7 +82,9 @@ export interface StmObject {
   /** PRD §8.11: the published model this project prints, credited on the project page (`thumbnail` relative to its folder). */
   credit?: {url: string; designer?: string; site?: string; title?: string; licence?: string; thumbnail?: string};
   /** PRD §8.11: the designer's files as published, and the one that prints. Relative to the project's folder. */
-  files?: {original: string[]; current: string; receipts?: (import('@scan-to-make/printer-handoff').ModelFileInfo & {path: string; name: string; credit?: NonNullable<StmObject['credit']>})[]};
+  files?: {original: string[]; current: string; receipts?: (import('@scan-to-make/printer-handoff').ModelFileInfo & {path: string; name: string; credit?: NonNullable<StmObject['credit']>;
+    /** false: a 3MF kept before a printer MCP could list its plates (list_3mf_plates); they are listed when one can. */
+    platesListed?: false})[]};
   plateProgress?: Record<string, import('./plates.js').PlateProgress>;
   publishedSelection?: {fileIndex: number; plateIndex: number; sliced: boolean};
   /** The Mac's open (or last) question, with its picture and allowed answers (PRD §4 Ask). */

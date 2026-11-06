@@ -29,7 +29,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, noSlicedFacts = false, laidFlat, slicedBytes, slicing, ownProcess, ownProcessArgs} = {}) {
+async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, noSlicedFacts = false, laidFlat, slicedBytes, slicing, ownProcess, ownProcessArgs, noPlates = false} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -40,7 +40,7 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(noSlicedFacts ? {HANDOFF_FIXTURE_NO_SLICED_FACTS: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {}), ...(ownProcess ? {HANDOFF_FIXTURE_OWN_PROCESS: ownProcess} : {}), ...(ownProcessArgs ? {HANDOFF_FIXTURE_OWN_PROCESS_ARGS: ownProcessArgs} : {})}},
+      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(noSlicedFacts ? {HANDOFF_FIXTURE_NO_SLICED_FACTS: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {}), ...(ownProcess ? {HANDOFF_FIXTURE_OWN_PROCESS: ownProcess} : {}), ...(ownProcessArgs ? {HANDOFF_FIXTURE_OWN_PROCESS_ARGS: ownProcessArgs} : {}), ...(noPlates ? {HANDOFF_FIXTURE_NO_PLATES: '1'} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
@@ -219,7 +219,7 @@ test('elicitation relay never answers itself: timeout resolves cancel', async ()
 test('discovery lists fixture tools without calling one', async t => {
   const f = await setup(t);
   const catalog = await f.runner.discover();
-  assert.deepEqual(catalog.tools.map(tool => tool.name), ['counterpart_printer_info', 'lay_flat', 'slice_stl', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
+  assert.deepEqual(catalog.tools.map(tool => tool.name), ['counterpart_printer_info', 'lay_flat', 'slice_stl', 'list_3mf_plates', 'inspect_print_file', 'camera_snapshot', 'print_3mf']);
   assert.equal((await f.calls()).filter(entry => entry.tool).length, 0);
 });
 
@@ -871,4 +871,36 @@ test("a designer's 3MF prints with its own process only when the MCP says so, as
   await threeMf.runner.ownProcess({modelPath: designer});
   assert.deepEqual((await threeMf.calls()).find(call => call.tool === 'get_slice_settings').arguments,
     {source_path: designer, bambu_model: 'p1s', nozzle_diameter: '0.4', slicer_profile: '/p/mine.json'});
+});
+
+// A designer's 3MF keeps its own plates (David, Nov 6: "if i download the 3d scanning rig ... and open it in bambu, it
+// just shows up as six plates. BEFORE slicing"). The plates come from the MCP's list_3mf_plates, never from the app.
+const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mNgYGAAAAAEAAHI6uv5AAAAAElFTkSuQmCC', 'base64');
+const sixPlates = () => {
+  const plate = n => `<plate><metadata key="plater_id" value="${n}"/><metadata key="plater_name" value="Plate ${n} parts"/><model_instance><metadata key="object_id" value="${n}"/></model_instance></plate>`;
+  const objects = [1, 2, 3, 4, 5, 6].map(n => `<object id="${n}"><metadata key="name" value="Part ${n}"/></object>`).join('');
+  return Buffer.from(zipSync({'[Content_Types].xml': strToU8('<Types/>'),
+    '3D/3dmodel.model': strToU8('<model><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>'),
+    'Metadata/model_settings.config': strToU8(`<config>${objects}${[1, 2, 3, 4, 5, 6].map(plate).join('')}</config>`),
+    ...Object.fromEntries([1, 2, 3, 4, 5, 6].map(n => [`Metadata/plate_${n}.png`, new Uint8Array(PNG_1PX)]))}));
+};
+test("a designer's six-plate 3MF lists its six plates and their pictures from the MCP", async t => {
+  const f = await setup(t);
+  const path = join(f.root, 'kit.3mf');
+  await writeFile(path, sixPlates());
+  const listed = await f.runner.modelPlates({modelPath: path});
+  assert.deepEqual(listed.plates.map(plate => [plate.index, plate.name, plate.objects, plate.sliced]),
+    [1, 2, 3, 4, 5, 6].map(n => [n - 1, `Plate ${n} parts`, [`Part ${n}`], false]));
+  assert.ok(listed.plates.every(plate => plate.thumbnail?.equals(PNG_1PX)), 'each plate has its own picture');
+  assert.deepEqual((await f.calls()).filter(entry => entry.tool).map(entry => entry.tool), ['list_3mf_plates']);
+});
+
+test('an MCP without list_3mf_plates is one to update, for listing and for printing a plate', async t => {
+  const f = await setup(t, {noPlates: true});
+  const path = join(f.root, 'kit.3mf');
+  await writeFile(path, sixPlates());
+  const update = {code: 'plates-unsupported', detail: 'Update bambu-printer-mcp in Settings → Printers to show this file’s plates.'};
+  await assert.rejects(f.runner.modelPlates({modelPath: path}), update);
+  await assert.rejects(f.runner.run({stlPath: path, selection: {plateIndex: 2}}), update);
+  assert.ok(!(await f.calls()).some(call => ['slice_stl', 'print_3mf'].includes(call.tool)), 'nothing sliced or sent');
 });
