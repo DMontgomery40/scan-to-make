@@ -54,19 +54,12 @@ final class FusionSetUpFlowTests: XCTestCase {
     /// The answer comes from `fusion_mcp_status`'s structured result through the companion (the same copy Settings →
     /// Printers runs), never from its wording (Settings → Printers follow-up, Nov 6; PRD §8.0's boundary).
     func testFusionsAnswerIsSaidPlainlyFromItsStructuredResult() {
-        func status(_ json: String?, error: String? = nil, design: FusionStatusReply.Design? = nil) -> FusionSetup.Status {
+        func status(_ json: String?, error: String? = nil) -> FusionSetup.Status {
             let value = json.flatMap { try? JSONDecoder().decode(JSONValue.self, from: Data($0.utf8)) }
-            return FusionSetup.Status.from(FusionStatusReply(status: value, server: "bambu-printer-mcp", error: error, design: design))
+            return FusionSetup.Status.from(FusionStatusReply(status: value, server: "bambu-printer-mcp", error: error))
         }
         XCTAssertEqual(status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true,"activeDesign":true}"#), .connected)
-        // Today's MCPs (no activeDesign): the companion's interim read of the open design decides, as before (#12).
-        let today = #"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true}"#
-        XCTAssertEqual(status(today, design: .init(isError: false)), .connected, "a design is open: Fusion is usable today")
-        XCTAssertEqual(status(today, design: .init(isError: true, text: "Error: NO_ACTIVE_DESIGN")), .needsDesign)
-        XCTAssertEqual(status(today, design: .init(isError: true, text: "Fusion get_parameters failed: timeout")), .connected)
-        // activeDesign, when an MCP reports it, wins over the interim read.
-        XCTAssertEqual(status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true,"activeDesign":false}"#, design: .init(isError: false)), .needsDesign)
-        // An MCP that can neither report activeDesign nor be read (no fusion_mcp_call): never success, the MCP needs updating.
+        // An MCP that doesn't report activeDesign: never success, the MCP needs updating (no design read, no wording matched).
         let older = status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true}"#)
         XCTAssertEqual(older, .designUnknown(server: "bambu-printer-mcp"))
         XCTAssertFalse(older.ok)

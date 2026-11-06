@@ -128,19 +128,10 @@ public struct FusionSetupReply: Decodable, Sendable, Equatable {
 /// `fusion.status`: `fusion_mcp_status {launch: true}` on the printer MCP as the companion runs it. `status` is the tool's
 /// structured result as the MCP gave it; nil when the MCP has no such tool (`error` set when the call itself failed).
 public struct FusionStatusReply: Decodable, Sendable, Equatable {
-    /// Until both MCPs report `activeDesign`: the companion's read of the open design's parameters, for an MCP without it.
-    public struct Design: Decodable, Sendable, Equatable {
-        public let isError: Bool
-        public let text: String?
-        public init(isError: Bool, text: String? = nil) { self.isError = isError; self.text = text }
-    }
     public let status: JSONValue?
     public let server: String
     public let error: String?
-    public let design: Design?
-    public init(status: JSONValue?, server: String, error: String? = nil, design: Design? = nil) {
-        self.status = status; self.server = server; self.error = error; self.design = design
-    }
+    public init(status: JSONValue?, server: String, error: String? = nil) { self.status = status; self.server = server; self.error = error }
 }
 
 public extension ControlClient {

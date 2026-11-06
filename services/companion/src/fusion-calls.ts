@@ -8,7 +8,6 @@ type Client = Pick<PrinterMcpClient, 'connect' | 'hasTool' | 'callTool' | 'close
  * The Mac's Fusion Set Up and its "is it working?" check (PRD §8.9), both on the printer MCP as the companion runs it:
  * `running()` is the profile after any Update or Move override, never printer-handoff.json's own route. Each answer is
  * the tool's structured result, passed to the Mac as the MCP gives it; nothing here reads the MCP's wording.
- * `fusionStatus` adds `design` (the interim open-design read) only for an MCP that doesn't report `activeDesign`.
  */
 export function fusionCalls(running: () => PrinterHandoffConfig, client: (config: PrinterHandoffConfig) => Client = config => new PrinterMcpClient(config)) {
   /** One tool call on an open connection: its structured result, or the MCP's own error text (never matched here). */
@@ -24,16 +23,14 @@ export function fusionCalls(running: () => PrinterHandoffConfig, client: (config
     if (result.isError) return {error: toolErrorText(result)};
     return {result: toolResultJson<Record<string, unknown>>(result)};
   };
-  const call = async (tool: string, args: Record<string, unknown>, timeoutMs: number,
-      then?: (mcp: Client, result: Record<string, unknown>, signal: AbortSignal) => Promise<Record<string, unknown>>) => {
+  const call = async (tool: string, args: Record<string, unknown>, timeoutMs: number) => {
     const config = running(), server = mcpPackageName(config.backend), mcp = client(config);
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       await mcp.connect(signal);
       if (!mcp.hasTool(tool)) return {result: null, server};
       const answer = await ask(mcp, tool, args, signal);
-      if (!answer.result) return {result: null, server, error: answer.error};
-      return {result: answer.result, server, ...(then ? await then(mcp, answer.result, signal) : {})};
+      return answer.result ? {result: answer.result, server} : {result: null, server, error: answer.error};
     } finally { await mcp.close().catch(() => {}); }
   };
   return {
@@ -43,14 +40,7 @@ export function fusionCalls(running: () => PrinterHandoffConfig, client: (config
     },
     /** fusion_mcp_status {launch: true}: may start Fusion, and waits up to 90 s for its add-in. */
     fusionStatus: async () => {
-      // Until both MCPs report `activeDesign` and it is installed through Update (PRD §8.0's order), an MCP without it
-      // gets the check the Mac ran before: a read of the open design's parameters, which changes nothing. Its answer
-      // goes to the Mac as `design`, as the MCP gave it. Delete this once the field ships in both MCPs.
-      const {result, ...rest} = await call('fusion_mcp_status', {launch: true, timeout_ms: 90_000}, 150_000, async (mcp, status, signal) => {
-        if (status.connected !== true || 'activeDesign' in status || !mcp.hasTool('fusion_mcp_call')) return {};
-        const read = await ask(mcp, 'fusion_mcp_call', {tool_name: 'get_parameters', arguments: {}, timeout_ms: 20_000}, signal);
-        return {design: read.result ? {isError: false} : {isError: true, text: read.error ?? ''}};
-      });
+      const {result, ...rest} = await call('fusion_mcp_status', {launch: true, timeout_ms: 90_000}, 150_000);
       return {status: result, ...rest};
     },
   };
