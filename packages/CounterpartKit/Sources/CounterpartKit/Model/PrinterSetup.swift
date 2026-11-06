@@ -56,6 +56,9 @@ public struct PrinterSetupOptions: Decodable, Sendable, Equatable {
         public let secret: Secret?
         /// The address field in the MCP's words; `url` when it also takes a web address (https://…, a sub-path).
         public let address: Address?
+        /// Every setting the MCP reads for this kind, in its words (its first MCP's list); nil from an older companion.
+        public let fields: [Field]?
+        public func field(_ name: String) -> Field? { fields?.first { $0.name == name } }
         public var id: String { printerType }
     }
     public struct Address: Decodable, Sendable, Equatable {
