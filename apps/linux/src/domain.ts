@@ -540,3 +540,39 @@ export function slicerControls(options: SetupOptions | undefined, backend: strin
     choose: (value: string) => (value === slicer.type ? "" : value),
   };
 }
+
+/**
+ * Add a printer's button that fetches the key or access code for the person, when the chosen MCP declares one for this
+ * kind (`obtain` on its secret field, `counterpart_setup_fields`): its words come from the MCP. None otherwise.
+ */
+export function obtainControl(options: SetupOptions | undefined, form: { printerType?: string; backend?: string }) {
+  const obtain = options?.types.find((t) => t.printerType === form.printerType)?.secret?.obtain;
+  if (!obtain || !form.backend || !obtain.backends.includes(form.backend)) return undefined;
+  return { field: "secret" as const, label: obtain.label, hint: obtain.hint };
+}
+
+/**
+ * Runs `printers.obtain` for the form until the person answers in the MCP's page, it fails, or `stopped()` (the sheet
+ * closed). Each step is shown as it comes; the last is returned, with the value when approved.
+ */
+export async function obtainValue(
+  call: <T>(method: string, params: object) => Promise<T>,
+  form: Record<string, string>,
+  onStep: (step: import("./types").ObtainStep) => void,
+  stopped: () => boolean,
+): Promise<import("./types").ObtainStep> {
+  const request = {
+    backend: form.backend,
+    printerType: form.printerType,
+    host: form.host?.trim(),
+    ...(form.port ? { port: form.port } : {}),
+    field: "secret",
+  };
+  let step = await call<import("./types").ObtainStep>("printers.obtain", request);
+  onStep(step);
+  while (step.status === "pending" && step.session && !stopped()) {
+    step = await call<import("./types").ObtainStep>("printers.obtain", { ...request, session: step.session });
+    if (!stopped()) onStep(step);
+  }
+  return step;
+}

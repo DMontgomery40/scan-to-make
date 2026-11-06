@@ -45,6 +45,7 @@ pub fn allowed(method: &str) -> bool {
             | "printers.updateMcp"
             | "printers.discover"
             | "printers.check"
+            | "printers.obtain"
             | "printers.add"
             | "printers.remove"
             | "printers.completeSettings"
@@ -90,7 +91,7 @@ pub fn deadline(method: &str, params: &Value) -> u64 {
         // A model file of up to 64 MB is read, hashed and kept: 120 s on the companion (Nov 6).
         "objects.addFile" => 122_000,
         "printers.updateMcp" | "printers.installMcp" | "printers.discover" => 17_000,
-        "printers.check" => 62_000,
+        "printers.check" | "printers.obtain" => 62_000,
         "printers.add" | "printers.remove" | "printers.chooseMcp" | "printers.completeSettings" => {
             32_000
         }

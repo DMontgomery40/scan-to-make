@@ -304,7 +304,13 @@ export interface SetupOptions {
     label: string;
     backends: string[];
     serial: boolean;
-    secret?: { label: string; hint?: string; required: boolean };
+    secret?: {
+      label: string;
+      hint?: string;
+      required: boolean;
+      /** The MCPs that can fetch it for the person (`printers.obtain`), and the button's words, in the MCP's own words. */
+      obtain?: { label: string; hint?: string; backends: string[] };
+    };
   }[];
   models: Record<string, { value: string; label: string }[]>;
   serialModels?: Record<string, string>;
@@ -372,4 +378,13 @@ export interface Route {
     available?: boolean;
     reason?: string;
   }[];
+}
+
+/** `printers.obtain`: one step of fetching a form field through its MCP (OctoPrint's key, approved in OctoPrint). */
+export interface ObtainStep {
+  session?: string;
+  status: "pending" | "approved" | "failed";
+  message: string;
+  approveUrl?: string;
+  value?: string;
 }

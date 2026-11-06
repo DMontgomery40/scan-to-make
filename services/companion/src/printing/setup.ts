@@ -2,6 +2,7 @@ import {appendFile, mkdir, readdir, readFile, rm, stat, writeFile} from 'node:fs
 import {readdirSync, statSync} from 'node:fs';
 import {dirname, isAbsolute, join, normalize, sep} from 'node:path';
 import {parseEnv} from 'node:util';
+import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {PrinterMcpClient, toolResultJson, type PrinterBackend, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {appInstall, appMcpId, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
@@ -139,6 +140,48 @@ export function envFor(form: FormFields, kind: SetupKind, slicer?: McpSetup['sli
 export const envFile = (env: Record<string, string>) =>
   '# Written by Counterpart (Settings → Printers → Add printer…). The printer MCP reads it; edit it here for anything advanced.\n' +
   Object.entries(env).map(([key, value]) => `${key}='${value}'`).join('\n') + '\n';
+
+/**
+ * `printers.obtain`: fetch a form field's value through the MCP instead of the person typing it, where the MCP's own
+ * field declares how (`obtain`, e.g. OctoPrint's key approved in OctoPrint). Without `session` it starts; with it, it
+ * waits up to about 20 s for the answer. The MCP keeps the request in its own process, so that copy stays running
+ * between calls (ten minutes at most).
+ */
+export const ObtainRequestSchema = z.strictObject({
+  backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server']),
+  printerType: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
+  host: z.string().trim().max(254).transform(value => value.replace(/\.$/, '')).pipe(z.string().min(1).max(253).regex(HOST)),
+  port: z.string().regex(/^[1-9][0-9]{0,4}$/).refine(value => Number(value) <= 65535).optional(),
+  /** The form field to fill: one whose MCP field declares `obtain` (only `secret` today). */
+  field: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
+  session: z.string().uuid().optional(),
+});
+export type ObtainRequest = z.infer<typeof ObtainRequestSchema>;
+/** What the person sees, and once approved the field's value for the form (only that field's own variable). */
+export interface ObtainResult {
+  session?: string;
+  status: 'pending' | 'approved' | 'failed';
+  message: string;
+  /** The page where the person approves it (the MCP's `approve_url`), http or https only. */
+  approveUrl?: string;
+  value?: string;
+}
+const ObtainAnswerSchema = z.object({
+  status: z.string().max(32),
+  message: z.string().max(600),
+  request_id: z.string().min(1).max(128).optional(),
+  approve_url: z.string().max(2048).optional(),
+  env: z.record(z.string().max(64), z.string().max(512)).optional(),
+});
+const OBTAIN_LIFETIME_MS = 10 * 60_000;
+const OBTAIN_WAIT_MS = 20_000;
+const MAX_OBTAIN_SESSIONS = 4;
+/** Clients ask again as soon as an answer comes: one not asked about for this long was abandoned (a closed sheet). */
+const OBTAIN_IDLE_MS = 45_000;
+const webUrl = (value: string | undefined) => {
+  if (!value) return undefined;
+  try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : undefined; } catch { return undefined; }
+};
 
 /** A printer Add printer… found, first in the sheet. Never carries a secret. */
 export interface SetupCandidate {
@@ -619,6 +662,88 @@ export class PrinterSetup {
     finally { await client.close().catch(() => undefined); }
     return result;
   }
+
+  readonly #obtaining = new Map<string, {client: ProbeClient; tool: string; requestId: string; key: string; field: string; env: string; timer: NodeJS.Timeout; seen: number; asking: boolean}>();
+
+  /** `printers.obtain` (ObtainRequestSchema). */
+  async obtain(input: ObtainRequest): Promise<ObtainResult> {
+    const key = JSON.stringify([input.backend, input.printerType, input.host, input.port ?? '', input.field]);
+    if (input.session) {
+      const open = this.#obtaining.get(input.session);
+      if (!open || open.key !== key) return {status: 'failed', message: 'That approval request is no longer open. Start it again.'};
+      open.seen = Date.now();
+      return this.#obtainAnswer(input.session, open, () => open.client.callTool(open.tool, {host: input.host, ...(input.port ? {port: input.port} : {}), request_id: open.requestId, wait_ms: OBTAIN_WAIT_MS},
+        {timeoutMs: OBTAIN_WAIT_MS + 10_000}));
+    }
+    const {kind} = await this.#kindForForm({backend: input.backend, printerType: input.printerType, host: input.host, ...(input.port ? {port: input.port} : {})});
+    const item = field(kind, input.field);
+    if (!item?.obtain) throw new PrinterSetupError('invalid', `${this.#label(input.backend)} can’t fetch that for you. Enter it in the form.`);
+    // A sheet that closed or moved to another printer stops asking without saying so: a new start for the same printer
+    // replaces its approval, and one nobody has asked about for a while is let go before the limit applies.
+    for (const [id, open] of [...this.#obtaining]) if (open.key === key || (!open.asking && Date.now() - open.seen > OBTAIN_IDLE_MS)) this.#closeObtain(id);
+    if (this.#obtaining.size >= MAX_OBTAIN_SESSIONS) throw new PrinterSetupError('conflict', 'Finish or close the other approvals first.');
+    const entry = await this.#entry(input.backend);
+    const cwd = join(this.deps.env.appPrinters, 'profiles');
+    await mkdir(cwd, {recursive: true, mode: 0o700});
+    // No printer settings: the MCP asks the printer named in the call, never one of its own.
+    const config: PrinterHandoffConfig = {backend: input.backend, process: {command: this.#node, args: [entry], cwd}};
+    const client = this.deps.client?.(config) ?? new PrinterMcpClient(config);
+    const id = randomUUID();
+    let open: {client: ProbeClient; tool: string; requestId: string; key: string; field: string; env: string; timer: NodeJS.Timeout; seen: number; asking: boolean} | undefined;
+    try {
+      const catalog = await client.connect(AbortSignal.timeout(25_000));
+      if (!catalog.tools.some(tool => tool.name === item.obtain!.tool)) {
+        await client.close().catch(() => undefined);
+        throw new PrinterSetupError('unavailable', `Update ${this.#label(input.backend)} in Settings → Printers to use ${item.obtain.label}.`);
+      }
+      open = {client, tool: item.obtain.tool, requestId: '', key, field: input.field, env: item.env,
+        timer: setTimeout(() => this.#closeObtain(id), OBTAIN_LIFETIME_MS), seen: Date.now(), asking: false};
+      open.timer.unref?.();
+      this.#obtaining.set(id, open);
+      const started = open;
+      return await this.#obtainAnswer(id, started, () => client.callTool(started.tool, {host: input.host, ...(input.port ? {port: input.port} : {}), app: 'Counterpart'}, {timeoutMs: 30_000}));
+    } catch (error) {
+      if (!open) await client.close().catch(() => undefined);
+      if (error instanceof PrinterSetupError) throw error;
+      this.#closeObtain(id);
+      throw new PrinterSetupError('unavailable', `${this.#label(input.backend)} couldn’t start the approval. Try again.`);
+    }
+  }
+
+  async #obtainAnswer(id: string, open: {client: ProbeClient; requestId: string; field: string; env: string; seen: number; asking: boolean}, call: () => Promise<unknown>): Promise<ObtainResult> {
+    let answer: z.infer<typeof ObtainAnswerSchema>;
+    try {
+      open.asking = true;
+      let reply: unknown;
+      try { reply = await call(); } finally { open.asking = false; open.seen = Date.now(); }
+      const parsed = ObtainAnswerSchema.safeParse(toolResultJson(reply as never));
+      if (!parsed.success) { this.#closeObtain(id); return {status: 'failed', message: 'The printer MCP answered in a way Counterpart can’t read. Update it in Settings → Printers.'}; }
+      answer = parsed.data;
+    } catch {
+      this.#closeObtain(id);
+      return {status: 'failed', message: 'The printer MCP stopped answering. Start the approval again.'};
+    }
+    if (answer.status === 'pending' && answer.request_id) {
+      open.requestId = answer.request_id;
+      return {session: id, status: 'pending', message: answer.message, ...(webUrl(answer.approve_url) ? {approveUrl: webUrl(answer.approve_url)} : {})};
+    }
+    this.#closeObtain(id);
+    // Only the field's own variable reaches the form; anything else the MCP returns is dropped.
+    const value = answer.status === 'approved' ? answer.env?.[open.env] : undefined;
+    if (value !== undefined && /^[\x20-\x26\x28-\x7e]{1,512}$/.test(value)) return {status: 'approved', message: answer.message, value};
+    return {status: 'failed', message: answer.status === 'approved' ? 'The printer MCP approved it but sent no usable value. Enter it in the form.' : answer.message};
+  }
+
+  #closeObtain(id: string): void {
+    const open = this.#obtaining.get(id);
+    if (!open) return;
+    this.#obtaining.delete(id);
+    clearTimeout(open.timer);
+    void open.client.close().catch(() => undefined);
+  }
+
+  /** Every approval's MCP copy stops (the companion is shutting down). */
+  closeObtaining(): void { for (const id of [...this.#obtaining.keys()]) this.#closeObtain(id); }
 
   /**
    * `printers.add`: a found folder runs where it is (its own `.env`); a printer from the form gets

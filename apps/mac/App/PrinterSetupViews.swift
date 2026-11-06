@@ -176,6 +176,9 @@ struct AddPrinterSheet: View {
     @State private var done: String?
     /// A found folder's model, chosen when Counterpart couldn't tell it.
     @State private var folderModels: [String: String] = [:]
+    /// The key being fetched through the MCP (approved in the printer's own page), and the task asking for it.
+    @State private var obtaining: ObtainStep?
+    @State private var obtainTask: Task<Void, Never>?
 
     private var options: PrinterSetupOptions? { discovery?.options }
     private var type: PrinterSetupOptions.PrinterType? { options?.types.first { $0.printerType == form.printerType } }
@@ -330,6 +333,7 @@ struct AddPrinterSheet: View {
                     if let hint = secret.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
                 }
             }
+            if let obtain = ObtainControl(options:options, form:form) { obtainRow(obtain) }
         }
         if let controls = SlicerControls(options:options, backend:form.backend) {
             let slicer = controls.slicer
@@ -371,6 +375,46 @@ struct AddPrinterSheet: View {
         }
         Section { checkResult }
     }
+
+    /// The MCP fetches the key for the person: they approve it in the printer's own page, and it fills the field.
+    @ViewBuilder private func obtainRow(_ obtain: ObtainControl) -> some View {
+        VStack(alignment:.leading, spacing:6) {
+            HStack(spacing:8) {
+                Button(obtain.label) { startObtaining(obtain) }
+                    .disabled(form.host.trimmingCharacters(in: .whitespaces).isEmpty || obtaining?.pending == true)
+                if obtaining?.pending == true { ProgressView().controlSize(.small) }
+            }
+            if let step = obtaining {
+                if step.status == "approved" {
+                    Label(step.message, systemImage:"checkmark.circle.fill").font(.caption).foregroundStyle(Color.okGreen)
+                } else {
+                    Text(step.message).font(.caption).foregroundStyle(step.status == "failed" ? .orange : .secondary)
+                }
+                if step.pending, let page = step.approvalPage { Link("Open the approval page", destination:page).font(.caption) }
+            } else if let hint = obtain.hint {
+                Text(hint).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: "\(form.backend)|\(form.printerType)|\(form.host)|\(form.port ?? "")") { stopObtaining() }
+        .onDisappear { stopObtaining() }
+    }
+
+    private func startObtaining(_ obtain: ObtainControl) {
+        stopObtaining()
+        let asked = form
+        obtainTask = Task {
+            do {
+                let client = try PrinterSetupModel.client(for:"printers.obtain")
+                let last = try await obtainSetupValue(asked, field:obtain.field, step: { try await client.obtainSetupValue($0, field:$1, session:$2) },
+                                                      shown: { obtaining = $0 })
+                if !Task.isCancelled, last.status == "approved", let value = last.value { form.secret = value; check = nil }
+            } catch {
+                if !Task.isCancelled { obtaining = ObtainStep(status:"failed", message:PrinterSetupModel.words(error, otherwise:"Counterpart couldn’t ask for the key. Enter it instead.")) }
+            }
+        }
+    }
+
+    private func stopObtaining() { obtainTask?.cancel(); obtainTask = nil; obtaining = nil }
 
     @ViewBuilder private var checkResult: some View {
         if checking {

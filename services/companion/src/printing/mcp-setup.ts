@@ -18,6 +18,11 @@ const FieldSchema = z.object({
   transform: z.string().max(16).optional(),
   choices: z.array(z.object({value: z.string().min(1).max(64), label: z.string().min(1).max(120)})).max(64).optional(),
   fromSerial: z.object({prefixLength: z.number().int().min(1).max(16), models: z.record(z.string().max(16), z.string().max(64))}).optional(),
+  /**
+   * A value the MCP can fetch instead of the person typing it (mcp-3d-printer-server 1.2.51+: OctoPrint's key, approved in
+   * OctoPrint): the tool to call with the form's host and port, and the button's words. `printers.obtain` runs it.
+   */
+  obtain: z.object({tool: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/), label: z.string().min(1).max(60), hint: z.string().max(200).optional()}).optional(),
 });
 export type SetupField = z.infer<typeof FieldSchema>;
 const KindSchema = z.object({
@@ -78,7 +83,8 @@ export function envOf(kind: SetupKind, values: Partial<Record<string, string>>):
 /** Add printer…'s choices, as the clients have always read them, from every MCP's own fields. */
 export interface SetupOptions {
   types: {printerType: string; label: string; backends: PrinterBackend[]; serial: boolean;
-    secret?: {label: string; hint?: string; required: boolean}; fields: SetupField[]}[];
+    /** `obtain`: the MCPs that can fetch it (`printers.obtain`), and the button's words, from the first that declares it. */
+    secret?: {label: string; hint?: string; required: boolean; obtain?: {label: string; hint?: string; backends: PrinterBackend[]}}; fields: SetupField[]}[];
   serialModels: Record<string, string>;
   models: Partial<Record<PrinterBackend, {value: string; label: string}[]>>;
   /** The slicer each MCP would run and the settings that choose it. */
@@ -108,6 +114,11 @@ export function setupOptions(byPackage: {package: PrinterBackend; label: string;
       if (listed) { if (!listed.backends.includes(pkg)) listed.backends.push(pkg); }
       else options.types.push({printerType: kind.kind, label: kind.label, backends: [pkg], serial: !!field(kind, 'serial'),
         ...(secret ? {secret: {label: secret.label, ...(secret.hint ? {hint: secret.hint} : {}), required: secret.required}} : {}), fields: kind.fields});
+      const type = options.types.find(item => item.printerType === kind.kind)!;
+      if (secret?.obtain && type.secret) {
+        type.secret.obtain ??= {label: secret.obtain.label, ...(secret.obtain.hint ? {hint: secret.obtain.hint} : {}), backends: []};
+        type.secret.obtain.backends.push(pkg);
+      }
       if (model?.choices && !options.models[pkg]) options.models[pkg] = model.choices;
       for (const [prefix, value] of Object.entries(model?.fromSerial?.models ?? {})) options.serialModels[prefix] ??= value;
     }
