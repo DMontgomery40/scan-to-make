@@ -41,6 +41,22 @@ Printer: P1S `01P00C4B2500106`, LAN Only + Developer Mode, AMS A1 black PLA, A2 
 
 **Waiting on David:** TestFlight 2.0 (4) in App Store Connect (group, Beta App Review, Notify Testers; see the TestFlight row). Every physical print; he starts them ("do not reprint anything on your own EVER"). Next: redo the caliper card (`1f1c5515`) in the app and print it (copy of a designer's 3MF, fixed and installed Nov 5, PRD §0), and the Bambu Cloud print (item 3). The phone's "Connected" in Settings was seen on device Nov 4 (old item 4.3, done).
 
+**Print upload timeout (Nov 6, base plate of "3D scan platform" `7f1a9e33`).**
+
+- **What happened:** Print failed with `Timeout (data socket)` and was shown as "could not confirm a print start".
+- **Cause:** bambu-printer-mcp ≤1.1.73 uploaded the file as one write, and basic-ftp 6's watchdog saw no progress while the P1S stored it at about 204 KB/s. A 4.6 MB plate always failed at 15 s; uploads up to 1.7 MB were fine.
+- **Evidence:** two partial files of exactly 3,162,112 bytes on the printer, and a scratch repro.
+- **Fixed in:**
+  - bambu-printer-mcp 1.1.74 (bambu-printer-mcp#123): 64 KiB writes, and code `printer-upload-failed`;
+  - mcp-3D-printer-server 1.2.57 (mcp-3D-printer-server#85): the code only, since its upload already streamed;
+  - the app reads the code (#385), so a failed upload is shown as not started and can be printed again.
+- **Installed:** Counterpart's bambu copy has been 1.1.76 since 14:47 MST Nov 6, so it has the upload fix. #385 is not in the installed Mac build (202611061750); it needs the next Mac build.
+- **Live check, 15:2x MST on the idle P1S with the published 1.1.74 code:** both scratch files arrived whole.
+  - 4,641,390 B in 34.9 s; 11,500,805 B in 69.3 s; the printer drains 130–160 KiB/s.
+  - The gap from end of data to `226` was 0.79 s and 0.82 s, against the 15 s control timeout.
+  - The scratch folder `/counterpart-probe` is deleted. David's partial `/cache/checked-9d743cc4-…-original_sliced.3mf` (3.16 MB) is left for him.
+- **Separate cause, still open:** the morning's "no fresh MQTT report" failure at load 300.
+
 **Mac disk during gates:** each ci_local run leaves a 0.7–1.8 GB `stm-ci-local-*` folder in `$TMPDIR`, and Time Machine's hourly local snapshot keeps deleted files until thinned. The LaunchAgent `com.scantomake.gate-temp-cleanup` (`~/scan-to-make-work/maintenance/gate-temp-cleanup.sh`, every 30 min) deletes idle gate folders older than 90 min, keeping their summaries in `~/scan-to-make-work/_kept-summaries/gate-temps/`, and thins snapshots when under 20 GiB free; log in `maintenance/cleanup.log`. By hand: `tmutil thinlocalsnapshots / 40000000000 4`.
 
 **Infrastructure:** the Jev boundary check runs through OpenRouter because TypeSafe direct has no credits (HTTP 402). Adding TypeSafe credits is the only open infrastructure item, and nothing waits on it. Two existing tests fail intermittently under load: `capture-response-drain` (Node 22 and 24) and `local-control.test.mjs` 'incomplete frame' (Node 24, Nov 5, during 7 parallel agents' gates; 6 of 6 passes alone at `5b1a34e6`).
