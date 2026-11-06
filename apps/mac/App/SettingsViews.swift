@@ -560,7 +560,7 @@ private struct MCPRow: View {
                 }
             }
             Spacer()
-            if busy { ProgressView().controlSize(.small) }
+            if status?.spinning == true { ProgressView().controlSize(.small) }
             if case .unresolved = status {
                 Button("Install a Fresh Copy", action:installFresh).buttonStyle(.glassProminent)
             } else if canUpdate {

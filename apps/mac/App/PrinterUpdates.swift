@@ -20,7 +20,11 @@ enum McpUpdateStatus: Equatable, Sendable {
     /// The request itself didn't go through.
     case problem(String)
 
+    /// Update can't be pressed again: one is running, or waits for the current print.
     var busy: Bool { if case .updating = self { return true }; return self == .waiting }
+    /// Work under way now, shown with a spinner. Waiting for a print isn't: a print can take hours, so the row says
+    /// "Updates after the current print." without one (Nov 6: "mcps won't update they just spin forever").
+    var spinning: Bool { if case .updating = self { return true }; return false }
 
     /// The line under the MCP's name.
     var words: String {

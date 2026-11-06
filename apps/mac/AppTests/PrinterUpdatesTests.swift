@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 
 /// PRD §8.10: Update asks the companion, which updates the install its own way and reports with `mcp.update.*`.
 @MainActor final class PrinterUpdatesTests: XCTestCase {
@@ -86,6 +87,28 @@ import XCTest
         XCTAssertFalse(updates.apply(try event("mcp.update.done", #"{}"#)), "an update event without its install changes nothing")
     }
 
+    /// Nov 6, David: "mcps won't update they just spin forever". Update did reach the companion; a print was running, so
+    /// it answered `waiting`, and the row drew a spinner for the hours the print had left. Pressing Update sends
+    /// `printers.updateMcp` for that install, and waiting reads as the sentence, with no spinner.
+    func testPressingUpdateSendsTheRequestAndWaitingForAPrintIsASentenceNotASpinner() async throws {
+        let companion = try OneRequestSocket(reply: ["update": ["mcpId": "mcp-c9d06fd7c405328e", "state": "waiting", "fromVersion": "1.1.73", "toVersion": "1.1.76"]])
+        let updates = PrinterUpdates()
+        await updates.update("mcp-c9d06fd7c405328e", fresh: false, socket: companion.path)
+        let request = try XCTUnwrap(companion.request)
+        XCTAssertEqual(request["method"] as? String, "printers.updateMcp")
+        XCTAssertEqual((request["params"] as? [String: Any])?["mcpId"] as? String, "mcp-c9d06fd7c405328e")
+        XCTAssertNil((request["params"] as? [String: Any])?["fresh"], "Update, not a fresh copy")
+        let status = try XCTUnwrap(updates.status["mcp-c9d06fd7c405328e"])
+        XCTAssertEqual(status, .waiting)
+        XCTAssertEqual(status.words, "Updates after the current print.")
+        XCTAssertFalse(status.spinning, "a print can take hours: waiting never spins")
+        XCTAssertTrue(status.busy, "Update isn't offered again while it waits")
+        XCTAssertTrue(McpUpdateStatus.updating(from: "1.1.73", to: "1.1.76").spinning, "an update under way does")
+        for finished in [McpUpdateStatus.updated(version: "1.1.76"), .current, .failed(log: nil), .problem("x"), .unresolved(found: "x")] {
+            XCTAssertFalse(finished.spinning, "\(finished)")
+        }
+    }
+
     func testTheAnswerSaysWhetherItStartedWaitsOrNeedsAFreshCopy() {
         XCTAssertEqual(McpUpdateStatus(McpUpdate(state: "started", mcpId: "m", fromVersion: "1.0.0", toVersion: "1.1.0")), .updating(from: "1.0.0", to: "1.1.0"))
         XCTAssertEqual(McpUpdateStatus(McpUpdate(state: "waiting", mcpId: "m")), .waiting)
@@ -119,4 +142,50 @@ import XCTest
         XCTAssertEqual(rows.first { $0.mcpId == "one" }?.printers.sorted(), ["a", "c"])
         XCTAssertEqual(PrinterMCP.list([printer("a", mcp: nil), printer("b", mcp: nil)]).count, 1, "an older companion groups as before")
     }
+}
+
+/// A companion control socket that answers one request, and keeps that request.
+private final class OneRequestSocket: @unchecked Sendable {
+    let path = "/tmp/stm-update-\(UUID().uuidString.prefix(8)).sock"
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var received: [String: Any]?
+    private let done = DispatchSemaphore(value: 0)
+    var request: [String: Any]? { _ = done.wait(timeout: .now() + 5); return lock.withLock { received } }
+
+    init(reply: [String: Any]) throws {
+        descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        let bytes = path.utf8CString
+        withUnsafeMutablePointer(to: &address.sun_path) { target in
+            target.withMemoryRebound(to: CChar.self, capacity: 104) { pointer in bytes.withUnsafeBufferPointer { pointer.update(from: $0.baseAddress!, count: $0.count) } }
+        }
+        let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        guard descriptor >= 0, bound == 0, listen(descriptor, 4) == 0 else { throw NSError(domain: "OneRequestSocket", code: 1) }
+        let fd = descriptor
+        DispatchQueue.global().async { [self] in
+            defer { done.signal() }
+            let client = accept(fd, nil, nil)
+            guard client >= 0 else { return }
+            defer { close(client) }
+            var one: Int32 = 1
+            setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+            var data = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+            while !data.contains(10) {
+                let count = read(client, &buffer, buffer.count)
+                if count <= 0 { return }
+                data.append(contentsOf: buffer.prefix(count))
+            }
+            guard let request = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            lock.withLock { received = request }
+            guard var answer = try? JSONSerialization.data(withJSONObject: ["v": 1, "id": request["id"] ?? NSNull(), "result": reply]) else { return }
+            answer.append(10)
+            _ = answer.withUnsafeBytes { write(client, $0.baseAddress!, $0.count) }
+            shutdown(client, SHUT_WR)
+            while read(client, &buffer, buffer.count) > 0 {}
+        }
+    }
+    deinit { shutdown(descriptor, SHUT_RDWR); close(descriptor); unlink(path) }
 }

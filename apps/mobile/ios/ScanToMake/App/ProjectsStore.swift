@@ -329,5 +329,7 @@ struct MCPUpdateProgress: Equatable {
         }
     }
     var isRunning: Bool { state == "started" || state == "waiting" }
+    /// Work under way now, shown with a spinner. Waiting for a print can take hours: that is the sentence alone (Nov 6).
+    var isWorking: Bool { state == "started" }
 }
 

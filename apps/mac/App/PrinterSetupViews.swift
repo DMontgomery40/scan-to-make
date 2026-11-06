@@ -114,7 +114,7 @@ struct McpPackageRow: View {
                 }
             }
             Spacer()
-            if busy { ProgressView().controlSize(.small) }
+            if status?.spinning == true { ProgressView().controlSize(.small) }
             if !package.installed {
                 Button(failed ? "Try Again" : "Download", action:download)
                     .buttonStyle(.glassProminent).disabled(busy || installedNow)

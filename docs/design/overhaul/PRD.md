@@ -1121,7 +1121,8 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
 | wrapped (for example `ssh … 127.0.0.1` running one of the above) | resolves the wrapped command from the profile's documented target (the remote command or the forced command in the key's `authorized_keys`) and updates that installation as above. If it can't resolve it, it says what it found, in plain words, and offers **Install a fresh copy** (the app's own install). It never just shows the config. |
 
 - **Latest version:** `npm view <pkg> version`, checked once a day and when Settings opens.
-- **The update runs between jobs.** It never starts while that printer has a print being prepared or monitored; it waits, and says "Updates after the current print".
+- **The update runs between jobs.** It never starts while that printer has a print being prepared or monitored; it waits, and says "Updates after the current print". Waiting is a sentence, never a spinner: a print can take hours (Nov 6, "mcps won't update they just spin forever"). When the print ends, npm is asked again, so the newest version is the one installed, not the one that was newest when Update was pressed.
+- **Nothing in an update waits forever.** npm and git runs, the print check, and the MCP's restart and connect each have a deadline. Past it, the update ends with `mcp.update.failed` and a sentence, and the previous version stays.
 - **After an update:** the companion closes that MCP's sessions, opens one again, re-reads its capabilities (§8.2) and shows the new version.
 - **On failure:** the previous version stays in use (npm and git leave it intact), and the log is attached to `mcp.update.failed`.
 - **The same flow** updates the Fusion MCP pin (§8.9) once a new pin has passed its acceptance check.

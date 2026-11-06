@@ -358,6 +358,20 @@ test("an accepted MCP move explains that it is waiting for the print", async () 
   assert.equal(mcpMoveNotice(reply), "Moves to Counterpart’s updated copy after the current print.");
 });
 
+// Nov 6, "mcps won't update they just spin forever": Update during a print answers `waiting`, and Linux showed the bare
+// word. Every answer is a sentence; waiting says it updates after the print.
+test("Update's answer is a sentence, and waiting for a print says so", async () => {
+  const {readFile} = await import("node:fs/promises");
+  const {mcpUpdateNotice} = await import("../src/domain.ts");
+  const waiting = JSON.parse(await readFile(new URL("../../../packages/contracts/fixtures/mcp-update-waiting.json", import.meta.url), "utf8"));
+  assert.equal(mcpUpdateNotice(waiting), "Updates after the current print.");
+  assert.equal(mcpUpdateNotice({update: {state: "started", toVersion: "1.1.76"}}), "Updating to 1.1.76…");
+  assert.equal(mcpUpdateNotice({update: {state: "current"}}), "Already the newest version.");
+  assert.equal(mcpUpdateNotice({update: {state: "unresolved", found: "It runs over SSH."}}), "It runs over SSH.");
+  assert.equal(mcpUpdateNotice({state: "waiting"}), "Updates after the current print.", "an older companion's flat answer");
+  for (const state of ["waiting", "started", "current", "unresolved"]) assert.notEqual(mcpUpdateNotice({update: {state}}), state);
+});
+
 test("a designer's file starts at its own settings, never the saved quality and strength (Nov 5)", () => {
   const settings = { printDefaults: { quality: "draft", strength: "strong", copies: 2 } };
   const designer = { settings, current: { model: "current/model.3mf", renders: [], ownSettings: true } } as unknown as Project;

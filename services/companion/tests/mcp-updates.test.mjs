@@ -87,18 +87,20 @@ test('shell command lines: quotes, escapes, cd and variables', () => {
 });
 
 /** A scripted updater: commands are recorded, sessions are fakes, versions come from a fake registry. */
-async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog} = {}) {
+async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest: published = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog, session: sessionFor, busyTimeoutMs, startTimeoutMs} = {}) {
+  // The registry: a version, or a function when a test publishes a newer one partway through.
+  const registry = () => typeof published === 'function' ? published() : published;
   const root = await mkdtemp(join(tmpdir(), 'mcp-updates-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const env = mac({'/opt/homebrew/bin/npm': '', '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js': '', ...files}, {'/opt/homebrew/bin/npm': '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js', ...links});
   const readFile = env.readFile;
   env.readFile = path => {
     const staged = path.match(/\.counterpart-update-[0-9a-f-]+\/lib\/node_modules\/([^/]+)\/package\.json$/);
-    return staged ? JSON.stringify({name: staged[1], version: latest, ...(postinstall ? {scripts: {postinstall}} : {})}) : readFile(path);
+    return staged ? JSON.stringify({name: staged[1], version: installing ?? registry(), ...(postinstall ? {scripts: {postinstall}} : {})}) : readFile(path);
   };
   const commands = [], events = [], restarts = [], moves = [];
-  let version = '1.1.46';
-  const session = id => ({
+  let version = '1.1.46', installing;
+  const session = sessionFor ? id => sessionFor(id, restarts) : id => ({
     restart: async config => { restarts.push({id, ...config}); },
     connect: async () => { if (connectFail?.(id)) throw new Error('spawn ENOENT'); return {server: {name: 'bambu-printer-mcp', version}, tools: []}; },
   });
@@ -108,13 +110,14 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
     catalog, gate, fs: {rename: async (from, to) => { moves.push(['rename', from, to]); if (failRename && failRename(from, to)) throw new Error('EXDEV'); }, rm: async path => { moves.push(['rm', path]); }, mkdir: async () => undefined},
     destinations: () => profiles ?? [{id: 'p1s', config: profile}, {id: 'a1', config: profile}],
     env, overrides, session, busy: async id => busy(id), runningVersion: id => id in installed ? installed[id] : '1.1.46',
-    emit: async event => { events.push(event); }, waitPollMs: 20, node: '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node', path: '/usr/bin:/bin',
+    emit: async event => { events.push(event); }, waitPollMs: 20, busyTimeoutMs, startTimeoutMs, node: '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node', path: '/usr/bin:/bin',
     run: async (command, args, options) => {
       commands.push([command, ...args, ...(options.cwd ? [`(in ${options.cwd})`] : [])].join(' '));
-      if (args.includes('view')) { await new Promise(resolve => setTimeout(resolve, 5)); return {code: 0, output: `${latest}\n`}; }
+      if (args.includes('view')) { await new Promise(resolve => setTimeout(resolve, 5)); return {code: 0, output: `${registry()}\n`}; }
       if (args.includes('rev-parse')) return {code: 0, output: 'abc123\n'};
       if (fail && (typeof fail === 'function' ? fail(args) : args.join(' ').includes(fail))) return {code: 1, output: 'npm ERR! network'};
-      if (args.includes('install') || args.includes('pull')) version = latest;
+      if (args.includes('install')) installing = args.at(-1).split('@').at(-1);
+      if (args.includes('install') || args.includes('pull')) version = installing ?? registry();
       return {code: 0, output: args.includes('install') ? installOutput : ''};
     },
   });
@@ -206,10 +209,85 @@ test('Update waits while a print on that printer is being prepared or monitored'
   assert.equal((await f.updates.update(f.mcpId)).state, 'waiting');
   assert.equal((await f.updates.update(f.mcpId)).state, 'waiting', 'asking again reports the same update');
   assert.deepEqual(f.events.map(event => event.type), ['mcp.update.waiting']);
-  assert.equal(f.commands.length, 1);
+  assert.ok(f.commands.every(command => command.includes(' view ')), 'nothing is installed while it waits');
   printing = false;
   await until(() => f.events.some(event => event.type === 'mcp.update.done'));
-  assert.equal(f.commands.length, 2);
+  assert.equal(f.commands.filter(command => command.includes(' install ')).length, 1);
+});
+
+// Nov 6: Update pressed at 12:32 MST during a print parked bambu-printer-mcp for 1.1.75; 1.1.76 was published while it
+// waited, and pressing Update again only answered the parked update. It would have installed 1.1.75 after the print.
+test('an update waiting for a print installs the version that is newest when the print ends, not when it was pressed', async t => {
+  let printing = true, published = '1.1.50';
+  const prefix = `${APP}/printers/bambu`;
+  const f = await updater(t, {profile: bambu('/x/node', [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]), latest: () => published,
+    files: {[`${prefix}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46')}, busy: () => printing});
+  assert.deepEqual(await f.updates.update(f.mcpId), {mcpId: f.mcpId, state: 'waiting', fromVersion: '1.1.46', toVersion: '1.1.50'});
+  published = '1.1.51';
+  // Asking again while it waits answers at once, and asks npm in the background: the next answer names the newer version.
+  await f.updates.update(f.mcpId);
+  await until(async () => (await f.updates.update(f.mcpId)).toVersion === '1.1.51');
+  published = '1.1.52';
+  printing = false;
+  await until(() => f.events.some(event => event.type === 'mcp.update.done'));
+  const started = f.events.find(event => event.type === 'mcp.update.started'), done = f.events.find(event => event.type === 'mcp.update.done');
+  assert.equal(started.data.toVersion, '1.1.52', 'npm is asked again when the print ends');
+  assert.equal(done.data.toVersion, '1.1.52');
+  assert.ok(f.commands.some(command => command.endsWith('bambu-printer-mcp@1.1.52')), f.commands.join('\n'));
+  assert.ok(!f.commands.some(command => /install .*bambu-printer-mcp@1\.1\.5[01]$/.test(command)), 'the version from when it was pressed is never installed');
+});
+
+// "every await on an MCP or npm child gets a bounded time, and a stuck one shows a sentence instead of a spinner"
+test('an updated MCP that never restarts or connects ends the update with a sentence and the previous version back', async t => {
+  const live = `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp`;
+  for (const stuck of ['restart', 'connect']) {
+    const forever = new Promise(() => undefined);
+    const f = await updater(t, {profile: bambu('/x/node', [`${live}/dist/index.js`]), files: {[`${live}/package.json`]: pkgJson('1.1.46')}, startTimeoutMs: 40,
+      session: (id, restarts) => ({
+        restart: async config => { restarts.push({id, ...config}); if (stuck === 'restart' && restarts.length === 1) return forever; },
+        connect: async () => stuck === 'connect' ? forever : {server: {version: '1.1.50'}},
+      })});
+    assert.equal((await f.updates.update(f.mcpId)).state, 'started');
+    await f.done();
+    const failed = f.events.at(-1);
+    assert.equal(failed.type, 'mcp.update.failed', stuck);
+    assert.match(failed.data.log, /The updated bambu-printer-mcp didn't start within \d+ seconds, so Counterpart put the previous version back\./, stuck);
+    assert.ok(f.moves.some(([kind, , to]) => kind === 'rename' && to === live), `${stuck}: the previous copy is put back`);
+    assert.equal((await f.updates.update(f.mcpId)).state, 'started', `${stuck}: nothing stays reserved; the next Update is a new one`);
+    await f.done();
+  }
+});
+
+test('a print check that never answers ends the update with a sentence, never a request that waits forever', async t => {
+  const prefix = `${APP}/printers/bambu`;
+  const files = {[`${prefix}/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46')}, profile = bambu('/x/node', [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]);
+  const hangs = () => new Promise(() => undefined);
+  // Out of time before the request is answered: the request says so.
+  const soon = await updater(t, {profile, files, busyTimeoutMs: 30, busy: hangs});
+  await assert.rejects(soon.updates.update(soon.mcpId), {code: 'unavailable', message: /couldn't check whether a print is running/});
+  // Out of time after it was admitted (the check goes on under the update's reservation): the update ends with the sentence.
+  const later = await updater(t, {profile, files, busyTimeoutMs: 400, busy: hangs});
+  assert.equal((await later.updates.update(later.mcpId)).state, 'started');
+  await later.done();
+  assert.deepEqual(later.events.map(event => event.type), ['mcp.update.failed']);
+  assert.match(later.events[0].data.log, /couldn't check whether a print is running/);
+  assert.ok(!later.commands.some(command => command.includes(' install ')));
+  assert.equal((await later.updates.update(later.mcpId)).state, 'started', 'nothing stays reserved');
+});
+
+test('a command whose child keeps its output open still answers by its deadline, and its process group is stopped', async t => {
+  const {runCommand} = await import('../dist/printing/mcp-updates.js');
+  // npm exits, but a postinstall grandchild still holds stdout: execFile alone would wait for the grandchild.
+  const started = Date.now();
+  const exited = await runCommand('/bin/sh', ['-c', 'echo installed; (sleep 30) & exit 0'], {env: process.env, timeoutMs: 60_000});
+  assert.equal(exited.code, 0);
+  assert.match(exited.output, /installed/);
+  assert.ok(Date.now() - started < 15_000, 'answers within the grace after its own exit');
+  // A command that never exits answers at its deadline with a sentence, its group stopped.
+  const hung = await runCommand('/bin/sh', ['-c', 'echo looking; sleep 30'], {env: process.env, timeoutMs: 200});
+  assert.notEqual(hung.code, 0);
+  assert.match(hung.output, /looking/);
+  assert.ok(Date.now() - started < 30_000);
 });
 
 test('npm is found beside the installation\'s node first, then on PATH and the usual places', () => {
