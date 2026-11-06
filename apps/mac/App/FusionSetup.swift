@@ -143,6 +143,9 @@ enum FusionSetup {
         case notConfigured
         /// The printer MCP has no Fusion bridge (no `fusion_mcp_status`): `server` is the MCP to update.
         case noBridge(server: String)
+        /// Fusion answers, but the MCP doesn't say whether a design is open (no `activeDesign`): Fusion can't be used
+        /// until it does, so this is never success (Codex P1 on #377).
+        case designUnknown(server: String)
         case notConnected(String)
         case unreachable(String)
 
@@ -151,7 +154,7 @@ enum FusionSetup {
         var phoneMessage: String? {
             switch self {
             case .connected: return nil
-            case .needsDesign, .reopenFusion, .notConfigured, .noBridge: return words
+            case .needsDesign, .reopenFusion, .notConfigured, .noBridge, .designUnknown: return words
             case .notConnected, .unreachable: return "Fusion did not connect. Check Counterpart on your Mac, then try again."
             }
         }
@@ -162,6 +165,7 @@ enum FusionSetup {
             case .reopenFusion: return "Quit Fusion and open it again, so it picks up the new settings. Then press Set Up Again."
             case .notConfigured: return "Your printer MCP doesn't see the Fusion settings yet. Press Set Up Again."
             case .noBridge(let server): return "\(server) can't talk to Fusion. Update it in Settings → Printers, then press Set Up Again."
+            case .designUnknown(let server): return "Fusion answers, but \(server) can't tell yet whether a design is open. Update it in Settings → Printers, then press Set Up Again."
             case .notConnected(let reason): return reason.isEmpty ? "Fusion didn't connect." : "Fusion didn't connect: \(reason)"
             case .unreachable(let reason): return "Counterpart couldn't ask your printer MCP about Fusion: \(reason)"
             }
@@ -175,8 +179,10 @@ enum FusionSetup {
             }
             let flag = { (key: String) -> Bool? in if case .bool(let on)? = value[key] { return on }; return nil }
             if flag("configured") == false { return .notConfigured }
-            // An MCP from before `activeDesign` says nothing about the design: connected is all it knows.
-            if flag("connected") == true { return flag("activeDesign") == false ? .needsDesign : .connected }
+            // An MCP from before `activeDesign` can't say a design is open, and the add-in refuses everything without one.
+            if flag("connected") == true {
+                switch flag("activeDesign") { case true?: return .connected; case false?: return .needsDesign; case nil: return .designUnknown(server: reply.server) }
+            }
             if flag("fusionRunning") == true, flag("addinReachable") == false { return .reopenFusion }
             if case .string(let error)? = value["error"] { return .notConnected(short(error)) }
             return .notConnected("")

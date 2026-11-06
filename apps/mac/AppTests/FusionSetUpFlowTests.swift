@@ -59,7 +59,11 @@ final class FusionSetUpFlowTests: XCTestCase {
             return FusionSetup.Status.from(FusionStatusReply(status: value, server: "bambu-printer-mcp", error: error))
         }
         XCTAssertEqual(status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true,"activeDesign":true}"#), .connected)
-        XCTAssertEqual(status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true}"#), .connected, "an MCP from before activeDesign")
+        // An MCP from before activeDesign can't say a design is open: never success, the MCP needs updating.
+        let older = status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true}"#)
+        XCTAssertEqual(older, .designUnknown(server: "bambu-printer-mcp"))
+        XCTAssertFalse(older.ok)
+        XCTAssertTrue(older.words.contains("Update it in Settings → Printers"))
         // faust-machines/fusion360-mcp-server#12: connected on Fusion's Home tab, no design open.
         let twelve = status(#"{"configured":true,"connected":true,"addinReachable":true,"fusionRunning":true,"activeDesign":false}"#)
         XCTAssertEqual(twelve, .needsDesign)
