@@ -555,6 +555,14 @@ test('the printer MCP\'s progress reaches the caller, in the phase it belongs to
  assert.deepEqual(seen,[{phase:'slicing',mcp:{progress:1,total:2,message:'Slicing plate 1'}},{phase:'slicing',mcp:{progress:2,total:2,message:'Writing the 3MF'}}]);
 });
 
+test('print_3mf\'s upload progress reaches the caller with its counterpart/1 stage and byte counts', async t => {
+ const f=await setup(t,{progress:true});
+ const seen=[];
+ await f.runner.run({stlPath:f.stlPath,onProgress:async update=>{if(update.mcp?.stage)seen.push(update);}});
+ assert.deepEqual(seen.map(({phase,mcp})=>[phase,mcp.stage,mcp.progress,mcp.total]),
+  [['requesting-print','upload',0,18_362_734],['requesting-print','upload',5_000_000,18_362_734],['requesting-print','upload',18_362_734,18_362_734]]);
+});
+
 test('Print never clears a printer error itself, even over FULU with the old rejection showing', async t => {
  const f=await setup(t,{crypto:true,route:{mode:'bambu_network',type:'lan'}});
  await f.runner.run({stlPath:f.stlPath});

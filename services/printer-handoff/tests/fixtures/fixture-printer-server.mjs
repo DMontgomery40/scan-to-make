@@ -154,8 +154,13 @@ async function elicitModel(args) {
 
 server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const name = request.params.name;
-  // HANDOFF_FIXTURE_PROGRESS: slice_stl reports its progress, as a slicer MCP may.
   const progressToken = request.params._meta?.progressToken;
+  // HANDOFF_FIXTURE_PROGRESS: print_3mf reports its upload as bambu-printer-mcp 1.1.77 does (counterpart/1).
+  if (process.env.HANDOFF_FIXTURE_PROGRESS === '1' && name === 'print_3mf' && progressToken !== undefined)
+    for (const sent of [0, 5_000_000, 18_362_734])
+      await extra.sendNotification({method: 'notifications/progress', params: {progressToken, progress: sent, total: 18_362_734,
+        message: `Sending to the printer: ${Math.floor(sent * 100 / 18_362_734)}%`, _meta: {'counterpart/stage': 'upload'}}});
+  // HANDOFF_FIXTURE_PROGRESS: slice_stl reports its progress, as a slicer MCP may.
   if (process.env.HANDOFF_FIXTURE_PROGRESS === '1' && name === 'slice_stl' && progressToken !== undefined)
     for (const [progress, message] of [[1, 'Slicing plate 1'], [2, 'Writing the 3MF']]) {
       await extra.sendNotification({method: 'notifications/progress', params: {progressToken, progress, total: 2, message}});

@@ -81,8 +81,10 @@ export interface PassthroughOptions {
   context?: ElicitationContext;
 }
 
-/** One `notifications/progress` from the printer MCP during a tool call. */
-export interface McpProgress {progress: number; total?: number; message?: string}
+/** One `notifications/progress` from the printer MCP during a tool call. `stage` is the MCP's
+ * `_meta["counterpart/stage"]` (counterpart/1): "upload" while print_3mf sends the file, progress and
+ * total in bytes. The app reads the stage, never the message's words (PRD §8.0). */
+export interface McpProgress {progress: number; total?: number; message?: string; stage?: string}
 
 export interface PrinterToolCallOptions {
   /** Transparent MCP adapters preserve tool errors and media under the SDK's
@@ -276,8 +278,9 @@ export class PrinterMcpClient {
         signal: options.signal, timeout, maxTotalTimeout: timeout, resetTimeoutOnProgress: true,
         // The SDK asks the MCP for progress (and resets the timeout on it) only with a handler: given only when the
         // caller wants it, so other calls (the Fusion worker's pass-through) send exactly what they always did.
-        ...(options.onProgress ? {onprogress: ({progress, total, message}: {progress: number; total?: number; message?: string}) => {
-          try { options.onProgress?.({progress, ...(total !== undefined ? {total} : {}), ...(message !== undefined ? {message} : {})}); }
+        ...(options.onProgress ? {onprogress: ({progress, total, message, _meta}: {progress: number; total?: number; message?: string; _meta?: Record<string, unknown>}) => {
+          const stage = _meta?.['counterpart/stage'];
+          try { options.onProgress?.({progress, ...(total !== undefined ? {total} : {}), ...(message !== undefined ? {message} : {}), ...(typeof stage === 'string' ? {stage} : {})}); }
           catch { /* A caller's progress display never fails the call. */ }
         }} : {}),
       }) as CallToolResult;

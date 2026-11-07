@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
-import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
+import {ObjectService, InvalidStateError, sendingWords} from '../dist/objects/service.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
 import {createServer} from 'node:http';
@@ -56,7 +56,8 @@ async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs
   const services = {store: bundles, relay, runner};
   const printers = {capabilities: () => ({filaments: 'ams'}), lastReport: () => printerReport, session: () => undefined,
     record() {}, refresh: async () => {}, printing: async () => false, list: () => ({defaultDestinationId: 'default', destinations: []})};
-  const service = showing(new ObjectService({store, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
+  const emitted = [];
+  const service = showing(new ObjectService({store, events: {emit: async event => { emitted.push(event); }}, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, printers,
     printerCatalog: {defaultDestinationId: 'default', canonical: id => id, destinations: [{id: 'default', name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', source: 'current', origin: 'printer-handoff'}],
       resolve: id => id === 'default' ? {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}} : undefined},
@@ -69,7 +70,7 @@ async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs
     await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
     made.push(object);
   }
-  return {service, store, object: made[0], objects: made, answers, relay, runs, bundles};
+  return {service, store, object: made[0], objects: made, answers, relay, runs, bundles, emitted};
 }
 const approve = async (service, id) => {
   const question = await until(async () => (await service.get(id)).printConfirmation);
@@ -303,6 +304,37 @@ test('print phases and estimates are visible before confirmation and survive a f
   assert.deepEqual(done.print.events.map(x=>x.message), ['Slicing the model…','Sliced file saved.']);
 });
 
+
+test('the MCP\'s upload progress shows as "Sending to the printer… 62%", logged once, on the status every layout reads', async () => {
+  // counterpart/1: print_3mf reports its upload as bytes of total, stage "upload" (bambu-printer-mcp 1.1.77).
+  const total = 18_362_734;
+  const upload = sent => ({phase:'requesting-print', mcp:{progress:sent, total, message:'any words', stage:'upload'}});
+  const {service, object, emitted} = await setup({progressUpdates:[{phase:'requesting-print'}, upload(0), upload(5_000_000), upload(11_400_000)]});
+  await service.print(object.id);
+  await until(async () => (await service.get(object.id)).printConfirmation);
+  const sending = await service.get(object.id);
+  // Announced once, not per percent; quick updates within 2 s don't each refresh the clients.
+  assert.deepEqual(emitted.filter(e => e.type === 'print.preparing').map(e => e.data.stage), ['Requesting print. Waiting for the printer service', 'Sending to the printer']);
+  assert.equal(emitted.filter(e => e.type === 'project.updated' && e.data?.keys?.includes('progress')).length, 0);
+  // Project.progress is what ProjectWords (Mac, iPhone, iPad), Android Words.kt and Linux domain.ts show while printing starts.
+  assert.equal(sending.progress, 'Sending to the printer… 62%');
+  assert.deepEqual(sending.print.events.map(x => x.message), ['Requesting print. Waiting for the printer service…', 'Sending to the printer…']);
+  assert.equal(sendingWords(0, total), 'Sending to the printer… 0%');
+  assert.equal(sendingWords(total, total), 'Sending to the printer… 100%');
+});
+
+test('later upload percentages reach the clients through the silent project.updated, never another announcement', async () => {
+  // Clients reload a project on its events; without one, phones would keep the first percentage (Codex on #396).
+  const total = 18_362_734;
+  const upload = sent => ({phase:'requesting-print', mcp:{progress:sent, total, stage:'upload'}});
+  const {service, object, emitted} = await setup({progressUpdates:[upload(0), upload(total)]});
+  await service.print(object.id);
+  await until(async () => (await service.get(object.id)).printConfirmation);
+  assert.equal((await service.get(object.id)).progress, 'Sending to the printer… 100%');
+  const refreshes = emitted.filter(e => e.type === 'project.updated' && e.projectId === object.id);
+  assert.deepEqual(refreshes.map(e => e.data), [{keys: ['progress']}], 'the last percentage is always delivered');
+  assert.equal(emitted.filter(e => e.type === 'print.preparing').length, 1);
+});
 
 test('an existing failed attempt shows the estimate saved with its print, and the app never reads its sliced file for one', async () => {
   const {service,store,object,bundles}=await setup();
