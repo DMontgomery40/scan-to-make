@@ -74,6 +74,8 @@ export const ESTIMATE_TIMEOUT_MS = 600_000;
 
 /** What a project's print status says while the printer MCP sends the file, from its upload progress in bytes. */
 const SENDING = 'Sending to the printer…';
+/** Least time between the silent refreshes that carry a new upload percentage to the clients. */
+const UPLOAD_REFRESH_MS = 2000;
 export function sendingWords(sent: number, total: number): string {
   return `${SENDING} ${Math.max(0, Math.min(100, Math.floor(sent * 100 / total)))}%`;
 }
@@ -1479,8 +1481,10 @@ export class ObjectService {
     };
     const eventBase = {projectId: id, printId, ...(printDestination ? {destinationId: printDestination.id, printerName: printDestination.name} : {})};
     // The MCP's upload progress (counterpart/1 stage "upload", bytes of total) shows as a percentage. Only the
-    // first one is logged and announced: the rest only move the number, so a slow upload doesn't flood the phone.
+    // first one is logged and announced (print.preparing); later ones send the silent project.updated, which
+    // clients reload on (never a notification, events/words.ts), at most every 2 s and at 100%.
     let sendingShown = false;
+    let refreshedAtMs = 0;
     const onProgress = async (update: PrintProgress) => {
       const upload = update.mcp?.stage === 'upload' && update.mcp.total ? sendingWords(update.mcp.progress, update.mcp.total) : undefined;
       const message = upload ?? messages[update.phase];
@@ -1493,6 +1497,11 @@ export class ObjectService {
           ...(logged ? {events:[...(o.print.events ?? []), {atMs:Date.now(), message:logMessage}].slice(-20)} : {})},
       })));
       if (update.phase !== 'accepted' && logged) await this.#emit({id: randomUUID(), type: 'print.preparing', ...eventBase, data: {stage: logMessage.replace(/…$/, '')}});
+      else if (upload !== undefined && (Date.now() - refreshedAtMs >= UPLOAD_REFRESH_MS || update.mcp!.progress >= update.mcp!.total!)) {
+        refreshedAtMs = Date.now();
+        await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['progress']}});
+      }
+      if (logged && upload !== undefined) refreshedAtMs = Date.now();
     };
     if (recheckTrays) this.#dispatchRechecks.set(id, recheckTrays);
     // Print Again slices again; the printer MCP reuses its own identical slice (PRD §8.0 item 8).
