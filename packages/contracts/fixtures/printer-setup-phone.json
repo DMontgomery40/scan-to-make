@@ -1,0 +1,641 @@
+{
+ "_about": "Add printer… on the phone (/v1/printers/setup/*). discover.options is setupOptions() run on bambu-printer-mcp 1.1.63's and mcp-3d-printer-server 1.2.55's real counterpart_setup_fields (services/companion/tests/fixtures); the found printers, check, obtain and add answers are example values in the companion's reply shapes. The companion route test, the iPhone fixtures and Android's tests all read it.",
+ "discover": {
+  "network": "complete",
+  "options": {
+   "types": [
+    {
+     "printerType": "bambu",
+     "label": "Bambu Lab",
+     "backends": [
+      "bambu-printer-mcp",
+      "mcp-3d-printer-server"
+     ],
+     "serial": true,
+     "secret": {
+      "label": "Access code",
+      "hint": "On the printer: Settings → WLAN → Access Code",
+      "required": true
+     },
+     "address": {
+      "hint": "The printer's IP address: on the printer, Settings → WLAN"
+     },
+     "fields": [
+      {
+       "name": "host",
+       "env": "PRINTER_HOST",
+       "aliases": [
+        "BAMBU_PRINTER_HOST"
+       ],
+       "label": "Address",
+       "hint": "The printer's IP address: on the printer, Settings → WLAN",
+       "required": true
+      },
+      {
+       "name": "serial",
+       "env": "BAMBU_SERIAL",
+       "aliases": [
+        "BAMBU_PRINTER_SERIAL"
+       ],
+       "label": "Serial number",
+       "hint": "On the printer: Settings → Device",
+       "required": true,
+       "transform": "uppercase"
+      },
+      {
+       "name": "model",
+       "env": "BAMBU_MODEL",
+       "aliases": [
+        "BAMBU_PRINTER_MODEL"
+       ],
+       "label": "Model",
+       "required": true,
+       "choices": [
+        {
+         "value": "p1s",
+         "label": "P1S"
+        },
+        {
+         "value": "p1p",
+         "label": "P1P"
+        },
+        {
+         "value": "p2s",
+         "label": "P2S"
+        },
+        {
+         "value": "x1c",
+         "label": "X1C"
+        },
+        {
+         "value": "x1e",
+         "label": "X1E"
+        },
+        {
+         "value": "a1",
+         "label": "A1"
+        },
+        {
+         "value": "a1mini",
+         "label": "A1 Mini"
+        },
+        {
+         "value": "h2d",
+         "label": "H2D"
+        },
+        {
+         "value": "h2dpro",
+         "label": "H2D Pro"
+        },
+        {
+         "value": "h2s",
+         "label": "H2S"
+        },
+        {
+         "value": "h2c",
+         "label": "H2C"
+        },
+        {
+         "value": "x2d",
+         "label": "X2D"
+        }
+       ],
+       "fromSerial": {
+        "prefixLength": 3,
+        "models": {
+         "239": "h2dpro",
+         "093": "h2s",
+         "094": "h2d",
+         "31B": "h2c",
+         "20P": "x2d",
+         "00M": "x1c",
+         "03W": "x1e",
+         "01S": "p1p",
+         "01P": "p1s",
+         "22E": "p2s",
+         "039": "a1",
+         "030": "a1mini"
+        }
+       }
+      },
+      {
+       "name": "secret",
+       "env": "BAMBU_TOKEN",
+       "aliases": [
+        "BAMBU_PRINTER_ACCESS_TOKEN"
+       ],
+       "label": "Access code",
+       "hint": "On the printer: Settings → WLAN → Access Code",
+       "required": true
+      }
+     ]
+    },
+    {
+     "printerType": "octoprint",
+     "label": "OctoPrint",
+     "backends": [
+      "mcp-3d-printer-server"
+     ],
+     "serial": false,
+     "secret": {
+      "label": "API key",
+      "hint": "Approve this app in OctoPrint, or copy a key from OctoPrint: Settings → Application Keys",
+      "required": true,
+      "obtain": {
+       "label": "Approve in OctoPrint",
+       "hint": "OctoPrint asks you to allow this app in its web page",
+       "backends": [
+        "mcp-3d-printer-server"
+       ]
+      }
+     },
+     "address": {
+      "hint": "OctoPrint's address (octopi.local or an IP address), or its full URL for HTTPS or a sub-path (https://octoprint.example.com, http://pi.lan/octoprint)",
+      "url": true
+     },
+     "fields": [
+      {
+       "name": "host",
+       "env": "PRINTER_HOST",
+       "label": "Address",
+       "hint": "OctoPrint's address (octopi.local or an IP address), or its full URL for HTTPS or a sub-path (https://octoprint.example.com, http://pi.lan/octoprint)",
+       "required": true,
+       "input": "url"
+      },
+      {
+       "name": "port",
+       "env": "PRINTER_PORT",
+       "label": "Port",
+       "hint": "Only if OctoPrint isn't on port 80 (OctoPi uses 80; a plain install uses 5000)",
+       "required": false
+      },
+      {
+       "name": "secret",
+       "env": "API_KEY",
+       "label": "API key",
+       "hint": "Approve this app in OctoPrint, or copy a key from OctoPrint: Settings → Application Keys",
+       "required": true,
+       "obtain": {
+        "tool": "octoprint_request_api_key",
+        "label": "Approve in OctoPrint",
+        "hint": "OctoPrint asks you to allow this app in its web page"
+       }
+      }
+     ]
+    },
+    {
+     "printerType": "klipper",
+     "label": "Klipper (Moonraker)",
+     "backends": [
+      "mcp-3d-printer-server"
+     ],
+     "serial": false,
+     "secret": {
+      "label": "API key",
+      "hint": "Only if Moonraker asks for one",
+      "required": false
+     },
+     "address": {
+      "hint": "The printer's IP address or host name"
+     },
+     "fields": [
+      {
+       "name": "host",
+       "env": "PRINTER_HOST",
+       "label": "Address",
+       "hint": "The printer's IP address or host name",
+       "required": true
+      },
+      {
+       "name": "port",
+       "env": "PRINTER_PORT",
+       "label": "Port",
+       "hint": "Moonraker's port, often 7125",
+       "required": false
+      },
+      {
+       "name": "secret",
+       "env": "API_KEY",
+       "label": "API key",
+       "hint": "Only if Moonraker asks for one",
+       "required": false
+      }
+     ]
+    },
+    {
+     "printerType": "prusa",
+     "label": "Prusa (PrusaLink)",
+     "backends": [
+      "mcp-3d-printer-server"
+     ],
+     "serial": false,
+     "secret": {
+      "label": "API key",
+      "hint": "The key PrusaLink shows in its settings",
+      "required": true
+     },
+     "address": {
+      "hint": "The printer's IP address or host name"
+     },
+     "fields": [
+      {
+       "name": "host",
+       "env": "PRINTER_HOST",
+       "label": "Address",
+       "hint": "The printer's IP address or host name",
+       "required": true
+      },
+      {
+       "name": "port",
+       "env": "PRINTER_PORT",
+       "label": "Port",
+       "hint": "Only if PrusaLink isn't on port 80",
+       "required": false
+      },
+      {
+       "name": "secret",
+       "env": "API_KEY",
+       "label": "API key",
+       "hint": "The key PrusaLink shows in its settings",
+       "required": true
+      }
+     ]
+    },
+    {
+     "printerType": "creality",
+     "label": "Creality",
+     "backends": [
+      "mcp-3d-printer-server"
+     ],
+     "serial": false,
+     "secret": {
+      "label": "API key",
+      "hint": "Only if your printer asks for one",
+      "required": false
+     },
+     "address": {
+      "hint": "The printer's IP address or host name"
+     },
+     "fields": [
+      {
+       "name": "host",
+       "env": "PRINTER_HOST",
+       "label": "Address",
+       "hint": "The printer's IP address or host name",
+       "required": true
+      },
+      {
+       "name": "port",
+       "env": "PRINTER_PORT",
+       "label": "Port",
+       "hint": "Only if your printer uses another port",
+       "required": false
+      },
+      {
+       "name": "secret",
+       "env": "API_KEY",
+       "label": "API key",
+       "hint": "Only if your printer asks for one",
+       "required": false
+      }
+     ]
+    },
+    {
+     "printerType": "duet",
+     "label": "Duet",
+     "backends": [
+      "mcp-3d-printer-server"
+     ],
+     "serial": false,
+     "secret": {
+      "label": "Password",
+      "hint": "Only if your Duet has one set",
+      "required": false
+     },
+     "address": {
+      "hint": "The printer's IP address or host name"
+     },
+     "fields": [
+      {
+       "name": "host",
+       "env": "PRINTER_HOST",
+       "label": "Address",
+       "hint": "The printer's IP address or host name",
+       "required": true
+      },
+      {
+       "name": "port",
+       "env": "PRINTER_PORT",
+       "label": "Port",
+       "hint": "Only if your Duet isn't on port 80",
+       "required": false
+      },
+      {
+       "name": "secret",
+       "env": "API_KEY",
+       "label": "Password",
+       "hint": "Only if your Duet has one set",
+       "required": false
+      }
+     ]
+    },
+    {
+     "printerType": "repetier",
+     "label": "Repetier",
+     "backends": [
+      "mcp-3d-printer-server"
+     ],
+     "serial": false,
+     "secret": {
+      "label": "API key",
+      "hint": "The key Repetier-Server shows in its settings",
+      "required": true
+     },
+     "address": {
+      "hint": "The printer's IP address or host name"
+     },
+     "fields": [
+      {
+       "name": "host",
+       "env": "PRINTER_HOST",
+       "label": "Address",
+       "hint": "The printer's IP address or host name",
+       "required": true
+      },
+      {
+       "name": "port",
+       "env": "PRINTER_PORT",
+       "label": "Port",
+       "hint": "Repetier-Server's port, often 3344",
+       "required": false
+      },
+      {
+       "name": "secret",
+       "env": "API_KEY",
+       "label": "API key",
+       "hint": "The key Repetier-Server shows in its settings",
+       "required": true
+      }
+     ]
+    }
+   ],
+   "serialModels": {
+    "239": "h2dpro",
+    "093": "h2s",
+    "094": "h2d",
+    "31B": "h2c",
+    "20P": "x2d",
+    "00M": "x1c",
+    "03W": "x1e",
+    "01S": "p1p",
+    "01P": "p1s",
+    "22E": "p2s",
+    "039": "a1",
+    "030": "a1mini"
+   },
+   "models": {
+    "bambu-printer-mcp": [
+     {
+      "value": "p1s",
+      "label": "P1S"
+     },
+     {
+      "value": "p1p",
+      "label": "P1P"
+     },
+     {
+      "value": "p2s",
+      "label": "P2S"
+     },
+     {
+      "value": "x1c",
+      "label": "X1C"
+     },
+     {
+      "value": "x1e",
+      "label": "X1E"
+     },
+     {
+      "value": "a1",
+      "label": "A1"
+     },
+     {
+      "value": "a1mini",
+      "label": "A1 Mini"
+     },
+     {
+      "value": "h2d",
+      "label": "H2D"
+     },
+     {
+      "value": "h2dpro",
+      "label": "H2D Pro"
+     },
+     {
+      "value": "h2s",
+      "label": "H2S"
+     },
+     {
+      "value": "h2c",
+      "label": "H2C"
+     },
+     {
+      "value": "x2d",
+      "label": "X2D"
+     }
+    ],
+    "mcp-3d-printer-server": [
+     {
+      "value": "p1s",
+      "label": "P1S"
+     },
+     {
+      "value": "p1p",
+      "label": "P1P"
+     },
+     {
+      "value": "x1c",
+      "label": "X1C"
+     },
+     {
+      "value": "x1e",
+      "label": "X1E"
+     },
+     {
+      "value": "a1",
+      "label": "A1"
+     },
+     {
+      "value": "a1mini",
+      "label": "A1 Mini"
+     },
+     {
+      "value": "h2d",
+      "label": "H2D"
+     }
+    ]
+   },
+   "slicer": {
+    "bambu-printer-mcp": {
+     "type": "bambustudio",
+     "path": "/opt/nowhere/bambu-studio",
+     "found": false,
+     "profilesRoot": "/opt/nowhere/resources/profiles",
+     "profilesFound": false,
+     "fields": [
+      {
+       "name": "slicer",
+       "env": "SLICER_TYPE",
+       "label": "Slicer",
+       "required": false,
+       "choices": [
+        {
+         "value": "bambustudio",
+         "label": "Bambu Studio"
+        },
+        {
+         "value": "orcaslicer",
+         "label": "OrcaSlicer"
+        },
+        {
+         "value": "orcaslicer-bambulab",
+         "label": "OrcaSlicer-bambulab (FULU)"
+        },
+        {
+         "value": "orca-slicer-api",
+         "label": "OrcaSlicer API (remote)"
+        },
+        {
+         "value": "prusaslicer",
+         "label": "PrusaSlicer"
+        },
+        {
+         "value": "cura",
+         "label": "Cura"
+        },
+        {
+         "value": "slic3r",
+         "label": "Slic3r"
+        }
+       ]
+      },
+      {
+       "name": "slicer-path",
+       "env": "SLICER_PATH",
+       "label": "Bambu Studio app",
+       "hint": "Bambu Studio isn't at /opt/nowhere/bambu-studio. Install it, or choose where it is.",
+       "required": true,
+       "input": "path"
+      },
+      {
+       "name": "profiles",
+       "env": "BAMBU_PROFILES_ROOT",
+       "label": "Bambu profiles folder",
+       "hint": "The folder with Bambu Studio's BBL profiles (it holds BBL/machine). Install Bambu Studio, or choose the folder.",
+       "required": true,
+       "input": "path"
+      }
+     ]
+    },
+    "mcp-3d-printer-server": {
+     "type": "prusaslicer",
+     "path": "/opt/nowhere/bambu-studio",
+     "found": false,
+     "fields": [
+      {
+       "name": "slicer",
+       "env": "SLICER_TYPE",
+       "label": "Slicer",
+       "required": false,
+       "choices": [
+        {
+         "value": "prusaslicer",
+         "label": "PrusaSlicer"
+        },
+        {
+         "value": "cura",
+         "label": "Cura"
+        },
+        {
+         "value": "slic3r",
+         "label": "Slic3r"
+        },
+        {
+         "value": "orcaslicer",
+         "label": "OrcaSlicer"
+        },
+        {
+         "value": "orcaslicer-bambulab",
+         "label": "OrcaSlicer-bambulab (FULU)"
+        },
+        {
+         "value": "bambustudio",
+         "label": "Bambu Studio"
+        }
+       ]
+      },
+      {
+       "name": "slicer-path",
+       "env": "SLICER_PATH",
+       "label": "PrusaSlicer app",
+       "hint": "PrusaSlicer isn't at /opt/nowhere/bambu-studio. Install it, or choose where it is.",
+       "required": true,
+       "input": "path"
+      }
+     ]
+    }
+   },
+   "updates": []
+  },
+  "found": [
+   {
+    "id": "ssdp:01P00A451601106",
+    "source": "ssdp",
+    "name": "Workshop P1S",
+    "backend": "bambu-printer-mcp",
+    "printerType": "bambu",
+    "host": "192.168.1.42",
+    "serial": "01P00A451601106",
+    "model": "p1s",
+    "added": false
+   },
+   {
+    "id": "bonjour:octopi.local:80",
+    "source": "bonjour",
+    "name": "OctoPi",
+    "backend": "mcp-3d-printer-server",
+    "printerType": "octoprint",
+    "host": "octopi.local",
+    "port": "80",
+    "added": false
+   }
+  ],
+  "labels": {
+   "bambu-printer-mcp": "bambu-printer-mcp",
+   "mcp-3d-printer-server": "mcp-3D-printer-server"
+  }
+ },
+ "check": {
+  "check": {
+   "reached": true,
+   "camera": "not-supported",
+   "model": "p1s"
+  }
+ },
+ "obtainPending": {
+  "session": "0b6b8a52-6f1e-4c5a-9d43-4c1c3f6a2e10",
+  "status": "pending",
+  "message": "Click Allow in OctoPrint to let Counterpart in.",
+  "approveUrl": "http://octopi.local/#/access"
+ },
+ "obtainApproved": {
+  "session": "0b6b8a52-6f1e-4c5a-9d43-4c1c3f6a2e10",
+  "status": "approved",
+  "message": "OctoPrint approved Counterpart.",
+  "value": "OCTO-KEY-FROM-APPROVAL"
+ },
+ "add": {
+  "id": "p-9f2c4e",
+  "destinationId": "profile-p-9f2c4e"
+ }
+}

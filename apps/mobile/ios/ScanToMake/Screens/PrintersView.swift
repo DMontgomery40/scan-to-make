@@ -8,6 +8,7 @@ struct PrintersView: View {
     let store: ProjectsStore
     @Environment(\.dismiss) private var dismiss
     @State private var path: [PrinterLink] = []
+    @State private var adding = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -22,8 +23,15 @@ struct PrintersView: View {
                     } else {
                         ProgressView()
                     }
+                    // The Mac's Add printer…, here (`printerAdd`): what the MCPs found, filled in.
+                    if store.macCapabilities.contains("printerAdd") {
+                        Button { adding = true } label: { Label("Add Printer…", systemImage: "plus.circle.fill") }
+                            .accessibilityIdentifier("add-printer")
+                    }
                 } footer: {
-                    Text(store.macCapabilities.contains("printerChoices") ? "Add printers in Counterpart on your Mac. Pick a printer here to change its MCP or connection." : "These come from bambu-printer-mcp and mcp-3D-printer-server on your Mac. Add or change printers there; Counterpart picks them up.")
+                    Text(store.macCapabilities.contains("printerAdd")
+                         ? "Printers live in bambu-printer-mcp and mcp-3D-printer-server on \(store.macName ?? "your Mac"). Add one here, or pick a printer to change its MCP or connection."
+                         : store.macCapabilities.contains("printerChoices") ? "Add printers in Counterpart on your Mac. Pick a printer here to change its MCP or connection." : "These come from bambu-printer-mcp and mcp-3D-printer-server on your Mac. Add or change printers there; Counterpart picks them up.")
                 }
                 Section("Printer software") { MCPCopiesView(store: store) }
             }
@@ -36,6 +44,9 @@ struct PrintersView: View {
             }
             .refreshable { await store.loadPrinters() }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .sheet(isPresented: $adding) {
+            AddPrinterView(store: store) { Task { await store.loadPrinters() } }
         }
         .task {
             #if DEBUG

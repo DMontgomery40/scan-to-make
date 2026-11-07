@@ -1,5 +1,7 @@
 package com.scantomake.counterpart
 
+import kotlinx.serialization.json.jsonObject
+import com.scantomake.counterpart.api.withSerial
 import com.scantomake.counterpart.api.ColourMapping
 import com.scantomake.counterpart.api.CompanionClient
 import com.scantomake.counterpart.api.ModelColourFilament
@@ -467,5 +469,65 @@ class WordsTests {
         assertEquals("""{"confirmationId":"c1","answer":{"action":"accept","content":{"clear":true,"speed":"a"}}}""", body.toString())
         assertEquals("""{"confirmationId":"c1","answer":{"action":"cancel"}}""", c.response("cancel", emptyMap(), now).toString())
         assertEquals("Fast", c.fields[1].displayName("b"))
+    }
+}
+
+/** Codex on #392: a found folder's missing model is the MCP's own declared model setting, never a variable name the app knows. */
+class PrinterCandidateModelTests {
+    private fun options(modelEnv: String) = com.scantomake.counterpart.api.PrinterSetupOptions(types = listOf(
+        com.scantomake.counterpart.api.PrinterSetupOptions.PrinterType("bambu", "Bambu Lab", listOf("bambu-printer-mcp"), serial = true,
+            fields = listOf(com.scantomake.counterpart.api.PrinterSetupOptions.Field("model", modelEnv, "Model", required = true)))))
+    private fun candidate(missing: List<String>, fill: Map<String, String> = emptyMap()) = com.scantomake.counterpart.api.PrinterCandidate(
+        "folder:/x", "folder", "P1S", "bambu-printer-mcp", "bambu", folder = "/x", missing = missing, fill = fill)
+
+    @org.junit.Test fun theModelSettingIsWhateverTheMcpDeclares() {
+        val renamed = options("PRINTER_MODEL")
+        org.junit.Assert.assertTrue("the MCP's own name asks for a model", candidate(listOf("PRINTER_MODEL")).needsModel(renamed))
+        org.junit.Assert.assertFalse("a name the MCP doesn't declare isn't its model", candidate(listOf("BAMBU_MODEL")).needsModel(renamed))
+        org.junit.Assert.assertFalse("Counterpart filled it", candidate(listOf("PRINTER_MODEL"), mapOf("PRINTER_MODEL" to "p1s")).needsModel(renamed))
+        org.junit.Assert.assertEquals("p1s", candidate(listOf("PRINTER_MODEL"), mapOf("PRINTER_MODEL" to "p1s")).filledModel(renamed))
+        org.junit.Assert.assertFalse("another missing setting isn't a model", candidate(listOf("PRINTER_HOST")).needsModel(renamed))
+        org.junit.Assert.assertFalse("no fields from the MCP: no guess", candidate(listOf("PRINTER_MODEL")).needsModel(null))
+    }
+}
+
+/** Codex on #392: a model the serial named follows a corrected serial; a model the person chose stays. */
+class PrinterFormSerialTests {
+    private val options = com.scantomake.counterpart.api.PrinterSetupOptions(
+        types = listOf(com.scantomake.counterpart.api.PrinterSetupOptions.PrinterType("bambu", "Bambu Lab", listOf("bambu-printer-mcp"), serial = true)),
+        models = mapOf("bambu-printer-mcp" to listOf(com.scantomake.counterpart.api.PrinterSetupOptions.Choice("p1s", "P1S"), com.scantomake.counterpart.api.PrinterSetupOptions.Choice("p1p", "P1P"))),
+        serialModels = mapOf("01P" to "p1s", "01S" to "p1p"))
+
+    @org.junit.Test fun aCorrectedSerialPicksItsModelAgain() {
+        var form = com.scantomake.counterpart.api.PrinterForm().withSerial("01P00A", options)
+        org.junit.Assert.assertEquals("p1s", form.model)
+        form = form.withSerial("01S00A", options)
+        org.junit.Assert.assertEquals("the corrected serial names another model", "p1p", form.model)
+        form = form.withSerial("XYZ", options)
+        org.junit.Assert.assertNull("a serial the MCP doesn't know leaves the model to choose", form.model)
+    }
+
+    @org.junit.Test fun aModelThePersonChoseStays() {
+        val form = com.scantomake.counterpart.api.PrinterForm(model = "p1p").withSerial("01P00A", options)
+        org.junit.Assert.assertEquals("p1p", form.model)
+    }
+
+    @org.junit.Test fun discoveryLabelsComeFromTheCompanion() {
+        val found = com.scantomake.counterpart.api.PrinterDiscovery(labels = mapOf("mcp-3d-printer-server" to "mcp-3D-printer-server"))
+        org.junit.Assert.assertEquals("mcp-3D-printer-server", found.label("mcp-3d-printer-server"))
+        org.junit.Assert.assertEquals("an MCP the companion didn't name keeps its own name", "some-new-mcp", found.label("some-new-mcp"))
+    }
+}
+
+/** #389's address field on Android: a web address only where the MCP's host field takes one (mcp-3D 1.2.55: OctoPrint). */
+class PrinterAddressFieldTests {
+    @org.junit.Test fun aWebAddressOnlyWhereTheMcpTakesOne() {
+        val answers = com.scantomake.counterpart.core.WireJson.parseToJsonElement(contractFixture("printer-setup-phone.json").readText()).jsonObject
+        val options = com.scantomake.counterpart.core.WireJson.decodeFromJsonElement<com.scantomake.counterpart.api.PrinterDiscovery>(answers["discover"]!!).options
+        val octo = com.scantomake.counterpart.api.addressField(options, "octoprint")
+        org.junit.Assert.assertTrue(octo.url)
+        org.junit.Assert.assertTrue(octo.prompt.contains("https://"))
+        org.junit.Assert.assertFalse(com.scantomake.counterpart.api.addressField(options, "bambu").url)
+        org.junit.Assert.assertFalse(com.scantomake.counterpart.api.addressField(options, "bambu").prompt.contains("https://"))
     }
 }

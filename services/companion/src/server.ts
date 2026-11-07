@@ -5,6 +5,7 @@ import type {EventLog} from './events/log.js';
 import type {LiveActivityTokenStore} from './devices/live-activity-tokens.js';
 import type {DevicePresence} from './devices/presence.js';
 import {McpUpdateError, type McpUpdater} from './printing/mcp-updates.js';
+import {parameters as controlParameters} from './local-control-protocol.js';
 import type {IcloudEnrolment} from './icloud-enrolment.js';
 import {LiveActivityTokenUploadSchema} from '@scan-to-make/contracts/counterpart';
 import type {ObjectService} from './objects/service.js';
@@ -28,6 +29,38 @@ import {
 
 const MAX_PAIR_REQUEST_BYTES = 4096;
 const McpUpdateRequestSchema = z.strictObject({ fresh: z.boolean().optional() });
+
+type PhoneSetupMethod='discover'|'check'|'obtain'|'add';
+type PhoneSetup=NonNullable<Parameters<typeof startCompanionServer>[0]>['printerSetup'];
+const SETUP_METHODS={discover:'printers.discover',check:'printers.check',obtain:'printers.obtain',add:'printers.add'} as const;
+
+/** One phone Add printer… call, parsed with the Mac's own `printers.*` schema. */
+async function phoneSetupCall(setup:NonNullable<PhoneSetup>,method:PhoneSetupMethod,input:unknown,discoveredFolders:Set<string>):Promise<unknown>{
+  const unavailable=()=>new ServerFailure('not-found');
+  const parsed=controlParameters[SETUP_METHODS[method]].safeParse(input);
+  if(!parsed.success)throw new ServerFailure('invalid-request');
+  switch(method){
+    case 'discover':{
+      if(!setup.discover)throw unavailable();
+      const found=await setup.discover();
+      // Kept, not replaced: another paired device's discovery never takes back a folder this one was shown.
+      for(const candidate of found.found)if(candidate.folder)discoveredFolders.add(candidate.folder);
+      // Each MCP's name as people see it, so the phones never map package names themselves.
+      const {MCP_PACKAGES}=await import('./printing/setup.js');
+      return {...found,labels:Object.fromEntries(MCP_PACKAGES.map(item=>[item.package,item.label]))};
+    }
+    case 'check':case 'add':{
+      const printer=(parsed.data as {printer:import('./printing/setup.js').PrinterForm}).printer;
+      if('folder' in printer&&!discoveredFolders.has(printer.folder))throw new ServerFailure('invalid-request');
+      if(method==='check'){if(!setup.check)throw unavailable();return {check:await setup.check(printer)};}
+      if(!setup.add)throw unavailable();
+      return await setup.add(printer);
+    }
+    case 'obtain':
+      if(!setup.obtain)throw unavailable();
+      return await setup.obtain(parsed.data as import('./printing/setup.js').ObtainRequest);
+  }
+}
 /** `POST /v1/pair/icloud`. `installId` is the phone's installation key, the same value QR pairing sends as `installationKey`. */
 const IcloudEnrolSchema = z.strictObject({
   macId: z.uuid(),
@@ -156,7 +189,8 @@ export async function startCompanionServer(
     /** The Mac's name as people know it ("Mac mini"), in /healthz so the phone can say which Mac it reached. */
     name?: string;
     /** Settings -> Printers on the phone: which MCP a printer uses (`PUT /v1/objects/printers/<id>/mcp`). */
-    printerSetup?: Pick<import('./printing/setup.js').PrinterSetup, 'chooseMcp' | 'mcps'>;
+    printerSetup?: Pick<import('./printing/setup.js').PrinterSetup, 'chooseMcp' | 'mcps'> &
+      Partial<Pick<import('./printing/setup.js').PrinterSetup, 'discover' | 'check' | 'obtain' | 'add'>>;
   } = {}
 ): Promise<{
   url: string;
@@ -212,6 +246,8 @@ export async function startCompanionServer(
   const printHandoffRoutes=options.printHandoff?createPrintHandoffRoutes(options.printHandoff):undefined;
   const objectRoutes=options.objects?createObjectRoutes(options.objects,options.printerSetup?{printerSetup:options.printerSetup}:{}):undefined;
   const eventRoutes=options.events?createEventRoutes(options.events):undefined;
+  /** Folders any phone discovery listed while the companion runs: a phone may add only one of these (a paired device never names a path itself). */
+  const discoveredFolders=new Set<string>();
   let authority = '';
   const handler: RequestListener = async (request, response) => {
     response.setHeader('Content-Type', 'application/json');
@@ -265,7 +301,7 @@ export async function startCompanionServer(
         // Scope name kept from the first protocol so existing pairings still parse.
         await authorize('generation:health');
         // Additive: older phones read only status and protocolVersion.
-        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, colourMapping: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, mcpCopies: !!options.printerSetup, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerChoices: !!options.objects && !!options.printerSetup, printerSettings: !!options.objects && !!options.printerSetup, reconstructionReviewV1: !!options.objects && (await reconstructionReadiness()).ok } }));
+        response.end(JSON.stringify({ status: 'ok', protocolVersion: '0.1.0', ...(options.name ? { name: options.name } : {}), capabilities: { genericConfirmations: !!options.objects, materialChoice: !!options.objects, colourMapping: !!options.objects, projectSettings: !!options.objects, projectPreferences: !!options.objects, projectRename: !!options.objects, messagePhotos: !!options.objects, publishedModels: !!options.objects, mcpUpdates: !!options.mcpUpdates, mcpCopies: !!options.printerSetup, blenderAddon: !!options.blenderAddon, printCopies: !!options.objects?.printCopiesAvailable, printLayerPauses: !!options.objects, printerChoices: !!options.objects && !!options.printerSetup, printerSettings: !!options.objects && !!options.printerSetup, printerAdd: !!options.printerSetup?.discover && !!options.printerSetup?.add, reconstructionReviewV1: !!options.objects && (await reconstructionReadiness()).ok } }));
         return;
       }
       if(captureRoutes&&request.url?.startsWith('/v1/saved-projects/')){
@@ -344,6 +380,32 @@ export async function startCompanionServer(
         await authorize('projects:read');
         const {packages}=await options.printerSetup.mcps();
         response.end(JSON.stringify({packages}));return;
+      }
+      const setupCall=/^\/v1\/printers\/setup\/(discover|check|obtain|add)$/.exec(request.url??'')?.[1] as PhoneSetupMethod|undefined;
+      if(options.printerSetup&&setupCall){
+        // Add printer… on the phone: the same companion methods as the Mac and Linux (`printers.discover`, `.check`,
+        // `.obtain`, `.add`), with the same parameter schemas. It writes an MCP's .env, so it needs both
+        // printing and settings, as choosing a printer's MCP does.
+        if(request.method!=='POST')throw new ServerFailure('method-not-allowed');
+        await authorize('printer-handoff:use');await authorize('projects:write');
+        const setup=options.printerSetup;
+        const controller=new AbortController();
+        const abort=()=>controller.abort();
+        response.once('close',abort);
+        let input:unknown={};
+        try{if(request.headers['content-length']!=='0'&&request.headers['content-type'])input=await readBody(request,controller.signal,16*1024);}finally{response.off('close',abort);}
+        try{
+          response.end(JSON.stringify(await phoneSetupCall(setup,setupCall,input??{},discoveredFolders)));
+        }catch(error){
+          const {PrinterSetupError}=await import('./printing/setup.js');
+          if(error instanceof PrinterSetupError){
+            response.statusCode=error.code==='not-found'?404:error.code==='invalid'?400:error.code==='conflict'?409:503;
+            // Written for the person ("Download mcp-3D-printer-server first, then add the printer."): the phone shows it as is.
+            response.end(JSON.stringify({error:{code:error.code==='invalid'?'invalid-request':error.code,message:error.message,sentence:error.message}}));return;
+          }
+          throw error;
+        }
+        return;
       }
       const mcpUpdate=/^\/v1\/printers\/mcp\/(mcp-[0-9a-f]{16})\/update$/.exec(request.url??'');
       if(options.mcpUpdates&&mcpUpdate){

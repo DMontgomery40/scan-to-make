@@ -20,6 +20,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
@@ -205,6 +209,89 @@ class HomeLayoutTests {
         org.junit.Assert.assertEquals("{\"fresh\":true}", String(moves.first().request.body!!))
         org.junit.Assert.assertEquals(listOf("mcp-0000000000000002"), pkg.moveIds)
         org.junit.Assert.assertEquals("projects:read", CompanionClient.scope("GET", "/v1/printers/mcps"))
+    }
+
+    /**
+     * David, Nov 6: "adding a printer is filling out a form that hsould be mostly autofilled by discovery". With projects
+     * present, Home → Printers → Add a Printer lists what the MCPs found; the found P1S opens filled in, and only the access
+     * code is typed before Check and Add, the companion's `printers.check` and `printers.add` as on the Mac.
+     */
+    @Test fun addAPrinterFillsAFoundPrinterAndAsksOnlyTheAccessCodeWithProjectsPresent() {
+        val transport = addPrinterFixture()
+        compose.onNodeWithTag("add-printer-found-ssdp:01P00A451601106").performClick()
+        compose.onNodeWithTag("add-printer-host").assertTextContains("192.168.1.42")
+        compose.onNodeWithTag("add-printer-serial").assertTextContains("01P00A451601106")
+        compose.onNodeWithText("On the printer: Settings → Device").assertExists()
+        compose.onNodeWithTag("add-printer-add").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("add-printer-secret").performScrollTo().performTextInput("12345678")
+        compose.onNodeWithTag("add-printer-check").performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("add-printer-connected")).fetchSemanticsNodes().isNotEmpty() }
+        // Check went out to the companion (printers.check) with the filled-in form and the typed code.
+        val checked = WireJson.parseToJsonElement(String(transport.calls.single { it.request.url.endsWith("/v1/printers/setup/check") }.request.body!!)).jsonObject["printer"]!!.jsonObject
+        assertEquals("192.168.1.42", (checked["host"] as JsonPrimitive).content)
+        assertEquals("12345678", (checked["secret"] as JsonPrimitive).content)
+        compose.onNodeWithTag("add-printer-add").performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Added.")).fetchSemanticsNodes().isNotEmpty() }
+        val sent = transport.calls.filter { it.request.url.endsWith("/v1/printers/setup/add") }.single()
+        val printer = WireJson.parseToJsonElement(String(sent.request.body!!)).jsonObject["printer"]!!.jsonObject
+        assertEquals(mapOf("backend" to "bambu-printer-mcp", "printerType" to "bambu", "host" to "192.168.1.42", "serial" to "01P00A451601106",
+            "model" to "p1s", "secret" to "12345678", "name" to "Workshop P1S"), printer.mapValues { (it.value as JsonPrimitive).content })
+        assertEquals("projects:write", CompanionClient.scope("POST", "/v1/printers/setup/add"))
+        compose.onNodeWithTag("add-printer-done").performClick()
+        compose.onNodeWithTag("add-printer").assertExists()
+    }
+
+    /** The MCP fetches the key for the person (`obtain`, "Approve in OctoPrint"): the approved key fills the field. */
+    @Test fun addAPrinterApprovalFromTheMcpFillsTheKey() {
+        val transport = addPrinterFixture()
+        compose.onNodeWithTag("add-printer-found-bonjour:octopi.local:80").performClick()
+        compose.onNodeWithTag("add-printer-add").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Approve in OctoPrint").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("OctoPrint approved Counterpart.")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("add-printer-add").performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("add-printer-added")).fetchSemanticsNodes().isNotEmpty() }
+        val obtains = transport.calls.filter { it.request.url.endsWith("/v1/printers/setup/obtain") }
+        assertEquals(2, obtains.size)
+        val body = WireJson.parseToJsonElement(String(obtains.last().request.body!!)).jsonObject
+        assertEquals("0b6b8a52-6f1e-4c5a-9d43-4c1c3f6a2e10", (body["session"] as JsonPrimitive).content)
+        val added = WireJson.parseToJsonElement(String(transport.calls.last { it.request.url.endsWith("/setup/add") }.request.body!!)).jsonObject["printer"]!!.jsonObject
+        assertEquals("OCTO-KEY-FROM-APPROVAL", (added["secret"] as JsonPrimitive).content)
+    }
+
+    /** Home with a project, then Printers → Add a Printer, answered from packages/contracts/fixtures/printer-setup-phone.json. */
+    private fun addPrinterFixture(): FakeTransport {
+        val answers = WireJson.parseToJsonElement(contractFixture("printer-setup-phone.json").readText()).jsonObject
+        fun answer(key: String) = HttpReply(200, answers[key].toString().toByteArray())
+        app.pairingStore.save(v2Record(), false)
+        val transport = FakeTransport { request, _ ->
+            val body = request.body?.let { WireJson.parseToJsonElement(String(it)).jsonObject }
+            when {
+                request.url.endsWith("/healthz") -> json(200, mapOf("status" to "ok", "capabilities" to mapOf("printerAdd" to true)))
+                request.url.endsWith("/v1/printers/setup/discover") -> answer("discover")
+                request.url.endsWith("/v1/printers/setup/check") -> answer("check")
+                request.url.endsWith("/v1/printers/setup/obtain") -> answer(if (body?.get("session") == null) "obtainPending" else "obtainApproved")
+                request.url.endsWith("/v1/printers/setup/add") -> answer("add")
+                else -> json(404, mapOf("error" to "not-found"))
+            }
+        }
+        app.pairing = PairingClient(app.pairingStore, transport)
+        app.companion = CompanionClient(app.pairing, transport, null, null, app.cacheDir)
+        state.projects.value = listOf(project("a", "Existing project", "ready"))
+        state.capabilities.value = setOf("printerAdd")
+        state.loaded.value = true
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination(id = "current", name = "Bambu Lab P1S", backend = "bambu-printer-mcp")), "current")
+        compose.setContent {
+            WithApp {
+                var showPrinters by remember { mutableStateOf(false) }
+                if (showPrinters) PrintersScreen(back = { showPrinters = false })
+                else HomeScreen(open = { _, _ -> }, newProject = {}, printers = { showPrinters = true }, settings = {})
+            }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Existing project"))
+        compose.onNodeWithContentDescription("Printers").performClick()
+        compose.onNodeWithTag("add-printer").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("add-printer-found-ssdp:01P00A451601106")).fetchSemanticsNodes().isNotEmpty() }
+        return transport
     }
 
     /** Settings → Printers follow-up (Nov 6): David's two P1S profiles each showed the same Move, ordered by id. */

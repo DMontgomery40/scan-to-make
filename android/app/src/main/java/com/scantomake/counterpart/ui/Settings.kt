@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -57,7 +58,13 @@ import kotlinx.coroutines.launch
 fun PrintersScreen(back: () -> Unit) {
     val state = AppState.of(LocalContext.current)
     val catalog by state.catalog.collectAsState()
+    val capabilities by state.capabilities.collectAsState()
+    var adding by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { state.loadCapabilities() }
     LaunchedEffect(Unit) { while (true) { state.loadPrinters(); kotlinx.coroutines.delay(10_000) } }
+    // The computer's Add printer…, here (`printerAdd`): what the MCPs found, filled in.
+    if (adding) { AddPrinterScreen(back = { adding = false }, added = { scope.launch { state.loadPrinters() } }); return }
     Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = back) { Icon(CIcons.Back, "Back") }
@@ -66,7 +73,8 @@ fun PrintersScreen(back: () -> Unit) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val list = catalog?.destinations
             if (list == null) Text("Reading the printers on your computer…", color = Palette.secondary)
-            else if (list.isEmpty()) Text("No printers are set up on your computer yet. Add one in Counterpart on your computer (bambu-printer-mcp or mcp-3D-printer-server).", color = Palette.secondary)
+            else if (list.isEmpty()) Text(if ("printerAdd" in capabilities) "No printers are set up on your computer yet." else "No printers are set up on your computer yet. Add one in Counterpart on your computer (bambu-printer-mcp or mcp-3D-printer-server).", color = Palette.secondary)
+            if ("printerAdd" in capabilities) PrimaryButton("Add a Printer", Modifier.fillMaxWidth().testTag("add-printer")) { adding = true }
             list?.forEach { d ->
                 GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

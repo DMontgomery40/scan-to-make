@@ -739,222 +739,24 @@ public extension ControlClient {
 }
 
 /// Add printer…: what the sheet offers, from the printer MCPs (`printers.discover` `options`).
-public struct PrinterSetupOptions: Decodable, Sendable, Equatable {
-    public struct Secret: Decodable, Sendable, Equatable {
-        public let label: String
-        public let hint: String?
-        public let required: Bool
-        /// The MCPs that can fetch it for the person (`printers.obtain`, e.g. OctoPrint's key approved in OctoPrint), in their words.
-        public let obtain: Obtain?
-    }
-    /// A field's value the MCP can fetch instead of the person typing it: the button's words and the MCPs that offer it.
-    public struct Obtain: Decodable, Sendable, Equatable {
-        public let label: String
-        public let hint: String?
-        public let backends: [String]
-    }
-    /// One of the MCP's own settings (`counterpart_setup_fields`): the `.env` variable, its label and hint, and whether it's needed.
-    public struct Field: Decodable, Sendable, Equatable, Identifiable {
-        public let name: String
-        public let env: String
-        public let label: String
-        public let hint: String?
-        public let required: Bool
-        /// "path": a file or folder on this Mac.
-        public let input: String?
-        public let choices: [Model]?
-        public var id: String { name }
-    }
-    /// The slicer an MCP would run, as it resolves it now, and the settings that choose it.
-    public struct Slicer: Decodable, Sendable, Equatable {
-        public let type: String
-        public let path: String?
-        public let found: Bool
-        public let profilesRoot: String?
-        public let profilesFound: Bool?
-        public let fields: [Field]
-        public func field(_ name: String) -> Field? { fields.first { $0.name == name } }
-    }
-    /// An MCP on this Mac that can't say yet what it needs: its words for the person.
-    public struct Update: Decodable, Sendable, Equatable, Identifiable {
-        public let package: String
-        public let message: String
-        public var id: String { package }
-    }
-    /// A brand or host software: mcp-3D-printer-server's `PRINTER_TYPE`, and the MCPs that can reach it (the default first).
-    public struct PrinterType: Decodable, Sendable, Equatable, Identifiable {
-        public let printerType: String
-        public let label: String
-        public let backends: [String]
-        /// It needs a serial number and a model (Bambu Lab).
-        public let serial: Bool
-        public let secret: Secret?
-        /// The address field in the MCP's words; `url` when it also takes a web address (https://…, a sub-path).
-        public let address: Address?
-        public var id: String { printerType }
-    }
-    public struct Address: Decodable, Sendable, Equatable {
-        public let hint: String?
-        public let url: Bool?
-    }
-    public struct Model: Decodable, Sendable, Equatable, Identifiable {
-        public let value: String
-        public let label: String
-        public var id: String { value }
-    }
-    public let types: [PrinterType]
-    /// Each MCP's own model names, by package.
-    public let models: [String: [Model]]
-    /// A serial number's prefix → its model (the MCP's own table).
-    public let serialModels: [String: String]?
-    /// The slicer each MCP would run and its settings, by package; nil from an older companion.
-    public let slicer: [String: Slicer]?
-    /// MCPs that need an update before they can set up printers.
-    public let updates: [Update]?
-    /// The model a typed serial number names, when it is one the MCP knows (its prefixes are all one length).
-    public func model(forSerial serial: String) -> String? {
-        guard let length = serialModels?.keys.first?.count else { return nil }
-        let prefix = String(serial.trimmingCharacters(in: .whitespaces).prefix(length)).uppercased()
-        return prefix.count == length ? serialModels?[prefix] : nil
-    }
-}
+/// Add printer…'s types live in CounterpartKit (the phones use them too); these names keep the Mac's code as it was.
+public typealias PrinterSetupOptions = CounterpartKit.PrinterSetupOptions
+public typealias PrinterCandidate = CounterpartKit.PrinterCandidate
+public typealias PrinterDiscovery = CounterpartKit.PrinterDiscovery
+public typealias SlicerControls = CounterpartKit.SlicerControls
+public typealias AddressField = CounterpartKit.AddressField
+public typealias ObtainControl = CounterpartKit.ObtainControl
+public typealias ObtainStep = CounterpartKit.ObtainStep
+public typealias PrinterForm = CounterpartKit.PrinterForm
+public typealias PrinterCheckResult = CounterpartKit.PrinterCheckResult
+public typealias PrinterAdded = CounterpartKit.PrinterAdded
 
-/// A printer Add printer… found: a configured MCP folder on this Mac, or a printer on the network. Never a secret.
-public struct PrinterCandidate: Decodable, Sendable, Equatable, Identifiable {
-    public let id: String
-    /// `folder`, `ssdp` or `bonjour`.
-    public let source: String
-    public let name: String
-    public let backend: String
-    public let printerType: String
-    public let model: String?
-    public let host: String?
-    public let port: String?
-    public let serial: String?
-    /// A configured MCP folder: Add runs it where it is, in one click.
-    public let folder: String?
-    /// Already one of the printers.
-    public let added: Bool
-    /// A folder whose `.env` lacks settings its MCP needs (names only), and what Add fills (only the model).
-    public let missing: [String]?
-    public let fill: [String: String]?
-    /// Its MCP needs a model Counterpart couldn't tell: the sheet asks.
-    public var needsModel: Bool { missing?.contains("BAMBU_MODEL") == true && fill?["BAMBU_MODEL"] == nil }
-}
-
-public struct PrinterDiscovery: Decodable, Sendable, Equatable {
-    public let found: [PrinterCandidate]
-    /// `unavailable` when this Mac couldn't listen for Bambu printers (another app may hold the port).
-    public let network: String
-    public let options: PrinterSetupOptions
-}
-
-/// What Check and Add send: a found folder, or the form's fields. `secret` is the access code or API key.
-/// Add printer…'s Slicer section, from the chosen MCP's own `slicer` fields (`counterpart_setup_fields`): its slicer
-/// choice, and the paths it reads when it can't find its slicer or Bambu profiles. None for an MCP that declares none.
-public struct SlicerControls: Sendable, Equatable {
-    public let slicer: PrinterSetupOptions.Slicer
-    public init?(options: PrinterSetupOptions?, backend: String) {
-        guard let slicer = options?.slicer?[backend] else { return nil }
-        self.slicer = slicer
+public extension CounterpartKit.PrinterForm {
+    /// The form as the control socket sends it: exactly its `Encodable` wire form.
+    var json: JSONValue {
+        guard let data = try? JSONEncoder().encode(self), let value = try? JSONDecoder().decode(JSONValue.self, from: data) else { return .object([:]) }
+        return value
     }
-    /// The slicer choice, when the MCP offers one.
-    public var choice: PrinterSetupOptions.Field? { slicer.field("slicer").flatMap { ($0.choices ?? []).isEmpty ? nil : $0 } }
-    public var path: PrinterSetupOptions.Field? { slicer.field("slicer-path") }
-    public var profiles: PrinterSetupOptions.Field? { slicer.field("profiles") }
-    /// The slicer shown as chosen: the person's, else the one the MCP would run.
-    public func selected(in form: PrinterForm) -> String { form.slicer ?? slicer.type }
-    /// The MCP's own slicer sends nothing, so only a change is sent (and SLICER_TYPE agrees with SLICER_PATH).
-    public func choose(_ value: String, in form: inout PrinterForm) { form.slicer = value == slicer.type ? nil : value }
-}
-
-/// Add printer…'s address field: the MCP's hint, and a prompt that offers a web address only where the MCP takes one.
-public struct AddressField: Sendable, Equatable {
-    public let hint: String?
-    public let prompt: String
-    public init(options: PrinterSetupOptions?, printerType: String) {
-        let address = options?.types.first { $0.printerType == printerType }?.address
-        hint = address?.hint
-        prompt = address?.url == true ? "192.168.1.20, printer.local or https://…" : "192.168.1.20 or printer.local"
-    }
-}
-
-/// Add printer…'s button that fetches the key or access code through the chosen MCP, when its field declares one
-/// (`obtain` in `counterpart_setup_fields`). Its words are the MCP's own; nil otherwise.
-public struct ObtainControl: Sendable, Equatable {
-    public let field = "secret"
-    public let label: String
-    public let hint: String?
-    public init?(options: PrinterSetupOptions?, form: PrinterForm) {
-        guard form.folder == nil, let obtain = options?.types.first(where: { $0.printerType == form.printerType })?.secret?.obtain,
-              obtain.backends.contains(form.backend) else { return nil }
-        label = obtain.label; hint = obtain.hint
-    }
-}
-
-/// One step of `printers.obtain`: what the person sees, the page where they approve it, and once approved the value.
-public struct ObtainStep: Decodable, Sendable, Equatable {
-    public let session: String?
-    /// `pending`, `approved` or `failed`.
-    public let status: String
-    public let message: String
-    public let approveUrl: String?
-    public let value: String?
-    public init(session: String? = nil, status: String, message: String, approveUrl: String? = nil, value: String? = nil) {
-        self.session = session; self.status = status; self.message = message; self.approveUrl = approveUrl; self.value = value
-    }
-    public var pending: Bool { status == "pending" }
-    /// The approval page, http or https only.
-    public var approvalPage: URL? { approveUrl.flatMap(URL.init(string:)).flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil } }
-}
-
-public struct PrinterForm: Sendable, Equatable {
-    public var folder: String?
-    public var backend = "bambu-printer-mcp"
-    public var printerType = "bambu"
-    public var host = ""
-    public var port: String?
-    public var serial = ""
-    public var model: String?
-    public var secret = ""
-    public var name: String?
-    /// The MCP's slicer settings, when the person sets them (`slicer.fields`): where the slicer and its Bambu profiles are.
-    public var slicer: String?
-    public var slicerPath: String?
-    public var profiles: String?
-    public init(folder: String? = nil) { self.folder = folder }
-    public var json: JSONValue {
-        if let folder { return .object(["folder": .string(folder)].merging(model.map { ["model": .string($0)] } ?? [:]) { $1 }) }
-        var value: [String: JSONValue] = ["backend": .string(backend), "printerType": .string(printerType), "host": .string(host.trimmingCharacters(in: .whitespaces))]
-        if let port, !port.isEmpty { value["port"] = .string(port) }
-        if printerType == "bambu" {
-            value["serial"] = .string(serial.trimmingCharacters(in: .whitespaces))
-            if let model { value["model"] = .string(model) }
-        }
-        if !secret.isEmpty { value["secret"] = .string(secret) }
-        if let name, !name.isEmpty { value["name"] = .string(name) }
-        if let slicer, !slicer.isEmpty { value["slicer"] = .string(slicer) }
-        if let slicerPath, !slicerPath.isEmpty { value["slicerPath"] = .string(slicerPath) }
-        if let profiles, !profiles.isEmpty { value["profiles"] = .string(profiles) }
-        return .object(value)
-    }
-}
-
-/// Check: what get_printer_status (and, for a Bambu printer, camera_snapshot) said. Never the MCP's own words.
-public struct PrinterCheckResult: Decodable, Sendable, Equatable {
-    public struct Image: Decodable, Sendable, Equatable { public let mimeType: String; public let base64: String }
-    public let reached: Bool
-    /// `connected`, `failed` or `not-supported`.
-    public let camera: String
-    public let image: Image?
-    public let model: String?
-}
-
-public struct PrinterAdded: Decodable, Sendable, Equatable {
-    public let id: String
-    /// The printer it is listed as; another one when it is the same printer through another MCP.
-    public let destinationId: String?
-    public let sameAs: String?
 }
 
 public extension ControlClient {
@@ -990,17 +792,4 @@ public extension ControlClient {
         let reply: Reply = try await call("printers.chooseMcp", ["destinationId": .string(destinationId), "backend": .string(backend)])
         return reply.destinationId
     }
-}
-
-/// Runs `printers.obtain` for the form until the person answers in the MCP's page, it fails, or the task is cancelled
-/// (the sheet closed or the printer changed). Each step is shown as it comes; the last is returned.
-public func obtainSetupValue(_ form: PrinterForm, field: String, step: (PrinterForm, String, String?) async throws -> ObtainStep,
-                             shown: @MainActor (ObtainStep) -> Void) async throws -> ObtainStep {
-    var current = try await step(form, field, nil)
-    await shown(current)
-    while current.pending, let session = current.session, !Task.isCancelled {
-        current = try await step(form, field, session)
-        if !Task.isCancelled { await shown(current) }
-    }
-    return current
 }

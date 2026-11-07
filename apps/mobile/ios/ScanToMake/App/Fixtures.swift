@@ -329,12 +329,37 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "mcpCopies": FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies.json").path), "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "mcpUpdates": true, "mcpCopies": FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies.json").path), "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true, "printerAdd": FileManager.default.fileExists(atPath: folder.appending(path: "printer-setup-phone.json").path)]]) }
         let completingMove = FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies-moved.json").path)
         if path == "/v1/printers/mcps" {
             let moved = await Fixtures.mcpCopyState.moved
             let name = completingMove && moved ? "mcp-profile-copies-moved.json" : "mcp-profile-copies.json"
             return json(["packages": [try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appending(path: name)))]])
+        }
+        // Add Printer: the companion's answers the companion and Android tests also read (printer-setup-phone.json).
+        if path.hasPrefix("/v1/printers/setup/"), method == "POST",
+           let data = try? Data(contentsOf: folder.appending(path: "printer-setup-phone.json")),
+           let answers = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            switch path.dropFirst("/v1/printers/setup/".count) {
+            case "discover": return json(answers["discover"] ?? [:])
+            case "check":
+                // Check answers "Connected" only for the form the sheet filled in: discovery's address and the typed code.
+                let printer = body["printer"] as? [String: Any] ?? [:]
+                guard printer["folder"] != nil || (!(printer["host"] as? String ?? "").isEmpty && !(printer["secret"] as? String ?? "").isEmpty) else {
+                    return json(["error": ["code": "invalid-request", "message": "incomplete form", "sentence": "Enter the access code."]], 400)
+                }
+                return json(answers["check"] ?? [:])
+            case "obtain": return json(answers[body["session"] == nil ? "obtainPending" : "obtainApproved"] ?? [:])
+            case "add":
+                // The companion refuses a form without the key its MCP requires; so does this fixture.
+                let printer = body["printer"] as? [String: Any] ?? [:]
+                guard printer["folder"] != nil || !(printer["secret"] as? String ?? "").isEmpty else {
+                    return json(["error": ["code": "invalid-request", "message": "missing secret", "sentence": "Enter the access code."]], 400)
+                }
+                return json(answers["add"] ?? [:])
+            default: return json(["error": ["code": "not-found"]], 404)
+            }
         }
         if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/route") {
