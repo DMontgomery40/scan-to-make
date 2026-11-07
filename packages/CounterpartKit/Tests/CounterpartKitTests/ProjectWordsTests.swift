@@ -134,6 +134,8 @@ final class ProjectWordsTests: XCTestCase {
                        "Making your changes. You can leave this project and return to it while your Mac works.")
         XCTAssertEqual(ProjectWords(ready()).status, "Ready to print")
         XCTAssertEqual(ProjectWords(ready(["state": "printing"])).status, "Preparing print…")
+        // The companion's status while the printer MCP sends the file (counterpart/1 upload progress).
+        XCTAssertEqual(ProjectWords(ready(["state": "printing", "progress": "Sending to the printer… 62%"])).status, "Sending to the printer… 62%")
         XCTAssertEqual(ProjectWords(ready(["state": "printed"])).status, "Print request accepted")
         XCTAssertEqual(ProjectWords(project(["state": "failed"])).status, "Something went wrong on your Mac.")
     }

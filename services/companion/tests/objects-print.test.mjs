@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
-import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
+import {ObjectService, InvalidStateError, sendingWords} from '../dist/objects/service.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
 import {createServer} from 'node:http';
@@ -303,6 +303,21 @@ test('print phases and estimates are visible before confirmation and survive a f
   assert.deepEqual(done.print.events.map(x=>x.message), ['Slicing the model…','Sliced file saved.']);
 });
 
+
+test('the MCP\'s upload progress shows as "Sending to the printer… 62%", logged once, on the status every layout reads', async () => {
+  // counterpart/1: print_3mf reports its upload as bytes of total, stage "upload" (bambu-printer-mcp 1.1.77).
+  const total = 18_362_734;
+  const upload = sent => ({phase:'requesting-print', mcp:{progress:sent, total, message:'any words', stage:'upload'}});
+  const {service, object} = await setup({progressUpdates:[{phase:'requesting-print'}, upload(0), upload(5_000_000), upload(11_400_000)]});
+  await service.print(object.id);
+  await until(async () => (await service.get(object.id)).printConfirmation);
+  const sending = await service.get(object.id);
+  // Project.progress is what ProjectWords (Mac, iPhone, iPad), Android Words.kt and Linux domain.ts show while printing starts.
+  assert.equal(sending.progress, 'Sending to the printer… 62%');
+  assert.deepEqual(sending.print.events.map(x => x.message), ['Requesting print. Waiting for the printer service…', 'Sending to the printer…']);
+  assert.equal(sendingWords(0, total), 'Sending to the printer… 0%');
+  assert.equal(sendingWords(total, total), 'Sending to the printer… 100%');
+});
 
 test('an existing failed attempt shows the estimate saved with its print, and the app never reads its sliced file for one', async () => {
   const {service,store,object,bundles}=await setup();

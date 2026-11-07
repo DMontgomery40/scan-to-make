@@ -365,6 +365,12 @@ class ContractTests {
         assertEquals(ProjectPhase.Unknown, ProjectWords(newer).phase)
     }
 
+    @Test fun sendingToThePrinterShowsTheCompanionsPercentage() {
+        // The companion's status while the printer MCP sends the file (counterpart/1 upload progress), as ProjectWords.swift shows it.
+        val sending = Project.decode(parseObject("""{"id":"x","createdAtMs":1,"updatedAtMs":2,"state":"printing","progress":"Sending to the printer… 62%"}""")!!)!!
+        assertEquals("Sending to the printer… 62%", ProjectWords(sending).status)
+    }
+
     @Test fun cappedPassesOfferRetryAndChangesAsTheSwiftDoes() {
         val rows = com.scantomake.counterpart.core.WireJson.parseToJsonElement(kitFixture("capped-projects.json").readText()).arr!!
         assertEquals(5, rows.size)

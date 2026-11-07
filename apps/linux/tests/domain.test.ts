@@ -11,6 +11,7 @@ import {
   guardPlate,
   parseLayers,
   searchProject,
+  words,
   startersShown,
   normalizeQuestion,
   validateAnswer,
@@ -505,4 +506,9 @@ test("Add a printer's address offers a web address only where the MCP's field ta
   assert.doesNotMatch(addressField(options, "klipper").placeholder, /https:/);
   assert.equal(addressField(options, "klipper").hint, "The printer's IP address or host name");
   assert.doesNotMatch(addressField(undefined, "octoprint").placeholder, /https:/);
+});
+
+test("while the printer MCP sends the file, a project shows the companion's percentage", () => {
+  // counterpart/1 upload progress, as the companion writes it to Project.progress (Mac, iPhone, iPad and Android show the same).
+  assert.equal(words({ id: "x", state: "printing", progress: "Sending to the printer… 62%" } as unknown as Project), "Sending to the printer… 62%");
 });
