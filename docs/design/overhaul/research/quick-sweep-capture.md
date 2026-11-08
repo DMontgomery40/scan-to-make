@@ -17,7 +17,7 @@ David, Nov 8:
 Everything custom from the earlier revisions is in the **Appendix**. Each item there is tied to the specific measured failure of an Apple-only run that would justify it.
 
 Markers:
-- **[A#]** is an Apple source, listed with its URL and availability in §10. Availability was read from Apple's documentation JSON on Nov 8.
+- **[A#]** is an Apple source, listed with its URL and availability under Sources. Availability was read from Apple's documentation JSON on Nov 8.
 - **[inference]** is reasoning that Apple does not document.
 - **[measure]** must be measured on David's iPhone, Mac or rig.
 - **New (proposed)** marks a rule that is not in the PRD and needs David's OK.
