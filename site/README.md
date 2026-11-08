@@ -52,8 +52,10 @@ buttons, meets WCAG AA in both palettes.
   Counterpart forward. Don't pair a Print sheet with a bed photo unless the sheet's colours match what printed. Replace a
   screen with a newer real one when the app changes.
 - **`made/*.jpg`**: the app's own renders (`current/renders/1_overview*.png`) of David's printed projects marked "It
-  works" (Vivi pick `a2bfa85a`, mic mount `7f157a66`). No generated or stock pictures: every image is the app, the
-  printer's camera, or a real part.
+  works" (Vivi pick `a2bfa85a`, mic mount `7f157a66`). Otherwise no generated or stock pictures: every image is the
+  app, the printer's camera, or a real part. The one exception is `made/glovebox-latch.jpg`, an illustration of the
+  glovebox-latch example (Gemini, passed the Nov 6 image review, cropped to remove a printer brand). David approved
+  reviewed images and asked for this one back on Nov 8 ("yes i do want it back").
 - **Written for people who print things.** Plain, confident product copy: no test-status notes, no "real screen" or
   "mockup" captions, no tool names, code, versions, paths or internals tables. Beta status is one line in Downloads.
   Claims still have to be true of what's on main (PRD §0).
