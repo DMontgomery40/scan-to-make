@@ -196,7 +196,7 @@ import CounterpartKit
         if (try? FileManager.default.copyItem(at: folder.appendingPathComponent("bed.jpg"), to: frame)) != nil,
            let attachment = try? UNNotificationAttachment(identifier: "frame", url: frame) { content.attachments = [attachment] }
         try? await center.add(UNNotificationRequest(identifier: "fixture-milestone", content: content,
-                                                    trigger: UNTimeIntervalNotificationTrigger(timeInterval: 8, repeats: false)))
+                                                    trigger: UNTimeIntervalNotificationTrigger(timeInterval: 20, repeats: false)))
     }
     #endif
 
