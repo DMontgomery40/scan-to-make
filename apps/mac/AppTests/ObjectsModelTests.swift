@@ -2,7 +2,7 @@ import XCTest
 import CounterpartKit
 import RealityKit
 import SwiftUI
-import AppKit
+import ViewInspector
 
 /// One companion's objects, as the control socket serves them.
 private actor FakeObjects: ObjectsCompanion {
@@ -151,17 +151,6 @@ private func project(_ item: [String: Any]) throws -> Project {
     try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: item))
 }
 
-@MainActor private struct PlateStripHarness: View {
-    @ObservedObject var model: ObjectsModel
-    let id: String
-    var body: some View {
-        if let project = model.objects.first(where: { $0.id == id }) {
-            ProjectPlatesView(project: project, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in },
-                markPrinted: { plate in Task { await model.markPlatePrinted(id, plate: plate) } })
-        }
-    }
-}
-
 @MainActor final class ObjectsModelTests: XCTestCase {
     func testPresenceRefreshIsNotMaskedByNewerCredentialTimestamp() async {
         let companion = FakeObjects()
@@ -268,25 +257,9 @@ private func project(_ item: [String: Any]) throws -> Project {
         await model.refresh()
         let project = try XCTUnwrap(model.objects.first { $0.id == id })
         let plate = try XCTUnwrap(project.plates?.first)
-        let view = PlateStripHarness(model: model, id: id)
-        let host = NSHostingView(rootView: view.frame(width: 1000, height: 500))
-        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 1000, height: 500), styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = host
-        window.orderBack(nil) // Off-screen test host; never activates or opens David's app.
-        try await Task.sleep(for: .milliseconds(100))
-        defer { window.close() }
-        host.layoutSubtreeIfNeeded()
-        func button(_ value: Any, identifier: String = "printed-elsewhere-0-0", depth: Int = 0) -> (any NSAccessibilityProtocol)? {
-            guard depth < 30, let node = value as? any NSAccessibilityProtocol else { return nil }
-            if node.accessibilityIdentifier() == identifier { return node }
-            for child in node.accessibilityChildren() ?? [] {
-                if let found = button(child, identifier: identifier, depth: depth + 1) { return found }
-            }
-            return nil
-        }
-        let control = try XCTUnwrap(button(host), "The plate's visible action must be reachable through accessibility")
-        XCTAssertEqual(control.accessibilityPerformPress(), true)
+        let view = ProjectPlatesView(project: project, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in },
+            markPrinted: { plate in Task { await model.markPlatePrinted(id, plate: plate) } })
+        try view.inspect().find(viewWithAccessibilityIdentifier: "printed-elsewhere-0-0").button().tap()
         for _ in 0..<100 {
             if model.objects.first(where: { $0.id == id })?.completedPlateCount == 1 { break }
             try await Task.sleep(for: .milliseconds(10))
@@ -296,9 +269,9 @@ private func project(_ item: [String: Any]) throws -> Project {
         let updated = try XCTUnwrap(model.objects.first { $0.id == id })
         XCTAssertEqual(updated.plates?.first?.statusText, "Printed")
         XCTAssertEqual(updated.completedPlateCount, 1)
-        host.layoutSubtreeIfNeeded()
-        let shown = try XCTUnwrap(button(host, identifier: "select-plate-0-0"))
-        XCTAssertTrue(shown.accessibilityLabel()?.contains("Printed") == true)
+        let shown = ProjectPlatesView(project: updated, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in }, markPrinted: { _ in })
+        XCTAssertNoThrow(try shown.inspect().find(text: "1 of 6 printed"))
+        XCTAssertNoThrow(try shown.inspect().find(text: "Printed"))
         XCTAssertEqual(updated.plates?[1].statusText, "Not printed")
     }
 

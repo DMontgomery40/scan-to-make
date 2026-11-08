@@ -4,6 +4,9 @@ options:
   deploymentTarget:
     macOS: '27.0'
 packages:
+  ViewInspector:
+    url: https://github.com/nalexn/ViewInspector
+    exactVersion: 0.10.5
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: 2.9.3
@@ -80,6 +83,7 @@ targets:
     dependencies:
       - target: AgentKit
       - package: CounterpartKit
+      - package: ViewInspector
     settings:
       GENERATE_INFOPLIST_FILE: YES
 schemes:

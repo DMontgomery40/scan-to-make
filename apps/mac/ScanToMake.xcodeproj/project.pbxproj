@@ -9,13 +9,13 @@
 /* Begin PBXBuildFile section */
 		007B0087635810646A5380B8 /* FusionSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FE7B5E2AF7AE14627DA9569 /* FusionSetup.swift */; };
 		02C51868139E34338B1B6200 /* SettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A63BE8D6BD19AFFDA3F5D4E /* SettingsViews.swift */; };
-		692B89C0007CA76C08D9851D /* PrinterSetupViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72682441B6240267DE248E3B /* PrinterSetupViews.swift */; };
 		03D161D806169A282A36F1EC /* MacStatusModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81F869DA19C2B26065AAF581 /* MacStatusModel.swift */; };
 		05551324D77D3BD8D2A0C7C3 /* PrinterCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112D6ADABF2AF7AAEB888655 /* PrinterCheck.swift */; };
 		0EFA54A02DBEEF87FFF4215E /* ModelAccessModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC5F2C1001F7210EDDAC44F0 /* ModelAccessModelTests.swift */; };
 		0FE5829508ADAECB01427A8E /* ModelAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BF8AD0AEAAA0378F114C4AB /* ModelAccessTests.swift */; };
 		10A460FF8712D01F74D0C610 /* NearbyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F496F4AF4B9CFF607CE85C /* NearbyViews.swift */; };
 		114B947DFF6305E6F53ADFFE /* NotificationPrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04530A8CA650F101ADAE8AB8 /* NotificationPrefs.swift */; };
+		122B63286CB1F2C0DE16B5E4 /* PrinterSetupViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 182F303BF9B57C60EF0E6F0D /* PrinterSetupViews.swift */; };
 		16062DFD6EE91A1948D2FD7F /* Runtime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1DA7ED6F82EDD9901D021D2 /* Runtime.swift */; };
 		1AD68916037597DF36587C57 /* PublishedModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E755D06CBF436291D928B062 /* PublishedModel.swift */; };
 		1CFBE8719FC7A12325804DDE /* PrinterUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78E5BE2D91907CDD0FB81A47 /* PrinterUpdates.swift */; };
@@ -79,6 +79,7 @@
 		B92D952C97614C5016FB77F6 /* Published.swift in Sources */ = {isa = PBXBuildFile; fileRef = C676E514E2134A0A699D7260 /* Published.swift */; };
 		BA0F02ADB0934148886ED85D /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 1D14D3233B33902B236A90C8 /* Sparkle */; };
 		BAF1A1C7C03E0182232FEFA5 /* ModelKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F489172C7C02B2C5FD93371 /* ModelKeychain.swift */; };
+		BB7493367C5FFC33C8E02E21 /* ViewInspector in Frameworks */ = {isa = PBXBuildFile; productRef = 418411250B46E115D2DB70DE /* ViewInspector */; };
 		BDC8064662448F9AD28A1E09 /* ModelAccessModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5042DB008B425E2606B911 /* ModelAccessModel.swift */; };
 		C2DB30294BD395175341B8E5 /* BlenderBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33A62B559A27E940358D1924 /* BlenderBridge.swift */; };
 		C4EA24E23D16F3944224C11D /* Confirmation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D25DA0A9EC41FEC7B93D7FC6 /* Confirmation.swift */; };
@@ -157,6 +158,7 @@
 		124E802B58E41122F995456E /* NearbyModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyModelTests.swift; sourceTree = "<group>"; };
 		12A92990D34D700BB41B84E9 /* FusionSetUpFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FusionSetUpFlowTests.swift; sourceTree = "<group>"; };
 		1496538ABC8C1B43DD7C1B15 /* Diagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Diagnostics.swift; sourceTree = "<group>"; };
+		182F303BF9B57C60EF0E6F0D /* PrinterSetupViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterSetupViews.swift; sourceTree = "<group>"; };
 		1B4CAC0C434F5FAB667272B0 /* ProjectDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetail.swift; sourceTree = "<group>"; };
 		1F489172C7C02B2C5FD93371 /* ModelKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelKeychain.swift; sourceTree = "<group>"; };
 		21B73436F785508B3D834AF9 /* Main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Main.swift; sourceTree = "<group>"; };
@@ -178,7 +180,6 @@
 		597C236AD2F8BEAB989B447D /* ModelAccessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelAccessViews.swift; sourceTree = "<group>"; };
 		59A8B37FDCCE714A49CB678C /* FileImagesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileImagesTests.swift; sourceTree = "<group>"; };
 		5A63BE8D6BD19AFFDA3F5D4E /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
-		72682441B6240267DE248E3B /* PrinterSetupViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterSetupViews.swift; sourceTree = "<group>"; };
 		6085C88754126EAB39C66248 /* Objects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Objects.swift; sourceTree = "<group>"; };
 		65E3A0D63F7083BD2ECAB4E5 /* CompanionSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSettingsTests.swift; sourceTree = "<group>"; };
 		666DD15803F0A0C9F25C5AB3 /* PairingSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingSessionTests.swift; sourceTree = "<group>"; };
@@ -233,6 +234,7 @@
 			files = (
 				20680B926C59DC5E0AE1AA44 /* AgentKit.framework in Frameworks */,
 				63E97B5537218BF3EC17EB05 /* CounterpartKit in Frameworks */,
+				BB7493367C5FFC33C8E02E21 /* ViewInspector in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -353,13 +355,13 @@
 				04530A8CA650F101ADAE8AB8 /* NotificationPrefs.swift */,
 				B5F06994F3DC2679FF8587BB /* ObjectsModel.swift */,
 				2D69C6D9C935E91492BF71E4 /* PairingWindow.swift */,
+				182F303BF9B57C60EF0E6F0D /* PrinterSetupViews.swift */,
 				78E5BE2D91907CDD0FB81A47 /* PrinterUpdates.swift */,
 				3B814B01D67995804A9C7A30 /* PrintSheet.swift */,
 				1B4CAC0C434F5FAB667272B0 /* ProjectDetail.swift */,
 				E755D06CBF436291D928B062 /* PublishedModel.swift */,
 				A1DA7ED6F82EDD9901D021D2 /* Runtime.swift */,
 				5A63BE8D6BD19AFFDA3F5D4E /* SettingsViews.swift */,
-				72682441B6240267DE248E3B /* PrinterSetupViews.swift */,
 				887E68D99AD15299EF044892 /* Style.swift */,
 			);
 			path = App;
@@ -428,6 +430,7 @@
 			name = AgentKitTests;
 			packageProductDependencies = (
 				9E8C01A4BBA1C6DDB8368206 /* CounterpartKit */,
+				418411250B46E115D2DB70DE /* ViewInspector */,
 			);
 			productName = AgentKitTests;
 			productReference = B8FC0CEA3CCA9AA8B21FB7AF /* AgentKitTests.xctest */;
@@ -485,6 +488,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7CE2902FF2BDD1171FF2FB31 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				F13A8B7160C2B6D6E7C6F0F7 /* XCRemoteSwiftPackageReference "ViewInspector" */,
 				06B2436EBA349A2198625DE0 /* XCLocalSwiftPackageReference "../../packages/CounterpartKit" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -585,13 +589,13 @@
 				3DC3AA5F72A5359487CBF13A /* PairingWindow.swift in Sources */,
 				B5370FB378445BA7284F753F /* PrintSheet.swift in Sources */,
 				05551324D77D3BD8D2A0C7C3 /* PrinterCheck.swift in Sources */,
+				122B63286CB1F2C0DE16B5E4 /* PrinterSetupViews.swift in Sources */,
 				8A43774E4F73900583F1D36F /* PrinterUpdates.swift in Sources */,
 				F6BF783263E183A6877B0CC9 /* ProjectDetail.swift in Sources */,
 				B92D952C97614C5016FB77F6 /* Published.swift in Sources */,
 				1AD68916037597DF36587C57 /* PublishedModel.swift in Sources */,
 				16062DFD6EE91A1948D2FD7F /* Runtime.swift in Sources */,
 				02C51868139E34338B1B6200 /* SettingsViews.swift in Sources */,
-				692B89C0007CA76C08D9851D /* PrinterSetupViews.swift in Sources */,
 				CD2C9A9B185AB263C69CF1F9 /* Style.swift in Sources */,
 				41E6E16B1111A02496D50670 /* UnixTransport.swift in Sources */,
 			);
@@ -989,6 +993,14 @@
 				version = 2.9.3;
 			};
 		};
+		F13A8B7160C2B6D6E7C6F0F7 /* XCRemoteSwiftPackageReference "ViewInspector" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/nalexn/ViewInspector";
+			requirement = {
+				kind = exactVersion;
+				version = 0.10.5;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -996,6 +1008,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 7CE2902FF2BDD1171FF2FB31 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		418411250B46E115D2DB70DE /* ViewInspector */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F13A8B7160C2B6D6E7C6F0F7 /* XCRemoteSwiftPackageReference "ViewInspector" */;
+			productName = ViewInspector;
 		};
 		9C3781E485F9980822ADA4B0 /* CounterpartKit */ = {
 			isa = XCSwiftPackageProductDependency;
