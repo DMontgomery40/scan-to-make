@@ -111,7 +111,7 @@
       <p>Walk around the object while Counterpart takes a set of photos. Your computer builds the model from them.</p>
       <h3>With a scan rig</h3>
       <p>For small objects, a rig gives steadier scans, and Counterpart guides each ring. Print <a href="https://makerworld.com/en/models/1531561">Kass 3D's scan platform</a>: it's one of the starter projects.</p>
-      <h3>Scan in hand</h3>
+      <h3>Scan in hand · Labs</h3>
       <p>Holding the object and turning it in front of the camera isn't ready yet. Walk around it, use a rig, or send photos.</p>
       <h3>Getting the size right</h3>
       <p>Phone scans are good to a few millimetres. For a part that has to fit exactly, measure the size that matters with a caliper and say it in plain words, or put the caliper in a photo. What changed shows where each size came from.</p>
@@ -192,6 +192,14 @@
       </div>
     </section>
 
+    <section id="report" aria-labelledby="report-h">
+      <h2 id="report-h">Report a problem and send logs</h2>
+      <p>On iPhone or iPad, use Send Beta Feedback in TestFlight, or take a screenshot in Counterpart and share it with the developer. Say what you tried, what you expected, what happened, the project name and the approximate time. Reports of successful prints help too.</p>
+      <p>Include your phone and computer models and OS versions, Counterpart’s version on each, printer model and firmware, slicer and connection method. Settings › Printers shows which printer software you use and its version.</p>
+      <p>On the Mac, open <strong>Settings › Advanced › Export Diagnostics…</strong> just after the problem. It saves a ZIP of logs and settings with credential fields redacted. Email the ZIP to the beta feedback address shown in TestFlight, using the same time and project name as your screenshot report. Exporting does not upload or send it. Review the ZIP before sharing it; don’t send passwords, printer access codes or API keys.</p>
+      <p>Printer testing can start with an existing STL or 3MF. It does not require scanning, AR, or an AI connection. In-hand scanning is Labs work and is unavailable in this build; AR preview issues do not prevent printer testing.</p>
+    </section>
+
     <section id="privacy" aria-labelledby="privacy-h">
       <h2 id="privacy-h">Privacy</h2>
       <p>Counterpart is self-hosted: it runs on your Mac or Linux computer, and nothing goes to a Counterpart cloud. It has no accounts and no subscription. Your computer stores your scans, photos and projects, and your phone reaches it directly, at home or over Tailscale. Counterpart is developed in public at <a href="https://github.com/DMontgomery40/scan-to-make">github.com/DMontgomery40/scan-to-make</a>, and the printer software it installs is open source (GPL-2.0).</p>
@@ -200,6 +208,7 @@
         <li><strong>Lock Screen updates</strong> go through Counterpart's relay at counterpart.dtmont.com, which receives the project name, the printer name, the progress and your phone's delivery token so Apple can deliver them. You turn it on in the Mac's Settings.</li>
         <li><strong>AI:</strong> design, changes and AI cleanup use the provider you choose in Settings, under your own account. What it needs for the job, including views of the model and your close-ups, goes to that provider. A local model keeps it on your network. Off turns AI off.</li>
         <li><strong>Printing:</strong> Counterpart reaches your printer from your computer.</li>
+        <li><strong>Beta diagnostics:</strong> exporting logs saves a local ZIP. You choose whether to send it. Logs and settings can include device names, network addresses and error details; review the export before sharing it.</li>
       </ul>
     </section>
 

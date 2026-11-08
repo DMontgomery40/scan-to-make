@@ -5,81 +5,43 @@ install the companion, its independent cleanup workers, or the printer MCPs.
 The iPhone identifiers remain `com.scantomake`, `com.scantomake.notifications`, and
 `com.scantomake.widgets`; the Mac remains `com.scantomake.mac`, team `X7F5F9LR24`.
 
-## Current prerequisites
+## Current release — checked November 7, 2026
 
-App Store Connect now contains **Counterpart 3D**, Apple ID **6830483457**, bundle
-`com.scantomake`, with **Full Access** saved and rechecked. David chose external
-testers through a public link. Xcode's signed-in account successfully cloud-signed,
-exported and uploaded **2.0 (2)** on 2026-11-03 at 23:19 Mountain. The app and both
-extensions passed signature, version and Production entitlement checks. Source:
-`c438efa`; artifact: `~/scan-to-make-work/testflight-2.0-2/`. Apple accepted the
-upload and finished processing. Build 1 was removed from review; build 2 was submitted
-at 23:32 and last showed **Waiting for Review** for the external
-`Counterpart Public Beta` group. Automatic tester notifications are off. The public link is **https://testflight.apple.com/join/S4tExVzp**, open to anyone.
-Apple displays: “Testers cannot join public link until this group has an approved build.”
-No tester email invitations were sent. The Mac release and beta setup page are published;
-Apple review notes now include the live download/setup link and starter details.
-The internal prerequisite group `Counterpart Team` exists. Beta description and
-David's supplied review/feedback contacts are saved in App Store Connect.
+- **App Store Connect:** Counterpart 3D, Apple ID **6830483457**, bundle `com.scantomake`.
+  The internal group is Counterpart Team; the external group is **Counterpart Public Beta**.
+  Beta description and David’s supplied private review/feedback contacts were saved earlier.
+- **Latest uploaded iPhone/iPad build: 2.0 (4)**, clean main `30e3afdd`, uploaded
+  November 6 at 19:50Z. Archive/export/upload receipts are in
+  `~/scan-to-make-work/testflight-2.0-4/`. Build 2 was last observed Waiting for Review;
+  that is not evidence that build 4 is assigned, approved or available. Recheck the live
+  build’s processing/compliance state, external group assignment and review status before submission.
+- **Public link:** https://testflight.apple.com/join/S4tExVzp, configured open to anyone.
+  The link is usable only when its group has an approved build available for testing.
+  Automatic tester notifications were off at the last verified group check. No email invitations are needed.
+- **Matching Mac beta 6:** clean main `30e3afdd`, Developer ID signed, notarized and stapled,
+  [published with Android and Linux](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.6).
+  The setup page is https://counterpart.dtmont.com/beta.html and the signed Sparkle feed is live.
+  The Mac ZIP is `Counterpart-202611061933.zip`, SHA-256
+  `403666f93f9bf41e9eabe028015ba89fe80147c69350993eeb2d074c6db137c2`.
+  Notarization `fc7218ce-1f91-49f4-a1a9-058b0c6ae35f` was Accepted.
+  Receipts: `~/scan-to-make-work/mac-beta-export-202611061933/` and `release-v2.0-beta.6/`.
+- **Printer software:** Download/Update installs npm’s latest independently of the app release.
+  Add the printer in the computer app first when using this matching release pair; adding a printer
+  from the phone landed later on main (#392). Printer behavior belongs in the MCPs.
+- **Cleanup workers:** independent of the signed Mac payload; follow the cleanup tools guide on
+  the beta setup page. Printing an existing STL/3MF does not require AI, Blender or scan cleanup.
 
-**Latest upload:** **2.0 (3)**, source `4a894769`, uploaded successfully on Nov 4 at
-16:16:47Z. It passed app/extension distribution signature and Production entitlement
-checks. Apple reports processing; group assignment and Beta App Review submission for
-build 3 are not yet verified. Build 2’s Waiting for Review status above is the last
-observed group state. Archive, IPA, hashes and upload log: `~/scan-to-make-work/testflight-2.0-3/`.
-No physical phone installation or production relay change was made.
+**Beta scope, David November 7:** get more people testing their own printers and sending logs.
+Other printer models are the purpose of the beta, not an acceptance prerequisite. In-hand scanning
+is **Labs** and remains unavailable in this build (`HandheldCapture.offered = false`); this release
+work does not enable the old recorder. AR is optional and does not block the public beta.
+Walk-around scan quality, production notification delivery and other open device checks stay
+recorded in the working PRD rather than being presented as accepted.
 
-Xcode used cloud-managed Apple Distribution signing for the iPhone. A Developer ID
-Application certificate and matching Production profile are installed for the Mac.
-The current [Mac beta release](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.4)
-is **0.1.0 (202611040930)**, source `fbd1a69b`, published Nov 4. It includes the final main
-queue through #293, provider routing, starters/plates, reconstruction qualification,
-MCP updater script authorization and the signed Node native-module entitlement.
-STLs use the slicer’s auto-orientation, 3MF placement is retained, and designer support
-settings reach the slicer. Multi-colour 3MFs retain their model and editable AMS mapping.
-
-The archive/export passed distribution signatures and Production entitlement checks,
-including both required signed-Node entitlements. Embedded Node/Python start; USD qualifier
-readiness passes under an empty environment; eight runtime modules match the prepared payload.
-Notarization submission `1f95f6b5-a85d-44b8-94a1-8aaf8b67d43e` was **Accepted**;
-the ticket is stapled and Gatekeeper accepts the app. Artifacts and receipts:
-`~/scan-to-make-work/mac-beta-export-202611040930/`. The Keychain notary profile is
-`Counterpart-Production`; the private Sparkle update key remains in Keychain.
-
-ZIP SHA-256: `4447c3b7e3eede94b87a24dd53ce9511aad9d89b48d96a294693da47e2a8e627`.
-The live setup page and signed Sparkle feed were fetched and match the committed bytes.
-The published ZIP was downloaded and its hash matches the signed artifact. Prior beta 3 remains available.
-The Production app was not installed over David’s development build 900.
-A downloaded-file check is not fresh-install acceptance. Verify installation
-independently of David's existing setup:
-
-- [Mac distribution inventory](../apps/mac/DISTRIBUTION.md) excludes cleanup workers
-  from the app payload. The [independent source installer](../deploy/companion/README.md#independent-workers-for-the-signed-counterpart-mac-app)
-  now qualifies and attaches them without another service or global installs.
-  It requires an existing Python 3.12 and Blender 5.0.1; include these prerequisites
-  and the exact release source commit in beta setup instructions.
-- The app's Download/Update MCP actions install npm's latest version independently
-  of the iPhone or Mac release. David authorized both combined MCP releases after
-  checks on Nov 4; the previous release hold is superseded. The FDM/MCP thread owns
-  the actual app's MCP Update/acceptance. Published versions reported by that owner on Nov 4
-  are bambu-printer-mcp **1.1.54** and mcp-3d-printer-server **1.2.28**, including slicer support arguments.
-  The actual Mac app successfully installed npm Bambu **1.1.54** through Settings → Printers → Update
-  at 13:37Z. The unused generic MCP checkout remains 1.2.26. Do not hand-copy local feature builds.
-  Accept print controls using visible Counterpart controls with the published packages users receive.
-- The installed development Mac build **202611040900** includes #298 guidance, the orientation/support
-  bridge and updater fixes. Final main **127721fa**, including #293 multi-colour 3MF/AMS mapping,
-  was integrated at **167b5770**, alongside Android/Linux and reconstruction; all of it is on main since #307.
-  Public Mac beta 4 now carries this integration; physical-print acceptance remains open.
-- The hand-copied version-label obstacle is resolved by the newer npm release. The updater now authorizes
-  the selected package's postinstall and verifies it before swapping; bundled Node permits third-party
-  native modules under Hardened Runtime. `--loglevel=notice` also preserves the verification banner
-  when the user's npm configuration is silent. Public Mac beta 4 carries all these fixes.
-- The legacy macOS installer and Docker image pin older MCP versions. They do not
-  reproduce the current installation.
-
-Physical capture, post-capture camera/Face ID, phone printer controls, real-print
-notifications and Watch delivery still need the acceptance recorded in
-[working PRD](design/overhaul/PRD.md) (§0). A successful archive does not close those checks.
+The existing distribution scripts validate the app and both extensions’ signatures, matching
+versions, Production entitlements and absence of debug entitlements. Keep using clean main;
+never archive a feature branch or a dirty checkout. This preparation does not replace David’s
+installed apps, restart his companion, or start a physical print.
 
 ## Production services
 
@@ -166,39 +128,48 @@ MCP discovery, update path and same-account phone pairing before sharing the lin
 
 Suggested Beta App Description:
 
-> Scan real objects with your iPhone, refine their 3D models, and send them to
-> your printer with Counterpart.
+> Counterpart connects your iPhone or iPad to your Mac and your 3D printer. Import
+> an STL or 3MF, check what will print, and send it to your printer. You can also
+> scan real objects with LiDAR, describe a part, or ask for changes.
 >
-> Counterpart works with your own printer tools: bambu-printer-mcp or
-> mcp-3D-printer-server. Bring your own AI connection—use your Claude Code or Codex
-> login, an API key, or an OpenAI-compatible endpoint such as OpenRouter or a
-> local model server.
+> We’re testing printer setup and printing across more hardware. Counterpart uses
+> bambu-printer-mcp or mcp-3D-printer-server; install or update them from Settings
+> → Printers on your computer. You don’t need scanning or an AI connection to test printing.
 >
-> The beta requires an iPhone running iOS 27 and the Counterpart companion on an
-> Apple silicon Mac running macOS 27. LiDAR scanning requires a compatible iPhone.
-> Linux desktop support and OpenCode integration are coming soon. Connect to your
-> computer locally or remotely over Tailscale.
+> iPhone and iPad require iOS/iPadOS 27 and the Counterpart companion on an Apple
+> silicon Mac with macOS 27. LiDAR capture needs compatible hardware. Mac, Android
+> and Linux beta downloads and setup: https://counterpart.dtmont.com/beta.html
 >
-> Setup and updates: https://counterpart.dtmont.com/help
-
-David's release direction is Linux desktop support soon and provider choice,
-not a permanent Mac/Claude Code requirement. Do not claim Linux is shipped or
-promise a public 24-hour deadline before acceptance. Saved provider routing is integrated for project jobs, cleanup and helper text;
-Off is enforced. Claude/Codex fixture MCP and image checks passed. Real app-level
-modeling acceptance, OpenCode integration and API cleanup capability coverage remain.
-API cleanup retains harness requirements; custom cleanup endpoints need Responses support. Linux must account for the Apple-only
-reconstruction and CloudKit pieces, alongside its UI, companion and Tailscale path.
-
+> Design and AI cleanup use your chosen provider and account. In-hand scanning is
+> Labs work and is unavailable in this build. AR preview is optional and still
+> being fixed. Walk-around scans can have missing or inaccurate surfaces.
 
 Suggested What to Test:
 
-> Install the linked Mac companion and follow its beta setup instructions. Pair
-> the phone and Mac, open a project and scan an object. Check every side of the
-> model and check that the camera works after capture. Try printer selection,
-> print estimates, pause/resume confirmation and completion updates. Report
-> unexpected connection messages, duplicate alerts, stuck Live Activities or
-> missing model surfaces through TestFlight. Include the phone model, app build,
-> Mac companion version and printer MCP version.
+> 1. Install the matching Mac companion from https://counterpart.dtmont.com/beta.html.
+>    In the Mac’s Settings → Printers, install/update the printer software and add your printer.
+> 2. Pair your iPhone or iPad. Import an STL/3MF or choose a starter project. Check
+>    connection status, the estimate and the What will print pictures.
+> 3. Start a small print when you’re ready. Test progress, Pause, Resume, Stop and
+>    the finished result. Tell us which steps worked, too.
+> 4. For a failure, send a screenshot through TestFlight with the steps, expected
+>    result, actual result, approximate time and project name. Include phone and
+>    computer OS/app versions, printer model/firmware, slicer, connection method,
+>    and the printer software version from Settings → Printers.
+> 5. On the Mac, Settings → Advanced → Export Diagnostics… saves a local ZIP.
+>    Email it to the beta feedback address shown in TestFlight, with the same time
+>    and project name. Review it before sharing; never send access codes or API keys.
+>
+> In-hand scanning is Labs work and unavailable in this build. AR is optional.
+> Neither is needed to test your printer. Reporting guide:
+> https://counterpart.dtmont.com/help.html#report
+
+Review notes addition:
+
+> This beta focuses on pairing, printer setup and printing with testers’ own hardware.
+> The companion download, prerequisites and cleanup-worker instructions are at
+> https://counterpart.dtmont.com/beta.html. Existing STL/3MF printing does not require
+> an AI account or scanning. In-hand capture is unavailable; AR preview is optional.
 
 Before submission, supply the actual companion/setup URLs and complete review
 instructions. David supplied feedback/review email and phone on November 3; those
