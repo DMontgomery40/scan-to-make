@@ -9,7 +9,7 @@ One screen, updated in place; git history keeps the rest. This is the only hando
 | Where | What |
 |---|---|
 | Mac app | **202611080746** from main `76127f6b` (#409), installed Nov 8 10:09Z while the printer was idle. Read-only checks pass: `printers.mcps` answered both MCPs in 0.06 s; `objects.estimate` for `7f1a9e33` plate index 2 answered in 32 s (13 h 1 min, 464.74 g); Counterpart never frontmost (225 samples). Settings rows not checked: no Settings window was open. Receipt: `~/scan-to-make-work/mac-202611080746/verification-results.txt`. Rollback: 202611062313 at `~/scan-to-make-work/mac-202611062313/Counterpart-202611062313.app`. |
-| Mac MCP copies | bambu-printer-mcp **1.1.77**, mcp-3d-printer-server **1.2.58**, unchanged by the Nov 8 install (bambu 1.1.79 and mcp-3D 1.2.60 are published). The P1S's mcp-3D profile still runs the hand-built `~/mcp-3D-printer-server` checkout. |
+| Mac MCP copies | bambu-printer-mcp **1.1.77**, mcp-3d-printer-server **1.2.58**, unchanged by the Nov 8 install (bambu 1.1.79 and mcp-3D 1.2.60 are published). The P1S's mcp-3D profile runs Counterpart's copy: `printers.mcps` on Nov 8 reads "Bambu Lab P1S uses Counterpart’s copy (1.2.58)", because `overrides.json` points it there; `profiles.json` still names the `~/mcp-3D-printer-server` checkout (1.2.25). |
 | iPhone Davica3, iPad Air | Nov 5 builds (iPhone `0c967a58`, iPad `a13cef78`). None of the Nov 6–7 fixes are on them. |
 | Android, Linux (agents-136) | Nov 5 builds with Nov 5 MCP copies. Stale. |
 | Public | beta 6 (GitHub pre-release, from `30e3afdd`). Site live from `6692b4a2` (`wrangler deploy` by hand; it does not deploy on merge). |
