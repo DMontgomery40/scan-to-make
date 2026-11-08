@@ -12,12 +12,16 @@ The iPhone identifiers remain `com.scantomake`, `com.scantomake.notifications`, 
   Beta description and David’s supplied private review/feedback contacts were saved earlier.
 - **Latest uploaded iPhone/iPad build: 2.0 (4)**, clean main `30e3afdd`, uploaded
   November 6 at 19:50Z. Archive/export/upload receipts are in
-  `~/scan-to-make-work/testflight-2.0-4/`. Build 2 was last observed Waiting for Review;
-  that is not evidence that build 4 is assigned, approved or available. Recheck the live
-  build’s processing/compliance state, external group assignment and review status before submission.
+  `~/scan-to-make-work/testflight-2.0-4/`. On November 7, the live browser showed build 2
+  Approved but not notified, and build 4 Ready to Submit. Build 4 was added to Counterpart
+  Public Beta with the saved What to Test and automatic tester notification; Apple then
+  showed **Approved**. The group’s public link is enabled, with no tester limit or
+  device/OS criteria configured, and **Tester Feedback is On**. There were 0 testers.
+  A fresh tester installation is not claimed; the desktop public-link page showed Apple’s generic instructions.
 - **Public link:** https://testflight.apple.com/join/S4tExVzp, configured open to anyone.
-  The link is usable only when its group has an approved build available for testing.
-  Automatic tester notifications were off at the last verified group check. No email invitations are needed.
+  Build 4 is approved in this group, with automatic tester notification selected on submission.
+  Build 2 remains approved with Notify Testers unpressed; it was not released by this work.
+  No individual email invitations are needed or were sent.
 - **Matching Mac beta 6:** clean main `30e3afdd`, Developer ID signed, notarized and stapled,
   [published with Android and Linux](https://github.com/DMontgomery40/scan-to-make/releases/tag/v2.0-beta.6).
   The setup page is https://counterpart.dtmont.com/beta.html and the signed Sparkle feed is live.
@@ -126,26 +130,31 @@ MCP discovery, update path and same-account phone pairing before sharing the lin
 
 ## Beta information and public link
 
-Suggested Beta App Description:
+Beta App Description saved in App Store Connect November 7:
 
-> Counterpart connects your iPhone or iPad to your Mac and your 3D printer. Import
-> an STL or 3MF, check what will print, and send it to your printer. You can also
-> scan real objects with LiDAR, describe a part, or ask for changes.
+> Scan a real object. Describe an idea. Make something that fits.
 >
-> We’re testing printer setup and printing across more hardware. Counterpart uses
-> bambu-printer-mcp or mcp-3D-printer-server; install or update them from Settings
-> → Printers on your computer. You don’t need scanning or an AI connection to test printing.
+> Counterpart combines your iPhone’s cameras and LiDAR depth to capture real objects in 3D, then automatically touches up the scan on your Mac—smoothing defects and cleaning up the model so you can work with it and print it. Add close-up photos to show the details that matter.
 >
-> iPhone and iPad require iOS/iPadOS 27 and the Counterpart companion on an Apple
-> silicon Mac with macOS 27. LiDAR capture needs compatible hardware. Mac, Android
-> and Linux beta downloads and setup: https://counterpart.dtmont.com/beta.html
+> Or just say what you want to make. Type your idea or use your phone’s voice-to-text: a hook for your stroller, a replacement knob, a mount that fits your microphone. Counterpart turns the conversation into a 3D model. You don’t need to know CAD or how to write a design prompt.
 >
-> Design and AI cleanup use your chosen provider and account. In-hand scanning is
-> Labs work and is unavailable in this build. AR preview is optional and still
-> being fixed. Walk-around scans can have missing or inaccurate surfaces.
+> Name a known product or part and Counterpart automatically looks up its dimensions, so you don’t have to measure everything yourself. Use a scan, photos or a measurement to show a particular shape or fit.
+>
+> Keep talking as you refine it. Say “make the opening wider,” “add a hole here,” or “use this part but change the base.” Change a scan, a new design, or a designer’s model from MakerWorld, Printables or Thingiverse. You can also bring your own STL or 3MF.
+>
+> Check the model and what will print, choose your printer and colours, then send it to your printer from the app. Make something new, replace a broken part, or adapt an existing design to what you need.
+>
+> Use your own 3D printer and your choice of AI connection. Your Mac does the work; your iPhone or iPad lets you describe, photograph, scan, review and print.
+>
+> Beta setup: https://counterpart.dtmont.com/beta.html
+> iPhone/iPad: iOS/iPadOS 27. Companion: Apple silicon Mac, macOS 27. LiDAR capture requires compatible hardware. Printing an existing file needs no AI account. Scan cleanup requires the tools linked in the setup guide.
+>
+> In-hand scanning is Labs work and unavailable in this build. AR preview is optional and still being fixed. Walk-around scans can have missing or inaccurate surfaces; check geometry and dimensions that need to fit.
 
-Suggested What to Test:
+What to Test for build 4 (saved November 7):
 
+> Try making something useful: describe it in your own words (your phone’s voice-to-text works), name a known part/product so Counterpart can look up its dimensions, or make a LiDAR-assisted scan and let the Mac touch it up. Ask for a change and inspect the result.
+>
 > 1. Install the matching Mac companion from https://counterpart.dtmont.com/beta.html.
 >    In the Mac’s Settings → Printers, install/update the printer software and add your printer.
 > 2. Pair your iPhone or iPad. Import an STL/3MF or choose a starter project. Check
@@ -157,7 +166,7 @@ Suggested What to Test:
 >    computer OS/app versions, printer model/firmware, slicer, connection method,
 >    and the printer software version from Settings → Printers.
 > 5. On the Mac, Settings → Advanced → Export Diagnostics… saves a local ZIP.
->    Email it to the beta feedback address shown in TestFlight, with the same time
+>    Email it to the developer’s feedback address in TestFlight’s App Details, with the same time
 >    and project name. Review it before sharing; never send access codes or API keys.
 >
 > In-hand scanning is Labs work and unavailable in this build. AR is optional.
@@ -171,8 +180,7 @@ Review notes addition:
 > https://counterpart.dtmont.com/beta.html. Existing STL/3MF printing does not require
 > an AI account or scanning. In-hand capture is unavailable; AR preview is optional.
 
-Before submission, supply the actual companion/setup URLs and complete review
-instructions. David supplied feedback/review email and phone on November 3; those
+For later submissions, keep the companion/setup URLs and review instructions current. David supplied feedback/review email and phone on November 3; those
 are saved in App Store Connect. Do not copy private review contact details into
 public setup documentation. Help is
 `https://counterpart.dtmont.com/help`; privacy is `/help#privacy`. Review the live
