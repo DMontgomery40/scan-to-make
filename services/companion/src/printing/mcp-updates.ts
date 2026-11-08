@@ -269,6 +269,11 @@ export class McpUpdater {
     return [...new Set(ids.flatMap(id => [id, catalog?.canonical(id) ?? id]))];
   }
   mcpId(destinationId: string): string | undefined { return this.install(destinationId)?.mcpId; }
+  /** The version a destination's install runs: the copy on disk, else what its running MCP reports. */
+  version(destinationId: string): string | undefined {
+    const entry = this.install(destinationId);
+    return entry ? installedVersion(entry.install, this.#deps.env) ?? this.#deps.runningVersion(destinationId) : undefined;
+  }
   /** Every printer on this install: by its id, and by the files it actually runs (so shared files are locked and restarted together). */
   #members(mcpId: string, options: {fresh?: boolean} = {}) {
     const all = this.#destinations().map(entry => ({...entry, ...this.install(entry.id)!}));

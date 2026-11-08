@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { call } from "./bridge";
-import { ReadOrder, newerProject, mcpUpdateNotices } from "./domain";
+import { ReadOrder, newerProject, mcpUpdateNotices, mcpWaitClock, mcpWaiting, MCP_UNHEARD } from "./domain";
 import type { Project, Printer, RawQuestion } from "./types";
 export function useWorkspace(enabled: boolean) {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -12,11 +12,15 @@ export function useWorkspace(enabled: boolean) {
   const [mcpEvents, setMcpEvents] = useState<Record<string, string>>({});
   const mcpNotices = {...mcpReplies, ...mcpEvents};
   const eventNotice = Object.values(mcpEvents).join(" ");
-  const recordMcpNotice = (id: string, words: string, begins = false) => {
+  // A wait that hears nothing more says so (PRD §8.10), in place of "waiting" forever.
+  const waits = useRef(mcpWaitClock((id) => setMcpEvents(old => ({...old, [id]: MCP_UNHEARD}))));
+  useEffect(() => () => waits.current.stop(), []);
+  const recordMcpNotice = (id: string, words: string, begins = false, waiting = false) => {
     if (begins) setMcpEvents(old => {
       const next = {...old}; delete next[id]; return next;
     });
     setMcpReplies(old => ({...old, [id]: words}));
+    waits.current.note(id, waiting);
   };
   const [jobs, setJobs] = useState<
     {
@@ -136,6 +140,9 @@ export function useWorkspace(enabled: boolean) {
             await refresh();
             await confirmations();
             setMcpEvents(old => mcpUpdateNotices(old, page.events));
+            for (const event of page.events) {
+              if (event.type.startsWith("mcp.update.") && event.data?.mcpId) waits.current.note(event.data.mcpId, mcpWaiting(event));
+            }
           }
         } catch {
           if (live) {

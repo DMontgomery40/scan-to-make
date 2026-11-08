@@ -36,7 +36,8 @@ Printer: P1S, LAN Only + Developer Mode; AMS A1 black PLA (nearly empty), A2 yel
 4. **Boundary leftovers** (AGENTS.md "The app staples onto the MCPs"):
    - the shared ControlKit form encoding (Mac Add Printer sheet and phones) still branches on `"bambu"` and `BAMBU_MODEL`; make it generic from `counterpart_setup_fields` (#392 merged over it with `--boundary-reviewed`);
    - move title, designer and licence into `list_3mf_plates` in both MCPs, publish, install, then delete `inspectModelFile`'s remaining 3MF parsing (PRD §8.0 item 9);
-   - port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D.
+   - port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D;
+   - package-name branching still in app code: Mac `PrinterMCP.label` (only the Add Printer sheet calls it, `PrinterSetupViews.swift:167`), ControlKit `PrinterDestination.mcpName`, CounterpartKit `Printers.swift` `mcpName`, Android `Models.kt` `via`. The companion now sends each MCP's `label` with `destination.mcps`; give the printer itself one too, then delete these.
 5. **Flaky tests: fix the cause, no retries.**
    - `capture-response-drain`;
    - `local-control` 'incomplete frame';

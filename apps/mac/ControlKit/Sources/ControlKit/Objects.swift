@@ -511,7 +511,15 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
     public struct McpChoice: Decodable, Sendable, Equatable {
         public let backend: String
         public let destinationId: String
-        public init(backend: String, destinationId: String) { self.backend = backend; self.destinationId = destinationId }
+        /// The install that MCP's profile runs, its name as people know it, and its versions (PRD §8.10), so the MCP
+        /// prints don't go through still has its own Settings row and Update. Absent from a companion before Nov 7.
+        public let mcpId: String?
+        public let label: String?
+        public let version: String?
+        public let latestVersion: String?
+        public init(backend: String, destinationId: String, mcpId: String? = nil, label: String? = nil, version: String? = nil, latestVersion: String? = nil) {
+            self.backend = backend; self.destinationId = destinationId; self.mcpId = mcpId; self.label = label; self.version = version; self.latestVersion = latestVersion
+        }
     }
     /// The MCP that reaches this printer, as people know it.
     public var mcpName: String {

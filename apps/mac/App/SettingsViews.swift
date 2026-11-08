@@ -437,7 +437,7 @@ struct PrintersSettings: View {
 
     /// The packages with no printer row above: neither MCP is ever missing from the list.
     private var unusedPackages: [PrinterMcpPackage] {
-        let used = Set(PrinterMCP.list(printers).map { $0.name.lowercased() })
+        let used = Set(PrinterMCP.list(printers).compactMap { $0.package.map(PrinterMCP.packageKey) })
         return setup.packages.filter { !used.contains($0.package) }
     }
 

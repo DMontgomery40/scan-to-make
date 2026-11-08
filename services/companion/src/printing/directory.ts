@@ -3,21 +3,30 @@ import {
   type PrinterCapabilities, type PrinterSession, type PrinterToolCatalog, type PrintReport,
 } from '@scan-to-make/printer-handoff';
 import type {PrinterCatalog, PrinterDestination} from '../objects/printers.js';
+import type {PrinterBackend} from '@scan-to-make/printer-handoff';
 
 export type Readiness = ReturnType<typeof readiness>;
-export interface PublicDestination extends PrinterDestination {
+/**
+ * One MCP the printer is set up in. Beyond the backend and its profile: the install it runs, its name as people know
+ * it, and its versions, so Settings can give every MCP its own row and Update without naming packages itself (PRD §8.10).
+ */
+export interface PublicMcpChoice {backend: PrinterBackend; destinationId: string; mcpId?: string; label?: string; version?: string; latestVersion?: string}
+export interface PublicDestination extends Omit<PrinterDestination, 'mcps'> {
   state?: Readiness;
   stateCheckedAt?: string;
   capabilities?: PrinterCapabilities;
   mcpId?: string;
+  mcps?: PublicMcpChoice[];
 }
 
 /** PRD §8.10: which install a destination runs, and the newest published version (McpUpdater). */
 export interface McpVersions {
   mcpId(destinationId: string): string | undefined;
   latestVersion(pkg: string, options?: {view?: boolean}): string | undefined;
+  /** The version a destination's install runs: on disk, else what its running MCP reports. */
+  version?(destinationId: string): string | undefined;
 }
-const PACKAGE_LABELS: Record<string, string> = {'bambu-printer-mcp': 'bambu-printer-mcp', 'mcp-3d-printer-server': 'mcp-3D-printer-server'};
+export const PACKAGE_LABELS: Record<string, string> = {'bambu-printer-mcp': 'bambu-printer-mcp', 'mcp-3d-printer-server': 'mcp-3D-printer-server'};
 /** Whether version a is newer than b (major.minor.patch). */
 export function newerVersion(a: string, b: string): boolean {
   // Semantic versions: major.minor.patch, then a release beats its prereleases (1.2.0 > 1.2.0-dev).
@@ -155,8 +164,16 @@ export class PrinterDirectory {
       return {...destination, state: known?.state ?? 'unknown',
         ...(known ? {stateCheckedAt: new Date(known.checkedAt).toISOString()} : {}),
         ...(capabilities ? {capabilities: this.#withLatest(structuredClone(capabilities), destination.backend)} : {}),
-        ...(mcpId ? {mcpId} : {})};
+        ...(mcpId ? {mcpId} : {}),
+        ...(destination.mcps ? {mcps: destination.mcps.map(choice => this.#choice(choice))} : {})};
     })};
+  }
+
+  /** An MCP the printer is set up in, with what its Settings row needs: its install, name and versions. */
+  #choice(choice: {backend: PrinterBackend; destinationId: string}): PublicMcpChoice {
+    const mcpId = this.#versions?.mcpId(choice.destinationId), label = PACKAGE_LABELS[choice.backend];
+    const version = this.#versions?.version?.(choice.destinationId), latestVersion = this.#versions?.latestVersion(choice.backend, {view: true});
+    return {...choice, ...(mcpId ? {mcpId} : {}), ...(label ? {label} : {}), ...(version ? {version} : {}), ...(latestVersion ? {latestVersion} : {})};
   }
 
   /** A newer published version shows as `update`, with `latestVersion`, even when no feature is missing. */
