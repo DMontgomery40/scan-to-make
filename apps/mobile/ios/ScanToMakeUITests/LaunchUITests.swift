@@ -583,6 +583,68 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(send.isEnabled)
     }
 
+    /// XCTest has no hinge API. These fixture-only links exercise the actual split's inherited size
+    /// class without relaunching; agent-device supplies the real Duo hinge proof alongside this test.
+    private func resize(_ app: XCUIApplication, to width: String) {
+        app.open(URL(string: "scantomake://fixture-width/\(width)")!)
+    }
+
+    private func launchResizable() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartLayoutTesting", "YES"]
+        app.launch()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))
+        resize(app, to: "regular")
+        return app
+    }
+
+    func testOpenProjectSurvivesCompactAndRegularResizesWithoutStaleSelection() {
+        let app = launchResizable()
+        let project = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10), app.debugDescription)
+        project.tap()
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10))
+        resize(app, to: "compact")
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "fold keeps the project")
+        resize(app, to: "regular")
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "unfold keeps the project")
+        resize(app, to: "compact")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 10))
+        resize(app, to: "regular")
+        XCTAssertTrue(app.buttons["starter-scan-platform"].waitForExistence(timeout: 10), "Back to Home clears the old selection")
+        XCTAssertFalse(app.buttons["print"].exists)
+    }
+
+    func testProjectAndPrintSheetSurviveCompactAndRegularResizes() {
+        let app = launchResizable()
+        let project = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10), app.debugDescription)
+        project.tap()
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10))
+        app.buttons["print"].tap()
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
+        resize(app, to: "compact")
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
+        resize(app, to: "regular")
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
+        resize(app, to: "compact")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "Cancel returns to the same project, not Home")
+    }
+
+    func testPrinterAttentionAndPrintingSummaryAtBothWidths() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["Printers, 1 needs attention"].waitForExistence(timeout: 20))
+        if regular {
+            let status = app.staticTexts["projects-status"]
+            XCTAssertTrue(status.label.contains("Mac mini connected"), status.label)
+            XCTAssertTrue(status.label.contains("Bambu Lab P1S printing"), status.label)
+            XCTAssertTrue(app.staticTexts["Needs you"].exists)
+            XCTAssertFalse(app.staticTexts["Other"].exists, "the failed project belongs to Needs you")
+        }
+    }
+
     /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
     /// on them". Plate 1's start couldn't be confirmed; on the iPhone and the iPad every plate stays choosable on the
     /// project and inside Print, and only plate 1 asks for the printer check again.

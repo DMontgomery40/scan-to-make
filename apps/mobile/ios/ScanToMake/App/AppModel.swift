@@ -32,6 +32,9 @@ import CounterpartKit
     var debugFirstRun: String?
     /// DEBUG: the Settings page `-CounterpartScreen notifications` or `about` opens.
     var debugSettings: String?
+    #if DEBUG
+    var fixtureWidth: UserInterfaceSizeClass?
+    #endif
     private var lastLink: (url: String, at: Date)?
     private var observer: NSObjectProtocol?
 
@@ -104,6 +107,12 @@ import CounterpartKit
 
     /// A link that opened the app. A cold start can deliver the same pairing link twice within moments.
     func open(_ url: URL) {
+        #if DEBUG
+        if Fixtures.folder != nil, UserDefaults.standard.bool(forKey: "CounterpartLayoutTesting"), url.host == "fixture-width" {
+            fixtureWidth = url.path == "/compact" ? .compact : .regular
+            return
+        }
+        #endif
         guard let route = AppRoute(url: url) else { return }
         if case .pair(let link) = route {
             let now = Date()

@@ -8,10 +8,14 @@ struct CounterpartApp: App {
     @UIApplicationDelegateAdaptor(MobileNotifications.self) private var notifications
     @State private var app = AppModel()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var width
 
     var body: some Scene {
         WindowGroup {
             RootView()
+                #if DEBUG
+                .environment(\.horizontalSizeClass, app.fixtureWidth ?? width)
+                #endif
                 .environment(app)
                 .tint(.filament)
                 .onOpenURL { app.open($0) }

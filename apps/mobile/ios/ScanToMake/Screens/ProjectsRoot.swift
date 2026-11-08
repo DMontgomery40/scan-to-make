@@ -9,7 +9,7 @@ struct ProjectsRoot: View {
     @Bindable var store: ProjectsStore
     let pairingKey: Int
     @Environment(\.horizontalSizeClass) private var width
-    @State private var path: [String] = []
+    @State private var preferredColumn = NavigationSplitViewColumn.sidebar
     @State private var detailPath: [String] = []
     @State private var selected: String?
     @State private var newSheet: NewSheetRequest?
@@ -18,9 +18,7 @@ struct ProjectsRoot: View {
     @State private var showPrinters = false
 
     var body: some View {
-        Group {
-            if width == .regular { split } else { stack }
-        }
+        split
         .preferredColorScheme(.dark)
         .sheet(item: $newSheet) { request in
             NewObjectView(store: store, job: request.job) { project in
@@ -57,44 +55,59 @@ struct ProjectsRoot: View {
             app.route = nil
             switch route {
             case .project(let id), .camera(let id): open(id)
-            case .printing(let id): open(id); if width == .regular { detailPath = [Page.printing(id)] } else { path.append(Page.printing(id)) }
+            case .printing(let id): open(id); detailPath = [Page.printing(id)]
             case .print(let id): open(id); printing = IdentifiedProject(id: id)
             case .newProject: newSheet = NewSheetRequest(job: nil)
             case .printers: showPrinters = true
-            case .home, .pair: path.removeAll(); selected = nil
+            case .home, .pair: closeProject()
             }
+        }
+        .onChange(of: preferredColumn) { _, column in
+            // The system Back button in the collapsed split returns to Home. Do not resurrect that
+            // project when the window expands again (Duo unfold or iPad multitasking).
+            if width == .compact, column == .sidebar { closeProject() }
         }
     }
 
     /// Opens a project. On iPad the detail's pushed pages belong to the previous project, so they go too:
     /// otherwise a starter added from the sidebar landed on the old project's Printing screen.
     private func open(_ id: String) {
-        if width == .regular { selected = id; detailPath = [] } else { path = [id] }
+        selected = id
+        detailPath = []
+        preferredColumn = .detail
     }
 
-    private var stack: some View {
-        NavigationStack(path: $path) {
-            HomeView(store: store, path: $path, newProject: { newSheet = NewSheetRequest(job: $0) },
-                     openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
-                .navigationDestination(for: String.self) { id in page(id) { path.removeAll() } }
-        }
+    private func closeProject() {
+        selected = nil
+        detailPath = []
+        preferredColumn = .sidebar
     }
 
+    /// One split and one detail stack survive every size-class change. Only the leading column's
+    /// presentation changes: Home's cards in compact width, grouped rows at regular width.
     private var split: some View {
-        NavigationSplitView {
-            SidebarList(store: store, selection: Binding(get: { selected }, set: { selected = $0; detailPath = [] }), newProject: { newSheet = NewSheetRequest(job: nil) },
-                        addStarter: addStarter, openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
-        } detail: {
-            if let selected {
-                NavigationStack(path: $detailPath) {
-                    projectPage(selected) { self.selected = nil }
-                        .navigationDestination(for: String.self) { id in page(id) { detailPath.removeAll() } }
-                }
-                .id(selected)
+        NavigationSplitView(preferredCompactColumn: $preferredColumn) {
+            if width == .regular {
+                SidebarList(store: store, selection: Binding(get: { selected }, set: { id in
+                    if let id { open(id) } else { closeProject() }
+                }), newProject: { newSheet = NewSheetRequest(job: nil) },
+                            addStarter: addStarter, openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
             } else {
-                // Nothing selected: the starters and the two jobs, as iPhone Home has them, whether or not
-                // projects exist (PRD §5.11, §6.1). This is what the iPad shows when the app opens.
-                StartPane(hasProjects: !store.projects.isEmpty, newProject: { newSheet = NewSheetRequest(job: $0) }, addStarter: addStarter)
+                HomeView(store: store, openProject: { value in
+                    if let id = Page.printingId(value) { open(id); detailPath = [value] }
+                    else { open(value) }
+                }, newProject: { newSheet = NewSheetRequest(job: $0) },
+                         openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
+            }
+        } detail: {
+            NavigationStack(path: $detailPath) {
+                Group {
+                    if let selected { projectPage(selected, close: closeProject).id(selected) }
+                    else {
+                        StartPane(hasProjects: !store.projects.isEmpty, newProject: { newSheet = NewSheetRequest(job: $0) }, addStarter: addStarter)
+                    }
+                }
+                .navigationDestination(for: String.self) { id in page(id, close: closeProject) }
             }
         }
     }
@@ -109,7 +122,7 @@ struct ProjectsRoot: View {
 
     private func projectPage(_ id: String, close: @escaping () -> Void) -> some View {
         ProjectView(store: store, id: id, close: close, openPrint: { printing = IdentifiedProject(id: $0) },
-                    openPrinting: { id in if width == .regular { detailPath.append(Page.printing(id)) } else { path.append(Page.printing(id)) } })
+                    openPrinting: { id in detailPath.append(Page.printing(id)) })
     }
 
     /// A pushed page: a project, or a print's Printing screen.
@@ -184,16 +197,17 @@ struct SidebarList: View {
             ProjectSearchBar(query: $query, searching: $searching, matched: store.projects.filter { matches($0) }.count, total: store.projects.count)
         List(selection: $selection) {
             section("Now", group([.printing, .preparing, .working, .sending]))
-            section("Needs you", group([.needsYou]))
-            section("Ready", group([.ready]), highlight: true)
+            section("Needs you", group([.needsYou, .failed]))
+            section("Ready", group([.ready]))
             section("Done", group([.confirmed]))
             section("Printed", group([.printed, .sent]))
-            section("Other", group([.draft, .failed, .unknown]))
+            section("Other", group([.draft, .unknown]))
             if !archived.isEmpty {
                 Section(isExpanded: Binding(get: { showArchived || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }, set: { showArchived = $0 })) {
                     ForEach(archived) { project in
                         SidebarRow(store: store, project: project)
                             .tag(project.id)
+                            .accessibilityIdentifier("sidebar-project-\(project.id)")
                             .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : nil)
                             .contextMenu {
                                 Button("Unarchive", systemImage: "tray.and.arrow.up") {
@@ -226,23 +240,30 @@ struct SidebarList: View {
         }
         .sheet(item: $openedStarter) { starter in StarterDetail(project: starter, start: addStarter) }
         .navigationTitle("Projects")
-        .navigationSubtitle(store.reachable == false ? "\(store.macName ?? "Your Mac") isn't answering" : store.reachable == true ? "\(store.macName ?? "Your Mac") connected" : store.macName ?? "Your Mac")
+        // A sidebar toolbar subtitle is a single truncated line. Keep the shared summary in the
+        // sidebar itself so both the connection and the printer status can wrap.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Text(store.homeSubtitle).font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 16).padding(.vertical, 8).accessibilityIdentifier("projects-status")
+        }
 
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .refreshable { await store.load() }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { Button(action: openPrinters) { Image(systemName: "printer.fill") }.accessibilityLabel("Printers") }
+            ToolbarItem(placement: .topBarTrailing) { Button(action: openPrinters) { Image(systemName: "printer.fill") }.badge(store.printerProblems).accessibilityLabel(store.printersLabel) }
             ToolbarItem(placement: .topBarTrailing) { Button(action: openSettings) { Image(systemName: "person.crop.circle") }.accessibilityLabel("Settings") }
         }
     }
 
-    @ViewBuilder private func section(_ title: String, _ projects: [Project], highlight: Bool = false) -> some View {
+    @ViewBuilder private func section(_ title: String, _ projects: [Project]) -> some View {
         if !projects.isEmpty {
             Section(title) {
                 ForEach(projects) { project in
                     SidebarRow(store: store, project: project)
                         .tag(project.id)
-                        .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : highlight ? Color.filament.opacity(0.12) : nil)
+                        .accessibilityIdentifier("sidebar-project-\(project.id)")
+                        .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : nil)
                         .contextMenu { DeleteProjectButton(store: store, project: project) }
                 }
             }

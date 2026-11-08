@@ -4,6 +4,7 @@ import type {
   Filament,
   PrintOptions,
   Project,
+  Printer,
   Question,
   RawQuestion,
   SetupOptions,
@@ -54,6 +55,52 @@ export function projectThumbnail(p: Project): string | undefined {
   if (p.photos[0]) return `photos/${p.photos[0]}`;
   if (p.capture?.[0]) return `capture/${p.capture[0]}`;
   return p.current?.renders[0] ?? p.credit?.thumbnail;
+}
+
+/** Sidebar groups describe what the person needs to do, not a second selection state. */
+export function projectGroups(projects: Project[]) {
+  const groups = ["Now", "Needs you", "Ready", "Printed", "Done", "Drafts"];
+  const group = (p: Project) => {
+    if (["printing", "touching-up", "sending"].includes(p.state)) return "Now";
+    if (["needs-closeup", "failed"].includes(p.state)) return "Needs you";
+    if (p.state === "ready") return "Ready";
+    if (["printed", "sent"].includes(p.state)) return "Printed";
+    if (p.state === "confirmed") return "Done";
+    return "Drafts";
+  };
+  return groups
+    .map((title) => ({
+      title,
+      projects: projects.filter((p) => !p.archived && group(p) === title),
+    }))
+    .filter((g) => g.projects.length > 0);
+}
+
+export function printerSummary(printers: Printer[], projects: Project[]) {
+  const problems = printers.filter(
+    (p) => p.state === "offline" || p.capabilities?.update != null,
+  ).length;
+  const printing = printers.filter((printer) =>
+    projects.some(
+      (p) =>
+        p.state === "printing" &&
+        p.print?.monitor?.phase !== "ended" &&
+        (p.print?.destinationId ?? p.print?.destination?.id) === printer.id,
+    ),
+  );
+  const ready = printers.filter((p) => p.state === "ready").length;
+  return {
+    problems,
+    label: problems
+      ? `Printers, ${problems} ${problems === 1 ? "needs" : "need"} attention`
+      : "Printers",
+    status:
+      printing.length === 1
+        ? `${printing[0].model ?? printing[0].name} printing`
+        : printing.length > 1
+          ? `${printing.length} printers printing`
+          : `${ready} ${ready === 1 ? "printer" : "printers"} ready`,
+  };
 }
 
 export function searchProject(p: Project, query: string) {

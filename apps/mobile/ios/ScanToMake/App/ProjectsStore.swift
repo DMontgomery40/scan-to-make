@@ -89,6 +89,33 @@ import CounterpartKit
         project.print?.destination?.name ?? catalog?.destination(project.printerDestinationId)?.name
     }
 
+    /// "Mac mini connected · 2 printers ready"
+    var homeSubtitle: String {
+        let mac = macName ?? "Your Mac"
+        let connection = reachable == false ? "\(mac) isn't answering" : reachable == true ? "\(mac) connected" : mac
+        guard let catalog = catalog, !catalog.destinations.isEmpty else { return connection }
+        // What the printers are doing: printing first ("Bambu Lab P1S printing"), then how many are ready.
+        // Printing, not getting ready: a print the printer is still preparing isn't "printing" yet.
+        let printing = catalog.destinations.filter { destination in
+            destination.state == "printing" || (self.printing(on: destination.id).map { words($0).phase == .printing } ?? false)
+        }
+        if printing.count == 1 { return "\(connection) · \(printing[0].model ?? printing[0].name) printing" }
+        if printing.count > 1 { return "\(connection) · \(printing.count) printers printing" }
+        let count = catalog.destinations.count
+        let ready = catalog.destinations.filter { $0.isReady == true }.count
+        if ready == 0 { return "\(connection) · \(count) \(count == 1 ? "printer" : "printers")" }
+        return "\(connection) · \(ready) \(ready == 1 ? "printer" : "printers") ready"
+    }
+
+    /// Printers that are offline or need an MCP update.
+    var printerProblems: Int {
+        catalog?.destinations.filter { $0.isOffline || $0.capabilities?.update != nil }.count ?? 0
+    }
+
+    var printersLabel: String {
+        printerProblems == 0 ? "Printers" : "Printers, \(printerProblems) \(printerProblems == 1 ? "needs" : "need") attention"
+    }
+
     var anyRunning: Bool { projects.contains { words($0).busy } || !sending.isEmpty }
 
     private var reads = ProjectReads()

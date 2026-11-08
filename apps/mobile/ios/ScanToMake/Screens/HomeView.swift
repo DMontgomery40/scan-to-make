@@ -7,7 +7,7 @@ import CounterpartKit
 struct HomeView: View {
     @Environment(AppModel.self) private var app
     @Bindable var store: ProjectsStore
-    @Binding var path: [String]
+    let openProject: (String) -> Void
     let newProject: (NewProjectJob?) -> Void
     let openPrinters: () -> Void
     let openSettings: () -> Void
@@ -55,7 +55,7 @@ struct HomeView: View {
                         VStack(spacing: 12) {
                             ForEach(running) { project in
                                 // A print opens the Printing screen; anything else, its project page.
-                                Button { path.append(ProjectWords.watchable(project, phase: store.words(project).phase) ? Page.printing(project.id) : project.id) } label: {
+                                Button { openProject(ProjectWords.watchable(project, phase: store.words(project).phase) ? Page.printing(project.id) : project.id) } label: {
                                     if [.printing, .preparing].contains(store.words(project).phase) { NowPrintingCard(store: store, project: project) }
                                     else { NowWorkingCard(store: store, project: project) }
                                 }
@@ -66,7 +66,7 @@ struct HomeView: View {
                     }
                     if !needsYou.isEmpty {
                         HomeSection("Needs you") {
-                            ForEach(needsYou) { project in NeedsYouCard(store: store, project: project) { path.append(project.id) } }
+                            ForEach(needsYou) { project in NeedsYouCard(store: store, project: project) { openProject(project.id) } }
                         }
                     }
                     if !grid.isEmpty { HomeSection("All projects") { projectGrid(grid) } }
@@ -78,7 +78,7 @@ struct HomeView: View {
                         }
                         .accessibilityIdentifier("show-archived")
                         if showArchived || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            VStack(spacing: 8) { ForEach(archived) { ArchivedRow(store: store, project: $0) { path.append($0.id) } } }
+                            VStack(spacing: 8) { ForEach(archived) { ArchivedRow(store: store, project: $0) { openProject($0.id) } } }
                         }
                     }
                     if query.isEmpty { starters }
@@ -97,14 +97,14 @@ struct HomeView: View {
         .background(Color.black)
         .refreshable { await store.load(); await store.loadPrinters() }
         .navigationTitle("Projects")
-        .navigationSubtitle(subtitle)
+        .navigationSubtitle(store.homeSubtitle)
 
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: openPrinters) { Image(systemName: "printer.fill") }
-                    .badge(printerProblems)
-                    .accessibilityLabel(printerProblems > 0 ? "Printers, \(printerProblems) need attention" : "Printers")
+                    .badge(store.printerProblems)
+                    .accessibilityLabel(store.printersLabel)
             }
             ToolbarSpacer(.fixed, placement: .topBarTrailing)
             ToolbarItem(placement: .topBarTrailing) {
@@ -127,7 +127,7 @@ struct HomeView: View {
             let ticket = store.startRequest()
             let project = try await store.mac.client.addStarter(starter)
             store.replace(project, ticket: ticket)
-            path.append(project.id)
+            openProject(project.id)
         }
     }
 
@@ -135,35 +135,14 @@ struct HomeView: View {
         // Two equal columns, 12 pt gutters both ways; the card's own shape sets its size, never its content.
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             ForEach(projects) { project in
-                Button { path.append(project.id) } label: { ProjectCard(store: store, project: project) }
+                Button { openProject(project.id) } label: { ProjectCard(store: store, project: project) }
                     .buttonStyle(.plain)
                     .contextMenu { DeleteProjectButton(store: store, project: project) }
             }
         }
     }
 
-    /// "Mac mini connected · 2 printers ready"
-    private var subtitle: String {
-        let mac = store.macName ?? "Your Mac"
-        let connection = store.reachable == false ? "\(mac) isn't answering" : store.reachable == true ? "\(mac) connected" : mac
-        guard let catalog = store.catalog, !catalog.destinations.isEmpty else { return connection }
-        // What the printers are doing: printing first ("Bambu Lab P1S printing"), then how many are ready.
-        // Printing, not getting ready: a print the printer is still preparing isn't "printing" yet.
-        let printing = catalog.destinations.filter { destination in
-            destination.state == "printing" || (store.printing(on: destination.id).map { store.words($0).phase == .printing } ?? false)
-        }
-        if printing.count == 1 { return "\(connection) · \(printing[0].model ?? printing[0].name) printing" }
-        if printing.count > 1 { return "\(connection) · \(printing.count) printers printing" }
-        let count = catalog.destinations.count
-        let ready = catalog.destinations.filter { $0.isReady == true }.count
-        if ready == 0 { return "\(connection) · \(count) \(count == 1 ? "printer" : "printers")" }
-        return "\(connection) · \(ready) \(ready == 1 ? "printer" : "printers") ready"
-    }
 
-    /// Printers that are offline or need an MCP update.
-    private var printerProblems: Int {
-        store.catalog?.destinations.filter { $0.isOffline || $0.capabilities?.update != nil }.count ?? 0
-    }
 }
 
 /// The Mac isn't answering, or this phone has to pair again.
