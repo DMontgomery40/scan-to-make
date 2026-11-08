@@ -18,6 +18,8 @@ import CounterpartKit
 struct FindYourMacView: View {
     enum Mode { case firstRun, replace }
     let mode: Mode
+    /// Back to iCloud discovery, when the code fallback was reached from it (F14). Nil elsewhere.
+    var onBack: (() -> Void)? = nil
 
     @Environment(AppModel.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -66,7 +68,12 @@ struct FindYourMacView: View {
             .background(Color.black.ignoresSafeArea())
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                if mode == .replace && phase != .connected {
+                if let onBack, phase != .connected {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button { goBack(onBack) } label: { Label("Back", systemImage: "chevron.backward") }
+                            .accessibilityIdentifier("pairing-back")
+                    }
+                } else if mode == .replace && phase != .connected {
                     ToolbarItem(placement: .cancellationAction) { Button(role: .close) { close() } }
                 }
             }
@@ -312,6 +319,15 @@ struct FindYourMacView: View {
     }
 
     // MARK: Actions
+
+    /// Back to iCloud discovery: nearby/QR work this screen started stops, as on close, but the
+    /// first-run flow stays open on the discovery screen.
+    private func goBack(_ onBack: () -> Void) {
+        pairingTask?.cancel(); pairingTask = nil
+        if nearbyOwned { app.nearby.cancel(); nearbyOwned = false }
+        app.holdPairingScreen = false
+        onBack()
+    }
 
     private func close() {
         pairingTask?.cancel(); pairingTask = nil

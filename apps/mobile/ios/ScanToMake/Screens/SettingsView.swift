@@ -228,8 +228,8 @@ enum NotificationChoices {
 /// progress milestones, which the Mac keeps.
 struct NotificationSettingsView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openURL) private var openURL
     let store: ProjectsStore
-    @State private var on: [String: Bool] = Dictionary(uniqueKeysWithValues: NotificationChoices.all.map { ($0.id, NotificationChoices.isOn($0.id)) })
     @State private var milestones = NotificationChoices.milestones
     @State private var milestonesAvailable = true
     @State private var problem: String?
@@ -241,12 +241,18 @@ struct NotificationSettingsView: View {
     var body: some View {
         List {
             NotificationPermissionRow()
-            Section { ForEach(NotificationChoices.projects) { row($0) } } header: { Text("Projects") } footer: {
+            // Per-event switches aren't ready yet: no disabled list (F9), one sentence and the way
+            // to the app's iOS notification settings. The saved choices stay saved.
+            Section {
+                Text("Counterpart sends every alert to this iPhone; turn them off in iOS Settings → Notifications.")
+                Button("Open Notification Settings") {
+                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
+                }
+                .accessibilityIdentifier("open-notification-settings")
+            } footer: {
                 Text(app.cloud.alertsMessage + " Your saved choices are kept; individual alert types cannot be changed here yet.")
             }
-            Section { ForEach(NotificationChoices.beforePrint) { row($0) } } header: { Text("Before a print") }
             Section {
-                ForEach(NotificationChoices.whilePrinting) { row($0) }
                 HStack(spacing: 12) {
                     SettingsIcon(symbol: "percent", tint: .okGreen)
                     Picker("Progress", selection: Binding(get: { milestones }, set: { setMilestones($0) })) {
@@ -259,13 +265,10 @@ struct NotificationSettingsView: View {
                     .disabled(!milestonesAvailable || savingMilestones)
                 }
                 .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                ForEach(NotificationChoices.afterProgress) { row($0) }
             } header: { Text("While printing") } footer: {
                 if !milestonesAvailable { Text("Update Counterpart on your Mac to choose progress milestones.") }
                 else if let problem { Text(problem).foregroundStyle(.red) }
-            }
-            Section { ForEach(NotificationChoices.problems) { row($0) } } header: { Text("Problems") } footer: {
-                Text("Sent from your Mac through iCloud, so use the same Apple Account on both. Marked ones are time sensitive.")
+                else { Text("Sent from your Mac through iCloud, so use the same Apple Account on both.") }
             }
         }
         .listSectionSpacing(10)
@@ -273,6 +276,7 @@ struct NotificationSettingsView: View {
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            await app.refreshCloud()
             do {
                 let value = try await store.mac.client.settings().milestones
                 guard !savingMilestones, !editedMilestones else { return }
@@ -281,21 +285,6 @@ struct NotificationSettingsView: View {
             } catch let failure as CompanionError where failure.isUnsupported { milestonesAvailable = false }
             catch {}
         }
-    }
-
-    private func row(_ kind: NotificationChoices.Kind) -> some View {
-        Toggle(isOn: Binding(get: { on[kind.id] ?? true }, set: { on[kind.id] = $0; NotificationChoices.set(kind.id, $0) })) {
-            HStack(spacing: 12) {
-                SettingsIcon(symbol: kind.symbol, tint: kind.tint)
-                Text(kind.title).lineLimit(1).minimumScaleFactor(0.85)
-                if kind.urgent {
-                    Image(systemName: "clock.badge.exclamationmark.fill").font(.caption).foregroundStyle(.secondary)
-                        .accessibilityLabel("Time sensitive")
-                }
-            }
-        }
-        .disabled(true)
-        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
     }
 
     private func setMilestones(_ value: String) {

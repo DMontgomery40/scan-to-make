@@ -12,6 +12,8 @@ final class LaunchUITests: XCTestCase {
         if codeFallback.waitForExistence(timeout: 20) {
             XCTAssertTrue(app.staticTexts["Connect to your Mac"].exists)
             XCTAssertTrue(codeFallback.isEnabled, "an unavailable iCloud account keeps code pairing available")
+            XCTAssertTrue(app.descendants(matching: .any)["get-counterpart-mac"].exists,
+                          "a tester who doesn't have the Mac app yet can get it from here (F14)")
         } else {
             XCTAssertTrue(app.buttons["new-project"].exists, "an already paired app opens its projects")
         }
@@ -41,6 +43,12 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Needs you"].exists)
         XCTAssertTrue(app.buttons["Camera"].exists && app.buttons["Best guess"].exists, "the ask card answers in place")
         XCTAssertTrue(app.buttons["new-project"].exists)
+        // Inline in one compact row (§5.1), clear of the floating New button after one scroll (F13).
+        app.scrollViews.firstMatch.swipeUp()
+        let camera = app.buttons["Camera"], photos = app.buttons["Photos"]
+        XCTAssertTrue(camera.isHittable && photos.isHittable && app.buttons["Best guess"].isHittable,
+                      "every answer is tappable, none under New")
+        XCTAssertEqual(camera.frame.minY, photos.frame.minY, accuracy: 2, "Camera and Photos share one row")
         // The Mac's real name and what its printer is doing, never "0 printers ready" while one prints.
         XCTAssertTrue(app.staticTexts["Mac mini connected · Bambu Lab P1S printing"].exists)
     }
@@ -467,11 +475,13 @@ final class SettingsAndFirstRunUITests: XCTestCase {
 
     func testNotificationsForThisIPhoneAndTheMac() {
         let app = launch("notifications")
-        // This device's Live Activity switch is off; the Mac alert is a separate setting.
-        let started = app.switches["Print started (Live Activity)"].firstMatch
-        XCTAssertTrue(started.waitForExistence(timeout: 20))
-        XCTAssertEqual(started.value as? String, "0")
-        XCTAssertTrue(app.switches["Ready to print"].firstMatch.exists)
+        // Per-event switches for this iPhone aren't ready yet (F9): one sentence and the way to the
+        // app's iOS notification settings at the top, never a list of disabled switches.
+        XCTAssertTrue(app.buttons["open-notification-settings"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Counterpart sends every alert to this iPhone; turn them off in iOS Settings → Notifications."].exists)
+        XCTAssertFalse(app.switches["Print started (Live Activity)"].exists, "no disabled iPhone switch list")
+        // The Mac's own alert is a separate, working setting below.
+        XCTAssertTrue(reach(app, app.switches["Ready to print"].firstMatch))
         XCTAssertFalse(app.switches.matching(NSPredicate(format: "label CONTAINS[c] 'plate'")).firstMatch.exists, "no plate notification")
     }
 

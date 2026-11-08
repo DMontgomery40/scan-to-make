@@ -70,15 +70,18 @@ fun StarterProjects(open: (String) -> Unit) {
             }
         }
     }
+    val reachable by state.reachable.collectAsState()
     selected?.let { starter ->
         AlertDialog(onDismissRequest = { if (!adding) selected = null }, title = { Text(starter.title) },
             text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Next to the top, where the tap's result is seen — not under the scroll (F6).
+                problem?.let { Text(it, color = Palette.failed) }
+                    ?: if (reachable == false) Text("Your computer isn't answering. Check it's on and awake, then try again.", color = Palette.failed) else null
                 StarterImage(starter, Modifier.fillMaxWidth().height(160.dp))
                 Text(starter.summary)
                 Text(starter.instructions)
                 Text("By ${starter.designer} · ${starter.licence}", fontSize = 12.sp, color = Palette.secondary)
                 starter.imageCredit?.let { Text(it, fontSize = 11.sp, color = Palette.secondary) }
-                problem?.let { Text(it, color = Palette.failed) }
             } },
             confirmButton = { TextButton(enabled = !adding, onClick = {
                 adding = true; problem = null

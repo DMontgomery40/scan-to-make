@@ -14,7 +14,10 @@ import Observation
     private var records: [CKRecord.ID: CKRecord] = [:]
     private var accountID: CKRecord.ID?
     private var subscribed: CloudNotificationSubscriptions.Availability?
-    private(set) var alertsMessage = "Connect to your Mac to check your saved notification choices."
+    // With no iCloud in this build, say that (F9) — never "Connect to your Mac" under "Connected now".
+    private(set) var alertsMessage = MobileCloud.configured
+        ? "Connect to your Mac to check your saved notification choices."
+        : "iCloud isn't available in this build, so alerts arrive only while Counterpart is open on your home network."
 
     static var configured: Bool {
         #if targetEnvironment(simulator)
@@ -29,12 +32,17 @@ import Observation
 
     func refresh() async {
         guard !reading else { return }
-        guard Self.configured else { message = "This build isn't signed for iCloud. You can still connect with your Mac's code."; return }
+        guard Self.configured else {
+            message = "This build isn't signed for iCloud. You can still connect with your Mac's code."
+            alertsMessage = "iCloud isn't available in this build, so alerts arrive only while Counterpart is open on your home network."
+            return
+        }
         reading = true; defer { reading = false }
         do {
             let container = CKContainer(identifier: CounterpartIdentifiers.cloudKitContainer)
             guard try await container.accountStatus() == .available else {
                 clear(); message = "Sign in to the same Apple Account on this iPhone and your Mac, or use your Mac's code."
+                alertsMessage = "iCloud isn't available on this iPhone, so alerts arrive only while Counterpart is open on your home network. Sign in to the same Apple Account on both for alerts anywhere."
                 return
             }
             let current = try await container.userRecordID()

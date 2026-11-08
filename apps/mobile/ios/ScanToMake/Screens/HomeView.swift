@@ -46,10 +46,12 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     starters
                     EmptyHome(start: newProject)
-                }.padding(.horizontal, 16).padding(.bottom, 96)
+                }.padding(.horizontal, 16).padding(.bottom, 120)
             } else {
                 VStack(alignment: .leading, spacing: 26) {
-                    if let error = store.error { ConnectionBanner(error: error, pair: store.onPair) }
+                    if let error = store.error {
+                        ConnectionBanner(error: error, pair: store.onPair) { Task { await store.load(); await store.loadPrinters() } }
+                    }
                     if !running.isEmpty {
                         HomeSection("Now") {
                         VStack(spacing: 12) {
@@ -89,8 +91,8 @@ struct HomeView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                // The last row scrolls clear of the search and New bar.
-                .padding(.bottom, 96)
+                // The last row scrolls clear of the floating New button (F13).
+                .padding(.bottom, 120)
             }
         }
         }
@@ -123,7 +125,8 @@ struct HomeView: View {
     }
 
     private var starters: some View {
-        StarterProjectsView { starter in
+        StarterProjectsView(unavailableMessage: store.reachable == false
+            ? "Your Mac isn't answering. Check it's on and awake, then try again." : nil) { starter in
             let ticket = store.startRequest()
             let project = try await store.mac.client.addStarter(starter)
             store.replace(project, ticket: ticket)
@@ -166,17 +169,27 @@ struct HomeView: View {
     }
 }
 
-/// The Mac isn't answering, or this phone has to pair again.
+/// The Mac isn't answering, or this phone has to pair again. "…then try again" carries the button it names
+/// (F6): Try Again reloads from the store, and pairing again is here, not hidden in Settings.
 struct ConnectionBanner: View {
     let error: CompanionError
     let pair: () -> Void
+    let retry: () -> Void
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: error.needsPairing ? "desktopcomputer.trianglebadge.exclamationmark" : "wifi.exclamationmark")
                 .font(.title3).foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text(error.message).font(.subheadline)
-                if error.needsPairing { Button("Connect to Your Mac", action: pair).buttonStyle(.glassProminent) }
+                HStack(spacing: 8) {
+                    Button("Try Again", action: retry).buttonStyle(.glassProminent)
+                        .accessibilityIdentifier("connection-try-again")
+                    Button(error.needsPairing ? "Connect to Your Mac" : "Connect a Different Mac", action: pair)
+                        .buttonStyle(.glass)
+                        .accessibilityIdentifier("connection-different-mac")
+                }
+                .controlSize(.small)
+                .font(.footnote.weight(.semibold))
             }
             Spacer(minLength: 0)
         }
@@ -376,15 +389,20 @@ struct AskButtons: View {
                         }.buttonStyle(.glass)
                     }
                 }
-                if answers.contains("camera") {
-                    Button { answer(camera: true) } label: { StackLabel(text: "Camera", symbol: "camera.fill") }.buttonStyle(.glassProminent)
+                // Inline, as PRD §5.1 has it: three compact answers in one row, not three full-width
+                // slabs the floating New button lands on (F13).
+                HStack(alignment: .top, spacing: 8) {
+                    if answers.contains("camera") {
+                        Button { answer(camera: true) } label: { StackLabel(text: "Camera", symbol: "camera.fill") }.buttonStyle(.glassProminent)
+                    }
+                    if answers.contains("photos") {
+                        Button { answer(camera: false) } label: { StackLabel(text: "Photos", symbol: "photo") }.buttonStyle(.glass)
+                    }
+                    if answers.contains("best-guess") {
+                        Button { bestGuess() } label: { StackLabel(text: "Best guess", symbol: "sparkles") }.buttonStyle(.glass)
+                    }
                 }
-                if answers.contains("photos") {
-                    Button { answer(camera: false) } label: { StackLabel(text: "Photos", symbol: "photo") }.buttonStyle(.glass)
-                }
-                if answers.contains("best-guess") {
-                    Button { bestGuess() } label: { StackLabel(text: "Best guess", symbol: "sparkles") }.buttonStyle(.glass)
-                }
+                .controlSize(.regular)
             }
             .controlSize(.large)
             .labelStyle(.titleAndIcon)
