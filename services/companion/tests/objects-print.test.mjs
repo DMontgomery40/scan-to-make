@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {createHash} from 'node:crypto';
 import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay, PrinterMcpError} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError, sendingWords} from '../dist/objects/service.js';
@@ -81,7 +82,7 @@ const approve = async (service, id) => {
 const until = async check => { for (let i = 0; i < 200; i++) { const value = await check(); if (value) return value; await new Promise(r => setTimeout(r, 10)); } throw new Error('timed out'); };
 
 async function retainedPlate(f) {
-  const sha256='ab'.repeat(32);
+  const sha256=createHash('sha256').update(STL).digest('hex');
   await f.store.update(f.object.id,o=>({...o,kind:'published',
     files:{current:'current/model.stl',receipts:[{name:'model.stl',path:'current/model.stl',format:'stl',sha256,
       plates:[{index:0,name:'Base',sliced:false}]}]},publishedSelection:{fileIndex:0,plateIndex:0,sliced:false}}));
