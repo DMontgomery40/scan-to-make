@@ -109,6 +109,7 @@ jobs:
           python3 scripts/camera_safe_tests.py "${manifests[0]}"
           xcodebuild test-without-building -xctestrun "${manifests[0]}" \
             -destination "platform=iOS Simulator,id=$SIM" -parallel-testing-enabled NO -collect-test-diagnostics never
+          xcrun simctl shutdown "$SIM"
           # Regular width: the starters, the New button and search on the iPad layout (PRD §6.1).
           xcodebuild test-without-building -xctestrun "${manifests[0]}" \
             -destination "platform=iOS Simulator,id=$IPAD" -parallel-testing-enabled NO -collect-test-diagnostics never \
