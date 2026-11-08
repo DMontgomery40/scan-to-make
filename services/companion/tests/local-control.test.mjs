@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,rm,stat,writeFile,readFile,symlink,chmod} from 'node:fs/promises';
 import {join} from 'node:path';
-import {connect,createServer} from 'node:net';
+import {connect,createServer,Socket} from 'node:net';
 import {randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
@@ -163,6 +163,8 @@ test('invalid stored schemas report unavailable instead of blaming valid request
 });
 
 test('LAN pairing needs no login and an incomplete frame expires without a mutation',async t=>{
+  // Authentication writes must not race the deliberately short incomplete-frame clock.
+  t.mock.timers.enable({apis:['setTimeout']});
   const f=await fixture(t);
   const auth=await RemoteAuthStore.create(join(f.root,'lan-auth'),{transport:'lan',host:'192.168.1.2:9077',certificateSha256:'a'.repeat(64),allowedLogins:['lan']});
   let calls=0;
@@ -171,7 +173,17 @@ test('LAN pairing needs no login and an incomplete frame expires without a mutat
   const invitation=(await wire(server.path,{v:1,id:randomUUID(),method:'pairing.create',params:{}})).result;
   assert.equal(new URL(invitation.qrPayload).searchParams.get('f'),'a'.repeat(64));
   assert.equal(invitation.baseUrl,'https://192.168.1.2:9077');
-  await new Promise((resolve,reject)=>{const s=connect(server.path);s.on('error',reject);s.on('close',resolve);s.on('connect',()=>s.write('{"v":1'));s.resume();});
+  let read;const partial=new Promise(resolve=>{read=resolve;});
+  const emit=Socket.prototype.emit;
+  t.mock.method(Socket.prototype,'emit',function(event,...args){
+    const result=emit.call(this,event,...args);
+    if(event==='data'&&args[0].toString()==='{"v":1')read();
+    return result;
+  });
+  const closed=new Promise((resolve,reject)=>{const s=connect(server.path);s.on('error',reject);s.on('close',resolve);s.on('connect',()=>s.write('{"v":1'));s.resume();});
+  await partial; // The incomplete frame reached the server before its deadline.
+  t.mock.timers.tick(50);
+  await closed;
   assert.equal(calls,1);
 });
 

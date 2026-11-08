@@ -11,7 +11,7 @@ for(const action of ['download','disconnect','shutdown'])test(`response drain: $
  const f=await fixture(t,cleanupRunner()),{job}=await f.store.start(f.input);await f.store.wait();
  assert.equal((await f.store.load(f.input,job.jobId)).job.status,'succeeded');
  const routes=createCaptureRoutes({storage:f.storage,captures:f.captures,scanProcessing:f.store});
- const held=deferred(),release=deferred(),secondArrived=deferred(),secondHandled=deferred();let firstResponse,requests=0,paused=false,secondEntered=false,storageCalls=0;
+ const held=deferred(),release=deferred(),secondArrived=deferred(),secondHandled=deferred(),secondClosed=deferred();let firstResponse,requests=0,paused=false,secondEntered=false,storageCalls=0;
  const withCurrent=f.storage.withCurrentProject.bind(f.storage);
  f.storage.withCurrentProject=(id,revision,fn,...rest)=>{
   storageCalls++;
@@ -25,7 +25,7 @@ for(const action of ['download','disconnect','shutdown'])test(`response drain: $
  };
  const server=createServer((req,res)=>{
   const first=++requests===1;
-  if(first)firstResponse=res;else secondArrived.resolve();
+  if(first)firstResponse=res;else {res.once('close',()=>secondClosed.resolve());secondArrived.resolve();}
   void routes.handle(req,res,async()=>{},name=>req.headers[name]).finally(()=>{if(!first)secondHandled.resolve();});
  });
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -44,7 +44,7 @@ for(const action of ['download','disconnect','shutdown'])test(`response drain: $
   assert.equal(secondEntered,false,'next request entered the still-held project lock');
   let closing;
   if(action==='disconnect'){
-   secondRequest.destroy();await assert.rejects(next);await nextTurn();
+   secondRequest.destroy();await assert.rejects(next);await secondClosed.promise;
    const calls=storageCalls;release.resolve();await secondHandled.promise;assert.equal(storageCalls,calls);return;
   }
   if(action==='shutdown')closing=routes.close();

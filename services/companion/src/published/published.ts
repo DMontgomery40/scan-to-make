@@ -142,7 +142,8 @@ export async function folderAccess(path: string): Promise<'ok' | 'denied' | 'mis
  * time, written) between its start and its end. Hidden files are a browser's unfinished downloads, never counted.
  * Nov 6: the worker's own check of ~/Downloads missed files its clicks had saved there; the companion looks itself.
  */
-export async function arrivedDuring(folders: string[], sinceMs: number, untilMs: number): Promise<string[]> {
+export async function arrivedDuring(folders: string[], sinceMs: number, untilMs: number, before?: ReadonlySet<string>): Promise<string[]> {
+  if (untilMs < sinceMs) return [];
   const arrived: {path: string; atMs: number}[] = [];
   for (const folder of folders) {
     for (const name of await readdir(folder).catch(() => [] as string[])) {
@@ -150,7 +151,9 @@ export async function arrivedDuring(folders: string[], sinceMs: number, untilMs:
       const path = join(folder, name), info = await lstat(path).catch(() => undefined);
       if (!info?.isFile() || info.size === 0) continue;
       const atMs = info.birthtimeMs > 0 ? info.birthtimeMs : info.mtimeMs;
-      if (atMs >= sinceMs && atMs <= untilMs) arrived.push({path, atMs});
+      // Filesystem clocks may lag Date.now() by a tick. A pre-worker directory
+      // snapshot establishes arrival without assuming the clocks agree.
+      if (before ? !before.has(path) : atMs >= sinceMs && atMs <= untilMs) arrived.push({path, atMs});
     }
   }
   return arrived.sort((a, b) => a.atMs - b.atMs).map(file => file.path);
@@ -184,12 +187,14 @@ export async function runPublishedWorker(inv: TouchupInvocation, pass: TouchupPa
   onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal; startedAtMs?: number;
 } = {}): Promise<PublishedResult> {
   const startedAtMs = opts.startedAtMs ?? Date.now();
+  const folders = [opts.downloads ?? join(homedir(), 'Downloads'), pass.outDir];
+  const before = new Set((await Promise.all(folders.map(async folder =>
+    (await readdir(folder).catch(() => [] as string[])).map(name => join(folder, name))))).flat());
   const run = await (inv.worker ?? runClaudeWorker)(inv, {...(opts.spawn ? {spawn: opts.spawn} : {}), ...(opts.onProgress ? {onProgress: opts.onProgress} : {}), ...(opts.signal ? {signal: opts.signal} : {})});
   const endedAtMs = Date.now();
   const answer = run.resultEvent?.structured_output as Record<string, unknown> | undefined;
   const credit = model(answer, link);
-  const folders = [opts.downloads ?? join(homedir(), 'Downloads'), pass.outDir];
-  const landed = await arrivedDuring(folders, startedAtMs, endedAtMs);
+  const landed = await arrivedDuring(folders, startedAtMs, endedAtMs, before);
   const denied = await folderAccess(folders[0]!) === 'denied';
   const arrived = {...(landed.length ? {arrived: landed} : {}), ...(denied ? {downloadsDenied: true as const} : {})};
   const sessionId = typeof run.resultEvent?.session_id === 'string' ? run.resultEvent.session_id : undefined;

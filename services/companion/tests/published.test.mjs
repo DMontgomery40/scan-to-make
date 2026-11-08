@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,utimes,symlink,chmod} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,utimes,symlink,chmod,lstat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
@@ -75,6 +75,16 @@ test('the companion lists every model file that arrived during the pass itself; 
  await mkdir(join(f.root,'brave'));await writeFile(join(f.root,'brave','host.json'),'{}');
  assert.equal(chromeAvailable([join(f.root,'chrome','host.json'),join(f.root,'brave','host.json')]),true);
  assert.equal(chromeAvailable([join(f.root,'chrome','host.json')]),false);
+});
+test('file arrival uses the pre-worker snapshot when filesystem and wall clocks disagree',async t=>{
+ const f=await setup(t),path=join(f.root,'boundary.3mf');
+ const before=new Set();await writeFile(path,model());
+ const info=await lstat(path),atMs=info.birthtimeMs>0?info.birthtimeMs:info.mtimeMs;
+ // A cached filesystem tick can precede the pass; a fractional tick can follow its integer end.
+ for(const tick of [Math.floor(atMs)-1,Math.ceil(atMs)+10]){
+  assert.deepEqual(await arrivedDuring([f.root],tick,tick,before),[path]);
+  assert.deepEqual(await arrivedDuring([f.root],tick,tick,new Set([path])),[]);
+ }
 });
 test('a Downloads folder macOS privacy refuses is "denied", never an empty folder, and the pass says so',async t=>{
  if(process.getuid?.()===0)return t.skip('root reads any folder');
