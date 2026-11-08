@@ -205,13 +205,15 @@ struct ProjectView: View {
                 }
                 .padding(.horizontal, 20)
 
-                if (object.plates?.count ?? 0) > 1 {
+                if (object.plates?.count ?? 0) > 0 {
                     ProjectPlatesView(project: object, busy: working, thumbnail: { plate in
                         ProjectImage(project: object, path: plate.thumbnail, maxPixelSize: 400, contentMode: .fit)
                     }, select: { plate in
                         act { try await store.mac.client.selectPlate(object.id, fileIndex: plate.fileIndex, plateIndex: plate.plateIndex) }
                     }, printPlate: { plate in
                         selectAndPrint(plate, object: object)
+                    }, markPrinted: { plate in
+                        act { try await store.mac.client.markPlatePrinted(object.id, plateId: plate.id) }
                     }).padding(.horizontal, 20)
                 }
                 if object.kind == "published" {

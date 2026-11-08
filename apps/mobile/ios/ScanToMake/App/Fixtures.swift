@@ -29,6 +29,7 @@ enum Fixtures {
     nonisolated(unsafe) static var projectPreferences: [String: [String: Any]] = [:]
     nonisolated(unsafe) static var selectedPlate = 0
     nonisolated(unsafe) static var plateChanged = false
+    nonisolated(unsafe) static var printedElsewhere: Set<String> = []
     nonisolated(unsafe) static var duplicates: [[String: Any]] = []
 
     static let ids = (mic: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", potato: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
@@ -72,7 +73,11 @@ enum Fixtures {
             project["updatedAtMs"] = now.timeIntervalSince1970 * 1000
             project["publishedSelection"] = ["fileIndex": 0, "plateIndex": selectedPlate, "sliced": false]
             project["plates"] = (project["plates"] as? [[String: Any]] ?? []).map { plate in
-                plate.merging(["selected": plate["plateIndex"] as? Int == selectedPlate]) { $1 }
+                var row = plate.merging(["selected": plate["plateIndex"] as? Int == selectedPlate]) { $1 }
+                if let id = row["id"] as? String, printedElsewhere.contains(id) {
+                    row["status"] = "printed"; row["uncertain"] = nil; row["completedAtMs"] = now.timeIntervalSince1970 * 1000
+                }
+                return row
             }
             return [project]
         }
@@ -400,6 +405,13 @@ struct FixtureTransport: HTTPTransport {
             if parts.count == 4 && parts[2] == "printers" { return json(["error": ["code": "not-found"]], 404) }
             let id = parts[2]
             if parts.count == 3 { return object(id).map { json(["object": $0]) } ?? json(["error": ["code": "not-found"]], 404) }
+            if parts[3] == "plate-printed", method == "POST",
+               let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
+               let plateId = body["plateId"] as? String, body.count == 1,
+               (object(id)?["plates"] as? [[String: Any]] ?? []).contains(where: { $0["id"] as? String == plateId }) {
+                Fixtures.printedElsewhere.insert(plateId)
+                return json(["object": Fixtures.objects()[0]])
+            }
             if parts[3] == "plate-selection", method == "POST",
                let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
                let index = body["plateIndex"] as? Int, (0..<6).contains(index) {

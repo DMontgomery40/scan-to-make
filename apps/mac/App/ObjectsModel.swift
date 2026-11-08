@@ -8,6 +8,7 @@ import ControlKit
 /// What the objects window needs from the companion: local-control's `objects.*` methods.
 protocol ObjectsCompanion: Sendable {
     func addStarter(_ starterId: String) async throws -> Project
+    func markPlatePrinted(_ id: String, plateId: String) async throws -> Project
     func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project
     func print(_ id: String, checked: Bool, settings: PrintSettings, expectedPlate: String?) async throws -> Project
     func printers() async throws -> PrinterCatalog
@@ -50,6 +51,7 @@ protocol ObjectsCompanion: Sendable {
 
 extension ObjectsCompanion {
     func addStarter(_ starterId: String) async throws -> Project { throw ControlClientError.unavailable }
+    func markPlatePrinted(_ id: String, plateId: String) async throws -> Project { throw ControlClientError.unavailable }
     func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project { throw ControlClientError.unavailable }
     func print(_ id: String, checked: Bool, settings: PrintSettings, expectedPlate: String?) async throws -> Project {
         guard expectedPlate == nil else { throw ControlClientError.unavailable }
@@ -93,6 +95,9 @@ extension ObjectsCompanion {
 struct SocketObjects: ObjectsCompanion {
     let path: String
     func addStarter(_ starterId: String) async throws -> Project { try await ControlClient(socketPath: path).addStarter(starterId) }
+    func markPlatePrinted(_ id: String, plateId: String) async throws -> Project {
+        try await ControlClient(socketPath: path).markPlatePrinted(id, plateId: plateId)
+    }
     func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
         try await ControlClient(socketPath: path).selectPlate(id, fileIndex: fileIndex, plateIndex: plateIndex)
     }
@@ -601,6 +606,10 @@ struct SocketObjects: ObjectsCompanion {
         applyReply(project)
         selection = project.id
         wake()
+    }
+
+    @discardableResult func markPlatePrinted(_ id: String, plate: ProjectPlate) async -> Bool {
+        await change(id) { try await self.companion.markPlatePrinted(id, plateId: plate.id) }
     }
 
     @discardableResult func selectPlate(_ id: String, plate: ProjectPlate) async -> Bool {

@@ -512,3 +512,87 @@ test("while the printer MCP sends the file, a project shows the companion's perc
   // counterpart/1 upload progress, as the companion writes it to Project.progress (Mac, iPhone, iPad and Android show the same).
   assert.equal(words({ id: "x", state: "printing", progress: "Sending to the printer… 62%" } as unknown as Project), "Sending to the printer… 62%");
 });
+
+// This is an interaction check of the production plate strip, not a duplicate of its state logic.
+test("printed elsewhere presses the plate control, calls the companion and renders its reply", async () => {
+  const { JSDOM } = await import("jsdom");
+  const React = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { ProjectPlates } = await import("../src/ProjectPlates.tsx");
+  const dom = new JSDOM("<div id='root'></div>", { url: "http://localhost" });
+  const priorWindow = globalThis.window,
+    priorDocument = globalThis.document;
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../../packages/contracts/fixtures/six-plate-unconfirmed.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  let project = fixture.unconfirmed as Project;
+  const calls: unknown[] = [];
+  const root = createRoot(document.getElementById("root")!);
+  const render = () =>
+    root.render(
+      React.createElement(ProjectPlates, {
+        project,
+        mutate: async (method, params) => {
+          calls.push({ method, params });
+          project = {
+            ...project,
+            plates: project.plates!.map((plate, i) =>
+              i === 0
+                ? {
+                    ...plate,
+                    status: "printed",
+                    completedAtMs: 1000,
+                    uncertain: false,
+                  }
+                : plate,
+            ),
+          };
+          render();
+          return { object: project };
+        },
+      }),
+    );
+  try {
+    await React.act(async () => render());
+    const button = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="I printed this elsewhere, Screws"]',
+    );
+    assert.ok(button);
+    assert.equal(button.disabled, false);
+    await React.act(async () => button.click());
+    assert.deepEqual(calls, [
+      {
+        method: "objects.markPlatePrinted",
+        params: { id: project.id, plateId: project.plates![0].id },
+      },
+    ]);
+    assert.match(document.body.textContent!, /1 of 6 plates printed/);
+    assert.match(
+      document.querySelectorAll("button.plate")[0]!.textContent!,
+      /Printed/,
+    );
+    assert.match(
+      document.querySelectorAll("button.plate")[1]!.textContent!,
+      /Not printed/,
+    );
+  } finally {
+    await React.act(async () => root.unmount());
+    dom.window.close();
+    Object.assign(globalThis, {
+      window: priorWindow,
+      document: priorDocument,
+      IS_REACT_ACT_ENVIRONMENT: false,
+    });
+  }
+});

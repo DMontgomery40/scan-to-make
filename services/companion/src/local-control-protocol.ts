@@ -74,6 +74,7 @@ export const parameters = {
   'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), photos: z.array(z.string().min(2).max(4096)).max(24).optional()}),
   'objects.addStarter': z.strictObject({starterId: z.enum(['scan-platform', 'long-vernier-caliper'])}),
   'objects.create': z.strictObject({instructions: z.string().max(8000).optional(), kind: z.enum(['fit', 'copy', 'published']).optional(), url: z.string().max(2048).optional()}),
+  'objects.markPlatePrinted': z.strictObject({id: z.uuid(), plateId: z.string().min(1).max(128)}),
   'objects.selectPlate': z.strictObject({id: z.uuid(), fileIndex: z.number().int().nonnegative(), plateIndex: z.number().int().nonnegative()}),
   'objects.answerAsk': z.strictObject({id: z.uuid(), askId: z.uuid(), choices: z.array(z.string().min(1).max(64)).min(1).max(32)}),
   'objects.addFile': z.strictObject({id: z.uuid(), kind: z.enum(['photos', 'scan', 'model']), path: z.string().min(2).max(4096), forMessage: z.boolean().optional()}),

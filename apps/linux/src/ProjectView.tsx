@@ -3,6 +3,7 @@ import { artifact, call, importFiles, openLink, openProject } from "./bridge";
 import { activePrint, canSelectPlate, duration, words } from "./domain";
 import { Picture, Stage } from "./Stage";
 import { Question } from "./Question";
+import { ProjectPlates } from "./ProjectPlates";
 import { PrintSheet } from "./PrintSheet";
 import { ReconstructionReviewCard } from "./ReconstructionReview";
 import { Action, Modal } from "./ui";
@@ -290,54 +291,7 @@ export function ProjectView({
           )}
           {p.plates && p.plates.length > 0 && (
             <section className="plates">
-              <h3>
-                {p.plates.filter((x) => x.status === "printed").length} of{" "}
-                {p.plates.length} plates printed
-              </h3>
-              <div>
-                {p.plates.map((plate) => (
-                  <button
-                    key={plate.id}
-                    className={plate.selected ? "plate selected" : "plate"}
-                    disabled={!canSelectPlate(p)}
-                    aria-pressed={plate.selected}
-                    aria-label={`${plate.name}, ${plate.status}${plate.selected ? ", selected" : ""}`}
-                    onClick={() =>
-                      void mutate("objects.selectPlate", {
-                        id: p.id,
-                        fileIndex: plate.fileIndex,
-                        plateIndex: plate.plateIndex,
-                      }).catch((e) => setError(String(e)))
-                    }
-                  >
-                    <Picture
-                      id={p.id}
-                      path={plate.thumbnail}
-                      alt={plate.name}
-                    />
-                    <strong>{plate.name}</strong>
-                    <small>{plate.fileName}</small>
-                    <span>{plate.status}</span>
-                  </button>
-                ))}
-              </div>
-              <Action
-                // Marking it settles a send Counterpart couldn't confirm, so only a running print holds it.
-                disabled={p.state === "printing"}
-                run={() =>
-                  mutate("objects.settings.set", {
-                    id: p.id,
-                    status:
-                      p.plates?.find((x) => x.selected)?.status === "printed"
-                        ? "not-printed"
-                        : "printed",
-                  })
-                }
-              >
-                {p.plates.find((x) => x.selected)?.status === "printed"
-                  ? "Mark selected plate not printed"
-                  : "Mark selected plate printed"}
-              </Action>
+              <ProjectPlates project={p} mutate={mutate} />
               <Action
                 disabled={activePrint(p)}
                 run={async () => {

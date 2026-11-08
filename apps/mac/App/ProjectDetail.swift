@@ -58,7 +58,7 @@ struct ProjectDetail: View {
                 }
                 .ignoresSafeArea(edges: .top)
             VStack(spacing: 12) {
-                if (object.plates?.count ?? 0) > 1 {
+                if (object.plates?.count ?? 0) > 0 {
                     ProjectPlatesView(project: object, busy: working, thumbnail: { plate in
                         if let url = plate.thumbnail.flatMap(object.projectFile) {
                             FillImage(url: url, version: object.updatedAtMs)
@@ -69,6 +69,8 @@ struct ProjectDetail: View {
                         Task { await model.selectPlate(object.id, plate: plate) }
                     }, printPlate: { plate in
                         Task { if await model.selectPlate(object.id, plate: plate) { print() } }
+                    }, markPrinted: { plate in
+                        Task { await model.markPlatePrinted(object.id, plate: plate) }
                     })
                     .padding(12).background(.regularMaterial, in: .rect(cornerRadius: 20))
                 }

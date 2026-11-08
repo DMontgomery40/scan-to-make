@@ -47,6 +47,7 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `POST /v1/objects/<id>/start` | WRITE | `{captureManifest?}` | `{object}` |
 | `POST /v1/objects/<id>/corrections` | WRITE | `{note: string 1–4000}`. Upload any new photos first with `…/photos`. | `{object}` (a new pass) |
 | `POST /v1/objects/<id>/model?name=<file>` | WRITE | 3MF or STL bytes, ≤64 MiB; preserves the supplied original | `{object}` (ready or plate/file choice) |
+| `POST /v1/objects/<id>/plate-printed` | WRITE | `{plateId: string}` (the retained plate's exact `id`) | `{object}`. Records the person's **I printed this elsewhere** report, with a completion timestamp and acknowledgement; does not change selection or another plate. Clears the chosen plate's uncertainty. 409 during printing/touch-up or for an unknown plate. Emits `project.updated` (`keys: ["plates"]`). Local equivalent: `objects.markPlatePrinted({id, plateId})`. No printer call. |
 | `POST /v1/objects/<id>/ask` | WRITE | `{askId, choices: [optionId]}` | `{object}` |
 | `POST /v1/objects/<id>/closeup` | WRITE | `{bestGuess?: boolean, text?: string ≤ 2000, photoNames?: string[] ≤ 100}`. Answers the open Ask: upload photos first, then name those exact files in `photoNames`; or use `{bestGuess: true}` or `{text}`. Omitted names select no photos; queued correction evidence remains pending. Empty answers or missing photos are refused before consuming the Ask. | `{object}` (a new pass) |
 | `GET /v1/objects/<id>/passes/<n>/activity` | READ | | `{activity: [{atMs, kind: "message"\|"tool", text}]}` |

@@ -64,12 +64,13 @@ export function projectPlates(object: StmObject): ProjectPlate[] {
 }
 
 /** An explicit user acknowledgement, including a part printed outside Counterpart. */
-export function acknowledgePlate(object: StmObject, status: 'printed' | 'not-printed'): Record<string, PlateProgress> {
-  const saved = retainedPlateProgress(object), plate = selectedPlateIdentity(object);
+export function acknowledgePlate(object: StmObject, status: 'printed' | 'not-printed', identity = selectedPlateIdentity(object)): Record<string, PlateProgress> {
+  const saved = retainedPlateProgress(object), plate = identity;
   if (!plate) return saved;
-  const now = Date.now();
+  const now = Date.now(), printPlate = object.print?.plate ?? selectedPlateIdentity(object);
+  const printId = printPlate && key(printPlate) === key(plate) ? object.print?.printId : undefined;
   saved[key(plate)] = {status, acknowledgedAtMs: now,
-    ...(object.print?.printId ? {printId: object.print.printId} : {}),
+    ...(printId ? {printId} : {}),
     ...(status === 'printed' ? {completedAtMs: saved[key(plate)]?.completedAtMs ?? now} : {})};
   return saved;
 }

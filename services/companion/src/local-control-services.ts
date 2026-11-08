@@ -312,7 +312,7 @@ export function createControlDispatcher(services: ControlServices) {
             throw error;
           }
         }
-        case 'objects.selectPlate': case 'objects.answerAsk': case 'objects.answerReconstruction': case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.colourMapping': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
+        case 'objects.markPlatePrinted': case 'objects.selectPlate': case 'objects.answerAsk': case 'objects.answerReconstruction': case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.colourMapping': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
         case 'objects.addStarter': case 'objects.create': case 'objects.addFile':
         case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'printers.route': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
@@ -369,6 +369,10 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'objects.correct') {
               const {id, note, photos, photoNames} = parameters[method].parse(raw);
               return {object: local(await objects.correct(id, note, photos, photoNames))};
+            }
+            if (method === 'objects.markPlatePrinted') {
+              const {id, plateId} = parameters[method].parse(raw);
+              return {object: local(await objects.markPlatePrinted(id, plateId))};
             }
             if (method === 'objects.selectPlate') {
               const {id, fileIndex, plateIndex} = parameters[method].parse(raw);

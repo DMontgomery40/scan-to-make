@@ -25,7 +25,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 
 @Composable
-fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Unit, print: (ProjectPlate) -> Unit) {
+fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Unit, print: (ProjectPlate) -> Unit, markPrinted: (ProjectPlate) -> Unit = {}) {
     val plates = project.plates.orEmpty()
     if (plates.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -47,6 +47,9 @@ fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Uni
                         enabled = !busy && project.canSelectPlate && !plate.selected) { select(plate) }
                     PrimaryButton(if (plate.completedAtMs == null) "Print…" else "Print Again…", Modifier.fillMaxWidth(),
                         enabled = !busy && project.canSelectPlate) { print(plate) }
+                    if (plate.status != "printed") SecondaryButton("I printed this elsewhere",
+                        Modifier.fillMaxWidth().testTag("printed-elsewhere-${plate.fileIndex}-${plate.plateIndex}"),
+                        enabled = !busy && project.canSelectPlate) { markPrinted(plate) }
                 }
             }
         }

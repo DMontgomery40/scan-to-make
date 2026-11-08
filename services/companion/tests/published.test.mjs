@@ -433,3 +433,25 @@ test('an unlisted 3MF that isn’t selected doesn’t block the selected STL’s
  await f.service.selectPlate(object.id,both.files.receipts.findIndex(receipt=>receipt.format==='3mf'),0);
  await assert.rejects(f.service.estimate(object.id),{message:update});
 });
+
+test('printed elsewhere is atomic for its named plate, persists and never changes another plate or calls a printer', async t => {
+ const f=await setup(t), object=await f.service.create('Platform','published',LINK);
+ const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Platform',6));
+ await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
+ await f.store.update(object.id,o=>({...o,state:'failed',print:{bundleId:'b',printId:'p',uncertain:true,plate:{sha256:o.files.receipts[0].sha256,plateIndex:0}}}));
+ const before=publicObject(await f.service.get(object.id));
+ const third=before.plates[2].id;
+ const elsewhere=publicObject(await f.service.markPlatePrinted(object.id,third));
+ assert.equal(elsewhere.plates[2].status,'printed'); assert.ok(elsewhere.plates[2].completedAtMs);
+ assert.equal(elsewhere.plates[0].status,'unknown'); assert.equal(elsewhere.print.uncertain,true);
+ assert.equal(elsewhere.plates[0].selected,true,'recording another plate does not select it');
+ const first=publicObject(await f.service.markPlatePrinted(object.id,before.plates[0].id));
+ assert.equal(first.plates[0].status,'printed');assert.equal(first.print.uncertain,undefined);
+ await f.service.selectPlate(object.id,0,1);
+ const reloaded=publicObject(await new ObjectStore(join(f.root,'objects')).get(object.id));
+ assert.deepEqual(reloaded.plates.filter(p=>p.completedAtMs).map(p=>p.plateIndex),[0,2]);
+ await assert.rejects(f.service.markPlatePrinted(object.id,'stale:0'),/plate/i);
+ await f.store.update(object.id,o=>({...o,state:'printing'}));
+ await assert.rejects(f.service.markPlatePrinted(object.id,third),/finish/i);
+ assert.ok(f.events.some(e=>e.type==='project.updated'&&e.data?.keys?.includes('plates')));
+});

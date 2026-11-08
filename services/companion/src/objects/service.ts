@@ -1386,6 +1386,24 @@ export class ObjectService {
       detail: {title: projectTitle(object)}});
   }
 
+  /** A person's report of a plate printed in Studio, Handy or elsewhere. Never sends a printer command. */
+  markPlatePrinted(id: string, plateId: string): Promise<StmObject> {
+    return this.#gate(id, async () => {
+      const object = await this.get(id);
+      if (object.state === 'printing' || object.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
+      const plate = projectPlates(object).find(p => p.id === plateId);
+      if (!plate || !object.current) throw new InvalidStateError('Choose a plate in this model.');
+      const file = object.files!.receipts![plate.fileIndex]!;
+      const updated = await this.#deps.store.update(id, o => ({...o,
+        plateProgress: acknowledgePlate(o, 'printed', {sha256: file.sha256, plateIndex: plate.plateIndex}),
+        ...(plate.selected ? {state: 'printed' as const, failure: undefined, outcome: undefined, completion: undefined,
+          print: o.print ? {...o.print, uncertain: undefined} : undefined} : {}),
+      }));
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['plates']}});
+      return this.#changed(updated);
+    });
+  }
+
   /** Select any retained plate, including after printing another one. Shares the print operation gate. */
   selectPlate(id: string, fileIndex: number, plateIndex: number): Promise<StmObject> {
     return this.#gate(id, async () => {

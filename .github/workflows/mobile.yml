@@ -99,7 +99,7 @@ jobs:
           set -euo pipefail
           SIM=$(xcrun simctl create "mobile-ci-${GITHUB_RUN_ID:-local}-$$" "$SIM_TYPE" "$SIM_RUNTIME")
           IPAD=$(xcrun simctl create "mobile-ci-ipad-${GITHUB_RUN_ID:-local}-$$" "$IPAD_TYPE" "$SIM_RUNTIME")
-          trap 'for s in "$SIM" "$IPAD"; do xcrun simctl shutdown "$s" >/dev/null 2>&1 || true; xcrun simctl delete "$s" >/dev/null 2>&1 || true; done; rm -rf "${{ runner.temp }}/app-tests"' EXIT
+          trap 'for s in "$SIM" "$IPAD"; do xcrun simctl shutdown "$s" >/dev/null 2>&1 || true; done; trash "${{ runner.temp }}/app-tests"' EXIT
           # Ad hoc signing gives the Simulator build its Keychain entitlement, as on a device.
           xcodebuild build-for-testing -project apps/mobile/ios/ScanToMake.xcodeproj -scheme ScanToMake \
             -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "${{ runner.temp }}/app-tests" \

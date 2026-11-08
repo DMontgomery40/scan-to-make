@@ -575,6 +575,27 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(check.waitForExistence(timeout: 5), "the plate that may have started asks for the printer check")
     }
 
+    /// The same real button → CompanionClient HTTP call → visible strip update runs at both widths.
+    func testPrintedElsewhereRecordsOnlyThatPlate() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let rig = try String(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/six-plate-unconfirmed.json"), encoding: .utf8)
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "plates-unconfirmed", "-CounterpartScreen", "ready"]
+        app.launchEnvironment["COUNTERPART_RIG_FIXTURE"] = rig
+        app.launch()
+        let button = app.buttons["printed-elsewhere-0-0"]
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        for _ in 0..<4 where !button.isHittable { app.swipeUp() }
+        button.tap()
+        let first = app.buttons["select-plate-0-0"]
+        let printed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@ AND NOT label CONTAINS %@", "Printed", "Check print result"), object: first)
+        XCTAssertEqual(XCTWaiter().wait(for: [printed], timeout: 5), .completed)
+        XCTAssertTrue(app.staticTexts["1 of 6 printed"].exists)
+        XCTAssertFalse(button.exists)
+        XCTAssertTrue(app.buttons["printed-elsewhere-0-1"].exists, "another plate remains unprinted")
+    }
+
     /// The project list: the iPad sidebar, or iPhone Home.
     private func projectList(_ app: XCUIApplication) -> XCUIElement {
         regular ? app.collectionViews.firstMatch : app.scrollViews.firstMatch

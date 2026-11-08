@@ -27,6 +27,7 @@ pub fn allowed(method: &str) -> bool {
             | "objects.colourMapping"
             | "objects.selectPrinter"
             | "objects.selectPlate"
+            | "objects.markPlatePrinted"
             | "objects.answerAsk"
             | "objects.answerCloseup"
             | "objects.answerReconstruction"

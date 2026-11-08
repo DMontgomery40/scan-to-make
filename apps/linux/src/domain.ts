@@ -601,3 +601,23 @@ export function addressField(options: SetupOptions | undefined, printerType: str
     placeholder: address?.url ? "192.168.1.20, printer.local or https://…" : "192.168.1.20 or printer.local",
   };
 }
+
+export function plateStatusText(
+  plate: NonNullable<Project["plates"]>[number],
+): string {
+  return (
+    (
+      {
+        printed: "Printed",
+        "not-started": "Not started",
+        preparing: "Getting ready",
+        printing: "Printing",
+        paused: "Paused",
+        cancelled: "Cancelled",
+        failed: "Print failed",
+        sent: "Sent to printer",
+        unknown: "Check print result",
+      } as Record<string, string>
+    )[plate.status] ?? (plate.completedAtMs ? "Printed" : "Not printed")
+  );
+}

@@ -124,6 +124,11 @@ public extension ControlClient {
         let reply: Reply = try await call("objects.addStarter", ["starterId": .string(starterId)])
         return reply.object
     }
+    func markPlatePrinted(_ id: String, plateId: String) async throws -> Project {
+        struct Reply: Decodable { let object: Project }
+        let reply: Reply = try await call("objects.markPlatePrinted", ["id": .string(id), "plateId": .string(plateId)])
+        return reply.object
+    }
     func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
         struct Reply: Decodable { let object: Project }
         let reply: Reply = try await call("objects.selectPlate", ["id": .string(id), "fileIndex": .number(Double(fileIndex)), "plateIndex": .number(Double(plateIndex))])

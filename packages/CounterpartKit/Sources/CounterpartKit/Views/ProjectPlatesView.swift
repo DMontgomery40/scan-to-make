@@ -9,11 +9,12 @@ public struct ProjectPlatesView<Thumbnail: View>: View {
     let thumbnail: (ProjectPlate) -> Thumbnail
     let select: (ProjectPlate) -> Void
     let printPlate: (ProjectPlate) -> Void
+    let markPrinted: (ProjectPlate) -> Void
 
     public init(project: Project, busy: Bool, @ViewBuilder thumbnail: @escaping (ProjectPlate) -> Thumbnail,
-                select: @escaping (ProjectPlate) -> Void, printPlate: @escaping (ProjectPlate) -> Void) {
+                select: @escaping (ProjectPlate) -> Void, printPlate: @escaping (ProjectPlate) -> Void, markPrinted: @escaping (ProjectPlate) -> Void) {
         self.project = project; self.busy = busy; self.thumbnail = thumbnail
-        self.select = select; self.printPlate = printPlate
+        self.select = select; self.printPlate = printPlate; self.markPrinted = markPrinted
     }
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -47,6 +48,12 @@ public struct ProjectPlatesView<Thumbnail: View>: View {
                                 .buttonStyle(.glass)
                                 .accessibilityLabel("\(plate.completedAtMs == nil ? "Print" : "Print again"), \(plate.name)")
                                 .accessibilityIdentifier("print-plate-\(plate.fileIndex)-\(plate.plateIndex)")
+                            if plate.status != "printed" {
+                                Button("I printed this elsewhere") { markPrinted(plate) }
+                                    .font(.caption).buttonStyle(.glass)
+                                    .accessibilityLabel("I printed this elsewhere, \(plate.name)")
+                                    .accessibilityIdentifier("printed-elsewhere-\(plate.fileIndex)-\(plate.plateIndex)")
+                            }
                         }
                         .frame(width: 144, alignment: .leading).padding(10)
                         .background(plate.selected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08), in: .rect(cornerRadius: 18))

@@ -449,6 +449,41 @@ class HomeLayoutTests {
         assertEquals(false, requireNotNull(Project.decode(sixPlates["cancelled"]!!.jsonObject)).printNeedsCheck)
     }
 
+    @Test fun printedElsewhereCallsTheCompanionAndUpdatesThePlateStrip() {
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        var recorded: String? = null
+        fun current(): JsonObject {
+            val p = rig(0, true)
+            val plates = JsonArray(p["plates"]!!.jsonArray.map { value ->
+                val row = value.jsonObject
+                if (row["id"]?.jsonPrimitive?.content == recorded)
+                    JsonObject(row + mapOf("status" to JsonPrimitive("printed"), "completedAtMs" to JsonPrimitive(1000)))
+                else row
+            })
+            return JsonObject(p + ("plates" to plates))
+        }
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$PROJECT/plate-printed") -> {
+                assertEquals("POST", request.method)
+                val body = WireJson.parseToJsonElement(String(request.body!!)).jsonObject
+                assertEquals(setOf("plateId"), body.keys)
+                recorded = body["plateId"]!!.jsonPrimitive.content
+                json(200, mapOf("object" to current()))
+            }
+            request.url.endsWith("/v1/objects/$PROJECT") -> json(200, mapOf("object" to current()))
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(requireNotNull(Project.decode(current())))
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(PROJECT, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNode(hasTestTag("printed-elsewhere-0-0")).performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("1 of 6 printed")).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(rig(0,true)["plates"]!!.jsonArray[0].jsonObject["id"]!!.jsonPrimitive.content, recorded)
+        compose.onNode(hasTestTag("printed-elsewhere-0-0")).assertDoesNotExist()
+        compose.onNode(hasTestTag("printed-elsewhere-0-1")).assertExists()
+    }
+
     /** The same rig in Print: its plate row changes the plate, re-reads that plate's colours, and only plate 1 asks for the check. */
     @Test fun everyPlateStaysChoosableInPrintAfterAnUnconfirmedStart() {
         app.pairingStore.save(v2Record(ADDRESSES[0]), false)

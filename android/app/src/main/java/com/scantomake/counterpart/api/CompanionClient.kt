@@ -100,7 +100,7 @@ class CompanionClient(
                 "PUT" -> if (m("$one/scan")) return "captures:import"
                 "POST" -> {
                     if (m("/v1/blender/(check|update)")) return "projects:write"
-                    if (m("/v1/objects") || m("$one/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
+                    if (m("/v1/objects") || m("$one/(start|duplicate|corrections|closeup|model|ask|plate-selection|plate-printed|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
                     if (m("$one/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)")) return "printer-handoff:use"
                     if (m("/v1/devices/live-activity-tokens")) return "projects:write"
                     if (m("/v1/settings/(ai/test|fusion/setup)")) return "projects:write"
@@ -220,6 +220,9 @@ class CompanionClient(
     suspend fun get(id: String): Project = one(request("GET", "/v1/objects/$id"))
 
     suspend fun addStarter(starterId: String): Project = one(request("POST", "/v1/objects", jsonOf("starterId" to starterId)))
+
+    suspend fun markPlatePrinted(id: String, plateId: String): Project =
+        one(request("POST", "/v1/objects/$id/plate-printed", jsonOf("plateId" to plateId)))
 
     suspend fun selectPlate(id: String, fileIndex: Int, plateIndex: Int): Project =
         one(request("POST", "/v1/objects/$id/plate-selection", jsonOf("fileIndex" to fileIndex, "plateIndex" to plateIndex)))

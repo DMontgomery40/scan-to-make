@@ -1,6 +1,8 @@
 import XCTest
 import CounterpartKit
 import RealityKit
+import SwiftUI
+import AppKit
 
 /// One companion's objects, as the control socket serves them.
 private actor FakeObjects: ObjectsCompanion {
@@ -118,6 +120,13 @@ private actor FakeObjects: ObjectsCompanion {
     }
     func start(_ id: String) async throws -> Project { try change(id, "start", ["state": "touching-up"]) }
     /// As the companion does: the chosen plate is selected, and a send it couldn't confirm stays on its own plate.
+    func markPlatePrinted(_ id: String, plateId: String) async throws -> Project {
+        guard let item = items.first(where: { $0["id"] as? String == id }) else { throw ControlClientError.unavailable }
+        let plates = (item["plates"] as? [[String: Any]] ?? []).map { plate in
+            plate["id"] as? String == plateId ? plate.merging(["status": "printed", "completedAtMs": 1000, "uncertain": false]) { $1 } : plate
+        }
+        return try change(id, "printed-elsewhere:\(plateId)", ["plates": plates])
+    }
     func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
         guard let index = items.firstIndex(where: { $0["id"] as? String == id }) else { throw ControlRemoteError(code:"not-found", message:"gone") }
         let plates = (items[index]["plates"] as? [[String: Any]] ?? []).map { plate in
@@ -234,6 +243,48 @@ private func project(_ item: [String: Any]) throws -> Project {
         }
         let calls = await companion.calls
         XCTAssertEqual(calls.filter { $0.hasPrefix("plate:") }, ["plate:0:5", "plate:0:4", "plate:0:3", "plate:0:2", "plate:0:1", "plate:0:0"])
+    }
+
+    func testPrintedElsewhereButtonCallsTheCompanionAndUpdatesTheStrip() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/six-plate-unconfirmed.json"))) as? [String: Any])
+        let rig = try XCTUnwrap(fixture["unconfirmed"] as? [String: Any])
+        let id = try XCTUnwrap(rig["id"] as? String)
+        let companion = FakeObjects()
+        await companion.set([item("another", "ready"), rig])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let project = try XCTUnwrap(model.objects.first { $0.id == id })
+        let plate = try XCTUnwrap(project.plates?.first)
+        let view = ProjectPlatesView(project: project, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in },
+            markPrinted: { plate in Task { await model.markPlatePrinted(id, plate: plate) } })
+        let host = NSHostingView(rootView: view.frame(width: 1000, height: 500))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 500), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        defer { window.close() }
+        host.layoutSubtreeIfNeeded()
+        func button(_ value: Any, depth: Int = 0) -> (any NSAccessibility)? {
+            guard depth < 30, let node = value as? any NSAccessibility else { return nil }
+            if node.accessibilityIdentifier?() == "printed-elsewhere-0-0" { return node }
+            for child in node.accessibilityChildren?() ?? [] {
+                if let found = button(child, depth: depth + 1) { return found }
+            }
+            return nil
+        }
+        let control = try XCTUnwrap(button(host), "The plate's visible action must be reachable through accessibility")
+        XCTAssertEqual(control.accessibilityPerformPress?(), true)
+        for _ in 0..<100 {
+            if await companion.calls.contains("printed-elsewhere:\(plate.id)") { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let calls = await companion.calls
+        XCTAssertTrue(calls.contains("printed-elsewhere:\(plate.id)"))
+        let updated = try XCTUnwrap(model.objects.first { $0.id == id })
+        XCTAssertEqual(updated.plates?.first?.statusText, "Printed")
+        XCTAssertEqual(updated.completedPlateCount, 1)
+        XCTAssertEqual(updated.plates?[1].statusText, "Not printed")
     }
 
     /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and
