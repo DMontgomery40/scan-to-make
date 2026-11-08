@@ -443,6 +443,63 @@ test("Bambu Studio's words reach the project: its error is the failure, its warn
   assert.deepEqual(await warned.tools(), ['slice_stl', 'inspect_print_file', 'inspect_print_file', 'print_3mf']);
 });
 
+// Audit F9: the printer MCP's own upload progress, through the real runner and session, to what every layout reads:
+// project.progress (ProjectWords on Mac, iPhone and iPad; Android Words.kt; Linux domain.ts) and the silent
+// project.updated they reload on. Audit F3: the upload runs past toolMs in total and still prints, as it reports progress.
+test('the fixture MCP\'s upload progress reaches project.progress and project.updated, through 100%, past toolMs', async t => {
+  const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
+  const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
+  const root = await mkdtemp(join(tmpdir(), 'objects-print-upload-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const log = join(root, 'calls.jsonl');
+  await writeFile(log, '');
+  // Five steps of 18,362,734 bytes (20% each) over 2.5 s: past the 2 s step bound in total and the 2 s spacing of
+  // the silent refreshes, though never 2 s without progress.
+  const gapsMs = [10, 10, 1500, 1000, 10];
+  const services = createPrintHandoffServices({backend: 'bambu-printer-mcp',
+    process: {command: process.execPath, args: [new URL('fixture-printer-server.mjs', fixtures).pathname, 'bambu', log], cwd: root,
+      env: {HANDOFF_FIXTURE_UPLOAD: JSON.stringify({gapsMs})}},
+    selection: {model: 'p1s', nozzleDiameterMm: 0.4, nozzleType: 'hardened_steel', bedType: 'textured_plate', material: 'PLA', plateIndex: 0},
+    timeouts: {connectMs: 5000, toolMs: 2000, elicitationMs: 10000}}, join(root, 'bundles'));
+  const store = new ObjectStore(join(root, 'objects'));
+  const emitted = [];
+  const service = showing(new ObjectService({store, events: {emit: async event => {
+    emitted.push({...event, progress: event.projectId ? (await store.get(event.projectId))?.progress : undefined});
+  }}, runTouchup: async () => { throw new Error('not used'); }, stlInfo: async () => undefined, claudePath: '/c',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, print: {services}}));
+  const object = await store.create('A stove gap filler.');
+  await mkdir(join(store.dir(object.id), 'current'), {recursive: true});
+  await writeFile(join(store.dir(object.id), 'current', 'model.stl'), STL);
+  await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
+  // Every progress the project is given, in order, as the clients would read it.
+  const written = [];
+  const update = store.update.bind(store);
+  store.update = (id, change) => update(id, o => { const next = change(o); if (id === object.id && next.progress !== written.at(-1)) written.push(next.progress); return next; });
+  await service.print(object.id);
+  const printer = await until(async () => (await service.get(object.id)).printConfirmation);
+  assert.match(printer.message, /^Fixture bed-clearance confirmation/);
+  const sentAtMs = Date.now();
+  await service.answerPrintConfirmation(object.id, printer.id, {action: 'accept', content: {confirmed: true}});
+  await service.settled(object.id);
+  assert.ok(Date.now() - sentAtMs > 2000, 'the upload outlived toolMs');
+  const done = await service.get(object.id);
+  assert.notEqual(done.print?.status, 'uncertain');
+  assert.ok((await readFile(log, 'utf8')).includes('"uploaded":true'));
+  // sendingWords rounds down: 3,672,546 of 18,362,734 bytes is 19%.
+  const percents = ['19%', '39%', '59%', '79%', '100%'].map(percent => `Sending to the printer… ${percent}`);
+  assert.deepEqual(written.filter(progress => progress?.startsWith('Sending to the printer')), percents);
+  assert.ok(written.indexOf('Print request accepted.') > written.indexOf(percents[4]), 'accepted after the upload ended');
+  // Announced once; then the silent refreshes: spaced 2 s apart, so never the 39% that follows 19% at once, in order,
+  // and always ending at 100%. Which middle step crosses the spacing depends on load, so it isn't pinned.
+  assert.deepEqual(emitted.filter(e => e.type === 'print.preparing' && e.data.stage === 'Sending to the printer').map(e => e.progress), [percents[0]]);
+  const refreshes = emitted.filter(e => e.type === 'project.updated' && e.projectId === object.id && e.data?.keys?.includes('progress'));
+  const refreshed = refreshes.map(e => e.progress);
+  assert.equal(refreshed.at(-1), percents[4]);
+  assert.ok(!refreshed.includes(percents[1]), 'no refresh inside the 2 s spacing');
+  assert.deepEqual(refreshed, percents.filter(percent => refreshed.includes(percent)), 'in order, each once');
+  assert.deepEqual(done.print.events.filter(e => e.message.startsWith('Sending')).map(e => e.message), ['Sending to the printer…']);
+});
+
 // KAN-224: the print sheet's estimate says what Print would, in Bambu Studio's words, through the same real runner.
 test("an estimate carries Bambu Studio's words: its warning as slicerWarning, its error as the refusal; nothing is asked or sent", async t => {
   const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');

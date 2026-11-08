@@ -14,7 +14,9 @@ import {
   PrinterMcpError,
   PrinterSession,
   printerSelectionSchema,
+  printerTimeoutsSchema,
   readPrinterHandoffConfig,
+  timeoutsFor,
 } from '../dist/index.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/fixture-printer-server.mjs', import.meta.url));
@@ -29,7 +31,7 @@ const selection = {
   bedType: 'textured_plate', material: 'PLA', plateIndex: 0,
 };
 
-async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, noSlicedFacts = false, laidFlat, slicedBytes, slicing, ownProcess, ownProcessArgs, noPlates = false} = {}) {
+async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bambu-printer-mcp', answer = 'accept', relayTimeoutMs = 5000, choice, dispatch, ephemeral = false, noColour = false, crypto = false, noConnectionType = false, settings = false, supports = false, remote = false, slicer, slicerResult, noSlicerReport = false, noSlicedFacts = false, laidFlat, slicedBytes, slicing, ownProcess, ownProcessArgs, noPlates = false, upload, timeouts} = {}) {
   const root = await mkdtemp(join(tmpdir(), 'printer-handoff-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
@@ -40,10 +42,10 @@ async function setup(t, {progress = false, route, mode = 'bambu', backend = 'bam
   const config = {
     backend,
     process: {command: process.execPath, args: [fixture, mode, log], cwd: root,
-      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(noSlicedFacts ? {HANDOFF_FIXTURE_NO_SLICED_FACTS: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {}), ...(ownProcess ? {HANDOFF_FIXTURE_OWN_PROCESS: ownProcess} : {}), ...(ownProcessArgs ? {HANDOFF_FIXTURE_OWN_PROCESS_ARGS: ownProcessArgs} : {}), ...(noPlates ? {HANDOFF_FIXTURE_NO_PLATES: '1'} : {})}},
+      env: {...(progress ? {HANDOFF_FIXTURE_PROGRESS: '1'} : {}), ...(slicedBytes ? {HANDOFF_FIXTURE_SLICED_FILE: join(root, 'fixture-output.3mf')} : {}), ...(laidFlat !== undefined ? {HANDOFF_FIXTURE_LAID_FLAT: String(laidFlat)} : {}), ...(slicerResult ? {HANDOFF_FIXTURE_SLICER_RESULT: join(slicerResults, `${slicerResult}.json`)} : {}), ...(noSlicerReport ? {HANDOFF_FIXTURE_NO_SLICER_REPORT: '1'} : {}), ...(noSlicedFacts ? {HANDOFF_FIXTURE_NO_SLICED_FACTS: '1'} : {}), ...(settings ? {HANDOFF_FIXTURE_SLICE_SETTINGS:'1'} : {}), ...(supports ? {HANDOFF_FIXTURE_SUPPORTS:'1'} : {}), ...(slicing ? {HANDOFF_FIXTURE_SLICING: slicing} : {}), ...(remote ? {HANDOFF_FIXTURE_REMOTE:'1'} : {}), ...(noConnectionType ? {HANDOFF_FIXTURE_NO_CONNECTION_TYPE:'1'} : {}), ...(crypto ? {HANDOFF_FIXTURE_CRYPTO:'1'} : {}), ...(route ? {HANDOFF_FIXTURE_ROUTE: JSON.stringify(route)} : {}), ...(dispatch ? {HANDOFF_FIXTURE_DISPATCH: dispatch} : {}), ...(ephemeral ? {HANDOFF_FIXTURE_EPHEMERAL: '1'} : {}), ...(noColour ? {HANDOFF_FIXTURE_NO_COLOUR:'1'} : {}), ...(ownProcess ? {HANDOFF_FIXTURE_OWN_PROCESS: ownProcess} : {}), ...(ownProcessArgs ? {HANDOFF_FIXTURE_OWN_PROCESS_ARGS: ownProcessArgs} : {}), ...(noPlates ? {HANDOFF_FIXTURE_NO_PLATES: '1'} : {}), ...(upload ? {HANDOFF_FIXTURE_UPLOAD: JSON.stringify({gapsMs: upload})} : {})}},
     selection,
     ...(slicer ? {slicer} : {}),
-    timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs},
+    timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: relayTimeoutMs, ...timeouts},
   };
   const seen = [];
   const relay = new InMemoryElicitationRelay({timeoutMs: relayTimeoutMs});
@@ -114,6 +116,19 @@ test('config file parses backend, process, selection and timeouts', async t => {
   const path = join(f.root, 'config.json');
   await writeFile(path, JSON.stringify(f.config));
   assert.deepEqual(await readPrinterHandoffConfig(path), f.config);
+});
+
+test('toolTotalMs defaults to an hour, is bounded, and is never shorter than toolMs', () => {
+  assert.equal(timeoutsFor({}).toolTotalMs, 3_600_000);
+  assert.equal(timeoutsFor({timeouts: {toolTotalMs: 7_200_000}}).toolTotalMs, 7_200_000);
+  assert.ok(printerTimeoutsSchema.safeParse({toolMs: 600_000, toolTotalMs: 600_000}).success);
+  assert.equal(printerTimeoutsSchema.safeParse({toolMs: 600_000, toolTotalMs: 599_999}).success, false);
+  assert.equal(printerTimeoutsSchema.safeParse({toolTotalMs: 14_400_001}).success, false);
+  assert.equal(printerTimeoutsSchema.safeParse({toolTotalMs: 49}).success, false);
+  // Left out, toolMs is its default: a total below it would be ignored, so it is refused.
+  assert.equal(printerTimeoutsSchema.safeParse({toolTotalMs: 1000}).success, false);
+  assert.ok(printerTimeoutsSchema.safeParse({toolMs: 600, toolTotalMs: 1000}).success);
+  assert.ok(printerTimeoutsSchema.safeParse({toolMs: 1_800_000}).success, 'the default total covers the longest toolMs');
 });
 
 test('a selected colour and profile reach slicing and its AMS slot reaches printing', async t => {
@@ -561,6 +576,59 @@ test('print_3mf\'s upload progress reaches the caller with its counterpart/1 sta
  await f.runner.run({stlPath:f.stlPath,onProgress:async update=>{if(update.mcp?.stage)seen.push(update);}});
  assert.deepEqual(seen.map(({phase,mcp})=>[phase,mcp.stage,mcp.progress,mcp.total]),
   [['requesting-print','upload',0,18_362_734],['requesting-print','upload',5_000_000,18_362_734],['requesting-print','upload',18_362_734,18_362_734]]);
+});
+
+// Audit F3: toolMs bounds each step of print_3mf (time without progress); a slow upload that keeps reporting
+// progress may run past it, within toolTotalMs. Before, toolMs was also the total, so a large plate on a slow SD card
+// ended as dispatch-uncertain while the MCP went on to start the print.
+async function slowUpload(t, {gapsMs, timeouts, blockAt}) {
+ const f=await setup(t,{upload:gapsMs,timeouts});
+ const store=new HandoffBundleStore(join(f.root,'bundles'));
+ const bundle=await store.create({stl,prompt:'fixture',backend:'bambu-printer-mcp',selection});
+ const seen=[];
+ const started=Date.now();
+ const run=f.runner.runBundle(store,bundle.id,{onProgress:async update=>{
+  if(update.mcp?.stage!=='upload')return;
+  seen.push(update.mcp.progress);
+  // Hold this client's event loop while the MCP sends the rest, so it all arrives in one read.
+  if(seen.length===blockAt){const until=Date.now()+300;while(Date.now()<until);}
+ }});
+ return {f,store,bundle,seen,run,elapsed:()=>Date.now()-started};
+}
+
+test('a print_3mf upload that keeps reporting progress may run past toolMs in total, and prints', async t => {
+ // 10 steps 150 ms apart: 1.5 s of upload, 2.5 times the 600 ms step bound, never 600 ms without progress.
+ const {f,store,bundle,seen,run,elapsed}=await slowUpload(t,{gapsMs:Array(10).fill(150),timeouts:{toolMs:600}});
+ const outcome=await run;
+ assert.ok(elapsed()>600,`the upload outlived one step bound (${elapsed()} ms)`);
+ assert.equal(outcome.result.print.dispatch,'started');
+ assert.equal(seen.length,10);
+ assert.equal(seen.at(-1),18_362_734);
+ assert.equal((await store.read(bundle.id)).status,'printed');
+ assert.ok((await f.calls()).some(entry=>entry.uploaded));
+});
+
+test('the last progress reaches the caller even when it arrives in the same read as the result', async t => {
+ // The SDK runs a progress handler a microtask late but forgets the call when its result arrives: busy on the
+ // second-to-last step, this client reads the 100% and the result together, which used to drop the 100%.
+ const {f,run,seen}=await slowUpload(t,{gapsMs:[10,10,10,10],timeouts:{toolMs:2000},blockAt:3});
+ await run;
+ assert.deepEqual(seen,[4_590_683,9_181_367,13_772_050,18_362_734]);
+ assert.ok((await f.calls()).some(entry=>entry.uploaded));
+});
+
+test('a print_3mf upload that goes quiet for longer than toolMs is still uncertain, as before', async t => {
+ const {store,bundle,run}=await slowUpload(t,{gapsMs:[100,2000],timeouts:{toolMs:600}});
+ await assert.rejects(run,{code:'dispatch-uncertain'});
+ assert.equal((await store.read(bundle.id)).status,'uncertain');
+});
+
+test('toolTotalMs still bounds an upload that never stops reporting progress', async t => {
+ const {store,bundle,seen,run}=await slowUpload(t,{gapsMs:Array(20).fill(150),timeouts:{toolMs:600,toolTotalMs:1000}});
+ await assert.rejects(run,{code:'dispatch-uncertain'});
+ // About 1 s of 3 s: the call ended at its total, and the caller heard no progress after it.
+ assert.ok(seen.length>0&&seen.length<12,`stopped at the total bound, not the end of the upload (${seen.length} of 20 steps)`);
+ assert.equal((await store.read(bundle.id)).status,'uncertain');
 });
 
 test('Print never clears a printer error itself, even over FULU with the old rejection showing', async t => {

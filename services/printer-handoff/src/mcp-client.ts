@@ -1,6 +1,7 @@
+import {randomUUID} from 'node:crypto';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {ElicitRequestSchema, ErrorCode, McpError, type CallToolResult, type GetPromptResult, type ListPromptsResult, type ListResourcesResult, type ReadResourceResult, type ServerCapabilities, type Tool} from '@modelcontextprotocol/sdk/types.js';
+import {ElicitRequestSchema, ErrorCode, McpError, ProgressNotificationSchema, type CallToolResult, type GetPromptResult, type ListPromptsResult, type ListResourcesResult, type ReadResourceResult, type ServerCapabilities, type Tool} from '@modelcontextprotocol/sdk/types.js';
 import {Ajv, type ValidateFunction} from 'ajv';
 import {appOwnedPrinterProcess} from './node-runtime.js';
 import {timeoutsFor, type PrinterHandoffConfig} from './config.js';
@@ -102,7 +103,8 @@ export interface PrinterToolCallOptions {
    * server's elicitation requests carry no reference to the call that caused them.
    */
   elicitationContext?: ElicitationContext;
-  /** The MCP's progress notifications for this call. Given, the call asks for them, and each restarts its timeout (within its total). */
+  /** The MCP's progress notifications for this call. Given, the call asks for them, and each restarts its timeout;
+   * the whole call is then bounded by toolTotalMs instead (or by timeoutMs, if that is longer). */
   onProgress?: (progress: McpProgress) => void;
 }
 
@@ -120,6 +122,8 @@ export class PrinterMcpClient {
   readonly #onStderr?: (chunk: string) => void;
   readonly #onClose?: () => void;
   readonly #outstandingElicitations = new Set<string>();
+  /** Each running call's progress listener, by the progressToken it sent. */
+  readonly #progress = new Map<string, (params: {progress: number; total?: number; message?: string; _meta?: Record<string, unknown>}) => void>();
   #closing = false;
 
   constructor(config: PrinterHandoffConfig, options: PrinterMcpClientOptions = {}) {
@@ -154,6 +158,14 @@ export class PrinterMcpClient {
       {capabilities: this.#relay ? {elicitation: {form: {}, url: {}}} : {}},
     );
     this.#client = client;
+    // This client routes progress itself. The SDK runs notification handlers a microtask late but drops a call's
+    // progress handler as soon as its result arrives, so the last progress (an upload's 100%) was lost whenever it
+    // came in the same read as the result. Here the call's listener stays until the call has settled. This replaces
+    // the SDK's own progress handler for this Client: SDK `onprogress` options do nothing here, and progress for an
+    // unknown token is dropped rather than reported as an error.
+    client.setNotificationHandler(ProgressNotificationSchema, ({params: {progressToken, ...params}}) => {
+      this.#progress.get(String(progressToken))?.(params);
+    });
     if (this.#relay) {
       const relay = this.#relay;
       client.setRequestHandler(ElicitRequestSchema, request => {
@@ -267,22 +279,39 @@ export class PrinterMcpClient {
     if (!this.#client || !this.#catalog) fail('not-connected');
     const tool = this.getTool(name);
     this.#validate(tool, args);
-    const timeout = options.timeoutMs ?? timeoutsFor(this.#config).toolMs;
+    const timeouts = timeoutsFor(this.#config);
+    const timeout = options.timeoutMs ?? timeouts.toolMs;
+    // With progress, `timeout` is the longest wait without any and toolTotalMs bounds the whole call, so a large
+    // upload that keeps reporting can finish (audit F3). Without progress nothing resets it: `timeout` is the total.
+    const totalTimeout = options.onProgress ? Math.max(timeout, timeouts.toolTotalMs) : timeout;
     const declinedBefore = this.#declinedElicitations;
     if (options.signal?.aborted) fail('cancelled');
     await options.beforeDispatch?.();
     if (options.signal?.aborted) fail('cancelled');
     let result: CallToolResult;
+    // Progress is asked for only when the caller wants it, so other calls (the Fusion worker's pass-through) send
+    // exactly what they always did. With it, the SDK bounds the total and this client the time between progress.
+    const onProgress = options.onProgress;
+    const token = onProgress ? `counterpart-${randomUUID()}` : undefined;
+    const stalled = new AbortController();
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    const restartIdle = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => stalled.abort(McpError.fromError(ErrorCode.RequestTimeout, 'Request timed out', {timeout})), timeout);
+    };
+    if (token && onProgress) {
+      restartIdle();
+      this.#progress.set(token, ({progress, total, message, _meta}) => {
+        restartIdle();
+        const stage = _meta?.['counterpart/stage'];
+        try { onProgress({progress, ...(total !== undefined ? {total} : {}), ...(message !== undefined ? {message} : {}), ...(typeof stage === 'string' ? {stage} : {})}); }
+        catch { /* A caller's progress display never fails the call. */ }
+      });
+    }
     try {
-      result = await this.#client.callTool({name, arguments: args}, undefined, {
-        signal: options.signal, timeout, maxTotalTimeout: timeout, resetTimeoutOnProgress: true,
-        // The SDK asks the MCP for progress (and resets the timeout on it) only with a handler: given only when the
-        // caller wants it, so other calls (the Fusion worker's pass-through) send exactly what they always did.
-        ...(options.onProgress ? {onprogress: ({progress, total, message, _meta}: {progress: number; total?: number; message?: string; _meta?: Record<string, unknown>}) => {
-          const stage = _meta?.['counterpart/stage'];
-          try { options.onProgress?.({progress, ...(total !== undefined ? {total} : {}), ...(message !== undefined ? {message} : {}), ...(typeof stage === 'string' ? {stage} : {})}); }
-          catch { /* A caller's progress display never fails the call. */ }
-        }} : {}),
+      const signal = token ? (options.signal ? AbortSignal.any([options.signal, stalled.signal]) : stalled.signal) : options.signal;
+      result = await this.#client.callTool({name, arguments: args, ...(token ? {_meta: {progressToken: token}} : {})}, undefined, {
+        ...(signal ? {signal} : {}), timeout: token ? totalTimeout : timeout, maxTotalTimeout: totalTimeout,
       }) as CallToolResult;
     } catch (error) {
       const failure = new PrinterMcpError(options.dispatchSensitive && this.#declinedElicitations === declinedBefore
@@ -290,6 +319,9 @@ export class PrinterMcpClient {
         failureDetail({content:[{type:'text',text:error instanceof Error ? error.message : String(error)}]}, this.#config));
       failure.incomplete = true;
       throw failure;
+    } finally {
+      clearTimeout(idle);
+      if (token) this.#progress.delete(token);
     }
     // A transparent adapter keeps errors and media, within a wider bound than domain results.
     if (options.forwardResult) {
@@ -370,6 +402,7 @@ export class PrinterMcpClient {
     const client = this.#client, transport = this.#transport, pid = transport?.pid ?? null;
     this.#client = undefined; this.#transport = undefined; this.#catalog = undefined;
     this.#elicitationContext = {};
+    this.#progress.clear();
     // Cancel this session's unanswered prompts so no stale confirmation (or
     // its ref'd expiry timer) outlives the connection on abort/timeout.
     for (const id of [...this.#outstandingElicitations]) {
