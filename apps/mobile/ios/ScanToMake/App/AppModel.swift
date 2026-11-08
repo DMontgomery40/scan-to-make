@@ -72,6 +72,10 @@ import CounterpartKit
     /// Projects whose page or Printing screen is showing now, counted, so a push then a pop never loses one.
     /// A notification about one of them isn't shown again as a banner: the screen already shows it (PRD §9.2).
     private(set) var onScreen: [String: Int] = [:]
+    /// A sheet (Settings, Printers, New, Print) covers the page: a page under a sheet doesn't disappear, but isn't seen.
+    var sheetUp = false
+    /// The project whose page or Printing screen the person is looking at now, for `willPresent`.
+    func isShowing(_ id: String) -> Bool { !sheetUp && onScreen[id] != nil }
     func showing(_ id: String, _ visible: Bool) {
         let count = (onScreen[id] ?? 0) + (visible ? 1 : -1)
         onScreen[id] = count > 0 ? count : nil

@@ -30,6 +30,8 @@ struct ProjectsRoot: View {
         .sheet(item: $printing) { item in PrintSheet(store: store, projectId: item.id) }
         .sheet(isPresented: $showSettings) { SettingsView(store: store) }
         .sheet(isPresented: $showPrinters) { NavigationStack { PrintersView(store: store) } }
+        // A page under a sheet stays "appeared"; its notifications show while the sheet is up (F7).
+        .onChange(of: showSettings || showPrinters || newSheet != nil || printing != nil, initial: true) { _, up in app.sheetUp = up }
         .task(id: pairingKey) {
             store.reset()
             HandheldCapture.previewIfAsked()

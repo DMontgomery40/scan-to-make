@@ -86,11 +86,11 @@ import Observation
         let records = commands.map { command -> CKRecord in
             let id = UUID().uuidString.lowercased()
             let record = CKRecord(recordType: CloudKitRecords.command, recordID: CKRecord.ID(recordName: id, zoneID: CloudNotificationSubscriptions.zoneID))
-            record["commandId"] = id
+            // Only fields deployed in Production (docs/protocols/cloudkit-schema.ckdb). The record name is the command's
+            // id and its creation date is the server's, which the Mac's 10-minute check reads.
             record["type"] = command.type
             record["projectId"] = projectId
             record["payload"] = (try? JSONEncoder().encode(command.payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-            record["createdAt"] = Date()
             return record
         }
         do {

@@ -63,6 +63,9 @@ public enum AppRoute: Equatable, Sendable {
         // Try Again on a print that failed or never started opens Print, where the person presses Print: a
         // notification button never starts a print by itself. On a failed pass it opens the project's Try Again.
         else if action == "TRY_AGAIN" { self = type.hasPrefix("print.") ? .print(project) : .project(project) }
+        // Each Open button goes where it says; only a plain tap follows the event type.
+        else if action == "OPEN" { self = .project(project) }
+        else if action == "OPEN_PRINT" { self = .printing(project) }
         else if type.hasPrefix("print.") && !ended.contains(type) { self = .printing(project) }
         else { self = .project(project) }
     }
