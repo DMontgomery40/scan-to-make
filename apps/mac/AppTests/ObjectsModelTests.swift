@@ -246,9 +246,9 @@ private func project(_ item: [String: Any]) throws -> Project {
     }
 
     func testPrintedElsewhereButtonCallsTheCompanionAndUpdatesTheStrip() async throws {
-        var root = URL(fileURLWithPath: #filePath)
+        var root = URL(filePath: #filePath, directoryHint: .notDirectory)
         for _ in 0..<4 { root.deleteLastPathComponent() }
-        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/six-plate-unconfirmed.json"))) as? [String: Any])
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: root.appending(path: "packages/contracts/fixtures/six-plate-unconfirmed.json", directoryHint: .notDirectory))) as? [String: Any])
         let rig = try XCTUnwrap(fixture["unconfirmed"] as? [String: Any])
         let id = try XCTUnwrap(rig["id"] as? String)
         let companion = FakeObjects()

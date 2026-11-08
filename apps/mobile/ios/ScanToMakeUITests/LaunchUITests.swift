@@ -577,9 +577,9 @@ final class LayoutParityUITests: XCTestCase {
 
     /// The same real button → CompanionClient HTTP call → visible strip update runs at both widths.
     func testPrintedElsewhereRecordsOnlyThatPlate() throws {
-        var root = URL(fileURLWithPath: #filePath)
+        var root = URL(filePath: #filePath, directoryHint: .notDirectory)
         for _ in 0..<5 { root.deleteLastPathComponent() }
-        let rig = try String(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/six-plate-unconfirmed.json"), encoding: .utf8)
+        let rig = try String(contentsOf: root.appending(path: "packages/contracts/fixtures/six-plate-unconfirmed.json", directoryHint: .notDirectory), encoding: .utf8)
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "plates-unconfirmed", "-CounterpartScreen", "ready"]
         app.launchEnvironment["COUNTERPART_RIG_FIXTURE"] = rig

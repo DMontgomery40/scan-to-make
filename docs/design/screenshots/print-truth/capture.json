@@ -1,0 +1,47 @@
+{
+  "runtimeSource": "7292507fdd2a911f039bf900a97b34334f8df161",
+  "runtime": "iOS 27.2.iPhone19.4",
+  "fixture": "plates; synthetic six-plate project, no printer connection",
+  "captures": {
+    "outer": {
+      "file": "duo-outer.png",
+      "screenPoints": [
+        466,
+        678
+      ],
+      "control": {
+        "identifier": "printed-elsewhere-0-1",
+        "label": "I printed this elsewhere, Plate 2",
+        "enabled": true,
+        "hittable": true,
+        "rect": {
+          "x": 206,
+          "y": 382.3333333333332,
+          "width": 98.66666666666663,
+          "height": 50.33333333333337
+        }
+      }
+    },
+    "inner": {
+      "file": "duo-inner.png",
+      "screenPoints": [
+        951,
+        669
+      ],
+      "control": {
+        "identifier": "printed-elsewhere-0-1",
+        "label": "I printed this elsewhere, Plate 2",
+        "enabled": true,
+        "hittable": true,
+        "rect": {
+          "x": 526,
+          "y": 497.6666666666665,
+          "width": 98.66666666666663,
+          "height": 50.33333333333337
+        }
+      }
+    }
+  },
+  "postureVerification": "agent-device fold closed/open dispatched successfully but hinge reads returned no sample; device_screenshot confirmed the active outer and inner panels. No hinge angle is claimed.",
+  "result": "The full action label is legible and the enabled control is reachable above the composer in both layouts. Both control dimensions exceed 44 points. Production SwiftUI APIs are current. The API audit replaced deprecated Foundation URL calls in the two new tests; production UI code is unchanged."
+}
