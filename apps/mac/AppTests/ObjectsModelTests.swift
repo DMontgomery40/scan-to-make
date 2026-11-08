@@ -690,7 +690,7 @@ private func project(_ item: [String: Any]) throws -> Project {
         let printer = try JSONDecoder().decode(PrinterDestination.self, from: Data(#"{"id":"p1","name":"P1S","backend":"test","state":"ready","aliases":["old"]}"#.utf8))
         let offline = try JSONDecoder().decode(PrinterDestination.self, from: Data(#"{"id":"p2","name":"Desk","backend":"test","state":"offline"}"#.utf8))
         await companion.setPrinters([printer, offline])
-        await companion.set([item("clip", "printing", ["print": ["bundleId": "clip", "destination": ["id": "old", "name": "P1S"]]])])
+        await companion.set([item("clip", "printing", ["print": ["bundleId": "clip", "monitor": ["phase": "watching"], "destination": ["id": "old", "name": "P1S"]]])])
         let model = ObjectsModel(companion: companion)
         await model.refresh()
         XCTAssertEqual(model.printerProblems, 1)

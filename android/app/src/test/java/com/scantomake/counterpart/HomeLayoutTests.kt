@@ -117,7 +117,7 @@ class HomeLayoutTests {
     private fun home() = compose.setContent { WithApp { HomeScreen(open = { _, _ -> }, newProject = {}, printers = {}, settings = {}) } }
 
     @Test fun printerAttentionAndPrintingStayVisibleWithProjects() {
-        state.projects.value = listOf(WireJson.decodeFromString<Project>("""{"id":"clip","title":"Cable clip","state":"printing","createdAtMs":0,"updatedAtMs":0,"photos":[],"passes":[],"print":{"destinationId":"p1"}}"""))
+        state.projects.value = listOf(WireJson.decodeFromString<Project>("""{"id":"clip","title":"Cable clip","state":"printing","createdAtMs":0,"updatedAtMs":0,"photos":[],"passes":[],"print":{"destinationId":"p1","monitor":{"phase":"watching"}}}"""))
         state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1", "P1S", model = "Bambu Lab P1S", state = "ready"),
             PrinterDestination("p2", "Desk", state = "offline")))
         state.macName.value = "Mac mini"
