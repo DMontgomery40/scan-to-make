@@ -168,7 +168,7 @@ test('cancelling waits for Blender to exit before its throwaway HOME is removed'
  await writeFile(fake,`#!${process.execPath}
 const fs=require('node:fs'),path=require('node:path'),home=process.env.HOME;
 fs.writeFileSync(path.join(home,'started'),'');
-process.on('SIGTERM',()=>setTimeout(()=>{fs.mkdirSync(path.join(home,'.cache'),{recursive:true});fs.writeFileSync(path.join(home,'.cache','late'),'x');process.exit(143);},300));
+process.on('SIGTERM',()=>setTimeout(()=>{fs.mkdirSync(path.join(home,'.cache'),{recursive:true});fs.writeFileSync(path.join(home,'.cache','late'),'x');fs.writeFileSync(${JSON.stringify(join(root,'exited'))},'');process.exit(143);},300));
 setInterval(()=>{},1000);
 `);await chmod(fake,0o755);
  const homes=async()=>(await readdir(tmpdir())).filter(name=>name.startsWith('stm-ai-pick-home-'));
@@ -185,6 +185,8 @@ setInterval(()=>{},1000);
  controller.abort();
  await assert.rejects(pending);
  // Settled only after the child exited, so nothing it wrote late can survive (or recreate) the removed HOME.
- await new Promise(ok=>setTimeout(ok,600));
+ // The stand-in marks its exit outside HOME; wait for that, however slow the machine, before looking.
+ for(let i=0;i<200&&!await stat(join(root,'exited')).catch(()=>undefined);i++)await new Promise(ok=>setTimeout(ok,50));
+ assert.ok(await stat(join(root,'exited')).catch(()=>undefined),'the stand-in Blender finished shutting down');
  assert.equal((await homes()).includes(home),false);
 });
