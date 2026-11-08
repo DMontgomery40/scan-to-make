@@ -172,7 +172,8 @@ enum Fixtures {
         var shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
         // `-CounterpartScreen printer-connection`: the P1S idle, so its Settings → Printers choices can be changed.
         if idlePrinter { shown = shown.filter { $0["state"] as? String != "printing" } }
-        return (stopped + shown + duplicates).map(withStatus).map(withPreparing).map(withFinished).map { original in
+        // A status set on this run applies last, so It Works on the finished print (Printing screen) makes it Done.
+        return (stopped + shown + duplicates).map(withPreparing).map(withFinished).map(withStatus).map { original in
             guard let id = original["id"] as? String else { return original }
             var object = original
             if let title = titles[id] { object["title"] = title }
@@ -226,7 +227,7 @@ enum Fixtures {
         } else {
             object["archived"] = nil; object["outcome"] = nil
             switch status {
-            case "works": object["state"] = "confirmed"; object["outcome"] = "works"
+            case "works": object["state"] = "confirmed"; object["outcome"] = "works"; object["status"] = nil
             case "printed": object["state"] = "printed"
             case "not-printed": object["state"] = "ready"
             case "needs-changes": object["outcome"] = "needs-changes"; if object["state"] as? String == "confirmed" { object["state"] = "printed" }

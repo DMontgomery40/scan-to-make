@@ -131,6 +131,13 @@ class AppState(private val app: Counterpart) {
         mcpUpdateEvents.value = emptyMap(); mcpCopies.value = null; mcpCopiesProblem.value = null
     }
 
+    /** Projects whose page or Printing screen is showing, counted (a push then a pop never loses one). */
+    val onScreen = MutableStateFlow<Map<String, Int>>(emptyMap())
+    fun showing(id: String, visible: Boolean) = onScreen.update { now ->
+        val count = (now[id] ?: 0) + if (visible) 1 else -1
+        if (count > 0) now + (id to count) else now - id
+    }
+
     /** Starts following the Mac while the app is visible: one consumer for every screen. */
     fun startFollowing() {
         foreground = true
@@ -147,8 +154,10 @@ class AppState(private val app: Counterpart) {
                             EventUpdate.Resync -> { load(); loadPrinters() }
                             is EventUpdate.Event -> {
                                 val e = update.event
-                                // Seen here in the foreground: the background check must not post it again.
-                                Notifications.markSeen(app, e.id, e.seq)
+                                // In the foreground it shows unless its project's page or Printing screen is showing
+                                // (PRD §9.2: suppress only what the app already shows). Either way it's seen once.
+                                if (e.projectId != null && e.projectId in onScreen.value) Notifications.markSeen(app, e.id, e.seq)
+                                else Notifications.post(app, e)
                                 val pid = e.projectId
                                 if (pid != null) { if (e.type == "project.deleted") remove(pid) else reload(pid) }
                                 else if (e.type.startsWith("mcp.update.")) {

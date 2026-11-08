@@ -39,7 +39,7 @@ struct PrintersView: View {
             .navigationDestination(for: PrinterLink.self) { link in
                 switch link {
                 case .printer(let id): PrinterDetailView(store: store, id: id)
-                case .printing(let id): PrintingView(store: store, id: id)
+                case .printing(let id): PrintingView(store: store, id: id, openProject: { project in dismiss(); app.route = .project(project) })
                 }
             }
             .refreshable { await store.loadPrinters() }

@@ -11,8 +11,11 @@ struct PrintingView: View {
     @Environment(\.scenePhase) private var scenePhase
     let store: ProjectsStore
     let id: String
+    /// Opens the project page (Home's stack or the iPad's selection): where a finished print goes next.
+    var openProject: (String) -> Void = { _ in }
     @State private var feed = CameraFeed()
     @State private var working = false
+    @State private var answering = false
     @State private var problem: String?
     @State private var confirmStop = false
     @State private var fullScreen = false
@@ -34,7 +37,12 @@ struct PrintingView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     camera
                     summary(project)
-                    tiles(project).padding(.horizontal, 16)
+                    // The note is part of the page, under what it's about; nothing but glass controls sits in the bar
+                    // over the content (it scrolls under them, inset by the bar).
+                    Text(footer(project)).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity).padding(.horizontal, 20)
+                    // A finished print's temperatures are history, not news: what's next is "Did it fit?" and the project.
+                    if printEnded { ended(project).padding(.horizontal, 16) } else { tiles(project).padding(.horizontal, 16) }
                     if let problems = live?.problems, !problems.isEmpty { problemsCard(problems).padding(.horizontal, 16) }
                     if let problem { Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red).padding(.horizontal, 20) }
                 }
@@ -42,13 +50,7 @@ struct PrintingView: View {
             }
         }
         .scrollEdgeEffectStyle(.soft, for: .bottom)
-        // The note rides in the bar with the controls, so nothing it says is ever under them.
-        .safeAreaBar(edge: .bottom) {
-            VStack(spacing: 8) {
-                if let project { Text(footer(project)).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 20) }
-                controls
-            }
-        }
+        .safeAreaBar(edge: .bottom) { controls }
         .background(Color.black)
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Stop the print?", isPresented: $confirmStop, titleVisibility: .visible) {
@@ -65,6 +67,47 @@ struct PrintingView: View {
         .task(id: id) {
             // Project updates already come from ProjectsRoot's one event/fallback consumer.
             await store.loadPrinters()
+        }
+        .onAppear { app.showing(id, true) }
+        .onDisappear { app.showing(id, false) }
+    }
+
+    // MARK: Finished
+
+    /// After the print: "Did it fit?" when the Mac keeps the answer (the project page's own card and condition),
+    /// and the way to the project, where Print Again, changes and the files are.
+    private func ended(_ project: Project) -> some View {
+        let words = store.words(project)
+        return VStack(spacing: 14) {
+            if words.phase == .printed && words.actions.contains(.itWorks) && store.projectSettings {
+                DidItFitCard(project: project, macName: store.macName, working: answering,
+                             itWorks: { answer(.works) },
+                             needsChanges: {
+                                 answer(.needsChanges)
+                                 store.askAfterPrinting = id
+                                 openProject(id)
+                             })
+            }
+            Button { openProject(id) } label: {
+                Label("Open Project", systemImage: "cube").fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 36)
+            }
+            .buttonStyle(.glass).controlSize(.large)
+            .accessibilityIdentifier("open-project")
+        }
+    }
+
+    private func answer(_ status: ProjectStatus) {
+        guard !answering else { return }
+        answering = true; problem = nil
+        Task {
+            defer { answering = false }
+            do {
+                let ticket = store.startRequest()
+                if let next = try await store.mac.client.setStatus(id, status) { store.replace(next, ticket: ticket) }
+            } catch let failure as CompanionError {
+                if failure.needsPairing { store.onPair(); return }
+                problem = failure.message
+            } catch { problem = CompanionError.unreachable.message }
         }
     }
 

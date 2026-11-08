@@ -1,4 +1,5 @@
 import XCTest
+import UserNotifications
 @testable import CounterpartKit
 
 final class PairingClientTests: XCTestCase {
@@ -984,5 +985,118 @@ final class FormatTests: XCTestCase {
         XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.done"]), .project("p"))
         XCTAssertEqual(AppRoute(notification: ["ck": ["qry": ["af": ["projectId": "q", "type": "pass.ask"]]]], action: "CAMERA"), .camera("q"))
         XCTAssertNil(AppRoute(notification: [:]))
+        // Try Again never starts a print: it opens Print for a print, and the project for a failed pass.
+        XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.failed"], action: "TRY_AGAIN"), .print("p"))
+        XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.not-started"], action: "TRY_AGAIN"), .print("p"))
+        XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "pass.failed"], action: "TRY_AGAIN"), .project("p"))
+        // "Open Print" goes to Printing; "Open Project" on a finished print goes to the project.
+        XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.paused"], action: "OPEN_PRINT"), .printing("p"))
+        XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.done"], action: "OPEN"), .project("p"))
+        XCTAssertEqual(AppRoute.notificationFields(["ck": ["qry": ["af": ["projectId": "q", "type": "print.done", "eventId": "e"]]]]).projectId, "q")
+        XCTAssertEqual(AppRoute.printing("p").projectId, "p")
+        XCTAssertNil(AppRoute.home.projectId)
+    }
+}
+
+/// PRD §9.1, §9.2: each notification's buttons, chosen from the event type, and what each background button asks the Mac.
+final class NotificationActionsTests: XCTestCase {
+    typealias A = NotificationActions
+
+    func testEachMomentGetsItsOwnButtons() {
+        XCTAssertEqual(A.category(for: "print.done"), .done)
+        XCTAssertEqual(A.actions(in: .done), [.itWorks, .needsChanges, .openProject])
+        XCTAssertEqual(A.category(for: "print.cancelled"), .ended, "a cancelled print never offers It Works")
+        XCTAssertEqual(A.category(for: "print.sent"), .ended)
+        XCTAssertEqual(A.actions(in: .ended), [.openProject])
+        XCTAssertEqual(A.category(for: "print.milestone"), .progress)
+        XCTAssertEqual(A.category(for: "print.first-layer"), .progress)
+        XCTAssertEqual(A.actions(in: .progress), [.openPrint, .pause])
+        XCTAssertEqual(A.category(for: "print.paused"), .paused)
+        XCTAssertEqual(A.actions(in: .paused), [.openPrint, .resume])
+        for failed in ["print.failed", "print.not-started", "pass.failed"] { XCTAssertEqual(A.category(for: failed), .failed, failed) }
+        XCTAssertEqual(A.actions(in: .failed), [.tryAgain, .openProject])
+        XCTAssertEqual(A.category(for: "print.unreachable"), .problem)
+        XCTAssertEqual(A.actions(in: .ready), [.print, .askForChanges])
+        XCTAssertEqual(A.actions(in: .ask), [.camera, .bestGuess])
+        XCTAssertNil(A.category(for: "pass.started"))
+        XCTAssertEqual(A.Action.openPrint.title, "Open Print")
+        XCTAssertEqual(A.Action.openProject.rawValue, "OPEN", "notifications already delivered keep working")
+    }
+
+    func testTheCategoriesRegisterTextInputAndBackgroundButtons() throws {
+        let categories = Dictionary(uniqueKeysWithValues: A.categories().map { ($0.identifier, $0) })
+        XCTAssertEqual(Set(categories.keys), Set(A.Category.allCases.map(\.rawValue)))
+        let done = try XCTUnwrap(categories["DONE"])
+        XCTAssertEqual(done.actions.map(\.identifier), ["IT_WORKS", "NEEDS_CHANGES", "OPEN"])
+        XCTAssertTrue(done.actions[1] is UNTextInputNotificationAction, "Needs Changes takes words")
+        XCTAssertTrue(try XCTUnwrap(categories["READY"]).actions[1] is UNTextInputNotificationAction, "Ask for Changes takes words")
+        for action in done.actions.prefix(2) {
+            XCTAssertFalse(action.options.contains(.foreground), "\(action.identifier) runs without opening the app")
+            XCTAssertTrue(action.options.contains(.authenticationRequired), "the pairing is readable only while unlocked")
+        }
+        XCTAssertTrue(done.actions[2].options.contains(.foreground))
+        XCTAssertTrue(try XCTUnwrap(categories["FAILED"]).actions[0].options.contains(.foreground), "Try Again opens the app")
+    }
+
+    func testButtonsOnlyActOnTheirOwnMoment() {
+        XCTAssertEqual(A.command(action: "IT_WORKS", type: "print.done", projectId: "p"), .status("p", .works))
+        XCTAssertNil(A.command(action: "IT_WORKS", type: "print.cancelled", projectId: "p"), "not on a cancelled print")
+        XCTAssertNil(A.command(action: "IT_WORKS", type: "print.failed", projectId: "p"))
+        XCTAssertEqual(A.command(action: "NEEDS_CHANGES", type: "print.done", projectId: "p", text: "  2 mm wider "),
+                       .needsChanges("p", note: "After printing: 2 mm wider"))
+        XCTAssertEqual(A.command(action: "NEEDS_CHANGES", type: "print.done", projectId: "p", text: " "), .needsChanges("p", note: nil))
+        XCTAssertEqual(A.command(action: "PAUSE", type: "print.milestone", projectId: "p"), .control("p", .pause))
+        XCTAssertEqual(A.command(action: "PAUSE", type: "print.first-layer", projectId: "p"), .control("p", .pause))
+        XCTAssertNil(A.command(action: "PAUSE", type: "print.done", projectId: "p"), "a finished print can't pause")
+        XCTAssertEqual(A.command(action: "RESUME", type: "print.paused", projectId: "p"), .control("p", .resume))
+        XCTAssertNil(A.command(action: "RESUME", type: "print.failed", projectId: "p"))
+        XCTAssertEqual(A.command(action: "BEST_GUESS", type: "pass.ask", projectId: "p"), .bestGuess("p"))
+        XCTAssertEqual(A.command(action: "ASK_FOR_CHANGES", type: "pass.ready", projectId: "p", text: "Thicker walls"), .correct("p", note: "Thicker walls"))
+        XCTAssertNil(A.command(action: "ASK_FOR_CHANGES", type: "pass.ready", projectId: "p", text: ""), "no words, nothing sent")
+        XCTAssertNil(A.command(action: "TRY_AGAIN", type: "print.failed", projectId: "p"), "Try Again opens the app; it never prints")
+        XCTAssertNil(A.command(action: "PRINT", type: "pass.ready", projectId: "p"))
+        XCTAssertNil(A.command(action: "IT_WORKS", type: "print.done", projectId: ""))
+    }
+
+    func testEachButtonMakesTheAppsOwnCompanionCall() async throws {
+        let id = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        let object: [String: Any] = ["id": id, "createdAtMs": 1, "updatedAtMs": 2, "state": "printed", "photos": [], "passes": []]
+        let fake = FakeTransport { _, _ in json(200, ["object": object]) }
+        let store = PairingStore(store: MemoryStore())
+        try store.save(v2Record(), notify: false)
+        let client = CompanionClient(pairing: PairingClient(store: store, transport: fake), transport: fake,
+                                     cache: FileManager.default.temporaryDirectory.appending(path: "counterpart-tests-\(UUID().uuidString)"))
+        let commands: [A.Command] = [.status(id, .works), .needsChanges(id, note: "After printing: 2 mm wider"), .control(id, .pause),
+                                     .control(id, .resume), .bestGuess(id), .correct(id, note: "Thicker walls")]
+        for command in commands { try await command.run(client) }
+        let calls = fake.calls.map { call -> (String, String, [String: Any]) in
+            let body = call.request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            return (call.request.httpMethod ?? "", call.request.url?.path ?? "", body)
+        }
+        XCTAssertEqual(calls.map { "\($0.0) \($0.1)" }, [
+            "PATCH /v1/objects/\(id)/settings",
+            "PATCH /v1/objects/\(id)/settings", "POST /v1/objects/\(id)/corrections",
+            "POST /v1/objects/\(id)/print/pause", "POST /v1/objects/\(id)/print/resume",
+            "POST /v1/objects/\(id)/closeup", "POST /v1/objects/\(id)/corrections",
+        ])
+        XCTAssertEqual(calls[0].2["status"] as? String, "works")
+        XCTAssertEqual(calls[1].2["status"] as? String, "needs-changes")
+        XCTAssertEqual(calls[2].2["note"] as? String, "After printing: 2 mm wider")
+        XCTAssertEqual(calls[5].2["bestGuess"] as? Bool, true)
+        XCTAssertEqual(calls[6].2["note"] as? String, "Thicker walls")
+    }
+
+    /// Away from home the same buttons go as `CounterpartCommand` records the Mac already runs (PRD §9.3).
+    func testAwayFromHomeTheButtonsBecomeTheMacsCommands() {
+        XCTAssertEqual(A.Command.status("p", .works).cloudCommands.map(\.type), ["status"])
+        XCTAssertEqual(A.Command.status("p", .works).cloudCommands[0].payload, ["status": .string("works")])
+        let changes = A.Command.needsChanges("p", note: "After printing: wider").cloudCommands
+        XCTAssertEqual(changes.map(\.type), ["status", "correct"])
+        XCTAssertEqual(changes[1].payload, ["note": .string("After printing: wider")])
+        XCTAssertEqual(A.Command.needsChanges("p", note: nil).cloudCommands.map(\.type), ["status"])
+        XCTAssertEqual(A.Command.control("p", .pause).cloudCommands.map(\.type), ["pause"])
+        XCTAssertEqual(A.Command.control("p", .resume).cloudCommands.map(\.type), ["resume"])
+        XCTAssertEqual(A.Command.bestGuess("p").cloudCommands[0].type, "answerAsk")
+        XCTAssertEqual(A.Command.bestGuess("p").cloudCommands[0].payload, ["bestGuess": .bool(true)])
     }
 }

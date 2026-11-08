@@ -527,4 +527,112 @@ class HomeLayoutTests {
         compose.onNodeWithText("The last send of this plate may have reached the printer. I checked: it isn't printing this.").assertDoesNotExist()
         compose.onNodeWithText("The selected plate changed. Close this sheet and open Print again.").assertDoesNotExist()
     }
+
+    // UX walkthrough Nov 8 (F1, F3, F7): after the print, and the notifications that land there.
+
+    private val CLIP = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03"
+    private fun finishedClip(status: String? = null): JsonObject = WireJson.parseToJsonElement(
+        """{"id":"$CLIP","title":"Cable clip","instructions":"A clip","state":"${if (status == "works") "confirmed" else "printed"}","createdAtMs":1,"updatedAtMs":2,
+           "print":{"destinationId":"p1s","live":{"state":"finished","job":{"progress":100,"layer":212,"totalLayers":212},"temps":{"nozzle":{"actual":220},"bed":{"actual":55}}},
+                    "monitor":{"phase":"ended","endState":"done","endedAt":"2026-11-08T10:00:00Z"}}${status?.let { ""","settings":{"status":"$it"}""" } ?: ""}}"""
+    ).jsonObject
+
+    private fun companionAnswering(): FakeTransport {
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        var status: String? = null
+        val fake = FakeTransport { request, _ -> when {
+            request.method == "PATCH" && request.url.endsWith("/v1/objects/$CLIP/settings") -> {
+                status = WireJson.parseToJsonElement(String(request.body!!)).jsonObject["status"].toString().trim('"')
+                HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to finishedClip(status)))).toByteArray())
+            }
+            request.url.endsWith("/v1/objects/$CLIP") || request.url.contains("/v1/objects/$CLIP/") ->
+                HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to finishedClip(status)))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        return fake
+    }
+
+    /** F1: a finished print's Printing screen asks "Did it fit?" and goes on to the project, instead of old temperatures. */
+    @Test fun aFinishedPrintAsksDidItFitOnPrintingAndOpensTheProject() {
+        val fake = companionAnswering()
+        state.projects.value = listOf(requireNotNull(Project.decode(finishedClip())))
+        var opened = 0
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.PrintingScreen(CLIP, back = {}, project = { opened++ }) } }
+        compose.onNodeWithText("Did it fit?").assertExists()
+        compose.onNodeWithText("Nozzle 220 °C", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Stop").assertDoesNotExist()
+        compose.onNodeWithText("It Works").performScrollTo().performClick()
+        compose.waitUntil(5_000) { fake.calls.any { it.request.method == "PATCH" } }
+        val patch = fake.calls.first { it.request.method == "PATCH" }.request
+        assertEquals("\"works\"", WireJson.parseToJsonElement(String(patch.body!!)).jsonObject["status"].toString())
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Did it fit?")).fetchSemanticsNodes().isEmpty() }
+        compose.onNode(hasTestTag("open-project")).performScrollTo().performClick()
+        assertEquals(1, opened)
+    }
+
+    /** F3: the done notification carries It Works and Needs Changes… (with a reply), and It Works asks the Mac. */
+    @Test fun theDoneNotificationAnswersDidItFitFromItsButtons() {
+        val fake = companionAnswering()
+        org.robolectric.Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        com.scantomake.counterpart.app.Notifications.createChannels(app)
+        val done = CounterpartEvent(seq = 7, id = "e7", at = "2026-11-08T10:00:00Z", type = "print.done", projectId = CLIP, printId = "p",
+            printerName = "P1S", title = "Cable clip is done", body = "Take it off the plate.", notify = "active", data = null, frame = null)
+        com.scantomake.counterpart.app.Notifications.post(app, done)
+        val manager = app.getSystemService(android.app.NotificationManager::class.java)
+        val posted = org.robolectric.Shadows.shadowOf(manager).allNotifications.single()
+        assertEquals(listOf("It Works", "Needs Changes…", "Open Project"), posted.actions.map { it.title.toString() })
+        assertEquals("Needs Changes takes words", 1, posted.actions[1].remoteInputs?.size)
+        val itWorks = org.robolectric.Shadows.shadowOf(posted.actions[0].actionIntent).savedIntent
+        val failure = kotlinx.coroutines.runBlocking { com.scantomake.counterpart.app.NotificationActions.handle(app, itWorks) }
+        assertNull(failure)
+        val patch = fake.calls.single { it.request.method == "PATCH" }.request
+        assertEquals(true, patch.url.endsWith("/v1/objects/$CLIP/settings"))
+        assertEquals("\"works\"", WireJson.parseToJsonElement(String(patch.body!!)).jsonObject["status"].toString())
+        assertEquals("answered: the notification goes", 0, org.robolectric.Shadows.shadowOf(manager).allNotifications.size)
+    }
+
+    /** F3: Needs Changes… sends the words after "After printing: ", as the project page's Ask for changes does. */
+    @Test fun needsChangesFromTheNotificationSendsTheWords() {
+        val fake = companionAnswering()
+        val intent = android.content.Intent().apply {
+            putExtra(com.scantomake.counterpart.app.NotificationActions.EXTRA_ACTION, "NEEDS_CHANGES")
+            putExtra(com.scantomake.counterpart.app.NotificationActions.EXTRA_TYPE, "print.done")
+            putExtra(com.scantomake.counterpart.app.Notifications.EXTRA_PROJECT, CLIP)
+        }
+        androidx.core.app.RemoteInput.addResultsToIntent(arrayOf(androidx.core.app.RemoteInput.Builder(com.scantomake.counterpart.app.NotificationActions.REPLY).build()),
+            intent, android.os.Bundle().apply { putCharSequence(com.scantomake.counterpart.app.NotificationActions.REPLY, "2 mm wider") })
+        kotlinx.coroutines.runBlocking { com.scantomake.counterpart.app.NotificationActions.handle(app, intent) }
+        assertEquals(listOf("PATCH", "POST"), fake.calls.map { it.request.method })
+        assertEquals(true, fake.calls[1].request.url.endsWith("/v1/objects/$CLIP/corrections"))
+        assertEquals("\"After printing: 2 mm wider\"", WireJson.parseToJsonElement(String(fake.calls[1].request.body!!)).jsonObject["note"].toString())
+    }
+
+    /** F3: each moment's buttons, and a button never acts on another moment (no It Works on a cancelled print). */
+    @Test fun eachMomentGetsItsOwnButtons() {
+        val actions = com.scantomake.counterpart.app.NotificationActions
+        assertEquals(listOf("Open Print", "Pause"), actions.actions("print.milestone").map { it.title })
+        assertEquals(listOf("Open Print", "Resume"), actions.actions("print.paused").map { it.title })
+        assertEquals(listOf("Try Again", "Open Project"), actions.actions("print.failed").map { it.title })
+        assertEquals(listOf("Open Project"), actions.actions("print.cancelled").map { it.title })
+        assertEquals(listOf("Print", "Ask for Changes…"), actions.actions("pass.ready").map { it.title })
+        assertEquals(listOf("Take a Photo", "Best Guess"), actions.actions("pass.ask").map { it.title })
+        assertNull(actions.command("IT_WORKS", "print.cancelled", CLIP))
+        assertNull(actions.command("RESUME", "print.failed", CLIP))
+        assertNull(actions.command("PAUSE", "print.done", CLIP))
+        assertNull("Try Again opens Print; it never prints", actions.command("TRY_AGAIN", "print.failed", CLIP))
+        assertEquals("print", actions.screen(com.scantomake.counterpart.app.NotificationActions.Action.TryAgain, "print.failed"))
+        assertNull(actions.screen(com.scantomake.counterpart.app.NotificationActions.Action.TryAgain, "pass.failed"))
+        assertEquals("printing", actions.screen(null, "print.milestone"))
+    }
+
+    /** F7: in the foreground an event shows unless its own project's page or Printing screen is showing. */
+    @Test fun inTheForegroundOnlyTheShowingProjectsEventsStayQuiet() {
+        state.showing(CLIP, true); state.showing(CLIP, true); state.showing(CLIP, false)
+        assertEquals("a push then a pop keeps it", true, CLIP in state.onScreen.value)
+        state.showing(CLIP, false)
+        assertEquals(false, CLIP in state.onScreen.value)
+    }
 }
+

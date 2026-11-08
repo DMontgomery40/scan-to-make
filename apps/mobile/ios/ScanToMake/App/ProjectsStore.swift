@@ -34,6 +34,9 @@ import CounterpartKit
     var sending: Set<String> = [] { didSet { sendProgress = sendProgress.filter { sending.contains($0.key) } } }
     /// How much of a send has reached the Mac (0…1): a walk-around's every photo can take a while.
     var sendProgress: [String: Double] = [:]
+    /// A project whose page should open Ask for changes with "After printing: " started: Needs Changes was
+    /// pressed on its finished Printing screen. The page takes it once.
+    var askAfterPrinting: String?
     /// Why a send stopped, until it's tried again.
     var sendFailures: [String: String] = [:]
     /// Changes asked for while the Mac was working, sent when its pass ends (kept across launches).

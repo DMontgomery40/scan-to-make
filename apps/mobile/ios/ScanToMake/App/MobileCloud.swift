@@ -78,6 +78,32 @@ import Observation
         } catch { return false }
     }
 
+    /// Commands for the Mac when the phone can't reach it (PRD §9.3): `CounterpartCommand` records in the private
+    /// zone, which the Mac runs through the control method that does the same job and answers within 10 minutes.
+    /// Needs no earlier `refresh`, so a notification button can send them with no window open.
+    static func send(_ commands: [(type: String, payload: [String: JSONValue])], projectId: String) async -> Bool {
+        guard configured, !commands.isEmpty else { return false }
+        let records = commands.map { command -> CKRecord in
+            let id = UUID().uuidString.lowercased()
+            let record = CKRecord(recordType: CloudKitRecords.command, recordID: CKRecord.ID(recordName: id, zoneID: CloudNotificationSubscriptions.zoneID))
+            record["commandId"] = id
+            record["type"] = command.type
+            record["projectId"] = projectId
+            record["payload"] = (try? JSONEncoder().encode(command.payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            record["createdAt"] = Date()
+            return record
+        }
+        do {
+            let database = CKContainer(identifier: CounterpartIdentifiers.cloudKitContainer).privateCloudDatabase
+            // One at a time, in order: Needs Changes marks the project before its words start a change.
+            for record in records {
+                let result = try await database.modifyRecords(saving: [record], deleting: [], savePolicy: .allKeys)
+                for outcome in result.saveResults.values { _ = try outcome.get() }
+            }
+            return true
+        } catch { return false }
+    }
+
     func configureAlerts(settings: CompanionSettings?, localChoices: [Bool]) async {
         guard let database else { return }
         let availability = CloudNotificationSubscriptions.availability(settings: settings, localChoices: localChoices)

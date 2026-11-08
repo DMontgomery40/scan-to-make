@@ -15,6 +15,13 @@ final class NotificationService: UNNotificationServiceExtension {
         guard let notification = CKNotification(fromRemoteNotificationDictionary: request.content.userInfo) as? CKQueryNotification,
               let id = notification.recordID,
               let content = request.content.mutableCopy() as? UNMutableNotificationContent else { finish(); return }
+        // One subscription carries one category for several types (ev-problem, ev-stopped); the buttons follow the
+        // event's own type (PRD §9.1). Set before the fetch, so an expired fetch still delivers the right buttons.
+        if let type = notification.recordFields?["type"] as? String, let category = NotificationActions.category(for: type) {
+            content.categoryIdentifier = category.rawValue
+            content.userInfo["type"] = type
+        }
+        lock.lock(); original = content.copy() as? UNNotificationContent ?? original; lock.unlock()
         work = Task { [weak self] in
             do {
                 let database = CKContainer(identifier: CounterpartIdentifiers.cloudKitContainer).privateCloudDatabase
@@ -30,6 +37,7 @@ final class NotificationService: UNNotificationServiceExtension {
                 for key in ["eventId", "projectId", "printId", "type"] {
                     if let value = record[key] as? String { content.userInfo[key] = value }
                 }
+                if let type = record["type"] as? String, let category = NotificationActions.category(for: type) { content.categoryIdentifier = category.rawValue }
                 if let source = (record["frame"] as? CKAsset)?.fileURL {
                     let target = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).jpg")
                     try FileManager.default.copyItem(at: source, to: target)
