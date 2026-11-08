@@ -388,7 +388,10 @@ struct FixtureTransport: HTTPTransport {
             let log = folder.appending(path: "mcp-update-requests.log")
             if !FileManager.default.fileExists(atPath: log.path) { FileManager.default.createFile(atPath: log.path, contents: nil) }
             if let handle = try? FileHandle(forWritingTo: log) {
-                handle.seekToEndOfFile(); handle.write(Data((path + " " + (String(data: request.httpBody ?? Data(), encoding: .utf8) ?? "") + "\n").utf8)); try? handle.close()
+                defer { try? handle.close() }
+                let line = path + " " + (String(data: request.httpBody ?? Data(), encoding: .utf8) ?? "") + "\n"
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: Data(line.utf8))
             }
         }
         if completingMove, path.hasPrefix("/v1/printers/mcp/"), method == "POST" { await Fixtures.mcpCopyState.accept() }
