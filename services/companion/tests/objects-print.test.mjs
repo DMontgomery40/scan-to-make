@@ -84,7 +84,7 @@ const until = async check => { for (let i = 0; i < 200; i++) { const value = awa
 async function retainedPlate(f) {
   const sha256=createHash('sha256').update(STL).digest('hex');
   await f.store.update(f.object.id,o=>({...o,kind:'published',
-    files:{current:'current/model.stl',receipts:[{name:'model.stl',path:'current/model.stl',format:'stl',sha256,
+    files:{current:'current/model.stl',receipts:[{name:'model.stl',path:'current/model.stl',format:'stl',sha256,byteLength:STL.length,
       plates:[{index:0,name:'Base',sliced:false}]}]},publishedSelection:{fileIndex:0,plateIndex:0,sliced:false}}));
   return {sha256,plateIndex:0};
 }
