@@ -179,15 +179,18 @@ export function macReconstructRunner(binary: string | null = findMacReconstruct(
   });
 }
 
-/** Turns a scan into the STL a project prints (millimetres), without touching it up. */
-export type ScanToStl = (scan: string, stl: string, signal?: AbortSignal) => Promise<void>;
+/**
+ * Turns a scan into the STL a project prints (millimetres, Z up, on the bed), without touching it up; with `render`,
+ * also draws the project page's picture of it there (best effort: a scan that can't be drawn still gets its STL).
+ */
+export type ScanToStl = (scan: string, stl: string, options?: {render?: string; signal?: AbortSignal}) => Promise<void>;
 export const SCAN_TO_STL_FAILED = "Your Mac couldn't turn this scan into a printable model.";
 
-/** `mac-reconstruct stl <scan> <stl>`: the scan's triangles in millimetres (PhotogrammetrySession writes metres). */
+/** `mac-reconstruct stl <scan> <stl> [--render <png>]`: the scan's triangles in millimetres (PhotogrammetrySession writes metres). */
 export function macScanToStl(binary: string | null = findMacReconstruct() ?? null): ScanToStl | undefined {
   if (!binary) return undefined;
-  return (scan, stl, signal) => new Promise<void>((resolve, reject) => {
-    const child = spawn(binary, ['stl', scan, stl], {stdio: ['ignore', 'pipe', 'ignore'], ...(signal ? {signal} : {})});
+  return (scan, stl, {render, signal} = {}) => new Promise<void>((resolve, reject) => {
+    const child = spawn(binary, ['stl', scan, stl, ...(render ? ['--render', render] : [])], {stdio: ['ignore', 'pipe', 'ignore'], ...(signal ? {signal} : {})});
     let out = '', failed = false;
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => { out = (out + chunk).slice(-16384); });

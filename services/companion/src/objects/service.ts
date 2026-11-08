@@ -2943,9 +2943,12 @@ export class ObjectService {
     const passDir = join(dir, 'passes', 'scan', new Date(startedAtMs).toISOString().replace(/[:.]/g, '-'));
     await mkdir(join(passDir, 'out'), {recursive: true});
     const model = join(passDir, 'out', 'model.stl'), scan = join(dir, 'scan', scanName);
+    // Its picture is every layout's project picture until a touch-up draws its own (the photos are capture frames).
+    const render = join(passDir, 'out', 'overview.png');
     if (scanName.toLowerCase().endsWith('.stl')) await copyFile(scan, model);
-    else await this.#deps.scanToStl!(scan, model, signal);
-    return {status: 'done', model, renders: [], checkpoints: [], summary: scanSummary(rebuilt),
+    else await this.#deps.scanToStl!(scan, model, {render, signal});
+    const drawn = await stat(render).then(info => info.isFile() && info.size > 0, () => false);
+    return {status: 'done', model, renders: drawn ? [render] : [], checkpoints: [], summary: scanSummary(rebuilt),
       stats: {seconds: Math.round((Date.now() - startedAtMs) / 1000), toolCalls: 0}, passDir};
   }
 

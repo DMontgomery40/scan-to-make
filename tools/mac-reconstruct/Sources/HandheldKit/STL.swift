@@ -9,11 +9,13 @@ public struct STLSummary: Equatable {
     public var sizeMm: SIMD3<Double>
 }
 
-/// Writes every triangle of a model (USDZ, USD, OBJ) as a binary STL in millimetres.
+/// Writes every triangle of a model (USDZ, USD, OBJ) as a binary STL the way a project's models are kept: millimetres,
+/// Z up, centred on the origin and resting on z = 0, as the touch-up's Blender export leaves them.
 ///
-/// PhotogrammetrySession writes its models in metres (`metersPerUnit = 1`), and an STL has no units: slicers and the
-/// printer MCPs read millimetres. Each mesh is placed with its full composed transform, so the STL is what the model
-/// shows. Textures are dropped; a printer only needs the shape.
+/// PhotogrammetrySession writes its models in metres (`metersPerUnit = 1`) with Y up, and an STL has no units:
+/// slicers and the printer MCPs read millimetres with Z up. Y-up becomes Z-up by turning (x, y, z) into (x, −z, y), a
+/// rotation, so faces keep their winding. Each mesh is placed with its full composed transform first, so the STL is
+/// what the model shows. Textures are dropped; a printer only needs the shape.
 @discardableResult
 public func writeSTL(model: URL, to output: URL, metresPerUnit: Double = 1) throws -> STLSummary {
     let asset = MDLAsset(url: model)
@@ -51,19 +53,26 @@ public func writeSTL(model: URL, to output: URL, metresPerUnit: Double = 1) thro
     guard triangles > 0 else { throw HandheldError.io("\(model.lastPathComponent) has no triangles") }
 
     let scale = Float(metresPerUnit * 1000)
+    // Only an asset that says Z is up stays as it is; Apple's USDZ (and a file with no up axis) is Y up.
+    let yUp = abs(asset.upAxis.z) < 0.5
+    var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
+    for i in corners.indices {
+        let p = corners[i] * scale
+        corners[i] = yUp ? SIMD3(p.x, -p.z, p.y) : p
+        low = simd_min(low, corners[i]); high = simd_max(high, corners[i])
+    }
+    let offset = SIMD3<Float>(-(low.x + high.x) / 2, -(low.y + high.y) / 2, -low.z)
     var data = Data(count: 80)
     var count = UInt32(triangles).littleEndian
     data.append(Data(bytes: &count, count: 4))
-    var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
     data.reserveCapacity(84 + triangles * 50)
     for t in 0..<triangles {
-        let a = corners[t * 3] * scale, b = corners[t * 3 + 1] * scale, c = corners[t * 3 + 2] * scale
+        let a = corners[t * 3] + offset, b = corners[t * 3 + 1] + offset, c = corners[t * 3 + 2] + offset
         let cross = simd_cross(b - a, c - a), length = simd_length(cross)
         let normal = length > 0 ? cross / length : SIMD3<Float>(0, 0, 0)
         var floats = [normal.x, normal.y, normal.z, a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z].map { $0.bitPattern.littleEndian }
         data.append(Data(bytes: &floats, count: 48))
         data.append(contentsOf: [0, 0])
-        for p in [a, b, c] { low = simd_min(low, p); high = simd_max(high, p) }
     }
     try data.write(to: output, options: .atomic)
     let size = high - low

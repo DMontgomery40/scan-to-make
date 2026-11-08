@@ -231,7 +231,12 @@ typealias MacError = CompanionError
         let preview = UploadFile(kind: .scan, name: "scan.usdz", source: .file(model), type: "model/vnd.usdz+zip")
         let report = onSendProgress
         let progress: @Sendable (Double) -> Void = { share in Task { @MainActor in report(id, share) } }
-        guard !names.isEmpty, (try? await client.capabilities())?.contains("objectCaptureImages") == true else {
+        // A send cut short keeps the way it started: frames already there mean every image, a model alone the older
+        // send. A fresh one asks the Mac; if that question fails, the send fails and resumes, it never guesses.
+        let held = try await client.get(id)
+        let rebuilds = !(held.capture ?? []).isEmpty
+            || (held.scan == nil && !names.isEmpty && (try await client.capabilities()).contains("objectCaptureImages"))
+        guard rebuilds else {
             let files = [preview] + ProjectUploader.spread(names, count: 24).map { UploadFile.image(images.appending(path: $0), name: $0) }
             try await uploader.send(files, to: id, progress: progress)
             return nil

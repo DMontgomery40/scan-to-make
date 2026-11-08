@@ -29,9 +29,10 @@ async function setup({reconstruct, scanToStl} = {}) {
   const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
     onChange: object => changes.push(object),
-    ...(scanToStl === null ? {} : {objectCaptureRebuild: true, scanToStl: scanToStl ?? (async (scan, stl) => {
+    ...(scanToStl === null ? {} : {objectCaptureRebuild: true, scanToStl: scanToStl ?? (async (scan, stl, {render} = {}) => {
       converted.push({scan, bytes: await readFile(scan, 'utf8')});
       await writeFile(stl, STL);
+      if (render) await writeFile(render, 'png');
     })}),
     reconstruct: reconstruct ?? (async input => {
       builds.push(input);
@@ -131,6 +132,8 @@ test('a walk-around sends every Object Capture image; the Mac rebuilds them at f
   assert.deepEqual((await readdir(join(dir, 'scan'))).filter(name => name.startsWith('rebuilding-')), []);
   assert.deepEqual(converted, [{scan: join(dir, 'scan', 'scan.usdz'), bytes: 'usdz'}], 'the model is the rebuild, not the preview');
   assert.equal(done.current.summary, 'Rebuilt on your Mac from all 2 photos at full detail. Its size comes from the LiDAR depth in every photo. Nothing has been touched up yet. Ask for changes to clean it up.');
+  assert.deepEqual(done.current.renders, [join('current', 'renders', 'overview.png')], 'every layout gets a picture of the model');
+  assert.equal(await readFile(join(dir, 'current', 'renders', 'overview.png'), 'utf8'), 'png');
   assert.deepEqual(done.passes[0].stages.map(stage => stage.id), ['building', 'saving']);
 
   // Starting again with the same session changes nothing; it is not rebuilt twice.
@@ -229,6 +232,8 @@ test('the companion runs Apple folder mode for an Object Capture session, reads 
   const stl = await fake('stl', `echo "$@" > '${argv}'; echo '{"done":"'$3'","triangles":12}'`);
   await macScanToStl(stl)('/scan.usdz', '/model.stl');
   assert.equal((await readFile(argv, 'utf8')).trim(), 'stl /scan.usdz /model.stl');
+  await macScanToStl(stl)('/scan.usdz', '/model.stl', {render: '/overview.png'});
+  assert.equal((await readFile(argv, 'utf8')).trim(), 'stl /scan.usdz /model.stl --render /overview.png');
   const broken = await fake('broken-stl', `echo '{"error":"no triangles"}'; exit 1`);
   await assert.rejects(macScanToStl(broken)('/scan.usdz', '/model.stl'), /couldn't turn this scan into a printable model/);
   assert.equal(macScanToStl(null), undefined);
