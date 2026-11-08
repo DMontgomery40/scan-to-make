@@ -44,6 +44,42 @@ def first_party_executables(root: Path, manifest: dict) -> list[dict]:
     return helpers
 
 
+def verify_swift_packages(root: Path, manifest: dict, sparkle: dict) -> None:
+    """Audit every resolved pin; test dependencies must be pinned and linked only to a unit-test target."""
+    project = root / "apps/mac/ScanToMake.xcodeproj"
+    pins = json.loads((project / "project.xcworkspace/xcshareddata/swiftpm/Package.resolved").read_text())["pins"]
+    expected = {"sparkle": dict(version=sparkle["version"], revision=sparkle["revision"])}
+    policy = json.loads((root / "tools/licence-audit/policy.json").read_text())
+    pbx = (project / "project.pbxproj").read_text() if manifest.get("testOnlySwiftPackages") else ""
+    targets = re.findall(r"(?ms)^\t\t[0-9A-F]+ /\* [^\n]* \*/ = \{\n\t\t\tisa = PBXNativeTarget;(.*?)^\t\t\};", pbx)
+    for package in manifest.get("testOnlySwiftPackages", []):
+        if not evaluate_expression(package["licence"], set(policy["allowlists"]["mac"]), set(policy["denied"]["mac"]))[0]:
+            raise ValueError("Test-only Swift package licence is not allowed")
+        identity, name = package["identity"], package["name"]
+        if identity in expected or not package["repositoryUrl"].startswith("https://") or not package["licenceUrl"].startswith("https://"):
+            raise ValueError("Invalid test-only Swift package declaration")
+        if not re.fullmatch(r"[0-9a-f]{40}", package["revision"]):
+            raise ValueError("Test-only Swift package requires an exact revision")
+        expected[identity] = dict(version=package["version"], revision=package["revision"])
+        pin = next((pin for pin in pins if pin["identity"] == identity), {})
+        if pin.get("location") != package["repositoryUrl"]:
+            raise ValueError("Test-only Swift package source differs from audited declaration")
+        product = re.search(r"(?m)^\t\t([0-9A-F]+) /\* " + re.escape(name) + r" \*/ = \{\n\t\t\tisa = XCSwiftPackageProductDependency;", pbx)
+        linked = [target for target in targets if product and product[1] in target]
+        if len(linked) != 1 or 'productType = "com.apple.product-type.bundle.unit-test";' not in linked[0] or f'name = {package["target"]};' not in linked[0]:
+            raise ValueError("Test-only Swift package must link only to its declared unit-test target")
+        # A framework build phase can link a product independently of packageProductDependencies.
+        build_files = re.findall(r"(?m)^\t\t([0-9A-F]+) /\* [^\n]+ \*/ = \{isa = PBXBuildFile; productRef = " + product[1] + r" ", pbx)
+        phases = re.findall(r"(?ms)^\t\t([0-9A-F]+) /\* [^\n]* \*/ = \{\n\t\t\tisa = PBXFrameworksBuildPhase;(.*?)^\t\t\};", pbx)
+        for phase_id, phase in phases:
+            if any(build_file in phase for build_file in build_files):
+                users = [target for target in targets if phase_id in target]
+                if users != linked:
+                    raise ValueError("Test-only Swift package framework is linked outside its unit-test target")
+    if len(pins) != len(expected) or {pin["identity"]: pin["state"] for pin in pins} != expected:
+        raise ValueError("Swift package lock differs from audited runtime and test dependencies")
+
+
 def inventory_mac(root: Path, workspace: list[dict]) -> tuple[list[dict], list[dict]]:
     if not (root / "apps/mac").is_dir():
         return [], []
@@ -84,9 +120,7 @@ def inventory_mac(root: Path, workspace: list[dict]) -> tuple[list[dict], list[d
                                 licence=helper["licence"], firstParty=True,
                                 evidence=helper["licencePath"], sourceUrl=helper["sourcePath"]))
         sparkle = next(c for c in components if c["name"] == "Sparkle")
-        lock = json.loads((root / "apps/mac/ScanToMake.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved").read_text())
-        if len(lock["pins"]) != 1 or lock["pins"][0]["identity"] != "sparkle" or lock["pins"][0]["state"] != dict(version=sparkle["version"], revision=sparkle["revision"]):
-            raise ValueError("Swift package lock differs from audited Sparkle distribution")
+        verify_swift_packages(root, manifest, sparkle)
         packages = manifest["npmPackages"]
         if packages != ["packages/contracts", "services/project", "services/printer-handoff", "services/companion"]:
             raise ValueError("Unexpected Mac npm workspace set")

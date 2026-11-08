@@ -198,5 +198,17 @@
     "services/project",
     "services/printer-handoff",
     "services/companion"
+  ],
+  "testOnlySwiftPackages": [
+    {
+      "name": "ViewInspector",
+      "identity": "viewinspector",
+      "repositoryUrl": "https://github.com/nalexn/ViewInspector",
+      "version": "0.10.5",
+      "revision": "2dacb6e514be19379c605a5a11564d0f3fea89d9",
+      "licence": "MIT",
+      "licenceUrl": "https://github.com/nalexn/ViewInspector/blob/2dacb6e514be19379c605a5a11564d0f3fea89d9/LICENSE",
+      "target": "AgentKitTests"
+    }
   ]
 }

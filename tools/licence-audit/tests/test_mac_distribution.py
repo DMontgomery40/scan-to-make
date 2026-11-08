@@ -34,7 +34,9 @@ class MacDistributionTests(unittest.TestCase):
             component['notices'] = [dict(path='Licenses/Test.txt', sha256=hashlib.sha256(notice.read_bytes()).hexdigest(), sourceUrl='https://example.com/LICENSE')]
         lock = self.mac / 'ScanToMake.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'
         lock.parent.mkdir(parents=True)
-        lock.write_text(json.dumps({'pins': [dict(identity='sparkle', state=dict(version='2.9.3', revision='d46d456107feacc80711b21847b82b07bd9fb46e'))]}))
+        source_mac = Path(__file__).resolve().parents[3] / 'apps/mac'
+        shutil.copyfile(source_mac / lock.relative_to(self.mac), lock)
+        shutil.copyfile(source_mac / 'ScanToMake.xcodeproj/project.pbxproj', self.mac / 'ScanToMake.xcodeproj/project.pbxproj')
         self.policy = self.root / 'tools/licence-audit/policy.json'
         self.policy.parent.mkdir(parents=True)
         shutil.copyfile(Path(__file__).resolve().parents[1] / 'policy.json', self.policy)
@@ -97,6 +99,23 @@ class MacDistributionTests(unittest.TestCase):
         data = json.loads(lock.read_text())
         data['pins'].append(dict(identity='unexpected'))
         lock.write_text(json.dumps(data))
+        self.assertTrue(inventory_mac(self.root, [])[1])
+
+    def test_test_package_cannot_become_an_application_dependency(self):
+        project = self.mac / 'ScanToMake.xcodeproj/project.pbxproj'
+        project.write_text(project.read_text().replace('productType = "com.apple.product-type.bundle.unit-test";', 'productType = "com.apple.product-type.application";'))
+        self.assertTrue(inventory_mac(self.root, [])[1])
+
+    def test_test_package_pin_and_licence_are_audited(self):
+        lock = next(self.mac.rglob('Package.resolved'))
+        original = lock.read_text()
+        data = json.loads(original)
+        next(pin for pin in data['pins'] if pin['identity'] == 'viewinspector')['state']['revision'] = '0' * 40
+        lock.write_text(json.dumps(data))
+        self.assertTrue(inventory_mac(self.root, [])[1])
+        lock.write_text(original)
+        self.manifest['testOnlySwiftPackages'][0]['licence'] = 'GPL-3.0-only'
+        self.write_manifest()
         self.assertTrue(inventory_mac(self.root, [])[1])
 
     def test_stale_worker_and_package_manager_payloads_are_rejected(self):
