@@ -109,7 +109,11 @@ jobs:
           python3 scripts/camera_safe_tests.py "${manifests[0]}"
           xcodebuild test-without-building -xctestrun "${manifests[0]}" \
             -destination "platform=iOS Simulator,id=$SIM" -parallel-testing-enabled NO -collect-test-diagnostics never
-          xcrun simctl shutdown "$SIM"
+          # XCTest can shut down its destination itself. Continue only once this phone is off.
+          if ! xcrun simctl shutdown "$SIM" >/dev/null 2>&1; then
+            xcrun simctl list -j devices | python3 -c \
+              'import json,sys; off = any(d["udid"] == sys.argv[1] and d["state"] == "Shutdown" for group in json.load(sys.stdin)["devices"].values() for d in group); sys.exit(0 if off else "The iPhone test simulator did not shut down")' "$SIM"
+          fi
           # Regular width: the starters, the New button and search on the iPad layout (PRD §6.1).
           xcodebuild test-without-building -xctestrun "${manifests[0]}" \
             -destination "platform=iOS Simulator,id=$IPAD" -parallel-testing-enabled NO -collect-test-diagnostics never \
