@@ -57,6 +57,11 @@ export function ProjectPlates({
           </div>
         ))}
       </div>
+      {p.plates?.find((plate) => plate.selected)?.status === "printed" && (
+        <Action disabled={!canSelectPlate(p)} run={() => mutate("objects.settings.set", {id: p.id, status: "not-printed"})}>
+          Mark selected plate not printed
+        </Action>
+      )}
       {error && <p role="alert">{error}</p>}
     </>
   );
