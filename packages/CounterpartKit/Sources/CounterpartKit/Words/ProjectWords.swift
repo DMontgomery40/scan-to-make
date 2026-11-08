@@ -151,8 +151,8 @@ public struct ProjectWords: Equatable, Sendable {
             // Printing only once the printer reports our job; until then the print is being prepared.
             if project.print?.monitor?.phase == "watching" || (project.print?.printId != nil && ["printing", "paused"].contains(project.print?.live?.state ?? "")) { return .printing }
             return .preparing
-        // "Printed" only once the print monitor saw it finish; an older Mac marks a print printed when the
-        // printer accepts it, which is "sent" in the PRD's words.
+        // "Printed" once the monitor saw it finish or the person recorded this plate. An older Mac
+        // marks a print printed when the printer accepts it, which is "sent" in the PRD's words.
         case .printed: return (project.print?.monitor?.endState == "done" || project.selectedPlate?.status == "printed") ? .printed : .sent
         case .sent: return .sent
         case .confirmed: return .confirmed
@@ -223,7 +223,7 @@ public struct ProjectWords: Equatable, Sendable {
                     line = project.progress ?? "Getting the print ready"
                 }
             case .printed:
-                // A print request accepted isn't a print finished; only the print monitor says it finished.
+                // Completion comes from the monitor or the person's explicit plate report.
                 let finished = project.print?.monitor?.endState == "done" || project.selectedPlate?.status == "printed"
                 let endedAt = project.print?.monitor?.endedAt.flatMap(ISO.date) ?? project.updatedAt
                 // "Did it fit?" until you answer it, here or with any status in Project Settings.
