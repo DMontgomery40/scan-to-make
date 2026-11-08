@@ -123,6 +123,18 @@ final class PrintActivityTests: XCTestCase {
         XCTAssertTrue(path.contains(CGPoint(x: (66 - 23) * scale + (20 - 54 * scale) / 2, y: (77.5 - 25) * scale)), "the outline beyond the gap")
     }
 
+    /// A running print opens Printing; an ended one (still on the Lock Screen for hours) opens the project.
+    func testTappingTheActivityOpensPrintingWhileItRunsAndTheProjectOnceItEnds() throws {
+        for state in ["preparing", "printing", "paused", "offline"] {
+            let url = try XCTUnwrap(PrintActivityLink.url(projectId: "p1", state: .init(state: state, progress: 40, endsAt: Date())))
+            XCTAssertEqual(AppRoute(url: url), .printing("p1"), state)
+        }
+        for state in ["finished", "failed", "cancelled"] {
+            let url = try XCTUnwrap(PrintActivityLink.url(projectId: "p1", state: .init(state: state, progress: 100, endsAt: Date())))
+            XCTAssertEqual(AppRoute(url: url), .project("p1"), state)
+        }
+    }
+
     func testActivityWordsMatchTheMilestoneNotification() {
         let halfway = PrintAttributes.ContentState(state: "printing", progress: 50, layer: 106, totalLayers: 212, endsAt: Date())
         XCTAssertEqual(PrintActivityWords.detail(halfway, printer: "P1S"), "layer 106 of 212 · P1S")

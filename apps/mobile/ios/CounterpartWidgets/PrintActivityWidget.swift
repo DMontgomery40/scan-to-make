@@ -21,7 +21,7 @@ struct PrintActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PrintAttributes.self) { context in
             PrintActivityLockScreen(context: context)
-                .widgetURL(URL(string: "counterpart://printing/\(context.attributes.projectId)"))
+                .widgetURL(PrintActivityLink.url(projectId: context.attributes.projectId, state: context.state))
         } dynamicIsland: { context in
             let artwork = PrintActivityThumbnails.shared()?.artwork(for: context.attributes.projectId) ?? .mark
             return DynamicIsland {
@@ -48,7 +48,7 @@ struct PrintActivityWidget: Widget {
                 ProgressMark(state: context.state, side: 24)
             }
             .keylineTint(CounterpartBrand.orange)
-            .widgetURL(URL(string: "counterpart://printing/\(context.attributes.projectId)"))
+            .widgetURL(PrintActivityLink.url(projectId: context.attributes.projectId, state: context.state))
         }
     }
 }

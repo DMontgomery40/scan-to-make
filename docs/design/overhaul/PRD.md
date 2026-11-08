@@ -1328,6 +1328,7 @@ Screenshots: `screens/phone-lock.jpg` and `screens/phone-island.jpg` (approximat
 
 - **The picture.** The widget can't reach the Mac, so the app writes each live or ready project's picture (`thumbnailPath`: its render, else a photo) into the App Group `group.com.scantomake.counterpart` before it starts or updates an activity, keyed by project id (`PrintActivityThumbnails`, at most 168 px, as Apple requires images no larger than the presentation). The notification service writes the Mac's copy of the same render from the `CounterpartProject` record when a print notification arrives, so an activity the Mac started by push has it too. The newer project `updatedAt` wins. `PrintAttributes` is unchanged, so the relay's contract is too.
 - It also appears automatically in StandBy, on the Watch Smart Stack, in CarPlay and in the Mac menu bar. Apple: the Smart Stack and CarPlay combine the compact views, and the Mac menu bar uses the compact, minimal and expanded views unchanged, so the mark carries to all of them. Not seen on a Watch, in CarPlay or in a Mac menu bar yet.
+- **Tapping it** opens Printing while the print runs, and the project once it has finished, failed or been cancelled (`PrintActivityLink`): an ended activity stays on the Lock Screen for up to four hours, and Printing has nothing left to follow.
 - Starting and updating it follow §8.8: through the relay when there's an APNs key, and from the phone itself otherwise.
 
 ### 9.5 Widgets and system surfaces
