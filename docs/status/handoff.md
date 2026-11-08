@@ -38,13 +38,9 @@ Printer: P1S, LAN Only + Developer Mode; AMS A1 black PLA (nearly empty), A2 yel
    - the shared ControlKit form encoding (Mac Add Printer sheet and phones) still branches on `"bambu"` and `BAMBU_MODEL`; make it generic from `counterpart_setup_fields` (#392 merged over it with `--boundary-reviewed`);
    - move title, designer and licence into `list_3mf_plates` in both MCPs, publish, install, then delete `inspectModelFile`'s remaining 3MF parsing (PRD §8.0 item 9);
    - port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D.
-5. **Flaky tests: READY FOR REVIEW; no merges or publication.**
-   - Counterpart [#403](https://github.com/DMontgomery40/scan-to-make/pull/403): wait for server-observed disconnect, control the incomplete-frame timer after receipt, and snapshot download entries before the worker instead of comparing filesystem and wall clocks. Capture, local-control and published tests each pass **200/200** loaded runs (8 parallel processes, CPU 0); file-arrival probe **2,000/2,000**. Affected suites **53/53**.
-   - bambu [#130](https://github.com/DMontgomery40/bambu-printer-mcp/pull/130), head `7d521204`: synchronize deadline tests to request/body consumption (**200/200** loaded runs); port the final FULU event drain. Patch 1.1.79 prepared, not published.
-   - mcp-3D [#89](https://github.com/DMontgomery40/mcp-3D-printer-server/pull/89), head `ccf41556`: drain replies queued during the final polling sleep before disconnecting (**200/200** loaded suites, 2,400 selected control tests). Patch 1.2.59 prepared, not published. Both MCP behavior suites pass; existing optional hardware/profile skips are unchanged.
-   - Before-fix reproductions: capture delayed close **16/16 failed**; incomplete frame's valid pairing expired under a 75 ms poll stall; arrival **1,795/2,000 missed**; remote deadline **32/32 failed**; FULU **6/32 failed**. No retries, longer test deadlines or skips were added as fixes.
-   - Lead: review all three PRs, run the authoritative Mac gate (`ci_local.py all --changed-only --base origin/main`, then `branch_check.py --merge` SAFE), approve merges. Mac app/ControlKit/runtime/boundary, CounterpartKit, iPhone/iPad simulator and iPhoneOS build checks remain for the Mac. Hosted iPhone launch timeout untouched.
-
+5. **Flaky tests:** fixed at the cause in #403 (capture drain, local-control incomplete frame, published file arrival), bambu-printer-mcp 1.1.79 (#130: remote-slicer deadline, FULU final reply drain) and mcp-3D-printer-server 1.2.60 (#89: FULU drain). Each failed first, then passed 200/200 loaded runs.
+   - Open: the FULU drain changes pause/resume/stop on the printer and was checked only against mocked hosts. Check it on the P1S the next time David pauses, resumes or stops a print from Counterpart.
+   - Open: the hosted iPhone simulator launch timeout (the Mac's own gate is authoritative).
 6. **OctoPrint follow-ups** (built: #386 approve, #389 web address; checked only against Docker virtual printers):
    - (a) the MCP reports its normalized endpoint in counterpart/1, so one printer typed two ways lists once;
    - (b) Bonjour TXT `path`;

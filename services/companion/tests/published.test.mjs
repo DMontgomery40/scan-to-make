@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm,utimes,symlink,chmod,lstat} from 'node:fs/promises';
+import {writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
@@ -12,7 +13,7 @@ import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {publicObject} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
-import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished,arrivedDuring,chromeAvailable,folderAccess} from '../dist/published/published.js';
+import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished,arrivedDuring,snapshotFolders,chromeAvailable,folderAccess} from '../dist/published/published.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {mcpPlates, mcpPlatesResult, showing, showingRunner, shownSlice} from './support/shown-print.mjs';
 const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
@@ -82,9 +83,19 @@ test('file arrival uses the pre-worker snapshot when filesystem and wall clocks 
  const info=await lstat(path),atMs=info.birthtimeMs>0?info.birthtimeMs:info.mtimeMs;
  // A cached filesystem tick can precede the pass; a fractional tick can follow its integer end.
  for(const tick of [Math.floor(atMs)-1,Math.ceil(atMs)+10]){
-  assert.deepEqual(await arrivedDuring([f.root],tick,tick,before),[path]);
-  assert.deepEqual(await arrivedDuring([f.root],tick,tick,new Set([path])),[]);
+  assert.deepEqual(await arrivedDuring([f.root],tick,tick,new Map([[f.root,before]])),[path]);
+  assert.deepEqual(await arrivedDuring([f.root],tick,tick,new Map([[f.root,new Set([path])]])),[]);
  }
+});
+test('a folder the snapshot could not list falls back to the time window, never counting every old file as arrived',async t=>{
+ const f=await setup(t),path=join(f.root,'old.3mf');await writeFile(path,model());
+ const missing=join(f.root,'not-yet');
+ const snapshot=await snapshotFolders([missing]);
+ assert.equal(snapshot.has(missing),false,'an unlistable folder has no snapshot entry');
+ const info=await lstat(path),atMs=info.birthtimeMs>0?info.birthtimeMs:info.mtimeMs;
+ // f.root has no entry either: the old file is judged by the window, which excludes it.
+ assert.deepEqual(await arrivedDuring([f.root],atMs+1000,atMs+2000,snapshot),[]);
+ assert.deepEqual(await arrivedDuring([f.root],Math.floor(atMs)-1,Math.ceil(atMs)+1,snapshot),[path]);
 });
 test('a Downloads folder macOS privacy refuses is "denied", never an empty folder, and the pass says so',async t=>{
  if(process.getuid?.()===0)return t.skip('root reads any folder');
@@ -103,6 +114,15 @@ test('old Downloads names require confirmation; escapes and symlinks never estab
  const got=await runPublishedWorker({command:'/c',args:[],env:{},cwd:pass.dir,mcpConfigPath:'',mcpConfig:{mcpServers:{}}},pass,{url:LINK,site:'MakerWorld'},{downloads,spawn:spawnAnswer({status:'downloaded',summary:'Got file',download:{files:['caliper.3mf']}})});
  assert.equal(got.status,'needs_file');assert.equal(got.candidate,path);
  assert.equal(got.reason,'download_not_saved','it said downloaded, but no fresh file arrived');
+});
+test('a named file that appears during the pass counts as downloaded even when its timestamp lags the pass start',async t=>{
+ const f=await setup(t),downloads=join(f.root,'Downloads');await mkdir(downloads);const path=join(downloads,'caliper.3mf');
+ const pass=await prepareTouchupPass({root:join(f.root,'passes'),objectId:'p',scan:[],photos:[],requirePhotos:false});
+ const answer=spawnAnswer({status:'downloaded',summary:'Got file',download:{files:['caliper.3mf']}});
+ // The file system's clock reads a minute behind the pass's own start.
+ const spawn=(...args)=>{writeFileSync(path,model());return answer(...args);};
+ const got=await runPublishedWorker({command:'/c',args:[],env:{},cwd:pass.dir,mcpConfigPath:'',mcpConfig:{mcpServers:{}}},pass,{url:LINK,site:'MakerWorld'},{downloads,spawn,startedAtMs:Date.now()+60_000});
+ assert.equal(got.status,'downloaded');assert.deepEqual(got.files,[path]);
 });
 test('link retrieves or asks; explicit file preserves bytes, hash and embedded credit',async t=>{
  const f=await setup(t),object=await f.service.create('Print this','published',LINK);await f.service.start(object.id);const asking=await f.service.settled(object.id);assert.equal(asking.ask.type,'file');assert.equal(f.holds(),0);
