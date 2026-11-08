@@ -9,6 +9,7 @@
       "origin": "printer-handoff",
       "state": "unknown",
       "mcpId": "mcp-812bcaf2d1ff2948",
+      "mcpLabel": "bambu-printer-mcp",
       "mcps": [
         {"backend": "bambu-printer-mcp", "destinationId": "current", "mcpId": "mcp-812bcaf2d1ff2948", "label": "bambu-printer-mcp", "version": "1.1.73", "latestVersion": "1.1.78"},
         {"backend": "mcp-3d-printer-server", "destinationId": "counterpart-a07c6f7d", "mcpId": "mcp-3a2f0c9e5b7d1e44", "label": "mcp-3D-printer-server", "version": "1.2.56", "latestVersion": "1.2.58"}

@@ -147,6 +147,20 @@ class HomeLayoutTests {
      */
     @Test fun printerSoftwareMoveThatNeverHearsBackSaysSo() = printerSoftwareMove(false, neverHears = true)
 
+    /** PRD §8.10: the clocks the companion's own bounds give (the Mac's and iPhone's), and an update under way that never finishes. */
+    @Test fun anMcpUpdateUnderWayThatNeverFinishesSaysSoOnItsOwnClock() {
+        org.junit.Assert.assertEquals(120_000L, state.mcpWaitLimitMs)
+        org.junit.Assert.assertEquals(35 * 60_000L, state.mcpStartedLimitMs)
+        state.mcpStartedLimitMs = 1_000
+        state.noteMcpUpdate("mcp-000000000000000a", "started")
+        state.noteMcpUpdate("mcp-000000000000000b", "started")
+        state.noteMcpUpdate("mcp-000000000000000b", "done")
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(1_500))
+        org.junit.Assert.assertEquals(setOf("mcp-000000000000000a"), state.mcpUnheard.value)
+        state.noteMcpUpdate("mcp-000000000000000a", "started")
+        org.junit.Assert.assertEquals("a new word clears it", emptySet<String>(), state.mcpUnheard.value)
+    }
+
     private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false, secondUpdate: Boolean = false, neverHears: Boolean = false) {
         if (neverHears) state.mcpWaitLimitMs = 1_000
         val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
@@ -195,6 +209,7 @@ class HomeLayoutTests {
         }
         if (neverHears) {
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(state.mcpWaitLimitMs + 500))
+            org.junit.Assert.assertEquals("Counterpart didn’t say whether this updated. Try Update again.", AppState.MCP_UNHEARD)
             compose.waitUntil(5_000) { compose.onAllNodes(hasText(AppState.MCP_UNHEARD)).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("Updates as soon as Counterpart finishes its work on this printer.").assertDoesNotExist()
             compose.onNodeWithText("Move Bambu Lab P1S (mcp-3D-printer-server, your copy at /home/ada/mcp-3D-printer-server) to Counterpart’s updated copy").assertIsEnabled()

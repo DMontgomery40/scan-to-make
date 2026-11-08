@@ -30,7 +30,7 @@ import CounterpartKit
     var mcpCopiesProblem: String?
     /// What each printer MCP's update is doing, from `mcp.update.*` events and the Update reply. Set through `recordMCPUpdate`.
     private(set) var mcpUpdates: [String: MCPUpdateProgress] = [:]
-    /// A wait that hears nothing more for 90 s says so and offers Update again (the Mac's clock, CounterpartKit).
+    /// A wait (120 s) or an update under way (35 min) that hears nothing more says so and offers Update again (the Mac's clock, CounterpartKit).
     @ObservationIgnored let mcpWaits = MCPUpdateWaits()
     var attemptedMcpMoves: [String: String] = [:]
     /// What each printer last reported loaded, from a print sheet (the Mac reports spools per project).
@@ -44,17 +44,18 @@ import CounterpartKit
         #if DEBUG
         // UI tests: a wait that never hears from the canned Mac expires within the test.
         if Fixtures.folder != nil, let seconds = ProcessInfo.processInfo.environment["COUNTERPART_MCP_WAIT_SECONDS"].flatMap(Double.init) {
-            mcpWaits.limit = .milliseconds(Int(seconds * 1000))
+            mcpWaits.waitingLimit = .milliseconds(Int(seconds * 1000))
         }
         #endif
     }
 
-    /// Every change of an MCP update's state, from an event or an Update reply. A wait that hears nothing more becomes a
-    /// sentence and Update and Move are offered again (PRD §8.10: nothing in an update waits forever).
+    /// Every change of an MCP update's state, from an event or an Update reply. A wait or an update under way that hears
+    /// nothing more becomes a sentence and Update and Move are offered again (PRD §8.10: nothing in an update waits forever).
     func recordMCPUpdate(_ mcpId: String, _ progress: MCPUpdateProgress?) {
         mcpUpdates[mcpId] = progress
-        mcpWaits.note(mcpId, waiting: progress?.state == "waiting") { [weak self] in
-            guard let self, self.mcpUpdates[mcpId]?.state == "waiting" else { return }
+        let phase: MCPUpdateWaits.Phase? = progress?.state == "waiting" ? .waiting : progress?.state == "started" ? .started : nil
+        mcpWaits.note(mcpId, phase) { [weak self] in
+            guard let self, self.mcpUpdates[mcpId]?.isRunning == true else { return }
             self.recordMCPUpdate(mcpId, .unheard)
         }
     }

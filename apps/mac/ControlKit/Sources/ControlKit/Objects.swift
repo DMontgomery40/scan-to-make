@@ -497,6 +497,8 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
     public let capabilities: PrinterCapabilities?
     /// The MCP install this printer uses, shared by its printers (`printers.updateMcp`, PRD §8.10).
     public let mcpId: String?
+    /// The MCP its prints go through, as people know it, from the companion (absent before Nov 8).
+    public let mcpLabel: String?
     /// The same printer reached through both MCPs: the profile for each, the one in use first (`printers.chooseMcp`).
     public let mcps: [McpChoice]?
     /// A printer added in Counterpart: the folder its MCP runs in (its `.env` holds the settings).
@@ -528,10 +530,11 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
         default: return "mcp-3D-printer-server"
         }
     }
-    private enum CodingKeys: String, CodingKey { case id, aliases, name, backend, model, address, source, state, origin, capabilities, mcpId, mcps, folder, incomplete }
+    private enum CodingKeys: String, CodingKey { case id, aliases, name, backend, model, address, source, state, origin, capabilities, mcpId, mcpLabel, mcps, folder, incomplete }
     public init(id: String, name: String, backend: String, model: String? = nil, address: String? = nil, source: String = "mcp-profile",
                 state: String? = nil, origin: String? = nil, capabilities: PrinterCapabilities? = nil, mcpId: String? = nil,
-                mcps: [McpChoice]? = nil, folder: String? = nil, incomplete: Incomplete? = nil, aliases: [String]? = nil) {
+                mcps: [McpChoice]? = nil, folder: String? = nil, incomplete: Incomplete? = nil, aliases: [String]? = nil, mcpLabel: String? = nil) {
+        self.mcpLabel = mcpLabel
         self.id = id; self.name = name; self.backend = backend; self.model = model; self.address = address; self.source = source
         self.state = state; self.origin = origin; self.capabilities = capabilities; self.mcpId = mcpId; self.mcps = mcps; self.folder = folder
         self.incomplete = incomplete
@@ -550,6 +553,7 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
         origin = try? values.decodeIfPresent(String.self, forKey: .origin)
         capabilities = try? values.decodeIfPresent(PrinterCapabilities.self, forKey: .capabilities)
         mcpId = try? values.decodeIfPresent(String.self, forKey: .mcpId)
+        mcpLabel = try? values.decodeIfPresent(String.self, forKey: .mcpLabel)
         mcps = try? values.decodeIfPresent([McpChoice].self, forKey: .mcps)
         folder = try? values.decodeIfPresent(String.self, forKey: .folder)
         incomplete = try? values.decodeIfPresent(Incomplete.self, forKey: .incomplete)

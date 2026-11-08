@@ -281,6 +281,8 @@ export const PrinterDestinationSchema = z.strictObject({
   capabilities: PrinterCapabilitiesSchema.optional(),
   /** PRD §8.10 (PR 6): the MCP install this printer runs; every printer on the same install shares it. */
   mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/).optional(),
+  /** The MCP its prints go through, as people know it (`mcp-3D-printer-server`): clients show it as sent. */
+  mcpLabel: text(64).optional(),
   /**
    * The same printer reached through both MCPs: each MCP's profile, the one in use first (`printers.chooseMcp`). Each
    * names the install it runs, its name as people know it and its versions, so every MCP keeps its Settings row and Update.

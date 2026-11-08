@@ -524,29 +524,33 @@ export function spoolTitle(f: import("./types").Filament): string {
 }
 
 /**
- * PRD §8.10: an update that says it waits, then hears nothing more from the companion for this long, says so. The
- * companion ends every wait within a minute; past this its event went missing (a restart). The Mac's and phones' clock.
+ * PRD §8.10: an update that hears nothing more from the companion says so, as on the Mac and phones. A wait for
+ * Counterpart's own work: the companion waits up to 60 s, then admits the update after one claim and one npm lookup
+ * (~97 s at most before `started`).
  */
-export const MCP_WAIT_LIMIT_MS = 90_000;
+export const MCP_WAIT_LIMIT_MS = 120_000;
+/** An update under way: three install steps of up to 10 minutes each plus the MCP's restart. */
+export const MCP_STARTED_LIMIT_MS = 35 * 60_000;
 export const MCP_UNHEARD = "Counterpart didn’t say whether this updated. Try Update again.";
+export type McpPhase = "waiting" | "started";
 
-/** Whether an Update answer, or an mcp.update.* event, leaves that install waiting on the companion. */
-export function mcpWaiting(change: {type?: string; update?: {state: string}; state?: string}): boolean {
-  if (change.type) return change.type === "mcp.update.waiting";
-  return (change.update?.state ?? change.state) === "waiting";
+/** Where an Update answer, or an mcp.update.* event, leaves that install: waiting, under way, or neither. */
+export function mcpPhase(change: {type?: string; update?: {state: string}; state?: string}): McpPhase | undefined {
+  const state = change.type ? change.type.replace(/^mcp\.update\./, "") : change.update?.state ?? change.state;
+  return state === "waiting" || state === "started" ? state : undefined;
 }
 
 /**
- * The clock for each install's wait: `note` on every change of its state (a wait starts its clock, anything else stops
- * it); `expire` runs for an install whose wait heard nothing more within `limitMs`.
+ * The clock for each install: `note` on every change of its state (waiting or started starts that phase's clock,
+ * anything else stops it); `expire` runs for an install that heard nothing more within its phase's limit.
  */
-export function mcpWaitClock(expire: (mcpId: string) => void, limitMs = MCP_WAIT_LIMIT_MS) {
+export function mcpWaitClock(expire: (mcpId: string) => void, limits: Record<McpPhase, number> = {waiting: MCP_WAIT_LIMIT_MS, started: MCP_STARTED_LIMIT_MS}) {
   const clocks = new Map<string, ReturnType<typeof setTimeout>>();
   return {
-    note(mcpId: string, waiting: boolean) {
+    note(mcpId: string, phase: McpPhase | undefined) {
       clearTimeout(clocks.get(mcpId));
       clocks.delete(mcpId);
-      if (waiting) clocks.set(mcpId, setTimeout(() => { clocks.delete(mcpId); expire(mcpId); }, limitMs));
+      if (phase) clocks.set(mcpId, setTimeout(() => { clocks.delete(mcpId); expire(mcpId); }, limits[phase]));
     },
     stop() { for (const clock of clocks.values()) clearTimeout(clock); clocks.clear(); },
   };

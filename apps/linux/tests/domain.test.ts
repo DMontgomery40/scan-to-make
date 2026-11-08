@@ -513,26 +513,34 @@ test("while the printer MCP sends the file, a project shows the companion's perc
   assert.equal(words({ id: "x", state: "printing", progress: "Sending to the printer… 62%" } as unknown as Project), "Sending to the printer… 62%");
 });
 
-// PRD §8.10: an update the companion said waits, whose finishing event never came (a restart), says so instead of
-// "waiting" forever; any word about that install first (it started) stops its clock. The Mac's and phones' 90 s clock.
-test("a wait that never hears back says so, and any other word stops its clock", async () => {
-  const { mcpWaiting, mcpWaitClock, MCP_UNHEARD, MCP_WAIT_LIMIT_MS, mcpUpdateNotice } = await import("../src/domain.ts");
-  assert.equal(MCP_WAIT_LIMIT_MS, 90_000);
+// PRD §8.10: an update the companion said waits or started, whose finishing event never came (a restart), says so
+// instead of "waiting" forever; any word about that install first stops its clock. The Mac's and phones' clocks.
+// The useWorkspace wiring of the sentence has no component harness here and is untested.
+test("a wait or a start that never hears back says so, and any other word stops its clock", async () => {
+  const { mcpPhase, mcpWaitClock, MCP_UNHEARD, MCP_WAIT_LIMIT_MS, MCP_STARTED_LIMIT_MS, mcpUpdateNotice } = await import("../src/domain.ts");
+  assert.equal(MCP_WAIT_LIMIT_MS, 120_000);
+  assert.equal(MCP_STARTED_LIMIT_MS, 35 * 60_000);
   assert.equal(MCP_UNHEARD, "Counterpart didn’t say whether this updated. Try Update again.");
   const reply = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/mcp-update-waiting.json", import.meta.url), "utf8"));
-  assert.ok(mcpWaiting(reply), "Update's answer: waiting");
+  assert.equal(mcpPhase(reply), "waiting", "Update's answer: waiting");
   assert.equal(mcpUpdateNotice(reply), "Updates as soon as Counterpart finishes its work on this printer.");
-  assert.ok(mcpWaiting({ type: "mcp.update.waiting" }));
-  assert.ok(!mcpWaiting({ type: "mcp.update.started" }) && !mcpWaiting({ update: { state: "started" } }));
+  assert.equal(mcpPhase({ type: "mcp.update.waiting" }), "waiting");
+  assert.equal(mcpPhase({ type: "mcp.update.started" }), "started");
+  assert.equal(mcpPhase({ update: { state: "started" } }), "started");
+  assert.equal(mcpPhase({ type: "mcp.update.done" }), undefined);
+  assert.equal(mcpPhase({ update: { state: "current" } }), undefined);
   const expired: string[] = [];
-  const clock = mcpWaitClock((id) => expired.push(id), 30);
-  clock.note(reply.update.mcpId, true);
-  clock.note("heard", true);
-  clock.note("heard", false);
-  await new Promise((resolve) => setTimeout(resolve, 120));
-  assert.deepEqual(expired, [reply.update.mcpId]);
-  clock.note("stopped", true);
+  const clock = mcpWaitClock((id) => expired.push(id), { waiting: 30, started: 60 });
+  clock.note(reply.update.mcpId, "waiting");
+  clock.note("stuck", "started");
+  clock.note("heard", "waiting");
+  clock.note("heard", undefined);
+  clock.note("finished", "started");
+  clock.note("finished", undefined);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.deepEqual(expired, [reply.update.mcpId, "stuck"]);
+  clock.note("stopped", "started");
   clock.stop();
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.deepEqual(expired, [reply.update.mcpId], "stopping clears every clock");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(expired, [reply.update.mcpId, "stuck"], "stopping clears every clock");
 });

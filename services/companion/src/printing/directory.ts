@@ -16,6 +16,8 @@ export interface PublicDestination extends Omit<PrinterDestination, 'mcps'> {
   stateCheckedAt?: string;
   capabilities?: PrinterCapabilities;
   mcpId?: string;
+  /** The MCP this printer's prints go through, as people know it (PRD §8.10): clients never name a package themselves. */
+  mcpLabel?: string;
   mcps?: PublicMcpChoice[];
 }
 
@@ -165,6 +167,7 @@ export class PrinterDirectory {
         ...(known ? {stateCheckedAt: new Date(known.checkedAt).toISOString()} : {}),
         ...(capabilities ? {capabilities: this.#withLatest(structuredClone(capabilities), destination.backend)} : {}),
         ...(mcpId ? {mcpId} : {}),
+        ...(PACKAGE_LABELS[destination.backend] ? {mcpLabel: PACKAGE_LABELS[destination.backend]} : {}),
         ...(destination.mcps ? {mcps: destination.mcps.map(choice => this.#choice(choice))} : {})};
     })};
   }
