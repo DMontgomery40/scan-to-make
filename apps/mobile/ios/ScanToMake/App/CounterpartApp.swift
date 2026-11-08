@@ -8,13 +8,14 @@ struct CounterpartApp: App {
     @UIApplicationDelegateAdaptor(MobileNotifications.self) private var notifications
     @State private var app = AppModel()
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.horizontalSizeClass) private var width
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 #if DEBUG
-                .environment(\.horizontalSizeClass, app.fixtureWidth ?? width)
+                .transformEnvironment(\.horizontalSizeClass) { value in
+                    if let width = app.fixtureWidth { value = width }
+                }
                 #endif
                 .environment(app)
                 .tint(.filament)
