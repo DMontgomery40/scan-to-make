@@ -43,5 +43,6 @@
     }
   },
   "postureVerification": "agent-device fold closed/open dispatched successfully but hinge reads returned no sample; device_screenshot confirmed the active outer and inner panels. No hinge angle is claimed.",
-  "result": "The full action label is legible and the enabled control is reachable above the composer in both layouts. Both control dimensions exceed 44 points. Production SwiftUI APIs are current. The API audit replaced deprecated Foundation URL calls in the two new tests; production UI code is unchanged."
+  "result": "The full action label is legible and the enabled control is reachable above the composer in both layouts. Both control dimensions exceed 44 points. Production SwiftUI APIs are current. The API audit replaced deprecated Foundation URL calls in the two new tests; production UI code is unchanged.",
+  "validationStatus": "Historical before the S4 named confirmation and strip undo review fixes. runtimeSource is the exact build captured, not the current PR head. Recapture iPhone and both Duo panels after S4 before final review."
 }
