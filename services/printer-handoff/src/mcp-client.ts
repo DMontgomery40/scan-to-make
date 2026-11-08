@@ -160,7 +160,9 @@ export class PrinterMcpClient {
     this.#client = client;
     // This client routes progress itself. The SDK runs notification handlers a microtask late but drops a call's
     // progress handler as soon as its result arrives, so the last progress (an upload's 100%) was lost whenever it
-    // came in the same read as the result. Here the call's listener stays until the call has settled.
+    // came in the same read as the result. Here the call's listener stays until the call has settled. This replaces
+    // the SDK's own progress handler for this Client: SDK `onprogress` options do nothing here, and progress for an
+    // unknown token is dropped rather than reported as an error.
     client.setNotificationHandler(ProgressNotificationSchema, ({params: {progressToken, ...params}}) => {
       this.#progress.get(String(progressToken))?.(params);
     });
@@ -400,6 +402,7 @@ export class PrinterMcpClient {
     const client = this.#client, transport = this.#transport, pid = transport?.pid ?? null;
     this.#client = undefined; this.#transport = undefined; this.#catalog = undefined;
     this.#elicitationContext = {};
+    this.#progress.clear();
     // Cancel this session's unanswered prompts so no stale confirmation (or
     // its ref'd expiry timer) outlives the connection on abort/timeout.
     for (const id of [...this.#outstandingElicitations]) {

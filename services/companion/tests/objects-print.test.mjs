@@ -489,10 +489,14 @@ test('the fixture MCP\'s upload progress reaches project.progress and project.up
   const percents = ['19%', '39%', '59%', '79%', '100%'].map(percent => `Sending to the printer… ${percent}`);
   assert.deepEqual(written.filter(progress => progress?.startsWith('Sending to the printer')), percents);
   assert.ok(written.indexOf('Print request accepted.') > written.indexOf(percents[4]), 'accepted after the upload ended');
-  // Announced once; then the silent refreshes: after the 2 s spacing (79%) and always at 100%.
+  // Announced once; then the silent refreshes: spaced 2 s apart, so never the 39% that follows 19% at once, in order,
+  // and always ending at 100%. Which middle step crosses the spacing depends on load, so it isn't pinned.
   assert.deepEqual(emitted.filter(e => e.type === 'print.preparing' && e.data.stage === 'Sending to the printer').map(e => e.progress), [percents[0]]);
   const refreshes = emitted.filter(e => e.type === 'project.updated' && e.projectId === object.id && e.data?.keys?.includes('progress'));
-  assert.deepEqual(refreshes.map(e => e.progress), [percents[3], percents[4]]);
+  const refreshed = refreshes.map(e => e.progress);
+  assert.equal(refreshed.at(-1), percents[4]);
+  assert.ok(!refreshed.includes(percents[1]), 'no refresh inside the 2 s spacing');
+  assert.deepEqual(refreshed, percents.filter(percent => refreshed.includes(percent)), 'in order, each once');
   assert.deepEqual(done.print.events.filter(e => e.message.startsWith('Sending')).map(e => e.message), ['Sending to the printer…']);
 });
 

@@ -85,7 +85,9 @@ export const printerTimeoutsSchema = z.strictObject({
   /** A call that reports progress (print_3mf's upload) may run this long in total while it keeps reporting. */
   toolTotalMs: z.number().int().min(50).max(14_400_000).optional(),
   elicitationMs: z.number().int().min(50).max(1800000).optional(),
-}).refine(({toolMs, toolTotalMs}) => toolMs === undefined || toolTotalMs === undefined || toolTotalMs >= toolMs,
+  // Compared as they take effect: a value left out is its default (timeoutsFor), so toolTotalMs alone can't be shorter
+  // than the default toolMs and be quietly ignored.
+}).refine(({toolMs, toolTotalMs}) => (toolTotalMs ?? DEFAULT_TIMEOUTS.toolTotalMs) >= (toolMs ?? DEFAULT_TIMEOUTS.toolMs),
   {message: 'toolTotalMs must be at least toolMs', path: ['toolTotalMs']});
 export type PrinterTimeouts = z.infer<typeof printerTimeoutsSchema>;
 
@@ -107,6 +109,8 @@ export type PrinterHandoffConfig = z.infer<typeof printerHandoffConfigSchema>;
  * (src/printers/ftp-upload.ts), so 268,435,456 B / 133,120 B/s = 2,017 s of upload; the print's confirmation may
  * wait elicitationMs, 600 s, in the same call; that leaves 983 s, eight of the 120 s SD-card pauses either MCP
  * allows (FTP_UPLOAD_STALL_MS), before one hour. A printer that stops is still caught by toolMs without progress.
+ * A question to the person does not restart toolMs: as before this bound existed, the answer must come within toolMs
+ * of the call's start or its last progress.
  */
 export const DEFAULT_TIMEOUTS = {connectMs: 10000, toolMs: 600000, toolTotalMs: 3_600_000, elicitationMs: 600000} as const;
 export function timeoutsFor(config: Pick<PrinterHandoffConfig, 'timeouts'>): Required<PrinterTimeouts> {

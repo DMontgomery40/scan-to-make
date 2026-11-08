@@ -125,6 +125,10 @@ test('toolTotalMs defaults to an hour, is bounded, and is never shorter than too
   assert.equal(printerTimeoutsSchema.safeParse({toolMs: 600_000, toolTotalMs: 599_999}).success, false);
   assert.equal(printerTimeoutsSchema.safeParse({toolTotalMs: 14_400_001}).success, false);
   assert.equal(printerTimeoutsSchema.safeParse({toolTotalMs: 49}).success, false);
+  // Left out, toolMs is its default: a total below it would be ignored, so it is refused.
+  assert.equal(printerTimeoutsSchema.safeParse({toolTotalMs: 1000}).success, false);
+  assert.ok(printerTimeoutsSchema.safeParse({toolMs: 600, toolTotalMs: 1000}).success);
+  assert.ok(printerTimeoutsSchema.safeParse({toolMs: 1_800_000}).success, 'the default total covers the longest toolMs');
 });
 
 test('a selected colour and profile reach slicing and its AMS slot reaches printing', async t => {
