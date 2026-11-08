@@ -14,14 +14,6 @@ import HandheldKit
 //       Writes the model's triangles as a binary STL in millimetres, Z up, centred and resting on z = 0
 //       (PhotogrammetrySession writes metres, Y up). --render also draws the model for the project page; a model
 //       that can't be drawn still gets its STL, and the {"done":…} line names the picture only when there is one.
-//   mac-reconstruct walkaround <images-folder> <output.usdz> [reduced|medium|full|raw]
-//                   [--no-masks] [--save-masks <dir> [--masks-only]]
-//       A walk-around or scan-rig session's own HEICs (the object stays still, the phone moves), without depending
-//       on Object Capture's capture box. Each photo becomes a PhotogrammetrySample as Apple wrote it (LiDAR depth for
-//       scale, gravity, camera) with an object mask from ObjectMasker, the same Vision masks as `samples`: Apple's
-//       promptable segmentation seeded on the foreground blob nearest the middle and the camera. With no hand in
-//       frame there is nothing to subtract; a person behind the object is. A photo whose mask comes back empty, or a
-//       Mac before macOS 27, stays unmasked: RealityKit masks it itself.
 //   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
 //                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 //       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
@@ -41,7 +33,6 @@ func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
 let usage = """
 usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
        mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>]
-       mac-reconstruct walkaround <images-folder> <output.usdz> [reduced|medium|full|raw] [--no-masks] [--save-masks <dir> [--masks-only]]
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 
 """
@@ -64,8 +55,7 @@ if args.first == "stl" {
     } catch { fail(String(describing: error)) }
 }
 let samplesMode = args.first == "samples"
-let walkaroundMode = args.first == "walkaround"
-if samplesMode || walkaroundMode { args.removeFirst() }
+if samplesMode { args.removeFirst() }
 func option(_ name: String) -> String? {
     guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
     let value = args[i + 1]; args.removeSubrange(i...(i + 1)); return value
@@ -87,14 +77,16 @@ let detail = details[args.count > 2 ? args[2] : "full"] ?? .full
 guard PhotogrammetrySession.isSupported else { fail("Photogrammetry isn't supported on this Mac.") }
 
 var configuration = PhotogrammetrySession.Configuration()
-configuration.sampleOrdering = .sequential      // photos are in capture order
-configuration.featureSensitivity = .normal
 configuration.isObjectMaskingEnabled = !noObjectMasking   // the object, not what's around it
-if walkaroundMode {
-    // Apple's settings "for challenging images": slower, more sensitive landmark detection (a rig scan has a plain
-    // backdrop and dim, 1/60 s frames). The person's capture box is not used at all: the masks say what the object is.
+if samplesMode {
+    configuration.sampleOrdering = .sequential  // the handheld recorder's photos are adjacent, in capture order
+    configuration.featureSensitivity = .normal
+} else {
+    // An Object Capture folder, Apple's way: its own per-photo camera, depth, gravity and capture box, its own masks.
+    // .high: Apple's setting "for challenging images" (dim 1/60 s rig frames, a plain backdrop). The ordering stays
+    // Apple's default: on David's rig scan, .sequential with .high placed 5–7 of 24 photos and left part of the sign
+    // in three runs, against 9 of 24 and the same front of the sign in three runs unordered.
     configuration.featureSensitivity = .high
-    configuration.ignoreBoundingBox = true
 }
 
 let started = Date()
@@ -136,48 +128,7 @@ func prepareMasks(for files: [URL], in folder: URL) async throws {
 
 do {
     let session: PhotogrammetrySession
-    if walkaroundMode {
-        let files = try photos(in: input)
-        guard !files.isEmpty else { fail("No photos in \(input.path).") }
-        // Apple: "If your source images contain depth data, RealityKit uses it to calculate the real-world size."
-        emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count])
-        let folder = saveMasks ?? FileManager.default.temporaryDirectory.appendingPathComponent("mac-reconstruct-masks-\(UUID().uuidString)")
-        // Promptable segmentation is new in macOS 27; before that the photos go unmasked rather than failing the scan.
-        var masking = !noMasks && (maskFolder != nil || ObjectMasker.isSupported)
-        if masking {
-            // Vision's segmentation model downloads once; if it can't (offline), the scan still builds, unmasked.
-            do { try await prepareMasks(for: files, in: folder) }
-            catch { masking = false; emit(["masks": "unavailable", "reason": String(describing: error)]) }
-        } else if !noMasks { emit(["masks": "unavailable"]) }
-        let maskName = { (file: URL) in folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png") }
-        // A walk-around frames the object large. A mask under 2% of the photo missed it (on David's rig scan: 0.6% and
-        // 1.1%, a corner of the sign) and would hide nearly the whole photo from Apple; that photo goes unmasked instead.
-        func usableMask(_ file: URL) -> GrayImage? {
-            guard masking, let mask = try? GrayImage(contentsOf: maskName(file)) else { return nil }
-            return Double(mask.onCount) >= 0.02 * Double(mask.width * mask.height) ? mask : nil
-        }
-        let masked = files.filter { usableMask($0) != nil }.count
-        if masksOnly { emit(["done": folder.path, "masked": masked, "seconds": Int(Date().timeIntervalSince(started))]); exit(0) }
-        emit(["samples": files.count, "masked": masked, "stage": "reconstructing"])
-        // Loaded lazily, as Apple asks for a sequence: a few hundred full-resolution photos don't sit in memory together.
-        let samples = AnySequence<PhotogrammetrySample> {
-            var iterator = files.makeIterator()
-            return AnyIterator<PhotogrammetrySample> {
-                while let file = iterator.next() {
-                    do {
-                        var sample = try loadWalkAroundSample(file)
-                        if noDepth { sample.depthDataMap = nil }
-                        if let mask = usableMask(file) { sample.objectMask = mask.pixelBuffer() }
-                        return sample
-                    } catch {
-                        emit(["skipped": file.lastPathComponent, "reason": String(describing: error)])
-                    }
-                }
-                return nil
-            }
-        }
-        session = try PhotogrammetrySession(input: samples, configuration: configuration)
-    } else if samplesMode {
+    if samplesMode {
         let files = try photos(in: input)
         guard !files.isEmpty else { fail("No photos in \(input.path).") }
         var masks: URL? = nil
