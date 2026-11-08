@@ -92,9 +92,14 @@ function shuffled<T>(items:T[],seed:string):T[]{
 }
 
 async function blender(options:PickOptions,script:string,args:string[],signal?:AbortSignal){
- // Without --python-exit-code Blender exits 0 when the script raises (as every Blender call in this repo passes).
- await run(options.blender,['-b','--factory-startup','--python-exit-code','1','-P',join(options.toolDir,script),'--',...args],
-  {timeout:600000,maxBuffer:16*1024*1024,signal,env:{PATH:'/usr/bin:/bin',HOME:tmpdir()}});
+ // An isolated, throwaway HOME: Blender and fontconfig write .config/.cache under it,
+ // which HOME: tmpdir() left behind in the shared temp folder.
+ const home=await mkdtemp(join(tmpdir(),'stm-ai-pick-home-'));
+ try{
+  // Without --python-exit-code Blender exits 0 when the script raises (as every Blender call in this repo passes).
+  await run(options.blender,['-b','--factory-startup','--python-exit-code','1','-P',join(options.toolDir,script),'--',...args],
+   {timeout:600000,maxBuffer:16*1024*1024,signal,env:{PATH:'/usr/bin:/bin',HOME:home}});
+ }finally{await rm(home,{recursive:true,force:true});}
 }
 
 /**
