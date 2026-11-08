@@ -1,18 +1,18 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir,mkdtemp,readFile,readdir,rm,writeFile} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {mkdir,readFile,readdir,rm,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {ScanProcessingJobSchema,AI_ATTEMPT_PREVIEW_NAMES} from '@scan-to-make/contracts/scan-processing';
 import {aiTweakRecord,exportMeshBundle,exportPicked,publicReason,writeAiCorrection} from '../dist/ai-tweak-export.js';
 import {aiStageBudget,checkCleanupDisk,AI_AFTER_MS,AI_CLEANUP_JOB_MS} from '../dist/scan-cleanup-runner.js';
 import {open} from 'node:fs/promises';
 import {readScanMaterials} from '../dist/scan-model-assets.js';
+import {tempDir} from './support/temp.mjs';
 
 const PNG=[137,80,78,71,13,10,26,10];
 const png=n=>Buffer.from([...PNG,n,n,n]);
 
-async function dir(t){const root=await mkdtemp(join(tmpdir(),'ai-export-test-'));t.after(()=>rm(root,{recursive:true,force:true}));return root;}
+async function dir(t){const root=await tempDir('ai-export-test-');t.after(()=>rm(root,{recursive:true,force:true}));return root;}
 /** Run the exported bundle through the check the /model-assets publisher (KAN-141) and make-printable (KAN-185) apply. */
 async function publisherCheck(out,outputs){
  return readScanMaterials(out,await readFile(join(out,'corrected.obj')),outputs);

@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
+import {mkdir, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {createServer} from 'node:http';
 import {HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
@@ -10,13 +9,14 @@ import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {showing, showingRunner} from './support/shown-print.mjs';
+import {tempDir} from './support/temp.mjs';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean'}}, required: ['confirmed']};
 const until = async check => { for (let i = 0; i < 100; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
 
 async function fixture(t, {printers} = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'object-printers-'));
+  const root = await tempDir('object-printers-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const current = {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/ssh', args: ['retained-route'], env: {TOKEN: 'private-current-token'}}};
   const second = {backend: 'mcp-3d-printer-server', process: {command: '/absolute/other-mcp', args: ['serve'], env: {API_KEY: 'private-other-key'}}, selection: {host: 'second.local'}};

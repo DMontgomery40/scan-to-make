@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readFile,stat,writeFile,chmod,symlink} from 'node:fs/promises';
+import {rm,readFile,stat,writeFile,chmod,symlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {ModelAccessService} from '../dist/model-access.js';
@@ -8,10 +8,11 @@ import {createModelWorker} from '../dist/model-access-worker.js';
 import {parseRequest} from '../dist/local-control-protocol.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
+import {tempDir} from './support/temp.mjs';
 
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 async function fixture(t,worker=async()=>({exitCode:0,stdout:JSON.stringify({ok:true})})){
- const root=await mkdtemp('/tmp/stm-model-');t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('stm-model-');t.after(()=>rm(root,{recursive:true,force:true}));
  const service=await ModelAccessService.open(root,worker);t.after(()=>service.close());
  return {root,service};
 }
@@ -144,7 +145,7 @@ test('shared URL fixtures agree with the Swift wire validator',async()=>{
 });
 
 test('concurrent first-create publishes one complete record and ignores interrupted temporary files',async t=>{
- const root=await mkdtemp('/tmp/stm-model-');t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('stm-model-');t.after(()=>rm(root,{recursive:true,force:true}));
  await writeFile(join(root,'model-access.json.interrupted'),'{"version":',{mode:0o600});
  const stores=await Promise.all(Array.from({length:12},()=>ModelAccessService.open(root)));
  assert.equal(new Set(stores.map(s=>s.get().revision)).size,1);

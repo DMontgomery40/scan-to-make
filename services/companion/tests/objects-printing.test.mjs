@@ -2,9 +2,8 @@ import {createRequire} from 'node:module';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {existsSync} from 'node:fs';
-import {mkdtemp, mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, readdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {createServer} from 'node:http';
 import {HandoffBundleStore, InMemoryElicitationRelay, PrinterMcpError, PrinterSession} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
@@ -16,6 +15,7 @@ import {createObjectRoutes} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {showing, showingRunner, shownSlice} from './support/shown-print.mjs';
 import {createHash} from 'node:crypto';
+import {tempDir} from './support/temp.mjs';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(32, 7)]);
@@ -30,7 +30,7 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
  * test steps by hand: every printer report and every wait is scripted.
  */
 async function setup(t, {tools = ['counterpart_printer_info', 'counterpart_print_progress', 'camera_snapshot', 'get_printer_filaments', 'pause_print', 'resume_print', 'cancel_print', 'slice_stl'], sliceArgs = false, copies = false, controlsRoute = false, reports = [], route, backend = 'bambu-printer-mcp', info, slots, controlEnds = false} = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'objects-printing-'));
+  const root = await tempDir('objects-printing-');
   let service;
   t.after(async () => { await service?.close(); await rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}); });
   const calls = [], events = [], runs = [];

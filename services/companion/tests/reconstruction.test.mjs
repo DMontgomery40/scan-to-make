@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {createServer} from 'node:http';
-import {chmod, mkdtemp, mkdir, readFile, writeFile} from 'node:fs/promises';
+import {chmod, mkdir, readFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
 import {linuxReconstructRunner, macQualifiedReconstructRunner, parseRegionOutcome, parseScaleOutcome, reconstructionReviewSupported, reconstructionReadiness, resetReconstructionReadiness, QUALIFY_NOT_INSTALLED} from '../dist/objects/reconstruct.js';
 import {validateCaptureCamera, InvalidCaptureCameraError} from '../dist/objects/capture-camera.js';
+import {tempDir} from './support/temp.mjs';
 
 const STL = 'solid m\nendsolid m\n';
 const HASH_A = 'a'.repeat(64), HASH_B = 'b'.repeat(64);
@@ -32,7 +32,7 @@ function regionOutcome(input) {
 }
 
 async function setup({reconstruct} = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'reconstruction-'));
+  const root = await tempDir('reconstruction-');
   const store = new ObjectStore(join(root, 'objects'));
   const touchups = [], builds = [];
   const runTouchup = async input => {
@@ -173,7 +173,7 @@ test('manifest accepts numbered jpg/png and keeps depth an iPhone HEIC-only prot
 });
 
 test('linux runner maps exit 5 and 0, preserves abort, and parses outcomes strictly', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'linux-runner-'));
+  const root = await tempDir('linux-runner-');
   const script = join(root, 'fake-tool');
   const region = {needsObjectRegion: {receipt: '/w/needs.json', previewMeshSha256: HASH_A, previewMesh: '/w/p.ply', previewStl: '/w/p.stl',
     boundsMin: [-1, 0, -1], boundsMax: [1, 2, 1], scaleKnown: false, scaleMPerUnit: null,
@@ -259,7 +259,7 @@ test('scaleQualificationRequired is recorded, digest-bound, and reaches the runn
 });
 
 test('Mac qualified runner: Apple first, then qualify; plain iPhone path untouched', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'mac-qualified-'));
+  const root = await tempDir('mac-qualified-');
   const calls = join(root, 'calls.log');
   const mac = join(root, 'fake-mac');
   // mac-reconstruct argv: samples <dir> <output> full --save-masks <dir>
@@ -288,7 +288,7 @@ test('Mac qualified runner: Apple first, then qualify; plain iPhone path untouch
 });
 
 test('reconstructionReviewSupported reflects the tools actually present', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'capability-'));
+  const root = await tempDir('capability-');
   const tool = join(root, 'tool');
   await writeFile(tool, '#!/bin/sh\n');
   await chmod(tool, 0o755);
@@ -299,7 +299,7 @@ test('reconstructionReviewSupported reflects the tools actually present', async 
 
 test('readiness passes the supplied environment to the probe and drains stderr', async () => {
   resetReconstructionReadiness();
-  const root = await mkdtemp(join(tmpdir(), 'readiness-env-'));
+  const root = await tempDir('readiness-env-');
   const tool = join(root, 'tool');
   await writeFile(tool, `#!/bin/sh\ni=0; while [ $i -lt 200 ]; do echo "noisy-stderr-line-$i" >&2; i=$((i+1)); done\nif [ "$STM_PROBE" = "yes" ]; then echo '{"ok":true,"versions":{"python":"3.12"}}'; else echo '{"ok":false,"error":"no env"}'; exit 2; fi\n`);
   await chmod(tool, 0o755);
@@ -310,7 +310,7 @@ test('readiness passes the supplied environment to the probe and drains stderr',
 
 test('readiness cache is keyed by packaged BUILD-ID, not launcher mtime', async () => {
   resetReconstructionReadiness();
-  const root = await mkdtemp(join(tmpdir(), 'readiness-buildid-'));
+  const root = await tempDir('readiness-buildid-');
   await mkdir(join(root, 'bin'));
   const tool = join(root, 'bin', 'linux-reconstruct');
   const counter = join(root, 'count');
@@ -335,7 +335,7 @@ test('readiness cache is keyed by packaged BUILD-ID, not launcher mtime', async 
 
 test('readiness runs the tool check once, caches it, and never caches failure as success', async () => {
   resetReconstructionReadiness();
-  const root = await mkdtemp(join(tmpdir(), 'readiness-'));
+  const root = await tempDir('readiness-');
   const tool = join(root, 'tool');
   const counter = join(root, 'count');
   await writeFile(tool, `#!/bin/sh\necho x >> ${counter}\nif [ -f ${root}/fail ]; then echo '{"ok":false,"error":"USD runtime unavailable: test"}'; exit 2; fi\necho '{"ok":true,"toolVersion":"9.9","versions":{"python":"3.12"}}'\n`);

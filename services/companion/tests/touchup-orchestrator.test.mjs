@@ -1,26 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, writeFile} from 'node:fs/promises';
-import {mkdtempSync} from 'node:fs';
+import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {runTouchup, acquireBlenderLock} from '../dist/touchup/touchup.js';
 import {spawn} from 'node:child_process';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {BlenderBridgeUnavailableError} from '../dist/touchup/blender.js';
+import {tempDir, tempDirSync} from './support/temp.mjs';
 
 const fixtures = fileURLToPath(new URL('./fixtures/touchup/', import.meta.url));
 const handoff = {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true', env: {MCP_TRANSPORT: 'stdio'}}};
 const done = pass => ({status: 'done', model: join(pass.outDir, 'touched.stl'), summary: 'ok', renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}});
 
 async function input(extra = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-orch-'));
+  const root = await tempDir('touchup-orch-');
   return {root, objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')], handoff, claudePath: '/c', ...extra};
 }
 function recorder(log, runDelayMs = 0) {
   return {
-    lockPath: join(mkdtempSync(join(tmpdir(), 'touchup-orch-lock-')), 'blender.lock'),
+    lockPath: join(tempDirSync('touchup-orch-lock-'), 'blender.lock'),
     ensureBlender: async () => { log.push('ensureBlender'); return 'already-running'; },
     resetScene: async () => { log.push('resetScene'); },
     stopBlender: async () => { log.push('stopBlender'); },
@@ -64,7 +63,7 @@ test('a failed touch-up does not block the next one', async () => {
 
 test('correction pass', async () => {
   const log = [];
-  const previous = join(await mkdtemp(join(tmpdir(), 'touchup-prev-')), 'touched.stl');
+  const previous = join(await tempDir('touchup-prev-'), 'touched.stl');
   await writeFile(previous, 'solid previous\nendsolid previous\n');
   let seenScan, seenPrompt, seenSha;
   const deps = {...recorder(log),
@@ -85,7 +84,7 @@ test('making something from instructions needs no scan or photos', async () => {
 });
 
 test('explicit original-input recovery does not treat an STL as a completed model', async () => {
-  const previous = join(await mkdtemp(join(tmpdir(), 'touchup-prev-')), 'original.stl');
+  const previous = join(await tempDir('touchup-prev-'), 'original.stl');
   await writeFile(previous, 'solid original\nendsolid original\n');
   let seenPrompt;
   await runTouchup(await input({scan: [previous], note: 'Please try the saved inputs again.', currentModel: false}),
@@ -95,7 +94,7 @@ test('explicit original-input recovery does not treat an STL as a completed mode
 
 test('a correction on an instructions-only job needs no photos', async () => {
   const log = [];
-  const previous = join(await mkdtemp(join(tmpdir(), 'touchup-prev-')), 'touched.stl');
+  const previous = join(await tempDir('touchup-prev-'), 'touched.stl');
   await writeFile(previous, 'solid previous\nendsolid previous\n');
   let seenPrompt;
   const deps = {...recorder(log), run: async (inv, pass) => { seenPrompt = inv.args.at(-1); return done(pass); }};
@@ -104,7 +103,7 @@ test('a correction on an instructions-only job needs no photos', async () => {
 });
 
 test('another process holding Blender makes this one wait', async () => {
-  const lockPath = join(await mkdtemp(join(tmpdir(), 'touchup-lock-')), 'blender.lock');
+  const lockPath = join(await tempDir('touchup-lock-'), 'blender.lock');
   const holder = spawn('/bin/sleep', ['1']);
   await writeFile(lockPath, String(holder.pid));
   const started = Date.now();
@@ -114,7 +113,7 @@ test('another process holding Blender makes this one wait', async () => {
 });
 
 test('a lock left by a dead process is taken over', async () => {
-  const lockPath = join(await mkdtemp(join(tmpdir(), 'touchup-lock-')), 'blender.lock');
+  const lockPath = join(await tempDir('touchup-lock-'), 'blender.lock');
   await writeFile(lockPath, '999999');
   const started = Date.now();
   const release = await acquireBlenderLock(lockPath, {pollMs: 50});
@@ -123,7 +122,7 @@ test('a lock left by a dead process is taken over', async () => {
 });
 
 test('many processes racing for the Blender lock never overlap', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'touchup-race-'));
+  const dir = await tempDir('touchup-race-');
   const lockPath = join(dir, 'blender.lock'), logPath = join(dir, 'log');
   const module = new URL('../dist/touchup/touchup.js', import.meta.url).href;
   const script = `const {acquireBlenderLock} = await import(${JSON.stringify(module)});
@@ -158,7 +157,7 @@ test('a batch ending in Fusion still releases the Blender used by its earlier pa
   const log = [];
   const blender = recorder(log, 50);
   const fusion = {...recorder(log),
-    fusionLockPath: join(mkdtempSync(join(tmpdir(), 'touchup-mixed-lock-')), 'fusion.lock'),
+    fusionLockPath: join(tempDirSync('touchup-mixed-lock-'), 'fusion.lock'),
     client: () => ({connect: async () => {}, close: async () => {}, hasTool: () => true,
       getTool: () => ({inputSchema: {properties: {bind_document: {type: "boolean"}}}}),
       callTool: async () => ({content: [{type: 'text', text: JSON.stringify({connected: true, document_binding: 1, document_id: "owned-token"})}]})}),
@@ -183,7 +182,7 @@ test('shutdown holds the same Blender lock as the pass', async () => {
 });
 
 test("a copy of a designer's 3MF is refused when the pass rebuilt it: no 3MF, or print settings that differ (the Nov 4 caliper card)", async () => {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-designer-'));
+  const root = await tempDir('touchup-designer-');
   const designer = join(root, 'scan.3mf'), working = join(root, 'model.3mf');
   await writeFile(designer, 'PK designer'); await writeFile(working, 'PK working');
   const settings = {[designer]: {summary: {layer_height: 0.16, infill: '100%'}, raw_key_count: 412}};
@@ -228,7 +227,7 @@ test("a copy of a designer's 3MF is refused when the pass rebuilt it: no 3MF, or
 });
 
 test("a designer copy whose last edit already lost the designer's settings starts again from the designer's file", async () => {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-designer-restart-'));
+  const root = await tempDir('touchup-designer-restart-');
   const designer = join(root, 'scan.3mf'), working = join(root, 'model.3mf');
   await writeFile(designer, 'PK designer'); await writeFile(working, 'PK rebuilt');
   const client = () => ({connect: async () => {}, close: async () => {}, hasTool: () => true,
@@ -256,7 +255,7 @@ const designerSettings = settingsReply({summary: {layer_height: 0.16, infill: '1
 
 /** Runs a designer-copy pass whose worker ends with `ending` and writes a model and touched.3mf. */
 async function designerPass(client, ending = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-designer-check-'));
+  const root = await tempDir('touchup-designer-check-');
   const designer = join(root, 'scan.3mf');
   await writeFile(designer, 'PK designer');
   const deps = {...recorder([]), client, run: async (inv, pass) => {

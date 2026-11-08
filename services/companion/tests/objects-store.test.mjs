@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, readdir} from 'node:fs/promises';
+import {readdir} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
+import {tempDir} from './support/temp.mjs';
 
-const store = async () => new ObjectStore(await mkdtemp(join(tmpdir(), 'objects-')));
+const store = async () => new ObjectStore(await tempDir('objects-'));
 
 test('create, get and list round-trip, newest first', async () => {
   const s = await store();

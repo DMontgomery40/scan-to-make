@@ -1,14 +1,14 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {chmod,mkdir,mkdtemp,readFile,rm,stat,utimes,writeFile} from 'node:fs/promises';
+import {chmod,mkdir,readFile,rm,stat,utimes,writeFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {EXECUTION_LOCK_MS} from '../dist/scan-processing.js';
-import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DetailStillStore} from '../dist/detail-stills.js';
 import {writeAiCorrection,aiTweakRecord} from '../dist/ai-tweak-export.js';
 import {createScanCleanupRunner,aiWorkerEnv,AI_WORKER_GRACE_MS} from '../dist/scan-cleanup-runner.js';
 import {fixture,cleanupRunner,png,sha} from './fixtures/scan-processing.mjs';
+import {tempDir} from './support/temp.mjs';
 
 const realPng=Buffer.from([137,80,78,71,13,10,26,10,4,4]);
 const record=aiTweakRecord({kind:'codex-cli',model:'gpt-6-astra'},{attempts:[{index:1,outcome:'changed',wallMs:1000},{index:2,outcome:'changed',wallMs:2000}]},
@@ -50,7 +50,7 @@ test('a scripted cleanup job keeps the newest four close-ups and records no AI s
 });
 
 async function aiFixture(t,ai){
- const root=await mkdtemp(join(tmpdir(),'ai-cleanup-test-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('ai-cleanup-test-');t.after(()=>rm(root,{recursive:true,force:true}));
  const imported=join(root,'job','imported');await mkdir(imported,{recursive:true});
  await writeFile(join(imported,'mesh.obj'),'mtllib mesh.mtl\nv 0 0 0\nv .01 0 0\nv 0 .01 0\nvt 0 0\nusemtl material_0\nf 1/1 2/1 3/1\n');
  await writeFile(join(imported,'mesh.mtl'),'newmtl material_0\nKd 1 1 1\nmap_Kd mesh_basecolor_0.png\n');await writeFile(join(imported,'mesh_basecolor_0.png'),realPng);

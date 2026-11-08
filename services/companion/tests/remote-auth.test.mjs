@@ -1,16 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  mkdtemp,
   readFile,
   writeFile,
   mkdir,
   rm,
   stat,
 } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import {tempDir} from './support/temp.mjs';
 
 // A missing export is asserted as missing behavior, before implementation exists.
 const authModule = await import('../dist/remote-auth.js').catch((e) => {
@@ -23,7 +22,7 @@ async function fixture(t) {
     'function',
     'private auth registry exists'
   );
-  const root = await mkdtemp(join(tmpdir(), 'remote-auth-test-'));
+  const root = await tempDir('remote-auth-test-');
   t.after(() => rm(root, { recursive: true, force: true }));
   let now = 1_800_000_000_000;
   const directory = join(root, 'private');
@@ -522,7 +521,7 @@ function runCli(file, args, env = {}) {
   });
 }
 test('operator CLI initializes once, returns QR material, lists and individually revokes; startup configuration never falls back', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'auth-cli-'));
+  const root = await tempDir('auth-cli-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'private');
   const init = await runCli(admin, [
@@ -777,7 +776,7 @@ async function writeV1(directory, state) {
 }
 
 test('a version 1 LAN store migrates in place: same devices, hashes, scopes and expiry, a byte-exact backup, no escalation', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'auth-v1-'));
+  const root = await tempDir('auth-v1-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'auth');
   const now = 1_800_000_000_000;
@@ -823,7 +822,7 @@ test('a version 1 LAN store migrates in place: same devices, hashes, scopes and 
 });
 
 test('an unknown store version fails closed and is left untouched', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'auth-v3-'));
+  const root = await tempDir('auth-v3-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'auth');
   const original = await writeV1(directory, {
@@ -836,7 +835,7 @@ test('an unknown store version fails closed and is left untouched', async (t) =>
 });
 
 test('CLI pair mints the phone scopes; pair-capture omits only printing', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'auth-cli-pair-'));
+  const root = await tempDir('auth-cli-pair-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'private');
   assert.equal((await runCli(admin, ['init', directory, 'companion.example-tail.ts.net', 'alice@example.test'])).code, 0);
@@ -858,7 +857,7 @@ test('CLI pair mints the phone scopes; pair-capture omits only printing', async 
 });
 
 test('a version 1 Serve store migrates with its login provenance, and a code minted before migration still pairs', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'auth-v1-serve-'));
+  const root = await tempDir('auth-v1-serve-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'auth');
   const now = 1_800_000_000_000;
@@ -883,7 +882,7 @@ test('a version 1 Serve store migrates with its login provenance, and a code min
 });
 
 test('a busy lock defers migration: reads work on the version 1 file without writing; the next write migrates', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'auth-v1-busy-'));
+  const root = await tempDir('auth-v1-busy-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'auth');
   const now = 1_800_000_000_000;
@@ -909,7 +908,7 @@ test('a busy lock defers migration: reads work on the version 1 file without wri
 });
 
 test('an older, different backup is never overwritten; the new one gets a hash suffix', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'auth-v1-stale-'));
+  const root = await tempDir('auth-v1-stale-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = join(root, 'auth');
   const original = await writeV1(directory, {

@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, readdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import {readFile, writeFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { FileSavedProjectStorage } from '@scan-to-make/project';
 import { createSavedProjects } from '@scan-to-make/contracts/saved-project';
 import { CaptureStore } from '../dist/capture-import.js';
 import { DetailStillStore, sniffDetailStillMediaType } from '../dist/detail-stills.js';
+import {tempDir} from './support/temp.mjs';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const brief = { object: 'Bottle', context: 'Drawer', addition: 'Holder' };
@@ -34,7 +34,7 @@ export const pngBytes = () => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47
 export const heicBytes = () => Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypheic'), Buffer.alloc(64, 0x33)]);
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'detail-stills-'));
+  const root = await tempDir('detail-stills-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const storage = new FileSavedProjectStorage(join(root, 'projects'));
   const projects = createSavedProjects(storage);

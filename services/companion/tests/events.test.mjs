@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, readFile, rm, writeFile, stat} from 'node:fs/promises';
+import {readFile, rm, writeFile, stat} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {request as httpRequest} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {CounterpartEventSchema, EventsPageSchema} from '@scan-to-make/contracts/counterpart';
@@ -15,12 +14,13 @@ import {startCompanionServer} from '../dist/server.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {pruneLegacyDevices, LEGACY_DEVICE_IDLE_MS} from '../dist/devices/legacy.js';
 import {methodDeadlineMs} from '../dist/local-control.js';
+import {tempDir} from './support/temp.mjs';
 
 const until = async check => { for (let i = 0; i < 300; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
 const PROJECT = '3f1c2a9e-5b7d-4e21-9a6f-0c8d1e2f3a4b', PRINT = '8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d';
 const draft = (type, extra = {}) => ({id: randomUUID(), type, projectId: PROJECT, printId: PRINT, destinationId: 'current', printerName: 'Bambu Lab P1S', ...extra});
 async function openLog(t, {now = () => Date.now(), context = async () => ({title: 'Mic mount', size: '60 × 45 × 22 mm'})} = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'event-log-'));
+  const root = await tempDir('event-log-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const path = join(root, 'events.ndjson');
   const log = await new EventLog(path, {now, context}).open({prune: false});
@@ -129,7 +129,7 @@ test('every event type has words within the limits, and the state line matches t
 
 const forwarded = JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url), 'utf8')).expected;
 async function serve(t) {
-  const root = await mkdtemp(join(tmpdir(), 'events-http-'));
+  const root = await tempDir('events-http-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const remoteAuth = await RemoteAuthStore.create(join(root, 'auth'), {host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test']});
   const pair = async name => remoteAuth.exchange('alice@example.test', {code: (await remoteAuth.createPairing('alice@example.test')).code, deviceName: name});
@@ -232,7 +232,7 @@ test('a prune running while an event is written never loses it, and a torn last 
 });
 
 test('two first requests at once both leave their device\'s presence', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'presence-'));
+  const root = await tempDir('presence-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const presence = new DevicePresence(join(root, 'device-presence.json'));
   const a = randomUUID(), b = randomUUID();
@@ -246,7 +246,7 @@ test('two first requests at once both leave their device\'s presence', async t =
 
 const DAY = 24 * 60 * 60 * 1000;
 async function devicesFixture(t, start) {
-  const root = await mkdtemp(join(tmpdir(), 'legacy-devices-'));
+  const root = await tempDir('legacy-devices-');
   t.after(() => rm(root, {recursive: true, force: true, maxRetries: 3}));
   const clock = {now: start};
   const auth = await RemoteAuthStore.create(join(root, 'auth'), {host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test']}, () => clock.now);

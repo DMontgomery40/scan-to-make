@@ -1,8 +1,7 @@
 import {test} from 'node:test';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,readdir,rm,mkdir} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile,readdir,rm,mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
@@ -11,11 +10,12 @@ import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {createSavedProjects} from '@scan-to-make/contracts/saved-project';
 import {CaptureStore} from '../dist/capture-import.js';
 import {createCaptureConverter} from '../dist/capture-converter.js';
+import {tempDir} from './support/temp.mjs';
 const python=process.env.CAPTURE_TEST_PYTHON??'python3';
 const makeFixtures=fileURLToPath(new URL('../../../tools/capture-mesh-convert/make_fixtures.py',import.meta.url));
 
 test('real USDZ conversion imports and reopens exact source, binary-layer provenance and OBJ bytes',async t=>{
- const root=await mkdtemp(join(tmpdir(),'capture-real-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('capture-real-');t.after(()=>rm(root,{recursive:true,force:true}));
  const inputs=join(root,'fixtures'),jobs=join(root,'jobs');await mkdir(jobs);
  await promisify(execFile)(python,[makeFixtures,inputs],{timeout:30000});
  const storage=new FileSavedProjectStorage(join(root,'projects'));const projects=createSavedProjects(storage);
@@ -39,7 +39,7 @@ test('real USDZ conversion imports and reopens exact source, binary-layer proven
 });
 
 test('textured capture retains the complete OBJ material bundle after converter cleanup and restart',async t=>{
- const root=await mkdtemp(join(tmpdir(),'capture-textured-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('capture-textured-');t.after(()=>rm(root,{recursive:true,force:true}));
  const inputs=join(root,'fixtures'),jobs=join(root,'jobs');await mkdir(jobs);
  await promisify(execFile)(python,[fileURLToPath(new URL('./fixtures/cleanup-capture.py',import.meta.url)),inputs],{timeout:30000});
  const storage=new FileSavedProjectStorage(join(root,'projects'));const projects=createSavedProjects(storage);

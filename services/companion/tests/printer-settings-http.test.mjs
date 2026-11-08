@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {request as send} from 'node:http';
 import {PrinterSession} from '@scan-to-make/printer-handoff';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
@@ -14,9 +13,10 @@ import {PrinterDirectory} from '../dist/printing/directory.js';
 import {PrintGate} from '../dist/printing/print-gate.js';
 import {PrinterSetup} from '../dist/printing/setup.js';
 import {hostEnvironment} from '../dist/printing/mcp-install.js';
+import {tempDir} from './support/temp.mjs';
 
 async function fixture(t) {
-  const home = await mkdtemp(join(tmpdir(), 'phone-printer-settings-'));
+  const home = await tempDir('phone-printer-settings-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const clone = join(home, 'generic');
   await mkdir(clone);

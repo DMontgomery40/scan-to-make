@@ -14,6 +14,7 @@ import {InMemoryElicitationRelay,HandoffBundleStore} from '@scan-to-make/printer
 import {fixture as captureFixture} from './fixtures/scan-processing.mjs';
 
 async function fixture(t, extra={}) {
+  // '/tmp', not tmpdir(): the control socket under root must stay within macOS's sun_path limit.
   const root=await mkdtemp('/tmp/stmc-');
   t.after(()=>rm(root,{recursive:true,force:true}));
   const auth=await RemoteAuthStore.create(join(root,'auth'),{host:'fixture.example.ts.net',allowedLogins:['owner@example.test']});

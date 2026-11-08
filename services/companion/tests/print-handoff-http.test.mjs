@@ -1,7 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createServer, request as httpRequest} from 'node:http';
 import {execFile} from 'node:child_process';
@@ -11,6 +10,7 @@ import {RemoteAuthFailure, RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {createPrintHandoffRoutes, createPrintHandoffServices} from '../dist/print-handoff-http.js';
 import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
+import {tempDir} from './support/temp.mjs';
 
 const forwarded = JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url), 'utf8')).expected;
 const fixtureServer = fileURLToPath(new URL('../../printer-handoff/tests/fixtures/fixture-printer-server.mjs', import.meta.url));
@@ -21,7 +21,7 @@ const selection = {
 };
 
 async function fixture(t, scopes = ['printer-handoff:use'], makeServices, allowUnpreviewed = true) {
-  const root = await mkdtemp(join(tmpdir(), 'print-handoff-http-'));
+  const root = await tempDir('print-handoff-http-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const remoteAuth = await RemoteAuthStore.create(join(root, 'auth'), {
     host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test'],
@@ -297,7 +297,7 @@ for (const [pauseAt, outputFailure, revokeOnRetry] of [
   ['authorization', false, true],
 ]) {
   test(`status read overlapping completion stays consistent (${pauseAt}, output failure=${outputFailure}, revoked=${revokeOnRetry})`, {timeout: 5000}, async t => {
-    const root = await mkdtemp(join(tmpdir(), 'print-status-race-'));
+    const root = await tempDir('print-status-race-');
     const store = new HandoffBundleStore(root);
     const bundle = await store.create({stl, prompt: 'one dispatch', backend: 'bambu-printer-mcp'});
     const dispatch = Promise.withResolvers();
@@ -378,7 +378,7 @@ for (const [pauseAt, outputFailure, revokeOnRetry] of [
 
 for (const shutdown of [false, true]) {
   test(`pending print admission is exclusive and obeys shutdown (${shutdown})`, {timeout: 5000}, async t => {
-    const root = await mkdtemp(join(tmpdir(), 'print-admission-'));
+    const root = await tempDir('print-admission-');
     const store = new HandoffBundleStore(root);
     const bundle = await store.create({stl, prompt: 'one dispatch', backend: 'bambu-printer-mcp'});
     let releaseAuthorization;
@@ -442,7 +442,7 @@ for (const [command, scopes] of [
   ['pair-capture-and-printer-handoff', ['generation:health', 'projects:read', 'projects:write', 'captures:read', 'captures:import', 'printer-handoff:use']],
 ]) {
   test(`${command} grants exactly its explicit scopes`, async t => {
-    const root = await mkdtemp(join(tmpdir(), 'handoff-pairing-'));
+    const root = await tempDir('handoff-pairing-');
     t.after(() => rm(root, {recursive: true, force: true}));
     const directory = join(root, 'auth');
     const store = await RemoteAuthStore.create(directory, {

@@ -2,10 +2,10 @@
 // only where the MCP's own host field says it takes one (`input: "url"`, mcp-3d-printer-server 1.2.55+: OctoPrint).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
+import {mkdir, rm, writeFile} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
+import {tempDir} from './support/temp.mjs';
 
 const FIELDS = JSON.parse(readFileSync(new URL('./fixtures/setup-fields-mcp-3d-printer-server-1.2.55.json', import.meta.url), 'utf8'));
 const text = value => ({content: [{type: 'text', text: JSON.stringify(value)}], structuredContent: value});
@@ -22,7 +22,7 @@ test('the address field says, in the MCP\'s words, where a web address is taken'
 test('Check and Add take a web address only for a kind whose MCP field says so, and pass it as typed', async t => {
   const {PrinterSetup, PrinterFormSchema, webAddress} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
-  const home = await mkdtemp(join(tmpdir(), 'printer-address-'));
+  const home = await tempDir('printer-address-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const data = join(home, 'data');
   const copy = join(data, 'printers/generic/lib/node_modules/mcp-3d-printer-server');

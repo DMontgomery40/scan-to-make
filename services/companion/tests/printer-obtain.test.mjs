@@ -2,10 +2,10 @@
 // mcp-3d-printer-server 1.2.51+). The fixture is mcp-3d-printer-server 1.2.55's own counterpart_setup_fields answer.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
+import {mkdir, rm, writeFile} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
+import {tempDir} from './support/temp.mjs';
 
 const FIELDS = JSON.parse(readFileSync(new URL('./fixtures/setup-fields-mcp-3d-printer-server-1.2.55.json', import.meta.url), 'utf8'));
 const text = value => ({content: [{type: 'text', text: JSON.stringify(value)}], structuredContent: value});
@@ -13,7 +13,7 @@ const text = value => ({content: [{type: 'text', text: JSON.stringify(value)}], 
 async function fixture(t, answers) {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
-  const home = await mkdtemp(join(tmpdir(), 'printer-obtain-'));
+  const home = await tempDir('printer-obtain-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const data = join(home, 'data');
   const copy = join(data, 'printers/generic/lib/node_modules/mcp-3d-printer-server');

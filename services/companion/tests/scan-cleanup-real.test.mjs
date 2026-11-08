@@ -1,9 +1,9 @@
 import {test} from 'node:test';
 import {request} from 'node:http';
+import {tempDir} from './support/temp.mjs';
 function fetch(url,{method='GET',headers={},body}={}){return new Promise((resolve,reject)=>{const req=request(url,{method,headers},res=>{const chunks=[];res.on('data',b=>chunks.push(b));res.on('end',()=>{const bytes=Buffer.concat(chunks);resolve({status:res.statusCode,json:async()=>JSON.parse(bytes),text:async()=>bytes.toString(),clone:()=>({text:async()=>bytes.toString()}),arrayBuffer:async()=>bytes});});res.on('error',reject);});req.on('error',reject);req.end(body);});}
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,rm,access} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile,rm,access} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
@@ -21,7 +21,7 @@ const blender=process.env.BLENDER,python=process.env.CAPTURE_TEST_PYTHON??'pytho
 let ready=!!blender;try{if(blender)await access(blender);}catch{ready=false;}
 const path=relative=>fileURLToPath(new URL(relative,import.meta.url));
 test('paired full cleanup: real textured USDZ, PNG still, advice and corrected box within 0.05 mm',{skip:ready?false:'Set BLENDER to Blender 5.0.1',timeout:600000},async t=>{
- const root=await mkdtemp(join(tmpdir(),'companion-cleanup-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('companion-cleanup-');t.after(()=>rm(root,{recursive:true,force:true}));
  await promisify(execFile)(python,[path('./fixtures/cleanup-capture.py'),join(root,'fixture')]);
  const storage=new FileSavedProjectStorage(join(root,'projects')),projects=createSavedProjects(storage);
  await projects.create({id:'box',brief:{object:'Synthetic box',context:'Desk',addition:'Cleanup'}});

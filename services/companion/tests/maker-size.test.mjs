@@ -2,9 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {mkdtemp,mkdir,readFile,writeFile,rm,readdir} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,rm,readdir} from 'node:fs/promises';
 import {request as httpRequest} from 'node:http';
-import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {lookupMakerSize,MAKER_SIZE_PROMPT,MAKER_LOOKUP_MS} from '../dist/maker-size-lookup.js';
 import {AI_TWEAK_PROMPT} from '../dist/ai-tweak.js';
@@ -14,10 +13,11 @@ import {fixture,cleanupRunner,sha} from './fixtures/scan-processing.mjs';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {savedProjectETag} from '@scan-to-make/project';
+import {tempDir} from './support/temp.mjs';
 
 const proposal={productName:'AirPods Pro 2 charging case (USB-C)',makerName:'Apple',dimensionsMm:{length:60.6,width:45.2,height:21.7},sourceUrl:'https://support.apple.com/en-us/111834',confidence:.92};
 async function lookupFixture(t,action='valid'){
- const root=await mkdtemp(join(tmpdir(),'maker-size-test-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('maker-size-test-');t.after(()=>rm(root,{recursive:true,force:true}));
  const inputs=join(root,'inputs');await mkdir(inputs);const mesh=Buffer.from('v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n');await writeFile(join(inputs,'mesh.obj'),mesh);
  const manifest={inputs:{'mesh.obj':{sha256:sha(mesh),bytes:mesh.length}}};
  const cli=join(root,'claude'),calls=join(root,'calls');

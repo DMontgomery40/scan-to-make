@@ -1,12 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,readdir,readFile,rm,mkdir} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {writeFile,readdir,readFile,rm,mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createCaptureConverter} from '../dist/capture-converter.js';
+import {tempDir} from './support/temp.mjs';
 
 async function fixture(t,body,options={}) {
- const root=await mkdtemp(join(tmpdir(),'capture-worker-test-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('capture-worker-test-');t.after(()=>rm(root,{recursive:true,force:true}));
  const jobs=join(root,'jobs');await mkdir(jobs);
  const script=join(root,'worker.mjs');
  await writeFile(script,`import fs from 'node:fs';\nconst args=Object.fromEntries(process.argv.slice(2).reduce((a,v,i,all)=>i%2?a:[...a,[v,all[i+1]]],[]));\n${body}`);

@@ -1,12 +1,12 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,writeFile,readdir,rm,symlink} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile,writeFile,readdir,rm,symlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {createSavedProjects} from '@scan-to-make/contracts/saved-project';
 import {CaptureStore} from '../dist/capture-import.js';
+import {tempDir} from './support/temp.mjs';
 
 const sha = b => createHash('sha256').update(b).digest('hex');
 const source = Buffer.from('isolated synthetic converter fixture');
@@ -30,7 +30,7 @@ function texturedOutput({obj='mtllib mesh.mtl\nusemtl skin\n'+derived,
  next.report=Buffer.from(JSON.stringify(report));return next;
 }
 async function fixture(t, converter={convert:async bytes=>output(bytes)}) {
- const root=await mkdtemp(join(tmpdir(),'capture-store-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('capture-store-');t.after(()=>rm(root,{recursive:true,force:true}));
  const storage=new FileSavedProjectStorage(join(root,'projects'));
  const projects=createSavedProjects(storage);
  assert.equal((await projects.create({id:'test',brief})).status,'ok');

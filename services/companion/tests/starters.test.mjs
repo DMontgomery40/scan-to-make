@@ -1,16 +1,16 @@
 import test from 'node:test';
 import {mcpPlates} from './support/shown-print.mjs';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,rm,readFile,readdir,writeFile,chmod} from 'node:fs/promises';
+import {mkdir,rm,readFile,readdir,writeFile,chmod} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {publicObject} from '../dist/objects/http.js';
 import {STARTER_ASSETS} from '../dist/starters/catalog.js';
+import {tempDir} from './support/temp.mjs';
 const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
 
 /** A designer's 3MF with its own plates, as MakerWorld's print profiles are. */
@@ -25,7 +25,7 @@ const CATALOG=JSON.parse(readFileSync(join(STARTER_ASSETS,'catalog.json'),'utf8'
 const pinnedCatalog=id=>{const entry=CATALOG.find(item=>item.id===id);return entry?.id==='long-vernier-caliper'?{...entry,sha256:[sha(COLOR),sha(GAUGE)]}:entry;};
 /** The published-model worker (PRD §8.11), faked: what it was asked, and the files it "downloaded". */
 async function setup(t,answer=async()=>({status:'needs_file'}),extra={}) {
- const root=await mkdtemp(join(tmpdir(),'starters-')),store=new ObjectStore(join(root,'objects')),asked=[];
+ const root=await tempDir('starters-'),store=new ObjectStore(join(root,'objects')),asked=[];
  extra={downloads:join(root,'Downloads'),starter:pinnedCatalog,...extra};
  const runPublished=async input=>{asked.push(input);return answer(input,root);};
  const service=new ObjectService({store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/unused'}},

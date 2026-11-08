@@ -1,16 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
+import {tempDir} from './support/temp.mjs';
 
 const until = async check => { for (let i = 0; i < 300; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
 
 async function dispatcher(events) {
-  const store = new ObjectStore(join(await mkdtemp(join(tmpdir(), 'objects-ctl-')), 'objects'));
+  const store = new ObjectStore(join(await tempDir('objects-ctl-'), 'objects'));
   const objects = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(events ? {events} : {})});
   return {dispatch: createControlDispatcher({auth: {}, companionVersion: 'test', objects}), objects};
 }
@@ -89,7 +88,7 @@ test('the Mac app can delete an object, and the event says the Mac did', async (
 
 test('New Project on the Mac: create, copy a scan and photos in from paths, then ask for changes with more photos', async t => {
   const {dispatch, objects} = await dispatcher();
-  const folder = await mkdtemp(join(tmpdir(), 'objects-files-'));
+  const folder = await tempDir('objects-files-');
   const {writeFile, readFile, symlink} = await import('node:fs/promises');
   const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60)]);
   const stl = Buffer.concat([Buffer.alloc(80), Buffer.from([1, 0, 0, 0]), Buffer.alloc(50)]);
@@ -128,7 +127,7 @@ test('status.get says the Mac can create projects only when objects are set up',
 test('two photos with the same name added at once are both kept', async t => {
   const {dispatch, objects} = await dispatcher();
   const {writeFile, mkdir, rm} = await import('node:fs/promises');
-  const folder = await mkdtemp(join(tmpdir(), 'objects-race-'));
+  const folder = await tempDir('objects-race-');
   t.after(() => rm(folder, {recursive: true, force: true}));
   const jpeg = n => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60, n)]);
   for (const sub of ['a', 'b', 'c']) { await mkdir(join(folder, sub)); await writeFile(join(folder, sub, sub === 'b' ? 'Photo.JPG' : 'photo.jpg'), jpeg(sub.charCodeAt(0))); }
@@ -145,7 +144,7 @@ test('two photos with the same name added at once are both kept', async t => {
 test('a model dropped on its own needs photos or a request before it can start', async t => {
   const {dispatch} = await dispatcher();
   const {writeFile, rm} = await import('node:fs/promises');
-  const folder = await mkdtemp(join(tmpdir(), 'objects-model-only-'));
+  const folder = await tempDir('objects-model-only-');
   t.after(() => rm(folder, {recursive: true, force: true}));
   await writeFile(join(folder, 'part.stl'), Buffer.concat([Buffer.alloc(80), Buffer.from([1, 0, 0, 0]), Buffer.alloc(50)]));
   const {object} = await dispatch('objects.create', {});

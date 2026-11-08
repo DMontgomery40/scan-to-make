@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,readFile,rm,mkdir} from 'node:fs/promises';
+import {writeFile,readFile,rm,mkdir} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {createServer} from 'node:http';
 import {runProjectModel} from '../dist/project-worker.js';
 import {ModelAccessService} from '../dist/model-access.js';
+import {tempDir} from './support/temp.mjs';
 
-async function fixture(t){const root=await mkdtemp('/tmp/project-provider-');t.after(()=>rm(root,{recursive:true,force:true}));return root;}
+async function fixture(t){const root=await tempDir('project-provider-');t.after(()=>rm(root,{recursive:true,force:true}));return root;}
 const request=root=>({cwd:root,args:['-p','--mcp-config',join(root,'mcp.json'),'--append-system-prompt','Design a bracket','--json-schema',JSON.stringify({type:'object',properties:{status:{type:'string'},summary:{type:'string'}},required:['status','summary']}),'Make a bracket'],mcpConfig:{mcpServers:{printer:{command:process.execPath,args:[resolve('tests/fixtures/project-provider-mcp.mjs')],env:{RECEIPT:join(root,'receipt.json')}}}}});
 async function server(t,handler){const s=createServer(handler);await new Promise(r=>s.listen(0,'127.0.0.1',r));t.after(()=>{s.closeAllConnections();return new Promise(r=>s.close(r));});return `http://127.0.0.1:${s.address().port}/v1`;}
 for(const kind of ['endpoint','openai','anthropic'])test(`${kind} executes real MCP tools, returns images and structured slicer feedback to the model and isolates its credential`,async t=>{

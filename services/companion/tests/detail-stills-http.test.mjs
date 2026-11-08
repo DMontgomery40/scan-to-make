@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import {readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { request as httpRequest } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -10,6 +9,7 @@ import { CaptureStore } from '../dist/capture-import.js';
 import { DetailStillStore } from '../dist/detail-stills.js';
 import { RemoteAuthStore } from '../dist/remote-auth.js';
 import { startCompanionServer } from '../dist/server.js';
+import {tempDir} from './support/temp.mjs';
 
 const forwarded = JSON.parse(
   await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json', import.meta.url), 'utf8'),
@@ -41,7 +41,7 @@ const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(
 const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 0x22)]);
 
 async function fixture(t, scopes = ['projects:read', 'projects:write', 'captures:read', 'captures:import']) {
-  const root = await mkdtemp(join(tmpdir(), 'detail-stills-http-'));
+  const root = await tempDir('detail-stills-http-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const remoteAuth = await RemoteAuthStore.create(join(root, 'auth'), {
     host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test'],
@@ -197,7 +197,7 @@ test('tampered retained bytes are not served', async (t) => {
 });
 
 test('detail still routes are absent when the store is not configured', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'detail-stills-off-'));
+  const root = await tempDir('detail-stills-off-');
   t.after(() => rm(root, { recursive: true, force: true }));
   const remoteAuth = await RemoteAuthStore.create(join(root, 'auth'), {
     host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test'],

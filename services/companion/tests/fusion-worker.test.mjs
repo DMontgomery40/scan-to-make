@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, writeFile, readFile, rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {writeFile, readFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
+import {tempDir} from './support/temp.mjs';
 const handoffRequire = createRequire(new URL('../../printer-handoff/package.json', import.meta.url));
 const {Client} = await import(handoffRequire.resolve('@modelcontextprotocol/sdk/client/index.js'));
 const {StdioClientTransport} = await import(handoffRequire.resolve('@modelcontextprotocol/sdk/client/stdio.js'));
 
 test('actual worker CLI forwards the fixed binding and closes the configured peer on stdin EOF', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'fusion-worker-'));
+  const dir = await tempDir('fusion-worker-');
   t.after(() => rm(dir, {recursive: true, force: true}));
   const log = join(dir, 'calls.jsonl');
   const config = join(dir, 'binding.json');

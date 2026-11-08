@@ -1,19 +1,20 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFile} from 'node:child_process';
-import {chmod,mkdir,mkdtemp,readFile,readdir,rm,stat,writeFile} from 'node:fs/promises';
+import {chmod,mkdir,readFile,readdir,rm,stat,writeFile} from 'node:fs/promises';
 import {tmpdir,userInfo} from 'node:os';
 import {join} from 'node:path';
 import {promisify} from 'node:util';
 import {AI_TWEAK_PROMPT,aiTweakInternals,checkModelAccess,claudeSignedIn,defaultShell,modelAccessFromEnv,runAiTweak} from '../dist/ai-tweak.js';
 import {findExecutable,loginShellPath,resolveOptions} from '../dist/ai-tweak-cli.js';
+import {tempDir} from './support/temp.mjs';
 
 const run=promisify(execFile);
 const python=process.env.CAPTURE_TEST_PYTHON??'python3';
 const alive=pid=>{try{process.kill(pid,0);return true;}catch(e){return e.code==='EPERM';}};
 
 async function fixture(t){
- const root=await mkdtemp(join(tmpdir(),'ai-tweak-test-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('ai-tweak-test-');t.after(()=>rm(root,{recursive:true,force:true}));
  const scan=join(root,'capture'),home=join(root,'home');await mkdir(scan);await mkdir(home);
  await writeFile(join(scan,'mesh.obj'),'mtllib mesh.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nvt 0 0\nvt 1 0\nvt 0 1\nusemtl material_0\nf 1/1 2/2 3/3\nf 1/1 2/2 4/3\nf 1/1 3/2 4/3\nf 2/1 3/2 4/3\n');
  await writeFile(join(scan,'mesh.mtl'),'newmtl material_0\nKd 1 1 1\nmap_Kd mesh_basecolor_0.png\n');

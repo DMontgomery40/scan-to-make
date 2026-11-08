@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {mkdtemp, readFile, writeFile} from 'node:fs/promises';
+import {readFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {runTouchupWorker} from '../dist/touchup/runner.js';
+import {tempDir} from './support/temp.mjs';
 
 const fixtures = fileURLToPath(new URL('./fixtures/touchup/', import.meta.url));
 const fakeClaude = join(fixtures, 'fake-claude.mjs');
 
 async function setup(scenario) {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-run-'));
+  const root = await tempDir('touchup-run-');
   const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
   const inv = {command: process.execPath, args: [fakeClaude, scenario], env: {PATH: process.env.PATH}, cwd: pass.dir, mcpConfigPath: join(pass.dir, 'mcp.json'), mcpConfig: {mcpServers: {}}};
   return {pass, inv};
@@ -157,7 +157,7 @@ test('the worker can say it failed, and the last checkpoint is kept', async () =
 });
 
 test('a make job with no scan is done, not unchanged', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-run-'));
+  const root = await tempDir('touchup-run-');
   const pass = await prepareTouchupPass({root, objectId: 'mount', scan: [], photos: [], requirePhotos: false});
   const inv = {command: process.execPath, args: [fakeClaude, 'nocheckpoint'], env: {PATH: process.env.PATH}, cwd: pass.dir, mcpConfigPath: join(pass.dir, 'mcp.json'), mcpConfig: {mcpServers: {}}};
   const result = await runTouchupWorker(inv, pass);
@@ -179,7 +179,7 @@ test('a cut-off ASCII STL is not a model; the last checkpoint is used', async ()
 
 test('a binary STL with NaN coordinates is not valid', async () => {
   const {isValidStl} = await import('../dist/touchup/runner.js');
-  const dir = await mkdtemp(join(tmpdir(), 'stl-'));
+  const dir = await tempDir('stl-');
   const bytes = Buffer.alloc(134); bytes.writeUInt32LE(1, 80);
   for (let offset = 84; offset < 132; offset += 4) bytes.writeFloatLE(NaN, offset);
   await writeFile(join(dir, 'nan.stl'), bytes);

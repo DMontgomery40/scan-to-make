@@ -2,8 +2,7 @@
 // with Serve's forwarded headers, and a fake stdio printer MCP on the destination's shared session.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {mkdir, readFile, realpath, rm, symlink, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {request as httpRequest} from 'node:http';
 import {fileURLToPath} from 'node:url';
@@ -11,6 +10,7 @@ import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {createPrintHandoffServices} from '../dist/print-handoff-http.js';
 import {PrinterSessionPool, toolClass, callClass} from '@scan-to-make/printer-handoff';
+import {tempDir} from './support/temp.mjs';
 
 const sdk = path => new URL(`../../printer-handoff/node_modules/@modelcontextprotocol/sdk/dist/esm/${path}`, import.meta.url).href;
 const {Client} = await import(sdk('client/index.js'));
@@ -40,7 +40,7 @@ function serveFetch(extra) {
 }
 
 async function setup(t, {scopes = ['mcp:read'], admit, lockTimeoutMs, questionMs = 5000, toolTimeoutMs, selection} = {}) {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'remote-mcp-')));
+  const root = await realpath(await tempDir('remote-mcp-'));
   const pool = new PrinterSessionPool();
   t.after(async () => { await pool.close(); await rm(root, {recursive: true, force: true}); });
   const auth = await RemoteAuthStore.create(join(root, 'auth'), {host: forwarded.host, allowedLogins: [LOGIN]});

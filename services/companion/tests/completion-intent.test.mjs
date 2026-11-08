@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, writeFile, rm} from 'node:fs/promises';
+import {writeFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {reportsCompletion} from '../dist/objects/completion-intent.js';
+import {tempDir} from './support/temp.mjs';
 
 async function worker(t, value) {
-  const root = await mkdtemp(join(tmpdir(), 'completion-test-'));
+  const root = await tempDir('completion-test-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const path = join(root, 'claude');
   await writeFile(path, `#!/usr/bin/env node
