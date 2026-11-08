@@ -7,10 +7,11 @@ cleanup() {
   local container
   for container in "$name" "$name-init" "$name-tests"; do
     if docker container inspect "$container" >/dev/null 2>&1; then
-      docker stop --timeout 5 "$container" >/dev/null
-      printf 'Retained stopped smoke container: %s\n' "$container"
+      docker stop --timeout 5 "$container" >/dev/null 2>&1 || true
+      docker rm "$container" >/dev/null 2>&1 || true
     fi
   done
+  docker volume rm "$volume" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 docker volume create "$volume" >/dev/null
