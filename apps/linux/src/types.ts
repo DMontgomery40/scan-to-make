@@ -313,6 +313,8 @@ export interface SetupOptions {
     };
     /** The address field in the MCP's words; `url` when it also takes a web address (https://…, a sub-path). */
     address?: { hint?: string; url?: boolean };
+    /** Every setting the MCP reads for this kind, in its words (`counterpart_setup_fields`), by form role in `name`. */
+    fields?: SetupField[];
   }[];
   models: Record<string, { value: string; label: string }[]>;
   serialModels?: Record<string, string>;

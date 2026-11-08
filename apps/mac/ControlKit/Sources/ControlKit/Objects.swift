@@ -506,7 +506,15 @@ public struct PrinterDestination: Decodable, Sendable, Identifiable, Equatable {
     public struct Incomplete: Decodable, Sendable, Equatable {
         public let missing: [String]
         public let fill: [String: String]
-        public init(missing: [String], fill: [String: String] = [:]) { self.missing = missing; self.fill = fill }
+        /// The variable its MCP reads the model from (its kind's `model` field), by the companion.
+        public let modelSetting: String?
+        /// Complete Settings also copies another MCP's authenticated route for this printer (lines in `fill`).
+        public let route: Bool?
+        public init(missing: [String], fill: [String: String] = [:], modelSetting: String? = nil, route: Bool? = nil) {
+            self.missing = missing; self.fill = fill; self.modelSetting = modelSetting; self.route = route
+        }
+        /// Its MCP needs a model nobody could tell: Settings asks.
+        public var needsModel: Bool { modelSetting.map { missing.contains($0) && fill[$0] == nil } ?? false }
     }
     public struct McpChoice: Decodable, Sendable, Equatable {
         public let backend: String

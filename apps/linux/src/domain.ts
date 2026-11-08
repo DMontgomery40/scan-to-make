@@ -593,6 +593,66 @@ export async function obtainValue(
   return step;
 }
 
+/** A kind's setting by its form role (`host`, `port`, `serial`, `model`, `secret`), as the MCP declares it. */
+export function setupField(options: SetupOptions | undefined, printerType: string | undefined, name: string) {
+  return options?.types.find((t) => t.printerType === printerType)?.fields?.find((f) => f.name === name);
+}
+
+/** A found MCP folder, as Add a printer lists it: what its `.env` lacks and what Add fills (only the model). */
+export interface FoundFolder { printerType: string; missing?: string[]; fill?: Record<string, string> }
+
+/**
+ * The model a found folder's MCP needs: the variable it reads it from (the kind's `model` field, never a name the app
+ * knows), whether Counterpart couldn't tell it (so the person chooses), and the one Add fills. Port of CounterpartKit's
+ * `PrinterCandidate.modelSetting/needsModel/filledModel`.
+ */
+export function folderModel(candidate: FoundFolder, options: SetupOptions | undefined) {
+  const setting = setupField(options, candidate.printerType, "model")?.env;
+  return {
+    setting,
+    needed: !!setting && !!candidate.missing?.includes(setting) && candidate.fill?.[setting] === undefined,
+    filled: setting ? candidate.fill?.[setting] : undefined,
+  };
+}
+
+/**
+ * The model a typed serial number names, looked up in the MCP's own answer (`serialModels` from
+ * counterpart_setup_fields, keyed by its own key length). The app keeps no such table. Port of CounterpartKit's
+ * `PrinterSetupOptions.model(forSerial:)`; this lookup was inline in Settings.tsx.
+ */
+export function modelForSerial(options: SetupOptions | undefined, serial: string) {
+  const length = Object.keys(options?.serialModels ?? {})[0]?.length;
+  const key = length ? serial.trim().slice(0, length).toUpperCase() : "";
+  return length && key.length === length ? options?.serialModels?.[key] : undefined;
+}
+
+/**
+ * Types the serial number into the form. The model the MCP's answer names for it fills the form unless the person
+ * chose one, so a corrected serial fills again and one the MCP names nothing for clears a model it had filled.
+ * `inferred` says whether the current model came from discovery or the serial; the result says whether it now does.
+ * Port of CounterpartKit's `PrinterForm.setSerial`.
+ */
+export function typeSerial(form: Record<string, string>, value: string, options: SetupOptions | undefined, inferred: boolean) {
+  const next: Record<string, string> = { ...form, serial: value };
+  if (form.model && !inferred) return { form: next, inferred: false };
+  const found = modelForSerial(options, value);
+  const named = found && options?.models[form.backend]?.some((m) => m.value === found) ? found : undefined;
+  if (named || inferred) next.model = named ?? "";
+  return { form: next, inferred: !!named };
+}
+
+/**
+ * The form for a kind: values for fields its MCP doesn't declare (port, serial, model) are dropped, so they are never
+ * sent. Kept as they are when the kind's fields are unknown. Port of CounterpartKit's `PrinterForm.keepFields(of:)`.
+ */
+export function keepFields(form: Record<string, string>, options: SetupOptions | undefined) {
+  const fields = options?.types.find((t) => t.printerType === form.printerType)?.fields;
+  if (!fields) return form;
+  const next = { ...form };
+  for (const name of ["port", "serial", "model"]) if (!fields.some((f) => f.name === name)) delete next[name];
+  return next;
+}
+
 /** Add a printer's address field: the MCP's hint, and a placeholder that offers a web address only where the MCP takes one. */
 export function addressField(options: SetupOptions | undefined, printerType: string | undefined) {
   const address = options?.types.find((t) => t.printerType === printerType)?.address;
