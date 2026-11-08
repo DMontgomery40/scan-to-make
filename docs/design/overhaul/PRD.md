@@ -60,7 +60,7 @@ Checked against `main` at `4baf0cd8` on 2026-11-04. This replaces `docs/status/a
 | Remote MCP `/v1/mcp` (§8.12) | Built; tool scopes and argument kinds come from the MCPs (§8.0 item 5) | Not accepted |
 | Android app (§16) | Debug APK from clean main `1b66d937`, run Nov 5 on T3 API 35 emulator after KVM permission repair: Mac pairing, project list (after relaunch), caliper `1f1c5515` Print sheet and both MCP pictures observed; Print enabled, not pressed | Main `745e9b9f` rechecked Nov 5: fresh pairing still left Home loading (including a further 15-second wait) until relaunch; welcome headings remained black on dark backgrounds. Search showed “2 of 10 projects match” for “caliper”; Show All cleared the query and restored the list; the field stayed pinned while scrolling results for “a”. Screenshots: `~/scan-to-make-work/android-linux-20261105/android-main745-*.png` on Mac. #333 pairing/text fixes await main-build verification. Emulator shut down. No physical-device, scan or physical-print acceptance |
 | Linux desktop (§17) | Installed `27295626` on agents-136; Nov 5 engineering check: added P1S through Settings → Printers (connection and camera passed), imported Mac caliper `1f1c5515` current 3MF into local project `1b7a26a2`, selected its plate, opened Print sheet; both MCP pictures displayed and Print enabled, never pressed | Not accepted: physical print, provider or reconstruction review. Required installing Bambu Studio 02.09.01.70 and configuring the MCP’s `SLICER_PATH`/`BAMBU_PROFILES_ROOT`; Xvfb window needed software-rendering restart. Linux uses its own companion. Evidence: `~/scan-to-make-work/android-linux-20261105/linux-caliper-preview-enabled.png` on Mac |
-| TestFlight and Mac beta (§14) | 2.0 (3) uploaded; Mac v2.0-beta.4 notarized and published | external review approval; production push delivery |
+| TestFlight and Mac beta (§14) | 2.0 (4) uploaded Nov 6 from main `30e3afdd`; matching Mac v2.0-beta.6 notarized and published | live processing/group/review status must be rechecked; production push delivery |
 | Widgets (§9.5) | Built | Control Center, App Intents/Siri, Spotlight, Share extension and Watch are not built |
 
 **Known issues from the Nov 2–3 hands-on review — re-checked Nov 5, 2026.** Code baseline `1b66d937`; installed Mac 202611051513 (`6a6d4dde`). These are engineering findings, not device acceptance. No physical print was started.
@@ -1364,7 +1364,7 @@ Counterpart runs all day in the menu bar and on the phone, so it has to be cheap
 
 ## 11. Scan in hand
 
-**Status:** Built (`HandheldCapture.swift`, `HandheldDepthRecorder.swift`, `tools/mac-reconstruct samples`). Not accepted. A Codex review found defects that remain open: 24 frames at 10 fps covers only ~2.4 s of nearly identical views; `ObjectMasker` erases the object when a hand is nearer than it; and `reconstruct.ts` discards the reconstruction's stderr. Its advice: try Apple's own masking (`--no-masks`) first, then move to sharp still photos with depth and turn-pause-capture guidance.
+**Status:** **Labs; unavailable in the public beta** (`HandheldCapture.offered = false`). David, 2026-11-07: "scan in hand can be labs and ar shouldn't block it". The existing recorder (`HandheldCapture.swift`, `HandheldDepthRecorder.swift`, `tools/mac-reconstruct samples`) is not accepted; the release does not re-enable it. Printer testing can use an imported STL/3MF without capture or AR. A Codex review found defects that remain open: 24 frames at 10 fps covers only ~2.4 s of nearly identical views; `ObjectMasker` erases the object when a hand is nearer than it; and reconstruction failure reporting was insufficient. Private bounded stderr retention has since landed in `reconstruct.ts`; that improves diagnosis, not capture quality. Its advice: try Apple's own masking (`--no-masks`) first, then move to sharp still photos with depth and turn-pause-capture guidance.
 
 The full research is in [research/inhand-capture.md](research/inhand-capture.md).
 
@@ -1461,7 +1461,7 @@ Status per milestone, checked on 2026-11-04: M0 Accepted (React Native gone; pai
 
 ## 14. Open questions and the one manual step
 
-1. **Distribution: decided.** TestFlight for the iPhone app (App Store name *Counterpart 3D*, public beta group *Counterpart Public Beta*), and Developer ID with Sparkle for the Mac (v2.0-beta.4 notarized and published at counterpart.dtmont.com/beta.html). The procedure is in [`docs/distribution.md`](../../distribution.md). Still open: Apple's approval of the external build, and production push delivery.
+1. **Distribution: decided.** TestFlight for the iPhone app (App Store name *Counterpart 3D*, public beta group *Counterpart Public Beta*), and Developer ID with Sparkle for the Mac (v2.0-beta.6 notarized and published at counterpart.dtmont.com/beta.html). The procedure is in [`docs/distribution.md`](../../distribution.md). Still open: Apple's approval of the external build, and production push delivery.
 2. **The APNs key: done.** The relay is provisioned for Sandbox and Production.
 
 ## 15. Credits
