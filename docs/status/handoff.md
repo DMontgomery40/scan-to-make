@@ -38,13 +38,9 @@ Printer: P1S, LAN Only + Developer Mode; AMS A1 black PLA (nearly empty), A2 yel
    - the shared ControlKit form encoding (Mac Add Printer sheet and phones) still branches on `"bambu"` and `BAMBU_MODEL`; make it generic from `counterpart_setup_fields` (#392 merged over it with `--boundary-reviewed`);
    - move title, designer and licence into `list_3mf_plates` in both MCPs, publish, install, then delete `inspectModelFile`'s remaining 3MF parsing (PRD §8.0 item 9);
    - port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D.
-5. **Flaky tests: fix the cause, no retries.**
-   - `capture-response-drain`;
-   - `local-control` 'incomplete frame';
-   - `published.test.mjs` file arrival;
-   - bambu `remote-slicer` deadline;
-   - mcp-3D FULU controls;
-   - the hosted iPhone simulator launch timeout (the Mac's own iPhone/iPad gate is authoritative).
+5. **Flaky tests:** fixed at the cause in #403 (capture drain, local-control incomplete frame, published file arrival), bambu-printer-mcp 1.1.79 (#130: remote-slicer deadline, FULU final reply drain) and mcp-3D-printer-server 1.2.60 (#89: FULU drain). Each failed first, then passed 200/200 loaded runs.
+   - Open: the FULU drain changes pause/resume/stop on the printer and was checked only against mocked hosts. Check it on the P1S the next time David pauses, resumes or stops a print from Counterpart.
+   - Open: the hosted iPhone simulator launch timeout (the Mac's own gate is authoritative).
 6. **OctoPrint follow-ups** (built: #386 approve, #389 web address; checked only against Docker virtual printers):
    - (a) the MCP reports its normalized endpoint in counterpart/1, so one printer typed two ways lists once;
    - (b) Bonjour TXT `path`;

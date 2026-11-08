@@ -1,7 +1,7 @@
 import {writeFileSync, existsSync} from 'node:fs';
 import {readdir, lstat} from 'node:fs/promises';
 import {homedir} from 'node:os';
-import {extname, join} from 'node:path';
+import {dirname, extname, join} from 'node:path';
 import {isolatedClaudeEnv, type TouchupInvocation} from '../touchup/invocation.js';
 import {prepareTouchupPass, type TouchupPass} from '../touchup/inputs.js';
 import {runClaudeWorker, type TouchupProgress} from '../touchup/runner.js';
@@ -142,15 +142,29 @@ export async function folderAccess(path: string): Promise<'ok' | 'denied' | 'mis
  * time, written) between its start and its end. Hidden files are a browser's unfinished downloads, never counted.
  * Nov 6: the worker's own check of ~/Downloads missed files its clicks had saved there; the companion looks itself.
  */
-export async function arrivedDuring(folders: string[], sinceMs: number, untilMs: number): Promise<string[]> {
+/** What each folder held before the worker ran. A folder that couldn't be listed has no entry: the time window decides. */
+export type FolderSnapshot = ReadonlyMap<string, ReadonlySet<string>>;
+export async function snapshotFolders(folders: string[]): Promise<FolderSnapshot> {
+  const snapshot = new Map<string, Set<string>>();
+  for (const folder of folders) {
+    const names = await readdir(folder).catch(() => undefined);
+    if (names) snapshot.set(folder, new Set(names.map(name => join(folder, name))));
+  }
+  return snapshot;
+}
+export async function arrivedDuring(folders: string[], sinceMs: number, untilMs: number, before?: FolderSnapshot): Promise<string[]> {
+  if (untilMs < sinceMs) return [];
   const arrived: {path: string; atMs: number}[] = [];
   for (const folder of folders) {
+    const seen = before?.get(folder);
     for (const name of await readdir(folder).catch(() => [] as string[])) {
       if (name.startsWith('.') || !MODEL_FILE.test(name)) continue;
       const path = join(folder, name), info = await lstat(path).catch(() => undefined);
       if (!info?.isFile() || info.size === 0) continue;
       const atMs = info.birthtimeMs > 0 ? info.birthtimeMs : info.mtimeMs;
-      if (atMs >= sinceMs && atMs <= untilMs) arrived.push({path, atMs});
+      // Filesystem clocks may lag Date.now() by a tick. A pre-worker directory
+      // snapshot establishes arrival without assuming the clocks agree.
+      if (seen ? !seen.has(path) : atMs >= sinceMs && atMs <= untilMs) arrived.push({path, atMs});
     }
   }
   return arrived.sort((a, b) => a.atMs - b.atMs).map(file => file.path);
@@ -184,12 +198,13 @@ export async function runPublishedWorker(inv: TouchupInvocation, pass: TouchupPa
   onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal; startedAtMs?: number;
 } = {}): Promise<PublishedResult> {
   const startedAtMs = opts.startedAtMs ?? Date.now();
+  const folders = [opts.downloads ?? join(homedir(), 'Downloads'), pass.outDir];
+  const before = await snapshotFolders(folders);
   const run = await (inv.worker ?? runClaudeWorker)(inv, {...(opts.spawn ? {spawn: opts.spawn} : {}), ...(opts.onProgress ? {onProgress: opts.onProgress} : {}), ...(opts.signal ? {signal: opts.signal} : {})});
   const endedAtMs = Date.now();
   const answer = run.resultEvent?.structured_output as Record<string, unknown> | undefined;
   const credit = model(answer, link);
-  const folders = [opts.downloads ?? join(homedir(), 'Downloads'), pass.outDir];
-  const landed = await arrivedDuring(folders, startedAtMs, endedAtMs);
+  const landed = await arrivedDuring(folders, startedAtMs, endedAtMs, before);
   const denied = await folderAccess(folders[0]!) === 'denied';
   const arrived = {...(landed.length ? {arrived: landed} : {}), ...(denied ? {downloadsDenied: true as const} : {})};
   const sessionId = typeof run.resultEvent?.session_id === 'string' ? run.resultEvent.session_id : undefined;
@@ -205,7 +220,9 @@ export async function runPublishedWorker(inv: TouchupInvocation, pass: TouchupPa
   const names = Array.isArray(download?.files) ? download.files.map(name => clean(name, 255)).filter((name): name is string => !!name) : [];
   // Only files that really exist count, whatever the worker says, and every one it named must.
   const named = answer.status === 'downloaded' && names.length ? await findNamed(names, folders) : {found: [], missing: names};
-  const fresh = await Promise.all(named.found.map(async path => (await lstat(path)).mtimeMs >= startedAtMs));
+  // New since the snapshot, or rewritten since the pass began (the same name downloaded again).
+  const fresh = await Promise.all(named.found.map(async path =>
+    before.get(dirname(path))?.has(path) === false || (await lstat(path)).mtimeMs >= startedAtMs));
   if (named.found.length && !named.missing.length && fresh.every(Boolean)) {
     const profile = clean(download?.profile, 120);
     return {status: 'downloaded', files: named.found, ...(profile ? {profile} : {}), ...withModel, ...(summary ? {summary} : {})};
