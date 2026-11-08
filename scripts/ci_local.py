@@ -159,7 +159,7 @@ def select_python(version, env, temporary):
     actual = output([candidate, '-c', 'import sys; print(".".join(map(str,sys.version_info[:2])))'])
     if actual != version: raise ValueError('Python version mismatch')
     venv = temporary / 'python'
-    subprocess.run([candidate, '-m', 'venv', str(venv)], check=True)
+    subprocess.run([candidate, '-m', 'venv', str(venv)], env=env, check=True)
     return str(venv / 'bin'), 'Python ' + version + ' in isolated venv'
 
 
@@ -235,6 +235,10 @@ def run_job_steps(spec, workspace, directory):
                **{'matrix.' + k: v for k, v in spec['matrix'].items()}}
     env = dict(os.environ, CI='true', GITHUB_WORKSPACE=str(workspace), RUNNER_TEMP=str(temporary),
                GITHUB_ENV=str(environment_file), GITHUB_PATH=str(path_file))
+    if platform.system() == 'Linux':
+        # /tmp can have a small per-user quota. Keep pip and child-process scratch in this tracked job.
+        scratch = temporary / 'tmp'; scratch.mkdir(mode=0o700)
+        env['TMPDIR'] = str(scratch)
     env['PATH'] = env.get('PATH', '') + ':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
     for values in (spec['env'], spec['job'].get('env', {})):
         env.update({key: expand(value, context) for key, value in values.items()})

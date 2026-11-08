@@ -120,6 +120,22 @@ class LocalWorkflowTests(unittest.TestCase):
             self.assertFalse((root/'sub/must-not-exist').exists()); self.assertTrue((root/'sub/failure-ran').exists())
             self.assertEqual(json.loads((root/'logs/result.json').read_text())['status'],'FAIL')
 
+    def test_linux_jobs_keep_subprocess_temporary_files_inside_their_own_job(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder).resolve(); inherited=root/'inherited'; inherited.mkdir()
+            paths=[]
+            with patch.object(ci.platform,'system',return_value='Linux'), patch.dict(os.environ,{'TMPDIR':str(inherited)}):
+                for name in ('one','two'):
+                    directory=root/name
+                    job={'workflow':'fixture','key':name,'matrix':{},'env':{},'defaults':{},'job':{
+                        'runs-on':'ubuntu-latest','steps':[{'run':'python3 -c "import tempfile; print(tempfile.gettempdir())"'}]}}
+                    self.assertEqual(ci.execute_job(job,root,directory)['status'],'PASS')
+                    selected=Path((directory/'01.log').read_text().strip())
+                    self.assertTrue(selected.is_relative_to(directory/'temp'))
+                    self.assertTrue(selected.is_dir())
+                    paths.append(selected)
+            self.assertNotEqual(paths[0],paths[1])
+
     def test_mac_jobs_hold_the_ios_lock_and_linux_jobs_do_not(self):
         probe = 'python3 -c "import fcntl,os,sys\nf=open(os.environ[\'STM_IOS_LOCK\'],\'a\')\ntry: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept BlockingIOError: sys.exit(7)"'
         with tempfile.TemporaryDirectory() as folder:
