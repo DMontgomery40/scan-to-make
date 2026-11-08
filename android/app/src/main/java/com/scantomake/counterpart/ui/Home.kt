@@ -126,7 +126,8 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
             }
         PullToRefreshBox(refreshing, onRefresh = { scope.launch { refreshing = true; state.load(); state.loadPrinters(); refreshing = false } }, Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                error?.let { e -> item { ConnectionBanner(e.message, e.needsPairing) } }
+                error?.let { e -> item { ConnectionBanner(e.message, e.needsPairing,
+                    retry = { scope.launch { state.load(); state.loadPrinters() } }, connectDifferent = settings) } }
                 if (query.isBlank()) item { StarterProjects { open(it, false) } }
                 if (loaded && projects.isEmpty() && error == null) {
                     item { EmptyHome(newProject) }
@@ -171,11 +172,18 @@ private fun androidx.compose.foundation.lazy.LazyListScope.gridItems(list: List<
 }
 
 @Composable
-fun ConnectionBanner(message: String, pair: Boolean) {
+fun ConnectionBanner(message: String, pair: Boolean, retry: () -> Unit = {}, connectDifferent: () -> Unit = {}) {
     GlassCard(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(CIcons.Warning, null, tint = Palette.needsYou); Spacer(Modifier.width(10.dp))
-            Text(if (pair) "$message Open Settings → Connect a Different Computer." else message, fontSize = 14.sp)
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(CIcons.Warning, null, tint = Palette.needsYou); Spacer(Modifier.width(10.dp))
+                Text(message, fontSize = 14.sp)
+            }
+            // "…then try again" needs the button it names (F6); pairing again is one tap away, not a Settings hunt.
+            Row {
+                TextButton(onClick = retry) { Text("Try Again") }
+                TextButton(onClick = connectDifferent) { Text(if (pair) "Connect to Your Computer" else "Connect a Different Computer") }
+            }
         }
     }
 }

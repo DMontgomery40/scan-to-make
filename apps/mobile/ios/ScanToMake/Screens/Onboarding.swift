@@ -55,6 +55,9 @@ struct WelcomeView: View {
                     .frame(maxWidth: .infinity, minHeight: g.size.height, alignment: .center)
                 }
                 .scrollBounceBehavior(.basedOnSize)
+                // The content is forced to the full height above, so give the scroll content its own
+                // bottom margin: the last card scrolls clear of Continue in the safeAreaBar (F16).
+                .contentMargins(.bottom, 72, for: .scrollContent)
             }
             .safeAreaBar(edge: .bottom) {
                 Button(action: next) { Text("Continue").fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 44) }

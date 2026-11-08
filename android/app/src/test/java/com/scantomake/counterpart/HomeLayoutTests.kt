@@ -172,6 +172,16 @@ class HomeLayoutTests {
         compose.onNodeWithText("Vernier caliper with depth gauge").assertExists()
     }
 
+    /** F6: "…then try again" names a button; the banner carries it, plus the way to a different computer. */
+    @Test fun theOfflineBannerOffersTryAgainAndADifferentComputerWithProjectsPresent() {
+        state.projects.value = listOf(project("a", "Stove gap filler", "ready"))
+        state.loaded.value = true
+        state.error.value = com.scantomake.counterpart.api.CompanionException.unreachable
+        home()
+        compose.onNodeWithText("Try Again").assertExists()
+        compose.onNodeWithText("Connect a Different Computer").assertExists()
+    }
+
     @Test fun printerSoftwareShowsTheHiddenCopyAndExplicitMoveWithProjectsPresent() = printerSoftwareMove(false)
 
     @Test fun printerSoftwareShowsEventsEvenWhenTheMoveReplyIsLost() = printerSoftwareMove(true)

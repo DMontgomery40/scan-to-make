@@ -12,7 +12,7 @@ struct CloudPairingView: View {
     @State private var pairingTask: Task<Void, Never>?
 
     var body: some View {
-        if fallback { FindYourMacView(mode: .firstRun) }
+        if fallback { FindYourMacView(mode: .firstRun, onBack: { fallback = false }) }
         else {
             NavigationStack {
                 VStack(spacing: 20) {
@@ -36,6 +36,10 @@ struct CloudPairingView: View {
                         if let message = problem ?? app.cloud.message {
                             Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         }
+                        // A tester often installs the phone app first; the Mac app lives on beta.html (F14).
+                        Link("Get Counterpart for Mac", destination: URL(string: "https://counterpart.dtmont.com/beta.html")!)
+                            .font(.subheadline.weight(.semibold))
+                            .accessibilityIdentifier("get-counterpart-mac")
                         Button("Look Again") { Task { await discover() } }.buttonStyle(.glass)
                     }
                     Spacer()
@@ -47,6 +51,9 @@ struct CloudPairingView: View {
                     }
                 }.padding(28).frame(maxWidth: .infinity)
             }
+            // Dark like Welcome before it and Find your Mac after it (F14): this was the one screen
+            // in the first-run flow following the system.
+            .preferredColorScheme(.dark)
             .task { if app.pendingLink != nil { useCode() } else { await discover() } }
             .onChange(of: app.pendingLink) { _, link in if link != nil { useCode() } }
             .onChange(of: scenePhase) { _, phase in if phase == .active && connected == nil { Task { await discover() } } }
