@@ -65,7 +65,7 @@ jobs:
           set -euo pipefail
           if ! command -v xcodegen >/dev/null; then echo "xcodegen not installed; skipping the drift check"; exit 0; fi
           cp -R ScanToMake.xcodeproj "${{ runner.temp }}/committed.xcodeproj"
-          trap 'rm -rf "${{ runner.temp }}/committed.xcodeproj"' EXIT
+          trap 'trash "${{ runner.temp }}/committed.xcodeproj"' EXIT
           xcodegen generate --spec project.yml --quiet
           diff -r "${{ runner.temp }}/committed.xcodeproj" ScanToMake.xcodeproj
       - name: Find an iOS 27 simulator (iPhone 18 Pro when installed)
@@ -117,7 +117,7 @@ jobs:
       - name: Unsigned iPhoneOS Release build has no React Native in it
         run: |
           set -euo pipefail
-          trap 'rm -rf "${{ runner.temp }}/app-release"' EXIT
+          trap 'trash "${{ runner.temp }}/app-release"' EXIT
           xcodebuild build -project apps/mobile/ios/ScanToMake.xcodeproj -scheme ScanToMake -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath "${{ runner.temp }}/app-release" CODE_SIGNING_ALLOWED=NO
           APP="${{ runner.temp }}/app-release/Build/Products/Release-iphoneos/ScanToMake.app"
