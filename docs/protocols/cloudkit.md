@@ -94,7 +94,7 @@ Written by the phone when it can't reach the Mac directly (PRD §9.3). The print
 
 | Field | Type | Notes |
 |---|---|---|
-| `type` | String | `print`, `correct`, `answerAsk`, `confirm`, `pause`, `resume`, `cancel` |
+| `type` | String | `print`, `correct`, `answerAsk`, `confirm`, `pause`, `resume`, `cancel`, `status` |
 | `projectId` | String | |
 | `payload` | String | a JSON **string**, by type (below) |
 | `photos` | [Asset]? | for `correct` and `answerAsk` |
@@ -110,6 +110,7 @@ Written by the phone when it can't reach the Mac directly (PRD §9.3). The print
 | `answerAsk` | `{bestGuess?, text?}`; photos answer it with `bestGuess: false` | `objects.answerCloseup` |
 | `confirm` | `{confirmationId, answer: {action, content?}}` | `objects.answerPrintConfirmation` |
 | `pause`, `resume`, `cancel` | `{}` | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` |
+| `status` | `{status: "works" \| "needs-changes"}`: "Did it fit?" answered from a notification (PRD §9.1). Needs Changes with words sends a `correct` after it | `objects.settings.set` |
 
 How the Mac handles a command:
 - Each command runs apart from the reader and from the others, so a `pause` waiting on the printer's confirmation doesn't hold back the `confirm` that answers it. Its results are written in order by one writer.

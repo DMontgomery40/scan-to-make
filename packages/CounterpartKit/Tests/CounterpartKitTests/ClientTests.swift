@@ -928,6 +928,9 @@ final class FormatTests: XCTestCase {
         // "Open Print" goes to Printing; "Open Project" on a finished print goes to the project.
         XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.paused"], action: "OPEN_PRINT"), .printing("p"))
         XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.done"], action: "OPEN"), .project("p"))
+        XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.confirm"], action: "OPEN"), .project("p"), "Open Project says the project")
+        XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.unreachable"], action: "OPEN"), .project("p"))
+        XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.unreachable"]), .printing("p"), "a plain tap still follows the print")
         XCTAssertEqual(AppRoute.notificationFields(["ck": ["qry": ["af": ["projectId": "q", "type": "print.done", "eventId": "e"]]]]).projectId, "q")
         XCTAssertEqual(AppRoute.printing("p").projectId, "p")
         XCTAssertNil(AppRoute.home.projectId)

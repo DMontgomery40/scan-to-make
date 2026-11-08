@@ -66,7 +66,7 @@ import CounterpartKit
     /// Settings, another project's Print sheet) it shows as a banner.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let project = AppRoute.notificationFields(notification.request.content.userInfo).projectId
-        let showing = await MainActor.run { project.map { self.app?.onScreen[$0] != nil } ?? false }
+        let showing = await MainActor.run { project.map { self.app?.isShowing($0) == true } ?? false }
         return showing ? [] : [.banner, .list, .sound]
     }
 

@@ -116,8 +116,13 @@ object Notifications {
             putExtra(NotificationActions.EXTRA_TAG, tag)
             putExtra(EXTRA_PROJECT, event.projectId)
         }
-        // A reply needs a mutable intent so the system can add the words; the others stay immutable.
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (action.takesWords && Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
+        // A reply needs a mutable intent so the system can add the words (FLAG_MUTABLE from Android 12; before it,
+        // no immutability flag); the other buttons stay immutable.
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or when {
+            !action.takesWords -> PendingIntent.FLAG_IMMUTABLE
+            Build.VERSION.SDK_INT >= 31 -> PendingIntent.FLAG_MUTABLE
+            else -> 0
+        }
         val broadcast = PendingIntent.getBroadcast(context, code, intent, flags)
         val builder = NotificationCompat.Action.Builder(0, action.title, broadcast)
         if (action.takesWords) {
