@@ -78,7 +78,7 @@ import CounterpartKit
         guard let mcpId = printer.mcpId, working == nil else { return }
         working = "mcp." + mcpId; refusal = nil
         defer { working = nil }
-        do { store.mcpUpdates[mcpId] = MCPUpdateProgress(try await store.mac.client.updateMCP(mcpId, fresh: fresh)) }
+        do { store.recordMCPUpdate(mcpId, MCPUpdateProgress(try await store.mac.client.updateMCP(mcpId, fresh: fresh))) }
         catch let failure as CompanionError { refusal = failure.message } catch {}
         await store.loadPrinters()
     }
@@ -365,7 +365,7 @@ struct MCPCopiesView: View {
         working = id; problem = nil
         if let moveTitle { store.attemptedMcpMoves[id] = moveTitle }
         defer { working = nil }
-        do { store.mcpUpdates[id] = MCPUpdateProgress(try await store.mac.client.updateMCP(id, fresh: fresh)); await store.loadMCPCopies() }
+        do { store.recordMCPUpdate(id, MCPUpdateProgress(try await store.mac.client.updateMCP(id, fresh: fresh))); await store.loadMCPCopies() }
         catch let failure as CompanionError { problem = failure.message }
         catch { problem = CompanionError.unreachable.message }
     }

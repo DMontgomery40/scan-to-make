@@ -141,7 +141,14 @@ class HomeLayoutTests {
 
     @Test fun printerSoftwareRetainsWaitingMoveWhenAnotherUpdateStarts() = printerSoftwareMove(false, secondUpdate = true)
 
-    private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false, secondUpdate: Boolean = false) {
+    /**
+     * PRD §8.10: the Move asked the companion for that install, which answered "waiting", and its finishing event never
+     * came (a companion restart). After the clock runs out the row says so, not "waiting" forever, and the Move stays pressable.
+     */
+    @Test fun printerSoftwareMoveThatNeverHearsBackSaysSo() = printerSoftwareMove(false, neverHears = true)
+
+    private fun printerSoftwareMove(lostReply: Boolean, navigateHome: Boolean = false, secondUpdate: Boolean = false, neverHears: Boolean = false) {
+        if (neverHears) state.mcpWaitLimitMs = 1_000
         val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
         app.pairingStore.save(v2Record(), false)
         val transport = FakeTransport { request, _ ->
@@ -185,6 +192,12 @@ class HomeLayoutTests {
             }
         } else {
             compose.waitUntil(5_000) { compose.onAllNodes(hasText("Updates as soon as Counterpart finishes its work on this printer.")).fetchSemanticsNodes().isNotEmpty() }
+        }
+        if (neverHears) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(state.mcpWaitLimitMs + 500))
+            compose.waitUntil(5_000) { compose.onAllNodes(hasText(AppState.MCP_UNHEARD)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Updates as soon as Counterpart finishes its work on this printer.").assertDoesNotExist()
+            compose.onNodeWithText("Move Bambu Lab P1S (mcp-3D-printer-server, your copy at /home/ada/mcp-3D-printer-server) to Counterpart’s updated copy").assertIsEnabled()
         }
         if (secondUpdate) {
             compose.onNodeWithText("Update Counterpart’s copy").performScrollTo().performClick()

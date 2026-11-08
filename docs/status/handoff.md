@@ -37,7 +37,8 @@ Printer: P1S, LAN Only + Developer Mode; AMS A1 black PLA (nearly empty), A2 yel
 4. **Boundary leftovers** (AGENTS.md "The app staples onto the MCPs"):
    - the shared ControlKit form encoding (Mac Add Printer sheet and phones) still branches on `"bambu"` and `BAMBU_MODEL`; make it generic from `counterpart_setup_fields` (#392 merged over it with `--boundary-reviewed`);
    - move title, designer and licence into `list_3mf_plates` in both MCPs, publish, install, then delete `inspectModelFile`'s remaining 3MF parsing (PRD §8.0 item 9);
-   - port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D.
+   - port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D;
+   - package-name branching still in app code: Mac `PrinterMCP.label` (only the Add Printer sheet calls it, `PrinterSetupViews.swift:167`), ControlKit `PrinterDestination.mcpName`, CounterpartKit `Printers.swift` `mcpName`, Android `Models.kt` `via`. The companion now sends each MCP's `label` with `destination.mcps`; give the printer itself one too, then delete these.
 5. **Flaky tests:** fixed at the cause in #403 (capture drain, local-control incomplete frame, published file arrival), bambu-printer-mcp 1.1.79 (#130: remote-slicer deadline, FULU final reply drain) and mcp-3D-printer-server 1.2.60 (#89: FULU drain). Each failed first, then passed 200/200 loaded runs.
    - Open: the FULU drain changes pause/resume/stop on the printer and was checked only against mocked hosts. Check it on the P1S the next time David pauses, resumes or stops a print from Counterpart.
    - Open: the hosted iPhone simulator launch timeout (the Mac's own gate is authoritative).

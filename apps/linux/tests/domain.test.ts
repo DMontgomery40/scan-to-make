@@ -512,3 +512,27 @@ test("while the printer MCP sends the file, a project shows the companion's perc
   // counterpart/1 upload progress, as the companion writes it to Project.progress (Mac, iPhone, iPad and Android show the same).
   assert.equal(words({ id: "x", state: "printing", progress: "Sending to the printer… 62%" } as unknown as Project), "Sending to the printer… 62%");
 });
+
+// PRD §8.10: an update the companion said waits, whose finishing event never came (a restart), says so instead of
+// "waiting" forever; any word about that install first (it started) stops its clock. The Mac's and phones' 90 s clock.
+test("a wait that never hears back says so, and any other word stops its clock", async () => {
+  const { mcpWaiting, mcpWaitClock, MCP_UNHEARD, MCP_WAIT_LIMIT_MS, mcpUpdateNotice } = await import("../src/domain.ts");
+  assert.equal(MCP_WAIT_LIMIT_MS, 90_000);
+  assert.equal(MCP_UNHEARD, "Counterpart didn’t say whether this updated. Try Update again.");
+  const reply = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/mcp-update-waiting.json", import.meta.url), "utf8"));
+  assert.ok(mcpWaiting(reply), "Update's answer: waiting");
+  assert.equal(mcpUpdateNotice(reply), "Updates as soon as Counterpart finishes its work on this printer.");
+  assert.ok(mcpWaiting({ type: "mcp.update.waiting" }));
+  assert.ok(!mcpWaiting({ type: "mcp.update.started" }) && !mcpWaiting({ update: { state: "started" } }));
+  const expired: string[] = [];
+  const clock = mcpWaitClock((id) => expired.push(id), 30);
+  clock.note(reply.update.mcpId, true);
+  clock.note("heard", true);
+  clock.note("heard", false);
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.deepEqual(expired, [reply.update.mcpId]);
+  clock.note("stopped", true);
+  clock.stop();
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.deepEqual(expired, [reply.update.mcpId], "stopping clears every clock");
+});

@@ -132,6 +132,8 @@ test('Update runs the matching update in that installation, restarts every sessi
   const node = '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node';
   const f = await updater(t, {profile: bambu(node, [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]), files});
   assert.equal(f.updates.mcpId('a1'), f.mcpId, 'both printers share the install');
+  assert.equal(f.updates.version('p1s'), '1.1.46', 'the version Settings shows on that MCP\'s row');
+  assert.equal(f.updates.version('nowhere'), undefined);
   const started = await f.updates.update(f.mcpId);
   assert.deepEqual(started, {mcpId: f.mcpId, state: 'started', fromVersion: '1.1.46', toVersion: '1.1.50'});
   await f.done();

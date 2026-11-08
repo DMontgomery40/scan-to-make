@@ -119,12 +119,45 @@ import Darwin
                                      mcps: [.init(backend: "bambu-printer-mcp", destinationId: "current"),
                                             .init(backend: "mcp-3d-printer-server", destinationId: "counterpart-a07c6f7d")])
         let rows = PrinterMCP.list([p1s])
-        XCTAssertEqual(rows.map(\.name), ["bambu-printer-mcp", "mcp-3D-printer-server"])
+        XCTAssertEqual(rows.map(\.name), ["bambu-printer-mcp", "mcp-3d-printer-server"], "an older companion's choice has no label: its package, as sent")
         XCTAssertTrue(rows[0].updateAvailable, "the MCP prints go through keeps its Update")
         XCTAssertEqual(rows[1].printers, ["Bambu Lab P1S"])
         let alone = PrinterDestination(id: "a1", name: "A1", backend: "bambu-printer-mcp", mcpId: "m",
                                        mcps: [.init(backend: "bambu-printer-mcp", destinationId: "a1")])
         XCTAssertEqual(PrinterMCP.list([alone]).count, 1, "a printer in one MCP lists just that one")
+    }
+
+    /// #393's fallback row was built with no install, version or Update, and named every MCP other than bambu-printer-mcp
+    /// "mcp-3D-printer-server" itself. The companion now names each MCP a printer is set up in (its install, label and
+    /// versions, the shared fixture its own test checks), so that row has its name, version and an Update that reaches
+    /// the companion for that install. This drives the model and the companion socket, not the SwiftUI button.
+    func testTheRowForTheMcpPrintsDontGoThroughHasItsInstallVersionAndUpdate() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        struct Reply: Decodable { let destinations: [PrinterDestination] }
+        let printers = try JSONDecoder().decode(Reply.self, from: Data(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/printer-both-mcps.json"))).destinations
+        let rows = PrinterMCP.list(printers)
+        XCTAssertEqual(rows.map(\.name), ["bambu-printer-mcp", "mcp-3D-printer-server"])
+        let other = rows[1]
+        XCTAssertEqual(other.mcpId, "mcp-3a2f0c9e5b7d1e44")
+        XCTAssertEqual(other.version, "1.2.56")
+        XCTAssertEqual(other.update?.latestVersion, "1.2.58")
+        XCTAssertEqual(other.printers, ["Bambu Lab P1S"])
+        XCTAssertTrue(other.updateAvailable, "a newer version is out, so the row offers Update")
+        // A label the companion sends is shown as sent: the app never names a package itself.
+        let renamed = PrinterDestination(id: "current", name: "P1S", backend: "bambu-printer-mcp", mcpId: "mcp-812bcaf2d1ff2948",
+                                         mcps: [.init(backend: "bambu-printer-mcp", destinationId: "current"),
+                                                .init(backend: "mcp-3d-printer-server", destinationId: "x", mcpId: "mcp-0000000000000003", label: "Any Printer MCP")])
+        XCTAssertEqual(PrinterMCP.list([renamed]).map(\.name), ["Any Printer MCP", "bambu-printer-mcp"])
+
+        // Update on that row asks the companion to update that install, and its answer shows on the row.
+        let companion = try OneRequestSocket(reply: ["update": ["mcpId": "mcp-3a2f0c9e5b7d1e44", "state": "started", "fromVersion": "1.2.56", "toVersion": "1.2.58"]])
+        let updates = PrinterUpdates()
+        await updates.update(try XCTUnwrap(other.mcpId), fresh: false, socket: companion.path)
+        let request = try XCTUnwrap(companion.request)
+        XCTAssertEqual(request["method"] as? String, "printers.updateMcp")
+        XCTAssertEqual((request["params"] as? [String: Any])?["mcpId"] as? String, "mcp-3a2f0c9e5b7d1e44")
+        XCTAssertEqual(updates.status["mcp-3a2f0c9e5b7d1e44"]?.words, "Updating to 1.2.58…")
     }
 
     /// The companion ends every wait within a minute with an event. One that never comes (it restarted, as on Nov 6)

@@ -523,6 +523,35 @@ export function spoolTitle(f: import("./types").Filament): string {
   return f.label ? `${f.label} · ${f.name}` : `${f.material} · ${f.name || f.colour}`;
 }
 
+/**
+ * PRD §8.10: an update that says it waits, then hears nothing more from the companion for this long, says so. The
+ * companion ends every wait within a minute; past this its event went missing (a restart). The Mac's and phones' clock.
+ */
+export const MCP_WAIT_LIMIT_MS = 90_000;
+export const MCP_UNHEARD = "Counterpart didn’t say whether this updated. Try Update again.";
+
+/** Whether an Update answer, or an mcp.update.* event, leaves that install waiting on the companion. */
+export function mcpWaiting(change: {type?: string; update?: {state: string}; state?: string}): boolean {
+  if (change.type) return change.type === "mcp.update.waiting";
+  return (change.update?.state ?? change.state) === "waiting";
+}
+
+/**
+ * The clock for each install's wait: `note` on every change of its state (a wait starts its clock, anything else stops
+ * it); `expire` runs for an install whose wait heard nothing more within `limitMs`.
+ */
+export function mcpWaitClock(expire: (mcpId: string) => void, limitMs = MCP_WAIT_LIMIT_MS) {
+  const clocks = new Map<string, ReturnType<typeof setTimeout>>();
+  return {
+    note(mcpId: string, waiting: boolean) {
+      clearTimeout(clocks.get(mcpId));
+      clocks.delete(mcpId);
+      if (waiting) clocks.set(mcpId, setTimeout(() => { clocks.delete(mcpId); expire(mcpId); }, limitMs));
+    },
+    stop() { for (const clock of clocks.values()) clearTimeout(clock); clocks.clear(); },
+  };
+}
+
 /** Keep the latest software result for every MCP operation. */
 export function mcpUpdateNotices(previous: Record<string, string>, events: {type: string; title: string; body: string; data?: {mcpId?: string}}[]): Record<string, string> {
   const next = {...previous};

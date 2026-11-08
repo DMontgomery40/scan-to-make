@@ -38,6 +38,7 @@ fun PrinterSettingsControls(printer: PrinterDestination, state: AppState) {
     val client = Counterpart.instance.companion
     val scope = rememberCoroutineScope()
     val events by state.mcpUpdateEvents.collectAsState()
+    val unheard by state.mcpUnheard.collectAsState()
     val capabilities by state.capabilities.collectAsState()
     var route by remember(printer.id, printer.backend) { mutableStateOf<PrinterPrintRoute?>(null) }
     var routeLoading by remember(printer.id, printer.backend) { mutableStateOf(true) }
@@ -72,7 +73,11 @@ fun PrinterSettingsControls(printer: PrinterDestination, state: AppState) {
         val mcpId = printer.mcpId ?: return
         eventFloor = events[mcpId]?.seq ?: -1
         update = null
-        change { update = client.updatePrinterMcp(mcpId, fresh); state.loadPrinters() }
+        state.noteMcpUpdate(mcpId, false)
+        change {
+            update = client.updatePrinterMcp(mcpId, fresh).also { state.noteMcpUpdate(mcpId, it.state == "waiting") }
+            state.loadPrinters()
+        }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -111,7 +116,9 @@ fun PrinterSettingsControls(printer: PrinterDestination, state: AppState) {
             if (update?.state == "unresolved" && updateEvent == null)
                 SecondaryButton("Install a Fresh Copy", Modifier.fillMaxWidth(), enabled = !busy) { updateMcp(true) }
             // Events carry the completed/failed result. Never poll by replaying a mutation after an uncertain send.
-            if (updateEvent != null) {
+            // A wait whose event never came says so (PRD §8.10), and Update stays pressable.
+            if (printer.mcpId in unheard) Text(AppState.MCP_UNHEARD, color = Palette.secondary, fontSize = 12.sp)
+            else if (updateEvent != null) {
                 Text(updateEvent.title, color = if (updateEvent.type.endsWith("failed")) Palette.failed else Palette.secondary, fontSize = 13.sp)
                 if (updateEvent.body.isNotBlank()) Text(updateEvent.body, color = Palette.secondary, fontSize = 12.sp)
             } else update?.let { Text(it.words, color = Palette.secondary, fontSize = 12.sp) }
@@ -129,17 +136,20 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
     val events by state.mcpUpdateEvents.collectAsState()
     var busy by remember { mutableStateOf<String?>(null) }
     val attempts by state.mcpUpdateAttempts.collectAsState()
+    val unheard by state.mcpUnheard.collectAsState()
     LaunchedEffect(printerId) { state.loadCapabilities(); state.loadMcpCopies() }
     fun update(id: String, fresh: Boolean) {
         if (busy != null) return
         busy = id
         val attempt = AppState.McpUpdateAttempt(printerId, id, events[id]?.seq ?: -1)
         state.mcpUpdateAttempts.value = state.mcpUpdateAttempts.value + (id to attempt)
+        state.noteMcpUpdate(id, false)
         state.scope.launch {
             try {
                 val result = Counterpart.instance.companion.updatePrinterMcp(id, fresh)
                 if (state.mcpUpdateAttempts.value[id] === attempt) {
                     state.mcpUpdateAttempts.value = state.mcpUpdateAttempts.value + (id to attempt.copy(result = result))
+                    state.noteMcpUpdate(id, result.state == "waiting")
                     state.loadMcpCopies()
                 }
             }
@@ -171,8 +181,8 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
             // An update or Move started on another phone, the Mac or Linux: its events show here too (#357's deferred P2).
             (pkg.uses.filter { it.printerId == printerId }.map { it.mcpId } + pkg.appMcpId).distinct()
                 .filter { id -> attempts[id]?.printerId != printerId }
-                .mapNotNull { id -> events[id] }.forEach { event ->
-                    Text(event.body.takeIf { it.isNotBlank() } ?: event.title, fontSize = 12.sp,
+                .mapNotNull { id -> events[id]?.let { id to it } }.forEach { (id, event) ->
+                    Text(if (id in unheard) AppState.MCP_UNHEARD else event.body.takeIf { it.isNotBlank() } ?: event.title, fontSize = 12.sp,
                         color = if (event.type.endsWith("failed")) Palette.failed else Palette.secondary)
                 }
             Text("Moving updates Counterpart’s copy and uses it for the named printers. Your copy is left untouched.", color = Palette.secondary, fontSize = 12.sp)
@@ -181,7 +191,8 @@ fun McpCopiesPanel(printerId: String, state: AppState) {
         // Events are authoritative even when the accepted mutation's HTTP reply never arrived.
         attempts.values.filter { it.printerId == printerId }.forEach { attempt ->
             val event = events[attempt.mcpId]?.takeIf { it.seq > attempt.eventFloor }
-            val words = event?.body?.takeIf { it.isNotBlank() } ?: event?.title ?: attempt.result?.words
+            // A wait whose event never came says so (PRD §8.10); the Move and Update stay pressable.
+            val words = if (attempt.mcpId in unheard) AppState.MCP_UNHEARD else event?.body?.takeIf { it.isNotBlank() } ?: event?.title ?: attempt.result?.words
             words?.let { Text(it, fontSize = 12.sp) }
             if (event == null) attempt.problem?.let { Text(it, color = Palette.failed, fontSize = 12.sp) }
         }

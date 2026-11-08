@@ -145,6 +145,28 @@ import CounterpartKit
         XCTAssertEqual(uses?.first?.canMove, true, "its explicit move action remains available")
     }
 
+    /// PRD §8.10: an update the Mac said waits, whose finishing event never came, stops claiming to wait and lets Update
+    /// and Move be pressed again; word from the Mac before then (it started) is kept as it is.
+    func testAWaitThatNeverHearsBackBecomesASentenceAndUpdateComesBack() async throws {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        store.mcpWaits.limit = .milliseconds(50)
+        func event(_ type: String, _ mcpId: String) throws -> CounterpartEvent {
+            try JSONDecoder().decode(CounterpartEvent.self, from: Data(#"{"v":1,"seq":1,"id":"e","at":"2026-11-07T19:52:31Z","type":"\#(type)","title":"t","body":"","notify":"none","data":{"mcpId":"\#(mcpId)"}}"#.utf8))
+        }
+        await store.receive(try event("mcp.update.waiting", "mcp-0000000000000001"))
+        let reply = try JSONDecoder().decode(MCPUpdate.self, from: Data(#"{"mcpId":"mcp-0000000000000002","state":"waiting"}"#.utf8))
+        store.recordMCPUpdate("mcp-0000000000000002", MCPUpdateProgress(reply))
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000002"]?.isRunning, true, "Update and Move are held while it waits")
+        await store.receive(try event("mcp.update.started", "mcp-0000000000000002"))
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000001"], .unheard)
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000001"]?.words, "Counterpart didn’t say whether this updated. Try Update again.")
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000001"]?.isRunning, false, "Update and Move can be pressed again")
+        XCTAssertEqual(store.mcpUpdates["mcp-0000000000000002"]?.state, "started", "an update that started is left alone")
+    }
+
     func testRemoteDeletionEvictsProjectAndRejectsOlderReplies() async throws {
         let mac = SettingsMac()
         let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
