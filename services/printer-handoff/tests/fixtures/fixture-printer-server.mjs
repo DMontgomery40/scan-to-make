@@ -251,6 +251,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     await confirmPrint();
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'crash') process.exit(9);
     if (process.env.HANDOFF_FIXTURE_DISPATCH === 'timeout') await new Promise(() => {});
+    // HANDOFF_FIXTURE_UPLOAD {"gapsMs":[...]}: after the confirmation, a slow upload as bambu-printer-mcp 1.1.77 sends it:
+    // one progress notification (counterpart/1 stage "upload", bytes of total) per gap, each after waiting that gap.
+    if (process.env.HANDOFF_FIXTURE_UPLOAD && progressToken !== undefined) {
+      const {gapsMs} = JSON.parse(process.env.HANDOFF_FIXTURE_UPLOAD), total = 18_362_734;
+      for (const [index, gap] of gapsMs.entries()) {
+        await new Promise(resolve => setTimeout(resolve, gap));
+        const sent = Math.floor(total * (index + 1) / gapsMs.length);
+        await extra.sendNotification({method: 'notifications/progress', params: {progressToken, progress: sent, total,
+          message: `Sending to the printer: ${Math.floor(sent * 100 / total)}%`, _meta: {'counterpart/stage': 'upload'}}});
+      }
+      record({uploaded: true});
+    }
     if (process.env.HANDOFF_FIXTURE_REMOTE === '1') return text({status: 'success', dispatch: 'started', remoteProjectPath: 'cache/checked-1b2c-sliced.3mf', tool: name});
     return text({dispatch: 'started', tool: name});
   }

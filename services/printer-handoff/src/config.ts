@@ -80,9 +80,13 @@ export type PrinterPrintOptions = z.infer<typeof printerPrintOptionsSchema>;
 
 export const printerTimeoutsSchema = z.strictObject({
   connectMs: z.number().int().min(50).max(120000).optional(),
+  /** One tool call's bound; for a call that reports progress, the longest time without any. */
   toolMs: z.number().int().min(50).max(1800000).optional(),
+  /** A call that reports progress (print_3mf's upload) may run this long in total while it keeps reporting. */
+  toolTotalMs: z.number().int().min(50).max(14_400_000).optional(),
   elicitationMs: z.number().int().min(50).max(1800000).optional(),
-});
+}).refine(({toolMs, toolTotalMs}) => toolMs === undefined || toolTotalMs === undefined || toolTotalMs >= toolMs,
+  {message: 'toolTotalMs must be at least toolMs', path: ['toolTotalMs']});
 export type PrinterTimeouts = z.infer<typeof printerTimeoutsSchema>;
 
 export const printerHandoffConfigSchema = z.strictObject({
@@ -97,7 +101,14 @@ export const printerHandoffConfigSchema = z.strictObject({
 });
 export type PrinterHandoffConfig = z.infer<typeof printerHandoffConfigSchema>;
 
-export const DEFAULT_TIMEOUTS = {connectMs: 10000, toolMs: 600000, elicitationMs: 600000} as const;
+/**
+ * toolTotalMs is sized for the largest file a printer MCP sends at the slowest upload measured, with its pauses:
+ * bambu-printer-mcp accepts print files up to 256 MiB (src/safety/archive.ts), and a P1S took 130 KiB/s
+ * (src/printers/ftp-upload.ts), so 268,435,456 B / 133,120 B/s = 2,017 s of upload; the print's confirmation may
+ * wait elicitationMs, 600 s, in the same call; that leaves 983 s, eight of the 120 s SD-card pauses either MCP
+ * allows (FTP_UPLOAD_STALL_MS), before one hour. A printer that stops is still caught by toolMs without progress.
+ */
+export const DEFAULT_TIMEOUTS = {connectMs: 10000, toolMs: 600000, toolTotalMs: 3_600_000, elicitationMs: 600000} as const;
 export function timeoutsFor(config: Pick<PrinterHandoffConfig, 'timeouts'>): Required<PrinterTimeouts> {
   return {...DEFAULT_TIMEOUTS, ...config.timeouts};
 }

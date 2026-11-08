@@ -102,7 +102,8 @@ export interface PrinterToolCallOptions {
    * server's elicitation requests carry no reference to the call that caused them.
    */
   elicitationContext?: ElicitationContext;
-  /** The MCP's progress notifications for this call. Given, the call asks for them, and each restarts its timeout (within its total). */
+  /** The MCP's progress notifications for this call. Given, the call asks for them, and each restarts its timeout;
+   * the whole call is then bounded by toolTotalMs instead (or by timeoutMs, if that is longer). */
   onProgress?: (progress: McpProgress) => void;
 }
 
@@ -267,7 +268,11 @@ export class PrinterMcpClient {
     if (!this.#client || !this.#catalog) fail('not-connected');
     const tool = this.getTool(name);
     this.#validate(tool, args);
-    const timeout = options.timeoutMs ?? timeoutsFor(this.#config).toolMs;
+    const timeouts = timeoutsFor(this.#config);
+    const timeout = options.timeoutMs ?? timeouts.toolMs;
+    // With progress, `timeout` is the longest wait without any and toolTotalMs bounds the whole call, so a large
+    // upload that keeps reporting can finish (audit F3). Without progress nothing resets it: `timeout` is the total.
+    const totalTimeout = options.onProgress ? Math.max(timeout, timeouts.toolTotalMs) : timeout;
     const declinedBefore = this.#declinedElicitations;
     if (options.signal?.aborted) fail('cancelled');
     await options.beforeDispatch?.();
@@ -275,7 +280,7 @@ export class PrinterMcpClient {
     let result: CallToolResult;
     try {
       result = await this.#client.callTool({name, arguments: args}, undefined, {
-        signal: options.signal, timeout, maxTotalTimeout: timeout, resetTimeoutOnProgress: true,
+        signal: options.signal, timeout, maxTotalTimeout: totalTimeout, resetTimeoutOnProgress: true,
         // The SDK asks the MCP for progress (and resets the timeout on it) only with a handler: given only when the
         // caller wants it, so other calls (the Fusion worker's pass-through) send exactly what they always did.
         ...(options.onProgress ? {onprogress: ({progress, total, message, _meta}: {progress: number; total?: number; message?: string; _meta?: Record<string, unknown>}) => {
