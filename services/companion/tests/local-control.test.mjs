@@ -174,10 +174,10 @@ test('LAN pairing needs no login and an incomplete frame expires without a mutat
   assert.equal(new URL(invitation.qrPayload).searchParams.get('f'),'a'.repeat(64));
   assert.equal(invitation.baseUrl,'https://192.168.1.2:9077');
   let read;const partial=new Promise(resolve=>{read=resolve;});
-  const emit=Socket.prototype.emit;
+  const emit=Socket.prototype.emit;let bytes='';
   t.mock.method(Socket.prototype,'emit',function(event,...args){
     const result=emit.call(this,event,...args);
-    if(event==='data'&&args[0].toString()==='{"v":1')read();
+    if(event==='data'){bytes+=args[0].toString();if(bytes==='{"v":1')read();}
     return result;
   });
   const closed=new Promise((resolve,reject)=>{const s=connect(server.path);s.on('error',reject);s.on('close',resolve);s.on('connect',()=>s.write('{"v":1'));s.resume();});
