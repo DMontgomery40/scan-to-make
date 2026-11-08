@@ -143,8 +143,12 @@ do {
         emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count])
         let folder = saveMasks ?? FileManager.default.temporaryDirectory.appendingPathComponent("mac-reconstruct-masks-\(UUID().uuidString)")
         // Promptable segmentation is new in macOS 27; before that the photos go unmasked rather than failing the scan.
-        let masking = !noMasks && (maskFolder != nil || ObjectMasker.isSupported)
-        if masking { try await prepareMasks(for: files, in: folder) } else if !noMasks { emit(["masks": "unavailable"]) }
+        var masking = !noMasks && (maskFolder != nil || ObjectMasker.isSupported)
+        if masking {
+            // Vision's segmentation model downloads once; if it can't (offline), the scan still builds, unmasked.
+            do { try await prepareMasks(for: files, in: folder) }
+            catch { masking = false; emit(["masks": "unavailable", "reason": String(describing: error)]) }
+        } else if !noMasks { emit(["masks": "unavailable"]) }
         let maskName = { (file: URL) in folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png") }
         // A walk-around frames the object large. A mask under 2% of the photo missed it (on David's rig scan: 0.6% and
         // 1.1%, a corner of the sign) and would hide nearly the whole photo from Apple; that photo goes unmasked instead.

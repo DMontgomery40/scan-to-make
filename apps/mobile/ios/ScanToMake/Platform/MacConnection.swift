@@ -234,8 +234,10 @@ typealias MacError = CompanionError
         // A send cut short keeps the way it started: frames already there mean every image, a model alone the older
         // send. A fresh one asks the Mac; if that question fails, the send fails and resumes, it never guesses.
         let held = try await client.get(id)
-        let rebuilds = !(held.capture ?? []).isEmpty
-            || (held.scan == nil && !names.isEmpty && (try await client.capabilities()).contains("objectCaptureImages"))
+        let rebuilds: Bool
+        if !(held.capture ?? []).isEmpty { rebuilds = true }
+        else if held.scan != nil || names.isEmpty { rebuilds = false }
+        else { rebuilds = try await client.capabilities().contains("objectCaptureImages") }
         guard rebuilds else {
             let files = [preview] + ProjectUploader.spread(names, count: 24).map { UploadFile.image(images.appending(path: $0), name: $0) }
             try await uploader.send(files, to: id, progress: progress)
