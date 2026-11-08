@@ -115,14 +115,17 @@ Which token to use, from PRD §8.8:
 |---|---|---|---|
 | `print.started` | `start` | 10 | required, e.g. "*Title* is printing" |
 | `print.status` | `update` | 5 | none |
+| `print.first-layer` / `print.milestone` | `update` | 10 while the print's activity runs on every device that shows activities (then no CloudKit event); otherwise 5 with no alert, and CloudKit alerts | the notification's own title and body; `sound: "default"` except the passive first layer (PRD §9.1, David, Nov 8) |
 | `print.resumed` | `update` | 5 | none |
 | `print.paused` | `update` | 10 | none; CloudKit owns the alert |
 | `print.done` | `end` | 10 | none; CloudKit owns the alert |
 | `print.failed` / `print.not-started` | `end` | 10 | none; CloudKit owns the alert |
 | `print.cancelled` | `end` | 10 (§8.8 doesn't name it; 10 matches the other ends) | none; CloudKit owns the alert |
 
-The Mac leaves optional update/end alerts out: the phone's CloudKit subscription delivers the event
-with its camera frame. `ev-started` is silent because ActivityKit requires the start alert. The server
+The Mac leaves update/end alerts out for pauses, ends and problems: the phone's CloudKit subscription
+delivers the event with its camera frame. Progress milestones are the exception (PRD §9.1): while the
+activity runs they alert on it, and the Mac writes the CloudKit event only if that alert can't go out
+promptly. `ev-started` is silent because ActivityKit requires the start alert. The server
 still accepts optional update/end alerts as part of its wire contract. If an activity token arrives
 after an event, the Mac recovers the latest saved state on its next poll; a retry ends the earlier
 activity for the same project, including when that earlier token arrives late.

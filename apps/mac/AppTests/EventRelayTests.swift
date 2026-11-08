@@ -190,6 +190,81 @@ final class EventRelayTests: XCTestCase {
         }
     }
 
+    // MARK: Milestones on the activity (David, Nov 8)
+
+    private func tokens(_ activities: [(device: String, print: String, token: String)], starters: [String] = []) -> LiveActivityTokens {
+        LiveActivityTokens(pushToStart: starters.map { .init(deviceId: $0, token: "start-" + $0, updatedAt: "") },
+                           activities: activities.map { .init(printId: $0.print, deviceId: $0.device, token: $0.token, updatedAt: "") })
+    }
+
+    func testAMilestoneAlertsTheRunningActivityInsteadOfANotification() throws {
+        let halfway = event("print.milestone", data: .init(progress: 50, layer: 106, totalLayers: 212, state: "printing"), printId: "print-1")
+        let local = tokens([("phone", "print-1", "AA")], starters: ["phone"])
+        let chosen = try XCTUnwrap(MilestoneAlert.tokens(for: halfway, relayOn: true, local: local, cloud: tokens([("phone", "print-1", "aa")]), dead: []))
+        XCTAssertEqual(chosen.count, 1, "the same token over the LAN and iCloud alerts once")
+        let push = try XCTUnwrap(MilestoneAlert.push(for: halfway, token: "AA", title: "Mic mount", now: now))
+        XCTAssertEqual(push.kind, .update)
+        XCTAssertEqual(push.priority, 10, "Apple delivers an alerting update at once only at priority 10")
+        XCTAssertEqual(push.alert, .init(title: halfway.title, body: halfway.body, sound: "default"), "the notification's own words")
+        XCTAssertEqual(push.contentState.progress, 50)
+        XCTAssertEqual(push.alertEventId, halfway.id)
+        let json = try XCTUnwrap(String(data: JSONEncoder().encode(push), encoding: .utf8))
+        XCTAssertFalse(json.contains("alertEventId"), "the relay contract has no such field")
+        let firstLayer = try XCTUnwrap(MilestoneAlert.push(for: event("print.first-layer", notify: "passive", printId: "print-1"), token: "aa", title: "Mic mount", now: now))
+        XCTAssertNil(firstLayer.alert?.sound, "the first layer is passive: it lights the screen without a sound")
+    }
+
+    func testAMilestoneIsANotificationWhenNoActivityCanShowIt() {
+        let halfway = event("print.milestone", printId: "print-1")
+        let running = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        XCTAssertNil(MilestoneAlert.tokens(for: halfway, relayOn: false, local: running, cloud: .init(), dead: []), "relay off: CloudKit")
+        XCTAssertNil(MilestoneAlert.tokens(for: halfway, relayOn: true, local: tokens([("phone", "other-print", "aa")], starters: ["phone"]), cloud: .init(), dead: []),
+                     "no activity for this print")
+        XCTAssertNil(MilestoneAlert.tokens(for: halfway, relayOn: true, local: running, cloud: .init(), dead: ["aa"]), "its token ended")
+        XCTAssertNil(MilestoneAlert.tokens(for: halfway, relayOn: true, local: tokens([("phone", "print-1", "aa")], starters: ["phone", "ipad"]), cloud: .init(), dead: []),
+                     "an iPad without the activity would hear nothing: CloudKit for everyone, never both")
+        XCTAssertNil(MilestoneAlert.tokens(for: event("print.milestone", notify: "none", printId: "print-1"), relayOn: true, local: running, cloud: .init(), dead: []), "muted")
+        for type in ["print.paused", "print.done", "print.failed", "print.not-started", "pass.ready"] {
+            XCTAssertNil(MilestoneAlert.tokens(for: event(type, printId: "print-1"), relayOn: true, local: running, cloud: .init(), dead: []),
+                         "\(type) stays a notification")
+        }
+    }
+
+    func testRecoveryMovesTheActivityToAMilestoneButNeverAlertsAgain() throws {
+        let name = "milestone-recovery-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        var recovery = LiveActivityRecovery(defaults: defaults)
+        recovery.record(event("print.milestone", data: .init(progress: 50, state: "printing"), printId: "print-1"), title: "Mic mount", now: now)
+        var restarted = LiveActivityRecovery(defaults: defaults)
+        let pushes = restarted.pushes(tokens: [.init(printId: "print-1", deviceId: "phone", token: "aa", updatedAt: "")], now: now)
+        XCTAssertEqual(pushes.first?.contentState.progress, 50)
+        XCTAssertNil(pushes.first?.alert, "a restart replays state, never the alert")
+        let alerted = AlertedMilestones(defaults: defaults)
+        alerted.insert("m1")
+        XCTAssertTrue(AlertedMilestones(defaults: defaults).contains("m1"), "an alerted milestone is remembered across restarts")
+    }
+
+    func testANewerStatusKeepsAWaitingMilestoneAlertAndAnEndDropsIt() throws {
+        let alerting = try XCTUnwrap(MilestoneAlert.push(for: event("print.milestone", printId: "print-1"), token: "aa", title: "Mic mount", now: now))
+        let status = try XCTUnwrap(LiveActivityPush.make(for: event("print.status", notify: "none", data: .init(progress: 51), printId: "print-1"),
+                                                          token: "aa", title: "Mic mount", now: now))
+        let merged = LiveActivityPush.carryingAlert(of: alerting, into: status)
+        XCTAssertEqual(merged.contentState.progress, 51, "the newest state")
+        XCTAssertEqual(merged.alert, alerting.alert, "the milestone's alert isn't lost behind a status")
+        XCTAssertEqual(merged.priority, 10)
+        let end = try XCTUnwrap(LiveActivityPush.make(for: event("print.done", printId: "print-1"), token: "aa", title: "Mic mount", now: now))
+        XCTAssertNil(LiveActivityPush.carryingAlert(of: alerting, into: end).alert, "done has its own notification")
+    }
+
+    func testTheRelayIsOnByDefaultOnlyInProductionSignedBuildsAndAChoiceWins() {
+        XCTAssertTrue(RelayDefault.enabled(stored: nil, apsEnvironment: "production"))
+        XCTAssertFalse(RelayDefault.enabled(stored: nil, apsEnvironment: "development"), "Sandbox phones' tokens would be denied by the production relay")
+        XCTAssertFalse(RelayDefault.enabled(stored: nil, apsEnvironment: nil))
+        XCTAssertFalse(RelayDefault.enabled(stored: false, apsEnvironment: "production"), "turned off in Settings stays off")
+        XCTAssertTrue(RelayDefault.enabled(stored: true, apsEnvironment: "development"))
+    }
+
     func testNotStartedEndsTheActivityDespiteTheLastPreparingReport() throws {
         let push = try XCTUnwrap(LiveActivityPush.make(for: event("print.not-started", data: .init(state: "preparing"), printId: "print-1"),
                                                       token: "aa", title: "Mic mount", now: now))

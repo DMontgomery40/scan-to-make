@@ -73,7 +73,9 @@ Actual delivery to a TestFlight phone is still unverified; see
 Mac has a saved Sandbox relay URL. A TestFlight phone has production push tokens;
 in Mac Settings → Advanced, use the verified production address
 `https://counterpart.dtmont.com/relay/v1` and enable Live Activity relay. A fresh
-Mac defaults to that address but the relay is off. Do not send production tokens
+Mac defaults to that address. The relay is on by default in a production-signed
+(Developer ID, `aps-environment` production) build and off in a development-signed
+one (David, Nov 8); a choice saved in Settings wins either way. Do not send production tokens
 to Sandbox or development tokens to Production: the relay can deny a rejected
 token for 30 days. Do not switch a working development installation early merely
 to prepare a release. Validate real start/update/end delivery after the phone and

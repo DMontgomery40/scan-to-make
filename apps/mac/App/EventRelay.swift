@@ -30,6 +30,7 @@ import ControlKit
     func start() {
         guard loop == nil else { return }
         notifier.prepare()
+        relay.undelivered = { [weak self] id in await self?.saveUndeliveredMilestone(id) }
         cloud.start(runCommand: { [weak self] command, photos in await self?.run(command, photos: photos) ?? (false, "Counterpart isn't running.") })
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.cloud.fetchCommands() }
@@ -111,7 +112,12 @@ import ControlKit
                 notified.insert(event.id)
             }
             let frame = event.frame.flatMap { project?.projectFile($0) }
-            if event.notify != "none" { await cloud.save(event, frame: frame) }
+            // A milestone while the print's Live Activity runs alerts on the activity instead (David, Nov 8): no CloudKit
+            // event, so no separate notification. Without a running activity it is a notification as before.
+            let onActivity = await relay.alertMilestone(event, title: project?.words.title ?? event.title, client: client,
+                                                        cloudTokens: cloud.deviceTokens)
+            if onActivity { pendingMilestones[event.id] = event }
+            if event.notify != "none", !onActivity { await cloud.save(event, frame: frame) }
             // A pause or resume keeps the stage at printing, so the printer's own state counts as a change too, and so
             // does the printer asking (or no longer asking) to confirm something.
             let state = [project?.words.stage.rawValue, project?.print?.live?.state ?? project?.print?.printerStatus?.state,
@@ -123,6 +129,17 @@ import ControlKit
             if event.type == "print.started", !LiveActivityStart.stillRunning(event, project: project) { continue }
             await relay.deliver(event, title: project?.words.title ?? event.title, client: client, cloudTokens: cloud.deviceTokens)
         }
+    }
+
+    /// Milestones sent as activity alerts, kept for a while in case the alert can't go out and CloudKit takes it after all.
+    private var pendingMilestones: [String: CounterpartEvent] = [:] {
+        didSet { if pendingMilestones.count > 64 { pendingMilestones = Dictionary(uniqueKeysWithValues: pendingMilestones.suffix(32).map { ($0.key, $0.value) }) } }
+    }
+
+    private func saveUndeliveredMilestone(_ id: String) async {
+        guard let event = pendingMilestones.removeValue(forKey: id) else { return }
+        let project = event.projectId.flatMap { projects[$0] }
+        await cloud.save(event, frame: event.frame.flatMap { project?.projectFile($0) })
     }
 
     /// Runs one command from the phone through the control method that already does the job. A deadline after

@@ -536,6 +536,7 @@ What a person can see and reach, checked in code on `main` Nov 5 (after this PR:
 | Scan it: one capture, paced by the app (a photo each 5°), Done after 60 from two heights; a stopped scan's photos findable; what it stood on cut away on the Mac (§5.2, §5.3; #420) | New → one **Scan it** tile with the Kass 3D link; "Scan stopped · 9 photos kept" on Home and the project. † A finished scan still on the phone says "Scan saved · send to your Mac" with an enabled Send on its project (`LayoutParityUITests`), and project pictures are the real object first | † the same tile on LiDAR iPads; the stopped and saved words in the sidebar row and on the project. iPads without LiDAR and the iPhone Duo show the tile disabled ("Needs an iPhone or iPad with LiDAR.") | No camera scan; rebuilds the photos and cuts away the support. † Sidebar and CloudKit pictures are the real object first (`ObjectsClientTests`) | **Exception for now: Android keeps its current scan until the iPhone path is proven** (David, Nov 8/9). † Its finished local scan still offers Send (`ClientTests`), asks Copy / Fit / Save in New, and its project picture is the real object first | No camera scan. † Project cards show the real object first (`domain.test.ts`) |
 | Help | Settings → Help: guide, scanning, the scan rig | the same | Help menu: Counterpart Help, the scan rig | † Settings → Help: the guide and the scan rig. **Before: none** | Settings → About → Open guide |
 | Print identity (mark, project picture and words), §9.4 | Counterpart mark + cached real-object-first picture on Lock Screen and Dynamic Island; mark while artwork refreshes. An ended activity opens the project | same Lock Screen activity and project link | iPhone-mirrored Live Activity uses the same views; native Mac status item keeps its cube and native print notifications use the app icon and camera frame | Counterpart mark on ongoing and milestone notifications; ongoing print shows the cached real-object-first picture, refreshes separately, and opens the project (`HomeLayoutTests`) | No print notifications or tray item; print identity is the project picture and words in Printing |
+| Progress milestones while a print's Live Activity runs (§9.1, David, Nov 8: an alert on the activity, not a separate notification) | † an alert on the Live Activity through the Mac's relay; a notification when no activity can carry it | † the same on the iPad | † the relay is on by default in production-signed builds (Settings → Advanced); Mac notifications for progress stay off by default | unchanged: no Live Activity, so milestones stay notifications | no print notifications |
 
 **Add printer on the phones** (David, 2026-11-06: "adding a printer is filling out a form that hsould be mostly autofilled by discovery"). The iPhone, iPad and Android call the companion's own `printers.discover`, `.check`, `.obtain` and `.add` over `/v1/printers/setup/*` (objects-api.md), so the MCPs still find the printers and declare the fields, and their `.env` files stay on the computer. A found printer opens filled in; the person types only what discovery can't know, such as the access code or API key, or approves it in the printer's own page when the MCP offers that.
 
@@ -975,13 +976,13 @@ type CounterpartEvent = {
 
 ### 8.8 Delivery: Mac, CloudKit, and the Live Activity relay
 
-**Status:** Built. The relay is provisioned for Sandbox and Production. CloudKit owns the discrete alerts, with their camera frames. A Live Activity push carries an alert only on push-to-start, so a pause or completion never shows two banners. Not accepted: production push delivery.
+**Status:** Built. The relay is provisioned for Sandbox and Production, and is on by default in production-signed (Developer ID) Mac builds; development-signed builds keep it off until it is turned on in Settings → Advanced, because their phones' tokens are Sandbox ones. CloudKit owns the pause, done and problem alerts, with their camera frames. A Live Activity push carries an alert on push-to-start, and on a progress milestone while that print's activity runs (§9.1, David, Nov 8); a pause or completion never shows two banners. Not accepted: production push delivery.
 
 **Mac app `EventRelay` (new, Swift).** It loops on `events.wait` and persists its cursor. After a restart it doesn't notify for events older than 10 minutes; it only syncs them.
 
 For every event with `notify ≠ none`:
 1. **A Mac notification** (`UNUserNotificationCenter`), according to Settings. Its defaults are the Mac column of §9.1: `pass.ready`, `pass.ask`, `pass.failed`, `print.confirm`, `print.paused`, `print.done`, `print.failed` and `print.not-started` are on; progress, `print.sent` and `print.unreachable` are off.
-2. **CloudKit.** Save a `CounterpartEvent` record in the custom zone `Counterpart` of the private database, in container `iCloud.com.scantomake.counterpart`.
+2. **CloudKit.** Except for a progress milestone (`print.first-layer`, `print.milestone`) that the running Live Activity carries as an alert (§9.1): save a `CounterpartEvent` record in the custom zone `Counterpart` of the private database, in container `iCloud.com.scantomake.counterpart`.
    - Fields: `eventId`, `seq`, `type`, `projectId`, `printId`, `title`, `body`, `notify`, `progress`, `remainingSec`, `createdAt`, and `frame` (a `CKAsset`: a JPEG at most 1280 px on the long edge and about 300 KB, made with ImageIO).
    - A daily sweep deletes records older than 7 days.
 
@@ -1009,7 +1010,7 @@ For every event with `notify ≠ none`:
 - **Worker → APNs:** HTTP/2 to `api.push.apple.com`, with these headers:
   - `apns-push-type: liveactivity`;
   - `apns-topic: com.scantomake.push-type.liveactivity`;
-  - `apns-priority`: 5 for progress, 10 for start, paused, done and failed.
+  - `apns-priority`: 5 for progress, 10 for start, paused, done, failed and a milestone alert.
 
   The body is `{"aps": {"timestamp", "event": "start"|"update"|"end", "content-state", "stale-date", "attributes-type": "PrintAttributes", "attributes", "alert", "dismissal-date"}}`. The app sets `NSSupportsLiveActivitiesFrequentUpdates = YES`.
 - **When the Mac sends:**
@@ -1021,9 +1022,10 @@ For every event with `notify ≠ none`:
   - The app opens at login by default (journey.md §3.3).
   - Its **Quit** menu item reads "Quit Counterpart (your phone stops getting updates)".
   - On the next launch, catch-up writes every missed record to CloudKit. It notifies only for terminal events (`print.done`, `print.failed`, `pass.ready`, `pass.ask`) that are still unanswered, once each.
-- **Without the relay** (no key yet, or the Worker is unreachable):
+- **Without the relay** (turned off, no key yet, or the Worker is unreachable):
   - The phone starts the activity itself when the user taps Print, or the next time the app opens during a print.
-  - It updates the activity whenever it gets time: in the foreground, on CloudKit content-available pushes, and on `BGAppRefreshTask`.
+  - It updates the activity when it gets time: in the foreground, and only occasionally while locked (CloudKit content-available pushes are throttled; `BGAppRefreshTask` runs when iOS allows). So a locked phone's activity falls behind and catches up when Counterpart opens; the Mac's Settings footer says so.
+  - Progress milestones come as separate notifications, because nothing can alert the activity.
   - In both modes the activity renders with `Text(timerInterval:)` and `ProgressView(timerInterval:countsDown:)` up to `endsAt`, so it keeps counting between updates. `staleDate = endsAt + 10 min` shows "Checking…" if nothing has arrived.
 
 ### 8.9 Design engine: Blender, or Fusion when the user has it
@@ -1234,14 +1236,16 @@ Screenshot: `screens/phone-notifications.jpg` (an approximation: the system draw
 | `pass.ask` | "*Title*: *the question*", with the region picture | **Camera** (opens it), **Best Guess** (background) | active | on |
 | `print.confirm` | "*Printer* needs a yes before printing *title*" | opens the confirmation | time-sensitive | on |
 | `print.started` | no banner; the Live Activity starts | — | passive | off |
-| `print.first-layer` | "*Title*: first layer's down", with the frame | **Open**, **Pause** | passive | off |
-| `print.milestone` | "*Title* is halfway" · time left, layer, printer, with the frame | **Open**, **Pause** | active | off |
+| `print.first-layer` | while the print's Live Activity runs: an alert on the activity, no sound; otherwise "*Title*: first layer's down", with the frame | **Open**, **Pause** (notification only) | passive | off |
+| `print.milestone` | while the print's Live Activity runs: an alert on the activity; otherwise "*Title* is halfway" · time left, layer, printer, with the frame | **Open**, **Pause** (notification only) | active | off |
 | `print.paused` | "*Printer* paused *title*" · reason, with the frame | **Open**, **Resume** | time-sensitive | on |
 | `print.done` | "*Title* is done. Take it off the plate.", with the frame | **Open**, **It Works** (background), **Needs Changes** (text input, background) | active | on |
 | `print.failed` / `print.not-started` / `pass.failed` | what happened and what to do | **Open** / **Try Again** | time-sensitive (print) / active (pass) | on |
 | `print.unreachable` | "Lost contact with *printer*. Still trying." | — | passive | off |
 
 Each row has its own switch in Settings → Notifications, on both devices. The milestone choice is in the same place (§8.6).
+
+**Milestones on the Live Activity** (David, Nov 8). While a print's Live Activity is running, its progress milestones (first layer, 50% and the others chosen) arrive as an alert on the activity instead of a separate notification: the Mac sends the relay an `update` with `alert` (the notification's own title and body; `apns-priority` 10; no sound for the passive first layer) and writes no `CounterpartEvent`, so the phone's `ev-progress` subscription stays quiet. Problems (paused, failed, didn't start, lost contact), questions and "done" stay normal notifications. A milestone is a separate notification only when no activity can carry it: the relay is off; no device has an activity for that print; a device that shows Live Activities (it registered a push-to-start token) has none for this print, so it would otherwise hear nothing; or the relay can't deliver promptly (unreachable, no APNs key, a long rate-limit wait, token gone), in which case the Mac writes the event after all. Nobody gets both. Apple: an update alert lights the screen and shows the expanded presentation, or a banner without the Dynamic Island, and on a paired Watch ([ActivityKit push notifications](https://developer.apple.com/documentation/activitykit/starting-and-updating-live-activities-with-activitykit-push-notifications), [`update(_:alertConfiguration:)`](https://developer.apple.com/documentation/activitykit/activity/update(_:alertconfiguration:))); the HIG: "don't use push notifications alongside Live Activities for the same updates" ([Live Activities](https://developer.apple.com/design/human-interface-guidelines/live-activities)). The activity alert has no camera frame; the expanded activity shows the model's picture (§9.4). The phone doesn't alert locally: it reads events only while Counterpart is open, when iOS suppresses an activity's alert for its own app.
 
 ### 9.2 iPhone: subscriptions, extension and actions
 
@@ -1330,6 +1334,7 @@ Screenshots: `screens/phone-lock.jpg` and `screens/phone-island.jpg` (approximat
 - It also appears automatically in StandBy, on the Watch Smart Stack, in CarPlay and in the Mac menu bar. Apple: the Smart Stack and CarPlay combine the compact views, and the Mac menu bar uses the compact, minimal and expanded views unchanged, so the mark carries to all of them. Not seen on a Watch, in CarPlay or in a Mac menu bar yet.
 - **Tapping it** opens Printing while the print runs, and the project once it has finished, failed or been cancelled (`PrintActivityLink`): an ended activity stays on the Lock Screen for up to four hours, and Printing has nothing left to follow.
 - Starting and updating it follow §8.8: through the relay when there's an APNs key, and from the phone itself otherwise.
+- **Progress milestones alert on it** while it runs (§9.1, David, Nov 8), instead of separate notifications.
 
 ### 9.5 Widgets and system surfaces
 

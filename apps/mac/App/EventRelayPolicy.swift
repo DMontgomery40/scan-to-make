@@ -189,11 +189,16 @@ struct LiveActivityPush: Encodable, Equatable {
 
     var token: String
     var kind: Kind
+    /// The milestone event this push's alert announces (never sent): if the alert can't go out promptly, the Mac writes
+    /// that event to CloudKit instead, so the phone still gets it as a notification.
+    var alertEventId: String?
     var attributes: Attributes?
     var contentState: ContentState
     var staleDate: Int?
     var priority: Int
     var alert: Alert?
+
+    private enum CodingKeys: String, CodingKey { case token, kind, attributes, contentState, staleDate, priority, alert }
 
     static let states: Set<String> = ["idle", "preparing", "printing", "paused", "finished", "failed", "cancelled", "offline", "busy"]
 
@@ -203,7 +208,9 @@ struct LiveActivityPush: Encodable, Equatable {
         var priority = 5
         switch event.type {
         case "print.started": kind = .start; priority = 10
-        case "print.status", "print.resumed": kind = .update
+        // A milestone moves the activity like any status; its alert is added only by `MilestoneAlert` (sent once,
+        // never replayed by `LiveActivityRecovery`).
+        case "print.status", "print.resumed", "print.first-layer", "print.milestone": kind = .update
         case "print.paused": kind = .update; priority = 10
         // A print the printer never started ends its activity too, or it stays at 0% "Waiting for an update".
         case "print.done", "print.failed", "print.cancelled", "print.not-started": kind = .end; priority = 10
@@ -239,8 +246,17 @@ struct LiveActivityPush: Encodable, Equatable {
         } else if kind == .start {
             return nil
         }
-        // CloudKit owns discrete event alerts with their camera frames. An optional ActivityKit
-        // update/end alert would produce another banner for the same pause or completion.
+        // CloudKit owns the pause, done and problem alerts with their camera frames; an update/end alert here would be a
+        // second banner for the same event. Progress milestones alert on the activity instead (`MilestoneAlert`).
+        return push
+    }
+
+    /// A newer update replaces an older one but keeps its milestone alert, so the alert isn't lost behind a status.
+    /// An end drops it: the "done" or problem notification follows.
+    static func carryingAlert(of older: LiveActivityPush?, into newer: LiveActivityPush) -> LiveActivityPush {
+        guard let older, older.alertEventId != nil, newer.alertEventId == nil, newer.kind == .update else { return newer }
+        var push = newer
+        push.alert = older.alert; push.alertEventId = older.alertEventId; push.priority = 10
         return push
     }
 
@@ -310,6 +326,63 @@ struct LiveActivityRecovery {
         }
         return pushes
     }
+}
+
+/// David, Nov 8: while a print's Live Activity is running, its progress milestones (first layer, 50%, …) arrive as an
+/// alert on the activity (`update(_:alertConfiguration:)`; the relay's APNs `alert`) instead of a separate notification.
+/// Pauses, problems and "done" stay notifications (CloudKit, with their camera frames). A milestone is a separate
+/// notification only when no activity can show it: the relay is off, or a device that shows Live Activities has none for
+/// this print (it gets the CloudKit notification, and nobody gets both).
+enum MilestoneAlert {
+    static let types: Set<String> = ["print.first-layer", "print.milestone"]
+
+    /// The activity tokens to alert, or nil when the milestone goes as a notification instead.
+    static func tokens(for event: CounterpartEvent, relayOn: Bool, local: LiveActivityTokens, cloud: LiveActivityTokens,
+                       dead: Set<String>) -> [LiveActivityTokens.Activity]? {
+        guard relayOn, types.contains(event.type), event.notify != "none", let printId = event.printId else { return nil }
+        var seen: Set<String> = []
+        let activities = (local.activities + cloud.activities).filter { activity in
+            let token = activity.token.lowercased()
+            guard activity.printId == printId, !dead.contains(token), !seen.contains(token) else { return false }
+            seen.insert(token)
+            return true
+        }
+        guard !activities.isEmpty else { return nil }
+        // Every device that can start Live Activities must have this print's: otherwise it would hear nothing.
+        let devices = Set((local.pushToStart + cloud.pushToStart).map(\.deviceId))
+        guard devices.isSubset(of: Set(activities.map(\.deviceId))) else { return nil }
+        return activities
+    }
+
+    /// The update that moves the activity to the milestone and alerts with the notification's own words. Priority 10:
+    /// Apple sends an alerting update at once. A passive milestone (the first layer) lights the screen without a sound.
+    static func push(for event: CounterpartEvent, token: String, title: String, now: Date) -> LiveActivityPush? {
+        guard types.contains(event.type), var push = LiveActivityPush.make(for: event, token: token, title: title, now: now) else { return nil }
+        push.priority = 10
+        push.alert = LiveActivityPush.alert(title: event.title, body: event.body, sound: event.notify == "passive" ? nil : "default")
+        push.alertEventId = event.id
+        return push
+    }
+}
+
+/// Milestones already sent as activity alerts, so a restart never alerts twice. Keeps the newest 200.
+struct AlertedMilestones {
+    let defaults: UserDefaults
+    static let key = "relay.alertedMilestones"
+    func contains(_ id: String) -> Bool { (defaults.stringArray(forKey: Self.key) ?? []).contains(id) }
+    func insert(_ id: String) {
+        var ids = defaults.stringArray(forKey: Self.key) ?? []
+        guard !ids.contains(id) else { return }
+        ids.append(id)
+        defaults.set(Array(ids.suffix(200)), forKey: Self.key)
+    }
+}
+
+/// Whether the relay is on (David, Nov 8: on by default in production-signed Mac builds). A choice made in Settings
+/// always wins. Development-signed builds stay off by default: their phones' tokens are Sandbox ones, which the production
+/// relay would reject (and deny for 30 days).
+enum RelayDefault {
+    static func enabled(stored: Bool?, apsEnvironment: String?) -> Bool { stored ?? (apsEnvironment == "production") }
 }
 
 /// How long to wait before resending when the relay cannot be reached. An end keeps trying for about an hour;
