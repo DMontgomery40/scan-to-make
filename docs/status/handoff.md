@@ -24,7 +24,8 @@ Printer: P1S, LAN Only + Developer Mode; AMS A1 black PLA (nearly empty), A2 yel
    - Next: David prints the remaining rig plate (5, Lifting Parts) from Counterpart; watch it and own any failure.
    - Wrong state: plates 0, 1, 2 and 3 were printed from Studio/Handy, but Counterpart shows 0 and 1 "Check print result" and 2 "failed". Make "printed elsewhere" recordable so the strip reads true, on every layout.
    - Wrong label: the Nov 6 morning failure (no fresh MQTT report, refused before anything was sent) was recorded as uncertain. Anything never sent must read "not started" (same class as #385). Check the code the MCP returns for that refusal and map it.
-2. **Install current main on the Mac:** done Nov 8 (202611080746 from `76127f6b`; see the Mac app row).
+2. **Install current main on the Mac**, then the read-only checks:
+   - done Nov 8: 202611080746 from `76127f6b`, every check recorded in the Mac app row.
 3. **Install current main on David's iPhone, iPad, Android and Linux** and run the same read-only checks as the Mac: build number, MCP versions, `printers.mcps` answers both MCPs within 5 s, a real `objects.estimate`. Plate picker, per-plate filaments, Update and phone Add printer have only run in simulators.
 4. **Boundary leftovers** (AGENTS.md "The app staples onto the MCPs"):
    - the shared ControlKit form encoding (Mac Add Printer sheet and phones) still branches on `"bambu"` and `BAMBU_MODEL`; make it generic from `counterpart_setup_fields` (#392 merged over it with `--boundary-reviewed`);
