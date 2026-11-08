@@ -451,7 +451,7 @@ test("Bambu Studio's words reach the project: its error is the failure, its warn
 test('the fixture MCP\'s upload progress reaches project.progress and project.updated, through 100%, past toolMs', async t => {
   const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
   const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
-  const root = await mkdtemp(join(tmpdir(), 'objects-print-upload-'));
+  const root = await tempDir('objects-print-upload-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
   await writeFile(log, '');
