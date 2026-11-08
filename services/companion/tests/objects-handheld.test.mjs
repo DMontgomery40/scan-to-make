@@ -205,8 +205,8 @@ test('a walk-around without a request on an older phone (model and photos, no se
   assert.deepEqual(done.passes[0].stages.map(stage => stage.id), ['saving']);
 });
 
-test('the companion runs Apple folder mode for an Object Capture session, reads its depth count, and makes STLs', async t => {
-  assert.deepEqual(macReconstructArgs({photosDir: '/p', output: '/o.usdz', masksDir: '/m', objectCapture: true}), ['/p', '/o.usdz', 'full']);
+test('the companion rebuilds an Object Capture session in walk-around mode, reads its depth count, and makes STLs', async t => {
+  assert.deepEqual(macReconstructArgs({photosDir: '/p', output: '/o.usdz', masksDir: '/m', objectCapture: true}), ['walkaround', '/p', '/o.usdz', 'full', '--save-masks', '/m']);
   assert.deepEqual(macReconstructArgs({photosDir: '/p', output: '/o.usdz', masksDir: '/m'}), ['samples', '/p', '/o.usdz', 'full', '--save-masks', '/m']);
   await assert.rejects(linuxReconstructRunner('/bin/true')({photosDir: '/p', output: '/o', masksDir: '/m', objectCapture: true}), {message: OBJECT_CAPTURE_NEEDS_MAC});
 
@@ -219,15 +219,15 @@ test('the companion runs Apple folder mode for an Object Capture session, reads 
     return path;
   };
   const argv = join(root, 'argv');
-  const folder = await fake('folder', `echo "$@" > '${argv}'; echo '{"images":59,"depth":58,"stage":"reconstructing"}'; echo '{"progress":0.5}'; echo '{"skipped":3,"reason":"not used"}'; echo '{"skipped":3,"reason":"x"}'; echo '{"skipped":7,"reason":"not used"}'; echo '{"warning":"stitching-incomplete"}'; echo '{"done":"/x.usdz"}'`);
+  const folder = await fake('folder', `echo "$@" > '${argv}'; echo '{"images":59,"depth":58}'; echo '{"stage":"masking","done":1,"total":59}'; echo '{"samples":59,"masked":58,"stage":"reconstructing"}'; echo '{"progress":0.5}'; echo '{"skipped":3,"reason":"not used"}'; echo '{"skipped":3,"reason":"x"}'; echo '{"skipped":7,"reason":"not used"}'; echo '{"warning":"stitching-incomplete"}'; echo '{"done":"/x.usdz"}'`);
   const seen = [];
   const outcome = await macReconstructRunner(folder)({photosDir: '/in', output: '/out.usdz', masksDir: '/m', objectCapture: true, onProgress: words => seen.push(words)});
-  assert.equal((await readFile(argv, 'utf8')).trim(), '/in /out.usdz full');
+  assert.equal((await readFile(argv, 'utf8')).trim(), 'walkaround /in /out.usdz full --save-masks /m');
   assert.deepEqual(outcome, {status: 'done', inputs: {images: 59, depth: 58, skipped: 2, stitchingIncomplete: true}});
   assert.equal(scanSummary({scan: 'scan.usdz', inputs: outcome.inputs}),
     "Rebuilt on your Mac from 57 of your 59 photos at full detail. Apple couldn't place the other 2, so more overlapping photos would help. Its size comes from the LiDAR depth in 58 of them. Apple couldn't join every photo together, so check every side. Nothing has been touched up yet. Ask for changes to clean it up.");
   assert.match(scanSummary({scan: 'scan.usdz', inputs: {images: 3, depth: 0}}), /These photos carry no depth, so its size isn't measured/);
-  assert.deepEqual(seen, ['Building the model from your photos.', 'Building the model from your photos (50%).']);
+  assert.deepEqual(seen, ['Finding the object in your photos (1 of 59).', 'Building the model from your photos.', 'Building the model from your photos (50%).']);
 
   const stl = await fake('stl', `echo "$@" > '${argv}'; echo '{"done":"'$3'","triangles":12}'`);
   await macScanToStl(stl)('/scan.usdz', '/model.stl');

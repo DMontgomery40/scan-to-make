@@ -12,8 +12,9 @@ export interface ReconstructInput {
   /** The handheld photos, in capture order by name. */
   photosDir: string;
   /**
-   * The photos are an iPhone Object Capture session's own HEICs (a walk-around): Apple's PhotogrammetrySession reads
-   * their LiDAR depth, gravity and capture box itself (`mac-reconstruct <folder>`), with no hand masks.
+   * The photos are an iPhone Object Capture session's own HEICs (a walk-around or a scan rig: the object stays still):
+   * `mac-reconstruct walkaround` makes each one a PhotogrammetrySample with its LiDAR depth and gravity, and a mask of
+   * the obvious object from Vision, instead of the capture box the person had to drag.
    */
   objectCapture?: boolean;
   /** Where the rebuilt model goes (USDZ, metres). */
@@ -125,9 +126,7 @@ export function progressWords(line: Record<string, unknown>): string | undefined
  * package" (PhotogrammetrySession.Request.Detail), and an STL keeps none of the extra texture maps either way.
  */
 export function macReconstructArgs(input: Pick<ReconstructInput, 'photosDir' | 'output' | 'masksDir' | 'objectCapture'>): string[] {
-  return input.objectCapture
-    ? [input.photosDir, input.output, 'full']
-    : ['samples', input.photosDir, input.output, 'full', '--save-masks', input.masksDir];
+  return [input.objectCapture ? 'walkaround' : 'samples', input.photosDir, input.output, 'full', '--save-masks', input.masksDir];
 }
 
 /** Runs `mac-reconstruct … full` and resolves when the model is written. Errors are plain sentences. */

@@ -14,6 +14,12 @@ import HandheldKit
 //       Writes the model's triangles as a binary STL in millimetres, Z up, centred and resting on z = 0
 //       (PhotogrammetrySession writes metres, Y up). --render also draws the model for the project page; a model
 //       that can't be drawn still gets its STL, and the {"done":…} line names the picture only when there is one.
+//   mac-reconstruct walkaround <images-folder> <output.usdz> [reduced|medium|full|raw]
+//                   [--no-masks] [--save-masks <dir> [--masks-only]]
+//       A walk-around or scan-rig session's own HEICs (the object stays still, the phone moves), without depending
+//       on Object Capture's capture box. Each photo becomes a PhotogrammetrySample as Apple wrote it (LiDAR depth for
+//       scale, gravity, camera), with an object mask from Vision's foreground instances: the obvious object, picked
+//       by ObviousObjectMasker. A photo where Vision finds nothing stays unmasked; RealityKit masks it itself.
 //   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
 //                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 //       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
@@ -33,6 +39,7 @@ func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
 let usage = """
 usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
        mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>]
+       mac-reconstruct walkaround <images-folder> <output.usdz> [reduced|medium|full|raw] [--no-masks] [--save-masks <dir> [--masks-only]]
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 
 """
@@ -55,7 +62,8 @@ if args.first == "stl" {
     } catch { fail(String(describing: error)) }
 }
 let samplesMode = args.first == "samples"
-if samplesMode { args.removeFirst() }
+let walkaroundMode = args.first == "walkaround"
+if samplesMode || walkaroundMode { args.removeFirst() }
 func option(_ name: String) -> String? {
     guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
     let value = args[i + 1]; args.removeSubrange(i...(i + 1)); return value
@@ -80,6 +88,12 @@ var configuration = PhotogrammetrySession.Configuration()
 configuration.sampleOrdering = .sequential      // photos are in capture order
 configuration.featureSensitivity = .normal
 configuration.isObjectMaskingEnabled = !noObjectMasking   // the object, not what's around it
+if walkaroundMode {
+    // Apple's settings "for challenging images": slower, more sensitive landmark detection (a rig scan has a plain
+    // backdrop and dim, 1/60 s frames). The person's capture box is not used at all: the masks say what the object is.
+    configuration.featureSensitivity = .high
+    configuration.ignoreBoundingBox = true
+}
 
 let started = Date()
 
@@ -118,9 +132,65 @@ func prepareMasks(for files: [URL], in folder: URL) async throws {
     }
 }
 
+/// The obvious object in each walk-around photo, saved as <dir>/<photo-name>.png; no file where Vision found nothing.
+func prepareWalkAroundMasks(for files: [URL], in folder: URL) throws -> Int {
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let masker = ObviousObjectMasker()
+    var masked = 0
+    for (index, file) in files.enumerated() {
+        let sample = try loadWalkAroundSample(file)
+        let depth = sample.depthDataMap.flatMap { DepthImage(buffer: $0) }
+        let result = try masker.mask(image: sample.image, depth: depth)
+        let target = folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
+        try? FileManager.default.removeItem(at: target)
+        var note: [String: Any] = ["stage": "masking", "done": index + 1, "total": files.count, "instances": result.instances]
+        if let mask = result.mask, let chosen = result.chosen {
+            try mask.writePNG(to: target)
+            masked += 1
+            note["coverage"] = (Double(mask.onCount) / Double(mask.width * mask.height) * 1000).rounded() / 1000
+            note["centre"] = [(chosen.u * 100).rounded() / 100, (chosen.v * 100).rounded() / 100]
+            if let d = chosen.depth { note["depthM"] = (Double(d) * 100).rounded() / 100 }
+        } else {
+            note["unmasked"] = file.lastPathComponent
+        }
+        emit(note)
+    }
+    return masked
+}
+
 do {
     let session: PhotogrammetrySession
-    if samplesMode {
+    if walkaroundMode {
+        let files = try photos(in: input)
+        guard !files.isEmpty else { fail("No photos in \(input.path).") }
+        // Apple: "If your source images contain depth data, RealityKit uses it to calculate the real-world size."
+        emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count])
+        let folder = saveMasks ?? FileManager.default.temporaryDirectory.appendingPathComponent("mac-reconstruct-masks-\(UUID().uuidString)")
+        let masked = noMasks ? 0 : try prepareWalkAroundMasks(for: files, in: folder)
+        if masksOnly { emit(["done": folder.path, "masked": masked, "seconds": Int(Date().timeIntervalSince(started))]); exit(0) }
+        emit(["samples": files.count, "masked": masked, "stage": "reconstructing"])
+        // Loaded lazily, as Apple asks for a sequence: a few hundred full-resolution photos don't sit in memory together.
+        let samples = AnySequence<PhotogrammetrySample> {
+            var iterator = files.makeIterator()
+            return AnyIterator<PhotogrammetrySample> {
+                while let file = iterator.next() {
+                    do {
+                        var sample = try loadWalkAroundSample(file)
+                        if noDepth { sample.depthDataMap = nil }
+                        let maskURL = folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
+                        if !noMasks, FileManager.default.fileExists(atPath: maskURL.path) {
+                            sample.objectMask = try GrayImage(contentsOf: maskURL).pixelBuffer()
+                        }
+                        return sample
+                    } catch {
+                        emit(["skipped": file.lastPathComponent, "reason": String(describing: error)])
+                    }
+                }
+                return nil
+            }
+        }
+        session = try PhotogrammetrySession(input: samples, configuration: configuration)
+    } else if samplesMode {
         let files = try photos(in: input)
         guard !files.isEmpty else { fail("No photos in \(input.path).") }
         var masks: URL? = nil

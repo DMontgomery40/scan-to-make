@@ -86,8 +86,8 @@ export class InvalidCaptureManifestError extends Error {
 
 /**
  * `source: 'object-capture'`: every image of an iPhone Object Capture session, as Apple wrote them (its own names,
- * each HEIC carrying LiDAR depth, gravity and the capture box), for Apple's PhotogrammetrySession on this Mac. The
- * phone's own model, sent with them, is only a preview until that rebuild replaces it.
+ * each HEIC carrying LiDAR depth and gravity), rebuilt on this Mac by `mac-reconstruct walkaround`. The phone's own
+ * model, sent with them, is only a preview until that rebuild replaces it.
  */
 export type CaptureSource = 'object-capture';
 export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean; cameraMetadataRequired?: boolean; scaleQualificationRequired?: boolean; source?: CaptureSource}

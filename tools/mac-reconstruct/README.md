@@ -6,8 +6,16 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   Object Capture photo folder with Apple's `PhotogrammetrySession`. On a Mac it can use detail levels
   above the iPhone's `.reduced`. It prints one JSON line per progress step, then `{"done":…}` or `{"error":…}`.
   First it prints `{"images":N,"depth":D}`: how many photos carry LiDAR depth, where the model's real-world size
-  comes from. Apple's `stitchingIncomplete` and `automaticDownsampling` come out as `{"warning":…}`. The companion
-  runs it at `full` on every image a walk-around sent (`ReconstructInput.objectCapture`).
+  comes from. Apple's `stitchingIncomplete` and `automaticDownsampling` come out as `{"warning":…}`. This mode uses
+  Object Capture's capture box, which the person drags on the phone.
+- `mac-reconstruct walkaround <images-folder> <output.usdz> [detail] [--no-masks] [--save-masks <dir> [--masks-only]]`
+  rebuilds a walk-around or scan-rig session (the object stays still, the phone moves) without the capture box. The
+  companion runs it at `full` on every image a walk-around sent (`ReconstructInput.objectCapture`).
+  - Each HEIC becomes a `PhotogrammetrySample` as Apple wrote it: LiDAR depth for scale, gravity and camera.
+  - Its `objectMask` is the obvious object from Vision's foreground instances (`VNGenerateForegroundInstanceMaskRequest`). `ObviousObjectMasker` picks the instance nearest the middle and nearest the camera, that doesn't run off the frame, and that continues the last photo. Inside it, anything more than 0.30 m behind its nearest surface is cut (a person standing behind).
+  - Where Vision finds nothing, the photo stays unmasked and RealityKit masks it itself.
+  - The session runs with `isObjectMaskingEnabled`, `featureSensitivity = .high`, `sampleOrdering = .sequential` and `ignoreBoundingBox = true`.
+  - Masks are saved as `<dir>/<photo-name>.png`, so a run can be checked afterwards (`turntable-synth overlay`).
 - `mac-reconstruct stl <model.usdz> <output.stl>` writes the model's triangles as a binary STL in millimetres
   (PhotogrammetrySession writes metres, `metersPerUnit = 1`), each mesh placed by its composed transform. The
   companion uses it to keep a scan as the project's model without a touch-up.
