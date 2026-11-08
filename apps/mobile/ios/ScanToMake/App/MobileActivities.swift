@@ -25,6 +25,7 @@ import CounterpartKit
     #if DEBUG
     /// The fixture's activity takes no push token: there is no relay to give it to.
     private static var pushType: PushType? { Fixtures.liveActivity ? nil : .token }
+    private var postedFixtureMilestone = false
     #else
     private static let pushType: PushType? = .token
     #endif
@@ -90,12 +91,15 @@ import CounterpartKit
                 // Printing remains independent of the activity's availability.
                 if let activity = try? Activity.request(attributes: snapshot.attributes, content: content, pushType: Self.pushType) {
                     watch(activity)
-                    #if DEBUG
-                    if Fixtures.liveActivity { await Self.postFixtureMilestone(snapshot) }
-                    #endif
                 }
             }
         }
+        #if DEBUG
+        if Fixtures.liveActivity, !postedFixtureMilestone, let live = snapshots.first(where: { $0.content.canStart }) {
+            postedFixtureMilestone = true
+            await Self.postFixtureMilestone(live)
+        }
+        #endif
         Task { await publish() }
     }
 
@@ -193,8 +197,11 @@ import CounterpartKit
         content.interruptionLevel = .active
         content.userInfo = ["projectId": snapshot.attributes.projectId, "printId": snapshot.attributes.printId, "type": "print.milestone"]
         let frame = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).jpg")
-        if (try? FileManager.default.copyItem(at: folder.appendingPathComponent("bed.jpg"), to: frame)) != nil,
-           let attachment = try? UNNotificationAttachment(identifier: "frame", url: frame) { content.attachments = [attachment] }
+        do {
+            // Read and write the bytes: a copy would also carry the assets folder's extended attributes.
+            try Data(contentsOf: folder.appendingPathComponent("bed.jpg")).write(to: frame)
+            content.attachments = [try UNNotificationAttachment(identifier: "frame", url: frame, options: nil)]
+        } catch { print("Fixture milestone: no camera frame attached: \(error)") }
         try? await center.add(UNNotificationRequest(identifier: "fixture-milestone", content: content,
                                                     trigger: UNTimeIntervalNotificationTrigger(timeInterval: 20, repeats: false)))
     }
