@@ -13,6 +13,7 @@ data class ProjectPlate(
 ) {
     val statusText: String get() = when (status) {
         "printed" -> "Printed"
+        "not-started" -> "Not started"
         "preparing" -> "Getting ready"
         "printing" -> "Printing"
         "paused" -> "Paused"

@@ -2,12 +2,12 @@ import type {StmObject} from './store.js';
 
 export interface PlateIdentity {sha256: string; plateIndex: number}
 export interface PlateProgress {
-  status: 'not-printed' | 'preparing' | 'printing' | 'paused' | 'printed' | 'cancelled' | 'failed' | 'sent' | 'unknown';
+  status: 'not-printed' | 'not-started' | 'preparing' | 'printing' | 'paused' | 'printed' | 'cancelled' | 'failed' | 'sent' | 'unknown';
   printId?: string;
   completedAtMs?: number;
   acknowledgedAtMs?: number;
   /** The send may have reached the printer (`print.uncertain`): printing this plate again asks "I checked the printer".
-   *  A cancelled or refused send also reads "unknown" when it has no end state, but it was never sent, so it isn't this. */
+   *  A cancelled or refused send before dispatch reads "not-started" and never asks for a printer check. */
   uncertain?: true;
 }
 export interface ProjectPlate extends PlateProgress {
@@ -34,11 +34,13 @@ export function retainedPlateProgress(object: StmObject): Record<string, PlatePr
   const active = object.state === 'printing';
   const status: PlateProgress['status'] = end === 'done' ? 'printed'
     : end === 'cancelled' ? 'cancelled'
-    : end === 'failed' || end === 'not-started' || end === 'replaced' ? 'failed'
+    : end === 'not-started' ? 'not-started'
+    : end === 'failed' || end === 'replaced' ? 'failed'
     : end === 'sent' || object.state === 'sent' ? 'sent'
     : active ? (print.live?.state === 'paused' ? 'paused' : print.live?.state === 'printing' ? 'printing' : 'preparing')
     // A start Counterpart couldn't confirm (such as a timed-out printer report) is unknown, never "failed": it may be printing.
     : print.uncertain ? 'unknown'
+    : !print.dispatchedAt ? 'not-started'
     : object.state === 'failed' ? 'failed' : 'unknown';
   const ended = print.monitor?.endedAt ? Date.parse(print.monitor.endedAt) : object.updatedAtMs;
   const completedAtMs = previous?.completedAtMs ?? (status === 'printed' ? (Number.isFinite(ended) ? ended : object.updatedAtMs) : undefined);

@@ -14,12 +14,13 @@ public struct ProjectPlate: Codable, Equatable, Identifiable, Sendable {
     public var printId: String?
     public var completedAtMs: Double?
     /// Its last send may have reached the printer: printing it again asks "I checked the printer". A cancelled or
-    /// refused send can read "unknown" too, but it was never sent, so it doesn't ask.
+    /// refused send before dispatch reads "not-started" and never asks.
     public var uncertain: Bool?
 
     public var statusText: String {
         switch status {
         case "printed": "Printed"
+        case "not-started": "Not started"
         case "preparing": "Getting ready"
         case "printing": "Printing"
         case "paused": "Paused"

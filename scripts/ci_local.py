@@ -363,7 +363,7 @@ def run_linux(spec, workspace, directory, host):
             check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     finally:
         # The job folder holds node_modules, venvs and Blender links; never leave it on the box.
-        subprocess.run(['ssh', host, 'rm -rf -- '+q(remote)], check=False)
+        subprocess.run(['ssh', host, 'if command -v gio >/dev/null && gio trash -- '+q(remote)+'; then :; else mkdir -p ~/.local/share/Trash/files && mv -- '+q(remote)+' ~/.local/share/Trash/files/; fi'], check=False)
     result_file = evidence / 'result.json'
     if not result_file.exists(): raise RuntimeError('Linux job on '+host+' returned no result (exit '+str(completed.returncode)+'); see '+str(evidence))
     result = json.loads(result_file.read_text()); result['remoteEvidence'] = host

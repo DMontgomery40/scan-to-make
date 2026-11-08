@@ -151,6 +151,17 @@ private func project(_ item: [String: Any]) throws -> Project {
     try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: item))
 }
 
+@MainActor private struct PlateStripHarness: View {
+    @ObservedObject var model: ObjectsModel
+    let id: String
+    var body: some View {
+        if let project = model.objects.first(where: { $0.id == id }) {
+            ProjectPlatesView(project: project, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in },
+                markPrinted: { plate in Task { await model.markPlatePrinted(id, plate: plate) } })
+        }
+    }
+}
+
 @MainActor final class ObjectsModelTests: XCTestCase {
     func testPresenceRefreshIsNotMaskedByNewerCredentialTimestamp() async {
         let companion = FakeObjects()
@@ -257,26 +268,25 @@ private func project(_ item: [String: Any]) throws -> Project {
         await model.refresh()
         let project = try XCTUnwrap(model.objects.first { $0.id == id })
         let plate = try XCTUnwrap(project.plates?.first)
-        let view = ProjectPlatesView(project: project, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in },
-            markPrinted: { plate in Task { await model.markPlatePrinted(id, plate: plate) } })
+        let view = PlateStripHarness(model: model, id: id)
         let host = NSHostingView(rootView: view.frame(width: 1000, height: 500))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 500), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer { window.close() }
         host.layoutSubtreeIfNeeded()
-        func button(_ value: Any, depth: Int = 0) -> (any NSAccessibility)? {
-            guard depth < 30, let node = value as? any NSAccessibility else { return nil }
-            if node.accessibilityIdentifier?() == "printed-elsewhere-0-0" { return node }
-            for child in node.accessibilityChildren?() ?? [] {
-                if let found = button(child, depth: depth + 1) { return found }
+        func button(_ value: Any, identifier: String = "printed-elsewhere-0-0", depth: Int = 0) -> (any NSAccessibilityProtocol)? {
+            guard depth < 30, let node = value as? any NSAccessibilityProtocol else { return nil }
+            if node.accessibilityIdentifier() == identifier { return node }
+            for child in node.accessibilityChildren() ?? [] {
+                if let found = button(child, identifier: identifier, depth: depth + 1) { return found }
             }
             return nil
         }
         let control = try XCTUnwrap(button(host), "The plate's visible action must be reachable through accessibility")
-        XCTAssertEqual(control.accessibilityPerformPress?(), true)
+        XCTAssertEqual(control.accessibilityPerformPress(), true)
         for _ in 0..<100 {
-            if await companion.calls.contains("printed-elsewhere:\(plate.id)") { break }
+            if model.objects.first(where: { $0.id == id })?.completedPlateCount == 1 { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         let calls = await companion.calls
@@ -284,6 +294,9 @@ private func project(_ item: [String: Any]) throws -> Project {
         let updated = try XCTUnwrap(model.objects.first { $0.id == id })
         XCTAssertEqual(updated.plates?.first?.statusText, "Printed")
         XCTAssertEqual(updated.completedPlateCount, 1)
+        host.layoutSubtreeIfNeeded()
+        let shown = try XCTUnwrap(button(host, identifier: "select-plate-0-0"))
+        XCTAssertTrue(shown.accessibilityLabel()?.contains("Printed") == true)
         XCTAssertEqual(updated.plates?[1].statusText, "Not printed")
     }
 

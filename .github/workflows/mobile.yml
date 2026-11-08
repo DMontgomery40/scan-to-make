@@ -43,7 +43,7 @@ jobs:
         working-directory: packages/CounterpartKit
         run: |
           set -euo pipefail
-          trap 'rm -rf "${{ runner.temp }}/counterpartkit"' EXIT
+          trap 'trash "${{ runner.temp }}/counterpartkit"' EXIT
           xcodebuild test -scheme CounterpartKit -destination 'platform=macOS' -derivedDataPath "${{ runner.temp }}/counterpartkit"
 
   app:

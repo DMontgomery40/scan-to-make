@@ -455,3 +455,14 @@ test('printed elsewhere is atomic for its named plate, persists and never change
  await assert.rejects(f.service.markPlatePrinted(object.id,third),/finish/i);
  assert.ok(f.events.some(e=>e.type==='project.updated'&&e.data?.keys?.includes('plates')));
 });
+
+test('a refusal before dispatch and a monitor-confirmed non-start both read Not started, without uncertainty', async t => {
+ const f=await setup(t), object=await f.service.create('Platform','published',LINK);
+ const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Platform',6));
+ await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
+ for (const monitor of [undefined,{phase:'ended',endState:'not-started'}]) {
+   await f.store.update(object.id,o=>({...o,state:'failed',print:{bundleId:'b',printId:'p',plate:{sha256:o.files.receipts[0].sha256,plateIndex:0},monitor}}));
+   const plate=publicObject(await f.service.get(object.id)).plates[0];
+   assert.equal(plate.status,'not-started'); assert.equal(plate.uncertain,undefined);
+ }
+});

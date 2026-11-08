@@ -59,6 +59,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import com.scantomake.counterpart.api.CounterpartEvent
 import com.scantomake.counterpart.net.TransportException
 import org.junit.After
