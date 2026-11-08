@@ -93,3 +93,13 @@ public struct PrintActivitySnapshot: Equatable, Sendable {
         attributes.projectId == earlier.projectId && attributes.printId != earlier.printId
     }
 }
+
+/// The Live Activity's words, in the print notifications' voice (services/companion/src/events/words.ts):
+/// the milestone notification's body is "38 min left · layer 84 of 212 · P1S", and the activity's detail
+/// line is that body without the time, which the activity counts down itself.
+public enum PrintActivityWords {
+    public static func detail(_ state: PrintAttributes.ContentState, printer: String) -> String {
+        let layers = state.layer > 0 && state.totalLayers > 0 ? "layer \(state.layer) of \(state.totalLayers)" : nil
+        return [layers, printer.isEmpty ? nil : printer].compactMap { $0 }.joined(separator: " · ")
+    }
+}

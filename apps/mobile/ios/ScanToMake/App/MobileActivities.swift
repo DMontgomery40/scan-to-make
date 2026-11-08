@@ -1,5 +1,6 @@
 import ActivityKit
 import UIKit
+import UserNotifications
 import CounterpartKit
 
 /// Starts locally only in the foreground. Background pushes may update existing activities during
@@ -20,10 +21,19 @@ import CounterpartKit
     private var lastPublished: String?
     private var dismissed = Set(UserDefaults.standard.stringArray(forKey: "CounterpartDismissedPrintActivities") ?? [])
     private var boundDevice = UserDefaults.standard.string(forKey: "CounterpartActivityDevice")
+    private let artwork = ActivityPictures()
+    #if DEBUG
+    /// The fixture's activity takes no push token: there is no relay to give it to.
+    private static var pushType: PushType? { Fixtures.liveActivity ? nil : .token }
+    #else
+    private static let pushType: PushType? = .token
+    #endif
 
     func attach(_ app: AppModel) {
         #if DEBUG
-        guard Fixtures.folder == nil else { return }
+        // The canned Mac starts no activities, except for `-CounterpartScreen live-activity`'s screenshots, which
+        // start one through `reconcile` like a real print (no tokens are published).
+        guard Fixtures.folder == nil else { if Fixtures.liveActivity { self.app = app }; return }
         #endif
         self.app = app
         guard let device = try? app.pairing.store.read()?.deviceId else { return }
@@ -55,6 +65,11 @@ import CounterpartKit
 
     func reconcile(_ snapshots: [PrintActivitySnapshot], mayStart: Bool) async {
         guard let app, !app.needsMac, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        // The widget can't reach the Mac: put each live print's picture where it can read it before the
+        // activity starts or updates, so its first frame already shows the project.
+        await artwork.refresh(app.projects.projects.filter { project in
+            project.state == .ready || snapshots.contains { $0.attributes.projectId == project.id && $0.content.canStart }
+        }, mac: app.projects.mac)
         for snapshot in snapshots {
             // Only a current companion snapshot may retire another print. An older CloudKit mirror
             // can otherwise race a freshly started activity before its mirror upsert arrives.
@@ -73,7 +88,12 @@ import CounterpartKit
             } else if snapshot.shouldStart(foreground: mayStart && UIApplication.shared.applicationState == .active, dismissed: dismissed) {
                 // The system can refuse when disabled, at capacity, or when the app loses foreground.
                 // Printing remains independent of the activity's availability.
-                if let activity = try? Activity.request(attributes: snapshot.attributes, content: content, pushType: .token) { watch(activity) }
+                if let activity = try? Activity.request(attributes: snapshot.attributes, content: content, pushType: Self.pushType) {
+                    watch(activity)
+                    #if DEBUG
+                    if Fixtures.liveActivity { await Self.postFixtureMilestone(snapshot) }
+                    #endif
+                }
             }
         }
         Task { await publish() }
@@ -158,6 +178,27 @@ import CounterpartKit
             if sent || cloudSent { lastPublished = signature }
         } while publishAgain
     }
+
+    #if DEBUG
+    /// The halfway notification, composed as the notification service composes a CloudKit event (title and
+    /// body from the companion's words, the printer camera frame attached, threaded by project), for the
+    /// screenshots that put it beside the activity. Not a CloudKit delivery.
+    private static func postFixtureMilestone(_ snapshot: PrintActivitySnapshot) async {
+        let center = UNUserNotificationCenter.current()
+        guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true, let folder = Fixtures.folder else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "\(snapshot.attributes.title) is halfway"
+        content.body = "\(max(1, Int((snapshot.content.endsAt.timeIntervalSinceNow / 60).rounded()))) min left · " + PrintActivityWords.detail(snapshot.content, printer: snapshot.attributes.printerName)
+        content.threadIdentifier = snapshot.attributes.projectId
+        content.interruptionLevel = .active
+        content.userInfo = ["projectId": snapshot.attributes.projectId, "printId": snapshot.attributes.printId, "type": "print.milestone"]
+        let frame = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).jpg")
+        if (try? FileManager.default.copyItem(at: folder.appendingPathComponent("bed.jpg"), to: frame)) != nil,
+           let attachment = try? UNNotificationAttachment(identifier: "frame", url: frame) { content.attachments = [attachment] }
+        try? await center.add(UNNotificationRequest(identifier: "fixture-milestone", content: content,
+                                                    trigger: UNTimeIntervalNotificationTrigger(timeInterval: 8, repeats: false)))
+    }
+    #endif
 
     private static func hex(_ data: Data) -> String { data.map { String(format: "%02x", $0) }.joined() }
 }
