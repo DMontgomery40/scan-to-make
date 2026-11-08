@@ -48,6 +48,50 @@ const project = {
   plates: [{ id: "a:1", selected: true }],
   directory: "/private/needle",
 } as unknown as Project;
+test("sidebar failures need you, ready is a group rather than a selection", () => {
+  const rows = ["ready", "failed", "needs-closeup", "printed"].map(
+    (state, i) => ({ ...project, id: String(i), state }),
+  );
+  assert.deepEqual(
+    projectGroups(rows).map((g) => [g.title, g.projects.map((p) => p.id)]),
+    [
+      ["Needs you", ["1", "2"]],
+      ["Ready", ["0"]],
+      ["Printed", ["3"]],
+    ],
+  );
+  assert.equal(projectGroups([{ ...rows[1], archived: true }]).length, 0);
+});
+
+test("printer summary keeps the attention badge and active print with projects present", () => {
+  const printers = [
+    {
+      id: "p1",
+      name: "P1S",
+      model: "Bambu Lab P1S",
+      backend: "",
+      state: "ready",
+    },
+    { id: "p2", name: "Desk", backend: "", state: "offline" },
+  ];
+  const rows = [
+    { ...project, state: "printing", print: { destinationId: "p1" } },
+  ];
+  assert.deepEqual(printerSummary(printers, rows), {
+    problems: 1,
+    label: "Printers, 1 needs attention",
+    status: "Bambu Lab P1S printing",
+  });
+  assert.equal(printerSummary([], rows).problems, 0);
+  assert.equal(
+    printerSummary(
+      printers.map((p) => ({ ...p, state: "offline" })),
+      rows,
+    ).label,
+    "Printers, 2 need attention",
+  );
+});
+
 test("a print sheet rejects a changed plate and never adopts it", () => {
   const frozen = freezePlate(project);
   assert.equal(frozen, "a:1");
@@ -513,48 +557,4 @@ test("Add a printer's address offers a web address only where the MCP's field ta
 test("while the printer MCP sends the file, a project shows the companion's percentage", () => {
   // counterpart/1 upload progress, as the companion writes it to Project.progress (Mac, iPhone, iPad and Android show the same).
   assert.equal(words({ id: "x", state: "printing", progress: "Sending to the printer… 62%" } as unknown as Project), "Sending to the printer… 62%");
-});
-
-test("sidebar failures need you, ready is a group rather than a selection", () => {
-  const rows = ["ready", "failed", "needs-closeup", "printed"].map(
-    (state, i) => ({ ...project, id: String(i), state }),
-  );
-  assert.deepEqual(
-    projectGroups(rows).map((g) => [g.title, g.projects.map((p) => p.id)]),
-    [
-      ["Needs you", ["1", "2"]],
-      ["Ready", ["0"]],
-      ["Printed", ["3"]],
-    ],
-  );
-  assert.equal(projectGroups([{ ...rows[1], archived: true }]).length, 0);
-});
-
-test("printer summary keeps the attention badge and active print with projects present", () => {
-  const printers = [
-    {
-      id: "p1",
-      name: "P1S",
-      model: "Bambu Lab P1S",
-      backend: "",
-      state: "ready",
-    },
-    { id: "p2", name: "Desk", backend: "", state: "offline" },
-  ];
-  const rows = [
-    { ...project, state: "printing", print: { destinationId: "p1" } },
-  ];
-  assert.deepEqual(printerSummary(printers, rows), {
-    problems: 1,
-    label: "Printers, 1 needs attention",
-    status: "Bambu Lab P1S printing",
-  });
-  assert.equal(printerSummary([], rows).problems, 0);
-  assert.equal(
-    printerSummary(
-      printers.map((p) => ({ ...p, state: "offline" })),
-      rows,
-    ).label,
-    "Printers, 2 need attention",
-  );
 });
