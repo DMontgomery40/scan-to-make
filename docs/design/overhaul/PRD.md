@@ -240,6 +240,8 @@ Screenshot: `screens/phone-new.jpg`.
 
 - **Walk-around (unchanged).** The existing Object Capture module (`apps/mobile/modules/object-capture/`) works and isn't touched. Changes are limited to its entry and exit: it's launched from New and returns its scan to New.
   - Close-ups come from the scan's own images, with no extra step. The Mac picks frames from the capture (§7.4).
+  - **The Mac rebuilds it (Nov 8).** The phone sends every image the session took, as Apple wrote them: each HEIC carries its LiDAR depth, gravity and the capture box. That is what `isOverCaptureEnabled` is for. The phone's own model is only a preview. On a Mac (`objectCaptureImages`), PhotogrammetrySession rebuilds the images at `.full`, with object masking on, and its size comes from the depth. Apple's checkpoint stays on the phone: macOS "starts from scratch, and does not resume from previous checkpoints". If the rebuild fails, the preview stays, and the model's summary says so. An older Mac gets the preview and 24 photos, as before.
+  - **No touch-up unless asked (Nov 8).** A scan sent without a request becomes the project's model as it is, and is `ready`. **Ask for changes** starts the touch-up. A request sent with the scan still runs it after the rebuild. The rig scan of Nov 8 ran a 7-minute touch-up on a 4,112-point preview nobody had looked at.
 - **Scan in hand (new; spec in §11).** Screenshot: `screens/phone-hand.jpg`.
   - A full-screen camera with the object's live outline and a coverage ring. One glass card carries one instruction at a time ("Turn it so the top faces you").
   - Shutter and LiDAR status are always visible ("1/500 s · LiDAR on"), with a count of sharp and skipped frames.

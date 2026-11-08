@@ -27,7 +27,7 @@ import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
-import {defaultReconstructRunner, ReconstructionReviewNeeded, type Reconstruct} from './reconstruct.js';
+import {defaultReconstructRunner, RECONSTRUCTION_FAILED, ReconstructionReviewNeeded, type Reconstruct, type ReconstructInputs, type ScanToStl} from './reconstruct.js';
 import {captureCameraDigest, validateCaptureCamera} from './capture-camera.js';
 import {clearReconstructionInputs, publicReview, reconstructionInputs, reconstructionPaths, saveReviewPreview, writeCaptureCamera, writeMeasurement, writeObjectRegion} from './reconstruction.js';
 import {ReconstructionAnswerSchema, type ReconstructionAnswer} from '@scan-to-make/contracts/reconstruction';
@@ -84,7 +84,18 @@ export class InvalidCaptureManifestError extends Error {
   constructor() { super('Invalid capture manifest'); this.name = 'InvalidCaptureManifestError'; }
 }
 
-export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean; cameraMetadataRequired?: boolean; scaleQualificationRequired?: boolean}
+/**
+ * `source: 'object-capture'`: every image of an iPhone Object Capture session, as Apple wrote them (its own names,
+ * each HEIC carrying LiDAR depth, gravity and the capture box), for Apple's PhotogrammetrySession on this Mac. The
+ * phone's own model, sent with them, is only a preview until that rebuild replaces it.
+ */
+export type CaptureSource = 'object-capture';
+export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean; cameraMetadataRequired?: boolean; scaleQualificationRequired?: boolean; source?: CaptureSource}
+/** Apple's Object Capture image names ("00041.732011084.HEIC"), as the capture upload route accepts them. */
+const OBJECT_CAPTURE_IMAGE = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(heic|jpe?g|png)$/i;
+function captureNameAllowed(name: string, source: CaptureSource | undefined): boolean {
+  return source === 'object-capture' ? OBJECT_CAPTURE_IMAGE.test(name) && !name.includes('..') : /^[0-9]{4}\.(heic|jpe?g|png)$/.test(name);
+}
 
 export {InvalidCaptureCameraError} from './capture-camera.js';
 
@@ -135,24 +146,30 @@ const CAPTURE_PENDING = 'The capture is still missing camera or depth files, or 
 function parseCaptureManifest(value: unknown): CaptureManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new InvalidCaptureManifestError();
   const manifest = value as Record<string, unknown>;
+  const source = manifest.source === 'object-capture' ? 'object-capture' as const : undefined;
   if (manifest.version !== 1 || typeof manifest.depthRequired !== 'boolean' || !Array.isArray(manifest.images)
+      || (manifest.source !== undefined && !source)
       || (manifest.cameraMetadataRequired !== undefined && typeof manifest.cameraMetadataRequired !== 'boolean')
       || (manifest.scaleQualificationRequired !== undefined && typeof manifest.scaleQualificationRequired !== 'boolean')
+      // An Object Capture HEIC carries its own depth; it has no sidecars, camera file or qualification step.
+      || (source && (manifest.depthRequired || manifest.cameraMetadataRequired || manifest.scaleQualificationRequired))
       || manifest.images.length < 1 || manifest.images.length > 10000
-      || manifest.images.some(name => typeof name !== 'string' || !/^[0-9]{4}\.(heic|jpe?g|png)$/.test(name))
+      || manifest.images.some(name => typeof name !== 'string' || !captureNameAllowed(name, source))
       // Depth companions belong to the iPhone HEIC protocol only.
       || (manifest.depthRequired && manifest.images.some(name => typeof name !== 'string' || !name.endsWith('.heic')))
       || new Set(manifest.images).size !== manifest.images.length) throw new InvalidCaptureManifestError();
   return {version: 1, images: [...manifest.images].sort(), depthRequired: manifest.depthRequired,
     ...(manifest.cameraMetadataRequired !== undefined ? {cameraMetadataRequired: manifest.cameraMetadataRequired} : {}),
-    ...(manifest.scaleQualificationRequired !== undefined ? {scaleQualificationRequired: manifest.scaleQualificationRequired} : {})};
+    ...(manifest.scaleQualificationRequired !== undefined ? {scaleQualificationRequired: manifest.scaleQualificationRequired} : {}),
+    ...(source ? {source} : {})};
 }
 
-function captureDigest(object: StmObject, depthRequired: boolean, cameraMetadataRequired = false, scaleQualificationRequired = false): string {
+function captureDigest(object: StmObject, depthRequired: boolean, cameraMetadataRequired = false, scaleQualificationRequired = false, source?: CaptureSource): string {
   return createHash('sha256').update(JSON.stringify({version: 1, depthRequired,
     // Only present fields bind, so digests of older image-only captures are unchanged.
     ...(cameraMetadataRequired ? {cameraMetadataRequired: true} : {}),
     ...(scaleQualificationRequired ? {scaleQualificationRequired: true} : {}),
+    ...(source ? {source} : {}),
     ...(object.captureCamera ? {camera: object.captureCamera.sha256} : {}),
     images: [...(object.capture ?? [])].sort(), depth: [...(object.captureDepth ?? [])].sort()})).digest('hex');
 }
@@ -180,6 +197,14 @@ export interface ObjectServiceDeps {
   onChange?: (object: StmObject) => void;
   /** Rebuilds a handheld scan from its photos (`mac-reconstruct samples`). Defaults to the bundled tool. */
   reconstruct?: Reconstruct;
+  /**
+   * Turns a scan into the project's printable STL without a touch-up (`mac-reconstruct stl`). With it, a scan sent
+   * without a request becomes the project's model and waits for the person (PRD §5.3); without it (no tool on this
+   * computer) such a scan is touched up as before.
+   */
+  scanToStl?: ScanToStl;
+  /** This computer has Apple's PhotogrammetrySession and the bundled `mac-reconstruct` (a Mac). */
+  objectCaptureRebuild?: boolean;
   print?: {
     services: PrintHandoffServices;
     /** Built once from each catalog entry's entire MCP config, never a host override. */
@@ -263,7 +288,34 @@ export function spreadPick<T>(items: T[], count: number): T[] {
   return Array.from({length: count}, (_, i) => items[Math.round(i * (items.length - 1) / (count - 1))]!);
 }
 
-/** The object lifecycle: inputs arrive, the touch-up runs by itself, and the result is ready to print. */
+/** What `#build` left as the scan: this Mac's rebuild (from `photos`, `inputs` for an Object Capture folder), or the phone's preview when the rebuild `failed`. */
+interface Rebuilt { scan: string; photos?: number; inputs?: ReconstructInputs; failed?: string }
+
+/** A pass's stages: the rebuild when there is one, the touch-up only when one was asked for, then saving. */
+export function passPlan(build: boolean, touchup: boolean): StageId[] {
+  return [...(build ? ['building' as const] : []), ...(touchup ? ['preparing' as const, 'working' as const] : []), 'saving'];
+}
+
+/** The model's summary when the scan is kept as it is: where it came from and where its size came from, in words. */
+export function scanSummary(rebuilt?: Rebuilt): string {
+  const next = 'Nothing has been touched up yet. Ask for changes to clean it up.';
+  if (rebuilt?.failed !== undefined) {
+    // The generic failure repeats this sentence; anything more specific ("…needs macOS 27", "Reinstall Counterpart") is kept.
+    const detail = rebuilt.failed === RECONSTRUCTION_FAILED ? '' : ` ${rebuilt.failed.replace(/\s+/g, ' ').trim()}`;
+    return `Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview.${detail} ${next}`;
+  }
+  if (!rebuilt) return `This is the scan as it came. ${next}`;
+  const inputs = rebuilt.inputs, count = inputs?.images ?? rebuilt.photos ?? 0, unused = Math.min(inputs?.skipped ?? 0, count);
+  const from = !count ? 'your photos' : unused ? `${count - unused} of your ${count} photos` : `all ${count} photo${count === 1 ? '' : 's'}`;
+  const size = !inputs ? '' : inputs.depth === 0 ? " These photos carry no depth, so its size isn't measured; check it before printing."
+    : inputs.depth === inputs.images ? ' Its size comes from the LiDAR depth in every photo.'
+    : ` Its size comes from the LiDAR depth in ${inputs.depth} of them.`;
+  const joined = inputs?.stitchingIncomplete ? " Apple couldn't join every photo together, so check every side." : '';
+  const left = unused ? ` Apple couldn't place the other ${unused}, so more overlapping photos would help.` : '';
+  return `Rebuilt on your Mac from ${from} at full detail.${left}${size}${joined} ${next}`;
+}
+
+/** The object lifecycle: inputs arrive, a capture is rebuilt, a touch-up runs when asked for, and the result is ready to print. */
 /**
  * A copy whose source is a 3MF the person added (a designer's project): its path in the project, else undefined.
  * Such a copy edits that file in place, so every pass starts from it rather than from the merged mesh.
@@ -524,6 +576,12 @@ export class ObjectService {
     const sliced = {...slicer, ...overrides, ...designedSupports(object)};
     return {selected, overrides, sliced, ...(chosenTrays ? {chosenTrays} : {})};
   }
+
+  /**
+   * The phone may send every image of an Object Capture session (`captureManifest.source: 'object-capture'`): this
+   * computer rebuilds them with Apple's PhotogrammetrySession and can keep the result as a model. Only a Mac can.
+   */
+  get objectCaptureImages(): boolean { return !!this.#deps.scanToStl && !!this.#deps.objectCaptureRebuild; }
 
   /** The printer this project would print on takes `copies` (slice_stl repetitions). */
   get printCopiesAvailable(): boolean {
@@ -1213,11 +1271,12 @@ export class ObjectService {
         throw new InvalidStateError(CAPTURE_PENDING);
       if (manifest.cameraMetadataRequired && !object.captureCamera)
         throw new InvalidStateError(CAPTURE_CAMERA_PENDING);
-      await this.#captureFilesPresent(object);
-      const sha256 = captureDigest(object, manifest.depthRequired, manifest.cameraMetadataRequired, manifest.scaleQualificationRequired);
+      await this.#captureFilesPresent(object, manifest.source);
+      const sha256 = captureDigest(object, manifest.depthRequired, manifest.cameraMetadataRequired, manifest.scaleQualificationRequired, manifest.source);
       const same = object.captureCompletion?.sha256 === sha256 && object.captureCompletion.depthRequired === manifest.depthRequired
         && !!object.captureCompletion.cameraMetadataRequired === !!manifest.cameraMetadataRequired
-        && !!object.captureCompletion.scaleQualificationRequired === !!manifest.scaleQualificationRequired;
+        && !!object.captureCompletion.scaleQualificationRequired === !!manifest.scaleQualificationRequired
+        && object.captureCompletion.source === manifest.source;
       if (same && ['touching-up', 'needs-closeup', 'ready', 'printing', 'printed'].includes(object.state)) return object;
       if (!same) {
         if (object.state !== 'new' && object.state !== 'failed') throw new InvalidStateError('Wait until the current step finishes.');
@@ -1225,8 +1284,11 @@ export class ObjectService {
           version: 1, depthRequired: manifest.depthRequired,
           ...(manifest.cameraMetadataRequired ? {cameraMetadataRequired: true} : {}),
           ...(manifest.scaleQualificationRequired ? {scaleQualificationRequired: true} : {}),
+          ...(manifest.source ? {source: manifest.source} : {}),
           frameCount: manifest.images.length, sha256, completedAtMs: Date.now(),
-        }}));
+        },
+        // The phone's own model came with its photos: a preview until this Mac rebuilds from them.
+        ...(manifest.source === 'object-capture' && o.scan && o.scanSource !== 'mac' ? {scanSource: 'phone-preview' as const} : {})}));
       }
     }
     // Photos only show what something looks like; without a scan, the description says what to make.
@@ -1260,12 +1322,12 @@ export class ObjectService {
     return this.#pass(object, {});
   }
 
-  async #captureFilesPresent(object: StmObject): Promise<void> {
+  async #captureFilesPresent(object: StmObject, source: CaptureSource | undefined): Promise<void> {
     // Names came from the validated manifest or its bound completion marker, never a caller path.
     const names = [...(object.capture ?? []), ...(object.captureDepth ?? [])];
     for (let offset = 0; offset < names.length; offset += 32) {
       const present = await Promise.all(names.slice(offset, offset + 32).map(async name => {
-        if (!/^[0-9]{4}\.(heic|jpe?g|png|depth\.plist)$/.test(name)) return false;
+        if (!captureNameAllowed(name, source) && !/^[0-9]{4}\.depth\.plist$/.test(name)) return false;
         const info = await stat(join(this.dir(object.id), 'capture', name)).catch(() => undefined);
         return info?.isFile() && info.size > 0;
       }));
@@ -1279,8 +1341,8 @@ export class ObjectService {
     if (!complete || complete.version !== 1 || complete.frameCount !== object.capture?.length
         || (object.captureDepth?.length && !complete.depthRequired)
         || (complete.cameraMetadataRequired && !object.captureCamera)
-        || complete.sha256 !== captureDigest(object, complete.depthRequired, complete.cameraMetadataRequired, complete.scaleQualificationRequired)) throw new InvalidStateError(CAPTURE_PENDING);
-    await this.#captureFilesPresent(object);
+        || complete.sha256 !== captureDigest(object, complete.depthRequired, complete.cameraMetadataRequired, complete.scaleQualificationRequired, complete.source)) throw new InvalidStateError(CAPTURE_PENDING);
+    await this.#captureFilesPresent(object, complete.source);
   }
 
   /** Asks for changes; `photos` are files on this Mac added first (the Mac app's drop target). */
@@ -2254,15 +2316,19 @@ export class ObjectService {
     const kind: PassKind = passKind(object);
     // Keep the decision: once this pass makes a model, a copy with nothing scanned would otherwise read as a copy again.
     if (object.kind !== kind) object = await store.update(object.id, o => ({...o, kind}));
-    // A handheld scan is rebuilt into scan/scan.usdz first, once; its photos also show the touch-up the object.
-    const build = kind !== 'published' && !fromCurrent && !object.scan && (object.capture?.length ?? 0) > 0;
+    // A capture is rebuilt into scan/scan.usdz on this Mac first, once: a handheld scan, or every photo of an iPhone
+    // Object Capture session, whose phone-made model is only a preview until then. Its photos also show the touch-up the object.
+    const objectCapture = object.captureCompletion?.source === 'object-capture';
+    const build = kind !== 'published' && !fromCurrent && (object.capture?.length ?? 0) > 0
+      && (!object.scan || (objectCapture && object.scanSource === 'phone-preview'));
+    const touchup = this.#touchupAsked(object, opts.note, kind);
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
     // Preserve the original/prior context, but never let a later queued message's uploads influence this pass.
     const pending = new Set(object.pendingPhotos ?? []);
     const photos = spreadPick([...object.photos.filter(name => !pending.has(name)).map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
     const startedAtMs = Date.now();
     // PRD §8.9: copies are cleaned up in Blender; a new design may use Fusion (the touch-up decides).
-    const plan: StageId[] = [...(build ? ['building' as const] : []), 'preparing', 'working', 'saving'];
+    const plan: StageId[] = passPlan(build, touchup);
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
     const first: PassStage = {id: plan[0]!, words: stageWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
@@ -2320,8 +2386,10 @@ export class ObjectService {
       return running;
     }
     const work = (async () => {
-      let scanName = object.scan;
-      if (build) scanName = await this.#build(object.id, dir, controller.signal);
+      let scanName = object.scan, rebuilt: Rebuilt | undefined;
+      if (build) { rebuilt = await this.#build(object.id, dir, controller.signal, objectCapture); scanName = rebuilt.scan; }
+      // Nothing asked for: the scan, rebuilt or as it came, becomes the model and waits for the person.
+      if (!touchup && scanName) { stage('saving'); await writing; return this.#scanAsModel(object, scanName, startedAtMs, controller.signal, rebuilt); }
       // A copy of a designer's 3MF works on that 3MF every pass: the latest edit of it, then the designer's own
       // file to compare against. Its merged mesh has lost the designer's parts, colours and print settings.
       const designer = designerFile(object, kind, scanName);
@@ -2796,8 +2864,12 @@ export class ObjectService {
     })();
   }
 
-  /** Rebuilds a handheld scan on this Mac, showing progress in words, and records it as the object's scan. */
-  async #build(id: string, dir: string, signal: AbortSignal): Promise<string> {
+  /**
+   * Rebuilds a capture on this Mac, showing progress in words, and records it as the object's scan. An Object
+   * Capture rebuild is written beside the phone's preview and replaces it only when it has finished; if Apple's
+   * rebuild fails, the preview stays the scan and the result says so (`failed`). A cancelled rebuild is not a failure.
+   */
+  async #build(id: string, dir: string, signal: AbortSignal, objectCapture = false): Promise<Rebuilt> {
     const reconstruct = this.#deps.reconstruct ?? defaultReconstructRunner();
     const store = this.#deps.store;
     let shownAt = 0, pending: string | undefined, writing = Promise.resolve();
@@ -2810,10 +2882,24 @@ export class ObjectService {
     await mkdir(join(dir, 'scan'), {recursive: true});
     // Qualification is keyed on the capture's own declaration, never on
     // whether camera metadata happens to be present.
-    const scaleQualificationRequired = !!(await store.get(id)).captureCompletion?.scaleQualificationRequired;
-    const outcome = await reconstruct({photosDir: join(dir, 'capture'), output: join(dir, 'scan', 'scan.usdz'),
-      masksDir: join(dir, 'capture-masks'), ...await reconstructionInputs(dir),
-      ...(scaleQualificationRequired ? {scaleQualificationRequired: true} : {}), signal, onProgress: show});
+    const before = await store.get(id);
+    const scaleQualificationRequired = !!before.captureCompletion?.scaleQualificationRequired;
+    const final = join(dir, 'scan', 'scan.usdz');
+    const output = objectCapture ? join(dir, 'scan', `rebuilding-${randomUUID()}.usdz`) : final;
+    let outcome: Awaited<ReturnType<Reconstruct>>;
+    try {
+      outcome = await reconstruct({photosDir: join(dir, 'capture'), output,
+        masksDir: join(dir, 'capture-masks'), ...await reconstructionInputs(dir), ...(objectCapture ? {objectCapture: true} : {}),
+        ...(scaleQualificationRequired ? {scaleQualificationRequired: true} : {}), signal, onProgress: show});
+    } catch (error) {
+      await writing;
+      if (!objectCapture || signal.aborted || !before.scan) throw error;
+      await rm(output, {force: true}).catch(() => undefined);
+      const reason = this.#publicText(error instanceof Error ? error.message : String(error));
+      console.error(`rebuild failed: project ${id} keeps the phone's preview: ${reason.replace(/\s+/g, ' ').slice(0, 300)}`);
+      this.#changed(await store.update(id, o => ({...o, progress: undefined})));
+      return {scan: before.scan, failed: reason};
+    }
     await writing;
     if (outcome?.status === 'needs-review') {
       // Not a failure and not a scan: the pass ends as an Ask (see #finishReconstructionReview).
@@ -2821,8 +2907,38 @@ export class ObjectService {
       await saveReviewPreview(dir, reviewId, outcome.review.previewStl);
       throw new ReconstructionReviewNeeded(outcome.review, reviewId);
     }
-    this.#changed(await store.update(id, o => ({...o, scan: 'scan.usdz', progress: undefined, reconstructionReview: undefined})));
-    return 'scan.usdz';
+    if (objectCapture) {
+      // The phone's preview is kept beside the rebuild, never thrown away.
+      if (before.scan === 'scan.usdz' && await stat(final).then(() => true, () => false)) await rename(final, join(dir, 'scan', 'phone-preview.usdz'));
+      await rename(output, final);
+    }
+    this.#changed(await store.update(id, o => ({...o, scan: 'scan.usdz', progress: undefined, reconstructionReview: undefined,
+      ...(objectCapture ? {scanSource: 'mac' as const} : {})})));
+    return {scan: 'scan.usdz', photos: before.capture?.length ?? 0, ...(outcome?.status === 'done' && outcome.inputs ? {inputs: outcome.inputs} : {})};
+  }
+
+  /**
+   * PRD §5.3: a touch-up runs only when the person asked for one, by sending a request with the scan or asking for
+   * changes later. A copy's scan sent on its own becomes the project's model as it is and waits for them. Where this
+   * computer can't make that model's STL (no `scanToStl`), or the scan isn't a mesh it can keep (a designer's 3MF),
+   * the touch-up runs as before.
+   */
+  #touchupAsked(object: StmObject, note: string | undefined, kind: PassKind): boolean {
+    if (kind !== 'copy' || note !== undefined || object.instructions?.trim() || !this.#deps.scanToStl) return true;
+    const scan = object.scan ?? ((object.capture?.length ?? 0) > 0 ? 'scan.usdz' : undefined);
+    return !scan || !/\.(usdz|stl)$/i.test(scan);
+  }
+
+  /** The scan kept as it is: its STL (millimetres) becomes the project's model, with a summary of where it came from. */
+  async #scanAsModel(object: StmObject, scanName: string, startedAtMs: number, signal: AbortSignal, rebuilt?: Rebuilt): Promise<TouchupResult & {passDir: string}> {
+    const dir = this.dir(object.id);
+    const passDir = join(dir, 'passes', 'scan', new Date(startedAtMs).toISOString().replace(/[:.]/g, '-'));
+    await mkdir(join(passDir, 'out'), {recursive: true});
+    const model = join(passDir, 'out', 'model.stl'), scan = join(dir, 'scan', scanName);
+    if (scanName.toLowerCase().endsWith('.stl')) await copyFile(scan, model);
+    else await this.#deps.scanToStl!(scan, model, signal);
+    return {status: 'done', model, renders: [], checkpoints: [], summary: scanSummary(rebuilt),
+      stats: {seconds: Math.round((Date.now() - startedAtMs) / 1000), toolCalls: 0}, passDir};
   }
 
   /** A rebuild stopped for the person: needs-closeup with an Ask and the public review, never failed. */
@@ -2852,7 +2968,8 @@ export class ObjectService {
     const kind: PassKind = passKind(object);
     const typical = {...await this.#typical(kind, pass.engine ?? 'blender')};
     for (const stage of pass.stages) typical[stage.id] = stage.typicalSec;
-    const plan: StageId[] = [...(pass.stages.some(stage => stage.id === 'building') ? ['building' as const] : []), 'preparing', 'working', 'saving'];
+    const plan = passPlan(pass.stages.some(stage => stage.id === 'building'),
+      pass.stages.some(stage => stage.id === 'preparing' || stage.id === 'working') || this.#touchupAsked(object, pass.note, kind));
     const estimate = passEstimate(pass.stages, plan, typical, Date.now());
     return {...object, passes: [...object.passes.slice(0, -1), {...pass, estimate}]};
   }

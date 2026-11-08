@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+import ModelIO
 @testable import HandheldKit
 
 final class HandheldKitTests: XCTestCase {
@@ -75,5 +76,28 @@ final class HandheldKitTests: XCTestCase {
         try invalid.write(to: dir.appendingPathComponent("0000.depth.plist"))
         XCTAssertThrowsError(try exactDepth(for: image))
         XCTAssertThrowsError(try loadSample(image))
+    }
+
+    /// A model in metres becomes a binary STL in millimetres: every triangle, placed by its transform.
+    func testSTLIsInMillimetresWithEveryTriangle() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("handheldkit-stl-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // A 40 × 20 × 10 mm box, written in metres the way PhotogrammetrySession writes its models.
+        let box = MDLMesh(boxWithExtent: [0.04, 0.02, 0.01], segments: [1, 1, 1], inwardNormals: false,
+                          geometryType: .triangles, allocator: nil)
+        let asset = MDLAsset(); asset.add(box)
+        let model = dir.appendingPathComponent("box.obj")
+        try asset.export(to: model)
+        let stl = dir.appendingPathComponent("box.stl")
+        let summary = try writeSTL(model: model, to: stl)
+        XCTAssertEqual(summary.triangles, 12)
+        XCTAssertEqual(summary.sizeMm.x, 40, accuracy: 0.01)
+        XCTAssertEqual(summary.sizeMm.y, 20, accuracy: 0.01)
+        XCTAssertEqual(summary.sizeMm.z, 10, accuracy: 0.01)
+        let bytes = try Data(contentsOf: stl)
+        XCTAssertEqual(bytes.count, 84 + 12 * 50)
+        XCTAssertEqual(bytes.subdata(in: 80..<84).withUnsafeBytes { $0.load(as: UInt32.self) }, 12)
+        XCTAssertThrowsError(try writeSTL(model: dir.appendingPathComponent("missing.usdz"), to: dir.appendingPathComponent("x.stl")))
     }
 }

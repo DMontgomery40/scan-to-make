@@ -7,7 +7,11 @@ import HandheldKit
 // `.reduced` are available (WWDC23 10191, WWDC24 10107).
 //
 //   mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
-//       An Object Capture photo folder (walk-around scan).
+//       An Object Capture photo folder (walk-around scan): the iPhone's own HEICs, each carrying its LiDAR depth,
+//       gravity and the capture box, which PhotogrammetrySession reads itself. Before building it prints
+//       {"images":N,"depth":D}: how many photos carry depth, which is where the model's real-world size comes from.
+//   mac-reconstruct stl <model.usdz> <output.stl>
+//       Writes the model's triangles as a binary STL in millimetres (PhotogrammetrySession writes metres).
 //   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
 //                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 //       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
@@ -26,10 +30,20 @@ func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
 
 let usage = """
 usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
+       mac-reconstruct stl <model.usdz> <output.stl>
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 
 """
 var args = Array(CommandLine.arguments.dropFirst())
+if args.first == "stl" {
+    guard args.count == 3 else { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
+    do {
+        let summary = try writeSTL(model: URL(fileURLWithPath: args[1]), to: URL(fileURLWithPath: args[2]))
+        emit(["done": args[2], "triangles": summary.triangles, "vertices": summary.vertices,
+              "sizeMm": [summary.sizeMm.x, summary.sizeMm.y, summary.sizeMm.z].map { ($0 * 10).rounded() / 10 }])
+        exit(0)
+    } catch { fail(String(describing: error)) }
+}
 let samplesMode = args.first == "samples"
 if samplesMode { args.removeFirst() }
 func option(_ name: String) -> String? {
@@ -130,6 +144,11 @@ do {
         }
         session = try PhotogrammetrySession(input: samples, configuration: configuration)
     } else {
+        // Apple: "If your source images contain depth data, RealityKit uses it to calculate the real-world size of
+        // the scanned object." Say how many do, so the size's source is on record.
+        let files = try photos(in: input)
+        guard !files.isEmpty else { fail("No photos in \(input.path).") }
+        emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count, "stage": "reconstructing"])
         session = try PhotogrammetrySession(input: input, configuration: configuration)
     }
     try session.process(requests: [.modelFile(url: output, detail: detail)])
@@ -147,6 +166,10 @@ do {
             emit(["skipped": id, "reason": reason])
         case .skippedSample(let id):
             emit(["skipped": id, "reason": "not used"])
+        case .stitchingIncomplete:
+            emit(["warning": "stitching-incomplete"])
+        case .automaticDownsampling:
+            emit(["warning": "downsampled"])
         case .processingCancelled:
             fail("cancelled")
         default:

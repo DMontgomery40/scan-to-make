@@ -527,7 +527,7 @@ struct ProjectView: View {
                         Text(about).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
                     }
                 }
-                if let fraction = work.fraction { ProgressView(value: fraction).tint(.blue) }
+                if let fraction = words.phase == .sending ? store.sendProgress[object.id] : work.fraction { ProgressView(value: fraction).tint(.blue) }
                 else { ProgressView().progressViewStyle(.linear).tint(.blue) }
                 Text(words.phase == .sending ? "Keep the app open until your files are sent." : ProjectWords.putDown)
                     .font(.footnote).foregroundStyle(.secondary)

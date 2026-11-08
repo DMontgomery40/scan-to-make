@@ -86,9 +86,9 @@ typealias MacError = CompanionError
             try await sendChosen(id, chosen)
             sent = try await sendHandheld(id)
         } else if let run = await finishedScan(id) {
-            try await sendCapture(id, run: run)
+            let manifest = try await sendCapture(id, run: run)
             try await sendChosen(id, chosen)
-            sent = try await start(id)
+            sent = try await start(id, captureManifest: manifest)
         } else {
             try await sendChosen(id, chosen)
             sent = try await start(id)
@@ -199,12 +199,25 @@ typealias MacError = CompanionError
     }
 
     func sendScan(_ id: String, run: String) async throws -> StmObject {
-        try await sendCapture(id, run: run)
-        return try await start(id)
+        let manifest = try await sendCapture(id, run: run)
+        return try await start(id, captureManifest: manifest)
     }
 
-    /// Sends the scan's model and up to 24 of its own photos, evenly spread (only what the Mac lacks).
-    func sendCapture(_ id: String, run: String) async throws {
+    /// How much of each project's send has reached the Mac (0…1), for the Sending card.
+    var onSendProgress: @MainActor @Sendable (String, Double) -> Void = { _, _ in }
+
+    /// Sends a walk-around scan so the Mac can rebuild it (only what the Mac lacks; a send cut short resumes).
+    ///
+    /// Every image Object Capture took goes as it was written: each HEIC carries its LiDAR depth, gravity and the
+    /// capture box, which the Mac's PhotogrammetrySession reads itself. That is what `isOverCaptureEnabled` is for:
+    /// "for use when the images are intended to be transferred to macOS for model reconstruction". The phone's own
+    /// model goes last, as a preview the Mac replaces with its full-detail rebuild. Apple's checkpoint folder stays
+    /// here: "For macOS reconstruction, the checkpointDirectory … starts from scratch, and does not resume from
+    /// previous checkpoints" (PhotogrammetrySession.Configuration.checkpointDirectory).
+    ///
+    /// Returns the start manifest that names every image. A Mac that can't rebuild them (an older Counterpart, or a
+    /// computer without Apple's reconstruction) gets the model and 24 of the photos, as before, and no manifest.
+    func sendCapture(_ id: String, run: String) async throws -> [String: Any]? {
         guard UUID(uuidString: run) != nil, run == run.lowercased() else { throw MacError(code: "invalid-request", message: "That request isn't allowed.") }
         let folder = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)", directoryHint: .isDirectory)
         let model = folder.appending(path: "Models/model-mobile.usdz")
@@ -215,9 +228,18 @@ typealias MacError = CompanionError
         let pattern = /[A-Za-z0-9][A-Za-z0-9._ -]{0,122}\.(HEIC|heic|JPG|jpg|JPEG|jpeg|PNG|png)/
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? [])
             .filter { $0.wholeMatch(of: pattern) != nil && !$0.contains("..") }.sorted()
-        var files = [UploadFile(kind: .scan, name: "scan.usdz", source: .file(model), type: "model/vnd.usdz+zip")]
-        files += ProjectUploader.spread(names, count: 24).map { UploadFile.image(images.appending(path: $0), name: $0) }
-        try await uploader.send(files, to: id)
+        let preview = UploadFile(kind: .scan, name: "scan.usdz", source: .file(model), type: "model/vnd.usdz+zip")
+        let report = onSendProgress
+        let progress: @Sendable (Double) -> Void = { share in Task { @MainActor in report(id, share) } }
+        guard !names.isEmpty, (try? await client.capabilities())?.contains("objectCaptureImages") == true else {
+            let files = [preview] + ProjectUploader.spread(names, count: 24).map { UploadFile.image(images.appending(path: $0), name: $0) }
+            try await uploader.send(files, to: id, progress: progress)
+            return nil
+        }
+        // The images first: the Mac takes capture frames only until a scan is there.
+        let files = names.map { UploadFile.image(images.appending(path: $0), name: $0, kind: .capture) } + [preview]
+        try await uploader.send(files, to: id, progress: progress)
+        return ["version": 1, "images": names, "depthRequired": false, "source": "object-capture"]
     }
 
     /// An in-hand scan's photos and depth (HandheldCapture.swift): the Mac rebuilds the model, then touches it up.

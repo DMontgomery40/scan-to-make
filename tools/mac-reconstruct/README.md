@@ -5,6 +5,12 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
 - `mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]` rebuilds a model from an
   Object Capture photo folder with Apple's `PhotogrammetrySession`. On a Mac it can use detail levels
   above the iPhone's `.reduced`. It prints one JSON line per progress step, then `{"done":…}` or `{"error":…}`.
+  First it prints `{"images":N,"depth":D}`: how many photos carry LiDAR depth, where the model's real-world size
+  comes from. Apple's `stitchingIncomplete` and `automaticDownsampling` come out as `{"warning":…}`. The companion
+  runs it at `full` on every image a walk-around sent (`ReconstructInput.objectCapture`).
+- `mac-reconstruct stl <model.usdz> <output.stl>` writes the model's triangles as a binary STL in millimetres
+  (PhotogrammetrySession writes metres, `metersPerUnit = 1`), each mesh placed by its composed transform. The
+  companion uses it to keep a scan as the project's model without a touch-up.
 - `mac-reconstruct samples <images-folder> <output.usdz> [detail] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]`
   rebuilds a handheld scan: the phone stays still and the object turns in the hand. Each photo becomes a
   `PhotogrammetrySample` with its embedded depth (metres), EXIF and calibration, and no gravity (the object moves

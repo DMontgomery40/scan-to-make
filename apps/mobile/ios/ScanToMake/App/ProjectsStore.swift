@@ -15,7 +15,9 @@ import CounterpartKit
     var reachable: Bool?
     var canScan = false
     /// Projects this phone is still sending files to: they show "Sending to your Mac".
-    var sending: Set<String> = []
+    var sending: Set<String> = [] { didSet { sendProgress = sendProgress.filter { sending.contains($0.key) } } }
+    /// How much of a send has reached the Mac (0…1): a walk-around's every photo can take a while.
+    var sendProgress: [String: Double] = [:]
     /// Why a send stopped, until it's tried again.
     var sendFailures: [String: String] = [:]
     /// Changes asked for while the Mac was working, sent when its pass ends (kept across launches).
@@ -37,7 +39,13 @@ import CounterpartKit
     var events: Bool?
     var onPair: () -> Void = {}
 
-    init(mac: MacConnection, pairing: PairingClient) { self.mac = mac; self.pairingClient = pairing }
+    init(mac: MacConnection, pairing: PairingClient) {
+        self.mac = mac; self.pairingClient = pairing
+        mac.onSendProgress = { [weak self] id, share in
+            guard let self, self.sending.contains(id) else { return }
+            self.sendProgress[id] = share
+        }
+    }
 
     func project(_ id: String) -> Project? { projects.first { $0.id == id } }
 

@@ -33,9 +33,11 @@ public actor ProjectUploader {
     public func isSending(_ projectId: String) -> Bool { sending.contains(projectId) }
 
     /// Sends whatever of `files` the Mac doesn't have yet, one after another, stopping at the first failure.
-    /// Returns how many photos or frames were sent (the scan isn't counted).
+    /// Returns how many photos or frames were sent (the scan isn't counted). `progress` gets the share of `files`
+    /// on the Mac, 0…1: what it already had first, then after each file, so a resumed send starts where it stopped.
     @discardableResult
-    public func send(_ files: [UploadFile], to projectId: String, forMessage: Bool = false) async throws -> Int {
+    public func send(_ files: [UploadFile], to projectId: String, forMessage: Bool = false,
+                     progress: (@Sendable (Double) -> Void)? = nil) async throws -> Int {
         guard !sending.contains(projectId) else { throw CompanionError(code: "busy", message: "This is already being sent.") }
         sending.insert(projectId)
         defer { sending.remove(projectId) }
@@ -52,7 +54,9 @@ public actor ProjectUploader {
             case .depth: !depths.contains(file.name)
             }
         }
-        var sent = 0
+        var sent = 0, arrived = files.count - missing.count
+        func report() { if !files.isEmpty { progress?(Double(arrived) / Double(files.count)) } }
+        report()
         for file in missing {
             let bytes: Data?
             switch file.source {
@@ -77,6 +81,8 @@ public actor ProjectUploader {
                     : CompanionError(code: "upload-failed", message: "Your Mac didn't accept a file from this scan. Try again.")
             }
             if file.kind != .scan { sent += 1 }
+            arrived += 1
+            report()
         }
         return sent
     }

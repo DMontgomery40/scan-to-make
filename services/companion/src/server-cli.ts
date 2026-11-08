@@ -41,6 +41,7 @@ import {ObjectService} from './objects/service.js';
 import {generateTitle} from './objects/title.js';
 import {PassTimings} from './touchup/stages.js';
 import {printerStlSize} from './objects/stl-size.js';
+import {findMacReconstruct,macScanToStl} from './objects/reconstruct.js';
 import {runTouchup, acquireBlenderLock} from './touchup/touchup.js';
 import {toolErrorText} from './touchup/blender.js';
 import {BlenderAddonRepair, BlenderSetupUnavailableError, type BlenderSetupReport} from './touchup/addon-repair.js';
@@ -216,6 +217,8 @@ if(handoffConfig&&printHandoff&&captureDirectory){
   const catalog=printerCatalog!, destinations=printerDestinations!;
   objects=new ObjectService({store:objectStore,runTouchup:input=>{if(!input.worker)throw Error('AI settings are unavailable. Open AI Settings on your Mac and retry.');return runTouchup(input);},modelAccess,requireModelAccess:true,claudePath:claudePath??'',handoff:handoffConfig,runningHandoff:()=>runningHandoff()!,printerCatalog:catalog,printers:printerDirectory,
     stlInfo:path=>printerStlSize(runningHandoff()!,path),
+    // A Mac rebuilds a phone's Object Capture photos with Apple's PhotogrammetrySession and keeps a scan as a model without a touch-up.
+    ...(process.platform==='darwin'?{scanToStl:macScanToStl(),objectCaptureRebuild:!!findMacReconstruct()}:{}),
     print:{services:printHandoff,destinations},
     settings:companionSettings,runtimeSettings,camera:new CameraFrames(),printGate,
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),

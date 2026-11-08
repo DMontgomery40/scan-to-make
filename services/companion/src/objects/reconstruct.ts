@@ -11,6 +11,11 @@ export type ReconstructProgress = (words: string) => void;
 export interface ReconstructInput {
   /** The handheld photos, in capture order by name. */
   photosDir: string;
+  /**
+   * The photos are an iPhone Object Capture session's own HEICs (a walk-around): Apple's PhotogrammetrySession reads
+   * their LiDAR depth, gravity and capture box itself (`mac-reconstruct <folder>`), with no hand masks.
+   */
+  objectCapture?: boolean;
   /** Where the rebuilt model goes (USDZ, metres). */
   output: string;
   /** Where the object masks are kept, so a rebuild can be checked afterwards. */
@@ -53,8 +58,13 @@ export interface ReconstructReviewOutcome {
     extents: {x: number; y: number; z: number}}[];
 }
 
+/** What a Mac rebuild of an Object Capture folder used: photos, how many carry LiDAR depth (the size's source), Apple's warnings. */
+export interface ReconstructInputs { images: number; depth: number; stitchingIncomplete?: boolean;
+  /** Photos Apple's reconstruction couldn't use (`skippedSample`/`invalidSample`). */
+  skipped?: number }
+
 export type ReconstructOutcome =
-  | {status: 'done'}
+  | {status: 'done'; inputs?: ReconstructInputs}
   | {status: 'needs-review'; review: ReconstructReviewOutcome};
 
 /** Older stubs resolving void are treated as done by the service. */
@@ -109,13 +119,26 @@ export function progressWords(line: Record<string, unknown>): string | undefined
   return undefined;
 }
 
-/** Runs `mac-reconstruct samples … full` and resolves when the model is written. Errors are plain sentences. */
+/**
+ * The arguments for one rebuild. Both build at `.full`: Apple's high-quality preset, the highest that is processed
+ * into a clean mesh. `.raw` is "unprocessed" and meant "only if you plan to export the model to a 3D software
+ * package" (PhotogrammetrySession.Request.Detail), and an STL keeps none of the extra texture maps either way.
+ */
+export function macReconstructArgs(input: Pick<ReconstructInput, 'photosDir' | 'output' | 'masksDir' | 'objectCapture'>): string[] {
+  return input.objectCapture
+    ? [input.photosDir, input.output, 'full']
+    : ['samples', input.photosDir, input.output, 'full', '--save-masks', input.masksDir];
+}
+
+/** Runs `mac-reconstruct … full` and resolves when the model is written. Errors are plain sentences. */
 export function macReconstructRunner(binary: string | null = findMacReconstruct() ?? null): Reconstruct {
   return input => new Promise<ReconstructOutcome>((resolve, reject) => {
     if (!binary) { reject(new Error(NOT_INSTALLED)); return; }
-    const child = spawn(binary, ['samples', input.photosDir, input.output, 'full', '--save-masks', input.masksDir],
+    const child = spawn(binary, macReconstructArgs(input),
       {stdio: ['ignore', 'pipe', 'pipe'], ...(input.signal ? {signal: input.signal} : {})});
     let buffered = '', error: string | undefined, done = false, lastWords = '', spawnFailed = false;
+    let inputs: ReconstructInputs | undefined;
+    const skipped = new Set<string>();
     let stderr = Buffer.alloc(0), stderrTruncated = false;
     child.stderr.on('data', (chunk: Buffer) => {
       const combined = Buffer.concat([stderr, chunk]);
@@ -134,6 +157,9 @@ export function macReconstructRunner(binary: string | null = findMacReconstruct(
         try { line = JSON.parse(text) as Record<string, unknown>; } catch { continue; }
         if (typeof line.error === 'string') error = line.error;
         if (typeof line.done === 'string') done = true;
+        if (typeof line.images === 'number' && typeof line.depth === 'number') inputs = {images: line.images, depth: line.depth};
+        if (line.warning === 'stitching-incomplete' && inputs) inputs.stitchingIncomplete = true;
+        if (inputs && (typeof line.skipped === 'number' || typeof line.skipped === 'string')) inputs.skipped = skipped.add(String(line.skipped)).size;
         const words = progressWords(line);
         if (words && words !== lastWords) { lastWords = words; input.onProgress?.(words); }
       }
@@ -144,11 +170,32 @@ export function macReconstructRunner(binary: string | null = findMacReconstruct(
     });
     child.on('close', (code, signal) => {
       if (spawnFailed) return; // Cancellation and launch failures already have their own actionable result.
-      if (code === 0 && done) { resolve({status: 'done'}); return; }
+      if (code === 0 && done) { resolve({status: 'done', ...(inputs ? {inputs} : {})}); return; }
       const failure = code === 3 || error === 'needs-macos-27' ? NEEDS_MACOS_27 : FAILED;
       // A diagnostic write failure must not replace the actionable public reconstruction error.
       void retainFailure(input, {code, signal, error, stderr, truncated: stderrTruncated})
         .catch(() => undefined).finally(() => reject(new Error(failure)));
+    });
+  });
+}
+
+/** Turns a scan into the STL a project prints (millimetres), without touching it up. */
+export type ScanToStl = (scan: string, stl: string, signal?: AbortSignal) => Promise<void>;
+export const SCAN_TO_STL_FAILED = "Your Mac couldn't turn this scan into a printable model.";
+
+/** `mac-reconstruct stl <scan> <stl>`: the scan's triangles in millimetres (PhotogrammetrySession writes metres). */
+export function macScanToStl(binary: string | null = findMacReconstruct() ?? null): ScanToStl | undefined {
+  if (!binary) return undefined;
+  return (scan, stl, signal) => new Promise<void>((resolve, reject) => {
+    const child = spawn(binary, ['stl', scan, stl], {stdio: ['ignore', 'pipe', 'ignore'], ...(signal ? {signal} : {})});
+    let out = '', failed = false;
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { out = (out + chunk).slice(-16384); });
+    child.on('error', failure => { failed = true; reject(failure.name === 'AbortError' ? failure : new Error(NOT_INSTALLED)); });
+    child.on('close', code => {
+      if (failed) return;
+      const done = out.trim().split('\n').some(line => { try { return typeof (JSON.parse(line) as {done?: unknown}).done === 'string'; } catch { return false; } });
+      if (code === 0 && done) resolve(); else reject(new Error(SCAN_TO_STL_FAILED));
     });
   });
 }
@@ -279,8 +326,12 @@ function runLinuxTool(binary: string, args: string[], input: ReconstructInput): 
 }
 
 /** Runs `linux-reconstruct samples … full` (COLMAP/OpenMVS on a Linux host). */
+export const OBJECT_CAPTURE_NEEDS_MAC = "This computer can't rebuild an iPhone walk-around scan from its photos; that needs Apple's reconstruction on a Mac.";
+
 export function linuxReconstructRunner(binary: string | null = findLinuxReconstruct() ?? null): Reconstruct {
   return input => {
+    // Apple's Object Capture HEICs carry what only PhotogrammetrySession reads (gravity, the capture box).
+    if (input.objectCapture) return Promise.reject(new Error(OBJECT_CAPTURE_NEEDS_MAC));
     if (!binary) return Promise.reject(new Error(LINUX_NOT_INSTALLED));
     return runLinuxTool(binary, ['samples', input.photosDir, input.output, 'full', '--save-masks', input.masksDir,
       ...(input.cameraMetadata ? ['--camera-metadata', input.cameraMetadata] : []),
