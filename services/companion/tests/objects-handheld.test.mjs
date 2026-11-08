@@ -152,13 +152,16 @@ test('a walk-around whose rebuild fails keeps the phone preview and says so; a r
   assert.equal(touchups.length, 0);
 
   // With a request, the person asked for the touch-up: it runs on the rebuild (here the preview, said in words above).
-  const asked = await setup({reconstruct: async () => { throw new Error(NEEDS_MACOS_27); }});
+  const asked = await setup({reconstruct: async () => { throw new Error("Counterpart's model builder is missing on this Mac. Reinstall Counterpart."); }});
   await asked.service.updateInstructions(asked.object.id, 'Copy this, but close the bottom.');
   await sendWalkAround(asked.service, asked.object.id);
   const askedStart = await asked.service.start(asked.object.id, objectCaptureManifest(APPLE));
   assert.equal(askedStart.passes[0].estimate.remainingSec, 630, 'build, then the touch-up that was asked for');
   const touched = await asked.service.settled(asked.object.id);
   assert.equal(asked.touchups.length, 1);
+  assert.deepEqual(touched.passes[0].activity.map(entry => entry.text), [
+    "Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview. Counterpart's model builder is missing on this Mac. Reinstall Counterpart."],
+    'the touch-up says it started from the preview');
   assert.deepEqual(asked.touchups[0].scan, [join(asked.service.dir(asked.object.id), 'scan', 'scan.usdz')]);
   assert.equal(touched.state, 'ready');
 });

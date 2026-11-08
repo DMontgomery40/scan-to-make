@@ -296,14 +296,16 @@ export function passPlan(build: boolean, touchup: boolean): StageId[] {
   return [...(build ? ['building' as const] : []), ...(touchup ? ['preparing' as const, 'working' as const] : []), 'saving'];
 }
 
+/** Said when Apple's rebuild failed and the phone's preview is the scan. The generic failure repeats it; anything more specific ("…needs macOS 27", "Reinstall Counterpart") is kept. */
+export function previewKept(failed: string): string {
+  const detail = failed === RECONSTRUCTION_FAILED ? '' : ` ${failed.replace(/\s+/g, ' ').trim()}`;
+  return `Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview.${detail}`;
+}
+
 /** The model's summary when the scan is kept as it is: where it came from and where its size came from, in words. */
 export function scanSummary(rebuilt?: Rebuilt): string {
   const next = 'Nothing has been touched up yet. Ask for changes to clean it up.';
-  if (rebuilt?.failed !== undefined) {
-    // The generic failure repeats this sentence; anything more specific ("…needs macOS 27", "Reinstall Counterpart") is kept.
-    const detail = rebuilt.failed === RECONSTRUCTION_FAILED ? '' : ` ${rebuilt.failed.replace(/\s+/g, ' ').trim()}`;
-    return `Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview.${detail} ${next}`;
-  }
+  if (rebuilt?.failed !== undefined) return `${previewKept(rebuilt.failed)} ${next}`;
   if (!rebuilt) return `This is the scan as it came. ${next}`;
   const inputs = rebuilt.inputs, count = inputs?.images ?? rebuilt.photos ?? 0, unused = Math.min(inputs?.skipped ?? 0, count);
   const from = !count ? 'your photos' : unused ? `${count - unused} of your ${count} photos` : `all ${count} photo${count === 1 ? '' : 's'}`;
@@ -2388,6 +2390,12 @@ export class ObjectService {
     const work = (async () => {
       let scanName = object.scan, rebuilt: Rebuilt | undefined;
       if (build) { rebuilt = await this.#build(object.id, dir, controller.signal, objectCapture); scanName = rebuilt.scan; }
+      // Never silently: the pass's Activity says the touch-up (or the model) starts from the phone's preview.
+      if (rebuilt?.failed !== undefined) {
+        const said = previewKept(rebuilt.failed);
+        writing = writing.then(async () => { this.#changed(await store.update(object.id, o => ({...o, passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p
+          : {...p, activity: this.#activity(p.activity, [{atMs: Date.now(), kind: 'message', text: said}])})}))); }).catch(() => undefined);
+      }
       // Nothing asked for: the scan, rebuilt or as it came, becomes the model and waits for the person.
       if (!touchup && scanName) { stage('saving'); await writing; return this.#scanAsModel(object, scanName, startedAtMs, controller.signal, rebuilt); }
       // A copy of a designer's 3MF works on that 3MF every pass: the latest edit of it, then the designer's own
