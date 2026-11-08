@@ -114,6 +114,26 @@ class HomeLayoutTests {
 
     private fun home() = compose.setContent { WithApp { HomeScreen(open = { _, _ -> }, newProject = {}, printers = {}, settings = {}) } }
 
+    @Test fun printerAttentionAndPrintingStayVisibleWithProjects() {
+        state.projects.value = listOf(WireJson.decodeFromString<Project>("""{"id":"clip","title":"Cable clip","state":"printing","createdAtMs":0,"updatedAtMs":0,"photos":[],"passes":[],"print":{"destinationId":"p1"}}"""))
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1", "P1S", model = "Bambu Lab P1S", state = "ready"),
+            PrinterDestination("p2", "Desk", state = "offline")))
+        state.macName.value = "Mac mini"
+        state.reachable.value = true
+        state.loaded.value = true
+        home()
+        compose.onNodeWithContentDescription("Printers, 1 needs attention").assertExists()
+        compose.onNodeWithText("Mac mini connected · Bambu Lab P1S printing").assertExists()
+    }
+
+    @Test fun failedProjectsAppearUnderNeedsYou() {
+        state.projects.value = listOf(project("failed", "Failed scan", "failed"), project("ready", "Mic mount", "ready"))
+        state.loaded.value = true
+        home()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Needs you"))
+        compose.onNodeWithText("Needs you").assertExists()
+    }
+
     @Test fun theStartersStayOnHomeWhileProjectsExist() {
         state.projects.value = listOf(project("a", "Stove gap filler", "ready"), project("b", "Cable clip", "printed"),
             project("c", "Guitar pick", "confirmed"))

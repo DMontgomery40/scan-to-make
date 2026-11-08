@@ -253,6 +253,17 @@ struct SocketObjects: ObjectsCompanion {
             return members.isEmpty ? nil : (group, members)
         }
     }
+    var printerProblems: Int {
+        printerCatalog?.destinations.filter { $0.state == "offline" || $0.capabilities?.update != nil }.count ?? 0
+    }
+
+    func sidebarPrinterStatus(_ printer: PrinterDestination) -> String {
+        if objects.contains(where: { object in
+            object.words.stage == .printing && ([printer.id] + (printer.aliases ?? [])).contains(object.print?.destinationId ?? object.print?.destination?.id ?? object.printerDestinationId ?? "")
+        }) { return "\(printer.name) printing" }
+        return printer.state == "busy" ? "\(printer.name) busy" : printer.name
+    }
+
     /// In sidebar order.
     var ordered: [Project] { groups.flatMap(\.objects) }
 

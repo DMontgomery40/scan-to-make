@@ -14,7 +14,13 @@ import { ProjectView } from "./ProjectView";
 import { Settings, Pairing } from "./Settings";
 import { Question } from "./Question";
 import { Action, Modal } from "./ui";
-import { searchProject, startersShown, words } from "./domain";
+import {
+  searchProject,
+  startersShown,
+  words,
+  projectGroups,
+  printerSummary,
+} from "./domain";
 import { useWorkspace } from "./useWorkspace";
 import { useChangeQueue } from "./useChangeQueue";
 import type { HostStatus, Project } from "./types";
@@ -86,6 +92,7 @@ export function App() {
       (filter === "archived" ? p.archived : !p.archived) &&
       (filter !== "working" || ["touching-up", "printing"].includes(p.state)),
   );
+  const printerStatus = printerSummary(workspace.printers, workspace.projects);
   const visible = eligible.filter((p) => searchProject(p, search));
   return (
     <div className="app">
@@ -132,19 +139,21 @@ export function App() {
           </button>
         )}
         <div className="sidebar-projects">
-          {workspace.projects
-            .filter((p) => !p.archived)
-            .slice(0, 8)
-            .map((p) => (
-              <button
-                key={p.id}
-                className={selected === p.id ? "selected" : ""}
-                onClick={() => setSelected(p.id)}
-              >
-                {p.title}
-                <small>{words(p)}</small>
-              </button>
-            ))}
+          {projectGroups(workspace.projects).map((group) => (
+            <section key={group.title} aria-label={group.title}>
+              <h3>{group.title}</h3>
+              {group.projects.map((p) => (
+                <button
+                  key={p.id}
+                  className={selected === p.id ? "selected" : ""}
+                  onClick={() => setSelected(p.id)}
+                >
+                  {p.title}
+                  <small>{words(p)}</small>
+                </button>
+              ))}
+            </section>
+          ))}
         </div>
         <div className="sidebar-foot">
           {workspace.jobs
@@ -171,6 +180,17 @@ export function App() {
                   ? "Computer stopped"
                   : "Computer not set up"}
           </p>
+          <p>{printerStatus.status}</p>
+          <button
+            className="nav"
+            aria-label={printerStatus.label}
+            onClick={() => setSettings(true)}
+          >
+            Printers{" "}
+            {printerStatus.problems > 0 && (
+              <span className="attention-badge">{printerStatus.problems}</span>
+            )}
+          </button>
           <button className="nav" onClick={() => setSettings(true)}>
             ⚙ Settings
           </button>
@@ -296,9 +316,7 @@ export function App() {
                   {workspace.connected
                     ? "This computer is connected"
                     : "Connecting to this computer"}{" "}
-                  ·{" "}
-                  {workspace.printers.filter((p) => p.state === "ready").length}{" "}
-                  printers ready
+                  · {printerStatus.status}
                 </p>
               </div>
               <div className="toolbar">
@@ -321,7 +339,10 @@ export function App() {
                 <Action run={workspace.refresh}>Refresh</Action>
                 {visible.length < eligible.length && (
                   <div role="status" className="search-summary">
-                    <span>{visible.length} of {eligible.length} projects match “{search}”</span>
+                    <span>
+                      {visible.length} of {eligible.length} projects match “
+                      {search}”
+                    </span>
                     <button onClick={() => setSearch("")}>Show All</button>
                   </div>
                 )}
@@ -384,7 +405,10 @@ export function App() {
                     {catalog.map((starter) => (
                       <article className="starter" key={starter.id}>
                         {starter.id === "long-vernier-caliper" ? (
-                          <img src={vernierImage} alt="Vernier caliper with depth gauge" />
+                          <img
+                            src={vernierImage}
+                            alt="Vernier caliper with depth gauge"
+                          />
                         ) : (
                           <div className="starter-symbol" aria-hidden>
                             ◎
