@@ -191,6 +191,22 @@ actor FixtureObjects: ObjectsCompanion {
         if case .string(let title)? = patch["title"] { return try change(id, ["title": title]) }
         throw ControlClientError.unavailable
     }
+    func markPlatePrinted(_ id: String, plateId: String) async throws -> Project { try markPlate(id, plateId: plateId, printed: true) }
+    func markPlateNotPrinted(_ id: String, plateId: String) async throws -> Project { try markPlate(id, plateId: plateId, printed: false) }
+    private func markPlate(_ id: String, plateId: String, printed: Bool) throws -> Project {
+        guard let item = items.first(where: { $0["id"] as? String == id }),
+              var plates = item["plates"] as? [[String: Any]],
+              let index = plates.firstIndex(where: { $0["id"] as? String == plateId }) else { throw ControlClientError.unavailable }
+        plates[index]["status"] = printed ? "printed" : "not-printed"
+        plates[index]["uncertain"] = nil
+        plates[index]["completedAtMs"] = printed ? (plates[index]["completedAtMs"] ?? now) : nil
+        var fields: [String: Any] = ["plates": plates]
+        if plates[index]["selected"] as? Bool == true {
+            fields["state"] = printed ? "printed" : "ready"
+            if var print = item["print"] as? [String: Any] { print["uncertain"] = nil; fields["print"] = print }
+        }
+        return try change(id, fields)
+    }
     func printers() async throws -> PrinterCatalog { catalog }
     func filaments(_ id: String) async throws -> [PrinterFilament] {
         [PrinterFilament(slot: 0, colour: "#141414", material: "PLA", name: "Black PLA Basic", filamentId: "GFA00", destinationId: "p1s", suggested: true, label: "A1", feed: "ams"),

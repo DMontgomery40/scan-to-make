@@ -609,15 +609,15 @@ export function plateStatusText(
     (
       {
         printed: "Printed",
-        "not-started": "Not started",
+        "not-started": plate.completedAtMs != null ? "Reprint not started · printed before" : "Not started",
         preparing: "Getting ready",
         printing: "Printing",
         paused: "Paused",
-        cancelled: "Cancelled",
-        failed: "Print failed",
+        cancelled: plate.completedAtMs != null ? "Reprint cancelled · printed before" : "Cancelled",
+        failed: plate.completedAtMs != null ? "Reprint failed · printed before" : "Print failed",
         sent: "Sent to printer",
         unknown: "Check print result",
       } as Record<string, string>
-    )[plate.status] ?? (plate.completedAtMs ? "Printed" : "Not printed")
+    )[plate.status] ?? (plate.completedAtMs != null ? "Printed" : "Not printed")
   );
 }

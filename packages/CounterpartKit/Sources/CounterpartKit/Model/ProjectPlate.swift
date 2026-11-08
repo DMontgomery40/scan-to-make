@@ -20,7 +20,7 @@ public struct ProjectPlate: Codable, Equatable, Identifiable, Sendable {
     public var statusText: String {
         switch status {
         case "printed": "Printed"
-        case "not-started": "Not started"
+        case "not-started": completedAtMs == nil ? "Not started" : "Reprint not started · printed before"
         case "preparing": "Getting ready"
         case "printing": "Printing"
         case "paused": "Paused"

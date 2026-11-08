@@ -1,5 +1,8 @@
 #if canImport(SwiftUI)
 import SwiftUI
+import Observation
+
+@Observable private final class PlateRecordingConfirmation { var plate: ProjectPlate? }
 
 /// Both clients use the same plate navigation. Image loading and mutations stay with their existing transports.
 @available(iOS 26.0, macOS 26.0, *)
@@ -10,11 +13,13 @@ public struct ProjectPlatesView<Thumbnail: View>: View {
     let select: (ProjectPlate) -> Void
     let printPlate: (ProjectPlate) -> Void
     let markPrinted: (ProjectPlate) -> Void
+    let markNotPrinted: (ProjectPlate) -> Void
+    @State private var recording = PlateRecordingConfirmation()
 
     public init(project: Project, busy: Bool, @ViewBuilder thumbnail: @escaping (ProjectPlate) -> Thumbnail,
-                select: @escaping (ProjectPlate) -> Void, printPlate: @escaping (ProjectPlate) -> Void, markPrinted: @escaping (ProjectPlate) -> Void) {
+                select: @escaping (ProjectPlate) -> Void, printPlate: @escaping (ProjectPlate) -> Void, markPrinted: @escaping (ProjectPlate) -> Void, markNotPrinted: @escaping (ProjectPlate) -> Void) {
         self.project = project; self.busy = busy; self.thumbnail = thumbnail
-        self.select = select; self.printPlate = printPlate; self.markPrinted = markPrinted
+        self.select = select; self.printPlate = printPlate; self.markPrinted = markPrinted; self.markNotPrinted = markNotPrinted
     }
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -48,11 +53,18 @@ public struct ProjectPlatesView<Thumbnail: View>: View {
                                 .buttonStyle(.glass)
                                 .accessibilityLabel("\(plate.completedAtMs == nil ? "Print" : "Print again"), \(plate.name)")
                                 .accessibilityIdentifier("print-plate-\(plate.fileIndex)-\(plate.plateIndex)")
-                            if plate.status != "printed" {
-                                Button("I printed this elsewhere") { markPrinted(plate) }
+                            if plate.status != "printed" && plate.completedAtMs == nil {
+                                Button("I printed this elsewhere") { recording.plate = plate }
                                     .font(.caption).buttonStyle(.glass)
                                     .accessibilityLabel("I printed this elsewhere, \(plate.name)")
                                     .accessibilityIdentifier("printed-elsewhere-\(plate.fileIndex)-\(plate.plateIndex)")
+                                    .confirmationDialog("Mark \(plate.name) as printed elsewhere?", isPresented: Binding(
+                                        get: { recording.plate?.id == plate.id },
+                                        set: { if !$0 { recording.plate = nil } }), titleVisibility: .visible) {
+                                        Button("Mark as printed") { recording.plate = nil; markPrinted(plate) }
+                                            .disabled(busy || !project.canSelectPlate)
+                                        Button("Cancel", role: .cancel) { recording.plate = nil }
+                                    } message: { Text(plate.fileName) }
                             }
                         }
                         .frame(width: 144, alignment: .leading).padding(10)
@@ -60,6 +72,16 @@ public struct ProjectPlatesView<Thumbnail: View>: View {
                         .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(plate.selected ? Color.accentColor : .clear, lineWidth: 1.5) }
                     }
                 }.padding(.vertical, 2)
+            }
+            .disabled(busy || !project.canSelectPlate)
+            ScrollView(.horizontal) {
+                HStack(spacing: 12) {
+                    ForEach((project.plates ?? []).filter { $0.status == "printed" || $0.completedAtMs != nil }) { plate in
+                        Button("Mark \(plate.name) not printed") { markNotPrinted(plate) }
+                            .buttonStyle(.glass)
+                            .accessibilityIdentifier("mark-not-printed-\(plate.fileIndex)-\(plate.plateIndex)")
+                    }
+                }
             }
             .disabled(busy || !project.canSelectPlate)
             if !project.canSelectPlate {

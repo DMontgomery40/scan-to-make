@@ -318,9 +318,9 @@ test(`after ${name} on one plate, the other plates stay choosable; only that pla
  await assert.rejects(f.service.print(object.id,{expectedPlate:settled.plates[0].id}),notConfirmRefusal);
 });
 
-// Codex on #380: a send that was cancelled before anything went out (a declined print confirmation, or the MCP's
-// print-choice "Not printed.") returns to Ready with its print record and no end state. It reads "unknown", but it was
-// never sent, so Print doesn't ask for the printer check.
+// Legacy pre-outcome cancellation records from #380 keep main's "unknown" display. They have no explicit
+// dispatch evidence to justify "Not started"; neither carries uncertainty, so Print keeps main's no-check behavior.
+// The explicit not-sent/locally recorded decline tests belong to the published-contract consumer path.
 for(const [name,failure] of [['a cancelled confirmation',undefined],['a print-choice refusal','Not printed.']])
 test(`${name} never asks for the printer check`, async t => {
  const f=await setup(t), object=await f.service.create('Scan rig','published',LINK);
@@ -451,9 +451,15 @@ test('printed elsewhere is atomic for its named plate, persists and never change
  await f.service.selectPlate(object.id,0,1);
  const reloaded=publicObject(await new ObjectStore(join(f.root,'objects')).get(object.id));
  assert.deepEqual(reloaded.plates.filter(p=>p.completedAtMs).map(p=>p.plateIndex),[0,2]);
+ const undone=publicObject(await f.service.markPlateNotPrinted(object.id,third));
+ assert.equal(undone.plates[2].status,'not-printed');assert.equal(undone.plates[2].completedAtMs,undefined);
+ assert.equal(undone.plates[1].selected,true,'undo never selects its plate');
+ assert.equal(undone.plates[0].status,'printed','undo preserves other completion history');
+ assert.equal(undone.plates[0].completedAtMs,first.plates[0].completedAtMs);
  await assert.rejects(f.service.markPlatePrinted(object.id,'stale:0'),/plate/i);
  await f.store.update(object.id,o=>({...o,state:'printing'}));
  await assert.rejects(f.service.markPlatePrinted(object.id,third),/finish/i);
+ await assert.rejects(f.service.markPlateNotPrinted(object.id,third),/finish/i);
  assert.ok(f.events.some(e=>e.type==='project.updated'&&e.data?.keys?.includes('plates')));
 });
 

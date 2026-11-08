@@ -50,6 +50,14 @@ final class ProjectPlateTests: XCTestCase {
     func testPrintedElsewhereUsesCaptureImportPermission() {
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/00000000-0000-4000-8000-000000000001/plate-printed"), "captures:import")
     }
+    func testARefusedReprintKeepsItsPrintedHistoryWords() throws {
+        let project = try JSONDecoder().decode(Project.self, from: Data(#"{"id":"p","createdAtMs":1,"updatedAtMs":2,"state":"ready","plates":[{"id":"h:0","fileIndex":0,"plateIndex":0,"name":"Base","fileName":"rig.3mf","selected":true,"sliced":false,"status":"not-started","completedAtMs":0}]}"#.utf8))
+        XCTAssertEqual(project.plates?.first?.statusText, "Reprint not started · printed before")
+        XCTAssertEqual(project.completedPlateCount, 1)
+    }
+    func testUndoUsesCaptureImportPermission() {
+        XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/00000000-0000-4000-8000-000000000001/plate-not-printed"), "captures:import")
+    }
     func testOlderCompanionDoesNotInventPlates() throws {
         let project = try JSONDecoder().decode(Project.self, from: Data(#"{"id":"p","createdAtMs":1,"updatedAtMs":2,"state":"ready"}"#.utf8))
         XCTAssertNil(project.plates)

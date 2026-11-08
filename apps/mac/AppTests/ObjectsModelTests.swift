@@ -127,6 +127,15 @@ private actor FakeObjects: ObjectsCompanion {
         }
         return try change(id, "printed-elsewhere:\(plateId)", ["plates": plates])
     }
+    func markPlateNotPrinted(_ id: String, plateId: String) async throws -> Project {
+        guard let item = items.first(where: { $0["id"] as? String == id }) else { throw ControlClientError.unavailable }
+        let plates = (item["plates"] as? [[String: Any]] ?? []).map { plate in
+            var row = plate
+            if row["id"] as? String == plateId { row["status"] = "not-printed"; row["completedAtMs"] = nil; row["uncertain"] = nil }
+            return row
+        }
+        return try change(id, "not-printed:\(plateId)", ["plates": plates])
+    }
     func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
         guard let index = items.firstIndex(where: { $0["id"] as? String == id }) else { throw ControlRemoteError(code:"not-found", message:"gone") }
         let plates = (items[index]["plates"] as? [[String: Any]] ?? []).map { plate in
@@ -258,8 +267,18 @@ private func project(_ item: [String: Any]) throws -> Project {
         let project = try XCTUnwrap(model.objects.first { $0.id == id })
         let plate = try XCTUnwrap(project.plates?.first)
         let view = ProjectPlatesView(project: project, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in },
-            markPrinted: { plate in Task { await model.markPlatePrinted(id, plate: plate) } })
-        try view.inspect().find(viewWithAccessibilityIdentifier: "printed-elsewhere-0-0").button().tap()
+            markPrinted: { plate in Task { await model.markPlatePrinted(id, plate: plate) } },
+            markNotPrinted: { plate in Task { await model.markPlateNotPrinted(id, plate: plate) } })
+        let control = try view.inspect().find(viewWithAccessibilityIdentifier: "printed-elsewhere-0-0").button()
+        try control.tap()
+        XCTAssertEqual(try control.confirmationDialog().title().string(), "Mark Screws as printed elsewhere?")
+        let pendingCalls = await companion.calls
+        XCTAssertFalse(pendingCalls.contains("printed-elsewhere:\(plate.id)"))
+        try control.confirmationDialog().actions().find(button: "Cancel").tap()
+        let cancelledCalls = await companion.calls
+        XCTAssertFalse(cancelledCalls.contains("printed-elsewhere:\(plate.id)"))
+        try control.tap()
+        try control.confirmationDialog().actions().find(button: "Mark as printed").tap()
         for _ in 0..<100 {
             if model.objects.first(where: { $0.id == id })?.completedPlateCount == 1 { break }
             try await Task.sleep(for: .milliseconds(10))
@@ -269,10 +288,27 @@ private func project(_ item: [String: Any]) throws -> Project {
         let updated = try XCTUnwrap(model.objects.first { $0.id == id })
         XCTAssertEqual(updated.plates?.first?.statusText, "Printed")
         XCTAssertEqual(updated.completedPlateCount, 1)
-        let shown = ProjectPlatesView(project: updated, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in }, markPrinted: { _ in })
+        let shown = ProjectPlatesView(project: updated, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in }, markPrinted: { _ in }, markNotPrinted: { plate in Task { await model.markPlateNotPrinted(id, plate: plate) } })
         XCTAssertNoThrow(try shown.inspect().find(text: "1 of 6 printed"))
         XCTAssertNoThrow(try shown.inspect().find(text: "Printed"))
         XCTAssertEqual(updated.plates?[1].statusText, "Not printed")
+        var refusedReprint = updated
+        refusedReprint.plates?[0].status = "not-started"
+        let reprintView = ProjectPlatesView(project: refusedReprint, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in }, markPrinted: { _ in }, markNotPrinted: { _ in })
+        XCTAssertNoThrow(try reprintView.inspect().find(text: "Reprint not started · printed before"))
+        XCTAssertThrowsError(try reprintView.inspect().find(viewWithAccessibilityIdentifier: "printed-elsewhere-0-0"))
+        try shown.inspect().find(viewWithAccessibilityIdentifier: "mark-not-printed-0-0").button().tap()
+        for _ in 0..<100 {
+            if model.objects.first(where: { $0.id == id })?.completedPlateCount == 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let undoCalls = await companion.calls
+        XCTAssertTrue(undoCalls.contains("not-printed:\(plate.id)"))
+        let undone = try XCTUnwrap(model.objects.first { $0.id == id })
+        XCTAssertEqual(undone.plates?.first?.statusText, "Not printed")
+        let finalView = ProjectPlatesView(project: undone, busy: false, thumbnail: { _ in Color.clear }, select: { _ in }, printPlate: { _ in }, markPrinted: { _ in }, markNotPrinted: { _ in })
+        XCTAssertNoThrow(try finalView.inspect().find(text: "0 of 6 printed"))
+        XCTAssertNoThrow(try finalView.inspect().find(text: "Not printed"))
     }
 
     /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and

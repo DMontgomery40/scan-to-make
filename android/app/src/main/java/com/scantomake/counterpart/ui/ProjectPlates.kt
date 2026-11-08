@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -25,7 +27,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 
 @Composable
-fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Unit, print: (ProjectPlate) -> Unit, markPrinted: (ProjectPlate) -> Unit) {
+fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Unit, print: (ProjectPlate) -> Unit, markPrinted: (ProjectPlate) -> Unit, markNotPrinted: (ProjectPlate) -> Unit) {
+    var recording by remember { mutableStateOf<ProjectPlate?>(null) }
     val plates = project.plates.orEmpty()
     if (plates.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -47,11 +50,23 @@ fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Uni
                         enabled = !busy && project.canSelectPlate && !plate.selected) { select(plate) }
                     PrimaryButton(if (plate.completedAtMs == null) "Print…" else "Print Again…", Modifier.fillMaxWidth(),
                         enabled = !busy && project.canSelectPlate) { print(plate) }
-                    if (plate.status != "printed") SecondaryButton("I printed this elsewhere",
+                    if (plate.status != "printed" && plate.completedAtMs == null) SecondaryButton("I printed this elsewhere",
                         Modifier.fillMaxWidth().testTag("printed-elsewhere-${plate.fileIndex}-${plate.plateIndex}"),
-                        enabled = !busy && project.canSelectPlate) { markPrinted(plate) }
+                        enabled = !busy && project.canSelectPlate) { recording = plate }
                 }
             }
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            plates.filter { it.status == "printed" || it.completedAtMs != null }.forEach { plate ->
+                SecondaryButton("Mark ${plate.name} not printed", Modifier.testTag("mark-not-printed-${plate.fileIndex}-${plate.plateIndex}"),
+                    enabled = !busy && project.canSelectPlate) { markNotPrinted(plate) }
+            }
+        }
+        recording?.let { plate ->
+            AlertDialog(onDismissRequest = { recording = null },
+                title = { Text("Mark ${plate.name} as printed elsewhere?") }, text = { Text(plate.fileName) },
+                confirmButton = { TextButton(enabled = !busy && project.canSelectPlate, onClick = { recording = null; markPrinted(plate) }) { Text("Mark as printed") } },
+                dismissButton = { TextButton(onClick = { recording = null }) { Text("Cancel") } })
         }
         if (!project.canSelectPlate) Text("Choose another plate when this step finishes.", color = Palette.secondary, fontSize = 13.sp)
     }

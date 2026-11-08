@@ -440,7 +440,7 @@ class HomeLayoutTests {
         assertEquals(true, unconfirmed.canSelectPlate)
         assertEquals(true, unconfirmed.printNeedsCheck)
         assertEquals(false, requireNotNull(Project.decode(rig(3, false))).printNeedsCheck)
-        compose.setContent { WithApp { ProjectPlates(unconfirmed, busy = false, select = {}, print = {}, markPrinted = {}) } }
+        compose.setContent { WithApp { ProjectPlates(unconfirmed, busy = false, select = {}, print = {}, markPrinted = {}, markNotPrinted = {}) } }
         assertEquals(5, compose.onAllNodes(hasText("Select")).fetchSemanticsNodes().size)
         compose.onAllNodes(hasText("Select")).assertAll(isEnabled())
         assertEquals(6, compose.onAllNodes(hasText("Print…")).fetchSemanticsNodes().size)
@@ -453,17 +453,28 @@ class HomeLayoutTests {
     @Test fun printedElsewhereCallsTheCompanionAndUpdatesThePlateStrip() {
         app.pairingStore.save(v2Record(ADDRESSES[0]), false)
         var recorded: String? = null
+        var undone = false
         fun current(): JsonObject {
             val p = rig(0, true)
             val plates = JsonArray(p["plates"]!!.jsonArray.map { value ->
                 val row = value.jsonObject
                 if (row["id"]?.jsonPrimitive?.content == recorded)
                     JsonObject(row + mapOf("status" to JsonPrimitive("printed"), "completedAtMs" to JsonPrimitive(1000)))
+                else if (undone && row["plateIndex"]?.jsonPrimitive?.content == "0")
+                    JsonObject(row + mapOf("status" to JsonPrimitive("not-printed"), "uncertain" to JsonPrimitive(false)))
                 else row
             })
             return JsonObject(p + ("plates" to plates))
         }
         val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$PROJECT/plate-not-printed") -> {
+                assertEquals("POST", request.method)
+                val body = WireJson.parseToJsonElement(String(request.body!!)).jsonObject
+                assertEquals(setOf("plateId"), body.keys)
+                assertEquals(recorded, body["plateId"]!!.jsonPrimitive.content)
+                recorded = null; undone = true
+                json(200, mapOf("object" to current()))
+            }
             request.url.endsWith("/v1/objects/$PROJECT/plate-printed") -> {
                 assertEquals("POST", request.method)
                 val body = WireJson.parseToJsonElement(String(request.body!!)).jsonObject
@@ -480,6 +491,12 @@ class HomeLayoutTests {
         compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(PROJECT, back = {}, print = {}, printing = {}, scan = {}) } }
         compose.onNodeWithTag("project-content").performScrollToNode(hasTestTag("printed-elsewhere-0-0"))
         compose.onNode(hasTestTag("printed-elsewhere-0-0")).performClick()
+        compose.onNodeWithText("Mark Screws as printed elsewhere?").assertExists()
+        assertEquals(null, recorded)
+        compose.onNodeWithText("Cancel").performClick()
+        assertEquals(null, recorded)
+        compose.onNode(hasTestTag("printed-elsewhere-0-0")).performClick()
+        compose.onNodeWithText("Mark as printed").performClick()
         try { compose.waitUntil(5_000) { compose.onAllNodes(hasText("1 of 6 printed")).fetchSemanticsNodes().isNotEmpty() } }
         catch (e: Throwable) { throw AssertionError("recorded=$recorded; paths=${fake.paths}; plates=${state.projects.value.first().plates}", e) }
         assertEquals(rig(0,true)["plates"]!!.jsonArray[0].jsonObject["id"]!!.jsonPrimitive.content, recorded)
@@ -487,6 +504,11 @@ class HomeLayoutTests {
         assertEquals("Printed", com.scantomake.counterpart.api.ProjectWords(reported).status)
         compose.onNode(hasTestTag("printed-elsewhere-0-0")).assertDoesNotExist()
         compose.onNode(hasTestTag("printed-elsewhere-0-1")).assertExists()
+        compose.onNodeWithTag("project-content").performScrollToNode(hasTestTag("mark-not-printed-0-0"))
+        compose.onNodeWithTag("mark-not-printed-0-0").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("0 of 6 printed")).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(true, undone)
+        compose.onNodeWithTag("printed-elsewhere-0-0").assertExists()
     }
 
     /** The same rig in Print: its plate row changes the plate, re-reads that plate's colours, and only plate 1 asks for the check. */

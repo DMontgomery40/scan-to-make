@@ -60,6 +60,12 @@ class PairingClientTests {
         "expiresAt" to System.currentTimeMillis() + 30.0 * 86_400_000, "scopes" to SCOPES) + extra
     private fun invitation() = PairingInvitation(ADDRESSES[0], code, Long.MAX_VALUE, addresses = ADDRESSES, publicKeySha256 = KEY_PIN)
 
+    @Test fun refusedReprintKeepsCompletionWords() {
+        val plate = com.scantomake.counterpart.api.ProjectPlate("h:0", 0, 0, "Base", "rig.3mf", selected = true, sliced = false, status = "not-started", completedAtMs = 0.0)
+        assertEquals("Reprint not started · printed before", plate.statusText)
+        assertEquals("Not started", plate.copy(completedAtMs = null).statusText)
+        assertEquals("captures:import", CompanionClient.scope("POST", "/v1/objects/00000000-0000-4000-8000-000000000001/plate-not-printed"))
+    }
     @Test fun v2PairsAtTheFirstAddressThatAnswersAndKeepsTheInvitationsPin() = runBlocking {
         val fake = FakeTransport { request, _ ->
             if (request.url.contains("192.168.68.123")) throw TransportException("network")

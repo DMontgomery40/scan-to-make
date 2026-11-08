@@ -18,7 +18,7 @@ import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|plate-printed|settings|duplicate|photos|capture|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|plate-printed|plate-not-printed|settings|duplicate|photos|capture|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 /** Settings -> Printers: the printer MCP's connection (`route`) and which MCP a printer uses (`mcp`). */
 const PRINTER_CHOICE = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
@@ -274,13 +274,14 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           await authorize(READ);
           return send(response, 200, {object: publicObject(await service.view(id))});
         }
-        if (action === 'plate-printed') {
+        if (action === 'plate-printed' || action === 'plate-not-printed') {
           if (method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(WRITE);
           const input = await json<Record<string, unknown>>(request);
-          const parsed = parameters['objects.markPlatePrinted'].safeParse({...input, id});
+          const operation = action === 'plate-printed' ? 'markPlatePrinted' : 'markPlateNotPrinted';
+          const parsed = parameters[operation === 'markPlatePrinted' ? 'objects.markPlatePrinted' : 'objects.markPlateNotPrinted'].safeParse({...input, id});
           if (!parsed.success || 'id' in input) throw new HttpFailure(400, 'invalid-request');
-          return send(response, 200, {object: publicObject(await service.markPlatePrinted(id, parsed.data.plateId))});
+          return send(response, 200, {object: publicObject(await service[operation](id, parsed.data.plateId))});
         }
         if (action === 'plate-selection') {
           if (method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');

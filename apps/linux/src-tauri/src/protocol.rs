@@ -28,6 +28,7 @@ pub fn allowed(method: &str) -> bool {
             | "objects.selectPrinter"
             | "objects.selectPlate"
             | "objects.markPlatePrinted"
+            | "objects.markPlateNotPrinted"
             | "objects.answerAsk"
             | "objects.answerCloseup"
             | "objects.answerReconstruction"

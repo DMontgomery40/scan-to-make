@@ -71,6 +71,8 @@ struct ProjectDetail: View {
                         Task { if await model.selectPlate(object.id, plate: plate) { print() } }
                     }, markPrinted: { plate in
                         Task { await model.markPlatePrinted(object.id, plate: plate) }
+                    }, markNotPrinted: { plate in
+                        Task { await model.markPlateNotPrinted(object.id, plate: plate) }
                     })
                     .padding(12).background(.regularMaterial, in: .rect(cornerRadius: 20))
                 }

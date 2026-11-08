@@ -13,7 +13,7 @@ data class ProjectPlate(
 ) {
     val statusText: String get() = when (status) {
         "printed" -> "Printed"
-        "not-started" -> "Not started"
+        "not-started" -> if (completedAtMs == null) "Not started" else "Reprint not started · printed before"
         "preparing" -> "Getting ready"
         "printing" -> "Printing"
         "paused" -> "Paused"

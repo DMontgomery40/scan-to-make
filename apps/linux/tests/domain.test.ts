@@ -21,6 +21,7 @@ import {
   obtainControl,
   obtainValue,
   addressField,
+  plateStatusText,
   canSelectPlate,
   printNeedsCheck,
 } from "../src/domain.ts";
@@ -77,88 +78,64 @@ test("after an unconfirmed start every plate stays choosable, and only its plate
   assert.equal("checked" in printRequest("p", choices, "sha", rig.switched.plates![3].id, false), false);
 });
 
-// This is an interaction check of the production plate strip, not a duplicate of its state logic.
-test("printed elsewhere presses the plate control, calls the companion and renders its reply", async () => {
+test("a refused reprint keeps the printed-before wording", () => {
+  const plate = {id:"h:0",fileIndex:0,plateIndex:0,name:"Base",fileName:"rig.3mf",selected:true,sliced:false,status:"not-started",completedAtMs:0};
+  assert.equal(plateStatusText(plate), "Reprint not started · printed before");
+  assert.equal(plateStatusText({...plate, completedAtMs:undefined}), "Not started");
+  assert.equal(plateStatusText({...plate, status:"failed"}), "Reprint failed · printed before");
+  assert.equal(plateStatusText({...plate, status:"cancelled"}), "Reprint cancelled · printed before");
+});
+
+// Press the production controls, then render the companion's response.
+test("printed elsewhere confirms the named plate, supports cancellation and undoes the same plate", async () => {
   const { JSDOM } = await import("jsdom");
   const React = await import("react");
   const { createRoot } = await import("react-dom/client");
   const { ProjectPlates } = await import("../src/ProjectPlates.tsx");
   const dom = new JSDOM("<div id='root'></div>", { url: "http://localhost" });
-  const priorWindow = globalThis.window,
-    priorDocument = globalThis.document;
-  Object.assign(globalThis, {
-    window: dom.window,
-    document: dom.window.document,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
-  const fixture = JSON.parse(
-    readFileSync(
-      new URL(
-        "../../../packages/contracts/fixtures/six-plate-unconfirmed.json",
-        import.meta.url,
-      ),
-      "utf8",
-    ),
-  );
+  // jsdom has no native dialog presentation; retain the real element and controls.
+  dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+  const priorWindow = globalThis.window, priorDocument = globalThis.document;
+  Object.assign(globalThis, {window:dom.window,document:dom.window.document,IS_REACT_ACT_ENVIRONMENT:true});
+  const fixture = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/six-plate-unconfirmed.json", import.meta.url),"utf8"));
   let project = fixture.unconfirmed as Project;
-  const calls: unknown[] = [];
+  const calls: {method:string;params:object}[] = [];
   const root = createRoot(document.getElementById("root")!);
-  const render = () =>
-    root.render(
-      React.createElement(ProjectPlates, {
-        project,
-        mutate: async (method, params) => {
-          calls.push({ method, params });
-          project = {
-            ...project,
-            plates: project.plates!.map((plate, i) =>
-              i === 0
-                ? {
-                    ...plate,
-                    status: "printed",
-                    completedAtMs: 1000,
-                    uncertain: false,
-                  }
-                : plate,
-            ),
-          };
-          render();
-          return { object: project };
-        },
-      }),
-    );
+  const render = () => root.render(React.createElement(ProjectPlates, {project,
+    mutate: async (method, params) => {
+      calls.push({method,params});
+      const printed = method === "objects.markPlatePrinted";
+      project={...project,plates:project.plates!.map((plate,i)=>i===0?{...plate,status:printed?"printed":"not-printed",completedAtMs:printed?1000:undefined,uncertain:false}:plate)};
+      render();return {object:project};
+    }}));
+  const button = (text:string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.trim()===text)!;
   try {
-    await React.act(async () => render());
-    const button = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="I printed this elsewhere, Screws"]',
-    );
-    assert.ok(button);
-    assert.equal(button.disabled, false);
-    await React.act(async () => button.click());
-    assert.deepEqual(calls, [
-      {
-        method: "objects.markPlatePrinted",
-        params: { id: project.id, plateId: project.plates![0].id },
-      },
-    ]);
-    assert.match(document.body.textContent!, /1 of 6 plates printed/);
-    assert.match(
-      document.querySelectorAll("button.plate")[0]!.textContent!,
-      /Printed/,
-    );
-    assert.match(
-      document.querySelectorAll("button.plate")[1]!.textContent!,
-      /Not printed/,
-    );
-    assert.ok([...document.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Mark selected plate not printed"), "the existing selected-plate undo stays reachable");
+    await React.act(async()=>render());
+    await React.act(async()=>button("I printed this elsewhere").click());
+    assert.deepEqual(calls,[],"opening the confirmation cannot change history");
+    assert.match(document.querySelector("dialog")!.textContent!,/Mark Screws as printed elsewhere\?/);
+    await React.act(async()=>button("Cancel").click());
+    assert.deepEqual(calls,[]);
+    assert.match(document.querySelector("button.plate")!.textContent!,/Check print result/);
+    await React.act(async()=>button("I printed this elsewhere").click());
+    await React.act(async()=>button("Mark as printed").click());
+    assert.deepEqual(calls,[{method:"objects.markPlatePrinted",params:{id:project.id,plateId:project.plates![0].id}}]);
+    assert.match(document.body.textContent!,/1 of 6 plates printed/);
+    assert.match(document.querySelector("button.plate")!.textContent!,/Printed/);
+    assert.ok(!document.querySelector('button[aria-label="I printed this elsewhere, Screws"]'));
+    project={...project,plates:project.plates!.map((plate,i)=>i===0?{...plate,status:"not-started"}:plate)};
+    await React.act(async()=>render());
+    assert.match(document.querySelector("button.plate")!.textContent!,/Reprint not started · printed before/);
+    assert.ok(!document.querySelector('button[aria-label="I printed this elsewhere, Screws"]'), "prior completion keeps the recording action hidden after a refused reprint");
+    await React.act(async()=>button("Mark Screws not printed").click());
+    assert.deepEqual(calls[1],{method:"objects.markPlateNotPrinted",params:{id:project.id,plateId:project.plates![0].id}});
+    assert.match(document.body.textContent!,/0 of 6 plates printed/);
+    assert.match(document.querySelector("button.plate")!.textContent!,/Not printed/);
+    assert.ok(document.querySelector('button[aria-label="I printed this elsewhere, Screws"]'));
   } finally {
-    await React.act(async () => root.unmount());
-    dom.window.close();
-    Object.assign(globalThis, {
-      window: priorWindow,
-      document: priorDocument,
-      IS_REACT_ACT_ENVIRONMENT: false,
-    });
+    await React.act(async()=>root.unmount());dom.window.close();
+    Object.assign(globalThis,{window:priorWindow,document:priorDocument,IS_REACT_ACT_ENVIRONMENT:false});
   }
 });
 

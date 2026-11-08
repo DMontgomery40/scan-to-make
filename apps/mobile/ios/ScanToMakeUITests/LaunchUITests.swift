@@ -591,12 +591,29 @@ final class LayoutParityUITests: XCTestCase {
         for _ in 0..<6 where button.frame.maxY > app.frame.maxY - 160 { page.swipeUp() }
         XCTAssertLessThan(button.frame.maxY, app.frame.maxY - 150, "The plate action must clear the bottom bar")
         button.tap()
+        XCTAssertTrue(app.staticTexts["Mark Screws as printed elsewhere?"].waitForExistence(timeout: 5))
+        if !regular {
+            // Regular-width confirmation dialogs are popovers; Apple omits the Cancel action there.
+            app.buttons["Cancel"].firstMatch.tap()
+            XCTAssertTrue(app.buttons["select-plate-0-0"].label.contains("Check print result"))
+            XCTAssertTrue(button.exists)
+            button.tap()
+        }
+        app.buttons["Mark as printed"].firstMatch.tap()
         let first = app.buttons["select-plate-0-0"]
         let printed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@ AND NOT label CONTAINS %@", "Printed", "Check print result"), object: first)
         XCTAssertEqual(XCTWaiter().wait(for: [printed], timeout: 5), .completed, app.debugDescription)
         XCTAssertTrue(app.staticTexts["1 of 6 printed"].exists)
         XCTAssertFalse(button.exists)
         XCTAssertTrue(app.buttons["printed-elsewhere-0-1"].exists, "another plate remains unprinted")
+        let undo = app.buttons["mark-not-printed-0-0"]
+        for _ in 0..<6 where !(undo.exists && undo.isHittable) { page.swipeUp() }
+        XCTAssertTrue(undo.exists)
+        undo.tap()
+        let notPrinted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Not printed"), object: first)
+        XCTAssertEqual(XCTWaiter().wait(for: [notPrinted], timeout: 5), .completed)
+        XCTAssertTrue(app.staticTexts["0 of 6 printed"].exists)
+        XCTAssertTrue(button.exists)
     }
 
     /// The project list: the iPad sidebar, or iPhone Home.

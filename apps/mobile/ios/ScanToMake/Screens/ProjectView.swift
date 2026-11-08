@@ -214,6 +214,8 @@ struct ProjectView: View {
                         selectAndPrint(plate, object: object)
                     }, markPrinted: { plate in
                         act { try await store.mac.client.markPlatePrinted(object.id, plateId: plate.id) }
+                    }, markNotPrinted: { plate in
+                        act { try await store.mac.client.markPlateNotPrinted(object.id, plateId: plate.id) }
                     }).padding(.horizontal, 20)
                 }
                 if object.kind == "published" {

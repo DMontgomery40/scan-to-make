@@ -175,7 +175,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     if (!plate.selected) state.show(app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex))
                     print()
                 } },
-                markPrinted = { plate -> run("plate") { state.show(app.companion.markPlatePrinted(id, plate.id)) } })
+                markPrinted = { plate -> run("plate") { state.show(app.companion.markPlatePrinted(id, plate.id)) } },
+                markNotPrinted = { plate -> run("plate") { state.show(app.companion.markPlateNotPrinted(id, plate.id)) } })
             if (project.kind == "published" && project.canSelectPlate) SecondaryButton("Import More Model Files", Modifier.fillMaxWidth(), enabled = working == null) {
                 pickModel.launch(arrayOf("*/*"))
             }

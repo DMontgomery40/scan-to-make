@@ -1388,6 +1388,15 @@ export class ObjectService {
 
   /** A person's report of a plate printed in Studio, Handy or elsewhere. Never sends a printer command. */
   markPlatePrinted(id: string, plateId: string): Promise<StmObject> {
+    return this.#markPlate(id, plateId, 'printed');
+  }
+
+  /** Undo the person's report for this exact plate. Never sends a printer command. */
+  markPlateNotPrinted(id: string, plateId: string): Promise<StmObject> {
+    return this.#markPlate(id, plateId, 'not-printed');
+  }
+
+  #markPlate(id: string, plateId: string, status: 'printed' | 'not-printed'): Promise<StmObject> {
     return this.#gate(id, async () => {
       const object = await this.get(id);
       if (object.state === 'printing' || object.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
@@ -1395,8 +1404,8 @@ export class ObjectService {
       if (!plate || !object.current) throw new InvalidStateError('Choose a plate in this model.');
       const file = object.files!.receipts![plate.fileIndex]!;
       const updated = await this.#deps.store.update(id, o => ({...o,
-        plateProgress: acknowledgePlate(o, 'printed', {sha256: file.sha256, plateIndex: plate.plateIndex}),
-        ...(plate.selected ? {state: 'printed' as const, failure: undefined, outcome: undefined, completion: undefined,
+        plateProgress: acknowledgePlate(o, status, {sha256: file.sha256, plateIndex: plate.plateIndex}),
+        ...(plate.selected ? {state: status === 'printed' ? 'printed' as const : 'ready' as const, failure: undefined, outcome: undefined, completion: undefined,
           print: o.print ? {...o.print, uncertain: undefined} : undefined} : {}),
       }));
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['plates']}});

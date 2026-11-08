@@ -91,7 +91,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/objects/printers/[A-Za-z0-9_-]+/(route|mcp)") { return "projects:write" }
         case "POST":
             if is_("/v1/blender/(check|update)") { return "projects:write" }
-            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|plate-selection|plate-printed|photos|capture|capture-depth)") { return "captures:import" }
+            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|plate-selection|plate-printed|plate-not-printed|photos|capture|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
             if is_("/v1/settings/(ai/test|fusion/setup)") { return "projects:write" }
@@ -251,6 +251,9 @@ public final class CompanionClient: @unchecked Sendable {
     }
     public func markPlatePrinted(_ id: String, plateId: String) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/plate-printed", json: ["plateId": plateId], as: One.self).object
+    }
+    public func markPlateNotPrinted(_ id: String, plateId: String) async throws -> Project {
+        try await request("POST", "/v1/objects/\(id)/plate-not-printed", json: ["plateId": plateId], as: One.self).object
     }
     public func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/plate-selection", json: ["fileIndex": fileIndex, "plateIndex": plateIndex], as: One.self).object
