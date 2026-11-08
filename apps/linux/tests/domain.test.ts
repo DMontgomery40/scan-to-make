@@ -150,6 +150,7 @@ test("printed elsewhere presses the plate control, calls the companion and rende
       document.querySelectorAll("button.plate")[1]!.textContent!,
       /Not printed/,
     );
+    assert.ok([...document.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Mark selected plate not printed"), "the existing selected-plate undo stays reachable");
   } finally {
     await React.act(async () => root.unmount());
     dom.window.close();
