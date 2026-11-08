@@ -1,7 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFile} from 'node:child_process';
-import {chmod,copyFile,mkdir,readFile,rm,stat,writeFile} from 'node:fs/promises';
+import {chmod,copyFile,mkdir,readFile,readdir,rm,stat,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {promisify} from 'node:util';
@@ -153,4 +154,37 @@ test('pick: incomplete renders, cancellation, no photos and reruns',{skip:!blend
  r=await pickAiTweak(g.dir,options(g,{claudePath:await judge(g,verdict)}));
  assert.deepEqual([r.choice,r.decidedBy],['captured','fallback']);assert.match(r.reason,/no close-up photos/);
  await assert.rejects(readFile(g.record));
+});
+
+test('cancelling waits for Blender to exit before its throwaway HOME is removed',async t=>{
+ const root=await tempDir('ai-pick-cancel-');t.after(()=>rm(root,{recursive:true,force:true}));
+ const dir=join(root,'tweak'),obj='v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n';
+ await mkdir(join(dir,'inputs'),{recursive:true});await writeFile(join(dir,'inputs','mesh.obj'),obj);
+ await mkdir(join(dir,'attempt-1','result'),{recursive:true});await writeFile(join(dir,'attempt-1','result','mesh.obj'),obj);
+ await writeFile(join(dir,'ai-tweak.json'),JSON.stringify({schema:'scan-to-make.ai-tweak/0.1',prompt:'x',access:{kind:'claude-code'},inputs:{'mesh.obj':{}},
+  attempts:[{index:1,outcome:'changed',result:{dir:'attempt-1/result',obj:'mesh.obj',sourcePath:'mesh.obj',files:{}}}]}));
+ // A stand-in Blender that is slow to shut down and writes its cache under HOME as it goes, as Blender and fontconfig do.
+ const fake=join(root,'blender');
+ await writeFile(fake,`#!${process.execPath}
+const fs=require('node:fs'),path=require('node:path'),home=process.env.HOME;
+fs.writeFileSync(path.join(home,'started'),'');
+process.on('SIGTERM',()=>setTimeout(()=>{fs.mkdirSync(path.join(home,'.cache'),{recursive:true});fs.writeFileSync(path.join(home,'.cache','late'),'x');process.exit(143);},300));
+setInterval(()=>{},1000);
+`);await chmod(fake,0o755);
+ const homes=async()=>(await readdir(tmpdir())).filter(name=>name.startsWith('stm-ai-pick-home-'));
+ const before=new Set(await homes());
+ const controller=new AbortController();
+ const pending=pickAiTweak(dir,{access:{kind:'claude-code'},blender:fake,python:'/usr/bin/python3',toolDir,mmPerUnit:1,requireGuiSession:false,
+  env:{HOME:root,PATH:'/usr/bin:/bin'},seed:'fixed',signal:controller.signal});
+ let home;
+ for(let i=0;i<100&&!home;i++){
+  for(const name of await homes())if(!before.has(name)&&await stat(join(tmpdir(),name,'started')).catch(()=>undefined))home=name;
+  if(!home)await new Promise(ok=>setTimeout(ok,50));
+ }
+ assert.ok(home,'the stand-in Blender started under its own HOME');
+ controller.abort();
+ await assert.rejects(pending);
+ // Settled only after the child exited, so nothing it wrote late can survive (or recreate) the removed HOME.
+ await new Promise(ok=>setTimeout(ok,600));
+ assert.equal((await homes()).includes(home),false);
 });

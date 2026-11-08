@@ -1,4 +1,4 @@
-import {execFile} from 'node:child_process';
+import {execFile,type ExecFileOptions} from 'node:child_process';
 import {createHash,randomBytes} from 'node:crypto';
 import {copyFile,mkdir,mkdtemp,readFile,readdir,rm,writeFile} from 'node:fs/promises';
 import {homedir,tmpdir} from 'node:os';
@@ -97,9 +97,28 @@ async function blender(options:PickOptions,script:string,args:string[],signal?:A
  const home=await mkdtemp(join(tmpdir(),'stm-ai-pick-home-'));
  try{
   // Without --python-exit-code Blender exits 0 when the script raises (as every Blender call in this repo passes).
-  await run(options.blender,['-b','--factory-startup','--python-exit-code','1','-P',join(options.toolDir,script),'--',...args],
-   {timeout:600000,maxBuffer:16*1024*1024,signal,env:{PATH:'/usr/bin:/bin',HOME:home}});
+  await untilExited(options.blender,['-b','--factory-startup','--python-exit-code','1','-P',join(options.toolDir,script),'--',...args],
+   {timeout:600000,maxBuffer:16*1024*1024,env:{PATH:'/usr/bin:/bin',HOME:home}},signal);
  }finally{await rm(home,{recursive:true,force:true});}
+}
+
+/**
+ * execFile that settles only once the child has exited. Cancelled through execFile's own `signal`, the promise
+ * rejects before Blender has shut down, and its last writes would land in (or recreate) a HOME already removed.
+ * A cancelled child gets SIGTERM, then SIGKILL if it hasn't exited 5 s later.
+ */
+function untilExited(file:string,args:string[],options:Omit<ExecFileOptions,'signal'>,signal?:AbortSignal):Promise<void>{
+ return new Promise((resolve,reject)=>{
+  if(signal?.aborted){reject(signal.reason);return;}
+  let escalate:ReturnType<typeof setTimeout>|undefined;
+  const cancel=()=>{child.kill('SIGTERM');escalate=setTimeout(()=>child.kill('SIGKILL'),5000);};
+  // execFile calls back on the child's close, also when it was killed.
+  const child=execFile(file,args,options,error=>{
+   signal?.removeEventListener('abort',cancel);clearTimeout(escalate);
+   if(signal?.aborted)reject(signal.reason);else if(error)reject(error);else resolve();
+  });
+  signal?.addEventListener('abort',cancel,{once:true});
+ });
 }
 
 /**
