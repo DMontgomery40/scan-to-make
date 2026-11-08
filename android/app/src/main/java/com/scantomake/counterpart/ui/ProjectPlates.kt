@@ -25,7 +25,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 
 @Composable
-fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Unit, print: (ProjectPlate) -> Unit, markPrinted: (ProjectPlate) -> Unit = {}) {
+fun ProjectPlates(project: Project, busy: Boolean, select: (ProjectPlate) -> Unit, print: (ProjectPlate) -> Unit, markPrinted: (ProjectPlate) -> Unit) {
     val plates = project.plates.orEmpty()
     if (plates.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

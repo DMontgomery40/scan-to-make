@@ -590,7 +590,7 @@ final class LayoutParityUITests: XCTestCase {
         button.tap()
         let first = app.buttons["select-plate-0-0"]
         let printed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@ AND NOT label CONTAINS %@", "Printed", "Check print result"), object: first)
-        XCTAssertEqual(XCTWaiter().wait(for: [printed], timeout: 5), .completed)
+        XCTAssertEqual(XCTWaiter().wait(for: [printed], timeout: 5), .completed, app.debugDescription)
         XCTAssertTrue(app.staticTexts["1 of 6 printed"].exists)
         XCTAssertFalse(button.exists)
         XCTAssertTrue(app.buttons["printed-elsewhere-0-1"].exists, "another plate remains unprinted")

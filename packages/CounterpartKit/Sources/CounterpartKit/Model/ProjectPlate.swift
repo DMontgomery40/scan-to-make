@@ -1,6 +1,6 @@
 import Foundation
 
-/// The companion's retained plates and printer-confirmed progress, independent of the selected plate.
+/// The companion's retained plates and recorded completion, including the person's report, independent of selection.
 public struct ProjectPlate: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var fileIndex: Int

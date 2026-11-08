@@ -440,13 +440,13 @@ class HomeLayoutTests {
         assertEquals(true, unconfirmed.canSelectPlate)
         assertEquals(true, unconfirmed.printNeedsCheck)
         assertEquals(false, requireNotNull(Project.decode(rig(3, false))).printNeedsCheck)
-        compose.setContent { WithApp { ProjectPlates(unconfirmed, busy = false, select = {}, print = {}) } }
+        compose.setContent { WithApp { ProjectPlates(unconfirmed, busy = false, select = {}, print = {}, markPrinted = {}) } }
         assertEquals(5, compose.onAllNodes(hasText("Select")).fetchSemanticsNodes().size)
         compose.onAllNodes(hasText("Select")).assertAll(isEnabled())
         assertEquals(6, compose.onAllNodes(hasText("Print…")).fetchSemanticsNodes().size)
         compose.onAllNodes(hasText("Print…")).assertAll(isEnabled())
         compose.onNodeWithText("Check print result").assertExists()
-        // A send cancelled before anything went out reads "unknown" too, but never asks (Codex on #380).
+        // A send cancelled before dispatch reads Not started and never asks for a printer check.
         assertEquals(false, requireNotNull(Project.decode(sixPlates["cancelled"]!!.jsonObject)).printNeedsCheck)
     }
 
@@ -479,7 +479,8 @@ class HomeLayoutTests {
         state.projects.value = listOf(requireNotNull(Project.decode(current())))
         compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(PROJECT, back = {}, print = {}, printing = {}, scan = {}) } }
         compose.onNode(hasTestTag("printed-elsewhere-0-0")).performScrollTo().performClick()
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText("1 of 6 printed")).fetchSemanticsNodes().isNotEmpty() }
+        try { compose.waitUntil(5_000) { compose.onAllNodes(hasText("1 of 6 printed")).fetchSemanticsNodes().isNotEmpty() } }
+        catch (e: Throwable) { throw AssertionError("recorded=$recorded; paths=${fake.paths}; plates=${state.projects.value.first().plates}", e) }
         assertEquals(rig(0,true)["plates"]!!.jsonArray[0].jsonObject["id"]!!.jsonPrimitive.content, recorded)
         compose.onNode(hasTestTag("printed-elsewhere-0-0")).assertDoesNotExist()
         compose.onNode(hasTestTag("printed-elsewhere-0-1")).assertExists()

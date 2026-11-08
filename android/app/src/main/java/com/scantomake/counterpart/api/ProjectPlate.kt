@@ -2,7 +2,7 @@ package com.scantomake.counterpart.api
 
 import kotlinx.serialization.Serializable
 
-/** The companion retains all plates and their printer-confirmed completion, including reprints. */
+/** The companion retains all plates and their recorded completion, including reprints and the person's reports. */
 @Serializable
 data class ProjectPlate(
     val id: String, val fileIndex: Int, val plateIndex: Int, val name: String, val fileName: String,

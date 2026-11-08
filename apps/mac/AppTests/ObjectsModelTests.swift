@@ -270,9 +270,11 @@ private func project(_ item: [String: Any]) throws -> Project {
         let plate = try XCTUnwrap(project.plates?.first)
         let view = PlateStripHarness(model: model, id: id)
         let host = NSHostingView(rootView: view.frame(width: 1000, height: 500))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 500), styleMask: .borderless, backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 1000, height: 500), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
+        window.orderBack(nil) // Off-screen test host; never activates or opens David's app.
+        try await Task.sleep(for: .milliseconds(100))
         defer { window.close() }
         host.layoutSubtreeIfNeeded()
         func button(_ value: Any, identifier: String = "printed-elsewhere-0-0", depth: Int = 0) -> (any NSAccessibilityProtocol)? {

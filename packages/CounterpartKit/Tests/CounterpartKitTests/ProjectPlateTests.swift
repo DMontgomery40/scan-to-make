@@ -32,8 +32,8 @@ final class ProjectPlateTests: XCTestCase {
         XCTAssertTrue(rig.back.printNeedsCheck)
         XCTAssertTrue(ProjectWords(rig.back).actions.contains(.printChecked))
         XCTAssertTrue(rig.back.uncertainPrintWords.contains("Screws"))
-        // A send cancelled before anything went out reads "unknown" too, but never asks (Codex on #380).
-        XCTAssertEqual(rig.cancelled.plates?.first?.status, "unknown")
+        // A send cancelled before dispatch reads Not started and never asks for a printer check.
+        XCTAssertEqual(rig.cancelled.plates?.first?.statusText, "Not started")
         XCTAssertFalse(rig.cancelled.printNeedsCheck)
         // A running print still locks the plates.
         var printing = rig.switched; printing.state = .printing
@@ -41,6 +41,9 @@ final class ProjectPlateTests: XCTestCase {
     }
     func testPlateSelectionUsesCaptureImportPermission() {
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/00000000-0000-4000-8000-000000000001/plate-selection"), "captures:import")
+    }
+    func testPrintedElsewhereUsesCaptureImportPermission() {
+        XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/00000000-0000-4000-8000-000000000001/plate-printed"), "captures:import")
     }
     func testOlderCompanionDoesNotInventPlates() throws {
         let project = try JSONDecoder().decode(Project.self, from: Data(#"{"id":"p","createdAtMs":1,"updatedAtMs":2,"state":"ready"}"#.utf8))
