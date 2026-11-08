@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,utimes,symlink,chmod,lstat} from 'node:fs/promises';
+import {mkdir,writeFile,readFile,rm,utimes,symlink,chmod,lstat} from 'node:fs/promises';
 import {writeFileSync} from 'node:fs';
-import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
 import {createHash} from 'node:crypto';
@@ -16,13 +15,14 @@ import {createControlDispatcher} from '../dist/local-control-services.js';
 import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished,arrivedDuring,snapshotFolders,chromeAvailable,folderAccess} from '../dist/published/published.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {mcpPlates, mcpPlatesResult, showing, showingRunner, shownSlice} from './support/shown-print.mjs';
+import {tempDir} from './support/temp.mjs';
 const {zipSync,strToU8}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
 const LINK='https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths';
 const model=(title='Caliper',plates=1)=>Buffer.from(zipSync({'[Content_Types].xml':strToU8('<Types/>'),
  '3D/3dmodel.model':strToU8(`<model><metadata name="Title">${title}</metadata><metadata name="Designer">Fixture Designer</metadata><metadata name="License">Fixture licence</metadata><resources><object id="1"><mesh/></object></resources><build><item objectid="1"/></build></model>`),
  'Metadata/model_settings.config':strToU8(`<config>${Array.from({length:plates},(_,i)=>`<plate><metadata key="plater_id" value="${i+1}"/><metadata key="plater_name" value="Size ${i+1}"/></plate>`).join('')}</config>`)}));
 async function setup(t,runPublished=async()=>({status:'needs_file'}),extra={}){
- const root=await mkdtemp(join(tmpdir(),'published-test-')),store=new ObjectStore(join(root,'objects')),events=[];let holds=0;
+ const root=await tempDir('published-test-'),store=new ObjectStore(join(root,'objects')),events=[];let holds=0;
  const service=new ObjectService({store,stlInfo:async()=>[1,2,3],claudePath:'/unused',handoff:{backend:'bambu-printer-mcp',process:{command:'/usr/bin/true'}},
  printGate:{updating:()=>false,hold:()=>{holds++;return()=>{holds--;};}},runPublished,runTouchup:async()=>{throw Error('published retrieval entered design');},events:{emit:async e=>events.push(e)},titleFor:async()=>'Generated',
   // A printer whose MCP lists a 3MF's plates (list_3mf_plates); a test that needs none passes print: undefined.
@@ -202,7 +202,7 @@ test('duplicating a selected published plate preserves its original receipt and 
 });
 
 for (const action of ['estimate','print']) test(`pre-sliced original ${action} keeps explicit one copy over configured repetitions`,async t=>{
- const root=await mkdtemp(join(tmpdir(),'published-sliced-copy-')),store=new ObjectStore(join(root,'objects')),calls=[];
+ const root=await tempDir('published-sliced-copy-'),store=new ObjectStore(join(root,'objects')),calls=[];
  const {unzipSync}=createRequire(new URL('../../printer-handoff/package.json',import.meta.url))('fflate');
  const entries=unzipSync(model());entries['Metadata/plate_1.gcode']=strToU8('; estimated printing time (normal mode) = 1m\nG1 X1');const bytes=Buffer.from(zipSync(entries));
  const session={hold:()=>()=>{},connect:async()=>({tools:[]}),config:{backend:'bambu-printer-mcp'},hasTool:name=>['inspect_print_file','print_3mf','counterpart_printer_info','list_3mf_plates'].includes(name),getTool:name=>({name,inputSchema:{type:'object',properties:Object.fromEntries(['file_path','bambu_model','plate_index','three_mf_path','include_preview','include_thumbnails'].map(x=>[x,{}]))}}),call:async(name,args,opts)=>{

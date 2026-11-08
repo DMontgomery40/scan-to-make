@@ -1,16 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, readFile} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir, userInfo} from 'node:os';
+import {userInfo} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {buildTouchupInvocation, systemRules, TOUCHUP_RESULT_SCHEMA, TOUCHUP_SYSTEM_RULES, TOUCHUP_INSTRUCTION} from '../dist/touchup/invocation.js';
+import {tempDir} from './support/temp.mjs';
 
 const fixtures = fileURLToPath(new URL('./fixtures/touchup/', import.meta.url));
 async function pass() {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-inv-'));
+  const root = await tempDir('touchup-inv-');
   return prepareTouchupPass({root, objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
 }
 const printer = {command: '/usr/bin/ssh', args: ['-T', 'x@127.0.0.1'], env: {MCP_TRANSPORT: 'stdio'}};
@@ -60,7 +61,7 @@ test('printer MCP is passed through unchanged', async () => {
 });
 
 test('a printer MCP working directory is honoured through a quoted shell wrapper', async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "printer mcp's dir "));
+  const cwd = await tempDir("printer mcp's dir ");
   const inv = buildTouchupInvocation({pass: await pass(), printer: {command: '/bin/pwd', args: [], cwd}, claudePath: '/c', sourceEnv});
   const server = inv.mcpConfig.mcpServers.printer;
   assert.equal(server.command, '/bin/sh');
@@ -96,7 +97,7 @@ test('the user\'s instructions are the prompt, word for word', async () => {
 });
 
 test('a pass with no scan and no photos lists neither', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-inv-'));
+  const root = await tempDir('touchup-inv-');
   const p = await prepareTouchupPass({root, objectId: 'mount', scan: [], photos: [], requirePhotos: false});
   const prompt = buildTouchupInvocation({pass: p, printer, claudePath: '/c', sourceEnv, instructions: 'A hook.'}).args.at(-1);
   assert.equal(prompt.includes('- Scan:'), false);
@@ -186,7 +187,7 @@ test('photo evidence lists overview pages first and every real filename, includi
 });
 
 test("a copy of a designer's 3MF is told to edit that project in place and compare with the designer's file", async () => {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-inv-designer-'));
+  const root = await tempDir('touchup-inv-designer-');
   const {writeFile} = await import('node:fs/promises');
   const working = join(root, 'model.3mf'), designer = join(root, 'scan.3mf');
   await writeFile(working, 'PK'); await writeFile(designer, 'PK');

@@ -2,18 +2,19 @@ import test from 'node:test';
 import {mcpPlates} from './support/shown-print.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {mkdtemp, mkdir, readFile, writeFile, symlink} from 'node:fs/promises';
+import {mkdir, readFile, writeFile, symlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
+import {tempDir} from './support/temp.mjs';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
 async function fixture(t, {denied = [], reconstruct, reportsCompletion, camera, printers, printerCatalog, print} = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'objects-http-'));
+  const root = await tempDir('objects-http-');
   const store = new ObjectStore(join(root, 'objects'));
   const inputs = [];
   const runTouchup = async input => {
@@ -769,7 +770,7 @@ test('duplicate keeps legacy print defaults and removes only its own partial cop
 test('exports refuse recorded final and intermediate symlinks that leave the project', async t => {
   const {call, service, store} = await fixture(t);
   const project = await service.create('Private exports');
-  const outside = await mkdtemp(join(tmpdir(), 'outside-project-'));
+  const outside = await tempDir('outside-project-');
   await writeFile(join(outside, 'secret.3mf'), 'private');
   await writeFile(join(outside, 'scan.usdz'), 'private scan');
   await mkdir(join(store.dir(project.id), 'original'), {recursive: true});

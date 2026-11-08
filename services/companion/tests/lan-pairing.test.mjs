@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {execFileSync} from 'node:child_process';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {X509Certificate} from 'node:crypto';
@@ -10,8 +9,9 @@ import {createServer} from 'node:net';
 import {request} from 'node:https';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
+import {tempDir} from './support/temp.mjs';
 async function fixture(t) {
- const root=await mkdtemp(join(tmpdir(),'lan-auth-')); t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('lan-auth-'); t.after(()=>rm(root,{recursive:true,force:true}));
  execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1','-keyout',join(root,'key.pem'),'-out',join(root,'cert.pem')],{stdio:'ignore'});
  const cert=await readFile(join(root,'cert.pem')),key=await readFile(join(root,'key.pem'));
  const reservation=createServer(); await new Promise(r=>reservation.listen(0,'127.0.0.1',r));

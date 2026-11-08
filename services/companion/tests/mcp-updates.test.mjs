@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {rm} from 'node:fs/promises';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {runTouchup} from '../dist/touchup/touchup.js';
 import {PrintGate} from '../dist/printing/print-gate.js';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {resolveMcpInstall, shellCommand, forcedCommand, mcpIdFor, installedVersion, findNpm} from '../dist/printing/mcp-install.js';
 import {McpUpdater, McpOverrides} from '../dist/printing/mcp-updates.js';
+import {tempDir, tempDirSync} from './support/temp.mjs';
 
 const HOME = '/Users/ada', APP = `${HOME}/Library/Application Support/Scan to Make`;
 /** A fake Mac: files by path, directories implied, symlinks by realpath. */
@@ -90,7 +90,7 @@ test('shell command lines: quotes, escapes, cd and variables', () => {
 async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest: published = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog, session: sessionFor, busyTimeoutMs, startTimeoutMs, inFlightWaitMs} = {}) {
   // The registry: a version, or a function when a test publishes a newer one partway through.
   const registry = () => typeof published === 'function' ? published() : published;
-  const root = await mkdtemp(join(tmpdir(), 'mcp-updates-'));
+  const root = await tempDir('mcp-updates-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const env = mac({'/opt/homebrew/bin/npm': '', '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js': '', ...files}, {'/opt/homebrew/bin/npm': '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js', ...links});
   const readFile = env.readFile;
@@ -396,7 +396,7 @@ test('the phone route, the Mac method, the capability flags, the printer list an
 
 test('an event about the Mac has no projectId, and the log keeps it like any other', async t => {
   const {EventLog} = await import('../dist/events/log.js');
-  const root = await mkdtemp(join(tmpdir(), 'mcp-events-'));
+  const root = await tempDir('mcp-events-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = await new EventLog(join(root, 'events.ndjson'), {context: async () => ({title: 'Counterpart'})}).open({prune: false});
   t.after(() => log.close());
@@ -520,7 +520,7 @@ test('review fixes, round two: fresh copies lock their users, stale overrides dr
   assert.deepEqual(f.updates.install('p1s').effective.process.args, [fresh]);
   // npm's notice after the version doesn't hide it.
   const {McpUpdater, McpOverrides} = await import('../dist/printing/mcp-updates.js');
-  const noisy = new McpUpdater({destinations: () => [], env: mac({'/opt/homebrew/bin/npm': ''}), overrides: new McpOverrides(join(tmpdir(), `o-${Date.now()}.json`)),
+  const noisy = new McpUpdater({destinations: () => [], env: mac({'/opt/homebrew/bin/npm': ''}), overrides: new McpOverrides(join(tempDirSync('mcp-overrides-file-'), 'o.json')),
     session: () => undefined, busy: async () => false, runningVersion: () => undefined, node: '/n', path: '/nowhere',
     run: async () => ({code: 0, output: '1.1.50\nnpm notice New minor version of npm available!\n'})});
   assert.equal(await noisy.checkLatest('bambu-printer-mcp'), '1.1.50');
@@ -549,7 +549,7 @@ test('review fixes, round three: one update per set of files, npx ranges, a slow
   const {McpUpdater, McpOverrides} = await import('../dist/printing/mcp-updates.js');
   let release;
   const slow = new McpUpdater({destinations: () => [{id: 'p1s', config: bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40'])}], env: mac({'/opt/homebrew/bin/npm': ''}),
-    overrides: new McpOverrides(join(tmpdir(), `o-${Date.now()}-slow.json`)), session: () => ({restart: async () => {}, connect: async () => ({server: {version: '1.1.50'}})}),
+    overrides: new McpOverrides(join(tempDirSync('mcp-overrides-file-'), 'o-slow.json')), session: () => ({restart: async () => {}, connect: async () => ({server: {version: '1.1.50'}})}),
     busy: async () => false, runningVersion: () => '1.1.40', node: '/n', path: '/nowhere', lookupTimeoutMs: 30,
     run: async (_command, args) => args.includes('view') ? new Promise(resolve => { release = () => resolve({code: 0, output: '1.1.50\n'}); }) : {code: 0, output: ''}});
   const id = slow.mcpId('p1s');
@@ -560,7 +560,7 @@ test('review fixes, round three: one update per set of files, npx ranges, a slow
   // Update asks npm again even with a fresh cached answer: a version published since is the one installed.
   let published = '1.1.50';
   const asks = new McpUpdater({destinations: () => [{id: 'p1s', config: bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40'])}], env: mac({'/opt/homebrew/bin/npm': ''}),
-    overrides: new McpOverrides(join(tmpdir(), `o-${Date.now()}-fresh.json`)), session: () => ({restart: async () => {}, connect: async () => ({server: {version: published}})}),
+    overrides: new McpOverrides(join(tempDirSync('mcp-overrides-file-'), 'o-fresh.json')), session: () => ({restart: async () => {}, connect: async () => ({server: {version: published}})}),
     busy: async () => false, runningVersion: () => '1.1.40', node: '/n', path: '/nowhere', lookupTimeoutMs: 200,
     run: async (_command, args) => args.includes('view') ? {code: 0, output: published + '\n'} : {code: 0, output: ''}});
   assert.equal(await asks.checkLatest('bambu-printer-mcp'), '1.1.50');
@@ -644,7 +644,7 @@ test('review fixes, round five: every printer on the files starts the new versio
 });
 
 test('review fixes, round six: overrides written at the same time all reach the file', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'mcp-overrides-'));
+  const root = await tempDir('mcp-overrides-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const path = join(root, 'printers', 'overrides.json');
   const overrides = new McpOverrides(path);
@@ -681,7 +681,7 @@ test('review fixes, round seven: a previous npm copy that cannot be put back is 
 
 
 test('updates wait for admitted design passes, their queue, and helper shutdown on the shared install', {timeout: 10_000}, async t => {
-  const root = await mkdtemp(join(tmpdir(), 'mcp-pass-reservation-'));
+  const root = await tempDir('mcp-pass-reservation-');
   const gate = new PrintGate(), first = Promise.withResolvers(), second = Promise.withResolvers(), cleanup = Promise.withResolvers();
   const prefix = `${APP}/printers/bambu`, profile = bambu('/x/node', [`${prefix}/lib/node_modules/bambu-printer-mcp/dist/index.js`]);
   const f = await updater(t, {gate, profiles: [{id: 'current', config: profile}, {id: 'p1s', config: profile}],
@@ -711,7 +711,7 @@ test('updates wait for admitted design passes, their queue, and helper shutdown 
 });
 
 test('an update reserves the install before its async busy check, so a correction cannot start under it', {timeout: 10_000}, async t => {
-  const root = await mkdtemp(join(tmpdir(), 'mcp-pass-admission-'));
+  const root = await tempDir('mcp-pass-admission-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const gate = new PrintGate(), checking = Promise.withResolvers();
   const profile = bambu('/opt/homebrew/bin/npx', ['-y', 'bambu-printer-mcp@1.1.40']);
@@ -925,7 +925,7 @@ test('Settings never borrows a worktree version when the selected app copy has n
 test('findMcpFolders finds a built copy of either MCP two levels into the home folder, and skips protected and hidden folders', async t => {
   const {findMcpFolders} = await import('../dist/printing/setup.js');
   const {mkdir, writeFile} = await import('node:fs/promises');
-  const home = await mkdtemp(join(tmpdir(), 'mcp-home-'));
+  const home = await tempDir('mcp-home-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const copy = async (dir, name, env = true) => {
     await mkdir(join(home, dir, 'dist'), {recursive: true});
@@ -1198,7 +1198,7 @@ test('Settings → Printers follow-up: the shared two-profile fixture is what th
 test('Settings → Printers follow-up: opening Settings waits briefly for the npm check it starts, so a new version shows on this visit', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   let answer = '1.1.68', delay = 20;
-  const updates = new McpUpdater({destinations: () => [], env: mac({'/opt/homebrew/bin/npm': ''}), overrides: new McpOverrides(join(tmpdir(), `o-${Date.now()}.json`)),
+  const updates = new McpUpdater({destinations: () => [], env: mac({'/opt/homebrew/bin/npm': ''}), overrides: new McpOverrides(join(tempDirSync('mcp-overrides-file-'), 'o.json')),
     session: () => undefined, busy: async () => false, runningVersion: () => undefined, node: '/n', path: '/nowhere',
     run: async (_command, args) => { await new Promise(resolve => setTimeout(resolve, delay)); return {code: 0, output: `${answer}\n`}; }});
   const setup = new PrinterSetup({env: mac(), configs: () => [], list: () => [], latestVersion: (pkg, options) => updates.latestVersionSettled(pkg, options)});
@@ -1236,7 +1236,7 @@ test('updating the app copy finds overridden users and waits for their print bef
 test('the updater addresses hidden catalog profiles and reserves their selected printer too', async t => {
   const {loadPrinterCatalog} = await import('../dist/objects/printers.js');
   const {mkdir, writeFile} = await import('node:fs/promises');
-  const home = await mkdtemp(join(tmpdir(), 'hidden-update-'));
+  const home = await tempDir('hidden-update-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const dir = join(home, 'mcp-3D-printer-server'), pkg = 'mcp-3d-printer-server';
   await mkdir(dir);
@@ -1281,7 +1281,7 @@ test('paired update and move require settings scope and retain the desktop print
       [dir + '/package.json']: pkgJson('1.1.46'), [dir + '/dist/index.js']: '',
       ...(fresh ? {[dir + '/.git/HEAD']: 'ref'} : {}),
     }});
-    const root = await mkdtemp(join(tmpdir(), 'paired-mcp-auth-'));
+    const root = await tempDir('paired-mcp-auth-');
     t.after(() => rm(root, {recursive: true, force: true}));
     const auth = await RemoteAuthStore.create(join(root, 'auth'), {host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test']});
     const phone = async scopes => {

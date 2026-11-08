@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, writeFile, readFile} from 'node:fs/promises';
+import {mkdir, writeFile, readFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {PrintGate} from '../dist/printing/print-gate.js';
 import {projectTitle} from '../dist/events/words.js';
+import {tempDir} from './support/temp.mjs';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
 async function setup(outcome = {status: 'done', summary: 'Fixed the card.'}, {throws, delayMs = 0, outcomes, waitForAbort, printGate, beforeResult} = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
+  const root = await tempDir('objects-svc-');
   const store = new ObjectStore(join(root, 'objects'));
   const calls = [];
   const runTouchup = async input => {
@@ -265,7 +265,7 @@ test('closing the companion stops object work before it shuts down', async () =>
 });
 
 test('photos alone, with no description and no scan, are refused before anything runs', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
+  const root = await tempDir('objects-svc-');
   const store = new ObjectStore(join(root, 'objects'));
   let ran = 0;
   const service = new ObjectService({store, runTouchup: async () => { ran++; throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/c',
@@ -278,7 +278,7 @@ test('photos alone, with no description and no scan, are refused before anything
 });
 
 test('a deleted project leaves a project.deleted event that says who deleted it; a refused delete leaves none', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
+  const root = await tempDir('objects-svc-');
   const store = new ObjectStore(join(root, 'objects'));
   const events = [];
   const service = new ObjectService({store, runTouchup: async input => { await new Promise(r => input.signal.addEventListener('abort', r, {once: true})); throw new Error('stopped'); },
@@ -314,7 +314,7 @@ test('an object can be deleted, but not while it is being worked on', async () =
 });
 
 test('a pass runs the printer MCP as the companion runs it now (after an MCP update), not the profile it started with', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'objects-svc-'));
+  const root = await tempDir('objects-svc-');
   const store = new ObjectStore(join(root, 'objects'));
   const seen = [];
   const updated = {backend: 'bambu-printer-mcp', process: {command: '/opt/homebrew/bin/npx', args: ['-y', 'bambu-printer-mcp@1.1.50']}};

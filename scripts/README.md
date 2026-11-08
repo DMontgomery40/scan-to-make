@@ -62,6 +62,15 @@ Debug builds, tests and the CI workflows are not guarded. For local debugging on
 `STM_TRUNK_OVERRIDE="<why>"` lets a build through, warns, and logs the head, branch and reason to
 `~/.local/state/counterpart/trunk-overrides.log`. Never install an override build for David or publish one.
 
+## JS test runner: `test-with-temp-guard.mjs`
+
+The `test` scripts of `services/companion`, `services/printer-handoff`, `services/project` and
+`packages/contracts` run their suites through it. It gives the suite a private `TMPDIR` and fails
+if anything is left in it afterwards, so a test that creates a temp folder without removing it
+fails instead of filling `/tmp` (2026-11-08: ~61,000 leftover test folders filled a 9 GB tmpfs).
+In companion tests, helpers without a test context create temp folders through
+`tests/support/temp.mjs`, which removes them when the test file finishes.
+
 ## Before every merge: `branch_check.py`
 
 David, 2026-11-01: "make sure ... no one is writing on top of each other and in worktrees that have already been changed by a sibling session next door and all of sudden nothing agrees."

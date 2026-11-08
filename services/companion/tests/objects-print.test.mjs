@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {DispatchedPrintError, HandoffBundleStore, InMemoryElicitationRelay} from '@scan-to-make/printer-handoff';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError, sendingWords} from '../dist/objects/service.js';
@@ -11,13 +10,14 @@ import {createObjectRoutes} from '../dist/objects/http.js';
 import {createServer} from 'node:http';
 import {PrintEstimateSchema} from '@scan-to-make/contracts/counterpart';
 import {showing, showingRunner} from './support/shown-print.mjs';
+import {tempDir} from './support/temp.mjs';
 
 const STL = Buffer.from('solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n' + ' '.repeat(40));
 // The advertised Bambu hardware-confirmation schema (including its unchecked default).
 const CONFIRM = {type: 'object', properties: {confirmed: {type: 'boolean', title: 'I checked the printer and confirm this operation', default: false}}, required: ['confirmed']};
 
 async function setup({runnerFails, afterDispatch, uncertain, objects = 1, slowMs = 0, schema = CONFIRM, mode = 'form', timeoutMs = 5000, inventory, progressUpdates, printerReport, relayExpiresEarlyMs} = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'objects-print-'));
+  const root = await tempDir('objects-print-');
   const store = new ObjectStore(join(root, 'objects'));
   const relay = new InMemoryElicitationRelay({timeoutMs});
   if (relayExpiresEarlyMs) {
@@ -321,6 +321,7 @@ test('the MCP\'s upload progress shows as "Sending to the printer… 62%", logge
   assert.deepEqual(sending.print.events.map(x => x.message), ['Requesting print. Waiting for the printer service…', 'Sending to the printer…']);
   assert.equal(sendingWords(0, total), 'Sending to the printer… 0%');
   assert.equal(sendingWords(total, total), 'Sending to the printer… 100%');
+  await service.close();
 });
 
 test('later upload percentages reach the clients through the silent project.updated, never another announcement', async () => {
@@ -334,6 +335,7 @@ test('later upload percentages reach the clients through the silent project.upda
   const refreshes = emitted.filter(e => e.type === 'project.updated' && e.projectId === object.id);
   assert.deepEqual(refreshes.map(e => e.data), [{keys: ['progress']}], 'the last percentage is always delivered');
   assert.equal(emitted.filter(e => e.type === 'print.preparing').length, 1);
+  await service.close();
 });
 
 test('an existing failed attempt shows the estimate saved with its print, and the app never reads its sliced file for one', async () => {
@@ -399,7 +401,7 @@ test("Bambu Studio's words reach the project: its error is the failure, its warn
   const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
   const studio = async name => JSON.parse(await readFile(new URL(`slicer-results/${name}.json`, fixtures), 'utf8'));
   const run = async result => {
-    const root = await mkdtemp(join(tmpdir(), 'objects-print-studio-'));
+    const root = await tempDir('objects-print-studio-');
     t.after(() => rm(root, {recursive: true, force: true}));
     const log = join(root, 'calls.jsonl');
     await writeFile(log, '');
@@ -449,7 +451,7 @@ test("Bambu Studio's words reach the project: its error is the failure, its warn
 test('the fixture MCP\'s upload progress reaches project.progress and project.updated, through 100%, past toolMs', async t => {
   const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
   const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
-  const root = await mkdtemp(join(tmpdir(), 'objects-print-upload-'));
+  const root = await tempDir('objects-print-upload-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const log = join(root, 'calls.jsonl');
   await writeFile(log, '');
@@ -506,7 +508,7 @@ test("an estimate carries Bambu Studio's words: its warning as slicerWarning, it
   const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
   const studio = async name => JSON.parse(await readFile(new URL(`slicer-results/${name}.json`, fixtures), 'utf8'));
   const estimate = async (result, request = {}) => {
-    const root = await mkdtemp(join(tmpdir(), 'objects-estimate-studio-'));
+    const root = await tempDir('objects-estimate-studio-');
     t.after(() => rm(root, {recursive: true, force: true}));
     const log = join(root, 'calls.jsonl');
     await writeFile(log, '');
@@ -580,7 +582,7 @@ test("the designer's supports choice reaches the slicer as it is, and an MCP tha
   const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
   const fixtures = new URL('../../printer-handoff/tests/fixtures/', import.meta.url);
   const estimate = async ({supports, mcpSupports, kind}) => {
-    const root = await mkdtemp(join(tmpdir(), 'objects-supports-'));
+    const root = await tempDir('objects-supports-');
     t.after(() => rm(root, {recursive: true, force: true}));
     const log = join(root, 'calls.jsonl');
     await writeFile(log, '');

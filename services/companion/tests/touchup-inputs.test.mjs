@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, readdir, readFile, writeFile, copyFile} from 'node:fs/promises';
+import {readdir, readFile, writeFile, copyFile} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
+import {tempDir} from './support/temp.mjs';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {prepareTouchupPass, NoPhotosError} from '../dist/touchup/inputs.js';
 
 const fixtures = fileURLToPath(new URL('./fixtures/touchup/', import.meta.url));
 const fixture = name => join(fixtures, name);
-const temp = prefix => mkdtemp(join(tmpdir(), prefix));
+const temp = tempDir;
 
 async function walk(dir, base = dir) {
   const out = [];

@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {chmod, mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile} from 'node:fs/promises';
+import {chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {macReconstructRunner, progressWords, NEEDS_MACOS_27, RECONSTRUCTION_FAILED} from '../dist/objects/reconstruct.js';
+import {tempDir} from './support/temp.mjs';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 const manifest = images => ({version: 1, images, depthRequired: true});
 
 async function setup({reconstruct} = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'objects-handheld-'));
+  const root = await tempDir('objects-handheld-');
   const store = new ObjectStore(join(root, 'objects'));
   const touchups = [], builds = [], changes = [];
   const runTouchup = async input => {
@@ -263,7 +263,7 @@ test('mac-reconstruct output becomes progress words and plain errors', async t =
   assert.equal(progressWords({progress: 0.416}), 'Building the model from your photos (42%).');
   assert.equal(progressWords({skipped: 4}), undefined);
 
-  const root = await mkdtemp(join(tmpdir(), 'mac-reconstruct-fake-'));
+  const root = await tempDir('mac-reconstruct-fake-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const fake = async (name, body) => {
     const path = join(root, name);
@@ -287,7 +287,7 @@ test('mac-reconstruct output becomes progress words and plain errors', async t =
 
 
 async function diagnosticFixture(t, script) {
-  const root = await mkdtemp(join(tmpdir(), 'reconstruct-diagnostic-'));
+  const root = await tempDir('reconstruct-diagnostic-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const binary = join(root, 'helper');
   await writeFile(binary, `#!${process.execPath}\n${script}\n`, {mode: 0o755});

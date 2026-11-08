@@ -40,7 +40,7 @@
   "scripts": {
     "prebuild": "test -d ../printer-handoff/node_modules/typescript || npm ci --prefix ../printer-handoff --ignore-scripts",
     "build": "npm run build --prefix ../project && npm run build --prefix ../printer-handoff && tsc -p tsconfig.json",
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "test": "npm run build && node ../../scripts/test-with-temp-guard.mjs tests/*.test.mjs",
     "serve": "npm run build && node dist/server-cli.js"
   },
   "dependencies": {

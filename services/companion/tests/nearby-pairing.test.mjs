@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {execFileSync, spawnSync} from 'node:child_process';
 import {EventEmitter} from 'node:events';
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {PassThrough} from 'node:stream';
 import {createHash, randomBytes, X509Certificate} from 'node:crypto';
@@ -15,12 +14,13 @@ import {NearbyPairing} from '../dist/nearby-pairing.js';
 import {advertise, instanceName} from '../dist/bonjour.js';
 import {parsePairingLink} from '@scan-to-make/contracts/pairing-link';
 import {NEARBY_PICKUP_MS, NEARBY_SESSION_MS, nearbyCodeFromDigest, nearbyCodeInput, nearbyCommitInput} from '@scan-to-make/contracts/nearby-pairing';
+import {tempDir} from './support/temp.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest();
 const b64 = bytes => Buffer.from(bytes).toString('base64url');
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'nearby-')); t.after(() => rm(root, {recursive: true, force: true}));
+  const root = await tempDir('nearby-'); t.after(() => rm(root, {recursive: true, force: true}));
   execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1', '-subj', '/CN=127.0.0.1',
     '-addext', 'subjectAltName=IP:127.0.0.1', '-keyout', join(root, 'key.pem'), '-out', join(root, 'cert.pem')], {stdio: 'ignore'});
   const cert = await readFile(join(root, 'cert.pem')), key = await readFile(join(root, 'key.pem'));

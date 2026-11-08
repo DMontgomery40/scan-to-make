@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, rm, stat} from 'node:fs/promises';
+import {rm, stat} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {IcloudEnrolment, ENROLMENT_TOKEN_LIFETIME_MS, ENROLMENT_TOKEN_REPLACE_MS} from '../dist/icloud-enrolment.js';
+import {tempDir} from './support/temp.mjs';
 
 async function setup(t) {
-  const root = await mkdtemp(join(tmpdir(), 'icloud-enrolment-'));
+  const root = await tempDir('icloud-enrolment-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const path = join(root, 'private-auth', 'mac-id');
   const clock = {now: 1000};

@@ -2,14 +2,14 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {runMakePrintable} from '../dist/scan-printable.js';
 import {readScanMaterials} from '../dist/scan-model-assets.js';
 import {cube,png,sha} from './fixtures/scan-processing.mjs';
 import {PrinterMcpClient} from '@scan-to-make/printer-handoff';
 import {createScanCleanupRunner} from '../dist/scan-cleanup-runner.js';
+import {tempDir} from './support/temp.mjs';
 
 test('real Blender preserves captured geometry and UVs while uniting shells', {skip:!process.env.BLENDER,timeout:120000},()=>{
  const result=spawnSync(process.env.BLENDER,['--background','--factory-startup','--python-exit-code','1','--threads','2','--python',
@@ -18,7 +18,7 @@ test('real Blender preserves captured geometry and UVs while uniting shells', {s
 });
 
 test('headless MCP cancellation stops its actual Blender child', {skip:!process.env.BLENDER,timeout:30000},async t=>{
- const root=await mkdtemp(join(tmpdir(),'printable-cancel-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('printable-cancel-');t.after(()=>rm(root,{recursive:true,force:true}));
  const pidFile=join(root,'pid'),bridge=fileURLToPath(new URL('../python/headless_blender_mcp.py',import.meta.url));
  const client=new PrinterMcpClient({backend:'bambu-printer-mcp',process:{command:process.env.CAPTURE_TEST_PYTHON??'/usr/bin/python3',args:[bridge],env:{BLENDER_STM_EXECUTABLE:process.env.BLENDER}},timeouts:{toolMs:20000}});
  t.after(()=>client.close());await client.connect();
@@ -36,7 +36,7 @@ test('headless MCP cancellation stops its actual Blender child', {skip:!process.
 });
 
 test('chosen PBR/normal material bytes survive, and unchecked maps fail closed',async t=>{
- const root=await mkdtemp(join(tmpdir(),'printable-material-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('printable-material-');t.after(()=>rm(root,{recursive:true,force:true}));
  const obj=Buffer.from('mtllib mesh.mtl\n'+cube);
  const mtl=Buffer.from('newmtl picked\nKd .4 .2 .1\nPr .8\nmap_Kd mesh_basecolor_0.png\nmap_Bump -bm 1 mesh_normal_0.png\n');
  const files={'mesh.mtl':mtl,'mesh_basecolor_0.png':png,'mesh_normal_0.png':png};
@@ -58,7 +58,7 @@ test('chosen PBR/normal material bytes survive, and unchecked maps fail closed',
 });
 
 test('make-printable commits only independently verified final bundles',async t=>{
- const root=await mkdtemp(join(tmpdir(),'printable-publish-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('printable-publish-');t.after(()=>rm(root,{recursive:true,force:true}));
  const input=join(root,'input');await mkdir(input);await writeFile(join(input,'corrected.obj'),cube);
  const repairTool=join(root,'external-tools','repair.py');
  const base={input,repairTool,hashes:{'corrected.obj':sha(cube)},blender:'/unused/blender',python:'/usr/bin/python3',signal:new AbortController().signal};
@@ -77,7 +77,7 @@ test('make-printable commits only independently verified final bundles',async t=
 });
 
 test('cleanup finalizes the selected correction before its publisher reads geometry',async t=>{
- const root=await mkdtemp(join(tmpdir(),'printable-cleanup-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('printable-cleanup-');t.after(()=>rm(root,{recursive:true,force:true}));
  const ctx={source:join(root,'source'),imported:join(root,'imported'),repaired:join(root,'repaired'),advice:join(root,'advice'),corrected:join(root,'corrected'),stills:[],signal:new AbortController().signal};
  await mkdir(ctx.imported);
  const fake=join(root,'correct.py');

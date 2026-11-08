@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {mkdtemp,rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {request} from 'node:http';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
+import {tempDir} from './support/temp.mjs';
 
 const display = await import('../dist/pairing-display.js').catch(e => {
   if(e.code === 'ERR_MODULE_NOT_FOUND') return {};
   throw e;
 });
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(),'qr-pair-'));
+  const root = await tempDir('qr-pair-');
   t.after(()=>rm(root,{recursive:true,force:true}));
   let now=Date.now();
   const store=await RemoteAuthStore.create(join(root,'auth'),{

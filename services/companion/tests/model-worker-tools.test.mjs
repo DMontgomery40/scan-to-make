@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, writeFile, rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {mkdir, writeFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {installedModelWorkerTools} from '../dist/model-worker-tools.js';
+import {tempDir} from './support/temp.mjs';
 
 test('cleanup helper reads only independent tool paths from its app-owned configuration', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'stm-worker-tools-'));
+  const root = await tempDir('stm-worker-tools-');
   t.after(() => rm(root, {recursive:true, force:true}));
   await writeFile(join(root, 'companion.env'), 'SCAN_TO_MAKE_CAPTURE_PYTHON="/independent workers/.venv/bin/python3"\nSCAN_TO_MAKE_AI_JUDGE_TOOL="/independent workers/judge"\nSCAN_TO_MAKE_SCAN_BLENDER=/Applications/Blender.app/Contents/MacOS/Blender\nSCAN_TO_MAKE_MODEL_KEY=private-fixture\nHOME=/untrusted\nSCAN_TO_MAKE_AI_ENDPOINT=https://untrusted.invalid\n');
   assert.deepEqual(installedModelWorkerTools(root), {
@@ -17,7 +17,7 @@ test('cleanup helper reads only independent tool paths from its app-owned config
 });
 
 test('fresh helper invents no judge; migrated workers retain their adjacent installed judge', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'stm-worker-tools-'));
+  const root = await tempDir('stm-worker-tools-');
   t.after(() => rm(root, {recursive:true, force:true}));
   assert.deepEqual(installedModelWorkerTools(root), {});
   const workers = join(root, 'workers');

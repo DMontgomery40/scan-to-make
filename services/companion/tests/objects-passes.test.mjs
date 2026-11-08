@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {basename, join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {createServer} from 'node:http';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {PassTimings} from '../dist/touchup/stages.js';
 import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
+import {tempDir} from './support/temp.mjs';
 
 const STL = 'solid x\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid x\n';
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(20, 3)]);
@@ -16,7 +16,7 @@ const until = async check => { for (let i = 0; i < 300; i++) { const value = awa
 
 /** A scripted touch-up worker: each pass follows the next outcome. */
 async function setup(t, outcomes) {
-  const root = await mkdtemp(join(tmpdir(), 'objects-passes-'));
+  const root = await tempDir('objects-passes-');
   // Stage timings are written in the background after a pass ends: retry the cleanup.
   t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
   const store = new ObjectStore(join(root, 'objects')), events = [], inputs = [];
@@ -203,7 +203,7 @@ test('a failed pass says why as an event; correction photos make it a late-photo
   assert.equal(failed.state, 'failed');
   assert.equal(f.events.at(-1).type, 'pass.failed');
   assert.equal(f.events.at(-1).detail.reason, 'Blender stopped responding.');
-  const folder = await mkdtemp(join(tmpdir(), 'objects-passes-photo-'));
+  const folder = await tempDir('objects-passes-photo-');
   t.after(() => rm(folder, {recursive: true, force: true}));
   await writeFile(join(folder, 'side.jpg'), JPEG);
   await dispatch('objects.correct', {id: object.id, note: 'Use this side view', photos: [join(folder, 'side.jpg')]});
@@ -249,7 +249,7 @@ test('an Ask pointing at a PNG render is still served at asks/<id>.jpg, as the p
 });
 
 test('a project from before titles gets one the first time it is listed, once, and never shows a null title meanwhile', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'objects-titles-'));
+  const root = await tempDir('objects-titles-');
   t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
   const store = new ObjectStore(join(root, 'objects'));
   const old = await store.update((await store.create('A mount for my mic stand that clamps on a 25 mm pole')).id, o => ({...o, state: 'ready'}));
@@ -314,7 +314,7 @@ test('a person renaming during a pass wins over the worker title', async t => {
 });
 
 test('a person renaming while the title generator answers keeps their name', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'title-race-'));
+  const root = await tempDir('title-race-');
   t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
   const store = new ObjectStore(join(root, 'objects'));
   const object = await store.update((await store.create('A holder')).id, o => ({...o, state: 'ready'}));

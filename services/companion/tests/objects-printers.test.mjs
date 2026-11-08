@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 import {PrinterHandoffRunner} from '@scan-to-make/printer-handoff';
 import {loadPrinterCatalog} from '../dist/objects/printers.js';
 import {SETUP_FIELDS, withSetupMcp, writeSetupFieldsCache} from './support/setup-mcp.mjs';
+import {tempDir} from './support/temp.mjs';
 
 async function fixture(t) {
-  const home = await mkdtemp(join(tmpdir(), 'printer-catalog-'));
+  const home = await tempDir('printer-catalog-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const current = {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/ssh', args: ['printer-tunnel'], cwd: home, env: {MCP_TRANSPORT: 'stdio'}}, selection: {model: 'p1s'}};
   const put = async (file, value) => {
@@ -343,7 +343,7 @@ test('Add printer: found MCP folders and the printers each MCP finds; Check; Add
   const {PrinterSetup, envFor} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
   const {stat} = await import('node:fs/promises');
-  const home = await mkdtemp(join(tmpdir(), 'printer-setup-'));
+  const home = await tempDir('printer-setup-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
   // The Mac's own P1S (bambu-printer-mcp), and a clone of mcp-3D-printer-server set up for the same P1S, in no MCP config.
@@ -497,7 +497,7 @@ test('a found install missing the model its MCP needs: Counterpart fills only BA
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
   const {stat, chmod} = await import('node:fs/promises');
-  const home = await mkdtemp(join(tmpdir(), 'printer-fill-'));
+  const home = await tempDir('printer-fill-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
   await put('.env', 'PRINTER_HOST=192.0.2.50\nPRINTER_TYPE=octoprint\n');
@@ -572,7 +572,7 @@ test('a found install missing the model its MCP needs: Counterpart fills only BA
 test('a printer\'s services rebuilt after Complete Settings keep its pooled session and confirmation relay, and carry the new model', async t => {
   const {createPrintHandoffServices} = await import('../dist/print-handoff-http.js');
   const {PrinterSessionPool} = await import('@scan-to-make/printer-handoff');
-  const dir = await mkdtemp(join(tmpdir(), 'printer-services-'));
+  const dir = await tempDir('printer-services-');
   const pool = new PrinterSessionPool();
   t.after(async () => { await pool.close(); await rm(dir, {recursive: true, force: true}); });
   const config = {backend: 'mcp-3d-printer-server', process: {command: '/usr/local/bin/node', args: ['/x/dist/index.js'], cwd: '/x'}, selection: {printerType: 'bambu'}};
@@ -587,7 +587,7 @@ test('a printer\'s services rebuilt after Complete Settings keep its pooled sess
 test('review fix (#295): an MCP known only through an npx profile is not "installed": Download gets a copy Check and Add can run', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
-  const home = await mkdtemp(join(tmpdir(), 'printer-setup-npx-'));
+  const home = await tempDir('printer-setup-npx-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const env = {...hostEnvironment(join(home, 'Library/Application Support/Scan to Make')), home};
   const npx = {backend: 'mcp-3d-printer-server', process: {command: '/opt/homebrew/bin/npx', args: ['-y', 'mcp-3d-printer-server']}};
@@ -607,7 +607,7 @@ test('an mcp-3D-printer-server Bambu printer with no route gets the authenticate
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
   const {stat, chmod} = await import('node:fs/promises');
-  const home = await mkdtemp(join(tmpdir(), 'printer-route-'));
+  const home = await tempDir('printer-route-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
   // The Mac's own bambu-printer-mcp, run over ssh into ~/bambu-printer-mcp (resolveMcpInstall's via.cwd), printing through FULU.
@@ -749,7 +749,7 @@ test('Complete Settings repairs a copied FULU route with the source MCP session 
 test('review fix (#295): a printer that only borrows a found checkout\'s code doesn\'t hide that checkout\'s own printer', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
-  const home = await mkdtemp(join(tmpdir(), 'setup-borrow-'));
+  const home = await tempDir('setup-borrow-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
   const clone = join(home, 'mcp-3D-printer-server');
@@ -799,7 +799,7 @@ test('public aliases include every canonical duplicate, including two configurat
 test('a printer\'s missing settings show as soon as its MCP\'s fields are read, without a restart (Cursor review on #346)', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
-  const home = await mkdtemp(join(tmpdir(), 'printer-fields-'));
+  const home = await tempDir('printer-fields-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
   const clone = join(home, 'mcp-3D-printer-server');
@@ -824,7 +824,7 @@ test('an MCP updated in place is asked again; one slow MCP never makes Find prin
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
   const {utimes} = await import('node:fs/promises');
-  const home = await mkdtemp(join(tmpdir(), 'printer-probes-'));
+  const home = await tempDir('printer-probes-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const data = join(home, 'Library/Application Support/Scan to Make');
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
@@ -868,7 +868,7 @@ test('an MCP updated in place is asked again; one slow MCP never makes Find prin
 test('an MCP that was only slow is asked again, not reported as needing an update; a stalled first MCP leaves the second its time (Codex review on #346)', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
-  const home = await mkdtemp(join(tmpdir(), 'printer-retry-'));
+  const home = await tempDir('printer-retry-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const data = join(home, 'Library/Application Support/Scan to Make');
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
@@ -905,7 +905,7 @@ test('an MCP that was only slow is asked again, not reported as needing an updat
 test('an odd time budget still lets every MCP listen: shares are whole milliseconds (Codex review on #346)', async t => {
   const {PrinterSetup} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
-  const home = await mkdtemp(join(tmpdir(), 'printer-share-'));
+  const home = await tempDir('printer-share-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const data = join(home, 'Library/Application Support/Scan to Make');
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
@@ -944,7 +944,7 @@ test('an mcp-3D-printer-server folder whose .env sets no PRINTER_TYPE is the kin
 test('Check reads only the chosen MCP\'s fields and answers inside one budget, even when the printer stalls (Codex review on #346)', async t => {
   const {PrinterSetup, PrinterFormSchema} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
-  const home = await mkdtemp(join(tmpdir(), 'printer-check-budget-'));
+  const home = await tempDir('printer-check-budget-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const data = join(home, 'Library/Application Support/Scan to Make');
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
@@ -979,7 +979,7 @@ test('Check reads only the chosen MCP\'s fields and answers inside one budget, e
 test('a configured folder is found while the MCPs listen; Add names its printer without starting the other MCP (Codex review on #346)', async t => {
   const {PrinterSetup, PrinterFormSchema} = await import('../dist/printing/setup.js');
   const {hostEnvironment} = await import('../dist/printing/mcp-install.js');
-  const home = await mkdtemp(join(tmpdir(), 'printer-folder-budget-'));
+  const home = await tempDir('printer-folder-budget-');
   t.after(() => rm(home, {recursive: true, force: true}));
   const put = async (file, text) => { await mkdir(join(home, file, '..'), {recursive: true}); await writeFile(join(home, file), text); };
   const data = join(home, 'Library/Application Support/Scan to Make');

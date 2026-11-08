@@ -4,10 +4,11 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {ModelAccessService} from '../dist/model-access.js';
 import {RuntimeSettings} from '../dist/runtime-settings.js';
+import {tempDir} from './support/temp.mjs';
 const claimantId=randomUUID();
 
 async function fixture(t) {
-  const root=await mkdtemp('/tmp/stm-runtime-settings-');
+  const root=await tempDir('stm-runtime-settings-');
   t.after(()=>rm(root,{recursive:true,force:true}));
   const ai=await ModelAccessService.open(root,async()=>({exitCode:0,stdout:'{"ok":true}'}));
   t.after(()=>ai.close());
@@ -100,7 +101,7 @@ test('real server and local socket bridge preserve CAS, permissions and Mac-only
   const {CompanionSettingsStore}=await import('../dist/settings.js');
   const {startCompanionServer}=await import('../dist/server.js');
   const {createControlDispatcher}=await import('../dist/local-control-services.js');
-  const root=await mkdtemp('/tmp/stm-runtime-http-');t.after(()=>rm(root,{recursive:true,force:true}));
+  const root=await tempDir('stm-runtime-http-');t.after(()=>rm(root,{recursive:true,force:true}));
   const auth=await RemoteAuthStore.create(join(root,'auth'),{host:'companion.example-tail.ts.net',allowedLogins:['alice@example.test']});
   async function phone(scopes){const {code}=await auth.createPairing('alice@example.test',scopes);return auth.exchange('alice@example.test',{code,deviceName:'Test'});}
   const full=await phone(['projects:read','projects:write']),readOnly=await phone(['projects:read']);
@@ -164,7 +165,7 @@ test('fusion.status asks the printer MCP as the companion runs it (with its Move
   const {mkdtemp,rm}=await import('node:fs/promises');
   const {tmpdir}=await import('node:os');
   const {join}=await import('node:path');
-  const root=await mkdtemp(join(tmpdir(),'fusion-status-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const root=await tempDir('fusion-status-');t.after(()=>rm(root,{recursive:true,force:true}));
   // printer-handoff.json's own route is ssh to an older copy; the Move left an override to Counterpart's copy (Nov 6).
   const profile={backend:'bambu-printer-mcp',process:{command:'/usr/bin/ssh',args:['-i','/k','me@127.0.0.1']}};
   const overrides=new McpOverrides(join(root,'overrides.json'));await overrides.load();

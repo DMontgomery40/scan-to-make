@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {runTouchupWorker} from '../dist/touchup/runner.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
 import {publicObject} from '../dist/objects/http.js';
+import {tempDir} from './support/temp.mjs';
 
 test('worker activity contains public text and tool names, never thinking, arguments or credentials', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'objects-worker-'));
+  const root = await tempDir('objects-worker-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const pass = await prepareTouchupPass({root, objectId: 'test', scan: [], photos: [], requirePhotos: false});
   const events = [
@@ -38,7 +38,7 @@ test('worker activity contains public text and tool names, never thinking, argum
 });
 
 test('worker progress persists in event order before failure and survives the next pass', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'objects-activity-'));
+  const root = await tempDir('objects-activity-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const store = new ObjectStore(root), changes = [];
   let attempt = 0;
@@ -74,7 +74,7 @@ test('worker progress persists in event order before failure and survives the ne
 });
 
 test('a long worker pass keeps bounded activity and the final failure', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'objects-activity-bounds-'));
+  const root = await tempDir('objects-activity-bounds-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const service = new ObjectService({store: new ObjectStore(root), claudePath: '/unused', stlInfo: async () => undefined,
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
@@ -92,7 +92,7 @@ test('a long worker pass keeps bounded activity and the final failure', async t 
 });
 
 test('tool progress uses plain language while retained activity keeps exact tool names', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'objects-progress-words-'));
+  const root = await tempDir('objects-progress-words-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const changes = [], names = ['mcp__printer__blender_mcp_call', 'Read', 'WebSearch', 'WebFetch', 'Bash'];
   const service = new ObjectService({store: new ObjectStore(root), claudePath: '/unused', stlInfo: async () => undefined,
@@ -115,7 +115,7 @@ test('tool progress uses plain language while retained activity keeps exact tool
 });
 
 test('final worker messages and thrown errors are redacted everywhere in the public project', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'objects-public-results-'));
+  const root = await tempDir('objects-public-results-');
   t.after(() => rm(root, {recursive: true, force: true}));
   const model = join(root, 'result.stl');
   await writeFile(model, 'solid result\nendsolid result\n');

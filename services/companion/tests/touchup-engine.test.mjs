@@ -1,9 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, writeFile} from 'node:fs/promises';
-import {mkdtempSync} from 'node:fs';
+import {mkdir, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {runTouchup, chooseEngine, printerDesignGuidance, slicingGuidanceUnavailable, slicingGuidanceUnreachable} from '../dist/touchup/touchup.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
@@ -12,6 +10,7 @@ import {runTouchupWorker} from '../dist/touchup/runner.js';
 import {passEstimate, PassTimings, STAGE_DEFAULT_SEC} from '../dist/touchup/stages.js';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
+import {tempDir, tempDirSync} from './support/temp.mjs';
 
 const fixtures = fileURLToPath(new URL('./fixtures/touchup/', import.meta.url));
 const handoff = {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}};
@@ -28,7 +27,7 @@ function bridge(results, tools = ['blender_mcp_status', 'blender_mcp_call', 'fus
 }
 
 test('a pass reads both of the printer MCP\'s prompts, fdm_design and fdm_slicing, and an MCP without prompts gives none', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-guidance-'));
+  const root = await tempDir('touchup-guidance-');
   const fixture = fileURLToPath(new URL('../../printer-handoff/tests/fixtures/fixture-printer-server.mjs', import.meta.url));
   const config = env => ({backend: 'bambu-printer-mcp', process: {command: process.execPath, args: [fixture, 'bambu', join(root, 'calls.jsonl')], cwd: root, env},
     timeouts: {connectMs: 5000, toolMs: 5000, elicitationMs: 5000}});
@@ -41,11 +40,11 @@ test('a pass reads both of the printer MCP\'s prompts, fdm_design and fdm_slicin
 test('a pass doesn\'t start when the printer MCP serves no fdm_slicing: Update it in Settings → Printers', async () => {
   const log = [];
   const fusion = bridge({fusion_mcp_status: text({configured: true, connected: true})});
-  const root = await mkdtemp(join(tmpdir(), 'touchup-engine-'));
+  const root = await tempDir('touchup-engine-');
   const base = {root, objectId: 'obj', scan: [], photos: [], handoff, claudePath: '/c', instructions: 'A hook for a 25 mm rail', kind: 'fit'};
   const deps = guidance => ({
-    lockPath: join(mkdtempSync(join(tmpdir(), 'touchup-engine-lock-')), 'blender.lock'),
-    fusionLockPath: join(mkdtempSync(join(tmpdir(), 'touchup-engine-fusion-')), 'fusion.lock'),
+    lockPath: join(tempDirSync('touchup-engine-lock-'), 'blender.lock'),
+    fusionLockPath: join(tempDirSync('touchup-engine-fusion-'), 'fusion.lock'),
     ensureBlender: async () => {}, resetScene: async () => {}, client: fusion.client,
     prepare: args => prepareTouchupPass(args),
     guidance: async () => { log.push('guidance'); return typeof guidance === 'function' ? guidance() : guidance; },
@@ -104,12 +103,12 @@ test('a project choosing Blender does not open Fusion even for a new design', as
 test('a Fusion pass never touches Blender: no lock, no launch, no scene reset', async () => {
   const log = [];
   const fusion = bridge({fusion_mcp_status: text({configured: true, connected: true})});
-  const root = await mkdtemp(join(tmpdir(), 'touchup-engine-'));
+  const root = await tempDir('touchup-engine-');
   const stages = [];
   const result = await runTouchup({root, objectId: 'obj', scan: [], photos: [], handoff, claudePath: '/c', instructions: 'A hook for a 25 mm rail', kind: 'fit',
     onStage: (stage, engine) => stages.push([stage, engine])}, {
-    lockPath: join(mkdtempSync(join(tmpdir(), 'touchup-engine-lock-')), 'blender.lock'),
-    fusionLockPath: join(mkdtempSync(join(tmpdir(), 'touchup-engine-fusion-')), 'fusion.lock'),
+    lockPath: join(tempDirSync('touchup-engine-lock-'), 'blender.lock'),
+    fusionLockPath: join(tempDirSync('touchup-engine-fusion-'), 'fusion.lock'),
     ensureBlender: async () => { log.push('ensureBlender'); },
     resetScene: async () => { log.push('resetScene'); },
     client: fusion.client,
@@ -130,7 +129,7 @@ test('the worker is told its engine, and a later change starts from the Fusion d
   assert.match(systemRules('fusion'), /named user parameter/);
   assert.doesNotMatch(systemRules('fusion'), /using Blender through MCP/, 'a Fusion worker is never told to model in Blender');
   assert.match(systemRules('blender'), /using Blender through MCP/);
-  const root = await mkdtemp(join(tmpdir(), 'touchup-engine-inv-'));
+  const root = await tempDir('touchup-engine-inv-');
   const pass = await prepareTouchupPass({root, objectId: 'o', scan: [], photos: [], requirePhotos: false});
   const inv = buildTouchupInvocation({pass, printer: handoff.process, claudePath: '/c', instructions: 'A hook', note: 'Make it 1 mm wider', currentModel: true,
     engine: 'fusion', documentId: 'owned-token', handoff, design: {f3d: '/p/current/design.f3d', parameters: '/p/current/parameters.json'}});
@@ -153,7 +152,7 @@ function fakeWorker(answer, message) {
 }
 
 test('the worker\'s title, what-changed list and Ask are checked before anyone sees them', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-engine-worker-'));
+  const root = await tempDir('touchup-engine-worker-');
   const pass = await prepareTouchupPass({root, objectId: 'o', scan: [], photos: [], requirePhotos: false});
   await writeFile(join(pass.outDir, 'touched.stl'), 'solid x\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid x\n');
   await writeFile(join(pass.outDir, 'touched.f3d'), 'f3d');
@@ -168,7 +167,7 @@ test('the worker\'s title, what-changed list and Ask are checked before anyone s
 });
 
 test('pass estimates come from real stage times on this Mac, with defaults until there are some', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'touchup-engine-timings-'));
+  const root = await tempDir('touchup-engine-timings-');
   const timings = new PassTimings(join(root, 'pass-timings.json'));
   assert.deepEqual(await timings.typical('fit', 'blender'), STAGE_DEFAULT_SEC.fit);
   for (const seconds of [100, 300, 200]) await timings.record('fit', 'blender', 'working', seconds);
@@ -183,13 +182,13 @@ test('pass estimates come from real stage times on this Mac, with defaults until
 
 test('design passes hold Fusion across processes from opening the document to the end of the worker', async () => {
   const {acquireBlenderLock} = await import('../dist/touchup/touchup.js');
-  const fusionLockPath = join(mkdtempSync(join(tmpdir(), 'touchup-engine-fusion2-')), 'fusion.lock');
+  const fusionLockPath = join(tempDirSync('touchup-engine-fusion2-'), 'fusion.lock');
   const other = await acquireBlenderLock(fusionLockPath); // another companion holds Fusion
   const fusion = bridge({fusion_mcp_status: text({configured: true, connected: true})});
-  const root = await mkdtemp(join(tmpdir(), 'touchup-engine-'));
+  const root = await tempDir('touchup-engine-');
   let ran = false;
   const pass = runTouchup({root, objectId: 'obj', scan: [], photos: [], handoff, claudePath: '/c', instructions: 'A hook', kind: 'fit'}, {
-    fusionLockPath, lockPath: join(mkdtempSync(join(tmpdir(), 'touchup-engine-lock2-')), 'blender.lock'),
+    fusionLockPath, lockPath: join(tempDirSync('touchup-engine-lock2-'), 'blender.lock'),
     client: fusion.client, prepare: args => prepareTouchupPass(args), guidance: async () => ({design: 'Plan the print.', slicing: 'Its slicer orients it.'}), 
     run: async (inv, p) => { ran = true; return {status: 'done', model: join(p.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
   });
@@ -213,7 +212,7 @@ test('Fusion selection requires a bound identity and imports the prior archive b
 
 test('Fusion worker config carries the binding independently of configured SSH arguments', async () => {
   const {readFile} = await import('node:fs/promises');
-  const pass = await prepareTouchupPass({root: await mkdtemp(join(tmpdir(), 'fusion-config-')), objectId: 'p', scan: [], photos: [], requirePhotos: false});
+  const pass = await prepareTouchupPass({root: await tempDir('fusion-config-'), objectId: 'p', scan: [], photos: [], requirePhotos: false});
   const ssh = {...handoff, process: {command: '/usr/bin/ssh', args: ['-i', '/configured/key', 'localhost', 'forced-printer']}};
   const invocation = buildTouchupInvocation({pass, printer: ssh.process, handoff: ssh, claudePath: '/claude', engine: 'fusion', documentId: 'trusted-document'});
   const entry = invocation.mcpConfig.mcpServers.printer;
@@ -236,7 +235,7 @@ for (const outcome of [
   {status: 'done', archive: 'truncated', closed: [], rejected: true},
   {status: 'done', archive: 'valid', returnedId: 'owned-token', closed: [], rejected: true},
 ]) test(`Fusion archive validation ${JSON.stringify(outcome)}`, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'fusion-owned-lifecycle-'));
+  const root = await tempDir('fusion-owned-lifecycle-');
   const fusion = bridge({
     fusion_mcp_status: text({configured: true, connected: true}),
     fusion_mcp_new_design: args => args.source_f3d
@@ -262,7 +261,7 @@ for (const outcome of [
 });
 
 test('bound Fusion workers redact configured credentials without receiving them in their environment', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'fusion-redaction-'));
+  const root = await tempDir('fusion-redaction-');
   const pass = await prepareTouchupPass({root, objectId: 'o', scan: [], photos: [], requirePhotos: false});
   const secret = 'private-printer-credential';
   const config = {...handoff, process: {...handoff.process, env: {ACCESS_CODE: secret}}};

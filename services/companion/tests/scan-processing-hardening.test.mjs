@@ -1,9 +1,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
+import {mkdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {FileSavedProjectStorage} from '@scan-to-make/project';
 import {ScanProcessingStore} from '../dist/scan-processing.js';
@@ -12,6 +11,7 @@ import {CaptureStore} from '../dist/capture-import.js';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {fixture,fakeRunner} from './fixtures/scan-processing.mjs';
+import {tempDir} from './support/temp.mjs';
 
 const deadOwnerPid=async()=>{const child=spawn(process.execPath,['-e','']);return new Promise(r=>child.once('exit',()=>r(child.pid)));};
 const sleeper=()=>spawn(process.execPath,['-e','setTimeout(()=>{},60000)'],{stdio:'ignore'});
@@ -26,7 +26,7 @@ async function eventually(check,label){
 }
 
 test('instance lock admits one holder, reclaims a dead owner, and release only removes its own lock',async t=>{
- const root=await mkdtemp(join(tmpdir(),'instance-lock-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('instance-lock-');t.after(()=>rm(root,{recursive:true,force:true}));
  const first=await acquireInstanceLock(root);
  await assert.rejects(acquireInstanceLock(root),e=>e.code==='instance-busy');
  await first.release();
@@ -46,7 +46,7 @@ test('instance lock admits one holder, reclaims a dead owner, and release only r
 });
 
 test('a second listener on the same capture directory fails to start until the first closes',async t=>{
- const root=await mkdtemp(join(tmpdir(),'instance-server-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('instance-server-');t.after(()=>rm(root,{recursive:true,force:true}));
  const remoteAuth=await RemoteAuthStore.create(join(root,'auth'),{host:'companion.example-tail.ts.net',allowedLogins:['alice@example.test']});
  const storage=new FileSavedProjectStorage(join(root,'projects'));
  const converter={convert:async()=>{throw new Error('unused');}};

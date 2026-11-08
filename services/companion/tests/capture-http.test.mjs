@@ -1,7 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,writeFile,rm,readdir} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile,writeFile,rm,readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {request as httpRequest} from 'node:http';
 import {execFile} from 'node:child_process';
@@ -12,11 +11,12 @@ import {CaptureStore} from '../dist/capture-import.js';
 import {createCaptureConverter} from '../dist/capture-converter.js';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
+import {tempDir} from './support/temp.mjs';
 const forwarded=JSON.parse(await readFile(new URL('./fixtures/tailscale-serve-v1.94.2.json',import.meta.url),'utf8')).expected;
 const python=process.env.CAPTURE_TEST_PYTHON??'python3';
 const project={formatVersion:'0.2.0',id:'phone',revision:7,brief:{object:'Bottle',context:'Drawer',addition:'Holder'},fit:null,preview:null,acceptedArtifact:null};
 async function fixture(t,wrap=x=>x){
- const root=await mkdtemp(join(tmpdir(),'capture-http-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('capture-http-');t.after(()=>rm(root,{recursive:true,force:true}));
  const remoteAuth=await RemoteAuthStore.create(join(root,'auth'),{host:'companion.example-tail.ts.net',allowedLogins:['alice@example.test']});
  const invitation=await remoteAuth.createPairing('alice@example.test',['projects:read','projects:write','captures:read','captures:import']);
  const phone=await remoteAuth.exchange('alice@example.test',{code:invitation.code,deviceName:'Fixture'});

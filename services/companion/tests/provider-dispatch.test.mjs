@@ -1,15 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {ModelAccessService} from '../dist/model-access.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {ObjectStore} from '../dist/objects/store.js';
+import {tempDir} from './support/temp.mjs';
 
 const invocation=root=>({command:'/must-not-run-claude',args:['-p','--append-system-prompt','rules','--json-schema','{}','make a bracket'],cwd:root,env:{},mcpConfigPath:join(root,'mcp.json'),mcpConfig:{mcpServers:{}}});
 test('project dispatch uses saved Codex then API after restart; changing selection cannot retarget an admitted pass; Off refuses dispatch',async t=>{
- const root=await mkdtemp('/tmp/provider-dispatch-');t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('provider-dispatch-');t.after(()=>rm(root,{recursive:true,force:true}));
  const calls=[];
  const worker=async(choice,args)=>{calls.push({choice,args});return {exitCode:0,stdout:JSON.stringify({toolCalls:0,seconds:0,exitCode:0,stderrTail:'',resultEvent:{structured_output:{status:'failed',summary:'fixture'}}})};};
  let access=await ModelAccessService.open(root,worker);
@@ -35,7 +36,7 @@ test('project dispatch uses saved Codex then API after restart; changing selecti
 
 test('title and completion helpers use the selected worker with tools disabled',async t=>{
  const {generateTitle}=await import('../dist/objects/title.js');const {reportsCompletion}=await import('../dist/objects/completion-intent.js');
- const root=await mkdtemp('/tmp/provider-text-');t.after(()=>rm(root,{recursive:true,force:true}));const seen=[];
+ const root=await tempDir('provider-text-');t.after(()=>rm(root,{recursive:true,force:true}));const seen=[];
  const access=await ModelAccessService.open(root,async(choice,args)=>{
   const {readFile}=await import('node:fs/promises');const input=JSON.parse(await readFile(args[1],'utf8'));seen.push({choice,input});
   const answer=seen.length===1?{title:'Shelf bracket'}:{intent:'works'};
@@ -48,7 +49,7 @@ test('title and completion helpers use the selected worker with tools disabled',
 
 test('cleanup dispatch snapshots the saved provider across a later switch and Off keeps deterministic cleanup',async t=>{
  const {createScanCleanupRunner}=await import('../dist/scan-cleanup-runner.js');
- const root=await mkdtemp('/tmp/provider-cleanup-');t.after(()=>rm(root,{recursive:true,force:true}));const seen=[];
+ const root=await tempDir('provider-cleanup-');t.after(()=>rm(root,{recursive:true,force:true}));const seen=[];
  const access=await ModelAccessService.open(root,async(choice,args)=>{seen.push({choice,args});return {exitCode:0,stdout:'{}'};});
  await access.set(access.get().revision,{kind:'codex-cli'});
  const snapshot=access.cleanupSnapshot();

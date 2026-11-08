@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {execFileSync} from 'node:child_process';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {X509Certificate} from 'node:crypto';
 import {createServer} from 'node:net';
@@ -12,6 +11,7 @@ import {certificatePublicKeySha256} from '../dist/lan-transport.js';
 import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {parsePairingLink} from '@scan-to-make/contracts/pairing-link';
+import {tempDir} from './support/temp.mjs';
 
 const v4=(address,internal=false)=>({address,family:'IPv4',internal,netmask:'255.255.255.0',mac:'',cidr:null});
 const v6=(address)=>({address,family:'IPv6',internal:false,netmask:'ffff:ffff:ffff:ffff::',mac:'',cidr:null,scopeid:0});
@@ -68,7 +68,7 @@ test('v2 origins: the configured address first, then other LANs, the .local name
 });
 
 async function fixture(t) {
- const root=await mkdtemp(join(tmpdir(),'lan-v2-')); t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await tempDir('lan-v2-'); t.after(()=>rm(root,{recursive:true,force:true}));
  execFileSync('openssl',['req','-x509','-newkey','rsa:2048','-nodes','-days','1','-subj','/CN=127.0.0.1','-addext','subjectAltName=IP:127.0.0.1','-keyout',join(root,'key.pem'),'-out',join(root,'cert.pem')],{stdio:'ignore'});
  const cert=await readFile(join(root,'cert.pem')),key=await readFile(join(root,'key.pem'));
  const reservation=createServer(); await new Promise(r=>reservation.listen(0,'127.0.0.1',r));

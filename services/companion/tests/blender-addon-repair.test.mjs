@@ -3,11 +3,11 @@
 // that keeps the add-on's state the way the MCP reports it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, readFile, rm} from 'node:fs/promises';
+import {readFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
-import {tmpdir} from 'node:os';
 import {BlenderAddonRepair, BlenderSetupUnavailableError} from '../dist/touchup/addon-repair.js';
 import {PrintGate} from '../dist/printing/print-gate.js';
+import {tempDir} from './support/temp.mjs';
 
 /** blender_mcp_setup as the MCP answers it: installed and expected protocol, Blender listening, the live handshake. */
 function mcp(state = {}) {
@@ -104,7 +104,7 @@ test('HTTP status requires read scope and repair/check require write scope', asy
   const {RemoteAuthStore} = await import('../dist/remote-auth.js');
   const {request} = await import('node:http');
   const {service} = fixture();
-  const root = await mkdtemp(join(tmpdir(), 'addon-repair-')); t.after(() => rm(root, {recursive: true, force: true}));
+  const root = await tempDir('addon-repair-'); t.after(() => rm(root, {recursive: true, force: true}));
   const remoteAuth = await RemoteAuthStore.create(join(root, 'auth'), {host: 'companion.example-tail.ts.net', allowedLogins: ['alice@example.test']});
   const pair = async scopes => { const invitation = await remoteAuth.createPairing('alice@example.test', scopes); return remoteAuth.exchange('alice@example.test', {code: invitation.code, deviceName: 'Fixture'}); };
   const reader = await pair(['projects:read']), writer = await pair(['projects:read', 'projects:write']);
@@ -122,7 +122,7 @@ test('HTTP status requires read scope and repair/check require write scope', asy
 });
 test('repair can stop waiting for the shared helper lock without acquiring it later', async t => {
   const {acquireBlenderLock} = await import('../dist/touchup/touchup.js');
-  const root = await mkdtemp(join(tmpdir(), 'addon-lock-')); t.after(() => rm(root, {recursive: true, force: true}));
+  const root = await tempDir('addon-lock-'); t.after(() => rm(root, {recursive: true, force: true}));
   const path = join(root, 'blender.lock'), release = await acquireBlenderLock(path);
   await assert.rejects(acquireBlenderLock(path, {pollMs: 2, signal: AbortSignal.timeout(10)}), {name: 'TimeoutError'});
   await release(); const next = await acquireBlenderLock(path); await next();
