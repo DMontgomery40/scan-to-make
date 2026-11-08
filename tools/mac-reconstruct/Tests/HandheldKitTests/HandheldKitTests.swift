@@ -79,25 +79,6 @@ final class HandheldKitTests: XCTestCase {
         XCTAssertThrowsError(try loadSample(image))
     }
 
-    /// The obvious object in a walk-around photo, by common sense: near the middle, nearest the camera, not running
-    /// off the frame, not a speck, and the same thing as in the last photo.
-    func testTheObviousObjectIsCentredNearAndTheSameAsLastTime() {
-        let sign = FoundInstance(label: 1, area: 0.15, u: 0.52, v: 0.48, edges: 0, depth: 0.25)
-        let person = FoundInstance(label: 2, area: 0.30, u: 0.20, v: 0.40, edges: 2, depth: 1.10)
-        let table = FoundInstance(label: 3, area: 0.40, u: 0.50, v: 0.80, edges: 3, depth: 0.22)
-        let screw = FoundInstance(label: 4, area: 0.001, u: 0.50, v: 0.50, edges: 0, depth: 0.20)
-        XCTAssertEqual(ObviousObjectMasker.choose([person, table, sign, screw], last: nil)?.label, 1)
-        // Without depth the middle of the frame and the frame edges still decide.
-        let flat = [person, table, sign].map { var i = $0; i.depth = nil; return i }
-        XCTAssertEqual(ObviousObjectMasker.choose(flat, last: nil)?.label, 1)
-        // Two equal things: the one that continues the last photo's object.
-        let left = FoundInstance(label: 5, area: 0.1, u: 0.35, v: 0.5, edges: 0, depth: 0.3)
-        let right = FoundInstance(label: 6, area: 0.1, u: 0.65, v: 0.5, edges: 0, depth: 0.3)
-        XCTAssertEqual(ObviousObjectMasker.choose([left, right], last: right)?.label, 6)
-        XCTAssertEqual(ObviousObjectMasker.choose([left, right], last: left)?.label, 5)
-        XCTAssertNil(ObviousObjectMasker.choose([screw], last: nil), "nothing worth masking: RealityKit masks that photo")
-    }
-
     /// A Y-up model in metres becomes the STL a project keeps: millimetres, Z up, centred, resting on z = 0.
     func testSTLIsInMillimetresWithEveryTriangle() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("handheldkit-stl-\(UUID().uuidString)")

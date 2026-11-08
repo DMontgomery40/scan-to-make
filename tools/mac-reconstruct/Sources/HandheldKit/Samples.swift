@@ -36,6 +36,14 @@ public func loadSample(_ url: URL) throws -> PhotogrammetrySample {
     return sample
 }
 
+/// One walk-around photo as Apple wrote it: pixels, LiDAR depth, gravity, camera and metadata. Unlike a handheld
+/// photo, gravity stays: the object is still and the phone moves, so gravity says which way is up.
+public func loadWalkAroundSample(_ url: URL) throws -> PhotogrammetrySample {
+    var sample = try PhotogrammetrySample(contentsOf: url)
+    if sample.depthDataMap == nil, let depth = embeddedDepth(in: url) { sample.depthDataMap = depth.pixelBuffer() }
+    return sample
+}
+
 /// EXIF orientations that flip the picture (2, 4, 5, 7). A mirrored photo set rebuilds a mirror-image object,
 /// so the phone must never send one; the front camera's preview is mirrored, its photos must not be.
 public func isMirrored(orientation: Int) -> Bool { [2, 4, 5, 7].contains(orientation) }

@@ -12,8 +12,8 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   rebuilds a walk-around or scan-rig session (the object stays still, the phone moves) without the capture box. The
   companion runs it at `full` on every image a walk-around sent (`ReconstructInput.objectCapture`).
   - Each HEIC becomes a `PhotogrammetrySample` as Apple wrote it: LiDAR depth for scale, gravity and camera.
-  - Its `objectMask` is the obvious object from Vision's foreground instances (`VNGenerateForegroundInstanceMaskRequest`). `ObviousObjectMasker` picks the instance nearest the middle and nearest the camera, that doesn't run off the frame, and that continues the last photo. Inside it, anything more than 0.30 m behind its nearest surface is cut (a person standing behind).
-  - Where Vision finds nothing, the photo stays unmasked and RealityKit masks it itself.
+  - Its `objectMask` comes from `ObjectMasker`, the same masks as `samples` (below). Apple's promptable segmentation is seeded on the foreground blob nearest the middle and nearest the camera (within 0.20 m of the nearest surface), and continues the last photo's seed. With no hand in frame there is nothing to subtract; a person standing behind is.
+  - A mask under 2% of the photo, an empty one, or a Mac before macOS 27 leaves the photo unmasked, and RealityKit masks it itself.
   - The session runs with `isObjectMaskingEnabled`, `featureSensitivity = .high`, `sampleOrdering = .sequential` and `ignoreBoundingBox = true`.
   - Masks are saved as `<dir>/<photo-name>.png`, so a run can be checked afterwards (`turntable-synth overlay`).
 - `mac-reconstruct stl <model.usdz> <output.stl>` writes the model's triangles as a binary STL in millimetres

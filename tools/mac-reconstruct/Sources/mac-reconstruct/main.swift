@@ -18,8 +18,10 @@ import HandheldKit
 //                   [--no-masks] [--save-masks <dir> [--masks-only]]
 //       A walk-around or scan-rig session's own HEICs (the object stays still, the phone moves), without depending
 //       on Object Capture's capture box. Each photo becomes a PhotogrammetrySample as Apple wrote it (LiDAR depth for
-//       scale, gravity, camera), with an object mask from Vision's foreground instances: the obvious object, picked
-//       by ObviousObjectMasker. A photo where Vision finds nothing stays unmasked; RealityKit masks it itself.
+//       scale, gravity, camera) with an object mask from ObjectMasker, the same Vision masks as `samples`: Apple's
+//       promptable segmentation seeded on the foreground blob nearest the middle and the camera. With no hand in
+//       frame there is nothing to subtract; a person behind the object is. A photo whose mask comes back empty, or a
+//       Mac before macOS 27, stays unmasked: RealityKit masks it itself.
 //   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
 //                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 //       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
@@ -132,32 +134,6 @@ func prepareMasks(for files: [URL], in folder: URL) async throws {
     }
 }
 
-/// The obvious object in each walk-around photo, saved as <dir>/<photo-name>.png; no file where Vision found nothing.
-func prepareWalkAroundMasks(for files: [URL], in folder: URL) throws -> Int {
-    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    let masker = ObviousObjectMasker()
-    var masked = 0
-    for (index, file) in files.enumerated() {
-        let sample = try loadWalkAroundSample(file)
-        let depth = sample.depthDataMap.flatMap { DepthImage(buffer: $0) }
-        let result = try masker.mask(image: sample.image, depth: depth)
-        let target = folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
-        try? FileManager.default.removeItem(at: target)
-        var note: [String: Any] = ["stage": "masking", "done": index + 1, "total": files.count, "instances": result.instances]
-        if let mask = result.mask, let chosen = result.chosen {
-            try mask.writePNG(to: target)
-            masked += 1
-            note["coverage"] = (Double(mask.onCount) / Double(mask.width * mask.height) * 1000).rounded() / 1000
-            note["centre"] = [(chosen.u * 100).rounded() / 100, (chosen.v * 100).rounded() / 100]
-            if let d = chosen.depth { note["depthM"] = (Double(d) * 100).rounded() / 100 }
-        } else {
-            note["unmasked"] = file.lastPathComponent
-        }
-        emit(note)
-    }
-    return masked
-}
-
 do {
     let session: PhotogrammetrySession
     if walkaroundMode {
@@ -166,7 +142,17 @@ do {
         // Apple: "If your source images contain depth data, RealityKit uses it to calculate the real-world size."
         emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count])
         let folder = saveMasks ?? FileManager.default.temporaryDirectory.appendingPathComponent("mac-reconstruct-masks-\(UUID().uuidString)")
-        let masked = noMasks ? 0 : try prepareWalkAroundMasks(for: files, in: folder)
+        // Promptable segmentation is new in macOS 27; before that the photos go unmasked rather than failing the scan.
+        let masking = !noMasks && (maskFolder != nil || ObjectMasker.isSupported)
+        if masking { try await prepareMasks(for: files, in: folder) } else if !noMasks { emit(["masks": "unavailable"]) }
+        let maskName = { (file: URL) in folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png") }
+        // A walk-around frames the object large. A mask under 2% of the photo missed it (on David's rig scan: 0.6% and
+        // 1.1%, a corner of the sign) and would hide nearly the whole photo from Apple; that photo goes unmasked instead.
+        func usableMask(_ file: URL) -> GrayImage? {
+            guard masking, let mask = try? GrayImage(contentsOf: maskName(file)) else { return nil }
+            return Double(mask.onCount) >= 0.02 * Double(mask.width * mask.height) ? mask : nil
+        }
+        let masked = files.filter { usableMask($0) != nil }.count
         if masksOnly { emit(["done": folder.path, "masked": masked, "seconds": Int(Date().timeIntervalSince(started))]); exit(0) }
         emit(["samples": files.count, "masked": masked, "stage": "reconstructing"])
         // Loaded lazily, as Apple asks for a sequence: a few hundred full-resolution photos don't sit in memory together.
@@ -177,10 +163,7 @@ do {
                     do {
                         var sample = try loadWalkAroundSample(file)
                         if noDepth { sample.depthDataMap = nil }
-                        let maskURL = folder.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png")
-                        if !noMasks, FileManager.default.fileExists(atPath: maskURL.path) {
-                            sample.objectMask = try GrayImage(contentsOf: maskURL).pixelBuffer()
-                        }
+                        if let mask = usableMask(file) { sample.objectMask = mask.pixelBuffer() }
                         return sample
                     } catch {
                         emit(["skipped": file.lastPathComponent, "reason": String(describing: error)])
