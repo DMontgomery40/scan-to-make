@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 image=${1:-scan-to-make-companion:local}
-name="stm-package-smoke-$$"
+name="stm-package-smoke-$(date +%s)-$$"
 volume="$name-data"
 cleanup() {
-  docker rm -f "$name" >/dev/null 2>&1 || true
-  docker volume rm "$volume" >/dev/null 2>&1 || true
+  local container
+  for container in "$name" "$name-init" "$name-tests"; do
+    if docker container inspect "$container" >/dev/null 2>&1; then
+      docker stop --timeout 5 "$container" >/dev/null
+      printf 'Retained stopped smoke container: %s\n' "$container"
+    fi
+  done
 }
 trap cleanup EXIT
 docker volume create "$volume" >/dev/null
-docker run --rm -v "$volume:/data" "$image" node /app/services/companion/dist/remote-auth-cli.js \
+docker run --name "$name-init" -v "$volume:/data" "$image" node /app/services/companion/dist/remote-auth-cli.js \
   init /data/auth smoke.example.ts.net smoke@example.com
 # Isolated network namespace: this smoke test never publishes a host port.
 docker run -d --name "$name" -v "$volume:/data" \
@@ -30,5 +35,5 @@ docker exec "$name" python3 -c 'from pxr import Usd; from PIL import Image; impo
 # Exercise the real correction sandbox as the image's non-root user.
 docker exec "$name" python3 -m unittest discover -s tools/scan-correct/tests -p test_service.py -k network_sandbox -v
 docker exec "$name" xvfb-run -a python3 -m unittest discover -s tools/scan-repair/tests -p test_repair.py -k test_render_and_decimate -v
-docker run --rm --entrypoint node "$image" --test /app/services/companion/tests/lan-pairing.test.mjs
+docker run --name "$name-tests" --entrypoint node "$image" --test /app/services/companion/tests/lan-pairing.test.mjs
 echo 'Companion container smoke passed'

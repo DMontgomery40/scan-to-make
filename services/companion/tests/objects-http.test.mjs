@@ -414,11 +414,10 @@ test('Status is set by hand: works makes the project confirmed ("It works"), and
 });
 
 test('the Mac sets Status over the control socket; project.updated tells the apps; the flag says so', async t => {
-  const {mkdtemp: temp, rm: remove, mkdir: makeDir, writeFile: write} = await import('node:fs/promises');
-  const {tmpdir: tmp} = await import('node:os');
+  const {rm: remove, mkdir: makeDir, writeFile: write} = await import('node:fs/promises');
   const {ObjectStore: Store} = await import('../dist/objects/store.js');
   const {createControlDispatcher} = await import('../dist/local-control-services.js');
-  const root = await temp(join(tmp(), 'objects-status-'));
+  const root = await tempDir('objects-status-');
   t.after(() => remove(root, {recursive: true, force: true}));
   const store = new Store(join(root, 'objects')), events = [];
   const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/c',

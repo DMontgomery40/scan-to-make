@@ -3,12 +3,33 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 image=${1:-scan-to-make-companion:local}
 files=(.env.sentinel services/companion/node_modules/SENTINEL packaging-sentinel.usdz deploy/companion/tls/KEY-SENTINEL.pem)
-# Never replace a developer's existing file; cleanup removes only our probes.
+# Never replace a developer's existing file; cleanup trashes only our probes.
 for file in "${files[@]}"; do
   [ ! -e "$file" ] || { echo "Sentinel already exists: $file" >&2; exit 1; }
 done
 tmp=$(mktemp -d)
-cleanup() { rm -f "${files[@]}"; rm -rf "$tmp"; }
+probe="stm-context-smoke-$(date +%s)-$$"
+cleanup() {
+  if docker container inspect "$probe" >/dev/null 2>&1; then
+    docker stop --timeout 5 "$probe" >/dev/null
+    printf 'Retained stopped smoke container: %s\n' "$probe"
+  fi
+  local item cleanup_trash_dir=""
+  for item in "${files[@]}" "$tmp"; do
+    [ -e "$item" ] || continue
+    if command -v trash >/dev/null; then
+      trash "$item"
+    elif command -v gio >/dev/null && gio trash -- "$item" 2>/dev/null; then
+      :
+    else
+      if [ -z "$cleanup_trash_dir" ]; then
+        mkdir -p "$HOME/.local/share/Trash/files"
+        cleanup_trash_dir=$(mktemp -d "$HOME/.local/share/Trash/files/stm-context-XXXXXXXX")
+      fi
+      mv -- "$item" "$cleanup_trash_dir/"
+    fi
+  done
+}
 trap cleanup EXIT
 mkdir -p services/companion/node_modules deploy/companion/tls
 for file in "${files[@]}"; do printf 'synthetic build-context sentinel\n' > "$file"; done
@@ -21,7 +42,7 @@ test -f "$tmp/context/packages/CounterpartKit/Sources/CounterpartKit/Resources/S
 for file in "${files[@]}"; do test ! -e "$tmp/context/$file"; done
 echo 'Dockerfile-specific ignore excluded all four sentinels from build context'
 docker build --platform linux/amd64 -t "$image" -f deploy/companion/Dockerfile .
-docker run --rm -i --entrypoint node "$image" --input-type=module - <<'JS'
+docker run --name "$probe" -i --entrypoint node "$image" --input-type=module - <<'JS'
 import assert from 'node:assert/strict';
 import {existsSync, readdirSync} from 'node:fs';
 import {starterProject, STARTER_ASSETS} from '/app/services/companion/dist/starters/catalog.js';
