@@ -849,3 +849,26 @@ test('phone plate selection stays authorized and exposes all retained plates', a
   assert.equal((await f.call('POST',`/v1/objects/${object.id}/plate-selection`,{fileIndex:0,plateIndex:1,id:object.id})).status,400);
   assert.equal((await f.call('POST',`/v1/objects/${object.id}/plate-selection`,{fileIndex:0,plateIndex:8})).status,409);
 });
+
+test('printed elsewhere uses the same named-plate action over HTTP and local control', async t => {
+  const {call, service, store, scopes} = await fixture(t);
+  const object = await service.create('Kit', 'published', 'https://makerworld.com/en/models/198362-vernier-caliper-ruler-two-lengths');
+  const sha = 'ab'.repeat(32);
+  await store.update(object.id, o => ({...o, state:'ready', current:{model:'original/rig.3mf',renders:[]},
+    publishedSelection:{fileIndex:0,plateIndex:0,sliced:false},
+    files:{receipts:[{sha256:sha,name:'rig.3mf',path:'original/rig.3mf',plates:[{index:0,name:'Base',sliced:false},{index:1,name:'Arm',sliced:false}]}]}}));
+  const recorded = await call('POST', `/v1/objects/${object.id}/plate-printed`, {plateId:`${sha}:1`});
+  assert.equal(recorded.status,200);
+  assert.equal(scopes.at(-1),'captures:import');
+  assert.equal(recorded.json.object.plates[0].selected,true);
+  assert.equal(recorded.json.object.plates[0].status,'not-printed');
+  assert.equal(recorded.json.object.plates[1].status,'printed');
+  const dispatch = createControlDispatcher({objects:service});
+  const local = await dispatch('objects.markPlatePrinted',{id:object.id,plateId:`${sha}:0`});
+  assert.deepEqual(local.object.plates.map(p=>p.status),['printed','printed']);
+  const bad = await call('POST', `/v1/objects/${object.id}/plate-printed`, {plateId:'old:0'});
+  assert.equal(bad.status,409);
+  assert.equal((await call('POST', `/v1/objects/${object.id}/plate-printed`, {plateId:`${sha}:1`,status:'printed'})).status,400);
+  const denied = await fixture(t,{denied:['captures:import']});
+  assert.equal((await denied.call('POST', `/v1/objects/${object.id}/plate-printed`,{plateId:`${sha}:1`})).status,403);
+});

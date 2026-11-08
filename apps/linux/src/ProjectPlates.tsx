@@ -16,12 +16,12 @@ export function ProjectPlates({
   return (
     <>
       <h3>
-        {(p.plates ?? []).filter((x) => x.status === "printed").length} of{" "}
+        {(p.plates ?? []).filter((x) => x.completedAtMs !== undefined).length} of{" "}
         {(p.plates ?? []).length} plates printed
       </h3>
       <div>
         {(p.plates ?? []).map((plate) => (
-          <div key={plate.id}>
+          <div key={plate.id} className="plate-record">
             <button
               className={plate.selected ? "plate selected" : "plate"}
               disabled={!canSelectPlate(p)}

@@ -478,7 +478,8 @@ class HomeLayoutTests {
         app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
         state.projects.value = listOf(requireNotNull(Project.decode(current())))
         compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(PROJECT, back = {}, print = {}, printing = {}, scan = {}) } }
-        compose.onNode(hasTestTag("printed-elsewhere-0-0")).performScrollTo().performClick()
+        compose.onNodeWithTag("project-content").performScrollToNode(hasTestTag("printed-elsewhere-0-0"))
+        compose.onNode(hasTestTag("printed-elsewhere-0-0")).performClick()
         try { compose.waitUntil(5_000) { compose.onAllNodes(hasText("1 of 6 printed")).fetchSemanticsNodes().isNotEmpty() } }
         catch (e: Throwable) { throw AssertionError("recorded=$recorded; paths=${fake.paths}; plates=${state.projects.value.first().plates}", e) }
         assertEquals(rig(0,true)["plates"]!!.jsonArray[0].jsonObject["id"]!!.jsonPrimitive.content, recorded)

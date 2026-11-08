@@ -601,6 +601,13 @@ main > .model-view {
   overflow: auto;
   margin: 15px 0;
 }
+.plate-record {
+  display: flex;
+  flex: 0 0 170px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
 .plate {
   display: flex;
   flex-direction: column;

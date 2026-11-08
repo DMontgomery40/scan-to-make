@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -155,7 +156,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
         }
         if (project == null) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading…", color = Palette.secondary) }; return@Column }
         val words = state.words(project)
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).testTag("project-content").padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             // The model's renders, else what was sent.
             val renders = project.current?.renders?.map { "renders/" + it.substringAfterLast('/') } ?: emptyList()
             val pictures = renders.ifEmpty { project.photos.take(6).map { "photos/$it" } }

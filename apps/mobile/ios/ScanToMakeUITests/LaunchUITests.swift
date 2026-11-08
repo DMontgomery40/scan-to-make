@@ -586,7 +586,10 @@ final class LayoutParityUITests: XCTestCase {
         app.launch()
         let button = app.buttons["printed-elsewhere-0-0"]
         XCTAssertTrue(button.waitForExistence(timeout: 20))
-        for _ in 0..<4 where !button.isHittable { app.swipeUp() }
+        let page = app.scrollViews.firstMatch
+        // isHittable can be true under the fixed bottom composer. Move the whole control above it.
+        for _ in 0..<6 where button.frame.maxY > app.frame.maxY - 160 { page.swipeUp() }
+        XCTAssertLessThan(button.frame.maxY, app.frame.maxY - 150, "The plate action must clear the bottom bar")
         button.tap()
         let first = app.buttons["select-plate-0-0"]
         let printed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@ AND NOT label CONTAINS %@", "Printed", "Check print result"), object: first)
