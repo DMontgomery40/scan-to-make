@@ -577,13 +577,18 @@ test('print_3mf\'s upload progress reaches the caller with its counterpart/1 sta
 // Audit F3: toolMs bounds each step of print_3mf (time without progress); a slow upload that keeps reporting
 // progress may run past it, within toolTotalMs. Before, toolMs was also the total, so a large plate on a slow SD card
 // ended as dispatch-uncertain while the MCP went on to start the print.
-async function slowUpload(t, {gapsMs, timeouts}) {
+async function slowUpload(t, {gapsMs, timeouts, blockAt}) {
  const f=await setup(t,{upload:gapsMs,timeouts});
  const store=new HandoffBundleStore(join(f.root,'bundles'));
  const bundle=await store.create({stl,prompt:'fixture',backend:'bambu-printer-mcp',selection});
  const seen=[];
  const started=Date.now();
- const run=f.runner.runBundle(store,bundle.id,{onProgress:async update=>{if(update.mcp?.stage==='upload')seen.push(update.mcp.progress);}});
+ const run=f.runner.runBundle(store,bundle.id,{onProgress:async update=>{
+  if(update.mcp?.stage!=='upload')return;
+  seen.push(update.mcp.progress);
+  // Hold this client's event loop while the MCP sends the rest, so it all arrives in one read.
+  if(seen.length===blockAt){const until=Date.now()+300;while(Date.now()<until);}
+ }});
  return {f,store,bundle,seen,run,elapsed:()=>Date.now()-started};
 }
 
@@ -596,6 +601,15 @@ test('a print_3mf upload that keeps reporting progress may run past toolMs in to
  assert.equal(seen.length,10);
  assert.equal(seen.at(-1),18_362_734);
  assert.equal((await store.read(bundle.id)).status,'printed');
+ assert.ok((await f.calls()).some(entry=>entry.uploaded));
+});
+
+test('the last progress reaches the caller even when it arrives in the same read as the result', async t => {
+ // The SDK runs a progress handler a microtask late but forgets the call when its result arrives: busy on the
+ // second-to-last step, this client reads the 100% and the result together, which used to drop the 100%.
+ const {f,run,seen}=await slowUpload(t,{gapsMs:[10,10,10,10],timeouts:{toolMs:2000},blockAt:3});
+ await run;
+ assert.deepEqual(seen,[4_590_683,9_181_367,13_772_050,18_362_734]);
  assert.ok((await f.calls()).some(entry=>entry.uploaded));
 });
 
