@@ -18,13 +18,23 @@ How to change, gate, build, install and drive Counterpart. What is built and acc
 - **Read Bambu Studio's source, don't guess** (`~/refs/BambuStudio`, v02.08.02.61, on the Mac and agents-136). Cite file:line for 3MF, CLI, G-code or AMS behaviour. Studio is AGPL-3.0 and the MCPs GPL-2.0: reimplement behaviour, never paste code.
 - No user or agent memories (AGENTS.md). Push after every feature. Clean up the worktrees, branches, caches and containers you create. iOS/macOS 27, Liquid Glass; read current Apple docs and use Apple's frameworks.
 
+## Agents, models and machines
+
+David, Nov 8. These apply to the lead and to every delegate; put them in each brief.
+
+- **T3 Connect, not ssh.** Work on another machine (Mac mini, agents-171, agents-173) runs in that machine's T3 environment (`delegate_task` with its `environmentId`). Don't ssh by hand; `scripts/ci_local.py`'s own Linux fan-out is the exception. A linked environment can't make a worktree for a child, so the Mac has one checkout per lane: `~/fleet/scan-to-make`, `~/fleet/stm-lane-a`, `~/fleet/stm-lane-b` (T3 projects of the same names).
+- **Computer use goes through the Codex computer-use MCP.** "Codex" is only its name; any agent can call it. David's rules above still hold: never bring a window forward or take his cursor.
+- **iOS without Xcode where it can.** T3's device tools (`device_list`, `device_open`, the `agent-device` CLI) drive the Mac mini's iOS simulators from any linked machine and show them in David's Device panel; use them, not `simctl`/`idb`, for launching, tapping and screenshots. Building and signing still need `xcodebuild` on the Mac.
+- **Models.** Claude Opus 5.5 is the default lead and coder: medium effort by default, high for harder work, xhigh for really complex work. GPT-6.1 Sol at high or xhigh for delegates. Muse Wonder Full 1.0 (`muse-wonder-full-1.0`) for reviews, ideas and easy coding: it is the best at catching the mistakes coding agents make. Gemini 4 Argon (`gemini-4-argon`) for reviews and opinions on spatial problems (scan geometry, meshes, plate layout, camera framing).
+- **Clean up when you finish.** Every agent removes the test environments it created before it reports: simulators and emulators it booted, VMs and containers (never FULU's Colima `bambu-fulu`), worktrees and clones, DerivedData and build folders, `stm-ci-local-*` temp folders, scratch `node_modules` and venvs, and merged or abandoned branches. The report lists what it removed.
+
 ## Changing code: one trunk
 
 - `main` is the only trunk. Branch from main, open a PR to main, and merge it once the gate passes. Feature branches never ship.
 - **Gate:** `CI_LOCAL_LINUX_HOSTS=agents-171 /usr/local/bin/python3 scripts/ci_local.py all --changed-only --base origin/main` on the Mac (Ubuntu jobs go to agents-171; never agents-173). Hosted Actions have no runner. Then `python3 scripts/branch_check.py --merge <branch>` must print SAFE (read it, don't chain it). It includes the Jev boundary check (PRD §8.0). Use one gate at a time per checkout.
 - **Builds refuse non-main or dirty source** (`scripts/trunk_guard.sh`; the list is in [`../scripts/README.md`](../scripts/README.md)). `STM_TRUNK_OVERRIDE="<why>"` is logged and for local debugging only; never install that build for David.
 - **Attribution:** Counterpart commits carry the authoring model's `Co-Authored-By` line. Both MCP repos prohibit AI attribution and have their own review conventions; read each AGENTS.md. In the MCP repos merging publishes to npm.
-- `~/scan-to-make` on each machine tracks main and fast-forwards every 2 minutes. `ssh agents-136 stm-ci <ref>` tests a pushed commit on Linux.
+- `~/scan-to-make` on each machine tracks main and fast-forwards every 2 minutes. `stm-ci <ref>`, run in agents-136's T3 environment, tests a pushed commit on Linux.
 
 ## Building and installing
 
@@ -42,6 +52,6 @@ How to change, gate, build, install and drive Counterpart. What is built and acc
 - **Phone:** `xcrun devicectl device capture screenshot --device 00008150-001A488C3642401C --destination <png>`; `devicectl device process launch` to launch.
 - **Files:** events `~/Library/Application Support/Scan to Make/events.ndjson`; projects `…/capture/objects/<id>/object.json`; printers `…/printers/profiles.json`; FULU control trace `~/.config/bambu-printer-mcp/bambu-network/control-trace.log`; companion control socket `…/auth/control.sock` (read-only diagnosis; never stand in for the app).
 - **zsh on the Mac:** don't `echo =====`; quote globs like `--include='*.ts'`.
-- **Second opinions:** Codex through the CLI inside ChatGPT.app (`/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex exec -s read-only …`).
+- **Second opinions:** a `delegate_task` review (see "Agents, models and machines"), not a CLI on the Mac.
 
 Evidence and receipts live in `~/scan-to-make-work/` on the Mac.
