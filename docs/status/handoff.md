@@ -12,7 +12,8 @@ One screen, updated in place; git history keeps the rest. This is the only hando
 | Mac MCP copies | bambu-printer-mcp **1.1.77**, mcp-3d-printer-server **1.2.58** (bambu 1.1.78 is published). The P1S's mcp-3D profile still runs the hand-built `~/mcp-3D-printer-server` checkout. |
 | iPhone Davica3, iPad Air | Nov 5 builds (iPhone `0c967a58`, iPad `a13cef78`). None of the Nov 6–7 fixes are on them. |
 | Android, Linux (agents-136) | Nov 5 builds with Nov 5 MCP copies. Stale. |
-| Public | beta 6 (GitHub pre-release, from `30e3afdd`). Site live from `6692b4a2` (`wrangler deploy` by hand; it does not deploy on merge). TestFlight 2.0 (4) approved in Counterpart Public Beta (#398, open). |
+| Public | beta 6 (GitHub pre-release, from `30e3afdd`). Site live from `6692b4a2` (`wrangler deploy` by hand; it does not deploy on merge). |
+| TestFlight | **2.0 (4) Approved** Nov 7, from main `30e3afdd`; assigned to **Counterpart Public Beta**, automatic tester notification selected. [Public link](https://testflight.apple.com/join/S4tExVzp) enabled, no configured tester limit/criteria, **Feedback On**, 0 testers at verification. Product description and What to Test saved: camera+LiDAR scans and automatic touch-up, spoken ideas, known-part dimension lookup, conversational edits, and printer reports with matching diagnostics ZIPs. In-hand is Labs/unavailable; AR is nonblocking. IPA distribution signatures/Production entitlements revalidated (`745dcca8…05bd`). No fresh external-tester install or production push delivery claimed. Details: [distribution](../distribution.md). |
 
 Printer: P1S, LAN Only + Developer Mode; AMS A1 black PLA (nearly empty), A2 yellow PLA, A3 PETG, A4 Blue Gray PLA. FULU runs in Colima `bambu-fulu`; never restart it.
 
@@ -54,7 +55,7 @@ Printer: P1S, LAN Only + Developer Mode; AMS A1 black PLA (nearly empty), A2 yel
    - plate-filament edge cases (paint on modifiers, filament 0, all three feature filaments overriding, layer ranges) are listed in bambu-printer-mcp#121 and mcp-3D#81.
 8. The rest of the PRD's not-accepted list (§0).
 
-**Other owners:** #398 (TestFlight description and approval record) edits this file; coordinate. bambu-printer-mcp#128 (X1C native route) belongs to someone else.
+**Other owners:** bambu-printer-mcp#128 (X1C native route) belongs to someone else.
 
 **Waiting on David:** every physical print; he starts them.
 
