@@ -32,8 +32,8 @@ final class ProjectPlateTests: XCTestCase {
         XCTAssertTrue(rig.back.printNeedsCheck)
         XCTAssertTrue(ProjectWords(rig.back).actions.contains(.printChecked))
         XCTAssertTrue(rig.back.uncertainPrintWords.contains("Screws"))
-        // A send cancelled before dispatch reads Not started and never asks for a printer check.
-        XCTAssertEqual(rig.cancelled.plates?.first?.statusText, "Not started")
+        // This older record has no explicit dispatch outcome: preserve its existing display and check.
+        XCTAssertEqual(rig.cancelled.plates?.first?.status, "unknown")
         XCTAssertFalse(rig.cancelled.printNeedsCheck)
         // A running print still locks the plates.
         var printing = rig.switched; printing.state = .printing

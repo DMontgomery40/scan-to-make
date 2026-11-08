@@ -11,6 +11,7 @@ import {HandoffBundleStore,InMemoryElicitationRelay,PrinterHandoffRunner,Printer
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {publicObject} from '../dist/objects/http.js';
+import {plateNeedsPrinterCheck} from '../dist/objects/plates.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {buildPublishedInvocation,runPublishedWorker,findNamed,defaultRunPublished,arrivedDuring,snapshotFolders,chromeAvailable,folderAccess} from '../dist/published/published.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
@@ -456,13 +457,25 @@ test('printed elsewhere is atomic for its named plate, persists and never change
  assert.ok(f.events.some(e=>e.type==='project.updated'&&e.data?.keys?.includes('plates')));
 });
 
-test('a refusal before dispatch and a monitor-confirmed non-start both read Not started, without uncertainty', async t => {
+test('missing dispatch metadata and legacy refusal codes keep main\'s plate state and printer check', async t => {
  const f=await setup(t), object=await f.service.create('Platform','published',LINK);
  const imported=await f.service.addModelFile(object.id,'platform.3mf',model('Platform',6));
  await f.service.answerAsk(object.id,imported.ask.id,['0:0']);
- for (const monitor of [undefined,{phase:'ended',endState:'not-started'}]) {
-   await f.store.update(object.id,o=>({...o,state:'failed',print:{bundleId:'b',printId:'p',plate:{sha256:o.files.receipts[0].sha256,plateIndex:0},monitor}}));
-   const plate=publicObject(await f.service.get(object.id)).plates[0];
-   assert.equal(plate.status,'not-started'); assert.equal(plate.uncertain,undefined);
+ const cases=[
+   {state:'failed',print:{},status:'failed',check:false},
+   {state:'ready',print:{},status:'unknown',check:false},
+   {state:'failed',print:{uncertain:true},status:'unknown',check:true},
+   {state:'failed',print:{monitor:{phase:'ended',endState:'not-started'}},status:'failed',check:false},
+   ...[undefined,'unknown'].map(printOutcome=>({state:'failed',print:{uncertain:true,events:[{atMs:1000,message:'Uploaded fixture'}],...(printOutcome?{printOutcome}:{})},status:'unknown',check:true})),
+   ...['printer-command-rejected','printer-not-ready','printer-upload-failed'].flatMap(failure=>
+     [undefined,'unknown'].map(printOutcome=>({state:'failed',failure,print:{...(printOutcome?{printOutcome}:{})},status:'failed',check:false}))),
+ ];
+ for (const c of cases) {
+   await f.store.update(object.id,o=>({...o,state:c.state,failure:c.failure,print:{bundleId:'b',printId:'p',plate:{sha256:o.files.receipts[0].sha256,plateIndex:0},...c.print}}));
+   const saved=await f.service.get(object.id),plate=publicObject(saved).plates[0];
+   assert.equal(plate.status,c.status,JSON.stringify(c));
+   assert.notEqual(plate.status,'not-started');
+   assert.equal(plate.uncertain,c.check?true:undefined);
+   assert.equal(plateNeedsPrinterCheck(saved),c.check);
  }
 });

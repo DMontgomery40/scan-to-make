@@ -303,7 +303,7 @@
     "fileName": "3D scan platform.3mf",
     "selected": true,
     "sliced": false,
-    "status": "not-started",
+    "status": "unknown",
     "printId": "c1"
    },
    {
