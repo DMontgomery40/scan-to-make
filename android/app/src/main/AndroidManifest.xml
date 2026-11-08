@@ -56,6 +56,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Background notification buttons (It Works, Pause, …): only this app's own notifications send them. -->
+        <receiver
+            android:name=".app.NotificationActionReceiver"
+            android:exported="false" />
+
         <service
             android:name=".app.WatchService"
             android:exported="false"

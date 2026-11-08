@@ -16,6 +16,9 @@ import CounterpartKit
     var canScan = false
     /// Projects this phone is still sending files to: they show "Sending to your Mac".
     var sending: Set<String> = []
+    /// A project whose page should open Ask for changes with "After printing: " started: Needs Changes was
+    /// pressed on its finished Printing screen. The page takes it once.
+    var askAfterPrinting: String?
     /// Why a send stopped, until it's tried again.
     var sendFailures: [String: String] = [:]
     /// Changes asked for while the Mac was working, sent when its pass ends (kept across launches).

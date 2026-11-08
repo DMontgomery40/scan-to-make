@@ -529,13 +529,47 @@ final class LayoutParityUITests: XCTestCase {
 
     private var regular: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
-    private func launch(set: String = "all", largeText: Bool = false) -> XCUIApplication {
+    private func launch(set: String = "all", largeText: Bool = false, screen: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", set]
         // Larger text makes any list longer than the screen, as David's ten projects are.
         if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"] }
+        if let screen { app.launchArguments += ["-CounterpartScreen", screen] }
         app.launch()
         return app
+    }
+
+    /// UX walkthrough Nov 8, F1: the Live Activity and print notifications land on Printing, and a finished print's
+    /// Printing screen was a dead end (100%, old temperatures, nothing to do). Now it asks "Did it fit?" there, and
+    /// Open Project goes to the project, on the iPhone stack and in the iPad's detail.
+    func testAFinishedPrintAsksDidItFitOnPrintingAndOpensTheProject() {
+        let app = launch(screen: "print-finished")
+        let works = app.buttons["it-works"]
+        XCTAssertTrue(works.waitForExistence(timeout: 20), "Did it fit? on the finished Printing screen")
+        XCTAssertTrue(app.staticTexts["Did it fit?"].exists)
+        XCTAssertTrue(app.buttons["open-project"].exists)
+        XCTAssertFalse(app.staticTexts["Nozzle"].exists, "a finished print's temperatures aren't shown as live")
+        XCTAssertFalse(app.buttons["Stop"].exists)
+        works.tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: works)], timeout: 10) == .completed,
+                      "answered on the Mac: the card goes")
+        let open = app.buttons["open-project"]
+        XCTAssertTrue(open.exists, "the way on stays")
+        open.tap()
+        XCTAssertTrue(app.buttons["Print Another"].waitForExistence(timeout: 10), "the project page, Done, and still printable")
+        XCTAssertFalse(app.buttons["open-project"].exists, "Printing is gone from the stack")
+    }
+
+    /// Needs Changes on the finished Printing screen starts the change on the project page, as the project's own card does.
+    func testNeedsChangesOnAFinishedPrintStartsTheChangeOnTheProject() {
+        let app = launch(screen: "print-finished")
+        let changes = app.buttons["needs-changes"]
+        XCTAssertTrue(changes.waitForExistence(timeout: 20))
+        changes.tap()
+        let field = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        XCTAssertEqual(field.value as? String, "After printing: ")
+        XCTAssertFalse(app.buttons["open-project"].exists)
     }
 
     /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click

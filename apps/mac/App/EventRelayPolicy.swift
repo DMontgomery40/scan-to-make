@@ -134,6 +134,12 @@ struct PhoneCommand: Equatable {
             params["confirmationId"] = confirmation
             params["answer"] = answer
             return ("objects.answerPrintConfirmation", params)
+        case "status":
+            // "Did it fit?" answered from the phone's notification (It Works, Needs Changes): the same Project
+            // Settings call the Mac's own card makes (`objects.settings.set {id, status}`, PRD §5.4).
+            guard case .string(let status)? = payload["status"], ["works", "needs-changes"].contains(status) else { return nil }
+            params["status"] = .string(status)
+            return ("objects.settings.set", params)
         case "pause": return ("objects.pausePrint", params)
         case "resume": return ("objects.resumePrint", params)
         case "cancel": return ("objects.cancelPrint", params)

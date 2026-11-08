@@ -114,7 +114,7 @@ struct ProjectsRoot: View {
 
     /// A pushed page: a project, or a print's Printing screen.
     @ViewBuilder private func page(_ value: String, close: @escaping () -> Void) -> some View {
-        if let id = Page.printingId(value) { PrintingView(store: store, id: id) } else { projectPage(value, close: close) }
+        if let id = Page.printingId(value) { PrintingView(store: store, id: id, openProject: { open($0) }) } else { projectPage(value, close: close) }
     }
 }
 

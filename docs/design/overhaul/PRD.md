@@ -386,7 +386,8 @@ Screenshot: `screens/phone-printing.jpg`.
   - the printer camera at the top, full bleed, as a photo refreshed every 3 s with "Updated *n* s ago", plus full-screen (§8.6);
   - a progress ring, layer, time left, finish time and filament;
   - nozzle, bed and speed tiles;
-  - Pause and Stop in the bottom glass bar. Stop asks for confirmation.
+  - Pause and Stop in the bottom glass bar. Stop asks for confirmation. Only the controls are in the bar; the note ("You'll get a notification…") is on the page under the progress, so it never sits over the tiles.
+- **After the print.** The camera stops, and "Did it fit?" (the project page's card, §5.4) and **Open Project** replace the nozzle and bed tiles. This is where a Live Activity or print notification tap lands, so it never ends on 100% with nothing to do.
 - **Live Activity.** It starts when the print starts (§9.4) and appears on:
   - the Lock Screen;
   - the Dynamic Island (compact: ring and minutes left; expanded: camera still, Pause, Open);
@@ -513,7 +514,7 @@ Screenshots, reflow: `screens/duo-home-empty.jpg` and `screens/ipad-welcome.jpg`
 
 **The parity rule.** David, Nov 5, after the starters went missing on the Mac and iPad: "how do make sure thing like that don't happen again?" A user-facing feature lands on every layout in the same PR: iPhone (compact), iPad and iPhone apps at regular width, Mac, Android and Linux. Where a layout can't have it, this table names the exception and quotes David's decision. Each client has a test that the feature is reachable on a layout with projects present: `LayoutParityUITests` runs on an iPhone and an iPad simulator in the mobile gate, `ObjectsModelTests` on the Mac, `HomeLayoutTests` on Android, `domain.test.ts` on Linux.
 
-What a person can see and reach, checked in code on `main` Nov 5 (after this PR: †):
+What a person can see and reach, checked in code on `main` Nov 5 (after this PR: †; after the Nov 8 after-the-print fix: ‡):
 
 | Feature | iPhone (compact) | iPad, regular width | Mac | Android | Linux |
 |---|---|---|---|---|---|
@@ -531,6 +532,9 @@ What a person can see and reach, checked in code on `main` Nov 5 (after this PR:
 | Printer software copies and explicit Move | Printers list/detail and Settings: each effective profile’s path/version (an older copy says so), managed copy separately; each Move names its printers, MCP and copy, in listed order; one accessibility container per MCP; other clients' updates and Moves show from the event stream (`MCPCopiesTests`) | Same views at regular width; `LayoutParityUITests` covers both widths | Settings → Printers (#355), `PrinterUpdatesTests` | Printers settings controls, `HomeLayoutTests` (grouping, Moves, another client's Move) | Settings → Printers (#355), `domain.test.ts` |
 | Settings, pairing | Settings sheet; Connect a Different Mac | the same | Settings; Add a Phone | Settings; Connect a Different Computer | Settings; Add a phone |
 | Help | Settings → Help: guide, scanning, the scan rig | the same | Help menu: Counterpart Help, the scan rig | † Settings → Help: the guide and the scan rig. **Before: none** | Settings → About → Open guide |
+| After the print (UX walkthrough Nov 8, F1): a finished print's Printing screen, where the Live Activity and print notifications land, asks "Did it fit?" (§5.4) and opens the project | ‡ "Did it fit?" and **Open Project** replace the temperature tiles (`LayoutParityUITests.testAFinishedPrintAsksDidItFitOnPrintingAndOpensTheProject`, `testNeedsChangesOnAFinishedPrintStartsTheChangeOnTheProject`). **Before: 100%, the last temperatures and "The print finished", nothing to do** | ‡ the same, in the detail (the same tests on the iPad) | no Printing screen: a notification selects the project, whose inspector already asks "Did it fit?" | ‡ the same card and **Open Project** (`HomeLayoutTests.aFinishedPrintAsksDidItFitOnPrintingAndOpensTheProject`). **Before: a "Project" button only** | no Printing screen; the project page's Status menu sets Done or Needs changes (Linux has no "Did it fit?" card; not changed here) |
+| Notification buttons (§9.1, F3) | ‡ each moment's own buttons (`NotificationActions`, CounterpartKit `NotificationActionsTests`); the service extension picks them from the event type | ‡ the same | ‡ the same buttons on Mac notifications, run through the control method a phone command uses (`EventRelayTests`) | ‡ the same buttons, Needs Changes… and Ask for Changes… as replies (`HomeLayoutTests.theDoneNotificationAnswersDidItFitFromItsButtons`). LAN only: Android has no iCloud route | Linux posts no desktop notifications (Settings: "desktop notifications depend on host support"); nothing to add buttons to |
+| Notifications while the app is open (§9.2, F7) | ‡ shown, unless that project's page or Printing screen is on screen. **Before: none shown** | ‡ the same | shown (unchanged) | ‡ the same rule. **Before: none posted while open** | none (above) |
 
 **Add printer on the phones** (David, 2026-11-06: "adding a printer is filling out a form that hsould be mostly autofilled by discovery"). The iPhone, iPad and Android call the companion's own `printers.discover`, `.check`, `.obtain` and `.add` over `/v1/printers/setup/*` (objects-api.md), so the MCPs still find the printers and declare the fields, and their `.env` files stay on the computer. A found printer opens filled in; the person types only what discovery can't know, such as the access code or API key, or approves it in the printer's own page when the MCP offers that.
 
@@ -1216,14 +1220,16 @@ Screenshot: `screens/phone-notifications.jpg` (an approximation: the system draw
 | `pass.ask` | "*Title*: *the question*", with the region picture | **Camera** (opens it), **Best Guess** (background) | active | on |
 | `print.confirm` | "*Printer* needs a yes before printing *title*" | opens the confirmation | time-sensitive | on |
 | `print.started` | no banner; the Live Activity starts | — | passive | off |
-| `print.first-layer` | "*Title*: first layer's down", with the frame | **Open**, **Pause** | passive | off |
-| `print.milestone` | "*Title* is halfway" · time left, layer, printer, with the frame | **Open**, **Pause** | active | off |
-| `print.paused` | "*Printer* paused *title*" · reason, with the frame | **Open**, **Resume** | time-sensitive | on |
-| `print.done` | "*Title* is done. Take it off the plate.", with the frame | **Open**, **It Works** (background), **Needs Changes** (text input, background) | active | on |
-| `print.failed` / `print.not-started` / `pass.failed` | what happened and what to do | **Open** / **Try Again** | time-sensitive (print) / active (pass) | on |
+| `print.first-layer` | "*Title*: first layer's down", with the frame | **Open Print**, **Pause** | passive | off |
+| `print.milestone` | "*Title* is halfway" · time left, layer, printer, with the frame | **Open Print**, **Pause** | active | off |
+| `print.paused` | "*Printer* paused *title*" · reason, with the frame | **Open Print**, **Resume** | time-sensitive | on |
+| `print.done` | "*Title* is done. Take it off the plate.", with the frame | **It Works** (background), **Needs Changes…** (text input, background), **Open Project** | active | on |
+| `print.failed` / `print.not-started` / `pass.failed` | what happened and what to do | **Try Again** (a print: opens Print, never prints by itself; a pass: opens the project), **Open Project** | time-sensitive (print) / active (pass) | on |
 | `print.unreachable` | "Lost contact with *printer*. Still trying." | — | passive | off |
 
 Each row has its own switch in Settings → Notifications, on both devices. The milestone choice is in the same place (§8.6).
+
+**Buttons** (`NotificationActions` in CounterpartKit; Android `NotificationActions.kt`). Each **Open** says where it goes: **Open Print** opens the Printing screen, **Open Project** the project. The same buttons are on Mac notifications. A button only acts on its own moment: a cancelled or sent print (`ENDED`) and a lost connection (`PROBLEM`) get only Open Project. The CloudKit subscriptions carry one category for several types, so the service extension sets the category from the event's `type` before it fetches the record. Background buttons need the phone unlocked (`.authenticationRequired`): the pairing is in the Keychain, readable only while unlocked, so Pause from the Lock Screen asks for Face ID first.
 
 ### 9.2 iPhone: subscriptions, extension and actions
 
@@ -1266,24 +1272,24 @@ If the fetch runs past the extension's time limit, the notification is delivered
 - Everything needs the same iCloud account on both devices. Without iCloud, the phone gets events only from the LAN long poll while the app is running or has background time. Settings says so.
 
 **Actions:**
-- Background actions without a destructive outcome run without opening the app: **Ask for Changes…** (`UNTextInputNotificationAction`), **Best Guess**, **Pause** and **Resume**.
+- Background actions without a destructive outcome run without opening the app: **Ask for Changes…** (`UNTextInputNotificationAction`), **Best Guess**, **Pause**, **Resume**, **It Works** and **Needs Changes…** (`UNTextInputNotificationAction`; it marks the project and sends "After printing: " and the words as a change).
 - Each one sends its command to the Mac:
-  - directly on the LAN, through the existing routes: `POST …/corrections`, `…/closeup`; pause and resume go through the new `POST …/print/pause` and `…/print/resume`;
-  - otherwise as a `CounterpartCommand` record (§9.3).
+  - directly on the LAN, through the existing routes: `POST …/corrections`, `…/closeup`, `PATCH …/settings {"status"}`; pause and resume go through `POST …/print/pause` and `…/print/resume`;
+  - otherwise, only when the Mac can't be reached at all (`/healthz` doesn't answer), as `CounterpartCommand` records (§9.3). Never after the Mac took the request: a second try could start a second change.
+  - A failure is said in a notification ("Couldn't pause the print: *title*").
 - **Print** and **Camera** open the app at the right screen.
 
 **No double banners.**
-- In the foreground, `userNotificationCenter(_:willPresent:)` suppresses events the app already showed from its LAN long poll, matched by `eventId`.
-- The in-app UI then shows the change instead.
+- In the foreground, `userNotificationCenter(_:willPresent:)` suppresses a notification only while its project's page or Printing screen is on screen: that screen already shows the change. Anywhere else (Home, Settings, another project's Print sheet) it shows as a banner. Android posts from its foreground event stream by the same rule.
 
 ### 9.3 Commands from anywhere (CloudKit)
 
 **Status:** Built. Not accepted away from home.
 
 - **How a command travels.** When the phone can't reach the Mac directly, it writes a `CounterpartCommand` record into the same private zone:
-  - `{commandId, type, projectId, payload, photos[CKAsset], createdAt}`, where `type` is one of `print | correct | answerAsk | confirm | pause | resume | cancel`.
+  - `{commandId, type, projectId, payload, photos[CKAsset], createdAt}`, where `type` is one of `print | correct | answerAsk | confirm | pause | resume | cancel | status`. `status` (`{"status": "works" | "needs-changes"}`) is "Did it fit?" answered from a notification.
 - **How the Mac receives it.** The Mac app subscribes to that record type (content-available) and also fetches on launch and on wake.
-  - It runs each command through the control socket method that already does the same job: `objects.print`, `objects.correct`, `objects.answerCloseup`, `objects.answerPrintConfirmation`, plus the new pause, resume and cancel.
+  - It runs each command through the control socket method that already does the same job: `objects.print`, `objects.correct`, `objects.answerCloseup`, `objects.answerPrintConfirmation`, `objects.settings.set` (status), plus the new pause, resume and cancel.
   - It writes the result back as `status: done|failed` with a message, and deletes the record a day later.
 - **Commands are bounded.** The Mac acts only on commands from its own private database that are less than 10 minutes old.
 - **The print confirmation is unchanged.** Starting a physical print still answers the printer MCP's own confirmation:
