@@ -137,7 +137,7 @@ class ProjectWords(project: Project, sending: Boolean = false, printerName: Stri
                     if (p?.monitor?.phase == "watching" || (p?.printId != null && (p.live?.state ?: "") in setOf("printing", "paused"))) ProjectPhase.Printing
                     else ProjectPhase.Preparing
                 }
-                Project.State.Printed -> if (project.print?.monitor?.endState == "done") ProjectPhase.Printed else ProjectPhase.Sent
+                Project.State.Printed -> if (project.print?.monitor?.endState == "done" || project.selectedPlate?.status == "printed") ProjectPhase.Printed else ProjectPhase.Sent
                 Project.State.Sent -> ProjectPhase.Sent
                 Project.State.Confirmed -> ProjectPhase.Confirmed
                 Project.State.Failed -> ProjectPhase.Failed
@@ -225,7 +225,7 @@ class ProjectWords(project: Project, sending: Boolean = false, printerName: Stri
                 } else { s = project.progress ?: "Preparing print…"; b = true; a = emptyList(); l = project.progress ?: "Getting the print ready" }
             }
             Project.State.Printed -> {
-                val finished = project.print?.monitor?.endState == "done"
+                val finished = project.print?.monitor?.endState == "done" || project.selectedPlate?.status == "printed"
                 val endedAt = Iso.parse(project.print?.monitor?.endedAt) ?: project.updatedAtMs.toLong()
                 val ask = finished && project.projectStatus in setOf(null, ProjectStatus.Printed)
                 s = if (finished) "Printed" else "Print request accepted"; b = false

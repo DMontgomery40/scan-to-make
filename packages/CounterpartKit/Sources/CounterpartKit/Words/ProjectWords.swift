@@ -153,7 +153,7 @@ public struct ProjectWords: Equatable, Sendable {
             return .preparing
         // "Printed" only once the print monitor saw it finish; an older Mac marks a print printed when the
         // printer accepts it, which is "sent" in the PRD's words.
-        case .printed: return project.print?.monitor?.endState == "done" ? .printed : .sent
+        case .printed: return (project.print?.monitor?.endState == "done" || project.selectedPlate?.status == "printed") ? .printed : .sent
         case .sent: return .sent
         case .confirmed: return .confirmed
         case .failed: return .failed
@@ -224,7 +224,7 @@ public struct ProjectWords: Equatable, Sendable {
                 }
             case .printed:
                 // A print request accepted isn't a print finished; only the print monitor says it finished.
-                let finished = project.print?.monitor?.endState == "done"
+                let finished = project.print?.monitor?.endState == "done" || project.selectedPlate?.status == "printed"
                 let endedAt = project.print?.monitor?.endedAt.flatMap(ISO.date) ?? project.updatedAt
                 // "Did it fit?" until you answer it, here or with any status in Project Settings.
                 let ask = finished && [nil, .printed].contains(project.projectStatus)

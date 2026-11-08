@@ -483,6 +483,8 @@ class HomeLayoutTests {
         try { compose.waitUntil(5_000) { compose.onAllNodes(hasText("1 of 6 printed")).fetchSemanticsNodes().isNotEmpty() } }
         catch (e: Throwable) { throw AssertionError("recorded=$recorded; paths=${fake.paths}; plates=${state.projects.value.first().plates}", e) }
         assertEquals(rig(0,true)["plates"]!!.jsonArray[0].jsonObject["id"]!!.jsonPrimitive.content, recorded)
+        val reported = state.projects.value.first().copy(state = Project.State.Printed, status = null)
+        assertEquals("Printed", com.scantomake.counterpart.api.ProjectWords(reported).status)
         compose.onNode(hasTestTag("printed-elsewhere-0-0")).assertDoesNotExist()
         compose.onNode(hasTestTag("printed-elsewhere-0-1")).assertExists()
     }

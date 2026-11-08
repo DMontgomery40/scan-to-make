@@ -42,6 +42,11 @@ final class ProjectPlateTests: XCTestCase {
     func testPlateSelectionUsesCaptureImportPermission() {
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/00000000-0000-4000-8000-000000000001/plate-selection"), "captures:import")
     }
+    func testARecordedPlateDoesNotClaimItWasJustSentToAPrinter() throws {
+        let project = try JSONDecoder().decode(Project.self, from: Data(#"{"id":"p","createdAtMs":1,"updatedAtMs":2,"state":"printed","plates":[{"id":"h:0","fileIndex":0,"plateIndex":0,"name":"Base","fileName":"rig.3mf","selected":true,"sliced":false,"status":"printed","completedAtMs":2}]}"#.utf8))
+        XCTAssertEqual(ProjectWords(project).phase, .printed)
+        XCTAssertEqual(ProjectWords(project).status, "Printed")
+    }
     func testPrintedElsewhereUsesCaptureImportPermission() {
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/00000000-0000-4000-8000-000000000001/plate-printed"), "captures:import")
     }
