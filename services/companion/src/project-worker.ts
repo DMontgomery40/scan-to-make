@@ -8,10 +8,10 @@ import {randomUUID} from 'node:crypto';
 import {PrinterMcpClient} from '@scan-to-make/printer-handoff';
 import type {AiTweakOptions} from './ai-tweak.js';
 import {aiTweakInternals} from './ai-tweak.js';
-import {runClaudeWorker,publicTouchupText,type WorkerRun,type TouchupProgress} from './touchup/runner.js';
+import {runClaudeWorker,publicTouchupText,TOUCHUP_TIMEOUT_MS,TOUCHUP_INACTIVITY_MS,TOUCHUP_MAX_TOOL_CALLS,limitWords,type WorkerRun,type WorkerLimit,type TouchupProgress} from './touchup/runner.js';
 import type {TouchupInvocation,McpServerEntry} from './touchup/invocation.js';
 
-type Request = Pick<TouchupInvocation,'args'|'cwd'|'mcpConfig'> & {timeoutMs?:number;maxToolCalls?:number};
+type Request = Pick<TouchupInvocation,'args'|'cwd'|'mcpConfig'> & {timeoutMs?:number;inactivityMs?:number;maxToolCalls?:number};
 const textBlock=(text:string)=>({type:'text' as const,text});
 const value=(args:string[],flag:string)=>args.includes(flag)?args[args.indexOf(flag)+1]:undefined;
 
@@ -38,13 +38,19 @@ export async function runProjectModel(request:Request,options:AiTweakOptions,sig
  const redact=(text:string)=>publicTouchupText(text,{...options.env,...Object.assign({},...Object.values(request.mcpConfig.mcpServers).map(s=>s.env))});
  const controller=new AbortController(),abort=()=>controller.abort(signal?.reason);
  signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
- const timer=setTimeout(()=>controller.abort('deadline'),request.timeoutMs??900000);
+ let limit:WorkerLimit|undefined;
+ const atLimit=(kind:WorkerLimit['kind'],value:number)=>{if(!controller.signal.aborted){limit={kind,value};controller.abort('deadline');}};
+ const timer=access.kind==='claude-code'?undefined:setTimeout(()=>atLimit('absolute',request.timeoutMs??TOUCHUP_TIMEOUT_MS),request.timeoutMs??TOUCHUP_TIMEOUT_MS);
+ let idleTimer:NodeJS.Timeout|undefined;
+ const activity=()=>{if(access.kind==='claude-code')return;clearTimeout(idleTimer);idleTimer=setTimeout(()=>atLimit('inactivity',request.inactivityMs??TOUCHUP_INACTIVITY_MS),request.inactivityMs??TOUCHUP_INACTIVITY_MS);};
+ activity();
+ const progress=(p:TouchupProgress)=>{activity();onProgress?.(p);};
  const base=()=>({seconds:Math.round((Date.now()-started)/1000),stderrTail:'',toolCalls:0,exitCode:0});
  try {
   controller.signal.throwIfAborted();
   if(access.kind==='none')throw Error('AI is off. Choose a provider in Settings.');
   if(access.kind==='api'||access.kind==='endpoint'){
-   const run=await runApi(request,options,controller.signal,onProgress);
+   const run=await runApi(request,options,controller.signal,progress);
    const sanitize=(v:unknown):unknown=>typeof v==='string'?redact(v):Array.isArray(v)?v.map(sanitize):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,sanitize(x)])):v;
    return sanitize(run) as Omit<WorkerRun,'publicText'>;
   }
@@ -59,7 +65,7 @@ export async function runProjectModel(request:Request,options:AiTweakOptions,sig
    if(access.kind==='claude-code'){
     const args=[...request.args];args[args.indexOf('--mcp-config')+1]=mcpPath;
     const inv={command:plan.executable,args,env:plan.env,cwd:request.cwd,mcpConfig,mcpConfigPath:mcpPath};
-    const {publicText:_redact,...run}=await runClaudeWorker(inv,{signal:controller.signal,maxToolCalls:request.maxToolCalls,timeoutMs:request.timeoutMs,onProgress});
+    const {publicText:_redact,...run}=await runClaudeWorker(inv,{signal:controller.signal,maxToolCalls:request.maxToolCalls,timeoutMs:request.timeoutMs,inactivityMs:request.inactivityMs,onProgress});
     return run;
    }
    if(plan.codexAuth){
@@ -82,24 +88,24 @@ export async function runProjectModel(request:Request,options:AiTweakOptions,sig
    let calls=0,bytes=0,tail='',partial='',stopped:string|undefined;
    let killTimer:NodeJS.Timeout|undefined;
    const stop=(reason:string)=>{if(stopped)return;stopped=reason;if(child.pid){try{process.kill(-child.pid,'SIGTERM');}catch{}killTimer=setTimeout(()=>{try{process.kill(-child.pid!,'SIGKILL');}catch{}},3000);}};
-   const cancel=()=>stop(controller.signal.reason==='deadline'?'time limit exceeded':'cancelled');
+   const cancel=()=>stop(limit ? limitWords(limit) : 'cancelled');
    controller.signal.addEventListener('abort',cancel,{once:true});if(controller.signal.aborted)cancel();
    child.stdout.on('data',chunk=>{
     bytes+=chunk.length;if(bytes>8*1024*1024){stop('worker output limit exceeded');return;}
     partial+=String(chunk);const lines=partial.split('\n');partial=lines.pop()!;
     for(const line of lines){try{
-     const event=JSON.parse(line),item=event.item;
+     const event=JSON.parse(line),item=event.item;activity();
      if(event.type==='item.completed'&&['mcp_tool_call','command_execution','web_search'].includes(item?.type)){
       calls++;onProgress?.({seconds:Math.round((Date.now()-started)/1000),toolCalls:calls,activity:[{atMs:Date.now(),kind:'tool',text:redact(item.tool??item.type)}]});
      }else if(event.type==='item.completed'&&item?.type==='agent_message'&&typeof item.text==='string')onProgress?.({seconds:Math.round((Date.now()-started)/1000),toolCalls:calls,activity:[{atMs:Date.now(),kind:'message',text:redact(item.text)}]});
     }catch{}}
-    if(calls>(request.maxToolCalls??120))stop('tool call limit exceeded');
+    if(calls>(request.maxToolCalls??TOUCHUP_MAX_TOOL_CALLS))atLimit('tool-calls',request.maxToolCalls??TOUCHUP_MAX_TOOL_CALLS);
    });
    child.stderr.on('data',chunk=>tail=(tail+String(chunk)).slice(-2000));
    try {
     const code=await new Promise<number|null>((done,reject)=>{child.once('error',reject);child.once('close',done);});
     let answer;try{answer=JSON.parse(await readFile(last,'utf8'));}catch{}
-    return {...base(),toolCalls:calls,exitCode:code,stderrTail:redact(tail),...(stopped?{stopReason:stopped}:{}),
+    return {...base(),toolCalls:calls,exitCode:code,stderrTail:redact(tail),...(stopped?{stopReason:stopped}:{}),...(limit?{limit}:{}),
      worker:{model:access.model??'gpt-6-astra',tools:['MCP','view_image'],plugins:[],mcpServers:Object.keys(mcpConfig.mcpServers)},
      resultEvent:answer?{structured_output:answer}:{is_error:true,result:'Codex did not return a valid project result. Check its login and model capabilities.'}};
    } finally {
@@ -111,10 +117,12 @@ export async function runProjectModel(request:Request,options:AiTweakOptions,sig
    await rm(work,{recursive:true,force:true});
   }
  } catch(error) {
-  return {...base(),exitCode:1,...(controller.signal.aborted?{stopReason:controller.signal.reason==='deadline'?'time limit exceeded':'cancelled'}:{}),resultEvent:{is_error:true,result:redact(error instanceof Error?error.message:'The selected AI provider failed.')}};
- } finally {clearTimeout(timer);signal?.removeEventListener('abort',abort);}
+  if(error instanceof ProviderLimitError)limit=error.limit;
+  return {...base(),exitCode:1,...(limit?{limit,stopReason:limitWords(limit)}:controller.signal.aborted?{stopReason:'cancelled'}:{}),resultEvent:{is_error:true,result:redact(error instanceof Error?error.message:'The selected AI provider failed.')}};
+ } finally {clearTimeout(timer);clearTimeout(idleTimer);signal?.removeEventListener('abort',abort);}
 }
 
+class ProviderLimitError extends Error {constructor(readonly limit:WorkerLimit){super(limitWords(limit));}}
 type Block={type:string;text?:string;data?:string;mimeType?:string};
 type Tool={name:string;description?:string;inputSchema:Record<string,unknown>};
 async function runApi(request:Request,options:AiTweakOptions,signal:AbortSignal,onProgress?:(progress:TouchupProgress)=>void):Promise<Omit<WorkerRun,'publicText'>> {
@@ -178,7 +186,7 @@ async function runApi(request:Request,options:AiTweakOptions,signal:AbortSignal,
    if(!uses.length)throw Error('Selected model did not use the required finish tool. Select a model with tool calling and image support.');
    const replies:any[]=[];const images:any[]=[];
    for(const use of uses){
-    if(++calls>(request.maxToolCalls??120))throw Error('Model job reached its tool call limit.');
+    if(++calls>(request.maxToolCalls??TOUCHUP_MAX_TOOL_CALLS))throw new ProviderLimitError({kind:'tool-calls',value:request.maxToolCalls??TOUCHUP_MAX_TOOL_CALLS});
     onProgress?.({seconds:Math.round((Date.now()-started)/1000),toolCalls:calls,activity:[{atMs:Date.now(),kind:'tool',text:publicTouchupText(String(use.name),options.env)}]});
     if(use.name==='finish')return {seconds:Math.round((Date.now()-started)/1000),toolCalls:calls,exitCode:0,stderrTail:'',resultEvent:{structured_output:use.args},worker:{model:access.model,tools:tools.map(t=>t.name),plugins:[],mcpServers:[...clients.keys()]}};
     let blocks:Block[];try{blocks=await invoke(use.name,use.args);}catch(e){signal.throwIfAborted();blocks=[textBlock(`Tool failed: ${e instanceof Error?e.message:'unknown error'}`)];}

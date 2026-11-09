@@ -164,7 +164,12 @@ final class ProjectWordsTests: XCTestCase {
         let rows = try JSONDecoder().decode([Row].self, from: fixture("capped-projects.json"))
         for row in rows {
             XCTAssertTrue(row.expected.passes.allSatisfy { $0.activity == nil }, row.name)
-            let actions = ProjectWords(row.expected).actions
+            let words = ProjectWords(row.expected)
+            if row.name.hasPrefix("limit-") {
+                XCTAssertEqual(words.status, row.expected.failure, row.name)
+                XCTAssertFalse(words.line.lowercased().contains("cancelled"), row.name)
+            }
+            let actions = words.actions
             XCTAssertEqual(actions.contains(.retry), row.retry, row.name)
             XCTAssertTrue(actions.contains(.correct), row.name)
             XCTAssertTrue(actions.contains(row.checkedPrint ? .printChecked : .print), row.name)

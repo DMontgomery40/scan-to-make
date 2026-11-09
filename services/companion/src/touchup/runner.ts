@@ -7,7 +7,14 @@ import {inspectModelFile} from '@scan-to-make/printer-handoff';
 import type {TouchupPass} from './inputs.js';
 import type {TouchupInvocation} from './invocation.js';
 
-export const TOUCHUP_TIMEOUT_MS = 900_000;
+export const TOUCHUP_TIMEOUT_MS = 2 * 60 * 60_000;
+export const TOUCHUP_INACTIVITY_MS = 10 * 60_000;
+export interface WorkerLimit {kind: 'inactivity' | 'absolute' | 'tool-calls'; value: number}
+export function limitWords(limit: WorkerLimit): string {
+  return limit.kind === 'tool-calls' ? `Stopped at the ${limit.value} tool-call limit`
+    : limit.kind === 'inactivity' ? `Stopped after ${Math.round(limit.value / 1000)} seconds without worker activity`
+    : `Stopped at the ${Math.round(limit.value / 1000)} second absolute time limit`;
+}
 export const TOUCHUP_MAX_TOOL_CALLS = 120;
 const KILL_GRACE_MS = 5000;
 
@@ -25,6 +32,12 @@ export interface TouchupResult {
   /** Fusion passes: the parametric design and its parameters, from fusion_mcp_export. */
   design?: {f3d: string; parameters?: string};
   reason?: string;
+  limit?: WorkerLimit;
+  sessionId?: string;
+  sessionCwd?: string;
+  /** Only a limit or a process exit without a final answer may continue. */
+  resumable?: boolean;
+  resume?: {sessionId: string; outcome: 'resumed' | 'cold-start' | 'attempted'; reason?: string};
   closeup?: string;
   summary?: string;
   model?: string;
@@ -41,6 +54,9 @@ export interface TouchupResult {
 export interface TouchupActivity {atMs: number; kind: 'message' | 'tool'; text: string}
 export interface TouchupProgress {
   seconds: number;
+  sessionId?: string;
+  sessionCwd?: string;
+  passDir?: string;
   toolCalls: number;
   lastText?: string;
   /** New public events only, in stream order. Never thinking, tool input or tool output. */
@@ -145,25 +161,27 @@ const sha256 = async (path: string) => createHash('sha256').update(await readFil
  */
 /** One `claude -p --output-format stream-json` worker, run to its end: limits, cancellation, activity and the result event. */
 export interface WorkerRun {
-  resultEvent?: ResultEvent; worker?: TouchupResult['worker']; toolCalls: number; stopReason?: string; stderrTail: string;
+  sessionId?: string;
+  sessionCwd?: string; limit?: WorkerLimit; resultEvent?: ResultEvent; worker?: TouchupResult['worker']; toolCalls: number; stopReason?: string; stderrTail: string;
   exitCode: number | null; error?: NodeJS.ErrnoException; seconds: number; publicText: (text: string) => string;
 }
-export type ProjectWorker = ((inv: TouchupInvocation, opts: {timeoutMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal}) => Promise<WorkerRun>)
+export type ProjectWorker = ((inv: TouchupInvocation, opts: {timeoutMs?: number; inactivityMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal}) => Promise<WorkerRun>)
   /** false when this worker can't drive the person's browser (`--chrome`): only Claude Code can. */
   & {browser?: boolean};
 
 export async function runClaudeWorker(inv: TouchupInvocation, opts: {
-  spawn?: typeof nodeSpawn; timeoutMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
+  spawn?: typeof nodeSpawn; timeoutMs?: number; inactivityMs?: number; maxToolCalls?: number; onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
 } = {}): Promise<WorkerRun> {
   if (opts.signal?.aborted) return {toolCalls: 0, stopReason: 'cancelled', stderrTail: '', exitCode: null, seconds: 0, publicText: text => text};
   const spawn = opts.spawn ?? nodeSpawn;
   const timeoutMs = opts.timeoutMs ?? TOUCHUP_TIMEOUT_MS, maxToolCalls = opts.maxToolCalls ?? TOUCHUP_MAX_TOOL_CALLS;
+  const inactivityMs = opts.inactivityMs ?? TOUCHUP_INACTIVITY_MS;
   const started = Date.now();
   const seconds = () => Math.round((Date.now() - started) / 1000);
   const publicText = (text: string) => publicTouchupText(text, {...inv.env, ...inv.mcpConfig.mcpServers.printer?.env, ...inv.redactionEnv});
   const child = spawn(inv.command, inv.args, {cwd: inv.cwd, env: inv.env, detached: true, stdio: ['ignore', 'pipe', 'pipe']});
   let toolCalls = 0, lastText: string | undefined, resultEvent: ResultEvent | undefined, stopReason: string | undefined, stderrTail = '';
-  let worker: TouchupResult['worker'];
+  let worker: TouchupResult['worker'], sessionId: string | undefined, limit: WorkerLimit | undefined;
   let killTimer: NodeJS.Timeout | undefined;
 
   const stop = (reason: string) => {
@@ -172,7 +190,12 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
     try { process.kill(-child.pid, 'SIGTERM'); } catch { /* already gone */ }
     killTimer = setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* already gone */ } }, KILL_GRACE_MS);
   };
-  const timer = setTimeout(() => stop(`stopped at the ${Math.round(timeoutMs / 1000)} s time limit`), timeoutMs);
+  const atLimit = (kind: WorkerLimit['kind'], value: number) => {
+    if (stopReason !== undefined) return;
+    limit = {kind, value}; stop(limitWords(limit));
+  };
+  const timer = setTimeout(() => atLimit('absolute', timeoutMs), timeoutMs);
+  let idleTimer = setTimeout(() => atLimit('inactivity', inactivityMs), inactivityMs);
   const onAbort = () => stop('cancelled');
   opts.signal?.addEventListener('abort', onAbort, {once: true});
   child.stderr?.on('data', chunk => { stderrTail = (stderrTail + String(chunk)).slice(-2000); });
@@ -181,6 +204,13 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
   lines.on('line', line => {
     let event: {type?: string; message?: {content?: {type?: string; text?: string; name?: string}[]}} & ResultEvent;
     try { event = JSON.parse(line); } catch { return; }
+    if (!event || typeof event.type !== 'string') return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => atLimit('inactivity', inactivityMs), inactivityMs);
+    if (typeof event.session_id === 'string' && event.session_id.trim() && sessionId !== event.session_id) {
+      sessionId = event.session_id;
+      opts.onProgress?.({seconds: seconds(), toolCalls, sessionId});
+    }
     if (event.type === 'system' && (event as {subtype?: string}).subtype === 'init') {
       const init = event as {model?: string; apiKeySource?: string; tools?: string[]; plugins?: {name?: string; source?: string}[]; mcp_servers?: {name?: string; status?: string}[]};
       worker = {
@@ -201,7 +231,7 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
         }
       }
       opts.onProgress?.({seconds: seconds(), toolCalls, lastText, activity});
-      if (toolCalls > maxToolCalls) stop(`stopped at the ${maxToolCalls} tool calls limit`);
+      if (toolCalls > maxToolCalls) atLimit('tool-calls', maxToolCalls);
     } else if (event.type === 'result') {
       resultEvent = event;
     }
@@ -215,16 +245,17 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
     child.once('close', code => settle({code}));
   });
   clearTimeout(timer);
+  clearTimeout(idleTimer);
   clearTimeout(killTimer);
   // A stopped worker's helpers (MCP servers, Blender bridges) may ignore SIGTERM: leave nothing behind.
   if (stopReason !== undefined && child.pid) { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* group already gone */ } }
   opts.signal?.removeEventListener('abort', onAbort);
-  return {...(resultEvent ? {resultEvent} : {}), ...(worker ? {worker} : {}), toolCalls, ...(stopReason !== undefined ? {stopReason} : {}), stderrTail,
+  return {...(sessionId ? {sessionId} : {}), ...(limit ? {limit} : {}), ...(resultEvent ? {resultEvent} : {}), ...(worker ? {worker} : {}), toolCalls, ...(stopReason !== undefined ? {stopReason} : {}), stderrTail,
     exitCode: ended.code, ...(ended.error ? {error: ended.error} : {}), seconds: seconds(), publicText};
 }
 
 export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass, opts: {
-  spawn?: typeof nodeSpawn; timeoutMs?: number; maxToolCalls?: number; inputStlSha256?: string;
+  spawn?: typeof nodeSpawn; timeoutMs?: number; inactivityMs?: number; maxToolCalls?: number; inputStlSha256?: string;
   onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
 } = {}): Promise<TouchupResult> {
   const started0 = Date.now();
@@ -250,7 +281,9 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const parts = model === touched ? await readFile(partsPath).then(bytes => {
     try { inspectModelFile(bytes, '3mf'); return partsPath; } catch { return undefined; }
   }, () => undefined) : undefined;
-  const base = {renders, checkpoints, ...(parts ? {parts} : {}), ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
+  const base = {renders, checkpoints: validCheckpoints, ...(run.sessionId ? {sessionId: run.sessionId} : {}),
+    resumable: !!run.sessionId && (run.limit !== undefined || (!resultEvent && stopReason !== 'cancelled' && !run.error)),
+    ...(run.limit ? {limit: run.limit} : {}), ...(parts ? {parts} : {}), ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;
   const declared = parts ? partColours(answer, publicText) : undefined;
@@ -263,7 +296,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
 
   if (ended.error) {
     const reason = ended.error.code === 'ENOENT' ? `Claude Code wasn't found at ${inv.command}. Install it or sign in.` : `Claude Code couldn't start: ${ended.error.message}`;
-    return {status: 'failed', reason: publicText(reason), ...base};
+    return {status: 'failed', reason: publicText(reason), ...withModel, ...base};
   }
   if (stopReason === 'cancelled') return {status: 'failed', reason: 'cancelled', ...withModel, ...base};
   if (stopReason !== undefined) return {status: 'capped', reason: stopReason, ...withModel, ...base};

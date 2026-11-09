@@ -60,7 +60,7 @@ async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {plates?: ProjectPlate[]; title: string; canRetryCleanup: boolean; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
+export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {plates?: ProjectPlate[]; title: string; canRetryCleanup: boolean; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity' | 'sessionId' | 'resumable' | 'checkpoints' | 'resume' | 'sessionCwd'> & {activityCount: number})[]};
 
 // Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
 // advice for those retained attempts too, leaving their original stored records intact.
@@ -86,7 +86,7 @@ export function publicObject(object: StmObject): PublicObject {
   // The companion's decision (copy, new design or published), so neither app re-derives it.
   return {...object, ...(object.kind === 'published' ? {plates: projectPlates(object)} : {}), kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
-    passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass,
+    passes: object.passes.map(({dir: _dir, activity, sessionId: _session, sessionCwd: _sessionCwd, resumable: _resumable, checkpoints: _checkpoints, resume: _resume, ...pass}) => ({...pass,
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
 }
 

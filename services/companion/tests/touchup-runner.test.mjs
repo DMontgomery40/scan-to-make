@@ -84,7 +84,7 @@ test('tool-call cap', async () => {
   const started = Date.now();
   const result = await runTouchupWorker(inv, pass, {maxToolCalls: 120});
   assert.equal(result.status, 'capped');
-  assert.match(result.reason, /120 tool calls/);
+  assert.match(result.reason, /120 tool-call limit/);
   assert.equal(result.model, join(pass.checkpointsDir, '02.stl'));
   assert.ok(Date.now() - started < 10000, 'the hung worker was killed');
 });
@@ -224,3 +224,62 @@ for (const [answer, expected] of [
     assert.deepEqual(result.supports, expected);
   });
 }
+
+for (const kind of ['inactivity', 'absolute', 'tool-calls']) {
+  test(`${kind} stop keeps the init session and only valid checkpoints`, async t => {
+    const {EventEmitter} = await import('node:events');
+    const {PassThrough} = await import('node:stream');
+    const {pass, inv} = await setup('hang');
+    const good = join(pass.checkpointsDir, '01.stl');
+    await writeFile(good, 'solid x\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid x\n');
+    await writeFile(join(pass.checkpointsDir, '02.stl'), 'broken');
+    const child = Object.assign(new EventEmitter(), {pid: 99999999, stdout: new PassThrough(), stderr: new PassThrough()});
+    t.mock.method(process, 'kill', () => { queueMicrotask(() => child.emit('close', null)); return true; });
+    t.mock.timers.enable({apis: ['setTimeout', 'Date']});
+    const progress = [];
+    const pending = runTouchupWorker(inv, pass, {spawn: () => child, inactivityMs: kind === 'absolute' ? 1000 : 60, timeoutMs: 300, maxToolCalls: 1, onProgress: p => progress.push(p)});
+    child.stdout.write('{"type":"system","subtype":"init","session_id":"saved-session"}\n');
+    if (kind === 'tool-calls') child.stdout.write('{"type":"assistant","message":{"content":[{"type":"tool_use"},{"type":"tool_use"}]}}\n');
+    t.mock.timers.tick(kind === 'absolute' ? 300 : 60);
+    const result = await pending;
+    assert.equal(result.status, 'capped');
+    assert.deepEqual(result.limit, {kind, value: kind === 'absolute' ? 300 : kind === 'inactivity' ? 60 : 1});
+    assert.equal(result.sessionId, 'saved-session');
+    assert.equal(result.resumable, true);
+    assert.deepEqual(result.checkpoints, [good]);
+    assert.equal(result.model, good);
+    assert.ok(progress.some(p => p.sessionId === 'saved-session'));
+  });
+}
+
+test('every worker event resets inactivity so active work can run beyond 900 seconds', async t => {
+  const {EventEmitter} = await import('node:events');
+  const {PassThrough} = await import('node:stream');
+  const {runClaudeWorker} = await import('../dist/touchup/runner.js');
+  const {inv} = await setup('hang');
+  const child = Object.assign(new EventEmitter(), {pid: 99999999, stdout: new PassThrough(), stderr: new PassThrough()});
+  const kills = t.mock.method(process, 'kill', () => { queueMicrotask(() => child.emit('close', null)); return true; });
+  t.mock.timers.enable({apis: ['setTimeout', 'Date']});
+  const pending = runClaudeWorker(inv, {spawn: () => child, inactivityMs: 60000, timeoutMs: 2000000});
+  for (let i = 0; i < 20; i++) { t.mock.timers.tick(50000); child.stdout.write('{"type":"user","session_id":"still-active"}\n'); }
+  assert.equal(kills.mock.callCount(), 0);
+  child.stdout.write('{"type":"result","structured_output":{"status":"done"}}\n'); child.emit('close', 0);
+  const result = await pending;
+  assert.equal(result.stopReason, undefined);
+  assert.equal(result.sessionId, 'still-active');
+});
+
+test('a crashed worker without a final answer remains resumable, while a person cancel does not', async t => {
+  const {EventEmitter} = await import('node:events');const {PassThrough} = await import('node:stream');
+  for (const cancelled of [false,true]) {
+    const {pass,inv}=await setup('hang'),controller=new AbortController();
+    const child=Object.assign(new EventEmitter(),{pid:99999999,stdout:new PassThrough(),stderr:new PassThrough()});
+    t.mock.method(process,'kill',()=>{queueMicrotask(()=>child.emit('close',null));return true;});
+    const pending=runTouchupWorker(inv,pass,{spawn:()=>child,signal:controller.signal});
+    child.stdout.write('{"type":"system","subtype":"init","session_id":"crash-session"}\n');
+    if(cancelled)controller.abort();else child.emit('close',1);
+    const result=await pending;
+    assert.equal(result.status,'failed');assert.equal(result.sessionId,'crash-session');assert.equal(result.resumable,!cancelled);
+    if(cancelled)assert.equal(result.reason,'cancelled');
+  }
+});

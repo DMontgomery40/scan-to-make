@@ -53,6 +53,15 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        if set == "limit-stops", let json = ProcessInfo.processInfo.environment["COUNTERPART_LIMIT_FIXTURES"],
+           let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
+            return rows.enumerated().compactMap { index, row in
+                guard var project = row["expected"] as? [String: Any] else { return nil }
+                project["id"] = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a0\(index + 1)"
+                project["title"] = row["name"]
+                return project
+            }
+        }
         // A copy of a designer's 3MF whose printer MCP says it prints with its own settings, saved at Fine/Strong
         // (Nov 5, caliper card 1f1c5515): the sheet must start at Standard and say it prints the designer's settings.
         if set == "designer" {

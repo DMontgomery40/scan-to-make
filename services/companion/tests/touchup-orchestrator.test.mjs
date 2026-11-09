@@ -319,3 +319,30 @@ test("every designer-copy result that can become the model is checked, whatever 
   assert.equal(kept.status, 'capped');
   assert.ok(kept.model);
 });
+
+for (const unavailable of [false, true]) test(`a recovery uses --resume and a short checkpoint prompt${unavailable ? ', falling back only when the session is missing' : ''}`, async () => {
+  const i = await input({instructions:'A unicorn', note:'Add a mane', resume:{sessionId:'old-session',passDir:'/old/pass'}}), seen=[];
+  const deps=recorder([]);
+  deps.run=async (inv,pass,opts)=>{
+    seen.push({args:[...inv.args],cwd:inv.cwd});
+    if (unavailable && seen.length===1) return {status:'failed',reason:'No conversation found with session ID: old-session',renders:[],checkpoints:[],stats:{seconds:1,toolCalls:0}};
+    return {...done(pass), sessionId:unavailable?'new-session':'old-session',resumable:false};
+  };
+  const result=await runTouchup(i,deps);
+  assert.equal(seen[0].args[seen[0].args.indexOf('--resume')+1],'old-session');
+  assert.equal(seen[0].cwd,'/old/pass');
+  assert.match(seen[0].args.at(-1),/Continue from where you stopped/);
+  assert.match(seen[0].args.at(-1),/\/old\/pass\/out\/checkpoints/);
+  assert.match(seen[0].args.at(-1),/Add a mane/);
+  assert.doesNotMatch(seen[0].args.at(-1),/Photo 1:/);
+  assert.equal(result.resume.outcome,unavailable?'cold-start':'resumed');
+  if(unavailable){assert.equal(seen.length,2);assert.equal(seen[1].args.includes('--resume'),false);assert.match(result.resume.reason,/session.*unavailable/i);}
+});
+
+test('a second recovery keeps the original session cwd and includes newly supplied evidence', async () => {
+ const i=await input({instructions:'A unicorn',resume:{sessionId:'same-session',passDir:'/second/pass',sessionCwd:'/first/pass',photos:[join(fixtures,'photo.jpg')]}});
+ const deps=recorder([]),seen=[];deps.run=async(inv,pass)=>{seen.push(inv);return {...done(pass),sessionId:'same-session'};};
+ const result=await runTouchup(i,deps);
+ assert.equal(seen[0].cwd,'/first/pass');assert.equal(result.sessionCwd,'/first/pass');
+ assert.match(seen[0].args.at(-1),/New photos for this request:/);
+});

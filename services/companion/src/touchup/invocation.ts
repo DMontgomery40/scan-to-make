@@ -229,7 +229,7 @@ function passRules(input: {pass: TouchupPass; kind?: 'copy' | 'fit'; engine?: De
     request: Boolean(input.instructions?.trim() || input.note?.trim()), ...(input.designerCopy ? {designerCopy: true} : {})};
 }
 
-export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; designerCopy?: boolean; sourceEnv?: NodeJS.ProcessEnv;
+export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; designerCopy?: boolean; sourceEnv?: NodeJS.ProcessEnv;
   engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: {f3d: string; parameters?: string}; guidance?: DesignGuidance;
   /** The pass's kind (PRD §8.9). Without it, a pass with a scan is a copy and one without is a new design, as passKind decides. */
   kind?: 'copy' | 'fit'}): TouchupInvocation {
@@ -247,6 +247,7 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
   writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2), {mode: 0o600});
   const args = [
     '-p',
+    ...(input.resumeSessionId ? ['--resume', input.resumeSessionId] : []),
     '--model', 'claude-opus-5-5',
     '--effort', 'high',
     '--mcp-config', mcpConfigPath,

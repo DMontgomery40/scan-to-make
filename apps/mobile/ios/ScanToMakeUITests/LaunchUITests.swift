@@ -538,6 +538,25 @@ final class LayoutParityUITests: XCTestCase {
         return app
     }
 
+    func testLimitStopNamesItsLimitOnHomeAndTheProject() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/capped-projects.json"))
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let selected = rows.filter { ($0["name"] as? String) == "limit-inactivity" }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "limit-stops"]
+        app.launchEnvironment["COUNTERPART_LIMIT_FIXTURES"] = String(data: try JSONSerialization.data(withJSONObject: selected), encoding: .utf8)
+        app.launch()
+        let words = NSPredicate(format: "label CONTAINS %@", "Stopped after 600 seconds without worker activity")
+        let listed = app.descendants(matching: .any).matching(words).firstMatch
+        XCTAssertTrue(listed.waitForExistence(timeout: 20))
+        listed.tap()
+        XCTAssertTrue(app.buttons["Try Again"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any).matching(words).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["cancelled"].exists)
+    }
+
     /// David, Nov 9: New showed two scan tiles ("On a scan rig", "Scan it") that ran the same capture. One Scan it tile,
     /// with Kass 3D's rig link underneath it, on the iPhone and the iPad.
     func testNewOffersOneScanWithTheRigLink() throws {

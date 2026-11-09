@@ -111,3 +111,5 @@ One monitor runs per dispatched print and holds its printer's MCP session until 
 ### Storage
 
 `<data root>/events.ndjson`: one JSON event per line, appended; the data root is the parent of the auth directory (`~/Library/Application Support/Scan to Make/` for the app). Mode 0600. Events older than 7 days are dropped at start and every hour; the highest `seq` is kept in `events.meta.json` so numbering continues after pruning. Clients never read these files directly.
+
+Design/touch-up worker limits (Nov 9): `pass.failed` is also emitted for a `capped` pass. Its existing `detail.reason` names the actual inactivity, absolute-time or tool-call limit and offers retry. This is distinct from the person's `cancelled` reason; a checkpoint never emits `pass.ready`. Session/checkpoint recovery metadata remains local to the pass record and is not event data. The event shape is unchanged.

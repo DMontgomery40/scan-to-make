@@ -1,5 +1,7 @@
 package com.scantomake.counterpart
 
+import kotlinx.serialization.json.jsonPrimitive
+
 import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
@@ -115,6 +117,22 @@ class HomeLayoutTests {
     }
 
     private fun home() = compose.setContent { WithApp { HomeScreen(open = { _, _ -> }, newProject = {}, printers = {}, settings = {}) } }
+
+    @Test fun limitStopsNameTheLimitWithProjectsPresent() {
+        val rows = WireJson.parseToJsonElement(kitFixture("capped-projects.json").readText()).jsonArray
+        val stopped = rows.filter { it.jsonObject["name"]!!.jsonPrimitive.content.startsWith("limit-") }
+            .map { requireNotNull(Project.decode(it.jsonObject["expected"]!!.jsonObject)) }
+        state.projects.value = listOf(project("other", "Existing project", "ready")) + stopped
+        state.loaded.value = true
+        home()
+        stopped.forEach { p ->
+            val words = requireNotNull(p.failure)
+            compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(words))
+            compose.onNodeWithText(words).assertExists()
+            assertEquals(words, com.scantomake.counterpart.api.ProjectWords(p).status)
+            org.junit.Assert.assertTrue(com.scantomake.counterpart.api.ProjectAction.Retry in com.scantomake.counterpart.api.ProjectWords(p).actions)
+        }
+    }
 
     @Test fun theStartersStayOnHomeWhileProjectsExist() {
         state.projects.value = listOf(project("a", "Stove gap filler", "ready"), project("b", "Cable clip", "printed"),
