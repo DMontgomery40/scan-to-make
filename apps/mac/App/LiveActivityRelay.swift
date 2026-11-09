@@ -52,9 +52,13 @@ import ControlKit
     deinit { flushTask?.cancel() }
 
     func deliver(_ event: CounterpartEvent, title: String, client: ControlClient, cloudTokens: LiveActivityTokens) async {
+        let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
+        deliver(event, title: title, local: local, cloudTokens: cloudTokens)
+    }
+
+    func deliver(_ event: CounterpartEvent, title: String, local: LiveActivityTokens, cloudTokens: LiveActivityTokens) {
         guard enabled, endpoint != nil, event.type.hasPrefix("print.") else { return }
         recovery.record(event, title: title, now: Date())
-        let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
         let candidates = event.type == "print.started" ? (local.pushToStart + cloudTokens.pushToStart).map(\.token) : []
         for token in Set(candidates.map { $0.lowercased() }) where !dead.contains(token) {
             if let push = LiveActivityPush.make(for: event, token: token, title: title, now: Date()) { enqueue(push) }
@@ -176,6 +180,10 @@ import ControlKit
                 pending[0] = LiveActivityPush.carryingAlert(of: push, into: newest)
             } else if retry { pending.insert(push, at: 0) }
             else { pending.append(push) }
+        } else if retry, !pending.isEmpty {
+            // The waiting state arrived while this request was in flight; never replace it with
+            // this older state, including after the older milestone loses its alert.
+            return
         } else if !pending.isEmpty {
             pending[pending.count - 1] = LiveActivityPush.carryingAlert(of: pending.last, into: push)
         } else { pending.append(push) }

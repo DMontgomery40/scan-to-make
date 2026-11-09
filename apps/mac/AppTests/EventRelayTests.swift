@@ -392,6 +392,20 @@ final class EventRelayTests: XCTestCase {
         XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
     }
 
+    @MainActor func testAnOlderStatusRetryCannotReplaceTheNewerWaitingProgress() async throws {
+        let harness = try MilestoneHarness { _, index in
+            (index == 0 ? 429 : 200, ["Retry-After": "1", "X-Test-Delay": index == 0 ? "0.2" : "0"])
+        }
+        defer { harness.close() }
+        let relay = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        relay.deliver(event("print.status", data: .init(progress: 20), printId: "print-1"), title: "Mic mount", local: local, cloudTokens: .init())
+        await eventually { harness.requestCount == 1 }
+        relay.deliver(event("print.status", data: .init(progress: 70), printId: "print-1"), title: "Mic mount", local: local, cloudTokens: .init())
+        await eventually(timeout: 3) { !harness.acceptedProgress.isEmpty }
+        XCTAssertEqual(harness.acceptedProgress, [70], "retrying the older request must preserve the newer state that arrived in flight")
+    }
+
     @MainActor private func eventually(timeout: TimeInterval = 2, _ condition: () -> Bool) async {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
@@ -613,8 +627,10 @@ private final class MilestoneHarness: @unchecked Sendable {
     let session: URLSession
     private let lock = NSLock()
     private var accepted: [String] = []
+    private var progress: [Double] = []
     private var count = 0
     private let response: (URLRequest, Int) -> (Int, [String: String])
+    var acceptedProgress: [Double] { lock.lock(); defer { lock.unlock() }; return progress }
     var requestCount: Int { lock.lock(); defer { lock.unlock() }; return count }
     var acceptedTitles: [String] { lock.lock(); defer { lock.unlock() }; return accepted }
     @MainActor init(response: @escaping (URLRequest, Int) -> (Int, [String: String])) throws {
@@ -632,6 +648,8 @@ private final class MilestoneHarness: @unchecked Sendable {
         let result = response(request, count); count += 1
         if result.0 == 200, let object = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any],
            let alert = object["alert"] as? [String: Any], let title = alert["title"] as? String { accepted.append(title) }
+        if result.0 == 200, let object = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any],
+           let state = object["contentState"] as? [String: Any], let value = state["progress"] as? Double { progress.append(value) }
         return result
     }
     func close() { session.invalidateAndCancel(); defaults.removePersistentDomain(forName: name); MilestoneProtocol.remove(name) }
@@ -659,9 +677,14 @@ private final class MilestoneProtocol: URLProtocol, @unchecked Sendable {
             sent.httpBody = body
         }
         let (code, headers) = harness.answer(sent)
-        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: headers)!, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"scope":"token-interval"}"#.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        let reply = { [self] in
+            client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: headers)!, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(#"{"scope":"token-interval"}"#.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        if let delay = Double(headers["X-Test-Delay"] ?? ""), delay > 0 {
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay, execute: reply)
+        } else { reply() }
     }
     override func stopLoading() {}
 }
