@@ -548,7 +548,7 @@ final class LayoutParityUITests: XCTestCase {
         app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "limit-stops"]
         app.launchEnvironment["COUNTERPART_LIMIT_FIXTURES"] = String(data: try JSONSerialization.data(withJSONObject: selected), encoding: .utf8)
         app.launch()
-        let words = NSPredicate(format: "label CONTAINS %@", "Stopped after 600 seconds without worker activity")
+        let words = NSPredicate(format: "label CONTAINS %@", "Stopped after 10 minutes without worker activity")
         let listed = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "limit-inactivity")).firstMatch
         XCTAssertTrue(listed.waitForExistence(timeout: 20))
         listed.tap()

@@ -11,9 +11,12 @@ export const TOUCHUP_TIMEOUT_MS = 2 * 60 * 60_000;
 export const TOUCHUP_INACTIVITY_MS = 10 * 60_000;
 export interface WorkerLimit {kind: 'inactivity' | 'absolute' | 'tool-calls'; value: number}
 export function limitWords(limit: WorkerLimit): string {
-  return limit.kind === 'tool-calls' ? `Stopped at the ${limit.value} tool-call limit`
-    : limit.kind === 'inactivity' ? `Stopped after ${Math.round(limit.value / 1000)} seconds without worker activity`
-    : `Stopped at the ${Math.round(limit.value / 1000)} second absolute time limit`;
+  if (limit.kind === 'tool-calls') return `Stopped at the ${limit.value} tool-call limit`;
+  const [unit, divisor] = limit.value % 3_600_000 === 0 ? ['hour', 3_600_000] as const
+    : limit.value % 60_000 === 0 ? ['minute', 60_000] as const : ['second', 1000] as const;
+  const count = Math.round(limit.value / divisor), duration = `${count} ${unit}${count === 1 ? '' : 's'}`;
+  return limit.kind === 'inactivity' ? `Stopped after ${duration} without worker activity`
+    : `Stopped at the absolute time limit of ${duration}`;
 }
 export const TOUCHUP_MAX_TOOL_CALLS = 120;
 const KILL_GRACE_MS = 5000;

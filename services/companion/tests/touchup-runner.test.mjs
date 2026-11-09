@@ -283,3 +283,10 @@ test('a crashed worker without a final answer remains resumable, while a person 
     if(cancelled === true)assert.equal(result.reason,'cancelled');
   }
 });
+
+test('limit words use minutes and hours a person can read', async () => {
+ const {limitWords}=await import('../dist/touchup/runner.js');
+ assert.equal(limitWords({kind:'inactivity',value:600000}),'Stopped after 10 minutes without worker activity');
+ assert.equal(limitWords({kind:'absolute',value:7200000}),'Stopped at the absolute time limit of 2 hours');
+ assert.equal(limitWords({kind:'tool-calls',value:120}),'Stopped at the 120 tool-call limit');
+});

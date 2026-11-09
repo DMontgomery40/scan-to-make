@@ -366,7 +366,7 @@
             {
               "atMs": 2,
               "kind": "message",
-              "text": "Stopped after 600 seconds without worker activity. Try again or review the saved checkpoint."
+              "text": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint."
             }
           ],
           "limit": {
@@ -380,7 +380,7 @@
           ]
         }
       ],
-      "failure": "Stopped after 600 seconds without worker activity. Try again or review the saved checkpoint."
+      "failure": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint."
     },
     "retry": true,
     "checkedPrint": false,
@@ -409,11 +409,11 @@
           }
         }
       ],
-      "failure": "Stopped after 600 seconds without worker activity. Try again or review the saved checkpoint.",
+      "failure": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.",
       "canRetryCleanup": true,
       "status": {
         "phase": "failed",
-        "text": "Stopped after 600 seconds without worker activity. Try again or review the saved checkpoint.",
+        "text": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
@@ -448,7 +448,7 @@
             {
               "atMs": 2,
               "kind": "message",
-              "text": "Stopped at the 7200 second absolute time limit. Try again or review the saved checkpoint."
+              "text": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint."
             }
           ],
           "limit": {
@@ -462,7 +462,7 @@
           ]
         }
       ],
-      "failure": "Stopped at the 7200 second absolute time limit. Try again or review the saved checkpoint."
+      "failure": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint."
     },
     "retry": true,
     "checkedPrint": false,
@@ -491,11 +491,11 @@
           }
         }
       ],
-      "failure": "Stopped at the 7200 second absolute time limit. Try again or review the saved checkpoint.",
+      "failure": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint.",
       "canRetryCleanup": true,
       "status": {
         "phase": "failed",
-        "text": "Stopped at the 7200 second absolute time limit. Try again or review the saved checkpoint.",
+        "text": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint.",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
