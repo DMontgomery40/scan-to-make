@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {ObjectStore} from '../dist/objects/store.js';
-import {ObjectService, InvalidStateError, scanSummary, SCANS_NEED_A_MAC, KEEP_SCAN_UNAVAILABLE, PREVIEW_ONLY} from '../dist/objects/service.js';
+import {ObjectService, InvalidStateError, scanSummary, tooFewPhotos, SCANS_NEED_A_MAC, KEEP_SCAN_UNAVAILABLE, PREVIEW_ONLY} from '../dist/objects/service.js';
 import {macReconstructArgs, macReconstructRunner, macScanToStl, linuxReconstructRunner, progressWords, NEEDS_MACOS_27, OBJECT_CAPTURE_NEEDS_MAC, RECONSTRUCTION_FAILED} from '../dist/objects/reconstruct.js';
 import {tempDir} from './support/temp.mjs';
 
@@ -29,10 +29,11 @@ async function setup({reconstruct, scanToStl, deps = {}} = {}) {
   const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
     onChange: object => changes.push(object), ...deps,
-    ...(scanToStl === null ? {} : {objectCaptureRebuild: true, scanToStl: scanToStl ?? (async (scan, stl, {render} = {}) => {
-      converted.push({scan, bytes: await readFile(scan, 'utf8')});
+    ...(scanToStl === null ? {} : {objectCaptureRebuild: true, scanToStl: scanToStl ?? (async (scan, stl, {render, removeSupport} = {}) => {
+      converted.push({scan, bytes: await readFile(scan, 'utf8'), ...(removeSupport ? {removeSupport} : {})});
       await writeFile(stl, STL);
       if (render) await writeFile(render, 'png');
+      return removeSupport ? {supportRemoved: true} : undefined;
     })}),
     reconstruct: reconstruct ?? (async input => {
       builds.push(input);
@@ -214,8 +215,9 @@ test('a walk-around sends every Object Capture image; the Mac rebuilds them at f
   assert.equal(await readFile(join(dir, 'scan', 'scan.usdz'), 'utf8'), 'usdz', 'the scan is the Mac rebuild');
   assert.equal(await readFile(join(dir, 'scan', 'phone-preview.usdz'), 'utf8'), 'phone preview', 'the phone preview is kept');
   assert.deepEqual((await readdir(join(dir, 'scan'))).filter(name => name.startsWith('rebuilding-')), []);
-  assert.deepEqual(converted, [{scan: join(dir, 'scan', 'scan.usdz'), bytes: 'usdz'}], 'the model is the rebuild, not the preview');
-  assert.equal(done.current.summary, 'Rebuilt on your Mac from all 2 photos at full detail. Its size comes from the LiDAR depth in every photo. Nothing has been touched up yet. Ask for changes to clean it up.');
+  assert.deepEqual(converted, [{scan: join(dir, 'scan', 'scan.usdz'), bytes: 'usdz', removeSupport: true}],
+    'the model is the rebuild, not the preview, with whatever it stood on cut away');
+  assert.equal(done.current.summary, 'Rebuilt on your Mac from all 2 photos at full detail. 2 photos are few, so expect gaps; more photos, including some from above, help. Its size comes from the LiDAR depth in every photo. The surface it stood on was removed. Nothing has been touched up yet. Ask for changes to clean it up.');
   assert.deepEqual(done.current.renders, [join('current', 'renders', 'overview.png')], 'every layout gets a picture of the model');
   assert.equal(await readFile(join(dir, 'current', 'renders', 'overview.png'), 'utf8'), 'png');
   assert.deepEqual(done.passes[0].stages.map(stage => stage.id), ['building', 'saving']);
@@ -233,8 +235,8 @@ test('a walk-around whose rebuild fails keeps the phone preview and says so; a r
   const dir = service.dir(object.id);
   assert.equal(done.state, 'ready', 'a failed rebuild is not a failed project: the preview is still a model');
   assert.equal(done.scanSource, 'phone-preview');
-  assert.deepEqual(converted, [{scan: join(dir, 'scan', 'scan.usdz'), bytes: 'phone preview'}]);
-  assert.equal(done.current.summary, "Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview. Scan it again to retry the full rebuild. Nothing has been touched up yet. Ask for changes to clean it up.");
+  assert.deepEqual(converted, [{scan: join(dir, 'scan', 'scan.usdz'), bytes: 'phone preview', removeSupport: true}]);
+  assert.equal(done.current.summary, "Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview. Scan it again to retry the full rebuild. The surface it stood on was removed. Nothing has been touched up yet. Ask for changes to clean it up.");
   assert.deepEqual((await readdir(join(dir, 'scan'))).sort(), ['scan.usdz']);
   assert.equal(touchups.length, 0);
 
@@ -338,21 +340,51 @@ test("the companion rebuilds an Object Capture session from Apple's images folde
   assert.equal((await readFile(argv, 'utf8')).trim(), '/in /out.usdz full');
   assert.deepEqual(outcome, {status: 'done', inputs: {images: 59, depth: 58, skipped: 2, stitchingIncomplete: true}});
   assert.equal(scanSummary({scan: 'scan.usdz', inputs: outcome.inputs}),
-    "Rebuilt on your Mac from 57 of your 59 photos at full detail. Apple couldn't place the other 2, so more overlapping photos would help. Its size comes from the LiDAR depth in 58 of them. Apple couldn't join every photo together, so check every side. Nothing has been touched up yet. Ask for changes to clean it up.");
+    "Rebuilt on your Mac from 57 of your 59 photos at full detail. Apple couldn't place the other 2, so more overlapping photos, including some from above, would help. Its size comes from the LiDAR depth in 58 of them. Apple couldn't join every photo together, so check every side. Nothing has been touched up yet. Ask for changes to clean it up.");
+  assert.equal(scanSummary({scan: 'scan.usdz', inputs: {images: 72, depth: 72}}, 'mac', true),
+    'Rebuilt on your Mac from all 72 photos at full detail. Its size comes from the LiDAR depth in every photo. The surface it stood on was removed. Nothing has been touched up yet. Ask for changes to clean it up.');
   assert.match(scanSummary({scan: 'scan.usdz', inputs: {images: 3, depth: 0}}), /These photos carry no depth, so its size isn't measured/);
   assert.deepEqual(seen, ['Building the model from your photos.', 'Building the model from your photos (50%).']);
 
   const stl = await fake('stl', `echo "$@" > '${argv}'; echo '{"done":"'$3'","triangles":12}'`);
   await macScanToStl(stl)('/scan.usdz', '/model.stl');
   assert.equal((await readFile(argv, 'utf8')).trim(), 'stl /scan.usdz /model.stl');
-  await macScanToStl(stl)('/scan.usdz', '/model.stl', {render: '/overview.png'});
+  assert.deepEqual(await macScanToStl(stl)('/scan.usdz', '/model.stl', {render: '/overview.png'}), {supportRemoved: false});
   assert.equal((await readFile(argv, 'utf8')).trim(), 'stl /scan.usdz /model.stl --render /overview.png');
+  const cut = await fake('stl-cut', `echo "$@" > '${argv}'; echo '{"done":"'$3'","triangles":12,"support":{"tiltDegrees":4.9}}'`);
+  assert.deepEqual(await macScanToStl(cut)('/scan.usdz', '/model.stl', {removeSupport: true}), {supportRemoved: true});
+  assert.equal((await readFile(argv, 'utf8')).trim(), 'stl /scan.usdz /model.stl --remove-support');
   const broken = await fake('broken-stl', `echo '{"error":"no triangles"}'; echo 'PRIVATE ModelIO detail' >&2; exit 1`);
   await assert.rejects(macScanToStl(broken)(join(root, 'scan.usdz'), join(root, 'out', 'model.stl')), {message: "Your Mac couldn't turn this scan into a printable model."});
   const kept = await readFile(join(root, 'out', '.reconstruction-diagnostics', 'last-failure.log'), 'utf8');
   assert.match(kept, /"error":"no triangles"/);
   assert.match(kept, /PRIVATE ModelIO detail/, 'stderr is kept privately, like the rebuild');
   assert.equal(macScanToStl(null), undefined);
+});
+
+test('a stopped scan sent as photos alone is rebuilt on the Mac, and too few photos are said plainly', async () => {
+  // David, Nov 9: the unicorn's scan was stopped with 9 photos and no phone model. Send to your Mac sends the photos.
+  let fail = true;
+  const {service, object, converted} = await setup({reconstruct: async input => {
+    if (fail) throw new Error(RECONSTRUCTION_FAILED);
+    await writeFile(input.output, 'usdz');
+    return {status: 'done', inputs: {images: 2, depth: 2}};
+  }});
+  await service.declareCapture(object.id, objectCaptureManifest(APPLE));
+  for (const name of APPLE) await service.addCapturePhoto(object.id, name, Buffer.from(name));
+  assert.equal((await service.get(object.id)).scan, undefined, 'no phone model came with it');
+  await service.start(object.id, objectCaptureManifest(APPLE));
+  const failed = await service.settled(object.id);
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.failure, tooFewPhotos(2));
+  assert.match(failed.failure, /^Your Mac couldn't build a model from these 2 photos\. That's too few/);
+  fail = false;
+  await service.start(object.id, objectCaptureManifest(APPLE));
+  const done = await service.settled(object.id);
+  assert.equal(done.state, 'ready');
+  assert.equal(done.scanSource, 'mac');
+  assert.equal(converted.at(-1).removeSupport, true);
+  assert.match(done.current.summary, /2 photos are few, so expect gaps; more photos, including some from above, help\./);
 });
 
 test('a Mac without macOS 27 says so plainly, and trying again rebuilds', async () => {

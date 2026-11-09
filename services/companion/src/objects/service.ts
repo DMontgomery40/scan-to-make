@@ -294,6 +294,14 @@ export function spreadPick<T>(items: T[], count: number): T[] {
 /** What `#build` left as the scan: this Mac's rebuild (from `photos`, `inputs` for an Object Capture folder), or the phone's preview when the rebuild `failed`. */
 interface Rebuilt { scan: string; photos?: number; inputs?: ReconstructInputs; failed?: string }
 
+/** Below this many photos a walk-around rarely rebuilds whole (the phone's Done waits for 60, from two heights). */
+export const ENOUGH_PHOTOS = 60;
+
+/** A walk-around with too few photos that Apple couldn't rebuild, said plainly. */
+export function tooFewPhotos(count: number): string {
+  return `Your Mac couldn't build a model from ${count === 1 ? 'this 1 photo' : `these ${count} photos`}. That's too few: scan it again, all the way round it, low and then from above, until the phone says it's ready.`;
+}
+
 /** A pass's stages: the rebuild when there is one, the touch-up only when one was asked for, then saving. */
 export function passPlan(build: boolean, touchup: boolean): StageId[] {
   return [...(build ? ['building' as const] : []), ...(touchup ? ['preparing' as const, 'working' as const] : []), 'saving'];
@@ -306,18 +314,20 @@ export function previewKept(failed: string): string {
 }
 
 /** The model's summary when the scan is kept as it is: where it came from and where its size came from, in words. */
-export function scanSummary(rebuilt?: Rebuilt, scanSource?: StmObject['scanSource']): string {
+export function scanSummary(rebuilt?: Rebuilt, scanSource?: StmObject['scanSource'], supportRemoved = false): string {
   const next = 'Nothing has been touched up yet. Ask for changes to clean it up.';
-  if (rebuilt?.failed !== undefined) return `${previewKept(rebuilt.failed)} ${next}`;
-  if (!rebuilt) return `${scanSource === 'phone-preview' ? PREVIEW_ONLY : 'This is the scan as it came.'} ${next}`;
+  const support = supportRemoved ? ' The surface it stood on was removed.' : '';
+  if (rebuilt?.failed !== undefined) return `${previewKept(rebuilt.failed)}${support} ${next}`;
+  if (!rebuilt) return `${scanSource === 'phone-preview' ? PREVIEW_ONLY : 'This is the scan as it came.'}${support} ${next}`;
   const inputs = rebuilt.inputs, count = inputs?.images ?? rebuilt.photos ?? 0, unused = Math.min(inputs?.skipped ?? 0, count);
   const from = !count ? 'your photos' : unused ? `${count - unused} of your ${count} photos` : `all ${count} photo${count === 1 ? '' : 's'}`;
   const size = !inputs ? '' : inputs.depth === 0 ? " These photos carry no depth, so its size isn't measured; check it before printing."
     : inputs.depth === inputs.images ? ' Its size comes from the LiDAR depth in every photo.'
     : ` Its size comes from the LiDAR depth in ${inputs.depth} of them.`;
   const joined = inputs?.stitchingIncomplete ? " Apple couldn't join every photo together, so check every side." : '';
-  const left = unused ? ` Apple couldn't place the other ${unused}, so more overlapping photos would help.` : '';
-  return `Rebuilt on your Mac from ${from} at full detail.${left}${size}${joined} ${next}`;
+  const left = unused ? ` Apple couldn't place the other ${unused}, so more overlapping photos, including some from above, would help.` : '';
+  const few = inputs && count > 0 && count < ENOUGH_PHOTOS && !unused ? ` ${count} photo${count === 1 ? ' is' : 's are'} few, so expect gaps; more photos, including some from above, help.` : '';
+  return `Rebuilt on your Mac from ${from} at full detail.${left}${few}${size}${joined}${support} ${next}`;
 }
 
 /** The object lifecycle: inputs arrive, a capture is rebuilt, a touch-up runs when asked for, and the result is ready to print. */
@@ -2938,6 +2948,9 @@ export class ObjectService {
           ...(scaleQualificationRequired ? {scaleQualificationRequired: true} : {}), signal, onProgress: show});
       } catch (error) {
         await writing;
+        // Photos alone (a stopped scan sent as it was): there is no preview to keep, so say plainly when they were too few.
+        const sent = before.capture?.length ?? 0;
+        if (objectCapture && !signal.aborted && !before.scan && sent < ENOUGH_PHOTOS) throw new Error(tooFewPhotos(sent));
         if (!objectCapture || signal.aborted || !before.scan) throw error;
         const reason = this.#publicText(error instanceof Error ? error.message : String(error));
         console.error(`rebuild failed: project ${id} keeps the phone's preview: ${reason.replace(/\s+/g, ' ').slice(0, 300)}`);
@@ -2992,10 +3005,13 @@ export class ObjectService {
     const model = join(passDir, 'out', 'model.stl'), scan = join(dir, 'scan', scanName);
     // Its picture is every layout's project picture until a touch-up draws its own (the photos are capture frames).
     const render = join(passDir, 'out', 'overview.png');
+    // An Object Capture scan stood on something (a table, a plate, any platform); what Apple's masking kept of it goes.
+    const removeSupport = object.captureCompletion?.source === 'object-capture';
+    let supportRemoved = false;
     if (scanName.toLowerCase().endsWith('.stl')) await copyFile(scan, model);
-    else await this.#deps.scanToStl!(scan, model, {render, signal});
+    else supportRemoved = !!(await this.#deps.scanToStl!(scan, model, {render, signal, ...(removeSupport ? {removeSupport} : {})}))?.supportRemoved;
     const drawn = await stat(render).then(info => info.isFile() && info.size > 0, () => false);
-    return {status: 'done', model, renders: drawn ? [render] : [], checkpoints: [], summary: scanSummary(rebuilt, object.scanSource),
+    return {status: 'done', model, renders: drawn ? [render] : [], checkpoints: [], summary: scanSummary(rebuilt, object.scanSource, supportRemoved),
       stats: {seconds: Math.round((Date.now() - startedAtMs) / 1000), toolCalls: 0}, passDir};
   }
 

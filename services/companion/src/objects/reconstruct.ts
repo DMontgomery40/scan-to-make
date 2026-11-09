@@ -183,15 +183,19 @@ export function macReconstructRunner(binary: string | null = findMacReconstruct(
 /**
  * Turns a scan into the STL a project prints (millimetres, Z up, on the bed), without touching it up; with `render`,
  * also draws the project page's picture of it there (best effort: a scan that can't be drawn still gets its STL).
+ * With `removeSupport`, whatever it stood on (a table, a plate, any platform Apple's masking kept) is cut away when
+ * the mesh shows one; the result says whether it was.
  */
-export type ScanToStl = (scan: string, stl: string, options?: {render?: string; signal?: AbortSignal}) => Promise<void>;
+export type ScanToStl = (scan: string, stl: string, options?: {render?: string; signal?: AbortSignal; removeSupport?: boolean})
+  => Promise<void | {supportRemoved?: boolean}>;
 export const SCAN_TO_STL_FAILED = "Your Mac couldn't turn this scan into a printable model.";
 
-/** `mac-reconstruct stl <scan> <stl> [--render <png>]`: the scan's triangles in millimetres (PhotogrammetrySession writes metres). */
+/** `mac-reconstruct stl <scan> <stl> [--render <png>] [--remove-support]`: the scan's triangles in millimetres (PhotogrammetrySession writes metres). */
 export function macScanToStl(binary: string | null = findMacReconstruct() ?? null): ScanToStl | undefined {
   if (!binary) return undefined;
-  return (scan, stl, {render, signal} = {}) => new Promise<void>((resolve, reject) => {
-    const child = spawn(binary, ['stl', scan, stl, ...(render ? ['--render', render] : [])], {stdio: ['ignore', 'pipe', 'pipe'], ...(signal ? {signal} : {})});
+  return (scan, stl, {render, signal, removeSupport} = {}) => new Promise<{supportRemoved: boolean}>((resolve, reject) => {
+    const child = spawn(binary, ['stl', scan, stl, ...(render ? ['--render', render] : []), ...(removeSupport ? ['--remove-support'] : [])],
+      {stdio: ['ignore', 'pipe', 'pipe'], ...(signal ? {signal} : {})});
     let out = '', failed = false, stderr = Buffer.alloc(0), stderrTruncated = false;
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => { out = (out + chunk).slice(-16384); });
@@ -204,8 +208,9 @@ export function macScanToStl(binary: string | null = findMacReconstruct() ?? nul
     child.on('error', failure => { failed = true; reject(failure.name === 'AbortError' ? failure : new Error(NOT_INSTALLED)); });
     child.on('close', (code, signalName) => {
       if (failed) return;
-      const lines = out.trim().split('\n').flatMap(line => { try { return [JSON.parse(line) as {done?: unknown; error?: unknown}]; } catch { return []; } });
-      if (code === 0 && lines.some(line => typeof line.done === 'string')) { resolve(); return; }
+      const lines = out.trim().split('\n').flatMap(line => { try { return [JSON.parse(line) as {done?: unknown; error?: unknown; support?: unknown}]; } catch { return []; } });
+      const done = lines.find(line => typeof line.done === 'string');
+      if (code === 0 && done) { resolve({supportRemoved: typeof done.support === 'object' && done.support !== null}); return; }
       const error = lines.map(line => line.error).find((value): value is string => typeof value === 'string');
       void retainFailure({output: stl}, {code, signal: signalName, error, stderr, truncated: stderrTruncated})
         .catch(() => undefined).finally(() => reject(new Error(SCAN_TO_STL_FAILED)));

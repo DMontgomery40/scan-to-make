@@ -10,10 +10,12 @@ import HandheldKit
 //       An Object Capture photo folder (walk-around scan): the iPhone's own HEICs, each carrying its LiDAR depth,
 //       gravity and the capture box, which PhotogrammetrySession reads itself. Before building it prints
 //       {"images":N,"depth":D}: how many photos carry depth, which is where the model's real-world size comes from.
-//   mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>]
+//   mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>] [--remove-support]
 //       Writes the model's triangles as a binary STL in millimetres, Z up, centred and resting on z = 0
 //       (PhotogrammetrySession writes metres, Y up). --render also draws the model for the project page; a model
 //       that can't be drawn still gets its STL, and the {"done":…} line names the picture only when there is one.
+//       --remove-support cuts away the surface the object stood on (a rig's plate, a patch of table) when there is
+//       one, stands the object where it stood, and draws the cut model; {"done":…} then carries "support".
 //   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
 //                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 //       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
@@ -32,7 +34,7 @@ func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
 
 let usage = """
 usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
-       mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>]
+       mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>] [--remove-support]
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 
 """
@@ -40,14 +42,20 @@ var args = Array(CommandLine.arguments.dropFirst())
 if args.first == "stl" {
     var render: String?
     if let i = args.firstIndex(of: "--render"), i + 1 < args.count { render = args[i + 1]; args.removeSubrange(i...(i + 1)) }
+    let cutSupport = args.contains("--remove-support"); args.removeAll { $0 == "--remove-support" }
     guard args.count == 3 else { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
     do {
-        let model = URL(fileURLWithPath: args[1])
-        let summary = try writeSTL(model: model, to: URL(fileURLWithPath: args[2]))
+        let model = URL(fileURLWithPath: args[1]), stl = URL(fileURLWithPath: args[2])
+        let summary = try writeSTL(model: model, to: stl, removeSupport: cutSupport)
         var done: [String: Any] = ["done": args[2], "triangles": summary.triangles, "vertices": summary.vertices,
                                    "sizeMm": [summary.sizeMm.x, summary.sizeMm.y, summary.sizeMm.z].map { ($0 * 10).rounded() / 10 }]
+        if let support = summary.support {
+            done["support"] = ["tiltDegrees": (support.tiltDegrees * 10).rounded() / 10, "areaMm2": Int(support.supportAreaMm2.rounded()),
+                               "trianglesBefore": support.trianglesBefore, "trianglesAfter": support.trianglesAfter]
+        }
         if let render {
-            do { try renderOverview(model: model, to: URL(fileURLWithPath: render)); done["render"] = render }
+            // The picture shows what prints: the cut STL when the support went, else the model with its textures.
+            do { try renderOverview(model: summary.support == nil ? model : stl, to: URL(fileURLWithPath: render), zUp: summary.support != nil); done["render"] = render }
             catch { FileHandle.standardError.write(Data("render: \(error)\n".utf8)) }
         }
         emit(done)

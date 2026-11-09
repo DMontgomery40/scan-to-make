@@ -130,4 +130,113 @@ final class HandheldKitTests: XCTestCase {
         let corner = image.colorAt(x: 2, y: 2)!, middle = image.colorAt(x: 150, y: 150)!
         XCTAssertGreaterThan(abs(middle.brightnessComponent - corner.brightnessComponent), 0.05, "the box shows on the stage")
     }
+
+    // MARK: Removing what it stood on (SupportCut)
+
+    /// A box from `low` to `high`, each face split into squares of about `step` mm, corners shared, outward winding.
+    private func box(_ low: SIMD3<Float>, _ high: SIMD3<Float>, step: Float = 5) -> [SIMD3<Float>] {
+        var out: [SIMD3<Float>] = []
+        func grid(_ origin: SIMD3<Float>, _ u: SIMD3<Float>, _ v: SIMD3<Float>) {
+            let nu = max(1, Int((simd_length(u) / step).rounded(.up))), nv = max(1, Int((simd_length(v) / step).rounded(.up)))
+            func p(_ i: Int, _ j: Int) -> SIMD3<Float> { origin + u * Float(i) / Float(nu) + v * Float(j) / Float(nv) }
+            for i in 0..<nu { for j in 0..<nv { out += [p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j), p(i + 1, j + 1), p(i, j + 1)] } }
+        }
+        let d = high - low
+        let x = SIMD3<Float>(d.x, 0, 0), y = SIMD3<Float>(0, d.y, 0), z = SIMD3<Float>(0, 0, d.z)
+        grid(low, y, x); grid(low + z, x, y)                     // bottom (down), top (up)
+        grid(low, x, z); grid(low + y, z, x)                     // front, back
+        grid(low, z, y); grid(low + x, y, z)                     // left, right
+        return out
+    }
+
+    /// A flat round plate: top and bottom fans in rings about `step` mm apart, and its rim.
+    private func disc(radius: Float, top: Float, thickness: Float, step: Float = 5, segments: Int = 72) -> [SIMD3<Float>] {
+        var out: [SIMD3<Float>] = []
+        let rings = max(1, Int((radius / step).rounded(.up)))
+        func p(_ ring: Int, _ k: Int, _ z: Float) -> SIMD3<Float> {
+            let r = radius * Float(ring) / Float(rings), a = Float(k % segments) / Float(segments) * 2 * .pi
+            return SIMD3(r * cos(a), r * sin(a), z)
+        }
+        for (z, up) in [(top, true), (top - thickness, false)] {
+            for ring in 0..<rings { for k in 0..<segments {
+                let a = p(ring, k, z), b = p(ring + 1, k, z), c = p(ring + 1, k + 1, z), d = p(ring, k + 1, z)
+                out += up ? [a, b, c, a, c, d] : [a, c, b, a, d, c]
+            } }
+        }
+        for k in 0..<segments {
+            let a = p(rings, k, top - thickness), b = p(rings, k + 1, top - thickness), c = p(rings, k + 1, top), d = p(rings, k, top)
+            out += [a, b, c, a, c, d]
+        }
+        return out
+    }
+
+    private func size(_ corners: [SIMD3<Float>]) -> SIMD3<Float> {
+        corners.reduce(SIMD3<Float>(repeating: -.infinity), simd_max) - corners.reduce(SIMD3<Float>(repeating: .infinity), simd_min)
+    }
+
+    /// Tilted a few degrees, as a scan's up rarely matches the surface exactly.
+    private func tilted(_ corners: [SIMD3<Float>], degrees: Float = 3) -> [SIMD3<Float>] {
+        let turn = simd_quatf(angle: degrees * .pi / 180, axis: simd_normalize(SIMD3<Float>(1, 0.4, 0)))
+        return corners.map { turn.act($0) }
+    }
+
+    /// An object (60 × 30 × 40 mm) on a plain flat table: the table goes, the object stays, standing on z = 0.
+    func testTheTableItStoodOnIsRemoved() throws {
+        let object = box(SIMD3(-30, -15, 0), SIMD3(30, 15, 40))
+        let table = box(SIMD3(-150, -150, -18), SIMD3(150, 150, 0), step: 10)
+        let cut = try XCTUnwrap(removeSupport(tilted(object + table)))
+        let s = size(cut.corners)
+        XCTAssertEqual(s.x, 60, accuracy: 1.5); XCTAssertEqual(s.y, 30, accuracy: 1.5)
+        XCTAssertEqual(s.z, 39.5, accuracy: 0.6, "cut 0.5 mm above the table")
+        XCTAssertEqual(cut.cut.tiltDegrees, 3, accuracy: 0.5)
+        XCTAssertEqual(cut.corners.map(\.z).min() ?? -1, 0, accuracy: 0.01, "stands on z = 0")
+    }
+
+    /// The same object on a round plate (any platform): the plate goes.
+    func testTheRoundPlateItStoodOnIsRemoved() throws {
+        let object = box(SIMD3(-30, -15, 0), SIMD3(30, 15, 40))
+        let cut = try XCTUnwrap(removeSupport(tilted(object + disc(radius: 100, top: 0, thickness: 8), degrees: 5)))
+        let s = size(cut.corners)
+        XCTAssertEqual(s.x, 60, accuracy: 1.5); XCTAssertEqual(s.y, 30, accuracy: 1.5)
+        XCTAssertEqual(s.z, 39.5, accuracy: 0.6)
+    }
+
+    /// A sign with nothing under it (a 180 × 30 × 25 mm plank, letters 160 × 10 × 70 mm on top): the plank's top is an
+    /// upward step under the letters, not a support, so nothing is cut.
+    func testAnObjectsOwnStepIsNotASupport() {
+        let plank = box(SIMD3(-90, -15, 0), SIMD3(90, 15, 25))
+        let letters = box(SIMD3(-80, -5, 25), SIMD3(80, 5, 95))
+        XCTAssertNil(removeSupport(plank + letters))
+        XCTAssertNil(removeSupport(tilted(plank + letters)))
+    }
+
+    /// Nothing flat at the bottom (an upright cylinder-ish object with no support) is left alone too.
+    func testNoSupportNoCut() {
+        XCTAssertNil(removeSupport(box(SIMD3(-20, -20, 0), SIMD3(20, 20, 60))))
+    }
+
+    /// `writeSTL(removeSupport:)` reports the cut and writes the object alone.
+    func testSTLWithTheSupportRemoved() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("handheldkit-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Written Y up in millimetres, as Apple's USDZ is (Model I/O reads an STL as Y up), read back through Model I/O.
+        let corners = (box(SIMD3(-30, -15, 0), SIMD3(30, 15, 40)) + disc(radius: 100, top: 0, thickness: 8)).map { SIMD3($0.x, $0.z, -$0.y) }
+        var data = Data(count: 80)
+        var count = UInt32(corners.count / 3).littleEndian
+        data.append(Data(bytes: &count, count: 4))
+        for t in 0..<(corners.count / 3) {
+            var floats = [Float](repeating: 0, count: 3) + [corners[3 * t], corners[3 * t + 1], corners[3 * t + 2]].flatMap { [$0.x, $0.y, $0.z] }
+            data.append(Data(bytes: &floats, count: 48)); data.append(contentsOf: [0, 0])
+        }
+        let input = dir.appendingPathComponent("in.stl"), output = dir.appendingPathComponent("out.stl")
+        try data.write(to: input)
+        let summary = try writeSTL(model: input, to: output, metresPerUnit: 0.001, removeSupport: true)
+        XCTAssertNotNil(summary.support)
+        XCTAssertLessThan(summary.sizeMm.x, 62); XCTAssertLessThan(summary.sizeMm.y, 62)
+        let plain = try writeSTL(model: input, to: output, metresPerUnit: 0.001)
+        XCTAssertNil(plain.support)
+        XCTAssertGreaterThan(plain.sizeMm.x, 190, "without the flag the plate stays")
+    }
 }
+
