@@ -93,3 +93,22 @@ public struct PrintActivitySnapshot: Equatable, Sendable {
         attributes.projectId == earlier.projectId && attributes.printId != earlier.printId
     }
 }
+
+/// The Live Activity's words, in the print notifications' voice (services/companion/src/events/words.ts):
+/// the milestone notification's body is "38 min left · layer 84 of 212 · P1S", and the activity's detail
+/// line is that body without the time, which the activity counts down itself.
+public enum PrintActivityWords {
+    public static func detail(_ state: PrintAttributes.ContentState, printer: String) -> String {
+        let layers = state.layer > 0 && state.totalLayers > 0 ? "layer \(state.layer) of \(state.totalLayers)" : nil
+        return [layers, printer.isEmpty ? nil : printer].compactMap { $0 }.joined(separator: " · ")
+    }
+}
+
+/// Where tapping the Live Activity goes (Lock Screen and Dynamic Island). While the print runs, the Printing
+/// screen; once it has ended (finished, failed or cancelled) the project, because an ended activity stays on
+/// the Lock Screen for up to four hours and the Printing screen has nothing left to follow.
+public enum PrintActivityLink {
+    public static func url(projectId: String, state: PrintAttributes.ContentState) -> URL? {
+        URL(string: "counterpart://\(state.terminal ? "project" : "printing")/\(projectId)")
+    }
+}

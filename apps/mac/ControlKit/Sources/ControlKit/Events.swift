@@ -235,24 +235,29 @@ public struct CompanionSettings: Decodable, Sendable, Equatable {
     public let milestones: String?
     /// `notifications.mac`: explicit overrides; omitted types retain their platform defaults.
     public let notificationsMac: [String: Bool]?
+    /// Saved phone/tablet choices, keyed by device ID then event type.
+    public let notificationsDevices: [String: [String: Bool]]?
     public let general: General?
     public let fusion: Fusion?
     /// `ai.check.outcome` of the latest Test; `needs-gui-session` means the sign-in has to finish on this Mac.
     public let aiCheckOutcome: String?
 
-    public init(milestones: String? = nil, notificationsMac: [String: Bool]? = nil, general: General? = nil, fusion: Fusion? = nil,
+    public init(milestones: String? = nil, notificationsMac: [String: Bool]? = nil, notificationsDevices: [String: [String: Bool]]? = nil, general: General? = nil, fusion: Fusion? = nil,
                 aiCheckOutcome: String? = nil) {
         self.milestones = milestones; self.notificationsMac = notificationsMac; self.general = general; self.fusion = fusion
         self.aiCheckOutcome = aiCheckOutcome
+        self.notificationsDevices = notificationsDevices
     }
 
     private enum CodingKeys: String, CodingKey { case milestones, notifications, general, fusion, ai }
-    private struct Notifications: Decodable { let mac: [String: Bool]? }
+    private struct Notifications: Decodable { let mac: [String: Bool]?; let devices: [String: [String: Bool]]? }
     private struct AI: Decodable { struct Check: Decodable { let outcome: String? }; let check: Check? }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         milestones = try? c.decodeIfPresent(String.self, forKey: .milestones)
-        notificationsMac = (try? c.decodeIfPresent(Notifications.self, forKey: .notifications))?.mac
+        let notifications = try? c.decodeIfPresent(Notifications.self, forKey: .notifications)
+        notificationsMac = notifications?.mac
+        notificationsDevices = notifications?.devices
         general = try? c.decodeIfPresent(General.self, forKey: .general)
         fusion = try? c.decodeIfPresent(Fusion.self, forKey: .fusion)
         aiCheckOutcome = (try? c.decodeIfPresent(AI.self, forKey: .ai))?.check?.outcome

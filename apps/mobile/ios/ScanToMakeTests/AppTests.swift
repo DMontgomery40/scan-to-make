@@ -39,6 +39,24 @@ import CounterpartKit
         XCTAssertEqual(project.thumbnailPath, "renders/overview.png")
     }
 
+    func testActivityPictureRefreshReturnsWhileTheMacIsStillUnreachable() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let transport = WaitingPictureMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: transport)
+        let mac = MacConnection(client: CompanionClient(pairing: pairing, transport: transport))
+        let pictures = ActivityPictures(store: PrintActivityThumbnails(folder: folder))
+        let project = Project(id: UUID().uuidString.lowercased(), createdAtMs: 1, updatedAtMs: 2,
+                              state: .printing, photos: ["bottle.jpg"])
+        let returned = expectation(description: "reconcile can apply progress without LAN artwork")
+        let refresh = Task { await pictures.refresh([project], mac: mac); returned.fulfill() }
+        await transport.waitForDownload()
+        await fulfillment(of: [returned], timeout: 0.5)
+        XCTAssertEqual(PrintActivityThumbnails(folder: folder).artwork(for: project.id), .mark)
+        await transport.finish()
+        await refresh.value
+    }
+
     func testAnEstimateShowsOnlyForItsOwnSettings() throws {
         var state = EstimateState()
         let estimate = try JSONDecoder().decode(SliceEstimate.self, from: Data(#"{"destinationId":"current","quality":"standard","strength":"standard","seconds":4320,"grams":22,"layers":212}"#.utf8))
@@ -364,5 +382,20 @@ private actor CopyCatalogMac: HTTPTransport {
             result["defaultDestinationId"] = selected
         } else { throw TransportError("network") }
         return HTTPReply(status: 200, body: try JSONSerialization.data(withJSONObject: result))
+    }
+}
+
+private actor WaitingPictureMac: HTTPTransport {
+    private var download: CheckedContinuation<HTTPReply, Error>?
+    private var waiting: CheckedContinuation<Void, Never>?
+    func waitForDownload() async {
+        if download != nil { return }
+        await withCheckedContinuation { waiting = $0 }
+    }
+    func finish() { download?.resume(throwing: TransportError("network")); download = nil }
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        try await withCheckedThrowingContinuation {
+            download = $0; waiting?.resume(); waiting = nil
+        }
     }
 }

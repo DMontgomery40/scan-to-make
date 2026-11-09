@@ -67,6 +67,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.scantomake.widgets
         INFOPLIST_FILE: CounterpartWidgets/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CounterpartWidgets/CounterpartWidgets.entitlements
         CODE_SIGN_STYLE: Automatic
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES

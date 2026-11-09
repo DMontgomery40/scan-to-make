@@ -1,5 +1,7 @@
 import XCTest
 import CloudKit
+import ImageIO
+import SwiftUI
 @testable import CounterpartKit
 
 final class PrintActivityTests: XCTestCase {
@@ -71,5 +73,84 @@ final class PrintActivityTests: XCTestCase {
         XCTAssertFalse(snapshot.shouldStart(foreground: true, dismissed: ["j"]), "refresh cannot recreate an activity the user dismissed")
         let encoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(attributes)) as? [String: String])
         XCTAssertEqual(encoded, ["projectId": "p", "printId": "j", "title": "Clip", "printerName": "Printer"])
+    }
+
+    /// The activity's picture goes in through the same store the app and the notification service write and
+    /// comes out where the widget reads it, scaled to fit the presentation; with none it's the mark.
+    func testActivityPictureRoundTripsAndFallsBackToTheMark() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("activity-pictures-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = PrintActivityThumbnails(folder: folder)
+        let project = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03"
+        XCTAssertEqual(store.artwork(for: project), .mark, "no picture yet: the mark, never a generic printer")
+
+        let large = try Self.png(width: 1000, height: 600)
+        XCTAssertTrue(store.store(imageData: large, projectId: project, version: 2_000, source: "renders/clip.png#1"))
+        guard case .thumbnail(let url) = store.artwork(for: project) else { return XCTFail("expected the stored picture") }
+        XCTAssertEqual(url.deletingLastPathComponent().standardizedFileURL, folder.standardizedFileURL)
+        let image = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+        XCTAssertEqual(max(image.width, image.height), PrintActivityThumbnails.maxPixels, "never larger than the presentation")
+        XCTAssertEqual(store.entry(for: project), .init(version: 2_000, source: "renders/clip.png#1"))
+
+        // An older write (the notification service with a stale record) never replaces a newer picture.
+        XCTAssertFalse(store.store(imageData: large, projectId: project, version: 1_000, source: "cloud"))
+        XCTAssertEqual(store.entry(for: project)?.source, "renders/clip.png#1")
+        XCTAssertTrue(store.store(imageData: large, projectId: project, version: 3_000, source: "cloud"))
+        XCTAssertEqual(store.entry(for: project)?.source, "cloud")
+
+        XCTAssertFalse(store.store(imageData: Data("not a picture".utf8), projectId: "other", version: 1, source: "x"))
+        XCTAssertEqual(store.artwork(for: "other"), .mark)
+
+        // An id can't name a file outside the folder.
+        XCTAssertTrue(store.store(imageData: large, projectId: "../../escape", version: 1, source: "x"))
+        guard case .thumbnail(let escaped) = store.artwork(for: "../../escape") else { return XCTFail("expected the stored picture") }
+        XCTAssertEqual(escaped.deletingLastPathComponent().standardizedFileURL, folder.standardizedFileURL)
+
+        store.remove(projectId: project)
+        XCTAssertEqual(store.artwork(for: project), .mark)
+    }
+
+    /// The mark fills the frame it's given (a 20 pt compact slot shows a 20 pt mark), centred, and the outline
+    /// is cut back where it passes behind the solid piece, as on the app icon.
+    func testTheMarkFillsItsFrame() {
+        let path = CounterpartMark().path(in: CGRect(x: 0, y: 0, width: 20, height: 20))
+        XCTAssertEqual(path.boundingRect.height, 20, accuracy: 0.01)
+        XCTAssertEqual(path.boundingRect.midX, 10, accuracy: 0.01)
+        let scale = 20.0 / 56
+        XCTAssertTrue(path.contains(CGPoint(x: (40 - 23) * scale, y: (50 - 25) * scale)), "the solid piece")
+        XCTAssertFalse(path.contains(CGPoint(x: (47 - 23) * scale + (20 - 54 * scale) / 2, y: (77.5 - 25) * scale)),
+                       "the outline's gap where it passes behind the solid piece")
+        XCTAssertTrue(path.contains(CGPoint(x: (66 - 23) * scale + (20 - 54 * scale) / 2, y: (77.5 - 25) * scale)), "the outline beyond the gap")
+    }
+
+    /// A running print opens Printing; an ended one (still on the Lock Screen for hours) opens the project.
+    func testTappingTheActivityOpensPrintingWhileItRunsAndTheProjectOnceItEnds() throws {
+        for state in ["preparing", "printing", "paused", "offline"] {
+            let url = try XCTUnwrap(PrintActivityLink.url(projectId: "p1", state: .init(state: state, progress: 40, endsAt: Date())))
+            XCTAssertEqual(AppRoute(url: url), .printing("p1"), state)
+        }
+        for state in ["finished", "failed", "cancelled"] {
+            let url = try XCTUnwrap(PrintActivityLink.url(projectId: "p1", state: .init(state: state, progress: 100, endsAt: Date())))
+            XCTAssertEqual(AppRoute(url: url), .project("p1"), state)
+        }
+    }
+
+    func testActivityWordsMatchTheMilestoneNotification() {
+        let halfway = PrintAttributes.ContentState(state: "printing", progress: 50, layer: 106, totalLayers: 212, endsAt: Date())
+        XCTAssertEqual(PrintActivityWords.detail(halfway, printer: "P1S"), "layer 106 of 212 · P1S")
+        XCTAssertEqual(PrintActivityWords.detail(.init(state: "preparing", progress: 0, endsAt: Date()), printer: "P1S"), "P1S")
+    }
+
+    private static func png(width: Int, height: Int) throws -> Data {
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 0.45, blue: 0.18, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
     }
 }

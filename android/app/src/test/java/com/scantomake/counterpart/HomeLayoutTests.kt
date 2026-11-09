@@ -57,6 +57,7 @@ import com.scantomake.counterpart.ui.NewProjectScreen
 import com.scantomake.counterpart.ui.SettingsScreen
 import com.scantomake.counterpart.ui.PrintSheetScreen
 import com.scantomake.counterpart.ui.designerSettingsWords
+import com.scantomake.counterpart.ui.posterName
 import com.scantomake.counterpart.net.HttpReply
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.decodeFromString
@@ -162,6 +163,27 @@ class HomeLayoutTests {
         home()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Needs you"))
         compose.onNodeWithText("Needs you").assertExists()
+    }
+
+    @Test fun anOngoingPrintShowsTheCounterpartMarkAndTheRealObjectsPicture() = kotlinx.coroutines.runBlocking {
+        val p = project("4a4c5c44-7379-4a92-8a20-11a4710331a2", "Bottle holder", "printing")
+            .copy(photos = listOf("bottle.jpg"), capture = listOf("0001.heic"))
+        state.projects.value = listOf(p, project("other", "Another project", "ready"))
+        val folder = File(app.cacheDir, "${p.id}/${p.mediaVersion}").apply { mkdirs() }
+        val photo = File(folder, "photos_bottle.jpg")
+        val bitmap = android.graphics.Bitmap.createBitmap(40, 40, android.graphics.Bitmap.Config.ARGB_8888)
+        photo.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        try {
+            assertEquals("photos/bottle.jpg", p.posterName())
+            org.junit.Assert.assertNotNull(com.scantomake.counterpart.app.NotificationPictures.refresh(p))
+            val service = org.robolectric.Robolectric.buildService(com.scantomake.counterpart.app.WatchService::class.java).get()
+            val notification = service.ongoing("Bottle holder", "Printing · 50%", p)
+            assertEquals(R.drawable.ic_notification, notification.smallIcon.resId)
+            org.junit.Assert.assertNotNull(notification.getLargeIcon())
+            assertEquals("Bottle holder", notification.extras.getString(android.app.Notification.EXTRA_TITLE))
+            val intent = org.robolectric.Shadows.shadowOf(notification.contentIntent).savedIntent
+            assertEquals(p.id, intent.getStringExtra(MainActivity.EXTRA_PROJECT))
+        } finally { photo.delete(); folder.delete(); folder.parentFile?.delete() }
     }
 
     @Test fun theStartersStayOnHomeWhileProjectsExist() {

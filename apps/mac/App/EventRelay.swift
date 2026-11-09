@@ -32,6 +32,7 @@ import ControlKit
         notifier.prepare()
         // The notification buttons (It Works, Pause, …) run as the phone's commands do: one control method each.
         notifier.runCommand = { [weak self] command in await self?.run(command, photos: []) ?? (false, "Counterpart isn't running.") }
+        relay.undelivered = { [weak self] event in await self?.saveUndeliveredMilestone(event) ?? false }
         cloud.start(runCommand: { [weak self] command, photos in await self?.run(command, photos: photos) ?? (false, "Counterpart isn't running.") })
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.cloud.fetchCommands() }
@@ -113,7 +114,11 @@ import ControlKit
                 notified.insert(event.id)
             }
             let frame = event.frame.flatMap { project?.projectFile($0) }
-            if event.notify != "none" { await cloud.save(event, frame: frame) }
+            // A milestone while the print's Live Activity runs alerts on the activity instead (David, Nov 8): no CloudKit
+            // event, so no separate notification. Without a running activity it is a notification as before.
+            let onActivity = await relay.alertMilestone(event, title: project?.words.title ?? event.title, client: client,
+                                                        cloudTokens: cloud.deviceTokens)
+            if event.notify != "none", !onActivity { await cloud.save(event, frame: frame) }
             // A pause or resume keeps the stage at printing, so the printer's own state counts as a change too, and so
             // does the printer asking (or no longer asking) to confirm something.
             let state = [project?.words.stage.rawValue, project?.print?.live?.state ?? project?.print?.printerStatus?.state,
@@ -125,6 +130,11 @@ import ControlKit
             if event.type == "print.started", !LiveActivityStart.stillRunning(event, project: project) { continue }
             await relay.deliver(event, title: project?.words.title ?? event.title, client: client, cloudTokens: cloud.deviceTokens)
         }
+    }
+
+    private func saveUndeliveredMilestone(_ event: CounterpartEvent) async -> Bool {
+        let project = event.projectId.flatMap { projects[$0] }
+        return await cloud.save(event, frame: event.frame.flatMap { project?.projectFile($0) })
     }
 
     /// Runs one command from the phone through the control method that already does the job. A deadline after

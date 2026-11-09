@@ -164,6 +164,7 @@ import CounterpartKit
         case "failed": route = .project(ids.failed); debugSection = "activity"
         case "printing": route = .printing(ids.clip)
         case "print-finished": Fixtures.finished = true; route = .printing(ids.clip)
+        case "live-activity": Fixtures.liveActivity = true
         // The one-colour sheet: v1 prints one filament (PRD §5.5); "print" shows the same until parts arrive (M3b).
         case "print", "print-one": route = .print(ids.mic)
         case "print-pauses": Fixtures.pauses = [12, 140]; route = .print(ids.mic)

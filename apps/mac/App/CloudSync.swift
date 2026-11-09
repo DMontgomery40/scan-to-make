@@ -164,9 +164,13 @@ import ControlKit
     }
 
     /// Saves the event, or keeps it to try again.
-    func save(_ event: CounterpartEvent, frame: URL?) async {
-        guard database != nil else { return }
-        if await !write(event, frame: frame) { pendingEvents.append(Pending(event: event, frame: frame?.path)) }
+    @discardableResult func save(_ event: CounterpartEvent, frame: URL?) async -> Bool {
+        guard database != nil else { return false }
+        if await write(event, frame: frame) { return true }
+        if !pendingEvents.contains(where: { $0.event.id == event.id }) {
+            pendingEvents.append(Pending(event: event, frame: frame?.path))
+        }
+        return false
     }
 
     private func write(_ event: CounterpartEvent, frame: URL?) async -> Bool {

@@ -23,6 +23,10 @@ enum Fixtures {
     /// `-CounterpartScreen preparing`: the cable clip is on the printer, getting ready (layer 0).
     nonisolated(unsafe) static var preparing = false
     nonisolated(unsafe) static var finished = false
+    /// `-CounterpartScreen live-activity`: the mic mount halfway through its print, its Live Activity started
+    /// the way a real print starts it, and the halfway notification as the notification service composes it
+    /// (PRD §9.1, §9.4). Its render is `render-live.png` in the assets folder, if there.
+    nonisolated(unsafe) static var liveActivity = false
     /// Statuses set on this run (`PATCH …/settings`), by project id.
     nonisolated(unsafe) static var statuses: [String: String] = [:]
     nonisolated(unsafe) static var titles: [String: String] = [:]
@@ -182,7 +186,7 @@ enum Fixtures {
         // `-CounterpartScreen printer-connection`: the P1S idle, so its Settings → Printers choices can be changed.
         if idlePrinter { shown = shown.filter { $0["state"] as? String != "printing" } }
         // A status set on this run applies last, so It Works on the finished print (Printing screen) makes it Done.
-        return (stopped + shown + duplicates).map(withPreparing).map(withFinished).map(withStatus).map { original in
+        return (stopped + shown + duplicates).map(withPreparing).map(withFinished).map(withLiveActivity).map(withStatus).map { original in
             guard let id = original["id"] as? String else { return original }
             var object = original
             if let title = titles[id] { object["title"] = title }
@@ -195,6 +199,19 @@ enum Fixtures {
             }
             return object
         }
+    }
+
+    /// The clip's print, as the mic mount halfway through (`-CounterpartScreen live-activity`).
+    private static func withLiveActivity(_ object: [String: Any]) -> [String: Any] {
+        guard liveActivity, object["id"] as? String == ids.clip, var print = object["print"] as? [String: Any],
+              var live = print["live"] as? [String: Any] else { return object }
+        var object = object
+        object["title"] = "Mic mount"
+        object["current"] = ["model": "current/model.stl", "renders": ["current/renders/live.png"], "sizeMm": [48.2, 50.4, 53.9]]
+        live["job"] = ["name": "mic-mount", "progress": 50, "remainingSec": 2280, "layer": 106, "totalLayers": 212, "stage": "Printing"]
+        print["live"] = live
+        object["print"] = print
+        return object
     }
 
     private static func withFinished(_ object: [String: Any]) -> [String: Any] {
@@ -323,6 +340,7 @@ enum Fixtures {
         if path.contains("/renders/mic.png") { return "thumb-mic.png" }
         if path.contains("/renders/potato.png") || path.contains("/asks/") || path.hasSuffix("/capture/potato.jpg") { return "thumb-potato.png" }
         if path.contains("/renders/clip.png") { return "bed.jpg" }
+        if path.contains("/renders/live.png") { return "render-live.png" }
         if let range = path.range(of: #"/photos/(photo[1-4]\.jpg)$"#, options: .regularExpression) { return String(path[range].dropFirst("/photos/".count)) }
         return nil
     }

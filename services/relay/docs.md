@@ -115,14 +115,21 @@ Which token to use, from PRD §8.8:
 |---|---|---|---|
 | `print.started` | `start` | 10 | required, e.g. "*Title* is printing" |
 | `print.status` | `update` | 5 | none |
+| `print.first-layer` / `print.milestone` | `update` | 10 when every known paired device has this print's activity (then no CloudKit event unless all recipients fail); otherwise 5 with no alert, and CloudKit alerts | the notification's own title and body; `sound: "default"` except the passive first layer (PRD §9.1, David, Nov 8) |
 | `print.resumed` | `update` | 5 | none |
 | `print.paused` | `update` | 10 | none; CloudKit owns the alert |
 | `print.done` | `end` | 10 | none; CloudKit owns the alert |
 | `print.failed` / `print.not-started` | `end` | 10 | none; CloudKit owns the alert |
 | `print.cancelled` | `end` | 10 (§8.8 doesn't name it; 10 matches the other ends) | none; CloudKit owns the alert |
 
-The Mac leaves optional update/end alerts out: the phone's CloudKit subscription delivers the event
-with its camera frame. `ev-started` is silent because ActivityKit requires the start alert. The server
+The Mac leaves update/end alerts out for pauses, ends and problems: the phone's CloudKit subscription
+delivers the event with its camera frame. Progress milestones are the exception (PRD §9.1): while the
+activity runs on every known paired recipient, they alert on it. The Mac persists the recipient
+decision before sending, respects saved phone choices, and retains distinct milestone alerts through
+retries and restart. Network failures and short 429/503 waits retain the alert for up to three attempts; unconfigured relays and long waits resolve the recipient as failed. A missing registration resolves after a 30-second grace period on recovery.
+Push-to-start retries always retain their mandatory alert. Once every
+recipient finishes, it writes the account-wide CloudKit fallback only if all failed; partial success
+logs each missed device and never falls back onto devices already alerted. `ev-started` is silent because ActivityKit requires the start alert. The server
 still accepts optional update/end alerts as part of its wire contract. If an activity token arrives
 after an event, the Mac recovers the latest saved state on its next poll; a retry ends the earlier
 activity for the same project, including when that earlier token arrives late.
