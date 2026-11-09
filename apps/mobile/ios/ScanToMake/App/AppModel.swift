@@ -32,9 +32,6 @@ import CounterpartKit
     var debugFirstRun: String?
     /// DEBUG: the Settings page `-CounterpartScreen notifications` or `about` opens.
     var debugSettings: String?
-    #if DEBUG
-    var fixtureWidth: UserInterfaceSizeClass?
-    #endif
     private var lastLink: (url: String, at: Date)?
     private var observer: NSObjectProtocol?
 
@@ -109,7 +106,10 @@ import CounterpartKit
     func open(_ url: URL) {
         #if DEBUG
         if Fixtures.folder != nil, UserDefaults.standard.bool(forKey: "CounterpartLayoutTesting"), url.host == "fixture-width" {
-            fixtureWidth = url.path == "/compact" ? .compact : .regular
+            // The scene's own size class, as a Duo fold or an iPad resize changes it. Overriding only SwiftUI's
+            // environment value left UIKit's split view uncollapsed (the gate, Nov 9), so the UI tests proved nothing.
+            let width: UIUserInterfaceSizeClass = url.path == "/compact" ? .compact : .regular
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes { scene.traitOverrides.horizontalSizeClass = width }
             return
         }
         #endif

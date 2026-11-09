@@ -583,8 +583,8 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(send.isEnabled)
     }
 
-    /// XCTest has no hinge API. These fixture-only links exercise the actual split's inherited size
-    /// class without relaunching; agent-device supplies the real Duo hinge proof alongside this test.
+    /// XCTest has no hinge API. These fixture-only links set the window scene's horizontal size class (UIKit
+    /// `traitOverrides`), as a fold or an iPad resize does, without relaunching; agent-device gives the Duo hinge proof.
     private func resize(_ app: XCUIApplication, to width: String) {
         app.open(URL(string: "scantomake://fixture-width/\(width)")!)
     }
