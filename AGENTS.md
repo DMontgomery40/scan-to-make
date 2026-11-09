@@ -39,6 +39,7 @@ David, 2026-11-05, after the starters went missing on the Mac and iPad: "how do 
 
 ## Read bambu-printer-mcp before you build
 
+Both MCPs are on the Mac: `~/fleet/bambu-printer-mcp` and `~/fleet/mcp-3D-printer-server`. Before you build or choose anything for slicing, printing, orientation, design engines or fit, read their tool lists, `docs/` and bambu-printer-mcp's `docs/prd/scan-to-print-PRD.md`. (Nov 9: that PRD had chosen build123d for fit parts on Oct 30; the app's design passes were built on Blender and Fusion without anyone reading it.)
 
 ## Rules:
 
