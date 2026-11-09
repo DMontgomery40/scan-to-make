@@ -142,6 +142,8 @@ export interface Project {
   state: string;
   kind?: string;
   archived?: boolean;
+  /** "works" or "needs-changes" from a companion that keeps the answer here rather than in `settings.status`. */
+  outcome?: string;
   progress?: string;
   failure?: string;
   pendingFollowup?: string;

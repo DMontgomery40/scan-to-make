@@ -110,7 +110,7 @@ Written by the phone when it can't reach the Mac directly (PRD §9.3). The print
 | `answerAsk` | `{bestGuess?, text?}`; photos answer it with `bestGuess: false` | `objects.answerCloseup` |
 | `confirm` | `{confirmationId, answer: {action, content?}}` | `objects.answerPrintConfirmation` |
 | `pause`, `resume`, `cancel` | `{}` | `objects.pausePrint`, `objects.resumePrint`, `objects.cancelPrint` |
-| `status` | `{status: "works" \| "needs-changes"}`: "Did it fit?" answered from a notification (PRD §9.1). Needs Changes with words sends a `correct` after it | `objects.settings.set` |
+| `status` | `{status: "works" \| "needs-changes", note?}`: "Did it fit?" answered from a notification (PRD §9.1). Needs Changes with words carries them as `note`; the Mac sends them with `objects.correct` once the status is set (one record, because commands run concurrently) | `objects.settings.set`, then `objects.correct` |
 
 How the Mac handles a command:
 - Each command runs apart from the reader and from the others, so a `pause` waiting on the printer's confirmation doesn't hold back the `confirm` that answers it. Its results are written in order by one writer.

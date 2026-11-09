@@ -121,8 +121,10 @@ public enum NotificationActions {
         public var cloudCommands: [(type: String, payload: [String: JSONValue])] {
             switch self {
             case .status(_, let status): [("status", ["status": .string(status.rawValue)])]
+            // One record: the Mac runs iCloud commands concurrently, so a separate `correct` could start the change
+            // before the status lands. The Mac sets the status, then sends the words as a change (cloudkit.md).
             case .needsChanges(_, let note):
-                [("status", ["status": .string(ProjectStatus.needsChanges.rawValue)])] + (note.map { [("correct", ["note": .string($0)])] } ?? [])
+                [("status", ["status": .string(ProjectStatus.needsChanges.rawValue)].merging(note.map { ["note": .string($0)] } ?? [:]) { $1 })]
             case .correct(_, let note): [("correct", ["note": .string(note)])]
             case .bestGuess: [("answerAsk", ["bestGuess": .bool(true)])]
             case .control(_, let action): [(action.rawValue, [:])]

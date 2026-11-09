@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  AFTER_PRINTING,
+  didItFitQuestion,
   projectGroups,
   printerSummary,
   ReadOrder,
@@ -54,6 +56,27 @@ test("a project thumbnail is the real object before any render", () => {
   assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "photos/bottle.jpg");
   assert.equal(projectThumbnail({ ...rendered, capture: ["0001.heic"] }), "capture/0001.heic");
   assert.equal(projectThumbnail(rendered), "renders/overview.png");
+});
+
+test("a finished print asks Did it fit? until it's answered, as the other clients do", () => {
+  const done = {
+    ...project,
+    state: "printed",
+    print: { monitor: { phase: "ended", endState: "done" } },
+  } as unknown as Project;
+  assert.equal(didItFitQuestion(done), "Did it fit?");
+  assert.equal(didItFitQuestion({ ...done, kind: "published" }), "Did it come out right?");
+  assert.equal(
+    didItFitQuestion({ ...done, settings: { status: "printed", archived: false } }),
+    "Did it fit?",
+  );
+  for (const status of ["works", "needs-changes", "not-printed"])
+    assert.equal(didItFitQuestion({ ...done, settings: { status, archived: false } }), undefined, status);
+  assert.equal(didItFitQuestion({ ...done, outcome: "works" }), undefined);
+  // Accepted by the printer isn't finished; a cancelled print isn't asked about.
+  assert.equal(didItFitQuestion({ ...done, print: { monitor: { phase: "watching" } } } as unknown as Project), undefined);
+  assert.equal(didItFitQuestion({ ...done, print: { monitor: { phase: "ended", endState: "cancelled" } } } as unknown as Project), undefined);
+  assert.equal(AFTER_PRINTING, "After printing: ");
 });
 
 test("sidebar failures need you, ready is a group rather than a selection", () => {

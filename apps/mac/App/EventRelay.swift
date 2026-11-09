@@ -143,6 +143,7 @@ import ControlKit
                 return (false, command.refusal)
             }
             _ = try await client.run(prepared.method, prepared.params)
+            if let next = command.followUp { return await run(next, photos: []) }
             return (true, "Done on your Mac.")
         } catch let error as ControlRemoteError {
             return (false, error.code == "conflict" && !error.message.isEmpty ? error.message : ObjectsModel.sentence(for: error))

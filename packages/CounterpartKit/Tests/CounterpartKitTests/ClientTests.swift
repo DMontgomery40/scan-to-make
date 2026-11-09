@@ -1094,8 +1094,9 @@ final class NotificationActionsTests: XCTestCase {
         XCTAssertEqual(A.Command.status("p", .works).cloudCommands.map(\.type), ["status"])
         XCTAssertEqual(A.Command.status("p", .works).cloudCommands[0].payload, ["status": .string("works")])
         let changes = A.Command.needsChanges("p", note: "After printing: wider").cloudCommands
-        XCTAssertEqual(changes.map(\.type), ["status", "correct"])
-        XCTAssertEqual(changes[1].payload, ["note": .string("After printing: wider")])
+        // One record, so the Mac can't start the change before the status lands (it runs commands concurrently).
+        XCTAssertEqual(changes.map(\.type), ["status"])
+        XCTAssertEqual(changes[0].payload, ["status": .string("needs-changes"), "note": .string("After printing: wider")])
         XCTAssertEqual(A.Command.needsChanges("p", note: nil).cloudCommands.map(\.type), ["status"])
         XCTAssertEqual(A.Command.control("p", .pause).cloudCommands.map(\.type), ["pause"])
         XCTAssertEqual(A.Command.control("p", .resume).cloudCommands.map(\.type), ["resume"])

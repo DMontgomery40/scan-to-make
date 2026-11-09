@@ -57,6 +57,20 @@ export function projectThumbnail(p: Project): string | undefined {
   return p.current?.renders[0] ?? p.credit?.thumbnail;
 }
 
+/** What Needs Changes puts before the person's words, as on the iPhone, iPad, Android and Mac (PRD §5.4). */
+export const AFTER_PRINTING = "After printing: ";
+
+/**
+ * "Did it fit?" (PRD §5.4) on a project whose print the printer says finished, until it's answered here or with any
+ * status in Project settings: the same condition as the other clients (`ProjectWords`, printed + monitor done).
+ */
+export function didItFitQuestion(p: Project): string | undefined {
+  if (p.state !== "printed" || p.print?.monitor?.endState !== "done") return undefined;
+  const status = p.settings?.status ?? p.outcome;
+  if (status !== undefined && status !== "printed") return undefined;
+  return p.kind === "published" ? "Did it come out right?" : "Did it fit?";
+}
+
 /** Sidebar groups describe what the person needs to do, not a second selection state. */
 export function projectGroups(projects: Project[]) {
   const groups = ["Now", "Needs you", "Ready", "Printed", "Done", "Drafts"];

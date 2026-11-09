@@ -142,6 +142,11 @@ final class EventRelayTests: XCTestCase {
         XCTAssertEqual(PhoneCommand(id: "c", type: "status", projectId: "p", payload: ["status": .string("needs-changes")]).call()?.params,
                        ["id": .string("p"), "status": .string("needs-changes")])
         XCTAssertNil(call("status"), "a status answer names its status")
+        // Needs Changes with words is one record: the status first, then the words as a change, in that order.
+        let changes = PhoneCommand(id: "c", type: "status", projectId: "p", payload: ["status": .string("needs-changes"), "note": .string("After printing: wider")])
+        XCTAssertEqual(changes.call()?.params, ["id": .string("p"), "status": .string("needs-changes")], "the note isn't a setting")
+        XCTAssertEqual(changes.followUp, PhoneCommand(id: "c-note", type: "correct", projectId: "p", payload: ["note": .string("After printing: wider")]))
+        XCTAssertNil(PhoneCommand(id: "c", type: "status", projectId: "p", payload: ["status": .string("works"), "note": .string("x")]).followUp)
         XCTAssertNil(call("status", ["status": .string("archived")]), "only the Did it fit? answers come from a notification")
         XCTAssertNil(call("format-disk"))
         let photos = PhoneCommand(id: "c", type: "correct", projectId: "p", payload: ["note": .string("n")]).call(photos: ["/tmp/a.jpg"])
