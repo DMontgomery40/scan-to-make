@@ -97,10 +97,11 @@ public struct ProjectWords: Equatable, Sendable {
     public static let putDown = "You can put your phone down. We'll let you know when it's ready."
 
     /// The generated title when the Mac gives one; else the first sentence of the request, cut at a word.
-    public static func title(_ project: Project) -> String {
+    public static func title(_ project: Project, localScan: Bool = false) -> String {
         if let title = project.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty { return title }
         let text = (project.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
+            if localScan && !project.hasScan { return "Scanned object" }
             if project.hasScan { return "Copy of your scan" }
             return project.photos.isEmpty ? "Unfinished project" : "Photo project"
         }
@@ -168,8 +169,8 @@ public struct ProjectWords: Equatable, Sendable {
         return "Can you send me a close-up of \(part.isEmpty ? "the part I missed" : part)? I can't see what's happening there."
     }
 
-    public init(_ project: Project, sending: Bool = false, printerName: String? = nil, now: Date = Date()) {
-        title = Self.title(project)
+    public init(_ project: Project, sending: Bool = false, localScan: Bool = false, printerName: String? = nil, now: Date = Date()) {
+        title = Self.title(project, localScan: localScan)
         size = project.current?.sizeMm.flatMap(Format.size)
         phase = Self.phase(project, sending: sending)
         let made: [ProjectAction] = project.current == nil ? [] : [project.printNeedsCheck ? .printChecked : .print, .correct]
@@ -185,13 +186,15 @@ public struct ProjectWords: Equatable, Sendable {
             case .new:
                 if sending {
                     (status, busy, actions) = ("Sending to your Mac. Keep the app open until it finishes.", true, [])
+                } else if localScan && !project.hasScan {
+                    (status, busy, actions) = ("Scan saved on this phone. Send it to your Mac to begin.", false, [.finishSending])
                 } else if project.hasScan || !project.photos.isEmpty {
                     (status, busy, actions) = ("Draft saved. Finish sending to begin.", false, [.finishSending])
                 } else {
                     let described = !(project.instructions ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     (status, busy, actions) = ("Add photos or a scan.", false, described ? [.scan, .attachPhotos, .makeIt] : [.scan, .attachPhotos])
                 }
-                line = sending ? phase.label : (project.hasScan || !project.photos.isEmpty ? "Draft saved · finish sending to begin" : "Add photos or a scan")
+                line = sending ? phase.label : (localScan && !project.hasScan ? "Scan saved · send to your Mac" : (project.hasScan || !project.photos.isEmpty ? "Draft saved · finish sending to begin" : "Add photos or a scan"))
             case .touchingUp where !(project.progress ?? "").trimmingCharacters(in: .whitespaces).isEmpty:
                 (status, busy, actions) = ("\(project.progress!) \(Self.wait)", true, [])
                 line = Self.workingLine(project, fallback: project.progress!)

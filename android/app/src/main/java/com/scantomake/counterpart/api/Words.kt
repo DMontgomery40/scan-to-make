@@ -89,8 +89,8 @@ enum class Tone { Working, NeedsYou, Accent, Printing, Secondary, Failed }
 enum class ProjectAction { FinishSending, Scan, AttachPhotos, MakeIt, Print, PrintChecked, Correct, OpenCamera, BestGuess, Retry, ItWorks, NeedsChanges }
 
 /** A project in plain words: the one source of status words. Port of CounterpartKit `ProjectWords`. */
-class ProjectWords(project: Project, sending: Boolean = false, printerName: String? = null, nowMs: Long = System.currentTimeMillis()) {
-    val title: String = title(project)
+class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolean = false, printerName: String? = null, nowMs: Long = System.currentTimeMillis()) {
+    val title: String = title(project, localScan)
     val phase: ProjectPhase = phase(project, sending)
     val status: String
     val line: String
@@ -105,10 +105,11 @@ class ProjectWords(project: Project, sending: Boolean = false, printerName: Stri
 
         fun outcomeQuestion(project: Project) = if (project.kind == "published") "Did it come out right?" else "Did it fit?"
 
-        fun title(project: Project): String {
+        fun title(project: Project, localScan: Boolean = false): String {
             project.title?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
             val text = (project.instructions ?: "").trim()
             if (text.isEmpty()) {
+                if (localScan && !project.hasScan) return "Scanned object"
                 if (project.hasScan) return "Copy of your scan"
                 return if (project.photos.isEmpty()) "Unfinished project" else "Photo project"
             }
@@ -192,13 +193,14 @@ class ProjectWords(project: Project, sending: Boolean = false, printerName: Stri
         } else when (project.state) {
             Project.State.New -> {
                 if (sending) { s = "Sending to your computer. Keep the app open until it finishes."; b = true; a = emptyList() }
+                else if (localScan && !project.hasScan) { s = "Scan saved on this phone. Send it to your computer to begin."; b = false; a = listOf(ProjectAction.FinishSending) }
                 else if (project.hasScan || project.photos.isNotEmpty()) { s = "Draft saved. Finish sending to begin."; b = false; a = listOf(ProjectAction.FinishSending) }
                 else {
                     val described = (project.instructions ?: "").isNotBlank()
                     s = "Add photos or a scan."; b = false
                     a = if (described) listOf(ProjectAction.Scan, ProjectAction.AttachPhotos, ProjectAction.MakeIt) else listOf(ProjectAction.Scan, ProjectAction.AttachPhotos)
                 }
-                l = if (sending) phase.label else if (project.hasScan || project.photos.isNotEmpty()) "Draft saved · finish sending to begin" else "Add photos or a scan"
+                l = if (sending) phase.label else if (localScan && !project.hasScan) "Scan saved · send to your computer" else if (project.hasScan || project.photos.isNotEmpty()) "Draft saved · finish sending to begin" else "Add photos or a scan"
             }
             Project.State.TouchingUp -> {
                 val progress = (project.progress ?: "").trim()

@@ -51,6 +51,7 @@ import com.scantomake.counterpart.pairing.MemoryStore
 import com.scantomake.counterpart.pairing.PairingClient
 import com.scantomake.counterpart.pairing.PairingStore
 import com.scantomake.counterpart.ui.HomeScreen
+import com.scantomake.counterpart.ui.NewProjectScreen
 import com.scantomake.counterpart.ui.SettingsScreen
 import com.scantomake.counterpart.ui.PrintSheetScreen
 import com.scantomake.counterpart.ui.designerSettingsWords
@@ -73,6 +74,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.util.ReflectionHelpers
 import org.robolectric.util.ReflectionHelpers.ClassParameter
+import java.io.File
 
 /**
  * Every layout reaches the same things (PRD §6.1, "Every layout"). David, Nov 5: "where did the 'start with these
@@ -124,6 +126,21 @@ class HomeLayoutTests {
         compose.onNodeWithText("Vernier caliper with depth gauge").assertExists()
         // This is Home with projects, not the empty Home's job cards.
         compose.onNodeWithText("Make something that fits").assertDoesNotExist()
+    }
+
+    @Test fun aFinishedScanAsksCopyFitOrSaveBeforeItCanSend() {
+        state.projects.value = listOf(project("a", "Existing project", "ready"))
+        app.prefs.edit().putString("CounterpartNewDraftId", "scan-draft").commit()
+        val capture = File(File(app.filesDir, "Captures"), "scan-draft").apply { mkdirs() }
+        File(capture, "finished").writeText("")
+        File(capture, "0000.jpg").writeBytes(byteArrayOf(1))
+        compose.setContent { WithApp { NewProjectScreen(job = null, close = {}, started = {}, scan = {}) } }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("scan-use")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("scan-use-copy").assertExists()
+        compose.onNodeWithTag("scan-use-fit").performScrollTo().performClick()
+        compose.onNodeWithTag("fit-size-lookup").assertExists()
+        compose.onNodeWithTag("fit-caliper-photo").assertExists()
+        compose.onNodeWithTag("scan-use-later").assertExists()
     }
 
     @Test fun theStartersAreOnTheEmptyHomeToo() {

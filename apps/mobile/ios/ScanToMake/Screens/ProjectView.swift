@@ -66,6 +66,7 @@ struct ProjectView: View {
         }
         .task(id: id) {
             await reload()
+            store.refreshStoppedScans()
             captureWarning = store.mac.localScanWarning(id)
             if let object { section = defaultSection(object) }
             #if DEBUG
@@ -682,9 +683,10 @@ struct ProjectView: View {
                 HStack(spacing: 8) {
                     if words.actions.contains(.finishSending) || words.actions.contains(.makeIt) {
                         Button { act { try await finishSending(object) } } label: {
-                            Label(words.actions.contains(.makeIt) ? "Send" : "Finish Sending", systemImage: "arrow.up.circle").frame(maxWidth: .infinity).frame(height: 30)
+                            Label("Send to your Mac", systemImage: "arrow.up.circle").frame(maxWidth: .infinity).frame(height: 30)
                         }
                         .buttonStyle(.glassProminent)
+                        .accessibilityIdentifier("draft.send")
                     }
                     if words.actions.contains(.scan) && store.canScan {
                         Button { act { try await scan(object, handheld: false) } } label: { Label("Scan", systemImage: "cube.transparent").frame(maxWidth: .infinity).frame(height: 30) }

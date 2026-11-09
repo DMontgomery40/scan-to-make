@@ -188,7 +188,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             failures[id]?.let { f ->
                 GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(f, color = Palette.failed)
-                    SecondaryButton("Finish Sending", Modifier.fillMaxWidth()) { state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
+                    SecondaryButton("Send to Your Computer", Modifier.fillMaxWidth()) { state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
                 } }
             }
             if (ProjectWords.watchable(project, words.phase)) PrimaryButton("Watch the Print", Modifier.fillMaxWidth(), icon = CIcons.Printer, onClick = printing)
@@ -254,7 +254,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             } }
 
             if (ProjectAction.Print in words.actions || ProjectAction.PrintChecked in words.actions) PrimaryButton("Print", Modifier.fillMaxWidth(), icon = CIcons.Printer, enabled = working == null, onClick = print)
-            if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Finish Sending", Modifier.fillMaxWidth(), enabled = working == null) {
+            if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth(), enabled = working == null) {
                 state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) }
             }
             if (ProjectAction.Scan in words.actions) SecondaryButton(if (Media.captureFinished(context, id)) "Scan Again" else "Scan It", Modifier.fillMaxWidth(), icon = CIcons.Cube, onClick = scan)

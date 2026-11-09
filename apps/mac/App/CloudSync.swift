@@ -250,8 +250,8 @@ import ControlKit
             record["confirmationSupported"] = confirmation.map { $0.supported ? 1 : 0 }
             record["confirmationFields"] = confirmation.flatMap { MirroredConfirmation.fieldsJSON($0.fields) }
             PrintActivitySnapshot.mirror(project, into: record)
-            if let render = project.renderURLs.first, let version = Self.version(render), defaults.string(forKey: "cloud.thumb.\(project.id)") != version,
-               let jpeg = Self.frameJPEG(render, longEdge: 640) {
+            if let picture = project.thumbnailURL, let version = Self.version(picture), defaults.string(forKey: "cloud.thumb.\(project.id)") != version,
+               let jpeg = Self.frameJPEG(picture, longEdge: 640) {
                 temporary.append(jpeg)
                 record["thumbnail"] = CKAsset(fileURL: jpeg)
                 thumbnails[project.id] = version

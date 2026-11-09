@@ -319,6 +319,19 @@ final class ObjectsClientTests: XCTestCase {
         XCTAssertEqual(plain.blenderModelURL?.path, current.appendingPathComponent("model.stl").path, "an STL model opens itself")
     }
 
+    func testTheThumbnailIsTheRealObjectBeforeAnyRender() throws {
+        var object = ready
+        object["photos"] = ["bottle.jpg"]
+        object["capture"] = ["0001.heic"]
+        object["current"] = ["model": "current/model.stl", "renders": ["current/renders/overview.png"]]
+        var decoded = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(decoded.thumbnailURL?.path, folder + "/photos/bottle.jpg")
+        decoded.photos = []
+        XCTAssertEqual(decoded.thumbnailURL?.path, folder + "/capture/0001.heic")
+        decoded.capture = nil
+        XCTAssertEqual(decoded.thumbnailURL?.path, folder + "/current/renders/overview.png")
+    }
+
     func testFilesResolveInsideTheObjectFolderOnly() throws {
         var object = ready
         object["current"] = ["model": "current/model.stl", "renders": ["current/renders/front.png", "../../elsewhere.png", "/etc/hosts", ""]]

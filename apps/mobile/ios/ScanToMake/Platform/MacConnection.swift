@@ -39,7 +39,7 @@ typealias MacError = CompanionError
         }
         return try await client.create(instructions, kind: link == nil ? kind : "published", url: link)
     }
-    func updateDraft(_ id: String, instructions: String) async throws -> StmObject { try await client.updateDraft(id, instructions: instructions) }
+    func updateDraft(_ id: String, instructions: String, kind: String? = nil) async throws -> StmObject { try await client.updateDraft(id, instructions: instructions, kind: kind) }
     func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject { try await client.start(id, captureManifest: captureManifest) }
     func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> StmObject { try await client.correct(id, note, photoNames: photoNames) }
     func closeup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> StmObject { try await client.answerAsk(id, bestGuess: bestGuess, photoNames: photoNames) }
@@ -95,6 +95,13 @@ typealias MacError = CompanionError
         }
         Self.clearPending(id)
         return sent
+    }
+
+    /// Sends a finished scan's own files without starting the project, so choosing Copy or Fit doesn't
+    /// wait for the largest transfer. Chosen photos stay for Send, so their thumbnails stay put here.
+    func uploadProject(_ id: String) async throws {
+        if HandheldCapture.finished(id) { _ = try await uploadHandheld(id) }
+        else if let run = await finishedScan(id) { _ = try await sendCapture(id, run: run) }
     }
 
     /// The photos chosen for a project still being sent, kept beside them in the cache.
@@ -163,6 +170,20 @@ typealias MacError = CompanionError
         } catch {
             throw MacError(code: "capture-error", message: error.localizedDescription)
         }
+    }
+
+    /// Projects with a finished scan still only on this phone: they must offer Send even though the Mac's
+    /// copy of the project has no scan yet.
+    func readyScanProjects() -> Set<String> {
+        #if DEBUG
+        // UI tests: "<project id>".
+        if Fixtures.folder != nil, let id = ProcessInfo.processInfo.environment["COUNTERPART_READY_SCAN"], !id.isEmpty { return [id] }
+        #endif
+        let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
+        return Set(drafts.compactMap { draft in
+            guard draft["status"] as? String == "ready" else { return nil }
+            return (draft["origin"] as? [String: Any])?["projectId"] as? String
+        })
     }
 
     /// A finished scan for this project still on the phone, so a send cut short can resume.
@@ -306,6 +327,10 @@ typealias MacError = CompanionError
 
     /// An in-hand scan's photos and depth (HandheldCapture.swift): the Mac rebuilds the model, then touches it up.
     func sendHandheld(_ id: String) async throws -> StmObject {
+        try await start(id, captureManifest: try await uploadHandheld(id))
+    }
+
+    func uploadHandheld(_ id: String) async throws -> [String: Any] {
         let folder = HandheldCapture.folder(id)
         guard FileManager.default.fileExists(atPath: folder.appending(path: "finished").path) else {
             throw MacError(code: "unfinished-capture", message: "This capture hasn't finished saving. Your capture is still saved on this phone.")
@@ -328,7 +353,7 @@ typealias MacError = CompanionError
             files.append(UploadFile(kind: .capture, name: name, source: .file(folder.appending(path: name)), type: "image/heic"))
         }
         try await uploader.send(files, to: id)
-        return try await start(id, captureManifest: ["version": 1, "images": names, "depthRequired": depthRequired])
+        return ["version": 1, "images": names, "depthRequired": depthRequired]
     }
 
     // MARK: 3D

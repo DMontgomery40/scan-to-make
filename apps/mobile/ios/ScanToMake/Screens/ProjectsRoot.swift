@@ -167,9 +167,9 @@ struct SidebarList: View {
     /// The projects in these phases, in the order the phases are given (printing before working, as on Home).
     /// Archived projects are only in Archived.
     private func group(_ phases: [ProjectPhase]) -> [Project] {
-        // A scan stopped with its photos still on this phone needs you (Send to your Mac or Scan again), so it's listed
+        // A scan still on this phone needs you (Send to your Mac or Scan again), so it's listed
         // near the top, not under Other where David couldn't find his unicorn (Nov 9).
-        let phase = { (p: Project) in store.stoppedScanWords(p) != nil ? ProjectPhase.needsYou : store.words(p).phase }
+        let phase = { (p: Project) in store.localScanWords(p) != nil ? ProjectPhase.needsYou : store.words(p).phase }
         let rank = { (p: Project) in phases.firstIndex(of: phase(p)) ?? phases.count }
         return store.projects.enumerated()
             .filter { !$0.element.isArchived && phases.contains(phase($0.element)) }
@@ -260,8 +260,8 @@ struct SidebarRow: View {
             ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 160).frame(width: 44, height: 44).clipShape(.rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 2) {
                 Text(words.title).font(.body.weight(.semibold)).lineLimit(1)
-                // A stopped scan's photos still on this phone, as on Home's card.
-                Text(store.stoppedScanWords(project) ?? words.line).font(.caption).foregroundStyle(prominence == .increased ? .white.opacity(0.9) : words.phase.color).lineLimit(1)
+                // A scan still on this phone, as on Home's card.
+                Text(store.localScanWords(project) ?? words.line).font(.caption).foregroundStyle(prominence == .increased ? .white.opacity(0.9) : words.phase.color).lineLimit(1)
             }
         }
         .accessibilityElement(children: .combine)

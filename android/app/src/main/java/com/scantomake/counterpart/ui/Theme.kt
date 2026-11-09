@@ -213,9 +213,10 @@ fun ProjectImage(project: Project, name: String?, modifier: Modifier = Modifier,
     }
 }
 
-/** The project's best picture: its first render, else the first photo it was sent. */
-fun Project.posterName(): String? = current?.renders?.firstOrNull()?.substringAfterLast('/')?.let { "renders/$it" }
-    ?: photos.firstOrNull()?.let { "photos/$it" }
+/** The project's picture: the real thing first (a photo or scan frame), else its model render. */
+fun Project.posterName(): String? = photos.firstOrNull()?.let { "photos/$it" }
+    ?: capture?.firstOrNull()?.let { "capture/$it" }
+    ?: current?.renders?.firstOrNull()?.substringAfterLast('/')?.let { "renders/$it" }
 
 @Composable
 fun Dot(color: Color, size: Dp = 10.dp) = Box(Modifier.size(size).clip(CircleShape).background(color))

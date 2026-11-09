@@ -57,6 +57,17 @@ test('create, list and get an object', async t => {
   assert.deepEqual(scopes, ['captures:import', 'projects:read', 'projects:read']);
 });
 
+test('an unsent scan draft can change from copy to fit before it starts', async t => {
+  const {call} = await fixture(t);
+  const id = (await call('POST', '/v1/objects', {kind: 'copy'})).json.object.id;
+  const changed = await call('PATCH', `/v1/objects/${id}`, {kind: 'fit', instructions: 'A pegboard holder for this bottle.'});
+  assert.equal(changed.status, 200);
+  assert.equal(changed.json.object.kind, 'fit');
+  assert.equal(changed.json.object.instructions, 'A pegboard holder for this bottle.');
+  assert.equal((await call('PATCH', `/v1/objects/${id}`, {kind: 'published'})).status, 400);
+  assert.equal((await call('PATCH', `/v1/objects/${id}`, {})).status, 400);
+});
+
 // Nov 6: refusals were invisible (the companion's output went nowhere) and the apps couldn't tell a sentence for the
 // person from a bare code. Each refusal is logged with its status and code; `sentence` marks the person's words.
 test('a refusal written for the person says so (sentence), a bare code doesn\'t, and both are logged', async t => {

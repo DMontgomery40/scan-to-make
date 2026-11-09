@@ -28,6 +28,17 @@ import CounterpartKit
         XCTAssertEqual(app.route, .print("p"))
     }
 
+    func testAProjectThumbnailIsTheRealObjectBeforeAnyRender() {
+        var project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready,
+                              photos: ["bottle.jpg"], capture: ["0001.heic"],
+                              current: Project.Result(model: "current/model.stl", renders: ["renders/overview.png"]))
+        XCTAssertEqual(project.thumbnailPath, "photos/bottle.jpg")
+        project.photos = []
+        XCTAssertEqual(project.thumbnailPath, "capture/0001.heic")
+        project.capture = nil
+        XCTAssertEqual(project.thumbnailPath, "renders/overview.png")
+    }
+
     func testAnEstimateShowsOnlyForItsOwnSettings() throws {
         var state = EstimateState()
         let estimate = try JSONDecoder().decode(SliceEstimate.self, from: Data(#"{"destinationId":"current","quality":"standard","strength":"standard","seconds":4320,"grams":22,"layers":212}"#.utf8))

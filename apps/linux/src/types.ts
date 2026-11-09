@@ -146,6 +146,7 @@ export interface Project {
   failure?: string;
   pendingFollowup?: string;
   photos: string[];
+  capture?: string[];
   requestPhotos?: string[];
   messages?: { id: string; text: string; atMs: number; photos: string[] }[];
   passes: Pass[];

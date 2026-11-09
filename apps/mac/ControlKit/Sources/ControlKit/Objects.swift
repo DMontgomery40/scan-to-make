@@ -224,6 +224,8 @@ public extension Project {
     var renderURLs: [URL] { current?.renders.compactMap(file) ?? [] }
     var photoURLs: [URL] { photos.compactMap { file("photos/\($0)") } }
     var captureURLs: [URL] { (capture ?? []).compactMap { file("capture/\($0)") } }
+    /// The project's picture: the real thing first (a photo or scan frame), else its model render.
+    var thumbnailURL: URL? { photoURLs.first ?? captureURLs.first ?? renderURLs.first }
     /// The Ask's picture, with `ask.region` to highlight on it.
     var askPhotoURL: URL? { ask?.photo.flatMap(file) }
     /// A file the companion names relative to this project's folder (an event's `frame`).

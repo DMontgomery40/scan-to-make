@@ -229,8 +229,10 @@ public final class CompanionClient: @unchecked Sendable {
         if let url { json["url"] = url.absoluteString }
         return try await request("POST", "/v1/objects", json: json, as: One.self).object
     }
-    public func updateDraft(_ id: String, instructions: String) async throws -> Project {
-        try await request("PATCH", "/v1/objects/\(id)", json: ["instructions": instructions], as: One.self).object
+    public func updateDraft(_ id: String, instructions: String, kind: String? = nil) async throws -> Project {
+        var json: [String: Any] = ["instructions": instructions]
+        if let kind, ["fit", "copy"].contains(kind) { json["kind"] = kind }
+        return try await request("PATCH", "/v1/objects/\(id)", json: json, as: One.self).object
     }
     public func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/start", json: captureManifest.map { ["captureManifest": $0] } ?? [:], as: One.self).object

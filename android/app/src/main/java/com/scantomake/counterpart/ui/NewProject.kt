@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,7 +44,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.scantomake.counterpart.MainActivity
@@ -77,6 +80,11 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
     var problem by remember { mutableStateOf<String?>(null) }
     var draftId by remember { mutableStateOf(prefs.getString("CounterpartNewDraftId", "") ?: "") }
     var scanned by remember { mutableStateOf(false) }
+    var scanUse by remember { mutableStateOf(job) }
+    var dimensionSource by remember { mutableStateOf("lookup") }
+    var measuredLongest by remember { mutableStateOf("") }
+    var measuredMiddle by remember { mutableStateOf("") }
+    var measuredShortest by remember { mutableStateOf("") }
     var pendingCamera by remember { mutableStateOf<File?>(null) }
     val link = PublishedModelLink.find(text)
 
@@ -91,7 +99,30 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         uris.take(24 - photos.size).forEach { uri -> Media.keep(context, uri)?.let(photos::add) }
     }
 
-    fun kind(): String? = job ?: if (scanned) "copy" else null
+    fun chosenKind(): String? = scanUse?.takeIf { it != "later" } ?: job
+    fun kind(): String? = chosenKind()
+
+    fun measuredValues(): List<Pair<String, Double>> = listOf("longest" to measuredLongest, "middle" to measuredMiddle, "shortest" to measuredShortest).mapNotNull { (edge, value) ->
+        value.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 && it <= 10_000 }?.let { edge to it }
+    }
+    fun measuredValid(): Boolean {
+        val typed = listOf(measuredLongest, measuredMiddle, measuredShortest).count { it.isNotBlank() }
+        return typed > 0 && measuredValues().size == typed
+    }
+    fun effectiveText(): String {
+        val base = text.trim()
+        if (!scanned || scanUse != "fit" || base.isEmpty()) return base
+        val dimension = when (dimensionSource) {
+            "measured" -> "- Dimensions I measured on the real object: " +
+                measuredValues().joinToString(", ") { "${it.first} ${it.second} mm" } +
+                ". Treat these as the exact overall size. If the scan differs by more than 2 mm or 2%, ask before designing anything fit-critical."
+            "scan" -> "- Dimensions: use the scan's measured size, say the clearance you allowed, and mark every fit-critical size as estimated."
+            else -> "- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size."
+        }
+        return listOf(base, "", "Fit brief:",
+            "- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.",
+            dimension).joinToString("\n")
+    }
 
     /** The draft this screen made, kept so coming back finishes the same one rather than making another. */
     suspend fun draft(): Project {
@@ -99,7 +130,12 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
             try {
                 val saved = app.companion.get(draftId)
                 if (saved.state == Project.State.New) {
-                    if (text.isNotBlank() && saved.instructions != text.trim()) return app.companion.updateDraft(saved.id, text.trim())
+                    val wanted = effectiveText(); val wantedKind = chosenKind()
+                    if ((wanted.isNotBlank() && saved.instructions != wanted) || (wantedKind != null && saved.kind != wantedKind)) {
+                        val updated = app.companion.updateDraft(saved.id, wanted, wantedKind)
+                        if (wantedKind != null && updated.kind != wantedKind) throw CompanionException("needs-update", "Update Counterpart on your computer so a scan can become a fit instead of a copy.")
+                        return updated
+                    }
                     return saved
                 }
             } catch (e: CompanionException) { if (e.code != "not-found") throw e }
@@ -108,7 +144,7 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
             state.loadCapabilities()
             if ("publishedModels" !in state.capabilities.value) throw CompanionException("published-models-unavailable", "Update Counterpart on your computer to get the designer’s file.")
             app.companion.create(text, "published", link)
-        } else app.companion.create(text, kind())
+        } else app.companion.create(effectiveText(), kind())
         draftId = created.id
         prefs.edit().putString("CounterpartNewDraftId", created.id).apply()
         state.show(created)
@@ -172,12 +208,56 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
                     }
                 }
             }
+            if (scanned) {
+                Text("What should this scan become?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.testTag("scan-use"))
+                ScanUseChoice("Copy this object", "Clean up the scan and print the same thing.", scanUse == "copy", "scan-use-copy") { scanUse = "copy" }
+                ScanUseChoice("Make something that fits this", "A holder, mount, case or adapter. The scan is what it must fit, not the print.", scanUse == "fit", "scan-use-fit") { scanUse = "fit" }
+                ScanUseChoice("Just save this scan", "Keep its shape with this project and decide later.", scanUse == "later", "scan-use-later") { scanUse = "later" }
+                if (scanUse == "fit") GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Exact size", fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SecondaryButton("Look up", Modifier.weight(1f).testTag("fit-size-lookup"), enabled = working == null) { dimensionSource = "lookup" }
+                        SecondaryButton("I measured", Modifier.weight(1f).testTag("fit-size-measured"), enabled = working == null) { dimensionSource = "measured" }
+                        SecondaryButton("Use scan", Modifier.weight(1f).testTag("fit-size-scan"), enabled = working == null) { dimensionSource = "scan" }
+                    }
+                    when (dimensionSource) {
+                        "measured" -> {
+                            Text("Measure the outside of the real thing. Leave a side blank if you don't know it.", color = Palette.secondary, fontSize = 13.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(measuredLongest, { measuredLongest = it }, Modifier.weight(1f).testTag("fit-size-longest"), label = { Text("Longest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                                OutlinedTextField(measuredMiddle, { measuredMiddle = it }, Modifier.weight(1f).testTag("fit-size-middle"), label = { Text("Middle mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                                OutlinedTextField(measuredShortest, { measuredShortest = it }, Modifier.weight(1f).testTag("fit-size-shortest"), label = { Text("Shortest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                            }
+                        }
+                        "scan" -> Text("Uses the scan's size as an estimate. Best for loose holders; your computer says the clearance it allowed.", color = Palette.secondary, fontSize = 13.sp)
+                        else -> Text("Your computer identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.", color = Palette.secondary, fontSize = 13.sp)
+                    }
+                    SecondaryButton("Add a caliper photo", Modifier.fillMaxWidth().testTag("fit-caliper-photo"), enabled = working == null && photos.size < 24, icon = CIcons.Camera) {
+                        val (file, uri) = Media.newPhotoTarget(context); pendingCamera = file; takePhoto.launch(uri)
+                    }
+                } }
+                if (scanUse == "later") Text("Nothing is sent or printed yet. This screen keeps the scan, so you can choose here later.", color = Palette.secondary, fontSize = 13.sp)
+            }
             problem?.let { Text(it, color = Palette.failed) }
         }
-        val canSend = text.isNotBlank() || scanned
-        PrimaryButton(if (working == "make") "Sending…" else "Send to ${macName ?: "your computer"}", Modifier.fillMaxWidth().padding(20.dp, 8.dp),
+        val missing = when {
+            scanned && scanUse == null -> "Choose whether to copy it, make something that fits it, or save the scan."
+            scanned && scanUse == "fit" && text.isBlank() -> "Say what it should hold, mount or adapt to."
+            scanned && scanUse == "fit" && dimensionSource == "measured" && !measuredValid() -> "Enter at least one measurement in millimetres."
+            !scanned && text.isBlank() -> "Describe what to make, or add a scan."
+            else -> null
+        }
+        val sendLabel = when {
+            working == "make" -> if (scanUse == "later") "Saving…" else "Sending…"
+            scanned && scanUse == null -> "Choose what to make"
+            scanned && scanUse == "copy" -> "Send copy to ${macName ?: "your computer"}"
+            scanned && scanUse == "later" -> "Save scan for later"
+            else -> "Send to ${macName ?: "your computer"}"
+        }
+        PrimaryButton(sendLabel, Modifier.fillMaxWidth().padding(20.dp, 8.dp).testTag("send"),
             enabled = working == null, icon = CIcons.Upload) {
-            if (!canSend) { problem = "Describe what to make, or add a scan."; return@PrimaryButton }
+            if (missing != null) { problem = missing; return@PrimaryButton }
+            if (scanned && scanUse == "later") { close(); return@PrimaryButton }
             run("make") {
                 val d = draft()
                 val chosen = photos.toList()
@@ -186,6 +266,18 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
                 started(d.id)
             }
         }
+    }
+}
+
+@Composable
+fun ScanUseChoice(title: String, detail: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Palette.glass).clickable(onClick = onClick).padding(14.dp).testTag(tag),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(detail, color = Palette.secondary, fontSize = 12.sp)
+        }
+        if (selected) Icon(CIcons.Check, null, tint = Palette.filament)
     }
 }
 

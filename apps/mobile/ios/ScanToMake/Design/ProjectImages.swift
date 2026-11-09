@@ -33,12 +33,13 @@ import CounterpartKit
 }
 
 extension Project {
-    /// The picture that stands for a project: its clearest render (the Mac names it first), else the first
-    /// photo or scan image you sent.
+    /// The picture that stands for a project: the real thing you showed Counterpart, so a project is
+    /// recognisable the same way on every card. A model render is the fallback when there is no real
+    /// photo or scan frame (a described or published project); the model itself is on its page.
     var thumbnailPath: String? {
-        if let render = current?.renders.first, let name = render.split(separator: "/").last { return "renders/\(name)" }
         if let photo = photos.first { return "photos/\(photo)" }
         if let frame = capture?.first { return "capture/\(frame)" }
+        if let render = current?.renders.first, let name = render.split(separator: "/").last { return "renders/\(name)" }
         return nil
     }
 }

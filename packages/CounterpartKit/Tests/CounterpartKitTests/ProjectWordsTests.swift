@@ -203,6 +203,14 @@ final class ProjectWordsTests: XCTestCase {
 
     // MARK: PRD §4 phases
 
+    func testAScanStillOnlyOnThisPhoneCanBeSentFromItsProject() {
+        let words = ProjectWords(project([:]), localScan: true)
+        XCTAssertEqual(words.status, "Scan saved on this phone. Send it to your Mac to begin.")
+        XCTAssertEqual(words.line, "Scan saved · send to your Mac")
+        XCTAssertEqual(words.actions, [.finishSending])
+        XCTAssertEqual(words.title, "Scanned object")
+    }
+
     func testSavedDraftDoesNotLookLikeAnActiveUploadAndThePhoneCanStillShowSending() {
         let idle = project(["status": ["phase": "draft", "text": "Add photos or a scan", "symbol": "square.and.pencil", "tint": "secondary"]])
         XCTAssertEqual(ProjectWords(idle).phase, .draft)
