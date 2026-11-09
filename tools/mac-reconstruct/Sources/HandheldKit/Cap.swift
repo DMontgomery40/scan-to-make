@@ -76,7 +76,26 @@ public func capCut(_ corners: [SIMD3<Double>], down: SIMD3<Double>, onCut: (SIMD
     return cap
 }
 
-/// Ear clipping of a polygon with holes (after Mapbox's earcut, without its z-order hash): `rings[0]` is the outline,
+// The ear clipping below is adapted from earcut by Mapbox (https://github.com/mapbox/earcut): its linked-list polygon,
+// hole bridging, ear test and fallback passes, ported to Swift. See tools/mac-reconstruct/THIRD_PARTY.md. Its licence:
+//
+// ISC License
+//
+// Copyright (c) 2026, Mapbox
+//
+// Permission to use, copy, modify, and/or distribute this software for any purpose
+// with or without fee is hereby granted, provided that the above copyright notice
+// and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+// REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+// FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+// INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+// OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+// TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+// THIS SOFTWARE.
+
+/// Ear clipping of a polygon with holes (adapted from Mapbox's earcut, without its z-order hash): `rings[0]` is the outline,
 /// the rest are holes. Returns index triples into the rings' points taken in order. Unlike earcut, points in a straight
 /// run are kept: each is a corner of the mesh the cap must meet, so dropping one would leave a gap beside it.
 func earcut(_ rings: [[SIMD2<Double>]]) -> [(Int, Int, Int)] {
