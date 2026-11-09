@@ -1,6 +1,6 @@
 # Quick scan: Apple's Object Capture, used the documented way
 
-Date: 2026-11-08. This is the third revision, written to David's direction. **It is a design only; nothing here is built.** It covers the walk-around and the rig. In-hand capture ([inhand-capture.md](inhand-capture.md), PRD §11) stays in Labs.
+Date: 2026-11-08. This is the third revision, written to David's direction. Updated 2026-11-09 with David's two decisions: the shutter rule (§4) and Android (§3.5). **It is a design only; nothing here is built.** It covers the walk-around and the rig. In-hand capture ([inhand-capture.md](inhand-capture.md), PRD §11) stays in Labs.
 
 David, Nov 8:
 
@@ -21,6 +21,7 @@ Markers:
 - **[inference]** is reasoning that Apple does not document.
 - **[measure]** must be measured on David's iPhone, Mac or rig.
 - **New (proposed)** marks a rule that is not in the PRD and needs David's OK.
+- **David's decision (Nov 8/9)** marks a rule David has decided. It goes into the PRD with the change that ships it.
 
 ---
 
@@ -140,9 +141,13 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
 | iPhone Duo | No LiDAR: disabled tile (PRD §6) | Yes | — |
 | Mac | No camera scan (existing §6.1 exception) | Yes | `ObjectsModelTests` |
 | Linux | No camera scan (existing §6.1 exception). `linux-reconstruct` reads JPEG and PNG only, so a phone paired to a Linux companion can't rebuild Apple HEICs there; what the phone shows in that case is **[check]**. | Yes | `domain.test.ts` |
-| Android | Keeps its ARCore scan. Whether it changes, or §6.1 records an exception in David's words, is **an open decision for David**. | Yes | `HomeLayoutTests` |
+| Android | **Exception for now** (David's decision, Nov 8/9): no no-box scan in this TestFlight cycle. Android keeps its current ARCore scan until the iPhone path is proven. | Unchanged: Android's existing scan results | `HomeLayoutTests` (unchanged) |
 
-The PRD §6.1 row lands in the PR that ships the user-facing change.
+**Proposed PRD §6.1 row.** It lands in the PR that ships the user-facing change, using §6.1's own columns:
+
+| Feature | iPhone (compact) | iPad, regular width | Mac | Android | Linux |
+|---|---|---|---|---|---|
+| Scan it: Apple Object Capture, no box, no mode; every image rebuilt on the Mac (§5.3, §11.1) | New → **Scan it**: Apple freeform capture, two heights, Done after one pass, point-cloud review | The same on LiDAR iPads (iPad Pro); iPads without LiDAR show the disabled tile (§5.2) | No camera scan; rebuilds the phone's images with `PhotogrammetrySession` | **Exception for now: Android keeps its current scan until the iPhone path is proven** (David, Nov 8/9) | No camera scan |
 
 ---
 
@@ -172,12 +177,19 @@ The PRD §6.1 row lands in the PR that ships the user-facing change.
 | 3 | Every image reaches the Mac: the count on the Mac = `numberOfShotsTaken` | New (proposed) |
 | 4 | Done → USDZ on the Mac ≤ 4 min (upload ≤ 60 s) | New (proposed) |
 | 5 | **Both D's whole**: the length is within tolerance of calipers (the Nov 8 failure) | New (proposed) |
-| 6 | Every axis within **±1.0 mm or ±1.5%**, whichever is larger; the feature dimension within ±1.0 mm | PRD §11 |
+| 6 | Every axis within **±1.0 mm or ±1.5%**, whichever is larger; the feature dimension within ±1.0 mm | PRD §11; part of David's decision (below) |
 | 7 | A and D counters open; no backdrop or platform geometry | PRD §11 (no foreign geometry) + new (holes) |
 | 8 | Underside closed, apart from real holes | PRD §11 |
-| 9 | Repeatability: 2 hand scans within 1%, 3 rig scans within 0.5% | PRD §11, §11.1 |
+| 9 | Repeatability: 2 hand scans within 1%, 3 rig scans within 0.5% | PRD §11, §11.1; part of David's decision (below) |
+| 10 | **Sharpness:** at most 15% of images fall below the sharpness line on the sign's region, measured as the variance of the Laplacian. The line is set from rig frames **[measure]**. Each image's EXIF exposure time and ISO are recorded as evidence. This is an engineering check run on the Mac, not part of the product. | David's decision (below) |
 
-**The shutter rule.** PRD §11.1's "1/250 s or faster" cannot be met by Apple-only, because Apple picks the exposure (§2.10). **Decision for David:** judge Apple capture by criteria 5–9 instead **(new, proposed)**. Otherwise the shutter rule alone forces Appendix item C4.
+**The shutter rule: David's decision (Nov 8/9).**
+- **What changes.** For Apple's capture path, the fixed "1/250 s or faster" rule is replaced. The scan must pass the measured checks instead:
+  - sharpness (criterion 10);
+  - caliper dimensions within ±1.0 mm or ±1.5% (criterion 6);
+  - repeat scans that agree (criterion 9).
+- **Why.** Apple picks the exposure (§2.10). Nov 8 was 1/60 s.
+- **What doesn't change.** In-hand capture (PRD §11) is not Apple's capture path and keeps its own rule.
 
 **Reading the results:**
 - **1-as-is passes:** ship the Apple-only path (Stage 2).
@@ -211,7 +223,7 @@ The PRD §6.1 row lands in the PR that ships the user-facing change.
 
 ## 6. Honest limits of Apple-only
 
-- **No shutter control** (§2.10), and therefore no PRD §11.1 1/250 s guarantee.
+- **No shutter control** (§2.10). By David's decision, this path is judged by measured sharpness, dimensions and repeatability, not by a fixed 1/250 s (§4).
 - **No coverage dial in freeform** (§2.2). The person relies on the one-line card and Apple's point-cloud review.
 - **The bottom.** Where the object sat on a surface, Apple's masked model has whatever RealityKit infers there. The existing touch-up and printer flow handles it as it does today; criterion 8 measures it.
 - **Unknowns [measure]:**
@@ -228,8 +240,13 @@ The PRD §6.1 row lands in the PR that ships the user-facing change.
 - **§11.1:**
   - remove "asks once ('Using the scan rig?')";
   - two clamp heights;
-  - the shutter decision (§4).
-- **§6.1:** the row from §3.5. **§0:** the Scanning status line.
+  - **the shutter rule (David's decision, Nov 8/9).** Replace "Exposure follows §11: 1/250 s or faster" with:
+
+    > Apple's capture path sets its own exposure. Instead of a fixed shutter, a scan passes the measured checks: sharpness (at most 15% of images below the sharpness line), caliper dimensions within ±1.0 mm or ±1.5%, whichever is larger, and repeat scans that agree (two within 1%; three rig scans within 0.5% on every axis). David, Nov 8/9.
+
+    In §11.1's pass criteria, "The same as §11" becomes "The same as §11, except the shutter item, which the measured checks above replace".
+- **§6.1:** the row from §3.5, including David's Android exception: "Exception for now: Android keeps its current scan until the iPhone path is proven."
+- **§0:** the Scanning status line.
 
 ---
 
@@ -242,7 +259,7 @@ None of these is in the plan. Each answers one specific failure of Stage 1 runs 
 | C1 | **Our object masks:** `ObjectMasker` rewritten for still objects (2D-first silhouettes with `GenerateIterativeSegmentationRequest`, iOS/macOS 27 [A13]; convergence of camera axes; highest support surface; rejecting anything that spans the backdrop). Applied by loading Apple's HEICs with `PhotogrammetrySample(contentsOf:)`, which keeps Apple's get-only `camera` and `depthConfidenceMap` [A7], and setting `objectMask` | Criterion 7: Apple's automatic masking fills the A and D counters, or keeps the backdrop or platform | Hands RealityKit our masks instead of its automatic ones | Mac 3–5 days; the `ObjectMasker` seeding is a rewrite; macOS-only `HandheldKit` is fine |
 | C2 | **Bottom cut and cap:** fit the cut plane to the mesh's own lowest open boundary (not a mapped capture plane; a 1–2° tilt slices 1.6–3 mm), cap only closed loops, never fill real holes | Criterion 8: underside not closed | A deterministic `scan-repair` operation | 2 days |
 | C3 | **Scale check:** a similarity fit of `.poses` [A10] against Apple's `camera.transform` centres [A7], using `linux-reconstruct`'s gates, with up taken from gravity (a flat-circle loop passes the eigenvalue gate at `scale.py:23,193-196`) | Criterion 6 misses by a scale factor while the shape is right | Flags the scale and asks for one measurement (`capture-measurement`); never corrects it silently | 2 days |
-| C4 | **Our own ARKit capture with shutter control:** 4K frames (`recommendedVideoFormatFor4KResolution`); shutter priority via `configurableCaptureDeviceForPrimaryCamera` (iOS 16) and `setExposureModeCustom(lensAperture: AVCaptureDevice.autoLensAperture, duration:, iso: AVCaptureDevice.autoISO)` (iOS 27) inside `lockForConfiguration()`, re-applied after every `run`; 1/250–1/125 s; blur = t_exp·max‖u̇‖ with rotation only from the gyro; depth NaN when invalid and kept out of samples until a registration gate passes | Criterion 6 fails **from blur** in 1-mitigated (sharpness inside the object under the line in more than 15% of images), or David keeps the 1/250 s rule | Sharp frames at a chosen shutter. It loses Apple's per-image camera data [A7], so RealityKit estimates poses itself | 4–6 weeks, including the upload contract (a depth bplist or new route, and HEIC support in the `capture-camera` validators at `schemas.py:68-91` / `capture-camera.ts:13-34`) |
+| C4 | **Our own ARKit capture with shutter control:** 4K frames (`recommendedVideoFormatFor4KResolution`); shutter priority via `configurableCaptureDeviceForPrimaryCamera` (iOS 16) and `setExposureModeCustom(lensAperture: AVCaptureDevice.autoLensAperture, duration:, iso: AVCaptureDevice.autoISO)` (iOS 27) inside `lockForConfiguration()`, re-applied after every `run`; 1/250–1/125 s; blur = t_exp·max‖u̇‖ with rotation only from the gyro; depth NaN when invalid and kept out of samples until a registration gate passes | Criterion 6 or 10 fails **from blur** in 1-mitigated: more than 15% of images under the sharpness line. The fixed 1/250 s rule no longer triggers this; David replaced it with the measured checks (§4). | Sharp frames at a chosen shutter. It loses Apple's per-image camera data [A7], so RealityKit estimates poses itself | 4–6 weeks, including the upload contract (a depth bplist or new route, and HEIC support in the `capture-camera` validators at `schemas.py:68-91` / `capture-camera.ts:13-34`) |
 | C5 | **Rig drift fallback:** compare ARKit Δyaw with CoreMotion; orbit-pose model; lime chroma ∩ depth masks | Only with C4, and only if rig tracking fails. Nov 8 tracking **held** (§1), so this is unlikely | Keeps a rig capture usable when the view is mostly a backdrop that moves with the camera | 2–3 days |
 | C6 | **CoreMotion coverage ring** (yaw and pitch bands) with `requestImageCapture()` for gaps [A4] | People stop at one height despite the card: Mac poses show one elevation band | Shows which height is missing | 2–3 days |
 | — | **LiDAR depth fusion (TSDF)** | **Rejected.** iPhone LiDAR has about 576 physical points, 15–20 mm apart at 40 cm, and matte black returns almost none (§1). It cannot meet ±1 mm, and must never patch the real A and D holes. | — | — |
