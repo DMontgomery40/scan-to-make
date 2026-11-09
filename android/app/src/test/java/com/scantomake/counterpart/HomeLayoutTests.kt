@@ -533,7 +533,7 @@ class HomeLayoutTests {
     private val CLIP = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03"
     private fun finishedClip(status: String? = null): JsonObject = WireJson.parseToJsonElement(
         """{"id":"$CLIP","title":"Cable clip","instructions":"A clip","state":"${if (status == "works") "confirmed" else "printed"}","createdAtMs":1,"updatedAtMs":2,
-           "print":{"destinationId":"p1s","live":{"state":"finished","job":{"progress":100,"layer":212,"totalLayers":212},"temps":{"nozzle":{"actual":220},"bed":{"actual":55}}},
+           "print":{"destinationId":"p1s","live":{"state":"finished","job":{"progress":100,"layer":212,"totalLayers":212},"temps":{"nozzle":{"actual":220,"target":0},"bed":{"actual":55,"target":0}}},
                     "monitor":{"phase":"ended","endState":"done","endedAt":"2026-11-08T10:00:00Z"}}${status?.let { ""","settings":{"status":"$it"}""" } ?: ""}}"""
     ).jsonObject
 
