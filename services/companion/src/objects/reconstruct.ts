@@ -14,7 +14,7 @@ export interface ReconstructInput {
   /**
    * The photos are an iPhone Object Capture session's own HEICs (a walk-around or a scan rig), rebuilt the way Apple
    * documents it: PhotogrammetrySession on the images folder (`mac-reconstruct <folder>`), which reads each photo's
-   * camera, LiDAR depth, gravity and capture box itself, with Apple's own object masking.
+   * camera, LiDAR depth and gravity itself, with Apple's own object masking always on and the capture box ignored.
    */
   objectCapture?: boolean;
   /** Where the rebuilt model goes (USDZ, metres). */

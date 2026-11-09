@@ -87,6 +87,9 @@ if samplesMode {
     // Apple's default: on David's rig scan, .sequential with .high placed 5–7 of 24 photos and left part of the sign
     // in three runs, against 9 of 24 and the same front of the sign in three runs unordered.
     configuration.featureSensitivity = .high
+    // Apple's capture box is not trusted to trim the object: on David's rig scan it was fitted to the script on the
+    // base and cut the letters. Apple's object masking (on above) still separates the object from the room.
+    configuration.ignoreBoundingBox = true
 }
 
 let started = Date()

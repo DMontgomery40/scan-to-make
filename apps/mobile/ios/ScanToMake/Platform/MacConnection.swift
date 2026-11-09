@@ -208,8 +208,8 @@ typealias MacError = CompanionError
 
     /// Sends a walk-around scan so the Mac can rebuild it (only what the Mac lacks; a send cut short resumes).
     ///
-    /// Every image Object Capture took goes byte for byte as Apple wrote it: each HEIC carries its camera, LiDAR depth,
-    /// gravity and capture box, which the Mac's PhotogrammetrySession reads itself. That is what `isOverCaptureEnabled` is for:
+    /// Every image Object Capture took goes byte for byte as Apple wrote it: each HEIC carries its camera, LiDAR depth
+    /// and gravity, which the Mac's PhotogrammetrySession reads itself. That is what `isOverCaptureEnabled` is for:
     /// "for use when the images are intended to be transferred to macOS for model reconstruction". The phone's own
     /// model goes last, as a preview the Mac replaces with its full-detail rebuild. Apple's checkpoint folder stays
     /// here: "For macOS reconstruction, the checkpointDirectory … starts from scratch, and does not resume from
