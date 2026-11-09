@@ -1,10 +1,11 @@
 import Foundation
+import Security
 #if canImport(ControlKit)
 import ControlKit
 #endif
 
-/// The Live Activity relay client (PRD §8.8, services/relay/docs.md). Off by default: it needs the APNs key in the
-/// relay's secrets first. One push in flight per token; while one is in flight only the newest state waits behind it.
+/// The Live Activity relay client (PRD §8.8, services/relay/docs.md). On by default in production-signed builds
+/// (David, Nov 8); a choice made in Settings wins. One push in flight per token; while one is in flight only the newest state waits behind it.
 /// An end or a pause is never dropped: after a 429 it is sent again once the wait is over, and when the relay can't be
 /// reached it is sent again with a growing wait (`RelayRetry`).
 @MainActor final class LiveActivityRelay {
@@ -12,7 +13,16 @@ import ControlKit
     static let urlKey = "relay.url"
     static let defaultURL = "https://counterpart.dtmont.com/relay/v1"
 
-    var enabled: Bool { UserDefaults.standard.bool(forKey: Self.enabledKey) }
+    /// This build's APNs environment (`com.apple.developer.aps-environment`): "production" in Developer ID releases.
+    nonisolated static let apsEnvironment: String? = {
+        guard let task = SecTaskCreateFromSelf(nil) else { return nil }
+        return SecTaskCopyValueForEntitlement(task, "com.apple.developer.aps-environment" as CFString, nil) as? String
+    }()
+    nonisolated static var enabledByDefault: Bool { RelayDefault.enabled(stored: nil, apsEnvironment: apsEnvironment) }
+
+    var enabled: Bool {
+        RelayDefault.enabled(stored: UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool, apsEnvironment: Self.apsEnvironment)
+    }
     var endpoint: URL? {
         let text = UserDefaults.standard.string(forKey: Self.urlKey) ?? Self.defaultURL
         guard let url = URL(string: text), url.scheme == "https" else { return nil }
@@ -150,7 +160,7 @@ import ControlKit
             let error = (try? JSONDecoder().decode([String: JSONValue].self, from: data))?["error"]?.string
             if error == "not_configured" {
                 pausedUntil = Date().addingTimeInterval(retry > 0 ? retry : 3600)
-                lastResult = "The relay has no APNs key yet; your phone updates its Live Activity itself."
+                lastResult = "The relay has no APNs key yet. Your phone's Live Activity catches up when you open Counterpart."
             } else {
                 pausedUntil = Date().addingTimeInterval(min(max(retry, 1), 900))
                 lastResult = "The relay is busy; trying again soon."
