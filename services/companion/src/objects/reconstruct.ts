@@ -83,7 +83,7 @@ const FAILED = RECONSTRUCTION_FAILED;
 const STDERR_LIMIT = 64 * 1024;
 
 /** Last failed attempt only, never part of public object data or the HTTP artifact allowlist. */
-async function retainFailure(input: ReconstructInput, detail: {code: number | null; signal: string | null; error?: string; stderr: Buffer; truncated: boolean}): Promise<void> {
+async function retainFailure(input: Pick<ReconstructInput, 'output'>, detail: {code: number | null; signal: string | null; error?: string; stderr: Buffer; truncated: boolean}): Promise<void> {
   const directory = join(dirname(input.output), '.reconstruction-diagnostics');
   await mkdir(directory, {recursive: true, mode: 0o700});
   if (!(await lstat(directory)).isDirectory()) throw new Error('Invalid diagnostic directory');
@@ -191,15 +191,24 @@ export const SCAN_TO_STL_FAILED = "Your Mac couldn't turn this scan into a print
 export function macScanToStl(binary: string | null = findMacReconstruct() ?? null): ScanToStl | undefined {
   if (!binary) return undefined;
   return (scan, stl, {render, signal} = {}) => new Promise<void>((resolve, reject) => {
-    const child = spawn(binary, ['stl', scan, stl, ...(render ? ['--render', render] : [])], {stdio: ['ignore', 'pipe', 'ignore'], ...(signal ? {signal} : {})});
-    let out = '', failed = false;
+    const child = spawn(binary, ['stl', scan, stl, ...(render ? ['--render', render] : [])], {stdio: ['ignore', 'pipe', 'pipe'], ...(signal ? {signal} : {})});
+    let out = '', failed = false, stderr = Buffer.alloc(0), stderrTruncated = false;
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => { out = (out + chunk).slice(-16384); });
+    // Kept like the rebuild's: a bounded private tail beside the output, never in the words the person sees.
+    child.stderr.on('data', (chunk: Buffer) => {
+      const combined = Buffer.concat([stderr, chunk]);
+      stderrTruncated ||= combined.length > STDERR_LIMIT;
+      stderr = Buffer.from(combined.subarray(Math.max(0, combined.length - STDERR_LIMIT)));
+    });
     child.on('error', failure => { failed = true; reject(failure.name === 'AbortError' ? failure : new Error(NOT_INSTALLED)); });
-    child.on('close', code => {
+    child.on('close', (code, signalName) => {
       if (failed) return;
-      const done = out.trim().split('\n').some(line => { try { return typeof (JSON.parse(line) as {done?: unknown}).done === 'string'; } catch { return false; } });
-      if (code === 0 && done) resolve(); else reject(new Error(SCAN_TO_STL_FAILED));
+      const lines = out.trim().split('\n').flatMap(line => { try { return [JSON.parse(line) as {done?: unknown; error?: unknown}]; } catch { return []; } });
+      if (code === 0 && lines.some(line => typeof line.done === 'string')) { resolve(); return; }
+      const error = lines.map(line => line.error).find((value): value is string => typeof value === 'string');
+      void retainFailure({output: stl}, {code, signal: signalName, error, stderr, truncated: stderrTruncated})
+        .catch(() => undefined).finally(() => reject(new Error(SCAN_TO_STL_FAILED)));
     });
   });
 }

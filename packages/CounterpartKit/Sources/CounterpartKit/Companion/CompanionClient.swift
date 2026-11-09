@@ -91,7 +91,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/objects/printers/[A-Za-z0-9_-]+/(route|mcp)") { return "projects:write" }
         case "POST":
             if is_("/v1/blender/(check|update)") { return "projects:write" }
-            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth)") { return "captures:import" }
+            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-manifest|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
             if is_("/v1/settings/(ai/test|fusion/setup)") { return "projects:write" }
@@ -234,6 +234,11 @@ public final class CompanionClient: @unchecked Sendable {
     }
     public func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/start", json: captureManifest.map { ["captureManifest": $0] } ?? [:], as: One.self).object
+    }
+    /// A walk-around's every image, named before any is sent (`source: "object-capture"`): the Mac then refuses to
+    /// start on part of it, from any client, and takes no frame outside the list. Needs `objectCaptureImages`.
+    public func declareCapture(_ id: String, manifest: [String: Any]) async throws -> Project {
+        try await request("POST", "/v1/objects/\(id)/capture-manifest", json: manifest, as: One.self).object
     }
     /// Ask for changes: a new pass with your text. Upload new photos first.
     public func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> Project {

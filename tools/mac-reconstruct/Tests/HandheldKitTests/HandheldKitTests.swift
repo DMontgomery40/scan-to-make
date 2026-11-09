@@ -79,6 +79,13 @@ final class HandheldKitTests: XCTestCase {
         XCTAssertThrowsError(try loadSample(image))
     }
 
+    /// A triangle with an index outside the mesh is dropped whole; the triangles after it keep their own corners.
+    func testABadIndexDropsItsWholeTriangleOnly() {
+        XCTAssertEqual(wholeTriangles([0, 1, 2, 3, 9, 4, 4, 5, 6, 7], vertexCount: 8), [[0, 1, 2], [4, 5, 6]])
+        XCTAssertEqual(wholeTriangles([0, 1], vertexCount: 8), [])
+        XCTAssertEqual(wholeTriangles([0, 1, -1], vertexCount: 8), [])
+    }
+
     /// A Y-up model in metres becomes the STL a project keeps: millimetres, Z up, centred, resting on z = 0.
     func testSTLIsInMillimetresWithEveryTriangle() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("handheldkit-stl-\(UUID().uuidString)")

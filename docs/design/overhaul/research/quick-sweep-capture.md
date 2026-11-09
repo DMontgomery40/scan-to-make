@@ -109,7 +109,7 @@ These are from Argon's geometry review of the Nov 8 capture, and from the code.
 | Manifest | `{version: 1, images, depthRequired, …}`; unknown keys are dropped (`service.ts:135-158`) | **Exactly:** `{"version": 1, "images": ["0001.heic", …], "depthRequired": false, "source": "object-capture"}`, with `cameraMetadataRequired` and `scaleQualificationRequired` **absent**. See "Why this manifest" below. |
 | Checkpoint | Not sent | **Not sent.** The Mac starts from scratch (§2.5) [A8]. If a later measurement shows otherwise, it needs a new folder route, and none exists. |
 | Depth | `capture-depth` route for `NNNN.depth.plist` | **None.** It is inside Apple's HEIC. |
-| Scan USDZ | Required by `sendCapture` | **Not sent.** No on-device rebuild. |
+| Scan USDZ | Required by `sendCapture` | **Sent last, as a preview** (`PUT …/scan?preview=true`, `scanSource: "phone-preview"`), as built in #417. It stays the project's model only if the Mac's rebuild fails, and then the words say so. Stage 1 removes the on-device rebuild, and with it this file (§3.1 item 8). |
 | Uploader | `ProjectUploader`: sequential, in memory, skips what the Mac has (`Uploads.swift:27-80`), on `URLSessionConfiguration.ephemeral` (`Transport.swift:75`). PRD §5.2 says a background session; the code doesn't use one. | Unchanged. A cut-short send resumes by skipping files already sent. |
 
 **Image names.**
@@ -148,7 +148,9 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
 - Apple says the ordering "has no impact on the quality", but these frames are spread picks, not adjacent shots.
 - Receipts: `~/scan-to-make-work/mac-reconstruction-2026-11-08/`.
 
-- **The companion** runs that mode for `source: "object-capture"`, keeps stdout and stderr (as `reconstruct.ts` already does for `samples`), and hands the USDZ to the existing touch-up and printer MCP path unchanged.
+- **The companion** runs that mode for `source: "object-capture"` and keeps stdout and stderr (as `reconstruct.ts` already does for `samples`).
+  - The rebuilt USDZ becomes the project's model as it is: an STL in millimetres, Z up, plus a render.
+  - **A touch-up runs only when the person asks**: a request sent with the scan, or Ask for changes (#417). Nothing starts the AI by itself after a scan arrives.
 - **Mac time:** about 60–90 s for 100–120 12 MP HEICs at `.full`. Measured Nov 2 on the Mac (117 → 74.3 s; 120 → 63.4 s, [audit](../../../status/capture-reconstruction-audit-2026-11-02.md)). `.high` is slower **[measure]**.
 - **Images that carry a box** (Nov 8 and earlier object-mode captures): rebuild with `ignoreBoundingBox = true`, masking still on [A9].
   - **Stage 0 answer (Nov 8, the 24 photos that reached the Mac): both D's come back.**

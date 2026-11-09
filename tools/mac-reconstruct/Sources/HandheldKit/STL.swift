@@ -9,6 +9,15 @@ public struct STLSummary: Equatable {
     public var sizeMm: SIMD3<Double>
 }
 
+/// A triangle list's indices three at a time. A triangle with any index outside the mesh is skipped whole, so one
+/// bad index can never shift the corners of every triangle after it.
+public func wholeTriangles(_ indices: [Int], vertexCount: Int) -> [[Int]] {
+    stride(from: 0, to: indices.count / 3 * 3, by: 3).compactMap { start in
+        let triangle = Array(indices[start..<start + 3])
+        return triangle.allSatisfy { $0 >= 0 && $0 < vertexCount } ? triangle : nil
+    }
+}
+
 /// Writes every triangle of a model (USDZ, USD, OBJ) as a binary STL the way a project's models are kept: millimetres,
 /// Z up, centred on the origin and resting on z = 0, as the touch-up's Blender export leaves them.
 ///
@@ -33,16 +42,14 @@ public func writeSTL(model: URL, to output: URL, metresPerUnit: Double = 1) thro
                 }
                 for case let submesh as MDLSubmesh in mesh.submeshes ?? [] where submesh.geometryType == .triangles {
                     let bytes = submesh.indexBuffer.map().bytes
-                    for i in 0..<(submesh.indexCount / 3 * 3) {
-                        let index: Int
+                    let indices = (0..<submesh.indexCount).map { i -> Int in
                         switch submesh.indexType {
-                        case .uInt8: index = Int(bytes.load(fromByteOffset: i, as: UInt8.self))
-                        case .uInt16: index = Int(bytes.load(fromByteOffset: i * 2, as: UInt16.self))
-                        default: index = Int(bytes.load(fromByteOffset: i * 4, as: UInt32.self))
+                        case .uInt8: return Int(bytes.load(fromByteOffset: i, as: UInt8.self))
+                        case .uInt16: return Int(bytes.load(fromByteOffset: i * 2, as: UInt16.self))
+                        default: return Int(bytes.load(fromByteOffset: i * 4, as: UInt32.self))
                         }
-                        guard index < mesh.vertexCount else { continue }
-                        corners.append(position(index))
                     }
+                    for triangle in wholeTriangles(indices, vertexCount: mesh.vertexCount) { corners += triangle.map(position) }
                 }
             }
         }

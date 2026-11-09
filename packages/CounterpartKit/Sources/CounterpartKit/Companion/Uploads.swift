@@ -10,9 +10,11 @@ public struct UploadFile: Equatable, Sendable {
     public var name: String
     public var source: Source
     public var type: String
+    /// A scan that is only the phone's own on-device model of a capture: the Mac keeps it marked as a preview.
+    public var preview: Bool
 
-    public init(kind: Kind, name: String, source: Source, type: String) {
-        self.kind = kind; self.name = name; self.source = source; self.type = type
+    public init(kind: Kind, name: String, source: Source, type: String, preview: Bool = false) {
+        self.kind = kind; self.name = name; self.source = source; self.type = type; self.preview = preview
     }
 
     public static func image(_ url: URL, name: String? = nil, kind: Kind = .photo) -> UploadFile {
@@ -68,7 +70,7 @@ public actor ProjectUploader {
                 throw CompanionError(code: "unreadable-file", message: "A file from this scan couldn't be read.")
             }
             let path: String, method: String
-            if file.kind == .scan { path = "/v1/objects/\(projectId)/scan"; method = "PUT" }
+            if file.kind == .scan { path = "/v1/objects/\(projectId)/scan" + (file.preview ? "?preview=true" : ""); method = "PUT" }
             else {
                 let route = file.kind == .depth ? "capture-depth" : file.kind == .capture ? "capture" : "photos"
                 let name = file.name.addingPercentEncoding(withAllowedCharacters: Self.queryValue) ?? file.name

@@ -765,6 +765,24 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(ProjectUploader.spread(Array(0..<3), count: 24), [0, 1, 2])
     }
 
+    /// A walk-around's manifest is declared with exactly its four fields, before any frame.
+    func testAWalkAroundIsDeclaredWithItsExactManifest() async throws {
+        let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"
+        final class Seen: @unchecked Sendable { var path = ""; var body: [String: Any] = [:] }
+        let seen = Seen()
+        let fake = FakeTransport { request, _ in
+            seen.path = request.url!.path
+            seen.body = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any] ?? [:]
+            return json(200, ["object": ["id": id, "createdAtMs": 1, "updatedAtMs": 1, "state": "new", "photos": [], "passes": []]])
+        }
+        let manifest: [String: Any] = ["version": 1, "images": ["0001.heic", "0002.heic"], "depthRequired": false, "source": "object-capture"]
+        _ = try await try client(fake).declareCapture(id, manifest: manifest)
+        XCTAssertEqual(seen.path, "/v1/objects/\(id)/capture-manifest")
+        XCTAssertEqual(Set(seen.body.keys), ["version", "images", "depthRequired", "source"])
+        XCTAssertEqual(seen.body["source"] as? String, "object-capture")
+        XCTAssertEqual(seen.body["depthRequired"] as? Bool, false)
+    }
+
     /// Apple's Object Capture names become the Mac's capture frame names, NNNN in capture order; anything else stops the send.
     func testObjectCaptureImagesBecomeNumberedFramesInCaptureOrder() throws {
         let frames = try ProjectUploader.captureFrames(["00393.886463125.HEIC", "00041.732011084.HEIC", ".hidden", "00049.698417084.HEIC"])
@@ -796,7 +814,7 @@ final class CompanionClientTests: XCTestCase {
         }
         let uploader = ProjectUploader(client: try client(fake))
         let files = names.map { UploadFile(kind: .capture, name: $0, source: .bytes(Data($0.utf8)), type: "image/heic") }
-            + [UploadFile(kind: .scan, name: "scan.usdz", source: .bytes(Data("preview".utf8)), type: "model/vnd.usdz+zip")]
+            + [UploadFile(kind: .scan, name: "scan.usdz", source: .bytes(Data("preview".utf8)), type: "model/vnd.usdz+zip", preview: true)]
         log.fail = 25
         do { try await uploader.send(files, to: id) { log.shares.append($0) }; XCTFail("the fake drops the 26th file") } catch {}
         XCTAssertEqual(log.sent.count, 25)
@@ -805,7 +823,7 @@ final class CompanionClientTests: XCTestCase {
         let count = try await uploader.send(files, to: id) { log.shares.append($0) }
         XCTAssertEqual(count, 35, "only the frames the Mac didn't have")
         XCTAssertEqual(log.sent.count, 61)
-        XCTAssertEqual(log.sent.last, "/v1/objects/\(id)/scan?", "the phone's model goes last, after every image")
+        XCTAssertEqual(log.sent.last, "/v1/objects/\(id)/scan?preview=true", "the phone's model goes last, after every image, marked as the preview")
         XCTAssertTrue(log.sent.dropLast().allSatisfy { $0.contains("/capture?name=") })
         XCTAssertEqual(log.shares.first ?? -1, 25.0 / 61.0, accuracy: 0.0001, "a resumed send starts from what arrived")
         XCTAssertEqual(log.shares.last, 1)

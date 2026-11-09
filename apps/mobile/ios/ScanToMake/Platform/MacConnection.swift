@@ -228,7 +228,8 @@ typealias MacError = CompanionError
         let pattern = /[A-Za-z0-9][A-Za-z0-9._ -]{0,122}\.(HEIC|heic|JPG|jpg|JPEG|jpeg|PNG|png)/
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? [])
             .filter { $0.wholeMatch(of: pattern) != nil && !$0.contains("..") }.sorted()
-        let preview = UploadFile(kind: .scan, name: "scan.usdz", source: .file(model), type: "model/vnd.usdz+zip")
+        // Marked as the phone's preview on every path, so a Mac never mistakes it for a full scan.
+        let preview = UploadFile(kind: .scan, name: "scan.usdz", source: .file(model), type: "model/vnd.usdz+zip", preview: true)
         let report = onSendProgress
         let progress: @Sendable (Double) -> Void = { share in Task { @MainActor in report(id, share) } }
         // A send cut short keeps the way it started: frames already there mean every image, a model alone the older
@@ -244,10 +245,13 @@ typealias MacError = CompanionError
             return nil
         }
         let frames = try ProjectUploader.captureFrames(((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? []))
-        // The images first: the Mac takes capture frames only until a scan is there.
+        let manifest: [String: Any] = ["version": 1, "images": frames.map(\.name), "depthRequired": false, "source": "object-capture"]
+        // Every image is named before any is sent: no client can start the Mac on part of them.
+        _ = try await client.declareCapture(id, manifest: manifest)
+        // Then the images: the Mac takes capture frames only until a scan is there.
         let files = frames.map { UploadFile.image(images.appending(path: $0.file), name: $0.name, kind: .capture) } + [preview]
         try await uploader.send(files, to: id, progress: progress)
-        return ["version": 1, "images": frames.map(\.name), "depthRequired": false, "source": "object-capture"]
+        return manifest
     }
 
 

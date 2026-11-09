@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {ObjectStore} from '../dist/objects/store.js';
-import {ObjectService, InvalidStateError, scanSummary} from '../dist/objects/service.js';
+import {ObjectService, InvalidStateError, scanSummary, SCANS_NEED_A_MAC, KEEP_SCAN_UNAVAILABLE, PREVIEW_ONLY} from '../dist/objects/service.js';
 import {macReconstructArgs, macReconstructRunner, macScanToStl, linuxReconstructRunner, progressWords, NEEDS_MACOS_27, OBJECT_CAPTURE_NEEDS_MAC, RECONSTRUCTION_FAILED} from '../dist/objects/reconstruct.js';
 import {tempDir} from './support/temp.mjs';
 
@@ -15,7 +15,7 @@ const objectCaptureManifest = images => ({version: 1, images, depthRequired: fal
 const APPLE = ['0001.heic', '0002.heic'];
 
 /** `scanToStl` stands in for `mac-reconstruct stl` (a Mac); `scanToStl: null` is a computer without it. */
-async function setup({reconstruct, scanToStl} = {}) {
+async function setup({reconstruct, scanToStl, deps = {}} = {}) {
   const root = await tempDir('objects-handheld-');
   const store = new ObjectStore(join(root, 'objects'));
   const touchups = [], builds = [], changes = [], converted = [];
@@ -28,7 +28,7 @@ async function setup({reconstruct, scanToStl} = {}) {
   };
   const service = new ObjectService({store, runTouchup, stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
-    onChange: object => changes.push(object),
+    onChange: object => changes.push(object), ...deps,
     ...(scanToStl === null ? {} : {objectCaptureRebuild: true, scanToStl: scanToStl ?? (async (scan, stl, {render} = {}) => {
       converted.push({scan, bytes: await readFile(scan, 'utf8')});
       await writeFile(stl, STL);
@@ -44,10 +44,11 @@ async function setup({reconstruct, scanToStl} = {}) {
   return {service, store, object, touchups, builds, changes, converted, root};
 }
 
-/** A walk-around as the phone sends it: every image first, then its own model as the preview. */
+/** A walk-around as the phone sends it: the image list declared first, every image, then its own model as the preview. */
 async function sendWalkAround(service, id, names = APPLE) {
+  await service.declareCapture(id, objectCaptureManifest(names));
   for (const name of names) await service.addCapturePhoto(id, name, Buffer.from(name));
-  await service.addScan(id, 'scan.usdz', Buffer.from('phone preview'));
+  await service.addScan(id, 'scan.usdz', Buffer.from('phone preview'), {preview: true});
 }
 
 test('a handheld scan is rebuilt on the Mac from its photos, and kept as the model until a touch-up is asked for', async () => {
@@ -90,14 +91,92 @@ test('a handheld scan is rebuilt on the Mac from its photos, and kept as the mod
   assert.equal(touched.state, 'ready');
 });
 
-test('without a way to keep the scan as a model (no Mac tool), the touch-up runs as before', async () => {
-  const {service, object, touchups} = await setup({scanToStl: null});
-  await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('a'));
-  const started = await service.start(object.id);
-  assert.equal(started.passes[0].estimate.remainingSec, 630, 'build, then the touch-up');
-  await service.settled(object.id);
-  assert.equal(touchups.length, 1);
+test('a computer that cannot keep a scan as a model never touches it up unasked; it says so instead (Linux)', async () => {
+  const {service, object, touchups, builds} = await setup({scanToStl: null});
   assert.equal(service.objectCaptureImages, false, 'the phone is told not to send an Object Capture session here');
+  await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('a'));
+  await assert.rejects(service.start(object.id), {message: KEEP_SCAN_UNAVAILABLE});
+  assert.equal((await service.get(object.id)).state, 'new');
+  assert.deepEqual([touchups.length, builds.length], [0, 0], 'no AI and no rebuild started');
+
+  // The phone's preview from an older send, and an iPhone walk-around: the design's Linux gate, in words.
+  const preview = await service.create();
+  await service.addScan(preview.id, 'scan.usdz', Buffer.from('phone model'), {preview: true});
+  await service.addPhoto(preview.id, 'a.jpg', Buffer.from([0xff, 0xd8, 0xff, 0]));
+  await assert.rejects(service.start(preview.id), {message: SCANS_NEED_A_MAC});
+  const walk = await service.create();
+  await assert.rejects(service.declareCapture(walk.id, objectCaptureManifest(APPLE)), {message: SCANS_NEED_A_MAC});
+  await service.addCapturePhoto(walk.id, '0001.heic', Buffer.from('a'));
+  await assert.rejects(service.start(walk.id, objectCaptureManifest(['0001.heic'])), {message: SCANS_NEED_A_MAC});
+  assert.equal(touchups.length, 0);
+
+  // An STL needs no conversion: it is kept as it came. And a request is asking: that touch-up runs.
+  const stl = await service.create();
+  await service.addScan(stl.id, 'scan.stl', Buffer.from(STL));
+  await service.addPhoto(stl.id, 'a.jpg', Buffer.from([0xff, 0xd8, 0xff, 0]));
+  await service.start(stl.id);
+  assert.equal((await service.settled(stl.id)).state, 'ready');
+  assert.equal(touchups.length, 0);
+  const asked = await service.create();
+  await service.updateInstructions(asked.id, 'Copy this, but close the bottom.');
+  await service.addCapturePhoto(asked.id, '0001.heic', Buffer.from('a'));
+  const started = await service.start(asked.id);
+  assert.equal(started.passes[0].estimate.remainingSec, 630, 'build, then the touch-up that was asked for');
+  await service.settled(asked.id);
+  assert.equal(touchups.length, 1);
+});
+
+test('with AI off, a scan kept as it is still rebuilds and becomes the model; only a request needs AI', async () => {
+  const off = {modelAccess: {projectWorker() { throw new Error('AI is off. Choose an AI provider in Settings before starting a model job.'); }}, requireModelAccess: true};
+  const {service, object, touchups} = await setup({deps: off});
+  await sendWalkAround(service, object.id);
+  await service.start(object.id, objectCaptureManifest(APPLE));
+  const done = await service.settled(object.id);
+  assert.equal(done.state, 'ready');
+  assert.equal(done.scanSource, 'mac');
+  assert.equal(touchups.length, 0);
+
+  const asked = await service.create();
+  await service.updateInstructions(asked.id, 'Copy this.');
+  await sendWalkAround(service, asked.id);
+  await assert.rejects(service.start(asked.id, objectCaptureManifest(APPLE)), /AI is off/);
+  assert.equal((await service.get(asked.id)).state, 'new');
+});
+
+test('a declared walk-around never starts on part of its images, from any client', async () => {
+  const {service, object, builds, touchups} = await setup();
+  await service.declareCapture(object.id, objectCaptureManifest(APPLE));
+  await service.addCapturePhoto(object.id, '0001.heic', Buffer.from('a'));
+  // Another client (the Mac app, the control socket) presses Start mid-send: no handheld rebuild of the prefix.
+  await assert.rejects(service.start(object.id), InvalidStateError);
+  await assert.rejects(service.start(object.id, {version: 1, images: ['0001.heic'], depthRequired: false}), InvalidStateError);
+  await assert.rejects(service.addCapturePhoto(object.id, '0009.heic', Buffer.from('x')), /isn't part of this scan/);
+  assert.deepEqual([builds.length, touchups.length], [0, 0]);
+  // A resumed send declares the same list again and finishes.
+  await service.declareCapture(object.id, objectCaptureManifest(APPLE));
+  await service.addCapturePhoto(object.id, '0002.heic', Buffer.from('b'));
+  await service.addScan(object.id, 'scan.usdz', Buffer.from('phone preview'), {preview: true});
+  await assert.rejects(service.start(object.id, objectCaptureManifest(['0001.heic'])), InvalidStateError);
+  const started = await service.start(object.id, objectCaptureManifest(APPLE));
+  assert.equal(started.captureDeclared, undefined);
+  // The start went through but its reply was lost: the phone's resumed send declares again, harmlessly.
+  assert.equal((await service.declareCapture(object.id, objectCaptureManifest(APPLE))).captureDeclared, undefined);
+  await assert.rejects(service.declareCapture(object.id, objectCaptureManifest(['0001.heic'])), InvalidStateError);
+  await service.settled(object.id);
+  assert.equal(builds.length, 1);
+  assert.equal(builds[0].objectCapture, true, 'Apple folder mode, never the handheld samples path');
+});
+
+test("the phone's preview from a send without every photo is kept as a preview, and says the full rebuild wasn't available", async () => {
+  const {service, object, builds, touchups} = await setup();
+  await service.addScan(object.id, 'scan.usdz', Buffer.from('phone model'), {preview: true});
+  await service.addPhoto(object.id, 'a.jpg', Buffer.from([0xff, 0xd8, 0xff, 0]));
+  assert.equal((await service.get(object.id)).scanSource, 'phone-preview');
+  await service.start(object.id);
+  const done = await service.settled(object.id);
+  assert.deepEqual([builds.length, touchups.length], [0, 0]);
+  assert.equal(done.state, 'ready');
+  assert.equal(done.current.summary, `${PREVIEW_ONLY} Nothing has been touched up yet. Ask for changes to clean it up.`);
 });
 
 test('a walk-around sends every Object Capture image; the Mac rebuilds them at full detail and the phone model stays a preview', async () => {
@@ -155,7 +234,7 @@ test('a walk-around whose rebuild fails keeps the phone preview and says so; a r
   assert.equal(done.state, 'ready', 'a failed rebuild is not a failed project: the preview is still a model');
   assert.equal(done.scanSource, 'phone-preview');
   assert.deepEqual(converted, [{scan: join(dir, 'scan', 'scan.usdz'), bytes: 'phone preview'}]);
-  assert.equal(done.current.summary, "Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview. Nothing has been touched up yet. Ask for changes to clean it up.");
+  assert.equal(done.current.summary, "Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview. Scan it again to retry the full rebuild. Nothing has been touched up yet. Ask for changes to clean it up.");
   assert.deepEqual((await readdir(join(dir, 'scan'))).sort(), ['scan.usdz']);
   assert.equal(touchups.length, 0);
 
@@ -168,20 +247,49 @@ test('a walk-around whose rebuild fails keeps the phone preview and says so; a r
   const touched = await asked.service.settled(asked.object.id);
   assert.equal(asked.touchups.length, 1);
   assert.deepEqual(touched.passes[0].activity.map(entry => entry.text), [
-    "Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview. Counterpart's model builder is missing on this Mac. Reinstall Counterpart."],
+    "Your Mac couldn't rebuild this from the photos, so this is your phone's quick preview. Counterpart's model builder is missing on this Mac. Reinstall Counterpart. Scan it again to retry the full rebuild."],
     'the touch-up says it started from the preview');
   assert.deepEqual(asked.touchups[0].scan, [join(asked.service.dir(asked.object.id), 'scan', 'scan.usdz')]);
   assert.equal(touched.state, 'ready');
 });
 
+test('a walk-around whose rebuild failed retries it when started again, while its model is still the preview', async () => {
+  let attempts = 0;
+  const {service, object, touchups} = await setup({reconstruct: async input => {
+    attempts += 1;
+    if (attempts === 1) throw new Error(RECONSTRUCTION_FAILED);
+    await writeFile(input.output, 'usdz');
+    return {status: 'done', inputs: {images: 2, depth: 2}};
+  }});
+  await sendWalkAround(service, object.id);
+  await service.start(object.id, objectCaptureManifest(APPLE));
+  const preview = await service.settled(object.id);
+  assert.equal(preview.state, 'ready');
+  assert.equal(preview.scanSource, 'phone-preview');
+  // The same manifest again is a resent start: nothing new. A start with no note retries the rebuild.
+  assert.equal((await service.start(object.id, objectCaptureManifest(APPLE))).state, 'ready');
+  assert.equal(attempts, 1);
+  await service.start(object.id);
+  const rebuilt = await service.settled(object.id);
+  assert.equal(attempts, 2);
+  assert.equal(rebuilt.scanSource, 'mac');
+  assert.match(rebuilt.current.summary, /^Rebuilt on your Mac from all 2 photos/);
+  assert.equal(touchups.length, 0);
+  // Once rebuilt, it is a model like any other: starting again changes nothing.
+  await assert.rejects(service.start(object.id), InvalidStateError);
+});
+
 test('a cancelled walk-around rebuild is not turned into the preview', async () => {
   let aborted, building;
   const started = new Promise(resolve => { building = resolve; });
-  const {service, object, touchups, converted} = await setup({reconstruct: input => new Promise((_, reject) => {
-    const stop = () => { aborted = true; reject(Object.assign(new Error('The operation was aborted'), {name: 'AbortError'})); };
-    if (input.signal.aborted) stop(); else input.signal.addEventListener('abort', stop);
-    building();
-  })});
+  const {service, object, touchups, converted} = await setup({reconstruct: async input => {
+    await writeFile(input.output, 'half-written');   // Apple's session had started writing when it was cancelled
+    return new Promise((_, reject) => {
+      const stop = () => { aborted = true; reject(Object.assign(new Error('The operation was aborted'), {name: 'AbortError'})); };
+      if (input.signal.aborted) stop(); else input.signal.addEventListener('abort', stop);
+      building();
+    });
+  }});
   await sendWalkAround(service, object.id);
   await service.start(object.id, objectCaptureManifest(APPLE));
   await started;
@@ -239,8 +347,11 @@ test("the companion rebuilds an Object Capture session from Apple's images folde
   assert.equal((await readFile(argv, 'utf8')).trim(), 'stl /scan.usdz /model.stl');
   await macScanToStl(stl)('/scan.usdz', '/model.stl', {render: '/overview.png'});
   assert.equal((await readFile(argv, 'utf8')).trim(), 'stl /scan.usdz /model.stl --render /overview.png');
-  const broken = await fake('broken-stl', `echo '{"error":"no triangles"}'; exit 1`);
-  await assert.rejects(macScanToStl(broken)('/scan.usdz', '/model.stl'), /couldn't turn this scan into a printable model/);
+  const broken = await fake('broken-stl', `echo '{"error":"no triangles"}'; echo 'PRIVATE ModelIO detail' >&2; exit 1`);
+  await assert.rejects(macScanToStl(broken)(join(root, 'scan.usdz'), join(root, 'out', 'model.stl')), {message: "Your Mac couldn't turn this scan into a printable model."});
+  const kept = await readFile(join(root, 'out', '.reconstruction-diagnostics', 'last-failure.log'), 'utf8');
+  assert.match(kept, /"error":"no triangles"/);
+  assert.match(kept, /PRIVATE ModelIO detail/, 'stderr is kept privately, like the rebuild');
   assert.equal(macScanToStl(null), undefined);
 });
 
