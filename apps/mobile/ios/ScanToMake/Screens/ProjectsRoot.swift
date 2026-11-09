@@ -167,9 +167,12 @@ struct SidebarList: View {
     /// The projects in these phases, in the order the phases are given (printing before working, as on Home).
     /// Archived projects are only in Archived.
     private func group(_ phases: [ProjectPhase]) -> [Project] {
-        let rank = { (p: Project) in phases.firstIndex(of: store.words(p).phase) ?? phases.count }
+        // A scan stopped with its photos still on this phone needs you (Send to your Mac or Scan again), so it's listed
+        // near the top, not under Other where David couldn't find his unicorn (Nov 9).
+        let phase = { (p: Project) in store.stoppedScanWords(p) != nil ? ProjectPhase.needsYou : store.words(p).phase }
+        let rank = { (p: Project) in phases.firstIndex(of: phase(p)) ?? phases.count }
         return store.projects.enumerated()
-            .filter { !$0.element.isArchived && phases.contains(store.words($0.element).phase) }
+            .filter { !$0.element.isArchived && phases.contains(phase($0.element)) }
             .filter { matches($0.element) }
             .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }
             .map(\.element)
