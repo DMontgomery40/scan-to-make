@@ -4,6 +4,22 @@ One screen, updated in place; git history keeps the rest. This is the only hando
 
 **How the owner works (David, Nov 6–8).** An item ends only as *done and verified on David's real install* (with evidence: SHA, log line, AX read, camera frame) or *blocked on one small thing only David can do*, named exactly. Green CI is not verification. Find facts yourself (code, logs, `object.json`, MQTT, camera); never ask David what you can read. Never end a turn "waiting"; re-drive agents that do. After every merge, `git pull` on agents-173, agents-136, agents-171 and the Mac.
 
+## Update Nov 9: stopped and stabilized (Muse lead session)
+
+David, Nov 9: "just, clean up, stabilize and stop. it worked with the potato crochet thing. so it works." He also named why held orbits are not a neutral ask: a rare myositis makes bending down and holding his arms up excruciating. Design consequence: minimize held-orbit time; the rig and an app-paced shutter are accessibility, not garnish. Scanning itself is proven (crochet potato Oct 31; Leatherman Nov 4 placed 23/23). The Nov 8–9 subjects (matte-black thin letters, translucent unicorn) are Apple's documented hard cases.
+
+What the Nov 9 baseline established (full receipts: `~/scan-to-make-work/baseline-2026-11-09/` on the Mac):
+
+- Our GuidedCapture fork vs Apple's current sample (same 2024 zip, SHA-256 `aeed6e76…5305`): 9 files differ + 3 added (watchdog, per-event evaluation writes, freeform path). Capture cadence on David's phone is at parity with Apple's unmodified sample (~27 shots/min both, Phase B). Low light is refuted as the regression cause; the watchdog never fired in any recorded run.
+- The disappearing unicorn was ours: only runs with a phone USDZ were ever listed or sendable (`MacConnection.swift`). The 24-of-59 send was the old-Mac capability fallback staying sticky per project.
+- Mac rebuild on identical photos: stock HelloPhotogrammetry never placed more than `mac-reconstruct`. Settings matrix: `.high` feature sensitivity causes `processError` (6/6 on Apple's 33 unicorn photos); honoring the embedded box clips letters; ignoring it causes stray sheets (incl. 2581854b's 79 mm off-plane head spike, verified from six sides — earlier "clean" calls used front/top only and were wrong for the app's models).
+- PR #420 is the scan fix (freeform-only, app-paced shutter with auto-capture fallback, Done coverage gate, stopped scans findable, support cut) plus round-3 commits `352c07b9` (evaluation writes throttled), `6a89a579` (stopped scans never deleted), `7ee707fd`+`1f1afee1` (rebuild retries once at normal sensitivity). Head `1f1afee1`; lead review done; focused tests pass. **Gate (`ci_local.py`) was cancelled mid-run at David's stop instruction. Not merged; nothing new installed.** Resume from the gate when David says go.
+- Apple's unmodified GuidedCaptureSample is installed on Davica3 (not launched by agents); David ran it Nov 9 — it produced no phone model on the unicorn.
+- Mac disk filled to 192 MiB free (65 GB of agent build bloat accumulated in `~/.Trash` — trashing was per rule, leaving it there was not — plus ~49 GB of gate simulators). David emptied the Trash; 59 GB free at last check. Gate simulators remain (David's call; `simctl delete` is forbidden). Every future delegate brief must include df before/after and its own cleanup list.
+- Prompt-only project 176821af ("Articulated unicorn"): classified `fit`, Fusion bridge reported not connected (Fusion open, add-in disconnected), silently fell back to Blender, hit the 900 s worker timeout with no checkpoint or model. The live Blender scene is empty; nothing recoverable. Nobody cancelled it — "cancelled" is how the timeout kill is recorded.
+
+Owner now: unassigned (David to name). Open scan list, in order: gate+merge #420, install from main, David's proof scans judged by whole letters, open counters and calipers (unicorn rebuild reference ≈112–123 mm long pending his measurements); reconnect the Fusion add-in/bridge before any Fusion-expected design pass; decide gate-simulator deletion.
+
 ## Installed now
 
 | Where | What |
