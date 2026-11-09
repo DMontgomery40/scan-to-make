@@ -8,8 +8,9 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   First it prints `{"images":N,"depth":D}`: how many photos carry LiDAR depth, where the model's real-world size
   comes from. Apple's `stitchingIncomplete` and `automaticDownsampling` come out as `{"warning":…}`. It runs Apple's
   way with Apple's settings: each photo's own camera, depth and gravity, Apple's own object masking (always on),
-  `featureSensitivity = .high`, the default (unordered) sample ordering, and `ignoreBoundingBox = true`. Apple's capture
-  box was fitted to the script on David's sign and cut off the letters; the masks still separate the object from the room. On David's rig scan, `.sequential` with
+  `featureSensitivity = .high`, the default (unordered) sample ordering, and `ignoreBoundingBox = true`; the first
+  line names both. For diagnostics only, `--feature normal|high` and `--honor-box` (`ignoreBoundingBox = false`)
+  change those two without changing the defaults. Apple's capture box was fitted to the script on David's sign and cut off the letters; the masks still separate the object from the room. On David's rig scan, `.sequential` with
   `.high` placed 5–7 of 24 photos in three runs, against 9 of 24 unordered. The companion runs it at `full` on every
   image a walk-around sent (`ReconstructInput.objectCapture`).
 - `mac-reconstruct stl <model.usdz> <output.stl> [--render <png>] [--remove-support]` writes the model's triangles as a
