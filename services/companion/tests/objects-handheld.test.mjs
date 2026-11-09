@@ -11,8 +11,8 @@ const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0
 const manifest = images => ({version: 1, images, depthRequired: true});
 /** What the phone sends with every image of an Object Capture session (MacConnection.sendCapture). */
 const objectCaptureManifest = images => ({version: 1, images, depthRequired: false, source: 'object-capture'});
-/** Apple's own Object Capture names: seconds since the session started. */
-const APPLE = ['00041.732011084.HEIC', '00049.698417084.HEIC'];
+/** A walk-around's frames as the phone names them (ProjectUploader.captureFrames): NNNN in capture order. */
+const APPLE = ['0001.heic', '0002.heic'];
 
 /** `scanToStl` stands in for `mac-reconstruct stl` (a Mac); `scanToStl: null` is a computer without it. */
 async function setup({reconstruct, scanToStl} = {}) {
@@ -104,11 +104,16 @@ test('a walk-around sends every Object Capture image; the Mac rebuilds them at f
   const {service, object, touchups, builds, converted} = await setup();
   assert.equal(service.objectCaptureImages, true);
   await sendWalkAround(service, object.id);
-  // Apple's own names are only good as a whole Object Capture session.
-  await assert.rejects(service.start(object.id, {version: 1, images: APPLE, depthRequired: false}), /capture/i);
+  // Exactly {version, images, depthRequired: false, source}: no depth sidecars, camera file or qualification step.
   await assert.rejects(service.start(object.id, {...objectCaptureManifest(APPLE), depthRequired: true}), /capture/i);
+  await assert.rejects(service.start(object.id, {...objectCaptureManifest(APPLE), cameraMetadataRequired: true}), /capture/i);
+  await assert.rejects(service.start(object.id, {...objectCaptureManifest(APPLE), scaleQualificationRequired: false}), /capture/i);
   await assert.rejects(service.start(object.id, {...objectCaptureManifest(APPLE), source: 'turntable'}), /capture/i);
-  await assert.rejects(service.start(object.id, objectCaptureManifest([...APPLE, '00055.064909084.HEIC'])), InvalidStateError);
+  await assert.rejects(service.start(object.id, objectCaptureManifest([...APPLE, '0003.heic'])), InvalidStateError);
+  // Apple's own names never reach the Mac: the phone numbers them, and the Mac takes NNNN only, whatever the source.
+  const named = await service.create();
+  await service.addCapturePhoto(named.id, '00041.732011084.HEIC', Buffer.from('a'));
+  await assert.rejects(service.start(named.id, objectCaptureManifest(['00041.732011084.HEIC'])), /capture/i);
 
   const started = await service.start(object.id, objectCaptureManifest(APPLE));
   assert.equal(started.state, 'touching-up');

@@ -243,11 +243,13 @@ typealias MacError = CompanionError
             try await uploader.send(files, to: id, progress: progress)
             return nil
         }
+        let frames = try ProjectUploader.captureFrames(((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? []))
         // The images first: the Mac takes capture frames only until a scan is there.
-        let files = names.map { UploadFile.image(images.appending(path: $0), name: $0, kind: .capture) } + [preview]
+        let files = frames.map { UploadFile.image(images.appending(path: $0.file), name: $0.name, kind: .capture) } + [preview]
         try await uploader.send(files, to: id, progress: progress)
-        return ["version": 1, "images": names, "depthRequired": false, "source": "object-capture"]
+        return ["version": 1, "images": frames.map(\.name), "depthRequired": false, "source": "object-capture"]
     }
+
 
     /// An in-hand scan's photos and depth (HandheldCapture.swift): the Mac rebuilds the model, then touches it up.
     func sendHandheld(_ id: String) async throws -> StmObject {

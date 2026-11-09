@@ -85,17 +85,13 @@ export class InvalidCaptureManifestError extends Error {
 }
 
 /**
- * `source: 'object-capture'`: every image of an iPhone Object Capture session, as Apple wrote them (its own names,
- * each HEIC carrying its camera, LiDAR depth and gravity), rebuilt on this Mac by Apple's PhotogrammetrySession on the
- * images folder. The phone's own model, sent with them, is only a preview until that rebuild replaces it.
+ * `source: 'object-capture'`: every image of an iPhone Object Capture session, byte for byte as Apple wrote them
+ * (each HEIC carrying its camera, LiDAR depth and gravity; named NNNN.heic in capture order by the phone), rebuilt on
+ * this Mac by Apple's PhotogrammetrySession on the images folder. The phone's own model, sent with them, is only a
+ * preview until that rebuild replaces it.
  */
 export type CaptureSource = 'object-capture';
 export interface CaptureManifest {version: 1; images: string[]; depthRequired: boolean; cameraMetadataRequired?: boolean; scaleQualificationRequired?: boolean; source?: CaptureSource}
-/** Apple's Object Capture image names ("00041.732011084.HEIC"), as the capture upload route accepts them. */
-const OBJECT_CAPTURE_IMAGE = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(heic|jpe?g|png)$/i;
-function captureNameAllowed(name: string, source: CaptureSource | undefined): boolean {
-  return source === 'object-capture' ? OBJECT_CAPTURE_IMAGE.test(name) && !name.includes('..') : /^[0-9]{4}\.(heic|jpe?g|png)$/.test(name);
-}
 
 export {InvalidCaptureCameraError} from './capture-camera.js';
 
@@ -151,10 +147,11 @@ function parseCaptureManifest(value: unknown): CaptureManifest {
       || (manifest.source !== undefined && !source)
       || (manifest.cameraMetadataRequired !== undefined && typeof manifest.cameraMetadataRequired !== 'boolean')
       || (manifest.scaleQualificationRequired !== undefined && typeof manifest.scaleQualificationRequired !== 'boolean')
-      // An Object Capture HEIC carries its own depth; it has no sidecars, camera file or qualification step.
-      || (source && (manifest.depthRequired || manifest.cameraMetadataRequired || manifest.scaleQualificationRequired))
+      // Exactly {version, images, depthRequired: false, source}: an Object Capture HEIC carries its own depth, and has
+      // no sidecars, camera file or qualification step.
+      || (source && (manifest.depthRequired || manifest.cameraMetadataRequired !== undefined || manifest.scaleQualificationRequired !== undefined))
       || manifest.images.length < 1 || manifest.images.length > 10000
-      || manifest.images.some(name => typeof name !== 'string' || !captureNameAllowed(name, source))
+      || manifest.images.some(name => typeof name !== 'string' || !/^[0-9]{4}\.(heic|jpe?g|png)$/.test(name))
       // Depth companions belong to the iPhone HEIC protocol only.
       || (manifest.depthRequired && manifest.images.some(name => typeof name !== 'string' || !name.endsWith('.heic')))
       || new Set(manifest.images).size !== manifest.images.length) throw new InvalidCaptureManifestError();
@@ -1273,7 +1270,7 @@ export class ObjectService {
         throw new InvalidStateError(CAPTURE_PENDING);
       if (manifest.cameraMetadataRequired && !object.captureCamera)
         throw new InvalidStateError(CAPTURE_CAMERA_PENDING);
-      await this.#captureFilesPresent(object, manifest.source);
+      await this.#captureFilesPresent(object);
       const sha256 = captureDigest(object, manifest.depthRequired, manifest.cameraMetadataRequired, manifest.scaleQualificationRequired, manifest.source);
       const same = object.captureCompletion?.sha256 === sha256 && object.captureCompletion.depthRequired === manifest.depthRequired
         && !!object.captureCompletion.cameraMetadataRequired === !!manifest.cameraMetadataRequired
@@ -1324,12 +1321,12 @@ export class ObjectService {
     return this.#pass(object, {});
   }
 
-  async #captureFilesPresent(object: StmObject, source: CaptureSource | undefined): Promise<void> {
+  async #captureFilesPresent(object: StmObject): Promise<void> {
     // Names came from the validated manifest or its bound completion marker, never a caller path.
     const names = [...(object.capture ?? []), ...(object.captureDepth ?? [])];
     for (let offset = 0; offset < names.length; offset += 32) {
       const present = await Promise.all(names.slice(offset, offset + 32).map(async name => {
-        if (!captureNameAllowed(name, source) && !/^[0-9]{4}\.depth\.plist$/.test(name)) return false;
+        if (!/^[0-9]{4}\.(heic|jpe?g|png|depth\.plist)$/.test(name)) return false;
         const info = await stat(join(this.dir(object.id), 'capture', name)).catch(() => undefined);
         return info?.isFile() && info.size > 0;
       }));
@@ -1344,7 +1341,7 @@ export class ObjectService {
         || (object.captureDepth?.length && !complete.depthRequired)
         || (complete.cameraMetadataRequired && !object.captureCamera)
         || complete.sha256 !== captureDigest(object, complete.depthRequired, complete.cameraMetadataRequired, complete.scaleQualificationRequired, complete.source)) throw new InvalidStateError(CAPTURE_PENDING);
-    await this.#captureFilesPresent(object, complete.source);
+    await this.#captureFilesPresent(object);
   }
 
   /** Asks for changes; `photos` are files on this Mac added first (the Mac app's drop target). */

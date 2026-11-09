@@ -765,11 +765,24 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(ProjectUploader.spread(Array(0..<3), count: 24), [0, 1, 2])
     }
 
+    /// Apple's Object Capture names become the Mac's capture frame names, NNNN in capture order; anything else stops the send.
+    func testObjectCaptureImagesBecomeNumberedFramesInCaptureOrder() throws {
+        let frames = try ProjectUploader.captureFrames(["00393.886463125.HEIC", "00041.732011084.HEIC", ".hidden", "00049.698417084.HEIC"])
+        XCTAssertEqual(frames.map(\.file), ["00041.732011084.HEIC", "00049.698417084.HEIC", "00393.886463125.HEIC"])
+        XCTAssertEqual(frames.map(\.name), ["0001.heic", "0002.heic", "0003.heic"])
+        XCTAssertEqual(try ProjectUploader.captureFrames(["a.JPG", "b.png"]).map(\.name), ["0001.jpg", "0002.png"])
+        XCTAssertThrowsError(try ProjectUploader.captureFrames(["00041.HEIC", "notes.txt"])) { error in
+            XCTAssertEqual((error as? CompanionError)?.message, "This scan has a file Counterpart can't send (notes.txt). Scan it again.")
+        }
+        XCTAssertThrowsError(try ProjectUploader.captureFrames(["frame"]))
+        XCTAssertEqual(try ProjectUploader.captureFrames([]).count, 0)
+    }
+
     /// A walk-around sends every Object Capture image as a capture frame, its own model last, and says how far it got;
     /// a send cut short resumes with only what's missing, and its progress starts from what the Mac already has.
     func testAWalkAroundSendsEveryImageThenThePreviewWithProgress() async throws {
         let id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"
-        let names = (0..<60).map { String(format: "%05d.%09d.HEIC", $0 * 7, $0) }
+        let names = (1...60).map { String(format: "%04d.heic", $0) }
         final class Log: @unchecked Sendable { var sent: [String] = []; var shares: [Double] = []; var fail: Int? }
         let log = Log()
         let fake = FakeTransport { request, _ in

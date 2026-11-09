@@ -97,6 +97,25 @@ public actor ProjectUploader {
         return set
     }()
 
+    /// Every image of an Object Capture session's Images folder, in capture order, with the name the Mac keeps it under:
+    /// NNNN and its own extension in lower case, as the Mac's capture frames are named. Apple names them by seconds since
+    /// the session started ("00041.732011084.HEIC"), which sorts in capture order. The bytes go as they are; the capture
+    /// time stays in each HEIC. Anything else in the folder stops the send, in words.
+    public static func captureFrames(_ entries: [String]) throws -> [(file: String, name: String)] {
+        let files = entries.filter { !$0.hasPrefix(".") }.sorted()
+        guard files.count <= 9999 else {
+            throw CompanionError(code: "capture-too-large", message: "This scan has more photos than Counterpart can send (\(files.count)). Scan it again with fewer.")
+        }
+        return try files.enumerated().map { index, file in
+            let ext = (file as NSString).pathExtension.lowercased()
+            let name = String(format: "%04d.", index + 1) + ext   // the Mac takes ^[0-9]{4}\.(heic|jpe?g|png)$ only
+            guard ["heic", "jpg", "jpeg", "png"].contains(ext), !file.contains("/"), !file.contains("..") else {
+                throw CompanionError(code: "unsendable-capture", message: "This scan has a file Counterpart can't send (\(file)). Scan it again.")
+            }
+            return (file, name)
+        }
+    }
+
     /// Evenly spread picks from first to last, so every side of the object stays represented.
     public static func spread<T>(_ items: [T], count: Int) -> [T] {
         guard items.count > count, count > 1 else { return Array(items.prefix(max(count, 0))) }
