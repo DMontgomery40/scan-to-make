@@ -180,6 +180,47 @@ final class HandheldKitTests: XCTestCase {
         return corners.map { turn.act($0) }
     }
 
+    /// Edges with no partner running the other way, corners matched by exact position: 0 for a closed, consistently
+    /// wound mesh (a lid wound the wrong way leaves both its own edges and the rim's unpaired).
+    private func unpairedEdges(_ corners: [SIMD3<Float>]) -> Int {
+        var ids: [SIMD3<Float>: Int] = [:]
+        func id(_ p: SIMD3<Float>) -> Int { if let i = ids[p + 0] { return i }; ids[p + 0] = ids.count; return ids.count - 1 }
+        var directed: [SIMD2<Int>: Int] = [:]
+        for t in 0..<corners.count / 3 {
+            let v = (0..<3).map { id(corners[3 * t + $0]) }
+            for k in 0..<3 { directed[SIMD2(v[k], v[(k + 1) % 3]), default: 0] += 1 }
+        }
+        return directed.filter { $0.value != 1 || directed[SIMD2($0.key.y, $0.key.x)] != 1 }.count
+    }
+
+    /// Signed volume in mm³ (positive for outward faces), measured from a point off the cut plane: only a closed mesh's
+    /// volume is the same from every point, so a missing or wrong-way bottom changes it.
+    private func volume(_ corners: [SIMD3<Float>]) -> Double {
+        let from = SIMD3<Double>(7, -3, -10)
+        return (0..<corners.count / 3).reduce(0.0) { sum, t in
+            let a = SIMD3<Double>(corners[3 * t]) - from, b = SIMD3<Double>(corners[3 * t + 1]) - from, c = SIMD3<Double>(corners[3 * t + 2]) - from
+            return sum + simd_dot(a, simd_cross(b, c)) / 6
+        }
+    }
+
+    private func ngonArea(_ radius: Double, segments: Int = 48) -> Double { Double(segments) / 2 * radius * radius * sin(2 * .pi / Double(segments)) }
+
+    /// A closed tube standing on z = 0: outer wall to `height`, a bore up to `ceiling`, a ring underneath.
+    private func tube(outer: Float, inner: Float, height: Float, ceiling: Float, segments: Int = 48) -> [SIMD3<Float>] {
+        func p(_ r: Float, _ k: Int, _ z: Float) -> SIMD3<Float> { let a = Float(k % segments) / Float(segments) * 2 * .pi; return SIMD3(r * cos(a), r * sin(a), z) }
+        let centre = { (z: Float) in SIMD3<Float>(0, 0, z) }
+        var out: [SIMD3<Float>] = []
+        let levels: [Float] = stride(from: 0, through: height, by: 5).map { $0 }, bore: [Float] = stride(from: 0, through: ceiling, by: 5).map { $0 }
+        for k in 0..<segments {
+            for (z0, z1) in zip(levels, levels.dropFirst()) { out += [p(outer, k, z0), p(outer, k + 1, z0), p(outer, k + 1, z1), p(outer, k, z0), p(outer, k + 1, z1), p(outer, k, z1)] }
+            for (z0, z1) in zip(bore, bore.dropFirst()) { out += [p(inner, k, z0), p(inner, k + 1, z1), p(inner, k + 1, z0), p(inner, k, z0), p(inner, k, z1), p(inner, k + 1, z1)] }
+            out += [centre(height), p(outer, k, height), p(outer, k + 1, height)]                    // top, up
+            out += [centre(ceiling), p(inner, k + 1, ceiling), p(inner, k, ceiling)]                 // bore's ceiling, down
+            out += [p(inner, k, 0), p(outer, k + 1, 0), p(outer, k, 0), p(inner, k, 0), p(inner, k + 1, 0), p(outer, k + 1, 0)]  // ring, down
+        }
+        return out
+    }
+
     /// An object (60 × 30 × 40 mm) on a plain flat table: the table goes, the object stays, standing on z = 0.
     func testTheTableItStoodOnIsRemoved() throws {
         let object = box(SIMD3(-30, -15, 0), SIMD3(30, 15, 40))
@@ -190,6 +231,11 @@ final class HandheldKitTests: XCTestCase {
         XCTAssertEqual(s.z, 39.5, accuracy: 0.6, "cut 0.5 mm above the table")
         XCTAssertEqual(cut.cut.tiltDegrees, 3, accuracy: 0.5)
         XCTAssertEqual(cut.corners.map(\.z).min() ?? -1, 0, accuracy: 0.01, "stands on z = 0")
+        // The cut is closed: every edge has its partner running the other way, and the bottom faces down.
+        XCTAssertEqual(unpairedEdges(cut.corners), 0, "watertight and consistently wound")
+        XCTAssertEqual(cut.cut.openEdges, 0)
+        XCTAssertGreaterThan(cut.cut.capTriangles, 0)
+        XCTAssertEqual(volume(cut.corners), 60 * 30 * 39.5, accuracy: 60 * 30 * 39.5 * 0.02, "the box's volume, bottom included")
     }
 
     /// The same object on a round plate (any platform): the plate goes.
@@ -199,6 +245,42 @@ final class HandheldKitTests: XCTestCase {
         let s = size(cut.corners)
         XCTAssertEqual(s.x, 60, accuracy: 1.5); XCTAssertEqual(s.y, 30, accuracy: 1.5)
         XCTAssertEqual(s.z, 39.5, accuracy: 0.6)
+        XCTAssertEqual(unpairedEdges(cut.corners), 0, "watertight and consistently wound")
+    }
+
+    /// A hollow object (a tube 60 mm across with a 40 mm bore, closed at the top) on a plate: the cut leaves a ring with
+    /// a hole in it. Only the ring is filled; the bore stays open underneath, so the volume leaves it out.
+    func testAHollowObjectsCutIsARingNotADisc() throws {
+        let cut = try XCTUnwrap(removeSupport(tilted(tube(outer: 30, inner: 20, height: 40, ceiling: 35) + disc(radius: 100, top: 0, thickness: 8))))
+        XCTAssertEqual(unpairedEdges(cut.corners), 0, "watertight and consistently wound")
+        XCTAssertEqual(cut.cut.openEdges, 0)
+        let ring = ngonArea(30) * 39.5 - ngonArea(20) * 34.5
+        XCTAssertEqual(volume(cut.corners), ring, accuracy: ring * 0.02, "the bore is not filled")
+        // Seen from below, the bore is still open: nothing at the middle of the bottom.
+        let bottom = cut.corners.filter { $0.z < 0.01 }
+        let centre = bottom.reduce(SIMD3<Float>.zero, +) / Float(bottom.count)
+        XCTAssertGreaterThan(bottom.map { simd_length(SIMD2($0.x - centre.x, $0.y - centre.y)) }.min() ?? 0, 19, "no cap corner inside the bore")
+    }
+
+    /// `capCut` alone: two separate openings on the plane (two feet, two posts) each get their own lid, from their own
+    /// corners only, facing down; an opening off the plane is left alone.
+    func testEachOpeningOnTheCutGetsItsOwnLid() {
+        func openBottom(_ low: SIMD3<Float>, _ high: SIMD3<Float>) -> [SIMD3<Float>] {
+            // The box minus its bottom face (the first face `box` writes).
+            let all = box(low, high), d = high - low
+            let bottomCount = 6 * max(1, Int((d.x / 5).rounded(.up))) * max(1, Int((d.y / 5).rounded(.up)))
+            return Array(all.dropFirst(bottomCount))
+        }
+        let feet = (openBottom(SIMD3(-40, -5, 0), SIMD3(-20, 5, 30)) + openBottom(SIMD3(20, -5, 0), SIMD3(40, 5, 30)))
+            .map { SIMD3<Double>(Double($0.x), Double($0.y), Double($0.z)) }
+        XCTAssertEqual(unpairedEdges(feet.map { SIMD3<Float>($0) }), 2 * 2 * (4 + 2), "two open bottoms before")
+        let cap = capCut(feet, down: SIMD3(0, 0, -1), onCut: { abs($0.z) < 1e-6 }, flat: { SIMD2($0.x, $0.y) })
+        let closed = (feet + cap).map { SIMD3<Float>($0) }
+        XCTAssertEqual(unpairedEdges(closed), 0)
+        XCTAssertEqual(volume(closed), 2 * 20 * 10 * 30, accuracy: 1)
+        XCTAssertTrue(cap.allSatisfy { $0.z == 0 } && Set(cap.map { SIMD3<Float>($0) }).isSubset(of: Set(closed)), "made from the cut's own corners")
+        // The same feet cut at z = 30 instead: nothing open lies on that plane, so nothing is added.
+        XCTAssertTrue(capCut(feet, down: SIMD3(0, 0, -1), onCut: { abs($0.z - 30) < 1e-6 }, flat: { SIMD2($0.x, $0.y) }).isEmpty)
     }
 
     /// A sign with nothing under it (a 180 × 30 × 25 mm plank, letters 160 × 10 × 70 mm on top): the plank's top is an
@@ -234,9 +316,30 @@ final class HandheldKitTests: XCTestCase {
         let summary = try writeSTL(model: input, to: output, metresPerUnit: 0.001, removeSupport: true)
         XCTAssertNotNil(summary.support)
         XCTAssertLessThan(summary.sizeMm.x, 62); XCTAssertLessThan(summary.sizeMm.y, 62)
+        XCTAssertEqual(summary.support?.openEdges, 0, "the cut is closed")
         let plain = try writeSTL(model: input, to: output, metresPerUnit: 0.001)
         XCTAssertNil(plain.support)
         XCTAssertGreaterThan(plain.sizeMm.x, 190, "without the flag the plate stays")
+    }
+
+    /// A model with nothing under it is written byte for byte the same with and without `--remove-support`.
+    func testNoSupportWritesTheSameFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("handheldkit-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let corners = tube(outer: 30, inner: 20, height: 40, ceiling: 35).map { SIMD3($0.x, $0.z, -$0.y) }
+        var data = Data(count: 80)
+        var count = UInt32(corners.count / 3).littleEndian
+        data.append(Data(bytes: &count, count: 4))
+        for t in 0..<(corners.count / 3) {
+            var floats = [Float](repeating: 0, count: 3) + [corners[3 * t], corners[3 * t + 1], corners[3 * t + 2]].flatMap { [$0.x, $0.y, $0.z] }
+            data.append(Data(bytes: &floats, count: 48)); data.append(contentsOf: [0, 0])
+        }
+        let input = dir.appendingPathComponent("in.stl"), cut = dir.appendingPathComponent("cut.stl"), plain = dir.appendingPathComponent("plain.stl")
+        try data.write(to: input)
+        XCTAssertNil(try writeSTL(model: input, to: cut, metresPerUnit: 0.001, removeSupport: true).support)
+        try writeSTL(model: input, to: plain, metresPerUnit: 0.001)
+        XCTAssertEqual(try Data(contentsOf: cut), try Data(contentsOf: plain))
     }
 }
 

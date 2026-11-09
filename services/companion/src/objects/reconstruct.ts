@@ -204,7 +204,7 @@ function macReconstructAttempt(binary: string | null) {
  * Turns a scan into the STL a project prints (millimetres, Z up, on the bed), without touching it up; with `render`,
  * also draws the project page's picture of it there (best effort: a scan that can't be drawn still gets its STL).
  * With `removeSupport`, whatever it stood on (a table, a plate, any platform Apple's masking kept) is cut away when
- * the mesh shows one; the result says whether it was.
+ * the mesh shows one, and the cut is closed flat so the model stays watertight; the result says whether it was.
  */
 export type ScanToStl = (scan: string, stl: string, options?: {render?: string; signal?: AbortSignal; removeSupport?: boolean})
   => Promise<void | {supportRemoved?: boolean}>;

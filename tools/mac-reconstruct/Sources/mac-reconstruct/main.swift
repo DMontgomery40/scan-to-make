@@ -19,7 +19,11 @@ import HandheldKit
 //       (PhotogrammetrySession writes metres, Y up). --render also draws the model for the project page; a model
 //       that can't be drawn still gets its STL, and the {"done":…} line names the picture only when there is one.
 //       --remove-support cuts away the surface the object stood on (a rig's plate, a patch of table) when there is
-//       one, stands the object where it stood, and draws the cut model; {"done":…} then carries "support".
+//       one, closes the cut with a flat bottom so the model stays watertight, stands the object where it stood, and
+//       draws the cut model; {"done":…} then carries "support" (with "capTriangles" and the "openEdges" left, 0 when
+//       the scan was closed). Apple's own Request.Geometry box was tried for this on Nov 9 and doesn't do it: with
+//       its floor just above David's plate, the DAD sign came back clipped at the floor and open (3,302 open edges),
+//       with the plate's scraps above the floor still on it.
 //   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
 //                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 //       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
@@ -55,7 +59,8 @@ if args.first == "stl" {
                                    "sizeMm": [summary.sizeMm.x, summary.sizeMm.y, summary.sizeMm.z].map { ($0 * 10).rounded() / 10 }]
         if let support = summary.support {
             done["support"] = ["tiltDegrees": (support.tiltDegrees * 10).rounded() / 10, "areaMm2": Int(support.supportAreaMm2.rounded()),
-                               "trianglesBefore": support.trianglesBefore, "trianglesAfter": support.trianglesAfter]
+                               "trianglesBefore": support.trianglesBefore, "trianglesAfter": support.trianglesAfter,
+                               "capTriangles": support.capTriangles, "openEdges": support.openEdges]
         }
         if let render {
             // The picture shows what prints: the cut STL when the support went, else the model with its textures.
