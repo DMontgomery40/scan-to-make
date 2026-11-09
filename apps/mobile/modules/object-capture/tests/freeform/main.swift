@@ -114,6 +114,48 @@ let rescanDoubled = Coverage(shots: 56, lookDowns: rescanAngles + rescanAngles)
 check("rescan twice over at the same height: go higher", rescanDoubled.line == "56 photos · now go higher and look down"
       && !rescanFlow.canFinish(coverage: rescanDoubled, trackingNormal: true))
 
+// The app's own shutter: a photo each 5° the camera's view turns, at most 3 a second.
+typealias Pacer = FreeformCaptureFlow.ShotPacer
+typealias Direction = Pacer.Direction
+/// The camera looking level at `azimuth`° round the object, `down`° down.
+func look(_ azimuth: Double, down: Double = 5) -> Direction {
+    let a = azimuth * .pi / 180, e = -down * .pi / 180
+    return Direction(x: cos(e) * cos(a), y: cos(e) * sin(a), z: sin(e))
+}
+var pacer = Pacer()
+check("the first photo is due at once", pacer.isDue(look(0), at: 0))
+pacer.took(look(0), at: 0)
+check("not again before the view turns", !pacer.isDue(look(4.9), at: 5))
+check("due after 5°", pacer.isDue(look(5.1), at: 5))
+check("not faster than 3 a second, however far it turned", !pacer.isDue(look(40), at: 0.3))
+check("due a third of a second later", pacer.isDue(look(40), at: 0.34))
+check("going higher counts too", pacer.isDue(look(0, down: 11), at: 1))
+check("holding still takes nothing", !pacer.isDue(look(0.5, down: 5.5), at: 60))
+// One steady turn in 30 s, sampled at 30 Hz the way the app polls: about 72 photos; three turns about 216.
+func photos(turns: Double, seconds: Double) -> Int {
+    var p = Pacer(), taken = 0
+    let samples = Int(seconds * 30)
+    for i in 0...samples {
+        let t = Double(i) / 30, direction = look(360 * turns * t / seconds)
+        if p.isDue(direction, at: t) { p.took(direction, at: t); taken += 1 }
+    }
+    return taken
+}
+let oneTurn = photos(turns: 1, seconds: 30), threeTurns = photos(turns: 3, seconds: 90)
+check("one turn ≈ 70 photos (\(oneTurn))", (65...75).contains(oneTurn))
+check("three turns ≈ 200 photos (\(threeTurns))", (195...220).contains(threeTurns))
+check("a fast turn (10 s) is held to 3 a second (\(photos(turns: 1, seconds: 10)))", photos(turns: 1, seconds: 10) <= 31)
+
+// The camera's direction from Core Motion's attitude matrix, whichever way round the matrix carries the frames.
+// The phone held upright facing +x in the reference frame (z up): device x → reference −y, device y → reference z,
+// device z → reference −x, so the back camera (device −z) looks along +x and gravity in the device frame is (0, −1, 0).
+let deviceToReference: [Double] = [0, 0, -1,  -1, 0, 0,  0, 1, 0]   // columns are the device axes in the reference frame
+let referenceToDevice: [Double] = [0, -1, 0,  0, 0, 1,  -1, 0, 0]   // its transpose
+let upright = Direction(x: 0, y: -1, z: 0)
+func same(_ a: Direction, _ b: Direction) -> Bool { Pacer.angle(a, b) < 0.01 }
+check("camera direction, matrix reference → device", same(Pacer.cameraDirection(rotation: referenceToDevice, gravity: upright), Direction(x: 1, y: 0, z: 0)))
+check("camera direction, matrix device → reference", same(Pacer.cameraDirection(rotation: deviceToReference, gravity: upright), Direction(x: 1, y: 0, z: 0)))
+
 if failures > 0 {
     print("\(failures) check(s) failed")
     exit(1)

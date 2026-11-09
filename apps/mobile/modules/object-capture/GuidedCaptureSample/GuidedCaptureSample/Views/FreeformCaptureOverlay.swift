@@ -2,8 +2,9 @@
 import RealityKit
 import SwiftUI
 
-/// The scan over Apple's capture view (quick-sweep-capture.md §3.1, §3.4): one card, Record, one line of progress, and
-/// Done once the photos are enough to rebuild (60, from two heights), which pauses the session and shows Apple's point
+/// The scan over Apple's capture view (quick-sweep-capture.md §3.1, §3.4): one card, Record, one line of progress (the
+/// app takes a photo each 5° the phone moves round it), and Done once the photos are enough to rebuild (60, from two
+/// heights), which pauses the session and shows Apple's point
 /// cloud to review. There is no box, no Area/Object switch, no segments or flips and no tutorial video; those were our
 /// sample app's choices, not Apple's requirements.
 struct FreeformCaptureOverlay: View {
@@ -60,9 +61,6 @@ struct FreeformCaptureOverlay: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Go round it twice: low, then high. Keep the room in view.")
                 .font(.headline)
-            Text("On the rig: clamp low, swing round; clamp high, swing again.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -95,27 +93,16 @@ struct FreeformCaptureOverlay: View {
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .glassEffect(.regular.tint(.black.opacity(0.35)), in: .capsule)
                     .accessibilityIdentifier("capture.shots")
-                HStack(spacing: 12) {
-                    // Apple's manual shot, beside its automatic capture (`requestImageCapture()`).
-                    Button { appModel.freeformTakePhoto() } label: {
-                        Label("Take a photo", systemImage: "camera.circle.fill")
-                            .labelStyle(.iconOnly)
-                            .font(.title)
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.extraLarge)
-                    .disabled(!session.canRequestImageCapture)
-                    .accessibilityIdentifier("capture.shutter")
-                    Spacer(minLength: 0)
-                    // Done is offered only once the photos are enough to rebuild: 60, from two heights.
-                    Button("Done") { appModel.freeformDone() }
-                        .font(.headline)
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.extraLarge)
-                        .disabled(!appModel.freeformFlow.canFinish(coverage: appModel.captureCoverage,
-                                                                   trackingNormal: trackingNormal && !session.isPaused))
-                        .accessibilityIdentifier("capture.done")
+                // The app takes the photos as the phone moves round it (ShotPacer); Done is enabled only once they're
+                // enough to rebuild: 60, from two heights.
+                Button { appModel.freeformDone() } label: {
+                    Text("Done").font(.headline).frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.glassProminent)
+                .controlSize(.extraLarge)
+                .disabled(!appModel.freeformFlow.canFinish(coverage: appModel.captureCoverage,
+                                                           trackingNormal: trackingNormal && !session.isPaused))
+                .accessibilityIdentifier("capture.done")
             }
         case .finishing:
             ProgressView("Saving scan")

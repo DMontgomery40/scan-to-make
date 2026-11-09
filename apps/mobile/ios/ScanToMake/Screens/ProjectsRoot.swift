@@ -257,7 +257,8 @@ struct SidebarRow: View {
             ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 160).frame(width: 44, height: 44).clipShape(.rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 2) {
                 Text(words.title).font(.body.weight(.semibold)).lineLimit(1)
-                Text(words.line).font(.caption).foregroundStyle(prominence == .increased ? .white.opacity(0.9) : words.phase.color).lineLimit(1)
+                // A stopped scan's photos still on this phone, as on Home's card.
+                Text(store.stoppedScanWords(project) ?? words.line).font(.caption).foregroundStyle(prominence == .increased ? .white.opacity(0.9) : words.phase.color).lineLimit(1)
             }
         }
         .accessibilityElement(children: .combine)

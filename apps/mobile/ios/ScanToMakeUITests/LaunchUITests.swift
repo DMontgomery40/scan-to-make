@@ -538,6 +538,35 @@ final class LayoutParityUITests: XCTestCase {
         return app
     }
 
+    /// David, Nov 9: New showed two scan tiles ("On a scan rig", "Scan it") that ran the same capture. One Scan it tile,
+    /// with Kass 3D's rig link underneath it, on the iPhone and the iPad.
+    func testNewOffersOneScanWithTheRigLink() throws {
+        let app = launch()
+        let new = app.buttons["new-project"]
+        XCTAssertTrue(new.waitForExistence(timeout: 20))
+        new.tap()
+        XCTAssertTrue(app.buttons["scan-object"].waitForExistence(timeout: 10), "one Scan it tile")
+        XCTAssertEqual(app.buttons.matching(identifier: "scan-object").count, 1)
+        XCTAssertFalse(app.staticTexts["On a scan rig"].exists, "no second scan mode")
+        XCTAssertTrue(app.buttons["scan-rig-link"].exists, "Kass 3D's rig is still linked")
+    }
+
+    /// David, Nov 9: "I SCANNED A PINK UNICORN TOO BUT THE APP IS TOO GLITCHY I DON'T EVEN KNOW WHERE IT IS". A scan
+    /// stopped after it kept photos says so on Home and on its project, with Send to your Mac and Scan again.
+    func testAStoppedScanThatKeptPhotosShowsOnHomeAndItsProject() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all"]
+        app.launchEnvironment["COUNTERPART_STOPPED_SCAN"] = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a0b:9"
+        app.launch()
+        // Home's card (iPhone) or the sidebar row (iPad) carries the words.
+        let words = NSPredicate(format: "label CONTAINS %@", "Scan stopped · 9 photos kept")
+        let listed = app.descendants(matching: .any).matching(words).firstMatch
+        XCTAssertTrue(listed.waitForExistence(timeout: 20), "the project list says which project holds the stopped scan")
+        listed.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["stopped-scan"].waitForExistence(timeout: 10), "its project says so too")
+        XCTAssertTrue(app.buttons["stopped-scan.send"].exists, "Send to your Mac")
+    }
+
     /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
     /// on them". Plate 1's start couldn't be confirmed; on the iPhone and the iPad every plate stays choosable on the
     /// project and inside Print, and only plate 1 asks for the printer check again.

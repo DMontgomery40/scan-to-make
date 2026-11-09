@@ -14,6 +14,14 @@ import CounterpartKit
     /// The Mac answered the last request (nil until one has).
     var reachable: Bool?
     var canScan = false
+    /// Scans stopped after keeping photos, by project: still on this phone, shown as "Scan stopped · 9 photos kept".
+    var stoppedScans: [String: MacConnection.StoppedScan] = [:]
+    func refreshStoppedScans() { stoppedScans = mac.stoppedScans() }
+    /// "Scan stopped · 9 photos kept", while the project hasn't been sent.
+    func stoppedScanWords(_ project: Project) -> String? {
+        guard project.state == .new, let stopped = stoppedScans[project.id] else { return nil }
+        return "Scan stopped · \(stopped.photos) photo\(stopped.photos == 1 ? "" : "s") kept"
+    }
     /// Projects this phone is still sending files to: they show "Sending to your Mac".
     var sending: Set<String> = [] { didSet { sendProgress = sendProgress.filter { sending.contains($0.key) } } }
     /// How much of a send has reached the Mac (0…1): a walk-around's every photo can take a while.
@@ -85,6 +93,7 @@ import CounterpartKit
             let latest = try await mac.list()
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return }
             projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; reachable = true
+            refreshStoppedScans()
             for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
         } catch let failure as CompanionError {
             guard !Task.isCancelled, reads.isCurrent(ticket), failure.code != "cancelled" else { return }

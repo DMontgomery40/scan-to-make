@@ -34,7 +34,7 @@ enum Fixtures {
     static let ids = (mic: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", potato: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
                       clip: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03", plush: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04",
                       first: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05", v1: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a06",
-                      failed: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a07")
+                      failed: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a07", unicorn: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a0b")
 
     /// A paired record for the canned Mac.
     static func store() -> MemoryStore {
@@ -162,11 +162,16 @@ enum Fixtures {
                                     ["id": "preparing", "words": "Filled the gaps", "startedAtMs": ago(9), "endedAtMs": ago(6), "typicalSec": 150],
                                     ["id": "working", "words": "Matching your photos", "startedAtMs": ago(6), "typicalSec": 300]]]]],
         ]
+        // `COUNTERPART_STOPPED_SCAN=<id>:<photos>`: an untitled project whose scan was stopped after it kept photos (the
+        // Nov 9 unicorn, 2581854b): never sent, so the Mac has it as a new project with nothing in it.
+        let stopped = ProcessInfo.processInfo.environment["COUNTERPART_STOPPED_SCAN"].map { _ in
+            [["id": ids.unicorn, "createdAtMs": ago(5), "updatedAtMs": ago(4), "state": "new", "kind": "copy", "photos": [String](), "passes": [[String: Any]]()]] as [[String: Any]]
+        } ?? []
         // `-CounterpartFixtureSet grid`: only the projects Home shows as cards, so the grid is at the top.
         var shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
         // `-CounterpartScreen printer-connection`: the P1S idle, so its Settings → Printers choices can be changed.
         if idlePrinter { shown = shown.filter { $0["state"] as? String != "printing" } }
-        return (shown + duplicates).map(withStatus).map(withPreparing).map(withFinished).map { original in
+        return (stopped + shown + duplicates).map(withStatus).map(withPreparing).map(withFinished).map { original in
             guard let id = original["id"] as? String else { return original }
             var object = original
             if let title = titles[id] { object["title"] = title }

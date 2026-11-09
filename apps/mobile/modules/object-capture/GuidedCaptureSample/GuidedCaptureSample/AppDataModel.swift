@@ -143,6 +143,8 @@ class AppDataModel: Identifiable {
     private(set) var shotLookDowns: [Double] = []
     /// One motion manager for the app, as Apple asks ("Create only one CMMotionManager object for your app").
     private let motion = CMMotionManager()
+    /// When the app takes the next photo (``FreeformCaptureFlow/ShotPacer``).
+    private var pacer = FreeformCaptureFlow.ShotPacer()
     /// What the photos so far cover, which gates Done (``FreeformCaptureFlow/Coverage``).
     var captureCoverage: FreeformCaptureFlow.Coverage {
         FreeformCaptureFlow.Coverage(shots: objectCaptureSession?.numberOfShotsTaken ?? 0, lookDowns: shotLookDowns,
@@ -317,6 +319,13 @@ extension AppDataModel {
             }
         })
         tasks.append(Task<Void, Never> { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(33))
+                guard !Task.isCancelled, let self, self.objectCaptureSession?.id == model.id else { return }
+                self.paceShot(model)
+            }
+        })
+        tasks.append(Task<Void, Never> { [weak self] in
             for await shots in model.numberOfShotsTakenUpdates {
                 guard !Task.isCancelled, let self, self.objectCaptureSession?.id == model.id else { return }
                 self.noteShots(shots)
@@ -426,11 +435,15 @@ extension AppDataModel {
         flipCount = 0
         freeformFlow = FreeformCaptureFlow()
         shotLookDowns = []
+        pacer = FreeformCaptureFlow.ShotPacer()
         objectCaptureSession = ObjectCaptureSession()
-        // After the session is set (setting it detaches the last one's listeners and stops motion). Read on every new
-        // shot; device motion needs no permission (NSMotionUsageDescription covers only CMSensorRecorder, CMPedometer,
-        // CMMotionActivityManager and CMMovementDisorderManager).
-        if motion.isDeviceMotionAvailable { motion.startDeviceMotionUpdates() }
+        // After the session is set (setting it detaches the last one's listeners and stops motion). Gravity-vertical
+        // attitude for the shutter and each photo's height; device motion needs no permission (NSMotionUsageDescription
+        // covers only CMSensorRecorder, CMPedometer, CMMotionActivityManager and CMMovementDisorderManager).
+        if motion.isDeviceMotionAvailable {
+            motion.deviceMotionUpdateInterval = 1.0 / 60
+            motion.startDeviceMotionUpdates(using: .xArbitraryZVertical)
+        }
         record("started", detail: "freeform")
 
         guard let session = objectCaptureSession else {
@@ -443,6 +456,9 @@ extension AppDataModel {
 
         // PRD §10 allows a success haptic when a result is ready and a warning on a plate alert, nothing else.
         session.shouldPlayHaptics = false
+        // The app takes the photos (ShotPacer): "If disabled, only manually triggered shots are taken". Without a motion
+        // sensor there is nothing to pace by, so Apple's auto-capture stays on.
+        session.isAutoCaptureEnabled = !motion.isDeviceMotionAvailable
         var configuration = ObjectCaptureSession.Configuration()
         // Every image goes to the Mac: "meant for use when the images are intended to be transferred to macOS".
         configuration.isOverCaptureEnabled = true
@@ -796,11 +812,21 @@ extension AppDataModel {
         stopCapture()
     }
 
-    /// Apple's manual shot, alongside its automatic capture: "call this method to request an image be manually
-    /// captured at the current location" (`requestImageCapture()`), only while `canRequestImageCapture` is true.
-    func freeformTakePhoto() {
-        guard freeformFlow.step == .capturing, let session = objectCaptureSession, session.canRequestImageCapture else { return }
-        record("manual-shot")
+    /// The app's shutter, checked 30 times a second while capturing: Apple's `requestImageCapture()` ("request an image
+    /// be manually captured at the current location") each time the view has turned 5° since the last photo, at most 3 a
+    /// second, only while Apple can take one (`canRequestImageCapture`), tracking is normal, the session isn't paused,
+    /// and Apple isn't saying `movingTooFast` ("the capturing may be paused to ensure quality").
+    fileprivate func paceShot(_ session: ObjectCaptureSession) {
+        guard freeformFlow.step == .capturing, case .capturing = session.state, !session.isPaused,
+              session.cameraTracking == .normal, session.canRequestImageCapture,
+              !session.feedback.contains(.movingTooFast), let reading = motion.deviceMotion else { return }
+        let m = reading.attitude.rotationMatrix
+        let direction = FreeformCaptureFlow.ShotPacer.cameraDirection(
+            rotation: [m.m11, m.m12, m.m13, m.m21, m.m22, m.m23, m.m31, m.m32, m.m33],
+            gravity: .init(x: reading.gravity.x, y: reading.gravity.y, z: reading.gravity.z))
+        let now = ProcessInfo.processInfo.systemUptime
+        guard pacer.isDue(direction, at: now) else { return }
+        pacer.took(direction, at: now)
         session.requestImageCapture()
     }
 

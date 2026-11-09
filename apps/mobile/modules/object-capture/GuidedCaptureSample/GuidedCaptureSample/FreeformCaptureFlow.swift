@@ -84,6 +84,46 @@ struct FreeformCaptureFlow: Equatable {
         }
     }
 
+    /// Our app decides when a photo is taken, not Apple's auto-capture cadence: on David's Nov 9 unicorn, three full
+    /// turns gave Apple's auto-capture 9 photos. With `isAutoCaptureEnabled = false` the app calls
+    /// `requestImageCapture()` each time the camera's view has turned at least `degrees` since the last photo, at most
+    /// `perSecond` a second: about 72 photos a turn. The same rule whether the phone is in a hand or on any arm.
+    struct ShotPacer: Equatable {
+        static let degrees = 5.0
+        static let perSecond = 3.0
+
+        struct Direction: Equatable { var x, y, z: Double }
+        private(set) var last: Direction?
+        private(set) var lastAt: Double?
+
+        /// A photo is due: the first one, or once the view has turned `degrees` and a third of a second has passed.
+        func isDue(_ direction: Direction, at time: Double) -> Bool {
+            guard let last, let lastAt else { return true }
+            guard time - lastAt >= 1 / Self.perSecond else { return false }
+            return Self.angle(last, direction) >= Self.degrees
+        }
+
+        mutating func took(_ direction: Direction, at time: Double) { last = direction; lastAt = time }
+
+        static func angle(_ a: Direction, _ b: Direction) -> Double {
+            let dot = a.x * b.x + a.y * b.y + a.z * b.z
+            let lengths = (a.x * a.x + a.y * a.y + a.z * a.z).squareRoot() * (b.x * b.x + b.y * b.y + b.z * b.z).squareRoot()
+            guard lengths > 0 else { return 0 }
+            return acos(max(-1, min(1, dot / lengths))) * 180 / .pi
+        }
+
+        /// Where the back camera looks (the device's −z) in Core Motion's gravity-vertical reference frame, from the
+        /// attitude's rotation matrix (`m` row by row: m11, m12, m13, m21 … m33) and the gravity Core Motion reports in the
+        /// device's frame. The matrix carries one frame into the other; whichever way round turns the reference frame's
+        /// down (0, 0, −1) into the reported gravity is the way round, so its transpose carries the camera out.
+        static func cameraDirection(rotation m: [Double], gravity g: Direction) -> Direction {
+            let byColumn = Direction(x: -m[2], y: -m[5], z: -m[8]), byRow = Direction(x: -m[6], y: -m[7], z: -m[8])
+            func distance(_ a: Direction) -> Double { (a.x - g.x) * (a.x - g.x) + (a.y - g.y) * (a.y - g.y) + (a.z - g.z) * (a.z - g.z) }
+            // Gravity is R·down (R maps reference → device): the camera is Rᵀ·(0, 0, −1), R's third row negated.
+            return distance(byColumn) <= distance(byRow) ? byRow : byColumn
+        }
+    }
+
     /// Record is offered only while Apple's session is `.ready` and tracking is normal: otherwise Apple's coaching
     /// overlay has the screen ("the app may need to hide its UI at this time").
     func canRecord(sessionReady: Bool, trackingNormal: Bool) -> Bool { step == .ready && sessionReady && trackingNormal }
