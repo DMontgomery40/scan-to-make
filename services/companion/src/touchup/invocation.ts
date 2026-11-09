@@ -5,7 +5,11 @@ import {fileURLToPath} from 'node:url';
 import type {PrinterMcpProcess, PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import type {TouchupPass} from './inputs.js';
 
-export const TOUCHUP_INSTRUCTION = 'Look at the pictures of this, and then tweak the scan based on that.';
+/**
+ * The request for a scan sent for cleanup with no words from the person (PRD §5.3: that runs only when they asked
+ * for changes without saying which).
+ */
+export const TOUCHUP_INSTRUCTION = 'Clean up this scan so it prints as the real object in the photos looks: recognise what it is, repair what the scan got wrong, and keep its size.';
 
 /**
  * The worker's final answer. With `--json-schema`, Claude Code puts it on the
@@ -52,28 +56,64 @@ export type DesignEngine = 'blender' | 'fusion';
 
 const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's fusion_mcp_* tools: fusion_mcp_call reaches Fusion's own tools (create_sketch, extrude, revolve, fillet, shell, boolean_operation, create_parameter, set_parameter, get_parameters, check_interference, …). A separate document is already prepared for this pass. Its identity is fixed by the tools: work with the provided design and component, without opening or switching documents.
 - Make every functional dimension a named user parameter, so a later change is one set_parameter.
-- When the design is finished, call fusion_mcp_export with output_dir set to the output folder and name "touched": it writes touched.stl, touched.f3d and touched.parameters.json. Use body_name when the design has more than one body; for several colours, export each colour's body under its own name and combine them as the multi-colour rule below says.
+- When the design is finished, call fusion_mcp_export with output_dir set to the output folder and name "touched": it writes touched.stl, touched.f3d and touched.parameters.json. Use body_name when the design has more than one body; for several colours, export each colour's body under its own name and combine them as the colour section below says.
 - If you can, save clear PNG views of the design to the output folder, named so the clearest overall view sorts first.`;
 
-const SYSTEM_RULES_TEMPLATE = `You are making a useful 3D object for a person. Understand what they want it to do, the things it must fit, and how they will assemble and use it. Deliver a complete model that answers that request.
-- ENGINE_RULES
-- Read every numbered photo overview first, then open the individual photos to inspect details and resolve different orientations. Read every supplied reference photo and the user's request before modeling. Identify the functional interfaces: what holds what, contact surfaces, clearances, access, and how the part attaches without obstructing the real objects.
-- For a new design, construct the complete functional geometry ENGINE_NAME. Procedural modeling, profiles, booleans, curves, modifiers and multiple iterations are available. A collection of rough primitives is a starting sketch, not a finished mount, clip, bracket or enclosure.
-- For a captured object, fix defects supported by the photos with targeted edits: raise features that are missing or too faint, and flatten or smooth surfaces the photos show are flat or smooth. Keep real surface detail the photos confirm, including texture, stitches and edges. Use Blender's existing sculpt and modifier tools for that cleanup.
+/**
+ * The worker's rules, composed per pass (PRD §8.9): a shared core, then only the sections that pass needs.
+ * Every pass gets the core; the rest depend on the pass's kind, its inputs and whether the person wrote anything.
+ */
+const CORE_RULES = (engine: string) => `You are making a useful 3D object for a person. Understand what they want it to do, the things it must fit, and how they will assemble and use it. Deliver a complete model that answers that request.
+${engine}
+- Read every numbered photo overview first, then open the individual photos to inspect details and resolve different orientations. Read every supplied reference photo and the user's request before modeling.
 - Use measured or published dimensions when available. Distinguish measurements from estimates. Make reasonable choices for noncritical details; ask for a close-up or measurement when a missing interface dimension prevents a useful fit.
-- For a part that must fit a scanned or photographed object, settle fit-critical dimensions before modelling them. When the request asks for a lookup, identify the exact product and variant, open the manufacturer's own published dimensions with WebSearch/WebFetch, then stop with needs_closeup to confirm them before building geometry that depends on them: the ask question names the product, its size in mm and the maker's source, and says the reply can confirm it, correct it in words, or send a caliper photo. If the exact product or size cannot be established, ask for the specific caliper measurements or a photo with calipers instead. Measured dimensions in the request are authoritative; if the scan disagrees by more than the stated tolerance (or 2 mm / 2% when none is stated), ask before designing the interface.
-- Plan how it will be printed as part of the design, following the printer MCP's manufacturing guidance when it is given below, for captured objects and new designs alike. For a captured object, that plan works with the captured shape: change it where printing it well calls for that, and keep the real surface detail the photos confirm.
+- Plan how it will be printed as part of the design, following the printer MCP's manufacturing guidance when it is given below, for captured objects and new designs alike.
 - Export the model in the orientation the object is used in. The print step sends it to the slicer as it is, with your answer's supports, off included. Set supports for every model you export: enabled, with a type, when the part needs them to print well; not enabled when it prints cleanly without them. How the slicer orients the model and generates supports, and how to check that choice with a checkpoint slice, is the printer MCP's to say: follow its slicing guidance below.
 - Scans from the phone are in metres. A current-model STL supplied for revision is already in millimetres. Build new designs in millimetres and export every STL in millimetres, the unit printers use.
 - After each fix, export the whole model as an STL to the checkpoints folder (01.stl, 02.stl, …).
-- Render and inspect the candidate from all six sides against the request and reference photos. For a captured object, compare the rear and underside explicitly with the supplied photos, accounting for the object being turned over between photographs. A smooth, closed scan surface can still be a reconstruction defect. Before calling any region unseen, check all supplied views and identify which views support that conclusion; do not infer missing photographic coverage from missing mesh detail. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the attachment interfaces, assembly path and dimensions; revise defects you can see. Successful export alone does not establish that the design works.
-- A request in more than one colour or material, except a copy of a designer's 3MF (the next rule): model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour in the order the request names them (part 1 on filament 1, and so on). Build the parts lying the way the object should print: a 3MF keeps its placement exactly as made (Counterpart never re-orients a 3MF), so the orientation you model is the orientation that prints, supports included. Report every part under "parts" in your answer, in that same order, with its name and the colour the person asked for as #RRGGBB (and its material when they named one): the 3MF itself carries no colours, so this list is how Counterpart knows which spool each part belongs on. Still export the whole model to out/touched.stl. Counterpart prints the 3MF and puts each part on a spool; never tell the person how to slice, which filament slot to use or which layer height to pick.
-- A copy of a designer's 3MF (the files list names a designer's 3MF project): that project is the thing being copied, and it prints with the designer's own parts, plate placement, painted colours and print settings. Change only what the person asked for, inside that project: edit its object models in place (for example re-paint or add faces with the same colour attributes the designer used, or change one object's mesh) and write the whole project, every other file unchanged, to out/touched.3mf. Never rebuild it from the merged mesh or with counterpart_make_3mf, never turn painted markings into separate parts, and never move, turn or rescale what the designer laid out. Export the merged mesh to out/touched.stl as well, for the renders. Check it against the designer's own file: everything the designer's file prints must still print. Counterpart refuses a copy whose print settings differ from the designer's file.
-- When the person asks you to copy, change or print an existing model and you can't get its file (a login, a missing download), set status to failed and say which file to add. Never design a substitute for a model the person named.
-- Export the final model to out/touched.stl and clear PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png). Explain what the part does and any remaining fit assumptions in the final summary.
+- Render and inspect the candidate from all six sides against the request and reference photos. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the dimensions; revise defects you can see. Successful export alone does not establish that the result works.
+- Export the final model to out/touched.stl and clear PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png).
 - If you can't see a part well enough to fix it, set status to needs_closeup and say what to photograph.
 - If something breaks and you can't finish (for example Blender stops responding), set status to failed and say what happened.`;
 
+/** The headings of the optional sections, as the worker reads them. Tests and the PR use them to say which a pass got. */
+export const RULE_SECTIONS = {
+  newDesign: 'A new design:',
+  captured: 'Cleaning up a captured object:',
+  fitSizes: 'Sizes the part must fit:',
+  colours: 'A request in more than one colour or material:',
+  designerCopy: "A copy of a designer's 3MF:",
+  namedModel: 'A model the person names:',
+} as const;
+
+const NEW_DESIGN_RULES = (engineName: string) => `${RULE_SECTIONS.newDesign}
+- Identify the functional interfaces: what holds what, contact surfaces, clearances, access, and how the part attaches without obstructing the real objects.
+- Construct the complete functional geometry ${engineName}. Procedural modeling, profiles, booleans, curves, modifiers and multiple iterations are available. A collection of rough primitives is a starting sketch, not a finished mount, clip, bracket or enclosure.
+- When you inspect it, check the attachment interfaces and the assembly path as well.
+- In the final summary, explain what the part does and any remaining fit assumptions.`;
+
+const CAPTURED_RULES = `${RULE_SECTIONS.captured}
+- First say what the object is and name its parts from the photos, for example: a bottle with a body, a shoulder, a cap with ribs and a printed label; or a sign with separate letters standing on a base. Plan every fix from that.
+- Fix defects supported by the photos with targeted edits: raise features that are missing or too faint, and flatten or smooth surfaces the photos show are flat or smooth. Keep real surface detail the photos confirm, including texture, stitches and edges. Use Blender's existing sculpt, modelling and modifier tools for that cleanup.
+- Manufactured features are regular in the real object, so scan wobble on them is a defect. Where the photos show one, rebuild it regular: flat faces flat, straight edges straight, cylinders round, mirrored halves mirrored, and repeated features (ribs, teeth, threads, the letters of one typeface) equal and evenly spaced, with their count taken from the photos. A feature the scan lost or smeared, like a cap's ribs, is rebuilt from the photos.
+- Printed graphics, labels and colour changes are ink, not shape. Keep that surface smooth unless the photos show real relief: a raised label is a scan defect, not surface detail the photos confirm.
+- Organic and handmade surfaces (fabric, crochet, carving, clay) stay as scanned.
+- Sizes still come from the scan or from measurements. Regularising a feature never rescales the object.
+- List each regularisation in your answer's changes, one line per feature (for example "Cap: 24 ribs made even"), tagged assumed, or estimated with toleranceMm when it sets a size, so the person sees what was inferred. If the photos can't settle what a feature is, set status to needs_closeup and ask for a close-up of it instead of guessing.
+- Plan the print with the captured shape: change it where printing it well calls for that, and keep the real surface detail the photos confirm.
+- When you inspect it, compare the rear and underside explicitly with the supplied photos, accounting for the object being turned over between photographs. A smooth, closed scan surface can still be a reconstruction defect. Before calling any region unseen, check all supplied views and identify which views support that conclusion; do not infer missing photographic coverage from missing mesh detail.`;
+
+const FIT_SIZE_RULES = `${RULE_SECTIONS.fitSizes}
+- For a part that must fit a scanned or photographed object, settle fit-critical dimensions before modelling them. When the request asks for a lookup, identify the exact product and variant, open the manufacturer's own published dimensions with WebSearch/WebFetch, then stop with needs_closeup to confirm them before building geometry that depends on them: the ask question names the product, its size in mm and the maker's source, and says the reply can confirm it, correct it in words, or send a caliper photo. If the exact product or size cannot be established, ask for the specific caliper measurements or a photo with calipers instead. Measured dimensions in the request are authoritative; if the scan disagrees by more than the stated tolerance (or 2 mm / 2% when none is stated), ask before designing the interface.`;
+
+const COLOUR_RULES = `${RULE_SECTIONS.colours}
+- Model each colour as its own body or object, export each one as an STL, and combine them with the printer MCP's counterpart_make_3mf into out/touched.3mf, one part per colour in the order the request names them (part 1 on filament 1, and so on). Build the parts lying the way the object should print: a 3MF keeps its placement exactly as made (Counterpart never re-orients a 3MF), so the orientation you model is the orientation that prints, supports included. Report every part under "parts" in your answer, in that same order, with its name and the colour the person asked for as #RRGGBB (and its material when they named one): the 3MF itself carries no colours, so this list is how Counterpart knows which spool each part belongs on. Still export the whole model to out/touched.stl. Counterpart prints the 3MF and puts each part on a spool; never tell the person how to slice, which filament slot to use or which layer height to pick.`;
+
+const DESIGNER_COPY_RULES = `${RULE_SECTIONS.designerCopy}
+- The files list names a designer's 3MF project: that project is the thing being copied, and it prints with the designer's own parts, plate placement, painted colours and print settings. Change only what the person asked for, inside that project: edit its object models in place (for example re-paint or add faces with the same colour attributes the designer used, or change one object's mesh) and write the whole project, every other file unchanged, to out/touched.3mf. Never rebuild it from the merged mesh or with counterpart_make_3mf, never turn painted markings into separate parts, and never move, turn or rescale what the designer laid out. Export the merged mesh to out/touched.stl as well, for the renders. Check it against the designer's own file: everything the designer's file prints must still print. Counterpart refuses a copy whose print settings differ from the designer's file.`;
+
+const NAMED_MODEL_RULES = `${RULE_SECTIONS.namedModel}
+- When the person asks you to copy, change or print an existing model and you can't get its file (a login, a missing download), set status to failed and say which file to add. Never design a substitute for a model the person named.`;
 
 /** Only what Claude Code needs to find the user's own login. Never printer tokens or provider keys. */
 const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHELL', 'CLAUDE_CONFIG_DIR'] as const;
@@ -146,18 +186,53 @@ export const BLENDER_RULES = "- Reach Blender only through the printer MCP's ble
  */
 export interface DesignGuidance {design?: string; slicing?: string}
 
-/** The system rules for an engine. */
-export function systemRules(engine: DesignEngine = 'blender', guidance: DesignGuidance = {}): string {
-  return SYSTEM_RULES_TEMPLATE.replace('- ENGINE_RULES', engine === 'fusion' ? FUSION_RULES : BLENDER_RULES)
-    .replace('ENGINE_NAME', engine === 'fusion' ? 'in Fusion through the printer MCP (only its fusion_mcp_* tools)' : 'using Blender through MCP')
+/** What decides a pass's rules: the inputs `buildTouchupInvocation` already has. */
+export interface PassRules {
+  /** "copy" cleans up or copies a captured or supplied object; "fit" designs something new (PRD §8.9). */
+  kind: 'copy' | 'fit';
+  engine?: DesignEngine;
+  /** The person wrote something: the project's request or a change they asked for. */
+  request?: boolean;
+  /** The pass edits a designer's 3MF project in place. */
+  designerCopy?: boolean;
+}
+
+/** The sections a pass gets on top of the core, in the order the worker reads them. */
+export function ruleSections(pass: PassRules): (keyof typeof RULE_SECTIONS)[] {
+  const sections: (keyof typeof RULE_SECTIONS)[] = [];
+  if (pass.kind === 'fit') sections.push('newDesign');
+  if (pass.kind === 'copy' && !pass.designerCopy) sections.push('captured');
+  if (pass.kind === 'fit') sections.push('fitSizes');
+  // No input says a request is in several colours; any words from the person may ask for them. A designer's 3MF keeps its own.
+  if (pass.request && !pass.designerCopy) sections.push('colours');
+  if (pass.designerCopy) sections.push('designerCopy');
+  if (pass.request) sections.push('namedModel');
+  return sections;
+}
+
+/** The system rules for one pass: the core, the sections it needs, then the printer MCP's own guidance. */
+export function systemRules(pass: PassRules, guidance: DesignGuidance = {}): string {
+  const engine = pass.engine ?? 'blender';
+  const engineName = engine === 'fusion' ? 'in Fusion through the printer MCP (only its fusion_mcp_* tools)' : 'using Blender through MCP';
+  const text: Record<keyof typeof RULE_SECTIONS, () => string> = {
+    newDesign: () => NEW_DESIGN_RULES(engineName), captured: () => CAPTURED_RULES, fitSizes: () => FIT_SIZE_RULES,
+    colours: () => COLOUR_RULES, designerCopy: () => DESIGNER_COPY_RULES, namedModel: () => NAMED_MODEL_RULES,
+  };
+  return [CORE_RULES(engine === 'fusion' ? FUSION_RULES : BLENDER_RULES), ...ruleSections(pass).map(section => text[section]())].join('\n\n')
     + (guidance.design?.trim() ? `\n\nManufacturing guidance from the printer MCP (its fdm_design prompt):\n${guidance.design.trim()}` : '')
     + (guidance.slicing?.trim() ? `\n\nHow the printer MCP slices (its fdm_slicing prompt):\n${guidance.slicing.trim()}` : '');
 }
-/** The Blender rules, as every copy and every Blender design pass gets them. */
-export const TOUCHUP_SYSTEM_RULES = systemRules('blender');
+
+/** The rules a pass gets, from the same inputs as its prompt. */
+function passRules(input: {pass: TouchupPass; kind?: 'copy' | 'fit'; engine?: DesignEngine; instructions?: string; note?: string; designerCopy?: boolean}): PassRules {
+  return {kind: input.kind ?? (input.designerCopy || input.pass.scanPaths.length ? 'copy' : 'fit'), ...(input.engine ? {engine: input.engine} : {}),
+    request: Boolean(input.instructions?.trim() || input.note?.trim()), ...(input.designerCopy ? {designerCopy: true} : {})};
+}
 
 export function buildTouchupInvocation(input: {pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; designerCopy?: boolean; sourceEnv?: NodeJS.ProcessEnv;
-  engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: {f3d: string; parameters?: string}; guidance?: DesignGuidance}): TouchupInvocation {
+  engine?: DesignEngine; documentId?: string; handoff?: PrinterHandoffConfig; design?: {f3d: string; parameters?: string}; guidance?: DesignGuidance;
+  /** The pass's kind (PRD §8.9). Without it, a pass with a scan is a copy and one without is a new design, as passKind decides. */
+  kind?: 'copy' | 'fit'}): TouchupInvocation {
   const {pass} = input;
   let printer = printerServer(input.printer);
   if (input.engine === 'fusion') {
@@ -181,7 +256,7 @@ export function buildTouchupInvocation(input: {pass: TouchupPass; printer: Print
     '--disable-slash-commands',
     '--setting-sources', '',
     '--settings', '{"disableAllHooks":true}',
-    '--append-system-prompt', systemRules(input.engine, input.guidance),
+    '--append-system-prompt', systemRules(passRules(input), input.guidance),
     '--json-schema', JSON.stringify(TOUCHUP_RESULT_SCHEMA),
     '--output-format', 'stream-json',
     '--verbose',

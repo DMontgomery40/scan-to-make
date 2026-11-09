@@ -272,6 +272,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   }
   input.onStage?.('working', choice.engine);
   const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
+    ...(input.kind ? {kind: input.kind} : {}),
     ...(input.designerCopy ? {designerCopy: true} : {}),
     ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}), ...(guidance ? {guidance} : {}),
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),

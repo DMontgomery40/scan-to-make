@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {runTouchup, chooseEngine, printerDesignGuidance, slicingGuidanceUnavailable, slicingGuidanceUnreachable} from '../dist/touchup/touchup.js';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
-import {systemRules, TOUCHUP_SYSTEM_RULES, TOUCHUP_RESULT_SCHEMA, buildTouchupInvocation} from '../dist/touchup/invocation.js';
+import {systemRules, RULE_SECTIONS, TOUCHUP_RESULT_SCHEMA, buildTouchupInvocation} from '../dist/touchup/invocation.js';
 import {runTouchupWorker} from '../dist/touchup/runner.js';
 import {passEstimate, PassTimings, STAGE_DEFAULT_SEC} from '../dist/touchup/stages.js';
 import {EventEmitter} from 'node:events';
@@ -115,6 +115,9 @@ test('a Fusion pass never touches Blender: no lock, no launch, no scene reset', 
     prepare: async args => { log.push('prepare'); return prepareTouchupPass(args); },
     guidance: async config => { log.push('guidance'); assert.equal(config, handoff, 'the guidance comes from the configured printer MCP'); return {design: 'Plan the print as part of the design.', slicing: 'Its slicer orients it.'}; },
     run: async (inv, pass) => { log.push('run'); assert.match(inv.args.join(' '), /fusion_mcp_export/);
+      // The service's pass kind reaches the rules: a new design's sections, never a scan cleanup's.
+      assert.ok(inv.args[inv.args.indexOf('--append-system-prompt') + 1].includes(RULE_SECTIONS.newDesign));
+      assert.equal(inv.args[inv.args.indexOf('--append-system-prompt') + 1].includes(RULE_SECTIONS.captured), false);
       assert.match(inv.args[inv.args.indexOf('--append-system-prompt') + 1], /its fdm_design prompt\):\nPlan the print as part of the design\.\n\nHow the printer MCP slices \(its fdm_slicing prompt\):\nIts slicer orients it\.$/); return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; },
   });
   assert.deepEqual(log, ['prepare', 'guidance', 'run']);
@@ -123,12 +126,14 @@ test('a Fusion pass never touches Blender: no lock, no launch, no scene reset', 
 });
 
 test('the worker is told its engine, and a later change starts from the Fusion design\'s parameters', async () => {
-  assert.equal(TOUCHUP_SYSTEM_RULES, systemRules('blender'));
-  assert.match(systemRules('blender'), /blender_mcp_\* tools/);
-  assert.doesNotMatch(systemRules('fusion'), /blender_mcp/);
-  assert.match(systemRules('fusion'), /named user parameter/);
-  assert.doesNotMatch(systemRules('fusion'), /using Blender through MCP/, 'a Fusion worker is never told to model in Blender');
-  assert.match(systemRules('blender'), /using Blender through MCP/);
+  const blender = systemRules({kind: 'fit', engine: 'blender', request: true}), fusion = systemRules({kind: 'fit', engine: 'fusion', request: true});
+  assert.match(blender, /blender_mcp_\* tools/);
+  assert.match(systemRules({kind: 'copy'}), /blender_mcp_\* tools/);
+  assert.doesNotMatch(fusion, /blender_mcp/);
+  assert.match(fusion, /named user parameter/);
+  assert.doesNotMatch(fusion, /using Blender through MCP/, 'a Fusion worker is never told to model in Blender');
+  assert.match(fusion, /in Fusion through the printer MCP/);
+  assert.match(blender, /using Blender through MCP/);
   const root = await tempDir('touchup-engine-inv-');
   const pass = await prepareTouchupPass({root, objectId: 'o', scan: [], photos: [], requirePhotos: false});
   const inv = buildTouchupInvocation({pass, printer: handoff.process, claudePath: '/c', instructions: 'A hook', note: 'Make it 1 mm wider', currentModel: true,
