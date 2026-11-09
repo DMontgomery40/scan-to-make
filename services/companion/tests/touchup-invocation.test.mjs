@@ -6,7 +6,7 @@ import {userInfo} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {prepareTouchupPass} from '../dist/touchup/inputs.js';
-import {buildTouchupInvocation, systemRules, TOUCHUP_RESULT_SCHEMA, TOUCHUP_SYSTEM_RULES, TOUCHUP_INSTRUCTION} from '../dist/touchup/invocation.js';
+import {buildTouchupInvocation, systemRules, ruleSections, RULE_SECTIONS, TOUCHUP_RESULT_SCHEMA, TOUCHUP_INSTRUCTION} from '../dist/touchup/invocation.js';
 import {tempDir} from './support/temp.mjs';
 
 const fixtures = fileURLToPath(new URL('./fixtures/touchup/', import.meta.url));
@@ -17,6 +17,9 @@ async function pass() {
 const printer = {command: '/usr/bin/ssh', args: ['-T', 'x@127.0.0.1'], env: {MCP_TRANSPORT: 'stdio'}};
 const sourceEnv = {HOME: '/Users/x', USER: 'x', PATH: '/usr/bin:/bin', BAMBU_TOKEN: 'printer-secret', ANTHROPIC_API_KEY: 'sk-secret'};
 const valueOf = (args, flag) => args[args.indexOf(flag) + 1];
+/** A scan sent for cleanup with no words: the pass the fixture `pass()` makes. */
+const CLEANUP_RULES = systemRules({kind: 'copy'});
+const FIT_RULES = systemRules({kind: 'fit', request: true});
 
 test('args are exactly the lean worker', async () => {
   const p = await pass();
@@ -31,7 +34,7 @@ test('args are exactly the lean worker', async () => {
   assert.equal(valueOf(inv.args, '--output-format'), 'stream-json');
   assert.equal(valueOf(inv.args, '--json-schema'), JSON.stringify(TOUCHUP_RESULT_SCHEMA));
   assert.equal(valueOf(inv.args, '--settings'), '{"disableAllHooks":true}');
-  assert.equal(valueOf(inv.args, '--append-system-prompt'), TOUCHUP_SYSTEM_RULES);
+  assert.equal(valueOf(inv.args, '--append-system-prompt'), CLEANUP_RULES);
   assert.equal(inv.args.includes('--resume'), false);
   assert.ok(inv.args.at(-1).startsWith(TOUCHUP_INSTRUCTION + '\n'));
 });
@@ -106,22 +109,24 @@ test('a pass with no scan and no photos lists neither', async () => {
 });
 
 test('every STL the worker saves is in millimetres', () => {
-  assert.match(TOUCHUP_SYSTEM_RULES, /millimetres/);
-  assert.match(TOUCHUP_SYSTEM_RULES, /metres/);
+  for (const rules of [CLEANUP_RULES, FIT_RULES]) {
+    assert.match(rules, /export every STL in millimetres/);
+    assert.match(rules, /Scans from the phone are in metres/);
+  }
 });
 
 test('the rules ask for the fixes the photos show, not just caution', () => {
-  assert.match(TOUCHUP_SYSTEM_RULES, /flatten/);
-  assert.match(TOUCHUP_SYSTEM_RULES, /too faint/);
-  assert.match(TOUCHUP_SYSTEM_RULES, /Keep real surface detail the photos confirm/);
-  assert.equal(/never smooth captured surface/.test(TOUCHUP_SYSTEM_RULES), false, 'a lumpy surface the photos show flat must be fixable');
+  assert.match(CLEANUP_RULES, /flatten/);
+  assert.match(CLEANUP_RULES, /too faint/);
+  assert.match(CLEANUP_RULES, /Keep real surface detail the photos confirm/);
+  assert.equal(/never smooth captured surface/.test(CLEANUP_RULES), false, 'a lumpy surface the photos show flat must be fixable');
 });
 
 test('every pass plans how it prints, with the printer MCP\'s own fdm_design and fdm_slicing guidance, for copies and new designs alike', async () => {
   const design = 'Design the finished object the user wants, with the manufacturing plan as part of the design.';
   const slicing = 'How this printer MCP slices. Its slicer is Some Slicer.';
   for (const engine of ['blender', 'fusion']) {
-    const rules = systemRules(engine, {design, slicing});
+    const rules = systemRules({kind: 'fit', engine, request: true}, {design, slicing});
     assert.ok(rules.endsWith(`Manufacturing guidance from the printer MCP (its fdm_design prompt):\n${design}\n\nHow the printer MCP slices (its fdm_slicing prompt):\n${slicing}`), engine);
     assert.doesNotMatch(rules, /Don't do print preparation/, 'supports and orientation are design choices now');
     assert.match(rules, /captured objects and new designs alike/);
@@ -130,16 +135,18 @@ test('every pass plans how it prints, with the printer MCP\'s own fdm_design and
     assert.match(rules, /with your answer's supports, off included/, 'its supports choice is what the print gets');
     assert.match(rules, /follow its slicing guidance below/);
     // PRD §8.0 item 10: how a slicer orients, supports and checks a slice comes from the MCP, never the app.
-    const own = systemRules(engine);
+    // Every section any pass can get, together: the app's own rules name no slicer detail.
+    const own = [systemRules({kind: 'fit', engine, request: true}), systemRules({kind: 'copy', engine, request: true}), systemRules({kind: 'copy', engine, request: true, designerCopy: true})].join('\n');
+    for (const section of Object.values(RULE_SECTIONS)) assert.ok(own.includes(section), section);
     for (const slicerFact of [/Bambu Studio/, /auto-orient/, /cantilever/, /orient true/, /enable_support/, /slice_stl/, /slicer_result/, /get_printer_filaments/, /get_slice_settings/, /OrcaSlicer|PrusaSlicer|Cura/])
       assert.doesNotMatch(own, slicerFact, `the app's own rules name no slicer detail: ${slicerFact}`);
     assert.doesNotMatch(own, /Manufacturing guidance from the printer MCP|How the printer MCP slices/, 'an MCP without the prompts adds nothing');
-    assert.ok(systemRules(engine, {slicing}).endsWith(`How the printer MCP slices (its fdm_slicing prompt):\n${slicing}`), 'either prompt alone');
+    assert.ok(systemRules({kind: 'copy', engine}, {slicing}).endsWith(`How the printer MCP slices (its fdm_slicing prompt):\n${slicing}`), 'either prompt alone');
   }
   // Every provider reads the same rules from --append-system-prompt (project-worker.ts).
   const inv = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv, guidance: {design, slicing}});
   assert.ok(valueOf(inv.args, '--append-system-prompt').endsWith(slicing));
-  assert.equal(valueOf(buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv}).args, '--append-system-prompt'), TOUCHUP_SYSTEM_RULES);
+  assert.equal(valueOf(buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv}).args, '--append-system-prompt'), CLEANUP_RULES);
 });
 
 test('the worker loads none of the user\'s personal Claude settings', async () => {
@@ -172,14 +179,14 @@ test('a revised request without a completed model uses original inputs without c
 });
 
 test('the worker works only with objects in its own scene', () => {
-  assert.match(TOUCHUP_SYSTEM_RULES, /current scene/);
+  for (const rules of [CLEANUP_RULES, FIT_RULES]) assert.match(rules, /current scene/);
 });
 
 test('a fit lookup is confirmed before fit-critical geometry', () => {
-  assert.match(TOUCHUP_SYSTEM_RULES, /manufacturer's own published dimensions/);
-  assert.match(TOUCHUP_SYSTEM_RULES, /stop with needs_closeup to confirm/);
-  assert.match(TOUCHUP_SYSTEM_RULES, /caliper photo/);
-  assert.match(TOUCHUP_SYSTEM_RULES, /Measured dimensions in the request are authoritative/);
+  assert.match(FIT_RULES, /manufacturer's own published dimensions/);
+  assert.match(FIT_RULES, /stop with needs_closeup to confirm/);
+  assert.match(FIT_RULES, /caliper photo/);
+  assert.match(FIT_RULES, /Measured dimensions in the request are authoritative/);
 });
 
 test('photo evidence lists overview pages first and every real filename, including PNG inputs', async () => {
@@ -205,7 +212,72 @@ test("a copy of a designer's 3MF is told to edit that project in place and compa
   assert.match(prompt, /The designer's original 3MF, to compare against: .*scan\.3mf/);
   assert.doesNotMatch(prompt, /an STL already in millimetres/);
   const rules = valueOf(inv.args, '--append-system-prompt');
-  assert.match(rules, /except a copy of a designer's 3MF/, 'the multi-colour rebuild rule does not apply to a designer\'s file');
+  assert.ok(rules.includes(RULE_SECTIONS.designerCopy));
+  assert.equal(rules.includes(RULE_SECTIONS.colours), false, 'the multi-colour rebuild rule does not apply to a designer\'s file');
+  assert.equal(rules.includes(RULE_SECTIONS.captured), false, 'a designer\'s 3MF is not a scan to clean up');
   assert.match(rules, /Never rebuild it from the merged mesh or with counterpart_make_3mf, never turn painted markings into separate parts/);
   assert.match(rules, /Never design a substitute for a model the person named/);
+});
+
+test('each pass gets the core and only the sections it needs', async () => {
+  const S = RULE_SECTIONS;
+  const cases = [
+    ['a scan sent for cleanup with no words', {kind: 'copy'}, [S.captured]],
+    ['a copy with a request', {kind: 'copy', request: true}, [S.captured, S.colours, S.namedModel]],
+    ['a copy revision of its current model', {kind: 'copy', request: true}, [S.captured, S.colours, S.namedModel]],
+    ["a designer's 3MF with no words", {kind: 'copy', designerCopy: true}, [S.designerCopy]],
+    ["a designer's 3MF with a request", {kind: 'copy', designerCopy: true, request: true}, [S.designerCopy, S.namedModel]],
+    ['a new design in Blender', {kind: 'fit', request: true}, [S.newDesign, S.fitSizes, S.colours, S.namedModel]],
+    ['a new design in Fusion', {kind: 'fit', engine: 'fusion', request: true}, [S.newDesign, S.fitSizes, S.colours, S.namedModel]],
+    ['a new design revision', {kind: 'fit', request: true}, [S.newDesign, S.fitSizes, S.colours, S.namedModel]],
+  ];
+  const core = systemRules({kind: 'copy'}).split(`\n\n${S.captured}`)[0];
+  for (const [name, shape, present] of cases) {
+    const rules = systemRules(shape);
+    assert.deepEqual(ruleSections(shape).map(key => S[key]), present, name);
+    for (const heading of Object.values(S)) assert.equal(rules.includes(`\n\n${heading}\n`), present.includes(heading), `${name}: ${heading}`);
+    // The core is the same for every pass, apart from the engine's own line.
+    assert.ok(rules.startsWith(shape.engine === 'fusion' ? 'You are making a useful 3D object' : core), name);
+    assert.match(rules, /captured objects and new designs alike/, name);
+    assert.doesNotMatch(rules, /PRINTER_FACTS|ENGINE_RULES|ENGINE_NAME/, name);
+  }
+  // The invocation builds the same shapes from its own inputs: kind (or a scan meaning a copy), the person's words, a designer's 3MF.
+  const root = await tempDir('touchup-inv-shapes-');
+  const empty = await prepareTouchupPass({root, objectId: 'fit', scan: [], photos: [], requirePhotos: false});
+  const rulesOf = input => valueOf(buildTouchupInvocation({printer, claudePath: '/c', sourceEnv, ...input}).args, '--append-system-prompt');
+  assert.equal(rulesOf({pass: await pass()}), systemRules({kind: 'copy'}));
+  assert.equal(rulesOf({pass: await pass(), note: 'the cap is wrong', summary: 'Cleaned.', currentModel: true}), systemRules({kind: 'copy', request: true}));
+  assert.equal(rulesOf({pass: empty, instructions: 'A hook.'}), systemRules({kind: 'fit', request: true}), 'no scan: a new design');
+  assert.equal(rulesOf({pass: await pass(), kind: 'fit', instructions: 'A cap that fits this bottle.'}), systemRules({kind: 'fit', request: true}), 'a fit around a scanned object is a new design');
+  assert.equal(rulesOf({pass: await pass(), instructions: '   '}), systemRules({kind: 'copy'}), 'blank words are no request');
+});
+
+test('a captured object is recognised first, and its manufactured features are rebuilt regular', () => {
+  const rules = CLEANUP_RULES.slice(CLEANUP_RULES.indexOf(RULE_SECTIONS.captured));
+  assert.match(rules, /First say what the object is and name its parts/);
+  assert.match(rules, /cap with ribs and a printed label/);
+  assert.match(rules, /sign with separate letters standing on a base/);
+  assert.match(rules, /flat faces flat, straight edges straight, cylinders round, mirrored halves mirrored/);
+  assert.match(rules, /equal and evenly spaced, with their count taken from the photos/);
+  assert.match(rules, /Printed graphics, labels and colour changes are ink, not shape/);
+  assert.match(rules, /a raised label is a scan defect, not surface detail the photos confirm/, 'the ink rule wins over keeping confirmed detail');
+  assert.match(rules, /Organic and handmade surfaces \(fabric, crochet, carving, clay\) stay as scanned/);
+  assert.match(rules, /never rescales the object/);
+  assert.match(rules, /tagged assumed, or estimated with toleranceMm when it sets a size/);
+  assert.match(rules, /ask for a close-up of it instead of guessing/);
+  // The answer can say all of that as it is: the tags, the tolerance, one line per feature, and the close-up.
+  const change = TOUCHUP_RESULT_SCHEMA.properties.changes.items.properties;
+  assert.ok(change.tag.enum.includes('assumed') && change.tag.enum.includes('estimated'));
+  assert.ok(change.toleranceMm);
+  assert.ok(TOUCHUP_RESULT_SCHEMA.properties.status.enum.includes('needs_closeup'));
+  for (const elsewhere of [FIT_RULES, systemRules({kind: 'copy', designerCopy: true, request: true})]) assert.doesNotMatch(elsewhere, /ink, not shape|First say what the object is/);
+});
+
+test('a scan sent with no words gets one sentence that states the job', async () => {
+  assert.match(TOUCHUP_INSTRUCTION, /^[^.]+\.$/, 'one sentence');
+  assert.match(TOUCHUP_INSTRUCTION, /Clean up this scan/);
+  assert.match(TOUCHUP_INSTRUCTION, /recognise what it is/);
+  assert.match(TOUCHUP_INSTRUCTION, /keep its size/);
+  const prompt = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv}).args.at(-1);
+  assert.ok(prompt.startsWith(`${TOUCHUP_INSTRUCTION}\n\nFiles:\n`));
 });
