@@ -1,15 +1,18 @@
 import XCTest
 import CounterpartKit
 import CloudKit
+#if canImport(ControlKit)
+import ControlKit
+#endif
 
 /// PRD §8.8 and §9.3 rules for delivery, tested apart from the socket, CloudKit and the relay.
 final class EventRelayTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func event(_ type: String, minutesAgo: Double = 0, notify: String = "active", project: String = "p1", id: String = UUID().uuidString,
-                       data: CounterpartEvent.Data? = nil, printId: String? = nil) -> CounterpartEvent {
+                       data: CounterpartEvent.Data? = nil, printId: String? = nil, title: String = "Mic mount is done") -> CounterpartEvent {
         CounterpartEvent(seq: 1, id: id, at: ISO8601DateFormatter().string(from: now.addingTimeInterval(-minutesAgo * 60)), type: type,
-                         projectId: project, printId: printId, printerName: "P1S", title: "Mic mount is done", body: "Ready to collect.",
+                         projectId: project, printId: printId, printerName: "P1S", title: title, body: "Ready to collect.",
                          notify: notify, data: data)
     }
     private func prefs() throws -> NotificationPrefs {
@@ -257,6 +260,143 @@ final class EventRelayTests: XCTestCase {
         XCTAssertNil(LiveActivityPush.carryingAlert(of: alerting, into: end).alert, "done has its own notification")
     }
 
+    @MainActor func testSecondMilestoneOverAWaitingFirstDeliversBoth() async throws {
+        let harness = try MilestoneHarness { request, index in
+            (index == 0 ? 429 : 200, ["Retry-After": "1"])
+        }
+        defer { harness.close() }
+        let relay = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        let first = event("print.first-layer", printId: "print-1", title: "First layer")
+        let second = event("print.milestone", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        XCTAssertTrue(relay.alertMilestone(first, title: "Mic mount", local: local, cloudTokens: .init()))
+        await eventually { relay.lastResult.hasPrefix("Waiting:") }
+        XCTAssertTrue(relay.alertMilestone(second, title: "Mic mount", local: local, cloudTokens: .init()))
+        await eventually(timeout: 4) { harness.acceptedTitles.count == 2 }
+        XCTAssertEqual(Set(harness.acceptedTitles), ["First layer", "Halfway"], "neither milestone may disappear during coalescing")
+    }
+
+    @MainActor func testRestartMidRetryRecoversTheUnconfirmedMilestone() async throws {
+        let harness = try MilestoneHarness { _, index in (index == 0 ? 429 : 200, ["Retry-After": "30"]) }
+        defer { harness.close() }
+        var relay: LiveActivityRelay? = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        let first = event("print.first-layer", id: "first", printId: "print-1", title: "First layer")
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        XCTAssertTrue(relay!.alertMilestone(first, title: "Mic mount", local: local, cloudTokens: .init()))
+        await eventually { relay!.lastResult.hasPrefix("Waiting:") }
+        XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(first.id), "enqueueing is not delivery")
+        relay = nil
+        let restarted = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        restarted.recover(local: local, cloud: .init())
+        await eventually { harness.acceptedTitles == ["First layer"] }
+        XCTAssertEqual(harness.acceptedTitles, ["First layer"], "the persisted outbox must outlive the waiting task and event cursor")
+        XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(first.id), "mark alerted only after a confirmed 200")
+    }
+
+    @MainActor func testOneOfTwoTokensFailingCannotAlsoNotifyTheDeviceThatGotAnAlert() async throws {
+        let harness = try MilestoneHarness { request, index in
+            let object = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any]
+            let failing = object?["token"] as? String == "bb"
+            return (failing ? (index < 2 ? 429 : 410) : 200, ["Retry-After": "1"])
+        }
+        defer { harness.close() }
+        let relay = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        var cloudFallbacks = 0
+        relay.undelivered = { _ in cloudFallbacks += 1; return true }
+        let event = event("print.milestone", id: "halfway", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa"), ("ipad", "print-1", "bb")], starters: ["phone", "ipad"])
+        XCTAssertTrue(relay.alertMilestone(event, title: "Mic mount", local: local, cloudTokens: .init(), pairedDeviceIds: ["phone", "ipad"]))
+        await eventually { harness.requestCount >= 2 }
+        XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(event.id), "wait for every recipient's final decision")
+        await eventually(timeout: 3) { harness.requestCount >= 3 && AlertedMilestones(defaults: harness.defaults).contains(event.id) }
+        XCTAssertEqual(cloudFallbacks, 0, "a failed device must never trigger an account-wide alert after another device succeeded")
+        XCTAssertEqual(harness.acceptedTitles, ["Halfway"])
+        XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(event.id))
+    }
+
+    @MainActor func testAllMilestoneTokensFailBeforeCloudKitFallbackIsChosen() async throws {
+        let harness = try MilestoneHarness { _, index in (index == 0 ? 429 : 410, ["Retry-After": "1"]) }
+        defer { harness.close() }
+        let relay = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        var cloudFallbacks = 0
+        relay.undelivered = { _ in cloudFallbacks += 1; return true }
+        let event = event("print.milestone", id: "halfway", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa"), ("ipad", "print-1", "bb")], starters: ["phone", "ipad"])
+        XCTAssertTrue(relay.alertMilestone(event, title: "Mic mount", local: local, cloudTokens: .init(), pairedDeviceIds: ["phone", "ipad"]))
+        await eventually { harness.requestCount >= 2 }
+        XCTAssertEqual(cloudFallbacks, 0, "one token still has its supported short retry")
+        XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(event.id))
+        await eventually(timeout: 3) { cloudFallbacks == 1 }
+        XCTAssertEqual(cloudFallbacks, 1)
+        XCTAssertTrue(harness.acceptedTitles.isEmpty)
+        XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(event.id))
+    }
+
+    func testAnEnumeratedIPadWithoutAnyTokenForcesCloudKitBeforeSending() {
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        let milestone = event("print.milestone", printId: "print-1")
+        XCTAssertNil(MilestoneAlert.tokens(for: milestone, relayOn: true, local: local, cloud: .init(), dead: [],
+                                           pairedDeviceIds: ["phone", "ipad"]))
+        let both = tokens([("phone", "print-1", "aa"), ("ipad", "print-1", "bb")], starters: ["phone", "ipad"])
+        XCTAssertEqual(MilestoneAlert.tokens(for: milestone, relayOn: true, local: both, cloud: .init(), dead: [],
+                                              pairedDeviceIds: ["phone", "ipad"])?.count, 2)
+        XCTAssertNil(MilestoneAlert.tokens(for: milestone, relayOn: true, local: both, cloud: .init(), dead: []),
+                     "device enumeration unavailable: use the conservative single-device guard")
+    }
+
+    @MainActor func testRestartKeepsTheSuccessfulRecipientAndRetriesOnlyTheMiss() async throws {
+        let harness = try MilestoneHarness { request, index in
+            let object = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any]
+            return (object?["token"] as? String == "aa" ? 200 : (index < 2 ? 429 : 410), ["Retry-After": "30"])
+        }
+        defer { harness.close() }
+        var relay: LiveActivityRelay? = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        var fallbacks = 0
+        relay!.undelivered = { _ in fallbacks += 1; return true }
+        let milestone = event("print.milestone", id: "m1", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa"), ("ipad", "print-1", "bb")], starters: ["phone", "ipad"])
+        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init(), pairedDeviceIds: ["phone", "ipad"]))
+        await eventually { harness.requestCount == 2 && !harness.acceptedTitles.isEmpty && relay!.lastResult.hasPrefix("Waiting:") }
+        relay = nil
+        let restarted = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        restarted.undelivered = { _ in fallbacks += 1; return true }
+        restarted.recover(local: local, cloud: .init())
+        await eventually { AlertedMilestones(defaults: harness.defaults).contains(milestone.id) }
+        XCTAssertEqual(harness.acceptedTitles, ["Halfway"], "the confirmed recipient never alerts again after restart")
+        XCTAssertEqual(fallbacks, 0, "a remembered success forbids account-wide fallback")
+        XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
+    }
+
+    @MainActor func testAnUnconfirmedCloudKitFallbackSurvivesRestart() async throws {
+        let harness = try MilestoneHarness { _, _ in (410, [:]) }
+        defer { harness.close() }
+        var relay: LiveActivityRelay? = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        var fallbacks = 0
+        relay!.undelivered = { _ in fallbacks += 1; return false }
+        let milestone = event("print.milestone", id: "m1", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init()))
+        await eventually { fallbacks == 1 }
+        XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
+        relay = nil
+        let restarted = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        restarted.undelivered = { event in
+            XCTAssertEqual(event.id, milestone.id)
+            XCTAssertEqual(event.title, milestone.title)
+            XCTAssertEqual(event.printId, milestone.printId)
+            fallbacks += 1; return true
+        }
+        restarted.recover(local: local, cloud: .init())
+        await eventually { AlertedMilestones(defaults: harness.defaults).contains(milestone.id) }
+        XCTAssertEqual(fallbacks, 2)
+        XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
+    }
+
+    @MainActor private func eventually(timeout: TimeInterval = 2, _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
     func testTheRelayIsOnByDefaultOnlyInProductionSignedBuildsAndAChoiceWins() {
         XCTAssertTrue(RelayDefault.enabled(stored: nil, apsEnvironment: "production"))
         XCTAssertFalse(RelayDefault.enabled(stored: nil, apsEnvironment: "development"), "Sandbox phones' tokens would be denied by the production relay")
@@ -473,4 +613,63 @@ final class EventRelayTests: XCTestCase {
         XCTAssertTrue(MacPublication.isDue(lastWritten: written, lastAddresses: "a", addresses: "a", tokenExpires: now.addingTimeInterval(120), now: now),
                       "before the published token runs out")
     }
+}
+
+private final class MilestoneHarness: @unchecked Sendable {
+    let name = "milestone-io-\(UUID().uuidString)"
+    let defaults: UserDefaults
+    let session: URLSession
+    private let lock = NSLock()
+    private var accepted: [String] = []
+    private var count = 0
+    private let response: (URLRequest, Int) -> (Int, [String: String])
+    var requestCount: Int { lock.lock(); defer { lock.unlock() }; return count }
+    var acceptedTitles: [String] { lock.lock(); defer { lock.unlock() }; return accepted }
+    @MainActor init(response: @escaping (URLRequest, Int) -> (Int, [String: String])) throws {
+        defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defaults.set(true, forKey: LiveActivityRelay.enabledKey)
+        defaults.set("https://relay.invalid/" + name, forKey: LiveActivityRelay.urlKey)
+        self.response = response
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MilestoneProtocol.self]
+        session = URLSession(configuration: config)
+        MilestoneProtocol.register(self, name: name)
+    }
+    func answer(_ request: URLRequest) -> (Int, [String: String]) {
+        lock.lock(); defer { lock.unlock() }
+        let result = response(request, count); count += 1
+        if result.0 == 200, let object = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any],
+           let alert = object["alert"] as? [String: Any], let title = alert["title"] as? String { accepted.append(title) }
+        return result
+    }
+    func close() { session.invalidateAndCancel(); defaults.removePersistentDomain(forName: name); MilestoneProtocol.remove(name) }
+}
+
+private final class MilestoneProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    private static var harnesses: [String: MilestoneHarness] = [:]
+    static func register(_ harness: MilestoneHarness, name: String) { lock.lock(); harnesses[name] = harness; lock.unlock() }
+    static func remove(_ name: String) { lock.lock(); harnesses[name] = nil; lock.unlock() }
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "relay.invalid" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lock.lock(); let harness = Self.harnesses[request.url?.pathComponents.dropFirst().first ?? ""]; Self.lock.unlock()
+        guard let harness else { client?.urlProtocol(self, didFailWithError: URLError(.cancelled)); return }
+        var sent = request
+        if sent.httpBody == nil, let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var body = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count <= 0 { break }
+                body.append(contentsOf: buffer.prefix(count))
+            }
+            sent.httpBody = body
+        }
+        let (code, headers) = harness.answer(sent)
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: headers)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"scope":"token-interval"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

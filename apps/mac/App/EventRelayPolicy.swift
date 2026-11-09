@@ -192,6 +192,7 @@ struct LiveActivityPush: Encodable, Equatable {
     /// The milestone event this push's alert announces (never sent): if the alert can't go out promptly, the Mac writes
     /// that event to CloudKit instead, so the phone still gets it as a notification.
     var alertEventId: String?
+    var alertDeviceId: String?
     var attributes: Attributes?
     var contentState: ContentState
     var staleDate: Int?
@@ -256,7 +257,7 @@ struct LiveActivityPush: Encodable, Equatable {
     static func carryingAlert(of older: LiveActivityPush?, into newer: LiveActivityPush) -> LiveActivityPush {
         guard let older, older.alertEventId != nil, newer.alertEventId == nil, newer.kind == .update else { return newer }
         var push = newer
-        push.alert = older.alert; push.alertEventId = older.alertEventId; push.priority = 10
+        push.alert = older.alert; push.alertEventId = older.alertEventId; push.alertDeviceId = older.alertDeviceId; push.priority = 10
         return push
     }
 
@@ -331,41 +332,88 @@ struct LiveActivityRecovery {
 /// David, Nov 8: while a print's Live Activity is running, its progress milestones (first layer, 50%, …) arrive as an
 /// alert on the activity (`update(_:alertConfiguration:)`; the relay's APNs `alert`) instead of a separate notification.
 /// Pauses, problems and "done" stay notifications (CloudKit, with their camera frames). A milestone is a separate
-/// notification only when no activity can show it: the relay is off, or a device that shows Live Activities has none for
-/// this print (it gets the CloudKit notification, and nobody gets both).
+/// notification when the relay is off or any known paired device lacks this print's activity. Once activity
+/// delivery is chosen, account-wide CloudKit fallback is allowed only when every recipient failed.
 enum MilestoneAlert {
     static let types: Set<String> = ["print.first-layer", "print.milestone"]
 
     /// The activity tokens to alert, or nil when the milestone goes as a notification instead.
     static func tokens(for event: CounterpartEvent, relayOn: Bool, local: LiveActivityTokens, cloud: LiveActivityTokens,
-                       dead: Set<String>) -> [LiveActivityTokens.Activity]? {
+                       dead: Set<String>, pairedDeviceIds: Set<String>? = nil) -> [LiveActivityTokens.Activity]? {
         guard relayOn, types.contains(event.type), event.notify != "none", let printId = event.printId else { return nil }
-        var seen: Set<String> = []
-        let activities = (local.activities + cloud.activities).filter { activity in
-            let token = activity.token.lowercased()
-            guard activity.printId == printId, !dead.contains(token), !seen.contains(token) else { return false }
-            seen.insert(token)
-            return true
+        // Select one current token per device. LAN and CloudKit can contain different generations.
+        var newest: [String: LiveActivityTokens.Activity] = [:]
+        for activity in local.activities + cloud.activities where activity.printId == printId {
+            if let old = newest[activity.deviceId], old.updatedAt >= activity.updatedAt { continue }
+            newest[activity.deviceId] = activity
         }
+        let activities = newest.values.filter { !dead.contains($0.token.lowercased()) }
         guard !activities.isEmpty else { return nil }
-        // Every device that can start Live Activities must have this print's: otherwise it would hear nothing.
-        let devices = Set((local.pushToStart + cloud.pushToStart).map(\.deviceId))
+        let registered = Set((local.pushToStart + cloud.pushToStart).map(\.deviceId))
+            .union((local.activities + cloud.activities).map(\.deviceId))
+        let devices: Set<String>
+        if let pairedDeviceIds { devices = pairedDeviceIds.union(registered) }
+        else {
+            // An unavailable device list cannot prove a multi-device account is fully covered.
+            guard registered.count == 1 else { return nil }
+            devices = registered
+        }
         guard devices.isSubset(of: Set(activities.map(\.deviceId))) else { return nil }
-        return activities
+        return activities.sorted { $0.deviceId < $1.deviceId }
     }
 
     /// The update that moves the activity to the milestone and alerts with the notification's own words. Priority 10:
     /// Apple sends an alerting update at once. A passive milestone (the first layer) lights the screen without a sound.
-    static func push(for event: CounterpartEvent, token: String, title: String, now: Date) -> LiveActivityPush? {
+    static func push(for event: CounterpartEvent, token: String, title: String, now: Date, deviceId: String? = nil) -> LiveActivityPush? {
         guard types.contains(event.type), var push = LiveActivityPush.make(for: event, token: token, title: title, now: now) else { return nil }
         push.priority = 10
         push.alert = LiveActivityPush.alert(title: event.title, body: event.body, sound: event.notify == "passive" ? nil : "default")
         push.alertEventId = event.id
+        push.alertDeviceId = deviceId
         return push
     }
 }
 
-/// Milestones already sent as activity alerts, so a restart never alerts twice. Keeps the newest 200.
+/// A durable outbox, written before acknowledging the event cursor. The transport and recipient devices
+/// are fixed for a milestone; no tokens are persisted. Results and retry counts survive process restarts.
+struct MilestoneDeliveries {
+    enum Outcome: String, Codable { case pending, succeeded, failed }
+    struct Entry: Codable {
+        var event: CounterpartEvent
+        var title: String
+        var outcomes: [String: Outcome]
+        var attempts: [String: Int] = [:]
+        var fallback = false
+        var complete: Bool { !outcomes.values.contains(.pending) }
+        var hasSuccess: Bool { outcomes.values.contains(.succeeded) }
+    }
+    private static let key = "relay.pendingMilestones"
+    private let defaults: UserDefaults
+    private(set) var entries: [String: Entry]
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        entries = defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode([String: Entry].self, from: $0) } ?? [:]
+    }
+    mutating func begin(_ event: CounterpartEvent, title: String, devices: [String]) {
+        guard entries[event.id] == nil else { return }
+        entries[event.id] = Entry(event: event, title: title, outcomes: Dictionary(uniqueKeysWithValues: devices.map { ($0, .pending) }))
+        save()
+    }
+    mutating func attempt(_ id: String, device: String) -> Int {
+        let count = (entries[id]?.attempts[device] ?? 0) + 1
+        entries[id]?.attempts[device] = count; save()
+        return count
+    }
+    mutating func resolve(_ id: String, device: String, outcome: Outcome) {
+        guard entries[id]?.outcomes[device] == .pending else { return }
+        entries[id]?.outcomes[device] = outcome; save()
+    }
+    mutating func useFallback(_ id: String) { entries[id]?.fallback = true; save() }
+    mutating func remove(_ id: String) { entries[id] = nil; save() }
+    private func save() { defaults.set(try? JSONEncoder().encode(entries), forKey: Self.key) }
+}
+
+/// Milestones whose recipient decision (or confirmed CloudKit fallback) completed. Keeps the newest 200.
 struct AlertedMilestones {
     let defaults: UserDefaults
     static let key = "relay.alertedMilestones"

@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import OSLog
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -21,159 +22,226 @@ import ControlKit
     nonisolated static var enabledByDefault: Bool { RelayDefault.enabled(stored: nil, apsEnvironment: apsEnvironment) }
 
     var enabled: Bool {
-        RelayDefault.enabled(stored: UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool, apsEnvironment: Self.apsEnvironment)
+        RelayDefault.enabled(stored: defaults.object(forKey: Self.enabledKey) as? Bool, apsEnvironment: Self.apsEnvironment)
     }
-    /// Writes a milestone to CloudKit after all, when its activity alert couldn't go out promptly (set by `EventRelay`).
-    var undelivered: ((String) async -> Void)?
-    private let alerted = AlertedMilestones(defaults: .standard)
-    private var fellBack: Set<String> = []
+    /// CloudKit delivery is confirmed before the durable fallback leaves the outbox.
+    var undelivered: ((CounterpartEvent) async -> Bool)?
+    private let defaults: UserDefaults
+    private let alerted: AlertedMilestones
+    private var milestones: MilestoneDeliveries
+    private var queuedMilestones: Set<String> = []
+    private var fallbackInFlight: Set<String> = []
     var endpoint: URL? {
-        let text = UserDefaults.standard.string(forKey: Self.urlKey) ?? Self.defaultURL
+        let text = defaults.string(forKey: Self.urlKey) ?? Self.defaultURL
         guard let url = URL(string: text), url.scheme == "https" else { return nil }
         return url.appendingPathComponent("live-activity")
     }
-
-    /// Plain words for Settings: what the relay last said.
     private(set) var lastResult = "Off"
     private var inFlight: Set<String> = []
-    private var waiting: [String: LiveActivityPush] = [:]
+    // Statuses coalesce; distinct milestone alerts retain their order for each token.
+    private var waiting: [String: [LiveActivityPush]] = [:]
     private var dead: Set<String> = []
     private var pausedUntil: Date?
-    /// Sends in a row that couldn't reach the relay, per token.
+    private var tokenPausedUntil: [String: Date] = [:]
     private var failures: [String: Int] = [:]
-    private var recovery = LiveActivityRecovery(defaults: .standard)
-    private let session: URLSession = {
+    private var recovery: LiveActivityRecovery
+    private let session: URLSession
+    private var flushAt: Date?
+    private var flushTask: Task<Void, Never>?
+    private static let logger = Logger(subsystem: "com.scantomake.mac", category: "MilestoneDelivery")
+
+    init(defaults: UserDefaults = .standard, session: URLSession? = nil) {
+        self.defaults = defaults
+        self.alerted = AlertedMilestones(defaults: defaults)
+        self.milestones = MilestoneDeliveries(defaults: defaults)
+        self.recovery = LiveActivityRecovery(defaults: defaults)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20
-        return URLSession(configuration: configuration)
-    }()
+        self.session = session ?? URLSession(configuration: configuration)
+    }
+    deinit { flushTask?.cancel() }
 
-    /// Tokens come from the companion (the phone on the LAN) and from iCloud (`CounterpartDevice`, the phone away).
     func deliver(_ event: CounterpartEvent, title: String, client: ControlClient, cloudTokens: LiveActivityTokens) async {
         guard enabled, endpoint != nil, event.type.hasPrefix("print.") else { return }
         recovery.record(event, title: title, now: Date())
         let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
         let candidates = event.type == "print.started" ? (local.pushToStart + cloudTokens.pushToStart).map(\.token) : []
         for token in Set(candidates.map { $0.lowercased() }) where !dead.contains(token) {
-            guard let push = LiveActivityPush.make(for: event, token: token, title: title, now: Date()) else { continue }
-            enqueue(push)
+            if let push = LiveActivityPush.make(for: event, token: token, title: title, now: Date()) { enqueue(push) }
         }
         recover(local: local, cloud: cloudTokens)
     }
 
-    /// A progress milestone while the print's Live Activity runs: an alert on the activity instead of a notification
-    /// (`MilestoneAlert`). Returns true when the activity carries it, so the caller writes no CloudKit event.
+    /// Choose one transport before any push. The full paired-device list includes phones whose token
+    /// has not arrived yet, unlike a union of push-to-start tokens alone.
     func alertMilestone(_ event: CounterpartEvent, title: String, client: ControlClient, cloudTokens: LiveActivityTokens) async -> Bool {
-        guard enabled, endpoint != nil, MilestoneAlert.types.contains(event.type) else { return false }
-        if alerted.contains(event.id) { return true }
+        guard MilestoneAlert.types.contains(event.type) else { return false }
         let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
-        guard let activities = MilestoneAlert.tokens(for: event, relayOn: true, local: local, cloud: cloudTokens, dead: dead) else { return false }
-        // A relay that asked to wait longer than a moment (no APNs key yet, a daily limit) would deliver it too late.
+        let devices = try? await client.devices()
+        return alertMilestone(event, title: title, local: local, cloudTokens: cloudTokens,
+                              pairedDeviceIds: devices.map { Set($0.map(\.deviceId)) })
+    }
+
+    func alertMilestone(_ event: CounterpartEvent, title: String, local: LiveActivityTokens, cloudTokens: LiveActivityTokens,
+                        pairedDeviceIds: Set<String>? = nil) -> Bool {
+        // A pending decision must be resumed even if Settings changed or the token disappeared.
+        if alerted.contains(event.id) { return true }
+        if milestones.entries[event.id] != nil { resumeMilestones(local: local, cloud: cloudTokens); return true }
+        guard enabled, endpoint != nil,
+              let activities = MilestoneAlert.tokens(for: event, relayOn: true, local: local, cloud: cloudTokens,
+                                                     dead: dead, pairedDeviceIds: pairedDeviceIds) else { return false }
         let soon = Date().addingTimeInterval(30)
         if let pausedUntil, pausedUntil > soon { return false }
         if activities.contains(where: { (tokenPausedUntil[$0.token.lowercased()] ?? .distantPast) > soon }) { return false }
-        let pushes = activities.compactMap { MilestoneAlert.push(for: event, token: $0.token, title: title, now: Date()) }
-        guard !pushes.isEmpty else { return false }
-        alerted.insert(event.id)
-        for push in pushes { enqueue(push) }
+        milestones.begin(event, title: title, devices: activities.map(\.deviceId))
+        resumeMilestones(local: local, cloud: cloudTokens)
         return true
     }
 
-    /// Called each long-poll cycle even with no new events: the phone may only now have registered its token.
     func recover(client: ControlClient, cloudTokens: LiveActivityTokens) async {
-        guard enabled, endpoint != nil else { return }
         let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
         recover(local: local, cloud: cloudTokens)
     }
 
-    private func recover(local: LiveActivityTokens, cloud: LiveActivityTokens) {
+    func recover(local: LiveActivityTokens, cloud: LiveActivityTokens) {
+        resumeMilestones(local: local, cloud: cloud)
+        guard enabled, endpoint != nil else { return }
         for push in recovery.pushes(tokens: local.activities + cloud.activities, now: Date()) where !dead.contains(push.token) { enqueue(push) }
     }
 
-    private var tokenPausedUntil: [String: Date] = [:]
+    private func resumeMilestones(local: LiveActivityTokens, cloud: LiveActivityTokens) {
+        for entry in milestones.entries.values.sorted(by: { $0.event.seq < $1.event.seq }) {
+            if entry.complete { decide(entry.event.id); continue }
+            for (device, outcome) in entry.outcomes where outcome == .pending {
+                let key = entry.event.id + "|" + device
+                guard !queuedMilestones.contains(key) else { continue }
+                guard enabled, endpoint != nil else {
+                    milestones.resolve(entry.event.id, device: device, outcome: .failed)
+                    decide(entry.event.id); continue
+                }
+                let candidates = (local.activities + cloud.activities).filter { $0.deviceId == device && $0.printId == entry.event.printId }
+                guard let token = candidates.max(by: { $0.updatedAt < $1.updatedAt })?.token else { continue }
+                if dead.contains(token.lowercased()) {
+                    milestones.resolve(entry.event.id, device: device, outcome: .failed)
+                    decide(entry.event.id); continue
+                }
+                guard let push = MilestoneAlert.push(for: entry.event, token: token, title: entry.title, now: Date(), deviceId: device) else { continue }
+                queuedMilestones.insert(key)
+                enqueue(push)
+            }
+        }
+    }
+
+    private func resolved(_ push: LiveActivityPush, _ outcome: MilestoneDeliveries.Outcome) {
+        guard let id = push.alertEventId, let device = push.alertDeviceId else { return }
+        queuedMilestones.remove(id + "|" + device)
+        milestones.resolve(id, device: device, outcome: outcome)
+        decide(id)
+    }
+
+    private func decide(_ id: String) {
+        guard let entry = milestones.entries[id], entry.complete else { return }
+        if entry.hasSuccess {
+            // CloudKit is account-wide. A miss is preferable to notifying successful devices twice.
+            for (device, outcome) in entry.outcomes where outcome == .failed {
+                Self.logger.notice("Milestone \(id, privacy: .public) missed device \(device, privacy: .public)")
+            }
+            alerted.insert(id)
+            milestones.remove(id)
+        } else {
+            milestones.useFallback(id)
+            guard let undelivered, !fallbackInFlight.contains(id) else { return }
+            fallbackInFlight.insert(id)
+            Task {
+                let delivered = await undelivered(entry.event)
+                fallbackInFlight.remove(id)
+                if delivered { alerted.insert(id); milestones.remove(id) }
+            }
+        }
+    }
+
+    private func until(_ token: String) -> Date? { [pausedUntil, tokenPausedUntil[token]].compactMap { $0 }.max() }
 
     private func enqueue(_ push: LiveActivityPush) {
-        // While the relay asked to wait, keep the newest state (an end always wins) and send it when the wait is over.
-        let until = [pausedUntil, tokenPausedUntil[push.token]].compactMap { $0 }.max()
-        if let until, Date() < until {
-            if waiting[push.token]?.kind != .end || push.kind == .end { waiting[push.token] = LiveActivityPush.carryingAlert(of: waiting[push.token], into: push) }
-            scheduleFlush(at: until)
-            return
+        if let until = until(push.token), Date() < until {
+            queue(push); scheduleFlush(at: until); return
         }
-        if inFlight.contains(push.token) {
-            // Keep the newest; an end always wins over an update, and a waiting milestone alert rides on the newer update.
-            if waiting[push.token]?.kind != .end || push.kind == .end { waiting[push.token] = LiveActivityPush.carryingAlert(of: waiting[push.token], into: push) }
-            return
-        }
+        if inFlight.contains(push.token) { queue(push); return }
         inFlight.insert(push.token)
         Task { await send(push) }
     }
 
-    private var flushAt: Date?
-    /// Sends what waited once the earliest wait is over; anything still waiting schedules the next flush.
+    private func queue(_ push: LiveActivityPush, retry: Bool = false) {
+        var pending = waiting[push.token] ?? []
+        if push.kind == .end {
+            for old in pending { resolved(old, .failed) }
+            pending = [push]
+        } else if pending.contains(where: { $0.kind == .end }) {
+            resolved(push, .failed)
+            return
+        } else if push.alertEventId != nil {
+            // A retry goes in front of newer milestones. A status can update its content, never its identity.
+            if let index = pending.firstIndex(where: { $0.alertEventId == push.alertEventId }) { pending[index] = push }
+            else if retry, let newest = pending.first, newest.alertEventId == nil {
+                pending[0] = LiveActivityPush.carryingAlert(of: push, into: newest)
+            } else if retry { pending.insert(push, at: 0) }
+            else { pending.append(push) }
+        } else if !pending.isEmpty {
+            pending[pending.count - 1] = LiveActivityPush.carryingAlert(of: pending.last, into: push)
+        } else { pending.append(push) }
+        waiting[push.token] = pending
+    }
+
+    private func drain(_ token: String) {
+        guard !inFlight.contains(token), var pending = waiting[token], !pending.isEmpty else { return }
+        if let until = until(token), Date() < until { scheduleFlush(at: until); return }
+        let next = pending.removeFirst()
+        waiting[token] = pending.isEmpty ? nil : pending
+        enqueue(next)
+    }
+
     private func scheduleFlush(at date: Date) {
         if let flushAt, flushAt <= date { return }
         flushAt = date
-        Task {
-            try? await Task.sleep(for: .seconds(max(1, date.timeIntervalSinceNow)))
-            guard flushAt == date else { return }
-            flushAt = nil
-            let now = Date()
-            if let pausedUntil, pausedUntil <= now { self.pausedUntil = nil }
-            tokenPausedUntil = tokenPausedUntil.filter { $0.value > now }
-            let ready = waiting.filter { inFlight.contains($0.key) == false }
-            for token in ready.keys { waiting[token] = nil }
-            for push in ready.values { enqueue(push) }
+        flushTask?.cancel()
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(0.01, date.timeIntervalSinceNow)))
+            guard !Task.isCancelled, let self, self.flushAt == date else { return }
+            self.flushAt = nil
+            for token in Array(self.waiting.keys) { self.drain(token) }
         }
     }
 
-    /// Keeps a push that couldn't go to be sent after the wait. Anything waiting arrived while it was in flight, so it
-    /// is newer and wins, except that an end always wins over an update.
-    private func keep(_ push: LiveActivityPush) {
-        if let newer = waiting[push.token], !(push.kind == .end && newer.kind != .end) {
-            waiting[push.token] = LiveActivityPush.carryingAlert(of: push, into: newer)
-            return
-        }
-        waiting[push.token] = push
-    }
-
-    /// The alert can't go out promptly: write its milestone to CloudKit (a notification) once, and keep sending the
-    /// activity's state without the alert.
-    private func fallBack(_ push: LiveActivityPush) -> LiveActivityPush {
-        guard let id = push.alertEventId else { return push }
-        if !fellBack.contains(id) {
-            fellBack.insert(id)
-            if let undelivered { Task { await undelivered(id) } }
-        }
+    private func withoutAlert(_ push: LiveActivityPush) -> LiveActivityPush {
+        resolved(push, .failed)
         var plain = push
-        plain.alert = nil; plain.alertEventId = nil; plain.priority = 5
+        plain.alert = nil; plain.alertEventId = nil; plain.alertDeviceId = nil; plain.priority = 5
         return plain
     }
 
     private func send(_ push: LiveActivityPush) async {
-        defer {
-            inFlight.remove(push.token)
-            if let next = waiting.removeValue(forKey: push.token) { enqueue(next) }
-        }
-        guard enabled, let endpoint, let body = try? JSONEncoder().encode(push) else { return }
+        defer { inFlight.remove(push.token); drain(push.token) }
+        guard enabled, let endpoint, let body = try? JSONEncoder().encode(push) else { resolved(push, .failed); return }
+        let attempt: Int
+        if let id = push.alertEventId, let device = push.alertDeviceId {
+            attempt = milestones.attempt(id, device: device)
+            guard attempt <= 3 else { resolved(push, .failed); return }
+        } else { attempt = 0 }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
         guard let (data, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else {
-            // Offline or the relay is down: an end has no later update to repair the phone's Live Activity, so keep
-            // it (unless something newer waits) and send it again after a growing wait.
             let count = (failures[push.token] ?? 0) + 1
             if let wait = RelayRetry.delay(failures: count, kind: push.kind) {
                 failures[push.token] = count
                 let until = Date().addingTimeInterval(wait)
                 tokenPausedUntil[push.token] = max(until, tokenPausedUntil[push.token] ?? until)
-                keep(fallBack(push))
+                queue(attempt > 0 && attempt >= 3 ? withoutAlert(push) : push, retry: true)
                 scheduleFlush(at: until)
                 lastResult = "The relay couldn't be reached; trying again soon."
             } else {
-                failures[push.token] = nil
-                _ = fallBack(push)
+                failures[push.token] = nil; _ = withoutAlert(push)
                 lastResult = "The relay couldn't be reached."
             }
             return
@@ -182,19 +250,16 @@ import ControlKit
         let retry = Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 60
         switch http.statusCode {
         case 200:
+            resolved(push, .succeeded)
             lastResult = "Working"
         case 410:
-            dead.insert(push.token) // the phone sends a new token, or updates the activity itself
-            _ = fallBack(push)
+            dead.insert(push.token); _ = withoutAlert(push)
             lastResult = "A phone's Live Activity ended."
         case 429:
-            // Wait as long as the relay says (a daily limit can mean hours), keep the newest state for this token (an
-            // end always wins), and send it once the wait is over. A network-wide limit pauses every token.
             let scope = (try? JSONDecoder().decode([String: JSONValue].self, from: data))?["scope"]?.string ?? "token-interval"
             let until = Date().addingTimeInterval(max(retry, 1))
             if scope.hasPrefix("token") || scope == "apns" { tokenPausedUntil[push.token] = until } else { pausedUntil = until }
-            // A short per-token wait (one update every 10 s) keeps the alert; a longer one would deliver it too late.
-            keep(retry <= 30 && scope == "token-interval" ? push : fallBack(push))
+            queue(retry <= 30 && scope == "token-interval" && attempt < 3 ? push : withoutAlert(push), retry: true)
             scheduleFlush(at: until)
             lastResult = "Waiting: the relay asked to slow down."
         case 503:
@@ -206,11 +271,10 @@ import ControlKit
                 pausedUntil = Date().addingTimeInterval(min(max(retry, 1), 900))
                 lastResult = "The relay is busy; trying again soon."
             }
-            // Keep this state (unless a newer one is already waiting) and send it after the wait.
-            keep(fallBack(push))
+            queue(withoutAlert(push), retry: true)
             if let pausedUntil { scheduleFlush(at: pausedUntil) }
         default:
-            _ = fallBack(push)
+            _ = withoutAlert(push)
             lastResult = "The relay refused an update (\(http.statusCode))."
         }
     }
