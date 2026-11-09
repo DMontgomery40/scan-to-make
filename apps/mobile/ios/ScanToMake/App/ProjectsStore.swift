@@ -107,6 +107,11 @@ import CounterpartKit
         return "\(connection) · \(ready) \(ready == 1 ? "printer" : "printers") ready"
     }
 
+    /// Said beside a starter's Add button before any tap, when the store already knows the Mac isn't answering (F6).
+    var starterUnavailableMessage: String? {
+        reachable == false ? "Your Mac isn't answering. Check it's on and awake, then try again." : nil
+    }
+
     /// Printers that are offline or need an MCP update.
     var printerProblems: Int {
         catalog?.destinations.filter { $0.isOffline || $0.capabilities?.update != nil }.count ?? 0

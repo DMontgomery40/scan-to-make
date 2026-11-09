@@ -130,6 +130,8 @@ class MainActivity : ComponentActivity() {
                     newProject = { job -> nav.navigate(if (job != null) "new?job=$job" else "new") },
                     printers = { nav.navigate("printers") },
                     settings = { nav.navigate("settings") },
+                    // The banner's Connect a Different Computer is the same pairing screen Settings opens.
+                    pairAgain = { nav.navigate("pair") },
                 )
             }
             composable("new?job={job}", arguments = listOf(navArgument("job") { type = NavType.StringType; nullable = true; defaultValue = null })) { entry ->

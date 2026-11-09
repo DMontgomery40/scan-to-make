@@ -104,7 +104,8 @@ struct ProjectsRoot: View {
                 Group {
                     if let selected { projectPage(selected, close: closeProject).id(selected) }
                     else {
-                        StartPane(hasProjects: !store.projects.isEmpty, newProject: { newSheet = NewSheetRequest(job: $0) }, addStarter: addStarter)
+                        StartPane(hasProjects: !store.projects.isEmpty, unavailableMessage: store.starterUnavailableMessage,
+                                  newProject: { newSheet = NewSheetRequest(job: $0) }, addStarter: addStarter)
                     }
                 }
                 .navigationDestination(for: String.self) { id in page(id, close: closeProject) }
@@ -143,6 +144,7 @@ struct IdentifiedProject: Identifiable { let id: String }
 /// The iPad detail with no project selected: what to start with, never an empty "Choose a project".
 struct StartPane: View {
     let hasProjects: Bool
+    var unavailableMessage: String? = nil
     let newProject: (NewProjectJob?) -> Void
     let addStarter: (StarterProject) async throws -> Void
     var body: some View {
@@ -150,7 +152,7 @@ struct StartPane: View {
             VStack(alignment: .leading, spacing: 28) {
                 Text(hasProjects ? "Choose a project, or start something new" : "Your next project starts here")
                     .font(.largeTitle.bold())
-                StarterProjectsView(start: addStarter)
+                StarterProjectsView(unavailableMessage: unavailableMessage, start: addStarter)
                 EmptyHome(start: newProject)
             }
             .padding(24).frame(maxWidth: 680, alignment: .leading)
@@ -238,14 +240,22 @@ struct SidebarList: View {
             .keyboardShortcut("n", modifiers: .command)
             .padding(.horizontal, 16).padding(.vertical, 10)
         }
-        .sheet(item: $openedStarter) { starter in StarterDetail(project: starter, start: addStarter) }
+        .sheet(item: $openedStarter) { starter in StarterDetail(project: starter, unavailableMessage: store.starterUnavailableMessage, start: addStarter) }
         .navigationTitle("Projects")
         // A sidebar toolbar subtitle is a single truncated line. Keep the shared summary in the
         // sidebar itself so both the connection and the printer status can wrap.
         .safeAreaInset(edge: .top, spacing: 0) {
-            Text(store.homeSubtitle).font(.caption).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 16).padding(.vertical, 8).accessibilityIdentifier("projects-status")
+            VStack(alignment: .leading, spacing: 8) {
+                // The same banner as iPhone Home, with Try Again and the way to another Mac (F6): at regular width
+                // Home's cards aren't shown, so without it the iPad said only "isn't answering" in the line below.
+                if let error = store.error {
+                    ConnectionBanner(error: error, pair: store.onPair) { Task { await store.load(); await store.loadPrinters() } }
+                }
+                Text(store.homeSubtitle).font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("projects-status")
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
         }
 
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }

@@ -329,6 +329,8 @@ struct FixtureTransport: HTTPTransport {
     let folder: URL
 
     func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        // An `offline` file in the folder: the Mac isn't answering. A UI test deletes it to bring the Mac back (Try Again).
+        if FileManager.default.fileExists(atPath: folder.appending(path: "offline").path) { throw TransportError("network") }
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
         func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }

@@ -125,8 +125,7 @@ struct HomeView: View {
     }
 
     private var starters: some View {
-        StarterProjectsView(unavailableMessage: store.reachable == false
-            ? "Your Mac isn't answering. Check it's on and awake, then try again." : nil) { starter in
+        StarterProjectsView(unavailableMessage: store.starterUnavailableMessage) { starter in
             let ticket = store.startRequest()
             let project = try await store.mac.client.addStarter(starter)
             store.replace(project, ticket: ticket)

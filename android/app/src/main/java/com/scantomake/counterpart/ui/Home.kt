@@ -59,7 +59,7 @@ import kotlinx.coroutines.launch
 /** Home (PRD §5.1): what's running now, what needs you, and every project as a real render. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, printers: () -> Unit, settings: () -> Unit) {
+fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, printers: () -> Unit, settings: () -> Unit, pairAgain: () -> Unit = settings) {
     val state = AppState.of(LocalContext.current)
     val projects by state.projects.collectAsState()
     val loaded by state.loaded.collectAsState()
@@ -127,7 +127,7 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
         PullToRefreshBox(refreshing, onRefresh = { scope.launch { refreshing = true; state.load(); state.loadPrinters(); refreshing = false } }, Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 error?.let { e -> item { ConnectionBanner(e.message, e.needsPairing,
-                    retry = { scope.launch { state.load(); state.loadPrinters() } }, connectDifferent = settings) } }
+                    retry = { scope.launch { state.load(); state.loadPrinters() } }, connectDifferent = pairAgain) } }
                 if (query.isBlank()) item { StarterProjects { open(it, false) } }
                 if (loaded && projects.isEmpty() && error == null) {
                     item { EmptyHome(newProject) }

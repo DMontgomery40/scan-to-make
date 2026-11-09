@@ -593,6 +593,28 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(send.isEnabled)
     }
 
+    /// Nov 8 walkthrough F6: "Your Mac isn't answering… then try again" carries Try Again and the way to another Mac,
+    /// on iPhone Home and in the iPad sidebar. Try Again brings the Mac's projects back.
+    func testTheOfflineBannerOffersTryAgainAndADifferentMac() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        let offline = folder.appendingPathComponent("offline")
+        try Data().write(to: offline)
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all"]
+        app.launch()
+        let retry = app.buttons["connection-try-again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(app.buttons["connection-different-mac"].label, "Connect a Different Mac")
+        try FileManager.default.removeItem(at: offline)
+        retry.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: retry)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 15), .completed, "the Mac answered, so the banner goes")
+        let mic = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch
+        XCTAssertTrue(mic.waitForExistence(timeout: 10), "with its projects")
+    }
+
     /// XCTest has no hinge API. These fixture-only links exercise the actual split's inherited size
     /// class without relaunching; agent-device supplies the real Duo hinge proof alongside this test.
     private func resize(_ app: XCUIApplication, to width: String) {
