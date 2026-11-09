@@ -124,7 +124,7 @@ func look(_ azimuth: Double, down: Double = 5) -> Direction {
 }
 var pacer = Pacer()
 check("the first photo is due at once", pacer.isDue(look(0), at: 0))
-pacer.took(look(0), at: 0)
+pacer.requested(look(0), at: 0); pacer.shotTaken(at: 0.1)
 check("not again before the view turns", !pacer.isDue(look(4.9), at: 5))
 check("due after 5°", pacer.isDue(look(5.1), at: 5))
 check("not faster than 3 a second, however far it turned", !pacer.isDue(look(40), at: 0.3))
@@ -137,7 +137,7 @@ func photos(turns: Double, seconds: Double) -> Int {
     let samples = Int(seconds * 30)
     for i in 0...samples {
         let t = Double(i) / 30, direction = look(360 * turns * t / seconds)
-        if p.isDue(direction, at: t) { p.took(direction, at: t); taken += 1 }
+        if p.isDue(direction, at: t) { p.requested(direction, at: t); p.shotTaken(at: t); taken += 1 }
     }
     return taken
 }
@@ -145,6 +145,26 @@ let oneTurn = photos(turns: 1, seconds: 30), threeTurns = photos(turns: 3, secon
 check("one turn ≈ 70 photos (\(oneTurn))", (65...75).contains(oneTurn))
 check("three turns ≈ 200 photos (\(threeTurns))", (195...220).contains(threeTurns))
 check("a fast turn (10 s) is held to 3 a second (\(photos(turns: 1, seconds: 10)))", photos(turns: 1, seconds: 10) <= 31)
+
+// A request Apple drops is asked again a third of a second later, without waiting for another 5° turn.
+var dropped = Pacer()
+dropped.requested(look(0), at: 0); dropped.shotTaken(at: 0)
+dropped.requested(look(6), at: 1)                       // Apple didn't take this one
+check("a dropped request is asked again", dropped.isDue(look(6), at: 1.34) && !dropped.isDue(look(6), at: 1.2))
+check("a dropped request alone doesn't give up on the app's shutter", !dropped.needsAutoCapture(at: 1.34))
+// Apple ignoring every request (a dim room, a busy session): after 3 unanswered requests over 5 s, Apple's
+// auto-capture takes over rather than the scan ending with no photos.
+var ignored = Pacer()
+for i in 0..<16 { let t = Double(i) / 3; if ignored.isDue(look(Double(i) * 6), at: t) { ignored.requested(look(Double(i) * 6), at: t) } }
+check("ignored for 5 s: hand back to Apple's auto-capture", ignored.needsAutoCapture(at: 5.1) && ignored.unanswered >= 3)
+check("not before 5 s", !ignored.needsAutoCapture(at: 4.9))
+ignored.shotTaken(at: 5.2)
+check("a photo resets it", !ignored.needsAutoCapture(at: 5.3) && ignored.unanswered == 0)
+// Holding still for a minute and then moving on doesn't count the stillness against Apple.
+var still = Pacer()
+still.requested(look(0), at: 0); still.shotTaken(at: 0)
+still.requested(look(10), at: 60)
+check("a fresh request after a long still spell is not a fallback", !still.needsAutoCapture(at: 60.4))
 
 // The camera's direction from Core Motion's attitude matrix, whichever way round the matrix carries the frames.
 // The phone held upright facing +x in the reference frame (z up): device x → reference −y, device y → reference z,

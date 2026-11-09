@@ -143,8 +143,9 @@ class AppDataModel: Identifiable {
     private(set) var shotLookDowns: [Double] = []
     /// One motion manager for the app, as Apple asks ("Create only one CMMotionManager object for your app").
     private let motion = CMMotionManager()
-    /// When the app takes the next photo (``FreeformCaptureFlow/ShotPacer``).
+    /// When the app takes the next photo (``FreeformCaptureFlow/ShotPacer``), while it paces the shots at all.
     private var pacer = FreeformCaptureFlow.ShotPacer()
+    private var pacing = false
     /// What the photos so far cover, which gates Done (``FreeformCaptureFlow/Coverage``).
     var captureCoverage: FreeformCaptureFlow.Coverage {
         FreeformCaptureFlow.Coverage(shots: objectCaptureSession?.numberOfShotsTaken ?? 0, lookDowns: shotLookDowns,
@@ -436,6 +437,7 @@ extension AppDataModel {
         freeformFlow = FreeformCaptureFlow()
         shotLookDowns = []
         pacer = FreeformCaptureFlow.ShotPacer()
+        pacing = motion.isDeviceMotionAvailable
         objectCaptureSession = ObjectCaptureSession()
         // After the session is set (setting it detaches the last one's listeners and stops motion). Gravity-vertical
         // attitude for the shutter and each photo's height; device motion needs no permission (NSMotionUsageDescription
@@ -458,7 +460,7 @@ extension AppDataModel {
         session.shouldPlayHaptics = false
         // The app takes the photos (ShotPacer): "If disabled, only manually triggered shots are taken". Without a motion
         // sensor there is nothing to pace by, so Apple's auto-capture stays on.
-        session.isAutoCaptureEnabled = !motion.isDeviceMotionAvailable
+        session.isAutoCaptureEnabled = !pacing
         var configuration = ObjectCaptureSession.Configuration()
         // Every image goes to the Mac: "meant for use when the images are intended to be transferred to macOS".
         configuration.isOverCaptureEnabled = true
@@ -817,7 +819,7 @@ extension AppDataModel {
     /// second, only while Apple can take one (`canRequestImageCapture`), tracking is normal, the session isn't paused,
     /// and Apple isn't saying `movingTooFast` ("the capturing may be paused to ensure quality").
     fileprivate func paceShot(_ session: ObjectCaptureSession) {
-        guard freeformFlow.step == .capturing, case .capturing = session.state, !session.isPaused,
+        guard pacing, freeformFlow.step == .capturing, case .capturing = session.state, !session.isPaused,
               session.cameraTracking == .normal, session.canRequestImageCapture,
               !session.feedback.contains(.movingTooFast), let reading = motion.deviceMotion else { return }
         let m = reading.attitude.rotationMatrix
@@ -825,8 +827,15 @@ extension AppDataModel {
             rotation: [m.m11, m.m12, m.m13, m.m21, m.m22, m.m23, m.m31, m.m32, m.m33],
             gravity: .init(x: reading.gravity.x, y: reading.gravity.y, z: reading.gravity.z))
         let now = ProcessInfo.processInfo.systemUptime
+        // Apple isn't taking the photos asked for: give the shutter back to its auto-capture rather than end with none.
+        if pacer.needsAutoCapture(at: now) {
+            session.isAutoCaptureEnabled = true
+            pacing = false
+            record("auto-capture-fallback", detail: "\(pacer.unanswered) requests unanswered")
+            return
+        }
         guard pacer.isDue(direction, at: now) else { return }
-        pacer.took(direction, at: now)
+        pacer.requested(direction, at: now)
         session.requestImageCapture()
     }
 
@@ -834,6 +843,7 @@ extension AppDataModel {
     /// each new photo gets the latest reading.
     fileprivate func noteShots(_ count: Int) {
         guard count > shotLookDowns.count else { return }
+        pacer.shotTaken(at: ProcessInfo.processInfo.systemUptime)
         let lookDown = motion.deviceMotion.map {
             FreeformCaptureFlow.lookDownDegrees(gravityX: $0.gravity.x, y: $0.gravity.y, z: $0.gravity.z)
         }
@@ -846,6 +856,8 @@ extension AppDataModel {
         switch call {
         case .startCapturing:
             session.startCapturing()
+            // Again once capturing, in case starting it reset the shutter: the app paces the photos.
+            if pacing { session.isAutoCaptureEnabled = false }
         case .pause:
             // The review sheet covers the capture view: "Call this when object capture view is not visible".
             setShowOverlaySheets(to: true)

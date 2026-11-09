@@ -2948,9 +2948,10 @@ export class ObjectService {
           ...(scaleQualificationRequired ? {scaleQualificationRequired: true} : {}), signal, onProgress: show});
       } catch (error) {
         await writing;
-        // Photos alone (a stopped scan sent as it was): there is no preview to keep, so say plainly when they were too few.
-        const sent = before.capture?.length ?? 0;
-        if (objectCapture && !signal.aborted && !before.scan && sent < ENOUGH_PHOTOS) throw new Error(tooFewPhotos(sent));
+        // Photos alone (a stopped scan sent as it was): there is no preview to keep, so when Apple simply couldn't build
+        // from them and they were few, say that plainly. A specific reason (macOS 27, a missing builder) is kept.
+        const sent = before.capture?.length ?? 0, message = error instanceof Error ? error.message : String(error);
+        if (objectCapture && !signal.aborted && !before.scan && sent < ENOUGH_PHOTOS && message === RECONSTRUCTION_FAILED) throw new Error(tooFewPhotos(sent));
         if (!objectCapture || signal.aborted || !before.scan) throw error;
         const reason = this.#publicText(error instanceof Error ? error.message : String(error));
         console.error(`rebuild failed: project ${id} keeps the phone's preview: ${reason.replace(/\s+/g, ' ').slice(0, 300)}`);

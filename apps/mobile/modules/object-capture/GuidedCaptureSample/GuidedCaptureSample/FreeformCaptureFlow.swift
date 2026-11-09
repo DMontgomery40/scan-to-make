@@ -91,19 +91,44 @@ struct FreeformCaptureFlow: Equatable {
     struct ShotPacer: Equatable {
         static let degrees = 5.0
         static let perSecond = 3.0
+        /// If this many requests in a row bring no new photo within `fallbackSeconds`, Apple isn't honouring them (a dim
+        /// room, a busy session): hand the shutter back to Apple's auto-capture rather than end with no photos.
+        static let fallbackRequests = 3
+        static let fallbackSeconds = 5.0
 
         struct Direction: Equatable { var x, y, z: Double }
+        /// Where the camera looked for the last photo Apple actually took.
         private(set) var last: Direction?
-        private(set) var lastAt: Double?
+        private(set) var lastRequestAt: Double?
+        private var pending: Direction?
+        private(set) var unanswered = 0
+        /// When the current run of unanswered requests began.
+        private var streakStart: Double?
 
-        /// A photo is due: the first one, or once the view has turned `degrees` and a third of a second has passed.
+        /// A photo is due: the first one, or once the view has turned `degrees` from the last photo taken, at most
+        /// `perSecond` requests a second. A request Apple dropped is asked again without waiting for another turn.
         func isDue(_ direction: Direction, at time: Double) -> Bool {
-            guard let last, let lastAt else { return true }
-            guard time - lastAt >= 1 / Self.perSecond else { return false }
+            if let lastRequestAt, time - lastRequestAt < 1 / Self.perSecond { return false }
+            guard let last else { return true }
             return Self.angle(last, direction) >= Self.degrees
         }
 
-        mutating func took(_ direction: Direction, at time: Double) { last = direction; lastAt = time }
+        /// The app asked Apple for a photo looking this way.
+        mutating func requested(_ direction: Direction, at time: Double) {
+            if unanswered == 0 { streakStart = time }
+            pending = direction; lastRequestAt = time; unanswered += 1
+        }
+
+        /// Apple's shot count rose: the photo was taken where the last request looked.
+        mutating func shotTaken(at time: Double) {
+            if let pending { last = pending }
+            pending = nil; unanswered = 0; streakStart = nil
+        }
+
+        /// Apple has ignored `fallbackRequests` requests for `fallbackSeconds`.
+        func needsAutoCapture(at time: Double) -> Bool {
+            unanswered >= Self.fallbackRequests && time - (streakStart ?? time) >= Self.fallbackSeconds
+        }
 
         static func angle(_ a: Direction, _ b: Direction) -> Double {
             let dot = a.x * b.x + a.y * b.y + a.z * b.z

@@ -385,6 +385,13 @@ test('a stopped scan sent as photos alone is rebuilt on the Mac, and too few pho
   assert.equal(done.scanSource, 'mac');
   assert.equal(converted.at(-1).removeSupport, true);
   assert.match(done.current.summary, /2 photos are few, so expect gaps; more photos, including some from above, help\./);
+
+  // A specific reason is never replaced by "too few".
+  const old = await setup({reconstruct: async () => { throw new Error(NEEDS_MACOS_27); }});
+  await old.service.declareCapture(old.object.id, objectCaptureManifest(APPLE));
+  for (const name of APPLE) await old.service.addCapturePhoto(old.object.id, name, Buffer.from(name));
+  await old.service.start(old.object.id, objectCaptureManifest(APPLE));
+  assert.equal((await old.service.settled(old.object.id)).failure, NEEDS_MACOS_27);
 });
 
 test('a Mac without macOS 27 says so plainly, and trying again rebuilds', async () => {
