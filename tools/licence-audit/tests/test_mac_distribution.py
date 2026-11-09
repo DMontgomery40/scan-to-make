@@ -10,7 +10,9 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from audit import run_audit
 from inventory import detect_app_gpl_tool_imports
-from mac_distribution import MANIFEST, NOTICES, inventory_mac, render_notices, verify_payload
+from mac_distribution import EARCUT, MANIFEST, NOTICES, RECONSTRUCTION_HELPER, inventory_mac, render_notices, verify_payload
+
+REPO = Path(__file__).resolve().parents[3]
 
 
 class MacDistributionTests(unittest.TestCase):
@@ -23,13 +25,16 @@ class MacDistributionTests(unittest.TestCase):
         notice = self.mac / 'Licenses/Test.txt'
         notice.write_text('Copyright test fixture. MIT licence.\n')
         self.manifest = json.loads((Path(__file__).resolve().parents[3] / MANIFEST).read_text())
-        self.manifest['firstPartyExecutables'] = [dict(name='mac-reconstruct', path='bin/mac-reconstruct',
-            sourcePath='tools/mac-reconstruct', licence='MIT', licencePath='tools/mac-reconstruct/LICENSE')]
+        self.manifest['firstPartyExecutables'] = [json.loads(json.dumps(RECONSTRUCTION_HELPER))]
         if 'tools/mac-reconstruct' not in self.manifest['sourcePaths']:
             self.manifest['sourcePaths'].append('tools/mac-reconstruct')
         helper = self.root / 'tools/mac-reconstruct'
         helper.mkdir(parents=True)
         shutil.copyfile(Path(__file__).resolve().parents[1] / 'LICENSE', helper / 'LICENSE')
+        # The adapted earcut code: its retained licence, the notice file and the source carrying the notice (the real ones).
+        for path in [EARCUT['licencePath'], EARCUT['noticePath'], *EARCUT['files']]:
+            (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(REPO / path, self.root / path)
         for component in self.manifest['components']:
             component['notices'] = [dict(path='Licenses/Test.txt', sha256=hashlib.sha256(notice.read_bytes()).hexdigest(), sourceUrl='https://example.com/LICENSE')]
         lock = self.mac / 'ScanToMake.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'
@@ -48,7 +53,9 @@ class MacDistributionTests(unittest.TestCase):
     def test_complete_declared_distribution_passes(self):
         report = run_audit(self.root, self.policy, python_paths=[])
         self.assertTrue(report['ok'], report['violations'])
-        self.assertEqual(len(report['inventory']['macDistribution']), 6)
+        self.assertEqual(len(report['inventory']['macDistribution']), 7)
+        earcut = next(i for i in report['inventory']['macDistribution'] if i['name'].startswith('earcut'))
+        self.assertEqual((earcut['licence'], earcut['status']), ('ISC', 'allowed'))
 
     def test_missing_notice_or_changed_licence_text_fails(self):
         (self.mac / 'Licenses/Test.txt').write_text('changed licence')
@@ -133,6 +140,9 @@ class MacDistributionTests(unittest.TestCase):
         source = payload / 'source/tools/mac-reconstruct'
         source.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(self.root / 'tools/mac-reconstruct/LICENSE', source / 'LICENSE')
+        for path in [EARCUT['licencePath'], EARCUT['noticePath'], *EARCUT['files']]:
+            (payload / 'source' / path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(self.root / path, payload / 'source' / path)
 
     def complete_payload(self):
         payload = self.root / 'Payload'
@@ -198,6 +208,48 @@ class MacDistributionTests(unittest.TestCase):
             verify_payload(self.root, payload)
         (self.root / 'tools/mac-reconstruct/LICENSE').unlink()
         self.assertTrue(inventory_mac(self.root, [])[1])
+
+    def test_adapted_earcut_code_is_named_with_its_licence_in_the_helpers_notices(self):
+        text = (self.root / NOTICES).read_text()
+        section = text[text.index('## Bundled first-party executable: mac-reconstruct'):text.index('## Companion npm production dependencies')]
+        self.assertIn('no third-party Swift package is bundled with this helper', section)
+        self.assertIn('### Adapted third-party code in mac-reconstruct: earcut', section)
+        self.assertIn('Licence: ISC. Source: https://github.com/mapbox/earcut', section)
+        self.assertIn('Copyright (c) 2026, Mapbox', section)
+        self.assertIn('provided that the above copyright notice\nand this permission notice appear in all copies.', section)
+
+    def test_manifest_cannot_drop_or_change_the_adapted_code_declaration(self):
+        for change in ['drop', 'licence', 'checksum']:
+            with self.subTest(change=change):
+                helper = self.manifest['firstPartyExecutables'][0]
+                original = json.loads(json.dumps(helper))
+                if change == 'drop':
+                    helper.pop('adaptedCode')
+                elif change == 'licence':
+                    helper['adaptedCode'][0]['licence'] = 'MIT'
+                else:
+                    helper['adaptedCode'][0]['sha256'] = '0' * 64
+                self.write_manifest()
+                self.assertTrue(inventory_mac(self.root, [])[1])
+                self.manifest['firstPartyExecutables'][0] = original
+                self.write_manifest()
+
+    def test_adapted_code_licence_must_stay_in_the_source_notice_file_and_retained_text(self):
+        for path, replacement in [(EARCUT['files'][0], '// adapted, notice removed\n'),
+                                  (EARCUT['noticePath'], '# Third-party code\n\nearcut, ISC.\n'),
+                                  (EARCUT['licencePath'], 'ISC License\n\nCopyright (c) 2026, Someone else\n')]:
+            with self.subTest(path=path):
+                original = (self.root / path).read_bytes()
+                (self.root / path).write_text(replacement)
+                self.assertTrue(inventory_mac(self.root, [])[1])
+                (self.root / path).write_bytes(original)
+        self.assertFalse(inventory_mac(self.root, [])[1])
+
+    def test_payload_must_carry_the_adapted_code_notice(self):
+        payload = self.complete_payload()
+        (payload / 'source' / EARCUT['noticePath']).unlink()
+        with self.assertRaises((ValueError, OSError)):
+            verify_payload(self.root, payload)
 
 
 if __name__ == '__main__':

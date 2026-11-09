@@ -23,8 +23,14 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   everything up to 0.5 mm above it goes, the largest part standing on it is kept, and the support's own low scraps
   outside that part's footprint go too. It only counts as a support when most of it, and at least 50 cm², lies
   outside the footprint of what stands on it, so an object's own step (a sign's plank under its letters) is never
-  cut. The result is levelled on the plane, turned so its long side runs along x, and drawn for the project page.
-  The `{"done":…}` line then carries `"support"`. On David's Nov 9 rescan (28 photos) it took the rebuild from
+  cut. The cut is then closed (`HandheldKit/Cap.swift`): each opening it left on the plane is filled flat by ear
+  clipping its own edge, holes kept (a hollow foot gets a ring, not a disc), with no new corners, so the kept triangles
+  are unchanged and a scan that was watertight stays watertight. The result is levelled on the plane, turned so its
+  long side runs along x, and drawn for the project page. The `{"done":…}` line then carries `"support"`, with
+  `"capTriangles"` and the `"openEdges"` left (0 when the scan was closed). On David's DAD sign (Nov 9, 94 photos) the
+  cut alone left 1,081 open edges; the cap closes them with 1,079 triangles and leaves the other 68,113 byte for byte.
+  Apple's `Request.Geometry` box was tried instead and doesn't do it: with its floor just above the plate (0.5 mm over the sign's lowest points), the
+  sign came back clipped at the floor and open (3,302 open edges), with the plate's scraps above the floor still on it. On David's Nov 9 rescan (28 photos) it took the rebuild from
   185 × 230 × 125 mm (half a round plate) to the sign alone, 204 × 58 × 101 mm.
 - `mac-reconstruct samples <images-folder> <output.usdz> [detail] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]`
   rebuilds a handheld scan: the phone stays still and the object turns in the hand. Each photo becomes a

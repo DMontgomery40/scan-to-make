@@ -20,8 +20,20 @@ from spdx import classify_licence_text, evaluate_expression, normalize_expressio
 
 MANIFEST = Path("apps/mac/distribution.json")
 NOTICES = Path("apps/mac/THIRD_PARTY_NOTICES.md")
+# Third-party source adapted into the helper (not a package: it is compiled in as first-party code, so its licence
+# notice must travel with the source and the app's notices).
+EARCUT = dict(name="earcut", licence="ISC", sourceUrl="https://github.com/mapbox/earcut",
+    licenceUrl="https://raw.githubusercontent.com/mapbox/earcut/main/LICENSE",
+    revision="934e54d8bed85387330b7acaa5d2f5ba30a460a3",
+    licencePath="tools/mac-reconstruct/Licenses/earcut.txt",
+    sha256="0b348fff56384b43dbb37593906904e56d0f9deb51eae590d4dc6d427fbf1808",
+    noticePath="tools/mac-reconstruct/THIRD_PARTY.md",
+    files=["tools/mac-reconstruct/Sources/HandheldKit/Cap.swift"],
+    adapted="The polygon-with-holes ear clipping that closes a cut scan's bottom (earcut's linked-list polygon, "
+            "hole bridging, ear test and fallback passes), ported from JavaScript to Swift.")
 RECONSTRUCTION_HELPER = dict(name="mac-reconstruct", path="bin/mac-reconstruct",
-    sourcePath="tools/mac-reconstruct", licence="MIT", licencePath="tools/mac-reconstruct/LICENSE")
+    sourcePath="tools/mac-reconstruct", licence="MIT", licencePath="tools/mac-reconstruct/LICENSE",
+    adaptedCode=[EARCUT])
 
 
 def sha256(path: Path) -> str:
@@ -41,7 +53,25 @@ def first_party_executables(root: Path, manifest: dict) -> list[dict]:
             raise ValueError("First-party executable source is absent from the payload manifest")
         if classify_licence_text((root / helper["licencePath"]).read_text()) != helper["licence"]:
             raise ValueError("First-party executable source licence differs from its declaration")
+        for code in helper.get("adaptedCode", []):
+            adapted_code_notice(root, code)
     return helpers
+
+
+def adapted_code_notice(root: Path, code: dict) -> str:
+    """The retained licence of third-party code adapted into a helper, checked to travel with every copy."""
+    path = root / code["licencePath"]
+    if sha256(path) != code["sha256"]:
+        raise ValueError(f"{code['name']}: adapted code licence text differs from its retained checksum")
+    text = path.read_text().strip()
+    if classify_licence_text(text) != code["licence"]:
+        raise ValueError(f"{code['name']}: adapted code licence differs from its declaration")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for file in [code["noticePath"], *code["files"]]:
+        body = " ".join(line.strip().lstrip("/").strip() for line in (root / file).read_text().splitlines())
+        if not all(line in body for line in lines):
+            raise ValueError(f"{code['name']}: licence notice missing from {file}")
+    return text
 
 
 def inventory_mac(root: Path, workspace: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -83,6 +113,10 @@ def inventory_mac(root: Path, workspace: list[dict]) -> tuple[list[dict], list[d
             records.append(dict(ecosystem="mac", name=helper["name"], version="source", scope="mac",
                                 licence=helper["licence"], firstParty=True,
                                 evidence=helper["licencePath"], sourceUrl=helper["sourcePath"]))
+            for code in helper.get("adaptedCode", []):
+                records.append(dict(ecosystem="mac", name=f"{code['name']} (adapted in {helper['name']})",
+                                    version=code["revision"], scope="mac", licence=normalize_expression(code["licence"]),
+                                    evidence=code["licencePath"], sourceUrl=code["sourceUrl"]))
         sparkle = next(c for c in components if c["name"] == "Sparkle")
         lock = json.loads((root / "apps/mac/ScanToMake.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved").read_text())
         if len(lock["pins"]) != 1 or lock["pins"][0]["identity"] != "sparkle" or lock["pins"][0]["state"] != dict(version=sparkle["version"], revision=sparkle["revision"]):
@@ -135,8 +169,15 @@ def render_notices(root: Path, manifest: dict, records: list[dict]) -> str:
         lines += ["", f"## Bundled first-party executable: {helper['name']}", "",
                   f"Built from `{helper['sourcePath']}` in the same source archive as the companion.",
                   f"Licence: {helper['licence']}. The source and licence ship in `Payload/source/{helper['sourcePath']}`.",
-                  "Uses Apple's system frameworks; no third-party Swift package is bundled with this helper.",
+                  "Uses Apple's system frameworks; no third-party Swift package is bundled with this helper."
+                  + (" It contains source code adapted from the third-party code listed below." if helper.get("adaptedCode") else ""),
                   "", "~~~~", (root / helper['licencePath']).read_text().strip(), "~~~~"]
+        for code in helper.get("adaptedCode", []):
+            lines += ["", f"### Adapted third-party code in {helper['name']}: {code['name']}", "",
+                      f"Licence: {code['licence']}. Source: {code['sourceUrl']} (licence text from {code['licenceUrl']},",
+                      f"revision `{code['revision']}`).", code["adapted"],
+                      "Adapted in " + ", ".join(f"`{f}`" for f in code["files"]) + f"; notice also in `{code['noticePath']}`.",
+                      "", "~~~~", (root / code['licencePath']).read_text().strip(), "~~~~"]
     lines += ["", "## Companion npm production dependencies", "",
               "Development dependencies, npm itself, pip and ensurepip are not shipped.", ""]
     seen = set()
@@ -179,6 +220,8 @@ def verify_payload(root: Path, payload: Path) -> None:
             raise ValueError("First-party executable is not a Mach-O binary: " + helper["name"])
         if sha256(payload / "source" / helper["licencePath"]) != sha256(root / helper["licencePath"]):
             raise ValueError("First-party executable source licence differs from retained licence")
+        for code in helper.get("adaptedCode", []):
+            adapted_code_notice(payload / "source", code)
     # Superset upstream notices mention these source/build-only licences; their
     # code is not in the approved binary distributions and is never allowlisted.
     if any(p.name in {"jsonchecker", "aclocal.m4", "config.guess"} for p in payload.rglob("*")):

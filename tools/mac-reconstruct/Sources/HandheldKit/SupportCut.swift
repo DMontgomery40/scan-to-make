@@ -7,9 +7,13 @@ public struct SupportCut: Equatable {
     public var tiltDegrees: Double
     /// Area of the support plane's own upward faces, in mm².
     public var supportAreaMm2: Double
-    /// Triangles before and after.
+    /// Triangles before and after (after includes the cap).
     public var trianglesBefore: Int
     public var trianglesAfter: Int
+    /// Triangles added to close the cut: the object's new flat bottom, made from the cut's own corners.
+    public var capTriangles: Int = 0
+    /// Edges still open after the cap (0 when the model was closed before the cut): openings the cut didn't make.
+    public var openEdges: Int = 0
 }
 
 /// Removes whatever an Object Capture scan stood on that Apple's object masking kept: a table, a desk, the floor, a
@@ -26,6 +30,10 @@ public struct SupportCut: Equatable {
 /// 4. It is only a support if it reaches well beyond what stands on it: at least half its area, and at least
 ///    `minimumOutsideArea` mm², lies outside the kept part's footprint. Otherwise (an object's own step, such as the
 ///    top of a sign's plank) nothing is cut and this returns nil.
+/// 5. The cut is closed (`capCut`): each opening it left on the plane is filled flat, from the opening's own corners,
+///    so a model that was watertight before the cut is watertight after it and its kept triangles are unchanged.
+///    (Apple's own `Request.Geometry` box can't do this: on David's DAD sign, a box whose floor sat just above the plate
+///    clipped the model at the floor and left it open, 3,302 open edges, and kept the plate's scraps above the floor.)
 /// The result is turned so the plane is level and moved so the cut is at z = 0: the object stands where it stood.
 public func removeSupport(_ corners: [SIMD3<Float>], clearance: Double = 0.5, band: Double = 2,
                           maximumTilt: Double = 15, minimumOutsideArea: Double = 5000) -> (corners: [SIMD3<Float>], cut: SupportCut)? {
@@ -182,23 +190,43 @@ public func removeSupport(_ corners: [SIMD3<Float>], clearance: Double = 0.5, ba
     // Level the plane and stand the object on z = 0.
     let turn = simd_quatd(from: normal, to: SIMD3<Double>(0, 0, 1))
     let base = simd_dot(point, normal) + clearance
+    func level(_ p: SIMD3<Double>) -> SIMD3<Float> {
+        let q = turn.act(p - normal * base)
+        return SIMD3<Float>(Float(q.x), Float(q.y), Float(max(0, q.z)))
+    }
     var result: [SIMD3<Float>] = []
     result.reserveCapacity(kept.count)
-    for t in object {
-        for p in triangle(t) {
-            let q = turn.act(p - normal * base)
-            result.append(SIMD3<Float>(Float(q.x), Float(q.y), Float(max(0, q.z))))
-        }
-    }
+    for t in object { for p in triangle(t) { result.append(level(p)) } }
     // Turn it about z so its longest side runs along x (principal axis of its footprint): its size reads along the object,
-    // and the project picture sees its face.
+    // and the project picture sees its face. Measured on the object alone, before the cap.
     var mean = SIMD2<Double>.zero
     for p in result { mean += SIMD2(Double(p.x), Double(p.y)) }
     mean /= Double(result.count)
     var sxx = 0.0, syy = 0.0, sxy = 0.0
     for p in result { let d = SIMD2(Double(p.x), Double(p.y)) - mean; sxx += d.x * d.x; syy += d.y * d.y; sxy += d.x * d.y }
     let yaw = Float(0.5 * atan2(2 * sxy, sxx - syy))
+    // 5. Close the cut. Its corners are the kept corners themselves, levelled the same way, so the two meet exactly.
+    let cap = capCut(object.flatMap(triangle), down: -normal, onCut: { abs(height($0)) < 1e-3 },
+                     flat: { SIMD2(simd_dot($0, across), simd_dot($0, along)) })
+    result += cap.map(level)
     let (c, s) = (cos(-yaw), sin(-yaw))
     result = result.map { SIMD3($0.x * c - $0.y * s, $0.x * s + $0.y * c, $0.z) }
-    return (result, SupportCut(tiltDegrees: tilt, supportAreaMm2: support, trianglesBefore: count, trianglesAfter: result.count / 3))
+    return (result, SupportCut(tiltDegrees: tilt, supportAreaMm2: support, trianglesBefore: count, trianglesAfter: result.count / 3,
+                               capTriangles: cap.count / 3, openEdges: openEdges(result)))
+}
+
+/// Edges used by exactly one triangle, corners matched by exact position: 0 for a closed mesh.
+public func openEdges(_ corners: [SIMD3<Float>]) -> Int {
+    var ids: [SIMD3<UInt32>: Int] = [:]
+    func id(_ p: SIMD3<Float>) -> Int {
+        let key = SIMD3<UInt32>((p.x + 0).bitPattern, (p.y + 0).bitPattern, (p.z + 0).bitPattern)
+        if let i = ids[key] { return i }
+        ids[key] = ids.count; return ids.count - 1
+    }
+    var uses: [SIMD2<Int>: Int] = [:]
+    for t in 0..<corners.count / 3 {
+        let v = [id(corners[3 * t]), id(corners[3 * t + 1]), id(corners[3 * t + 2])]
+        for k in 0..<3 where v[k] != v[(k + 1) % 3] { uses[SIMD2(min(v[k], v[(k + 1) % 3]), max(v[k], v[(k + 1) % 3])), default: 0] += 1 }
+    }
+    return uses.values.filter { $0 == 1 }.count
 }

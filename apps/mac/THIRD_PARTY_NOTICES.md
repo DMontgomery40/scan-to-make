@@ -79,7 +79,7 @@ Composite licence for the wheel: OpenUSD (TOST-1.0); RapidJSON binary, libdeflat
 
 Built from `tools/mac-reconstruct` in the same source archive as the companion.
 Licence: MIT. The source and licence ship in `Payload/source/tools/mac-reconstruct`.
-Uses Apple's system frameworks; no third-party Swift package is bundled with this helper.
+Uses Apple's system frameworks; no third-party Swift package is bundled with this helper. It contains source code adapted from the third-party code listed below.
 
 ~~~~
 MIT License
@@ -103,6 +103,31 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+~~~~
+
+### Adapted third-party code in mac-reconstruct: earcut
+
+Licence: ISC. Source: https://github.com/mapbox/earcut (licence text from https://raw.githubusercontent.com/mapbox/earcut/main/LICENSE,
+revision `934e54d8bed85387330b7acaa5d2f5ba30a460a3`).
+The polygon-with-holes ear clipping that closes a cut scan's bottom (earcut's linked-list polygon, hole bridging, ear test and fallback passes), ported from JavaScript to Swift.
+Adapted in `tools/mac-reconstruct/Sources/HandheldKit/Cap.swift`; notice also in `tools/mac-reconstruct/THIRD_PARTY.md`.
+
+~~~~
+ISC License
+
+Copyright (c) 2026, Mapbox
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
 ~~~~
 
 ## Companion npm production dependencies

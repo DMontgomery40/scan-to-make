@@ -176,7 +176,23 @@
       "path": "bin/mac-reconstruct",
       "sourcePath": "tools/mac-reconstruct",
       "licence": "MIT",
-      "licencePath": "tools/mac-reconstruct/LICENSE"
+      "licencePath": "tools/mac-reconstruct/LICENSE",
+      "adaptedCode": [
+        {
+          "name": "earcut",
+          "licence": "ISC",
+          "sourceUrl": "https://github.com/mapbox/earcut",
+          "licenceUrl": "https://raw.githubusercontent.com/mapbox/earcut/main/LICENSE",
+          "revision": "934e54d8bed85387330b7acaa5d2f5ba30a460a3",
+          "licencePath": "tools/mac-reconstruct/Licenses/earcut.txt",
+          "sha256": "0b348fff56384b43dbb37593906904e56d0f9deb51eae590d4dc6d427fbf1808",
+          "noticePath": "tools/mac-reconstruct/THIRD_PARTY.md",
+          "files": [
+            "tools/mac-reconstruct/Sources/HandheldKit/Cap.swift"
+          ],
+          "adapted": "The polygon-with-holes ear clipping that closes a cut scan's bottom (earcut's linked-list polygon, hole bridging, ear test and fallback passes), ported from JavaScript to Swift."
+        }
+      ]
     }
   ],
   "sourcePaths": [
