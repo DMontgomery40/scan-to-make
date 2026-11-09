@@ -450,8 +450,8 @@ struct ProjectCard: View {
     }
 
     private func capsuleText(_ words: ProjectWords) -> String? {
-        // A stopped scan's photos are still on this phone: say so, so the project can be found and sent.
-        if let stopped = store.stoppedScanWords(project) { return stopped }
+        // A scan still on this phone: say so, so the project can be found and sent.
+        if let local = store.localScanWords(project) { return local }
         return switch words.phase {
         case .confirmed: ProjectWords.doneLine
         case .printed: "Printed"

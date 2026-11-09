@@ -16,11 +16,19 @@ import CounterpartKit
     var canScan = false
     /// Scans stopped after keeping photos, by project: still on this phone, shown as "Scan stopped · 9 photos kept".
     var stoppedScans: [String: MacConnection.StoppedScan] = [:]
-    func refreshStoppedScans() { stoppedScans = mac.stoppedScans() }
+    /// Finished scans still only on this phone: their projects offer Send even though the Mac has no scan yet.
+    var readyScans: Set<String> = []
+    func refreshStoppedScans() { stoppedScans = mac.stoppedScans(); readyScans = mac.readyScanProjects() }
     /// "Scan stopped · 9 photos kept", while the project hasn't been sent.
     func stoppedScanWords(_ project: Project) -> String? {
         guard project.state == .new, let stopped = stoppedScans[project.id] else { return nil }
         return "Scan stopped · \(stopped.photos) photo\(stopped.photos == 1 ? "" : "s") kept"
+    }
+    /// A scan kept on this phone (stopped or finished but unsent), in the words its card and row show.
+    func localScanWords(_ project: Project) -> String? {
+        if let stopped = stoppedScanWords(project) { return stopped }
+        guard project.state == .new, !project.hasScan, readyScans.contains(project.id) else { return nil }
+        return "Scan saved · send to your Mac"
     }
     /// Projects this phone is still sending files to: they show "Sending to your Mac".
     var sending: Set<String> = [] { didSet { sendProgress = sendProgress.filter { sending.contains($0.key) } } }
@@ -58,7 +66,7 @@ import CounterpartKit
     func project(_ id: String) -> Project? { projects.first { $0.id == id } }
 
     func words(_ project: Project) -> ProjectWords {
-        ProjectWords(project, sending: sending.contains(project.id), printerName: printerName(project))
+        ProjectWords(project, sending: sending.contains(project.id), localScan: readyScans.contains(project.id), printerName: printerName(project))
     }
 
     /// Spools for the printers, read fresh each time (spools get swapped): the Mac reports them for a project's
@@ -256,7 +264,7 @@ import CounterpartKit
     func reset() {
         reads.reset()
         projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
-        sendFailures = [:]
+        stoppedScans = [:]; readyScans = []; sendFailures = [:]
     }
 
     /// One consumer for the visible app: events when served, otherwise a refresh every 30 s.
@@ -288,6 +296,38 @@ import CounterpartKit
     }
 
     // MARK: Sending
+
+    /// A finished scan uploading while its use is still being chosen. It starts no pass.
+    private var uploadTasks: [String: Task<Void, Never>] = [:]
+    func beginUpload(_ id: String, _ body: @escaping @MainActor () async throws -> Void) {
+        guard uploadTasks[id] == nil, !sending.contains(id) else { return }
+        sending.insert(id)
+        sendFailures[id] = nil
+        uploadTasks[id] = Task { @MainActor in
+            defer { sending.remove(id); uploadTasks[id] = nil }
+            do { try await body(); await reload(id) }
+            catch let failure as CompanionError {
+                if failure.code != "cancelled" { sendFailures[id] = failure.message }
+                if failure.needsPairing { onPair() }
+                await reload(id)
+            } catch {
+                sendFailures[id] = CompanionError.unreachable.message
+                await reload(id)
+            }
+        }
+    }
+
+    /// Send once an upload already under way settles; a cut-short upload is simply resumed by the send.
+    func sendAfterUpload(_ id: String, _ body: @escaping @MainActor () async throws -> Void) async {
+        if let task = uploadTasks[id] {
+            Task { @MainActor in
+                await task.value
+                await sendInBackground(id, body)
+            }
+        } else {
+            await sendInBackground(id, body)
+        }
+    }
 
     /// Sends a new project's files after its sheet has closed. The project shows Sending until they land,
     /// then the Mac starts. A send cut short is finished from the project page, or when it's next opened.

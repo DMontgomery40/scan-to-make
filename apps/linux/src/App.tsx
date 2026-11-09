@@ -14,7 +14,7 @@ import { ProjectView } from "./ProjectView";
 import { Settings, Pairing } from "./Settings";
 import { Question } from "./Question";
 import { Action, Modal } from "./ui";
-import { searchProject, startersShown, words } from "./domain";
+import { projectThumbnail, searchProject, startersShown, words } from "./domain";
 import { useWorkspace } from "./useWorkspace";
 import { useChangeQueue } from "./useChangeQueue";
 import type { HostStatus, Project } from "./types";
@@ -346,7 +346,7 @@ export function App() {
                   >
                     <Picture
                       id={p.id}
-                      path={p.current?.renders[0] ?? p.credit?.thumbnail}
+                      path={projectThumbnail(p)}
                       alt={p.title}
                     />
                     <div>

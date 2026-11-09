@@ -345,13 +345,13 @@ struct ProjectRow: View {
     }
 }
 
-/// The first render, else the first photo, else a quiet symbol on the stage colour. Never a fake picture.
+/// The real object first (a photo or scan frame), else its render, else a quiet symbol. Never a fake picture.
 struct ProjectThumbnail: View {
     let object: Project
     var body: some View {
         ZStack {
             Color.stageBottom
-            if let url = object.renderURLs.first ?? object.photoURLs.first ?? object.captureURLs.first {
+            if let url = object.thumbnailURL {
                 FillImage(url: url, version: object.updatedAtMs)
             } else if object.words.busy {
                 ProgressView().controlSize(.small)

@@ -139,7 +139,7 @@ struct ProjectDetail: View {
         } else {
             ZStack {
                 StageBackground()
-                if let still = object.renderURLs.first ?? object.photoURLs.first ?? object.captureURLs.first {
+                if let still = object.thumbnailURL {
                     FileImage(url: still, version: object.updatedAtMs, contentMode: .fit).padding(80)
                 } else if words.busy {
                     ProgressView().controlSize(.large)

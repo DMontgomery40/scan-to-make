@@ -11,6 +11,7 @@ import {
   guardPlate,
   parseLayers,
   searchProject,
+  projectThumbnail,
   words,
   startersShown,
   normalizeQuestion,
@@ -46,6 +47,12 @@ const project = {
   plates: [{ id: "a:1", selected: true }],
   directory: "/private/needle",
 } as unknown as Project;
+test("a project thumbnail is the real object before any render", () => {
+  const rendered = { ...project, current: { model: "m.stl", renders: ["renders/overview.png"] } } as unknown as Project;
+  assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "photos/bottle.jpg");
+  assert.equal(projectThumbnail({ ...rendered, capture: ["0001.heic"] }), "capture/0001.heic");
+  assert.equal(projectThumbnail(rendered), "renders/overview.png");
+});
 test("a print sheet rejects a changed plate and never adopts it", () => {
   const frozen = freezePlate(project);
   assert.equal(frozen, "a:1");

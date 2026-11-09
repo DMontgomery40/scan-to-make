@@ -162,9 +162,10 @@ enum Fixtures {
                                     ["id": "preparing", "words": "Filled the gaps", "startedAtMs": ago(9), "endedAtMs": ago(6), "typicalSec": 150],
                                     ["id": "working", "words": "Matching your photos", "startedAtMs": ago(6), "typicalSec": 300]]]]],
         ]
-        // `COUNTERPART_STOPPED_SCAN=<id>:<photos>`: an untitled project whose scan was stopped after it kept photos (the
-        // Nov 9 unicorn, 2581854b): never sent, so the Mac has it as a new project with nothing in it.
-        let stopped = ProcessInfo.processInfo.environment["COUNTERPART_STOPPED_SCAN"].map { _ in
+        // `COUNTERPART_STOPPED_SCAN=<id>:<photos>` or `COUNTERPART_READY_SCAN=<id>`: an untitled project whose scan
+        // is still only on this phone (stopped after it kept photos, or finished but unsent; the Nov 9 unicorn,
+        // 2581854b): never sent, so the Mac has it as a new project with nothing in it.
+        let stopped = (ProcessInfo.processInfo.environment["COUNTERPART_STOPPED_SCAN"] ?? ProcessInfo.processInfo.environment["COUNTERPART_READY_SCAN"]).map { _ in
             [["id": ids.unicorn, "createdAtMs": ago(5), "updatedAtMs": ago(4), "state": "new", "kind": "copy", "photos": [String](), "passes": [[String: Any]]()]] as [[String: Any]]
         } ?? []
         // `-CounterpartFixtureSet grid`: only the projects Home shows as cards, so the grid is at the top.

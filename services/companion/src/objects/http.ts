@@ -260,9 +260,12 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
         if (!action) {
           if (method === 'PATCH') {
             await authorize(WRITE);
-            const {instructions} = await json<{instructions?: unknown}>(request);
-            if (typeof instructions !== 'string' || instructions.length > 8000) throw new HttpFailure(400, 'invalid-request');
-            return send(response, 200, {object: publicObject(await service.updateInstructions(id, instructions))});
+            const {instructions, kind} = await json<{instructions?: unknown; kind?: unknown}>(request);
+            if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpFailure(400, 'invalid-request');
+            if (kind !== undefined && kind !== 'fit' && kind !== 'copy') throw new HttpFailure(400, 'invalid-request');
+            if (instructions === undefined && kind === undefined) throw new HttpFailure(400, 'invalid-request');
+            return send(response, 200, {object: publicObject(await service.updateDraft(id, {
+              ...(instructions !== undefined ? {instructions} : {}), ...(kind !== undefined ? {kind} : {})}))});
           }
           if (method === 'DELETE') {
             await authorize(WRITE);

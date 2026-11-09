@@ -175,6 +175,13 @@ test('the worker works only with objects in its own scene', () => {
   assert.match(TOUCHUP_SYSTEM_RULES, /current scene/);
 });
 
+test('a fit lookup is confirmed before fit-critical geometry', () => {
+  assert.match(TOUCHUP_SYSTEM_RULES, /manufacturer's own published dimensions/);
+  assert.match(TOUCHUP_SYSTEM_RULES, /stop with needs_closeup to confirm/);
+  assert.match(TOUCHUP_SYSTEM_RULES, /caliper photo/);
+  assert.match(TOUCHUP_SYSTEM_RULES, /Measured dimensions in the request are authoritative/);
+});
+
 test('photo evidence lists overview pages first and every real filename, including PNG inputs', async () => {
   const p = await pass();
   p.photoPaths = [join(p.photosDir, 'photo-01.jpg'), join(p.photosDir, 'photo-02.png')];

@@ -22,6 +22,11 @@ struct NewObjectView: View {
     @State private var askedForDescription = false
     @State private var created: Project?
     @State private var attached: Attached?
+    @State private var scanUse: ScanUse?
+    @State private var dimensionSource: DimensionSource = .lookup
+    @State private var measuredLongest = ""
+    @State private var measuredMiddle = ""
+    @State private var measuredShortest = ""
     @State private var captureWarning: String?
     @FocusState private var describing: Bool
     @Environment(\.dismiss) private var dismiss
@@ -30,17 +35,91 @@ struct NewObjectView: View {
     /// A scan finished for this draft, kept on this phone until Send.
     enum Attached: Equatable { case walkAround, inHand }
 
+    /// What a finished scan is for: the printed thing itself, the thing a new part must fit, or undecided.
+    enum ScanUse: String, Equatable { case copy, fit, later }
+
+    /// How a fit gets its exact size: a maker's published size you confirm, your own measurements, or the scan.
+    enum DimensionSource: String, CaseIterable, Hashable {
+        case lookup, measured, scan
+        var label: String {
+            switch self {
+            case .lookup: "Look up"
+            case .measured: "I measured"
+            case .scan: "Use scan"
+            }
+        }
+    }
+
     private var publishedLink: URL? { PublishedModelLink.find(in: instructions) }
     private var described: Bool { !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// Measurements you typed, by the edge you named: blank sides are simply unknown.
+    private var measuredValues: [(edge: String, mm: Double)] {
+        [("longest", measuredLongest), ("middle", measuredMiddle), ("shortest", measuredShortest)].compactMap { edge, text in
+            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty, let mm = Double(value.replacingOccurrences(of: ",", with: ".")), mm > 0, mm <= 10_000 else { return nil }
+            return (edge, mm)
+        }
+    }
+    private var measuredValid: Bool {
+        let typed = [measuredLongest, measuredMiddle, measuredShortest].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return !typed.isEmpty && measuredValues.count == typed.count
+    }
     /// The Mac's own rule for starting, in its words: photos show what something looks like, so without a
     /// scan the description says what to make. A scan always goes with its own photos.
     private var missing: String? {
-        described || attached != nil ? nil : "Describe what to make, or add a scan."
+        if attached != nil {
+            guard let scanUse else { return "Choose whether to copy it, make something that fits it, or save the scan." }
+            if scanUse == .fit {
+                if !described { return "Say what it should hold, mount or adapt to." }
+                if dimensionSource == .measured && !measuredValid { return "Enter at least one measurement in millimetres." }
+            }
+            return nil
+        }
+        return described ? nil : "Describe what to make, or add a scan."
     }
     private var canSend: Bool { missing == nil }
 
+    /// The one bottom action, in the words for what it will do now.
+    private var sendLabel: String {
+        if working == "make" { return scanUse == .later ? "Saving…" : "Sending…" }
+        if attached != nil {
+            switch scanUse {
+            case .copy: return "Send copy to \(store.macName ?? "your Mac")"
+            case .fit: return "Send to \(store.macName ?? "your Mac")"
+            case .later: return "Save scan for later"
+            case nil: return "Choose what to make"
+            }
+        }
+        return "Send to \(store.macName ?? "your Mac")"
+    }
+
+    /// A job card's choice, kept as the starting answer but still changeable after the scan.
+    private func useJobDefault() {
+        if scanUse == nil, let job { scanUse = job == .fit ? .fit : .copy }
+    }
+
+    /// What the Mac is told. For a fit, the brief below the person's words says the scan is the mating
+    /// object and how its exact size is settled before anything fit-critical is designed.
+    private var effectiveInstructions: String {
+        let base = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard attached != nil, scanUse == .fit, !base.isEmpty else { return base }
+        var lines = [base, "", "Fit brief:",
+                     "- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself."]
+        switch dimensionSource {
+        case .lookup:
+            lines.append("- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size.")
+        case .measured:
+            let sizes = measuredValues.map { "\($0.edge) \(String(format: "%g", $0.mm)) mm" }.joined(separator: ", ")
+            lines.append("- Dimensions I measured on the real object: \(sizes). Treat these as the exact overall size. If the scan differs by more than 2 mm or 2%, ask before designing anything fit-critical.")
+        case .scan:
+            lines.append("- Dimensions: use the scan's measured size, say the clearance you allowed, and mark every fit-critical size as estimated.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -93,6 +172,7 @@ struct NewObjectView: View {
                             }
                         }
                     }
+                    if attached != nil { scanUseSection }
                     if let captureWarning {
                         Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange)
                     }
@@ -104,6 +184,10 @@ struct NewObjectView: View {
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
             }
+            .onChange(of: attached) { _, now in
+                if now != nil { withAnimation { proxy.scrollTo("scan-use", anchor: .top) } }
+            }
+            }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("New Project")
             .navigationBarTitleDisplayMode(.inline)
@@ -113,7 +197,7 @@ struct NewObjectView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button { Task { await make() } } label: {
-                    Label(working == "make" ? "Sending…" : "Send to \(store.macName ?? "your Mac")", systemImage: "arrow.up")
+                    Label(sendLabel, systemImage: scanUse == .later && attached != nil ? "tray.and.arrow.down" : "arrow.up")
                         .fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 40)
                 }
                 .buttonStyle(.glassProminent).controlSize(.large).padding(.horizontal, 20)
@@ -129,9 +213,86 @@ struct NewObjectView: View {
         }
         .task {
             // A draft from an earlier sheet keeps its project and its finished scan.
+            useJobDefault()
             _ = try? await savedDraft()
             if let created, attached == nil { attached = await savedCapture(created.id) }
+            store.refreshStoppedScans()
         }
+    }
+
+    // MARK: After a scan
+
+    /// The question a finished scan always gets: a scan is just as often the thing a holder must fit
+    /// as the thing to print, so neither is assumed.
+    @ViewBuilder private var scanUseSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("What should this scan become?").font(.headline)
+            ScanUseRow(symbol: "doc.on.doc", title: "Copy this object",
+                       detail: "Clean up the scan and print the same thing.",
+                       selected: scanUse == .copy, identifier: "scan-use-copy") { scanUse = .copy }
+            ScanUseRow(symbol: "ruler", title: "Make something that fits this",
+                       detail: "A holder, mount, case or adapter. The scan is what it must fit, not the print.",
+                       selected: scanUse == .fit, identifier: "scan-use-fit") { scanUse = .fit }
+            ScanUseRow(symbol: "tray.and.arrow.down", title: "Just save this scan",
+                       detail: "Keep its shape with this project and decide later.",
+                       selected: scanUse == .later, identifier: "scan-use-later") { scanUse = .later }
+            if scanUse == .fit { fitDimensions }
+            if scanUse == .later {
+                Text("No pass starts and nothing is printed. The scan stays with this draft, so you can choose here later.")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .id("scan-use")
+        .accessibilityIdentifier("scan-use")
+    }
+
+    /// How the fit's exact size is settled, chosen before the scan is sent.
+    @ViewBuilder private var fitDimensions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Exact size").font(.subheadline.weight(.semibold))
+            Picker("Exact size", selection: $dimensionSource) {
+                ForEach(DimensionSource.allCases, id: \.self) { source in Text(source.label).tag(source) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("fit-dimension-source")
+            switch dimensionSource {
+            case .lookup:
+                Text("Your Mac identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            case .measured:
+                Text("Measure the outside of the real thing. Leave a side blank if you don't know it.")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    measuredField("Longest", text: $measuredLongest, identifier: "fit-size-longest")
+                    measuredField("Middle", text: $measuredMiddle, identifier: "fit-size-middle")
+                    measuredField("Shortest", text: $measuredShortest, identifier: "fit-size-shortest")
+                }
+            case .scan:
+                Text("Uses the scan's size as an estimate. Best for loose holders; your Mac says the clearance it allowed.")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Button { Task { await addPhotos(camera: true) } } label: {
+                Label("Add a caliper photo", systemImage: "camera").frame(maxWidth: .infinity).frame(height: 32)
+            }
+            .buttonStyle(.glass)
+            .disabled(working != nil || photosLocked || photos.count >= Self.photoLimit)
+            .accessibilityIdentifier("fit-caliper-photo")
+        }
+        .padding(14)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
+    }
+
+    private func measuredField(_ label: String, text: Binding<String>, identifier: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                TextField("0", text: text).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                Text("mm").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(9)
+            .glassEffect(.regular, in: .rect(cornerRadius: 12))
+        }
+        .accessibilityIdentifier(identifier)
     }
 
     /// The Mac takes up to 24 photos with a project.
@@ -183,19 +344,20 @@ struct NewObjectView: View {
         guard created == nil, !draftId.isEmpty else { return nil }
         do {
             let saved = try await store.mac.get(draftId)
-            // A draft begun as the other job (a scan to copy, then "Make something that fits") isn't this one:
-            // the Mac keeps a project's kind, so this starts afresh.
-            if let job, let kind = saved.kind, kind != job.rawValue, saved.state == .new { draftId = ""; return nil }
+            // An unsent draft can still change job: a scan first taken to copy can become the thing a
+            // holder must fit, without losing the scan already attached to this draft.
             if saved.state == .new { created = saved } else { draftId = "" }
             return saved
         } catch let failure as CompanionError where failure.code == "not-found" { draftId = ""; return nil }
     }
 
-    /// `fit` or `copy`: the starting card you picked; otherwise a scan means copy. Nil lets the Mac infer it.
-    private func kind(scanning: Bool) -> String? {
-        if let job { return job.rawValue }
-        return scanning || attached != nil ? NewProjectJob.copy.rawValue : nil
+    /// `fit` or `copy`, only once it is known: a starting card, or the answer after a scan. A scan by
+    /// itself no longer means copy. Nil lets the Mac infer a text-only request.
+    private var chosenKind: String? {
+        if let scanUse { return scanUse == .later ? nil : scanUse.rawValue }
+        return job?.rawValue
     }
+    private func kind(scanning _: Bool) -> String? { chosenKind }
 
     private func object(scanning: Bool = false) async throws -> Project {
         // A sent draft (started elsewhere) opens as it is.
@@ -204,13 +366,18 @@ struct NewObjectView: View {
             let latest = try await store.mac.get(created.id)
             // Start may have succeeded even when its reply was lost; never PATCH a started request.
             guard latest.state == .new else { return latest }
-            do { return try await store.mac.updateDraft(created.id, instructions: instructions) }
-            catch {
+            do {
+                let updated = try await store.mac.updateDraft(created.id, instructions: effectiveInstructions, kind: chosenKind)
+                if let chosenKind, updated.kind != chosenKind {
+                    throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac so a scan can become a fit instead of a copy.")
+                }
+                return updated
+            } catch {
                 if let current = try? await store.mac.get(created.id), current.state != .new { return current }
                 throw error
             }
         }
-        let object = try await store.mac.create(instructions, kind: kind(scanning: scanning))
+        let object = try await store.mac.create(effectiveInstructions, kind: kind(scanning: scanning))
         created = object
         draftId = object.id
         return object
@@ -219,9 +386,19 @@ struct NewObjectView: View {
     /// Send: the project is made at once and its page opens; its files follow while it shows Sending.
     /// Everything the send needs is captured now: this sheet is gone by the time the files go.
     private func make() async {
-        guard canSend else { askedForDescription = true; describing = true; return }
+        guard canSend else {
+            askedForDescription = true
+            describing = attached == nil || (scanUse == .fit && !described)
+            return
+        }
         describing = false
         await run("make") {
+            // Saving a scan starts nothing: the draft and its scan stay here for the next open of New.
+            if attached != nil && scanUse == .later {
+                store.refreshStoppedScans()
+                dismiss()
+                return
+            }
             let ticket = store.startRequest()
             let returned = try await object()
             guard let object = store.prepareDraftSend(returned, ticket: ticket) else { return }
@@ -230,12 +407,18 @@ struct NewObjectView: View {
             instructions = ""
             draftId = ""
             started(object)
-            await store.sendInBackground(object.id) { [store] in
+            await store.sendAfterUpload(object.id) { [store] in
                 guard store.requestIsCurrent(ticket) else { return }
                 let sendTicket = store.startRequest()
                 store.replace(try await mac.sendProject(object.id, photos: chosen), ticket: sendTicket)
             }
         }
+    }
+
+    /// The scan's own files go to the Mac while Copy or Fit is chosen; no pass starts until Send.
+    private func beginUpload(_ object: Project) {
+        let mac = store.mac
+        store.beginUpload(object.id) { try await mac.uploadProject(object.id) }
     }
 
     private func savedCapture(_ id: String) async -> Attached? {
@@ -253,17 +436,54 @@ struct NewObjectView: View {
         await run("scan") {
             let object = try await object(scanning: true)
             guard object.state == .new else { started(object); return }
-            if let saved = await savedCapture(object.id) { attached = saved; return }
+            if let saved = await savedCapture(object.id) { attached = saved; useJobDefault(); store.refreshStoppedScans(); return }
             guard object.scan == nil, (object.capture ?? []).isEmpty else {
                 throw CompanionError(code: "missing-capture", message: "This project's saved scan is no longer on this phone. Start a new project to scan it again.")
             }
             if handheld {
-                if await HandheldCapture.run(objectId: object.id) { attached = .inHand }
+                if await HandheldCapture.run(objectId: object.id) { attached = .inHand; beginUpload(object) }
             } else if try await store.mac.scan(object.id) != nil {
                 attached = .walkAround
                 captureWarning = store.mac.localScanWarning(object.id)
+                beginUpload(object)
+            } else if let saved = await savedCapture(object.id) {
+                // "Keep for later" in the capture still comes back here with the scan attached, not to a
+                // project page that can only offer Scan again.
+                attached = saved
             }
+            if attached != nil { useJobDefault(); store.refreshStoppedScans() }
         }
+    }
+}
+
+/// One answer to "What should this scan become?": the chosen one carries a checkmark, never colour alone.
+private struct ScanUseRow: View {
+    let symbol: String, title: String, detail: String
+    let selected: Bool
+    let identifier: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).font(.title3.weight(.semibold)).foregroundStyle(Color.filament)
+                    .frame(width: 40, height: 40)
+                    .glassEffect(.regular.tint(Color.filament.opacity(0.25)), in: .circle)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.headline).foregroundStyle(.primary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.filament) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
+        .overlay { if selected { RoundedRectangle(cornerRadius: 20).strokeBorder(Color.filament, lineWidth: 2) } }
+        .accessibilityIdentifier(identifier)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 }
 

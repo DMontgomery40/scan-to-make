@@ -233,7 +233,12 @@ class CompanionClient(
         url?.let { json["url"] = JsonPrimitive(it) }
         return one(request("POST", "/v1/objects", JsonObject(json)))
     }
-    suspend fun updateDraft(id: String, instructions: String) = one(request("PATCH", "/v1/objects/$id", jsonOf("instructions" to instructions)))
+    suspend fun updateDraft(id: String, instructions: String, kind: String? = null): Project {
+        val json = LinkedHashMap<String, JsonElement>()
+        json["instructions"] = JsonPrimitive(instructions)
+        if (kind != null && kind in setOf("fit", "copy")) json["kind"] = JsonPrimitive(kind)
+        return one(request("PATCH", "/v1/objects/$id", JsonObject(json)))
+    }
     suspend fun start(id: String, captureManifest: JsonObject? = null): Project =
         one(request("POST", "/v1/objects/$id/start", if (captureManifest != null) jsonOf("captureManifest" to captureManifest) else JsonObject(emptyMap())))
     /** Ask for changes: a new pass with your text. Upload new photos first. */

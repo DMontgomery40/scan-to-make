@@ -1133,11 +1133,19 @@ export class ObjectService {
   }
 
   /** An unsent draft may change; once a pass starts its original request is part of the history. */
-  updateInstructions(id: string, instructions: string): Promise<StmObject> {
+  updateDraft(id: string, patch: {instructions?: string; kind?: 'fit' | 'copy'}): Promise<StmObject> {
     return this.#gate(id, async () => {
-      if ((await this.get(id)).state !== 'new') throw new InvalidStateError('The description cannot change after work starts. Send a correction instead.');
-      return this.#changed(await this.#deps.store.update(id, object => ({...object, instructions: instructions.trim() || undefined})));
+      const object = await this.get(id);
+      if (object.state !== 'new') throw new InvalidStateError('The description cannot change after work starts. Send a correction instead.');
+      if (patch.kind !== undefined && object.kind === 'published')
+        throw new InvalidStateError('A published model project can’t become a copy or a new design. Start a new project instead.');
+      return this.#changed(await this.#deps.store.update(id, current => ({...current,
+        ...(patch.instructions !== undefined ? {instructions: patch.instructions.trim() || undefined} : {}),
+        ...(patch.kind !== undefined ? {kind: patch.kind} : {})})));
     });
+  }
+  updateInstructions(id: string, instructions: string): Promise<StmObject> {
+    return this.updateDraft(id, {instructions});
   }
 
   /** Phone uploads arriving right now, per project. A `new` project with none and no files yet is a draft. */

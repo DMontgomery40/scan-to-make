@@ -567,6 +567,22 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["stopped-scan.send"].exists, "Send to your Mac")
     }
 
+    /// A finished scan that never left this phone is invisible to the Mac's copy of its project, so its
+    /// page must still offer Send instead of only Scan again (David, Nov 9).
+    func testAFinishedScanStillOnThisPhoneOffersSendOnItsProject() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all"]
+        app.launchEnvironment["COUNTERPART_READY_SCAN"] = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a0b"
+        app.launch()
+        let words = NSPredicate(format: "label CONTAINS %@", "Scan saved · send to your Mac")
+        let listed = app.descendants(matching: .any).matching(words).firstMatch
+        XCTAssertTrue(listed.waitForExistence(timeout: 20), "the project list says the scan is still on this phone")
+        listed.tap()
+        let send = app.buttons["draft.send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 10), "its project offers Send to your Mac")
+        XCTAssertTrue(send.isEnabled)
+    }
+
     /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
     /// on them". Plate 1's start couldn't be confirmed; on the iPhone and the iPad every plate stays choosable on the
     /// project and inside Print, and only plate 1 asks for the printer check again.

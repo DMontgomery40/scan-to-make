@@ -76,7 +76,7 @@ class AppState(private val app: Counterpart) {
 
     fun project(id: String) = projects.value.firstOrNull { it.id == id }
     fun printerName(p: Project): String? = p.print?.destination?.name ?: catalog.value?.destination(p.printerDestinationId)?.name
-    fun words(p: Project) = ProjectWords(p, sending = p.id in sending.value, printerName = printerName(p))
+    fun words(p: Project) = ProjectWords(p, sending = p.id in sending.value, localScan = Media.captureFinished(app, p.id), printerName = printerName(p))
     val anyRunning: Boolean get() = projects.value.any { words(it).busy } || sending.value.isNotEmpty()
 
     /** Keeps the credential alive when the app opens and each time it comes back. */

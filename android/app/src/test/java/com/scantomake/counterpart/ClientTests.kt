@@ -442,6 +442,9 @@ class WordsTests {
     @Test fun phasesAndActions() {
         assertEquals(ProjectPhase.Draft, ProjectWords(project(""""state":"new"""")).phase)
         assertEquals(ProjectPhase.Sending, ProjectWords(project(""""state":"new""""), sending = true).phase)
+        val local = ProjectWords(project(""""state":"new""""), localScan = true)
+        assertEquals("Scan saved on this phone. Send it to your computer to begin.", local.status)
+        assertEquals(listOf(ProjectAction.FinishSending), local.actions)
         val ready = ProjectWords(project(""""state":"ready","current":{"model":"m.stl","renders":[],"sizeMm":[10,20,30]}"""))
         assertEquals(ProjectPhase.Ready, ready.phase)
         assertEquals("Ready to print · 10 × 20 × 30 mm", ready.line)
