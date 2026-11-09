@@ -600,6 +600,27 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(after.last, "list", "a refusal reads the object again to show where it is now")
     }
 
+    func testLimitStopsKeepTheirWordsAndRetryWithProjectsPresent() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/capped-projects.json"))
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let companion = FakeObjects()
+        for row in rows where (row["name"] as? String)?.hasPrefix("limit-") == true {
+            let stopped = try XCTUnwrap(row["expected"] as? [String: Any])
+            await companion.set([item("other", "ready"), stopped])
+            let model = ObjectsModel(companion: companion)
+            await model.refresh()
+            let project = try XCTUnwrap(model.objects.first { $0.id == (stopped["id"] as? String) })
+            XCTAssertEqual(ProjectWords(project).status, project.failure)
+            XCTAssertTrue(ProjectWords(project).actions.contains(.retry))
+            let retried = await model.perform(.retry, on: project.id)
+            XCTAssertTrue(retried)
+            let calls = await companion.calls
+            XCTAssertEqual(calls.last, "start")
+        }
+    }
+
     func testAFailedTouchUpStartsAgain() async {
         let companion = FakeObjects()
         await companion.set([item("b", "failed", ["failure": "Blender is not open on your Mac.", "current": NSNull()])])

@@ -1,5 +1,7 @@
 package com.scantomake.counterpart
 
+import kotlinx.serialization.json.jsonPrimitive
+
 import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
@@ -115,6 +117,30 @@ class HomeLayoutTests {
     }
 
     private fun home() = compose.setContent { WithApp { HomeScreen(open = { _, _ -> }, newProject = {}, printers = {}, settings = {}) } }
+
+    @Test fun limitStopsNameTheLimitWithProjectsPresent() {
+        val rows = WireJson.parseToJsonElement(kitFixture("capped-projects.json").readText()).jsonArray
+        val data = rows.first { it.jsonObject["name"]!!.jsonPrimitive.content == "limit-inactivity" }.jsonObject["expected"]!!.jsonObject
+        val stopped = requireNotNull(Project.decode(data))
+        val transport = FakeTransport { request, _ ->
+            if (request.url.endsWith("/v1/objects/${stopped.id}")) HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        }
+        app.pairing = PairingClient(app.pairingStore, transport)
+        app.companion = CompanionClient(app.pairing, transport, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), stopped)
+        state.loaded.value = true
+        compose.setContent { WithApp {
+            var selected by remember { mutableStateOf<String?>(null) }
+            if (selected == null) HomeScreen(open = { id, _ -> selected = id }, newProject = {}, printers = {}, settings = {})
+            else com.scantomake.counterpart.ui.ProjectScreen(selected!!, back = { selected = null }, print = {}, printing = {}, scan = {})
+        } }
+        val title = com.scantomake.counterpart.api.ProjectWords(stopped).title
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(title))
+        compose.onNodeWithText(title).performClick()
+        compose.onNodeWithText(requireNotNull(stopped.failure)).performScrollTo().assertExists()
+        compose.onNodeWithText("Try Again").performScrollTo().assertIsEnabled()
+    }
 
     @Test fun theStartersStayOnHomeWhileProjectsExist() {
         state.projects.value = listOf(project("a", "Stove gap filler", "ready"), project("b", "Cable clip", "printed"),

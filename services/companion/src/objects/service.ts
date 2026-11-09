@@ -24,7 +24,7 @@ import type {PrintHandoffServices} from '../print-handoff-http.js';
 import {InvalidAnswerError, printQuestion, validateAnswer, type ConfirmationValue} from './confirmation.js';
 import {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './errors.js';
 import type {TouchupInput} from '../touchup/touchup.js';
-import {publicTouchupText, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
+import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
 import {defaultReconstructRunner, RECONSTRUCTION_FAILED, ReconstructionReviewNeeded, type Reconstruct, type ReconstructInputs, type ScanToStl} from './reconstruct.js';
@@ -2417,13 +2417,12 @@ export class ObjectService {
       }).catch(() => undefined);
     };
     const onProgress: NonNullable<TouchupInput['onProgress']> = progress => {
-      if (!progress.activity?.length) return;
-      const entries = this.#activity([], progress.activity);
-      if (!entries.length) return;
+      const entries = this.#activity([], progress.activity ?? []);
+      if (!entries.length && !progress.sessionId && !progress.passDir) return;
       writing = writing.then(async () => {
         this.#changed(await store.update(object.id, o => ({...o,
-          progress: entries.at(-1)!.kind === 'tool' ? toolProgress(entries.at(-1)!.text) : entries.at(-1)!.text,
-          passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, activity: this.#activity(p.activity, entries)}),
+          ...(entries.length ? {progress: entries.at(-1)!.kind === 'tool' ? toolProgress(entries.at(-1)!.text) : entries.at(-1)!.text} : {}),
+          passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, ...(progress.sessionId ? {sessionId: progress.sessionId} : {}), ...(progress.passDir ? {dir: progress.passDir} : {}), ...(progress.sessionCwd ? {sessionCwd: progress.sessionCwd} : {}), activity: this.#activity(p.activity, entries)}),
         })));
       });
       // The worker callback is synchronous; the pass awaits this chain before its final state.
@@ -2460,7 +2459,11 @@ export class ObjectService {
       const scan = designer
         ? [...new Set([fromCurrent && isMultipart(object) ? object.current!.model : designer, designer])].map(path => join(dir, path))
         : fromCurrent ? [join(dir, currentMesh!)] : scanName ? [join(dir, 'scan', scanName)] : [];
-      const input: TouchupInput = {worker, root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent && !designer, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
+      const previous = object.passes.at(-1);
+      const resume = previous?.sessionId && previous.dir && (previous.resumable === true || (previous.resumable !== false && ['interrupted', 'failed'].includes(previous.status ?? ''))) && worker?.browser !== false
+        ? {sessionId: previous.sessionId, passDir: previous.dir, ...(previous.sessionCwd ? {sessionCwd: previous.sessionCwd} : {}),
+          ...(opts.photos?.length ? {photos: photos.filter(path => opts.photos!.includes(basename(path)))} : {})} : undefined;
+      const input: TouchupInput = {worker, ...(resume ? {resume} : {}), root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent && !designer, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
         ...(designer ? {designerCopy: true} : {}),
         kind, ...(object.preferences?.designEngine && object.preferences.designEngine !== 'auto' ? {preferredEngine: object.preferences.designEngine} : {}), onStage: (id, chosen) => stage(id, chosen),
         ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
@@ -3085,6 +3088,8 @@ export class ObjectService {
 
   async #finish(id: string, startedAtMs: number, result: TouchupResult & {passDir: string; engine?: DesignEngine; note?: string}, kind: PassKind = 'copy'): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(id);
+    const interrupted = this.#closed && result.reason === 'cancelled';
+    if (interrupted) result = {...result, reason: 'Interrupted when your computer stopped Counterpart.', resumable: !!result.sessionId};
     result = {...result,
       summary: result.summary === undefined ? undefined : this.#publicText(result.summary),
       reason: result.reason === undefined ? undefined : this.#publicText(result.reason),
@@ -3102,7 +3107,7 @@ export class ObjectService {
       }
       const sizeMm = await this.#deps.stlInfo(join(currentDir, 'model.stl')).catch(() => undefined);
       const summary = result.status === 'unchanged' ? result.summary ?? 'Nothing needed changing.'
-        : result.status === 'capped' ? `Stopped at the ${result.reason?.includes('time') ? 'time limit' : 'step limit'}; this is the last saved version.${result.summary ? ' ' + result.summary : ''}`
+        : result.status === 'capped' ? `${result.limit ? limitWords(result.limit) : result.reason ?? 'Stopped at a limit'}; this is the last saved version.${result.summary ? ' ' + result.summary : ''}`
         : result.summary;
       const engine = result.engine ?? 'blender';
       let design: {f3d: string; parameters?: string} | undefined;
@@ -3121,7 +3126,7 @@ export class ObjectService {
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
       : current && (result.status === 'done' || result.status === 'unchanged') ? 'ready' : 'failed';
     const failure = result.status === 'capped'
-      ? `Stopped at the ${result.reason?.includes('time') ? 'time' : 'step'} limit. ${current ? 'Try again or review the saved checkpoint.' : 'Try again.'}`
+      ? `${result.limit ? limitWords(result.limit) : `Stopped at the ${result.reason?.includes('time') ? 'time' : 'step'} limit`}. ${current ? 'Try again or review the saved checkpoint.' : 'Try again.'}`
       : result.reason ?? 'The touch-up stopped without a model.';
     const now = Date.now();
     // A changed model hasn't been shown to work yet: its first print asks "Did it fit?" again. A pass that
@@ -3135,11 +3140,13 @@ export class ObjectService {
       ...(ask ? {ask} : {}),
       ...(state === 'needs-closeup' ? {question: {closeup: result.closeup ?? result.ask?.question ?? 'a part of the object'}} : {}),
       ...(state === 'failed' ? {failure} : {}),
-      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: result.status,
+      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: interrupted ? 'interrupted' : result.status,
         stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
         ...(result.engine ? {engine: result.engine} : {}), ...(result.note ? {engineNote: this.#publicText(result.note)} : {}),
         ...(state === 'failed' ? {activity: this.#activity(p.activity, [{atMs: Date.now(), kind: 'message', text: failure}])} : {}),
-        ...(result.summary ? {summary: result.summary} : {}), seconds: result.stats.seconds,
+        ...(result.summary ? {summary: result.summary} : {}), seconds: result.stats.seconds, toolCalls: result.stats.toolCalls,
+        ...(result.sessionId ? {sessionId: result.sessionId} : {}), ...(result.sessionCwd ? {sessionCwd: result.sessionCwd} : {}), resumable: result.resumable ?? false, checkpoints: result.checkpoints,
+        ...(result.limit ? {limit: result.limit} : {}), ...(result.resume ? {resume: result.resume} : {}),
         ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir})}));
     const saving = updated.passes.find(p => p.startedAtMs === startedAtMs)?.stages?.find(item => item.id === 'saving');
     if (saving?.endedAtMs !== undefined) void this.#deps.passTimings?.record(kind, result.engine ?? 'blender', 'saving', (saving.endedAtMs - saving.startedAtMs) / 1000).catch(() => undefined);
@@ -3170,11 +3177,11 @@ export class ObjectService {
   }
 
   async #fail(id: string, startedAtMs: number, error: unknown): Promise<StmObject> {
-    const message = this.#publicText(error instanceof Error ? error.message : String(error));
+    const message = this.#closed ? 'Interrupted when your computer stopped Counterpart.' : this.#publicText(error instanceof Error ? error.message : String(error));
     console.error(`pass failed: project ${id}, pass ${new Date(startedAtMs).toISOString()}: ${message.replace(/\s+/g, ' ').slice(0, 600)}`);
     const now = Date.now();
     const updated = await this.#deps.store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined,
-      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: 'failed',
+      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: this.#closed ? 'interrupted' : 'failed',
         stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
         activity: this.#activity(p.activity, [{atMs: now, kind: 'message', text: message}])})}));
     await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: message}});

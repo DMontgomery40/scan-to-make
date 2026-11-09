@@ -375,14 +375,14 @@ for (const [limit, reason] of [['step', 'stopped at the 120 tool-call limit'], [
       if (checkpoint) {
         assert.equal(await readFile(join(f.service.dir(object.id), stopped.current.model), 'utf8'), STL);
         assert.equal(await readFile(join(stopped.passes.at(-1).dir, 'out', 'touched.stl'), 'utf8'), STL);
-        assert.match(stopped.current.summary, new RegExp(`${limit} limit`));
+        assert.match(stopped.current.summary, new RegExp(limit === 'step' ? '120 tool-call limit' : '900 s time limit'));
       } else assert.equal(stopped.current, undefined);
       await f.service.start(object.id);
       const retried = await f.service.settled(object.id);
       assert.equal(retried.state, 'ready');
       assert.equal(retried.failure, undefined);
       assert.equal(f.events.at(-1).type, 'pass.ready');
-      assert.deepEqual(f.inputs[1].scan, f.inputs[0].scan, 'Retry starts from the original source; it does not promise checkpoint continuation');
+      assert.deepEqual(f.inputs[1].scan, f.inputs[0].scan, 'A legacy pass without a session still has its original inputs');
     });
   }
 }
@@ -396,4 +396,61 @@ test('the shared Swift capped-retry fixture is the exact public projection witho
     assert.equal(actual.canRetryCleanup, row.retry, row.name);
     assert.ok(actual.passes.every(pass => !('activity' in pass)), row.name);
   }
+});
+
+for (const status of ['capped', 'failed']) test(`the next project request resumes a ${status} worker without a final answer`, async t => {
+  const f = await setup(t, [{status, result: {reason: 'Stopped at a limit.', limit: {kind:'inactivity',value:600000}, sessionId:'recover-me', resumable:true}}, {status:'done'}]);
+  const object = await f.service.create('An articulated unicorn', 'fit');
+  await f.service.start(object.id);
+  const stopped = await f.service.settled(object.id), pass = stopped.passes.at(-1);
+  assert.equal(pass.sessionId, 'recover-me');
+  assert.equal(publicObject(stopped).canRetryCleanup, true);
+  assert.deepEqual(pass.limit, {kind:'inactivity',value:600000});
+  assert.equal(pass.toolCalls, 2);
+  assert.deepEqual(pass.checkpoints, []);
+  await f.service.correct(object.id, 'Please continue and add a mane');
+  await f.service.settled(object.id);
+  assert.deepEqual(f.inputs[1].resume, {sessionId:'recover-me', passDir:pass.dir});
+  const wire = publicObject(stopped).passes.at(-1);
+  assert.equal(wire.sessionId, undefined);
+  assert.equal(wire.checkpoints, undefined);
+  assert.deepEqual(wire.limit, pass.limit);
+});
+
+test('a completed answer or person cancellation never resumes an old worker', async t => {
+  for (const result of [{sessionId:'finished',resumable:false}, {sessionId:'cancelled',resumable:false,reason:'cancelled'}]) {
+    const f=await setup(t,[{status:'failed',result},{status:'done'}]);
+    const o=await f.service.create('A unicorn','fit');await f.service.start(o.id);await f.service.settled(o.id);
+    await f.service.start(o.id);await f.service.settled(o.id);
+    assert.equal(f.inputs[1].resume,undefined);
+  }
+});
+
+test('session init and pass folder survive a companion restart before a final answer', async t => {
+ const f=await setup(t,[{wait:true},{status:'done'}]);
+ const o=await f.service.create('A unicorn','fit');await f.service.start(o.id);
+ await until(()=>f.inputs.length);
+ f.inputs[0].onProgress({seconds:1,toolCalls:0,sessionId:'live-session',passDir:'/saved/pass'});
+ await until(async()=> (await f.store.get(o.id)).passes.at(-1).sessionId==='live-session');
+ const restarted=new ObjectStore(join(f.root,'objects'));await restarted.recoverInterrupted();
+ const recovered=await restarted.get(o.id);
+ assert.equal(recovered.passes.at(-1).sessionId,'live-session');assert.equal(recovered.passes.at(-1).dir,'/saved/pass');
+ f.release();await f.service.settled(o.id);
+});
+
+test('closing the companion interrupts a worker without attributing it to the person', async t => {
+ const f=await setup(t,[{wait:true,status:'failed',result:{reason:'cancelled',sessionId:'shutdown-session',resumable:false}}]);
+ const o=await f.service.create('A unicorn','fit');await f.service.start(o.id);await until(()=>f.inputs.length);
+ const closing=f.service.close();f.release();await closing;
+ const stopped=await f.store.get(o.id);
+ assert.equal(stopped.passes.at(-1).status,'interrupted');assert.equal(stopped.passes.at(-1).resumable,true);
+ assert.match(stopped.failure,/Interrupted/);assert.doesNotMatch(stopped.failure,/cancelled/i);
+});
+
+test('a request after restart resumes the interrupted session from the saved cwd', async t => {
+ const f=await setup(t,[{status:'done'}]),o=await f.service.create('A unicorn','fit');
+ await f.store.update(o.id,old=>({...old,state:'touching-up',passes:[{startedAtMs:1,sessionId:'interrupted-session',sessionCwd:'/first/pass',dir:'/latest/pass'}]}));
+ await f.store.recoverInterrupted();
+ await f.service.start(o.id);await f.service.settled(o.id);
+ assert.deepEqual(f.inputs[0].resume,{sessionId:'interrupted-session',passDir:'/latest/pass',sessionCwd:'/first/pass'});
 });

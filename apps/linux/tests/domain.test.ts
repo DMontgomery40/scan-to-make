@@ -519,3 +519,16 @@ test("while the printer MCP sends the file, a project shows the companion's perc
   // counterpart/1 upload progress, as the companion writes it to Project.progress (Mac, iPhone, iPad and Android show the same).
   assert.equal(words({ id: "x", state: "printing", progress: "Sending to the printer… 62%" } as unknown as Project), "Sending to the printer… 62%");
 });
+
+
+test("limit stops say which limit on Home with projects present", () => {
+  const rows = JSON.parse(readFileSync(new URL("../../../packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/capped-projects.json", import.meta.url), "utf8"));
+  const projects = [project, ...rows.filter((row: {name: string}) => row.name.startsWith("limit-")).map((row: {expected: Project}) => row.expected)];
+  assert.equal(projects.length, 4);
+  for (const stopped of projects.slice(1)) {
+    assert.equal(words(stopped), stopped.failure);
+    assert.match(words(stopped), /^Stopped/);
+    assert.doesNotMatch(words(stopped), /cancelled/i);
+    assert.equal(stopped.canRetryCleanup, true);
+  }
+});

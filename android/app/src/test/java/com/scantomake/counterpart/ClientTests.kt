@@ -373,12 +373,17 @@ class ContractTests {
 
     @Test fun cappedPassesOfferRetryAndChangesAsTheSwiftDoes() {
         val rows = com.scantomake.counterpart.core.WireJson.parseToJsonElement(kitFixture("capped-projects.json").readText()).arr!!
-        assertEquals(5, rows.size)
+        assertEquals(8, rows.size)
         for (row in rows) {
             val r = row.obj!!
             val name = r["name"].str
             val expected = Project.decode(r["expected"].obj!!)!!
-            val actions = ProjectWords(expected).actions
+            val words = ProjectWords(expected)
+            if (name?.startsWith("limit-") == true) {
+                assertEquals(expected.failure, words.status)
+                assertFalse(words.line.lowercase().contains("cancelled"))
+            }
+            val actions = words.actions
             assertEquals(name, r["retry"].toString() == "true", ProjectAction.Retry in actions)
             assertTrue(name, ProjectAction.Correct in actions)
             assertTrue(name, (if (r["checkedPrint"].toString() == "true") ProjectAction.PrintChecked else ProjectAction.Print) in actions)

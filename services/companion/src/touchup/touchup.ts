@@ -13,6 +13,7 @@ import {DESIGNER_FILE_REBUILT, designerEditProblem} from './designer-file.js';
 import {mcpPackageName} from '../printing/print-settings.js';
 
 export interface TouchupInput {
+  resume?: {sessionId: string; passDir: string; sessionCwd?: string; photos?: string[]};
   worker?: import('./runner.js').ProjectWorker;
   root: string;
   objectId: string;
@@ -271,7 +272,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
     return {status: 'failed', reason: slicingGuidanceUnavailable(input.handoff.backend), renders: [], checkpoints: [], stats: {seconds: 0, toolCalls: 0}, passDir: pass.dir};
   }
   input.onStage?.('working', choice.engine);
-  const inv = buildTouchupInvocation({pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
+  const inv = buildTouchupInvocation({...(input.resume ? {resumeSessionId: input.resume.sessionId} : {}), pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
     ...(input.kind ? {kind: input.kind} : {}),
     ...(input.designerCopy ? {designerCopy: true} : {}),
     ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}), ...(guidance ? {guidance} : {}),
@@ -279,11 +280,38 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});
   inv.worker = input.worker;
   const inputStlSha256 = await stlSha256(input.scan);
-  const result = await (deps.run ?? runTouchupWorker)(inv, pass, {
+  const coldPrompt = inv.args.at(-1)!;
+  if (input.resume) {
+    // Use the session's original working directory: Claude stores -p sessions by cwd.
+    inv.cwd = input.resume.sessionCwd ?? input.resume.passDir;
+    // Session lookup keeps its original cwd; relative output names must still belong to this new attempt.
+    const rules = inv.args.indexOf('--append-system-prompt') + 1;
+    inv.args[rules] += `\nFor this resumed attempt, resolve every out/... output name in these rules and the result schema against ${pass.dir}, not the session working directory. Write final files only to ${pass.outDir} and checkpoints only to ${pass.checkpointsDir}, using absolute paths. The previous pass folder is a recovery source: do not overwrite its files.`;
+    inv.args[inv.args.length - 1] = `Continue from where you stopped. The previous checkpoints folder is ${join(input.resume.passDir, 'out', 'checkpoints')}. Restore the latest valid checkpoint if needed. Save this pass's checkpoints in ${pass.checkpointsDir} and final files in ${pass.outDir}. The modeling engine is prepared for this pass; use its current MCP binding. You already have the original request and photos in this session.${input.note ? ` New request: ${input.note}` : ''}${input.resume.photos?.length ? ` New photos for this request: ${input.resume.photos.map(path => pass.photoPaths[input.photos.indexOf(path)]).filter(Boolean).join(', ')}.` : ''}`;
+  }
+  const runOptions = {
     ...(inputStlSha256 ? {inputStlSha256} : {}),
-    ...(input.onProgress ? {onProgress: input.onProgress} : {}),
+    onProgress: (progress: TouchupProgress) => input.onProgress?.({...progress, passDir: pass.dir, sessionCwd: inv.cwd}),
     ...(input.signal ? {signal: input.signal} : {}),
-  });
+  };
+  // Persist the pass folder before the worker can exit or the companion can restart.
+  input.onProgress?.({seconds: 0, toolCalls: 0, passDir: pass.dir, sessionCwd: inv.cwd, ...(input.resume ? {sessionId: input.resume.sessionId} : {})});
+  let result = await (deps.run ?? runTouchupWorker)(inv, pass, runOptions);
+  if (input.resume) {
+    const unavailable = result.status === 'failed' && !result.worker && result.stats.toolCalls === 0
+      && /no conversation found with session ID|session[^\n]*(?:not found|does not exist|unavailable)|invalid session (?:id|identifier)/i.test(result.reason ?? '');
+    if (unavailable && !input.signal?.aborted) {
+      const reason = 'The previous Claude Code session is unavailable. Started again from the saved project inputs.';
+      input.onProgress?.({seconds: 0, toolCalls: 0, activity: [{atMs: Date.now(), kind: 'message', text: reason}]});
+      inv.cwd = pass.dir;
+      const coldArgs = [...inv.args], index = coldArgs.indexOf('--resume');
+      coldArgs.splice(index, 2); coldArgs[coldArgs.length - 1] = coldPrompt;
+      const prior = result;
+      result = await (deps.run ?? runTouchupWorker)({...inv, args: coldArgs, cwd: pass.dir}, pass, runOptions);
+      result = {...result, stats: {...result.stats, seconds: prior.stats.seconds + result.stats.seconds}, resume: {sessionId: input.resume.sessionId, outcome: 'cold-start', reason}};
+    } else result = {...result, resume: {sessionId: input.resume.sessionId, outcome: result.sessionId === input.resume.sessionId ? 'resumed' : 'attempted'}};
+  }
+  result = {...result, sessionCwd: inv.cwd};
   // Whatever the pass's status: a model a capped, failed or close-up pass saved still becomes the current model.
   if (input.designerCopy && (result.model || result.parts)) {
     const problem = await designerEditProblem(input.handoff, pass.scanPaths.at(-1)!, result.parts,

@@ -3,7 +3,7 @@ import {lstat,open,rename,rm,link} from 'node:fs/promises';
 import {mkdtemp,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import type {ProjectWorker,WorkerRun} from './touchup/runner.js';
-import {publicTouchupText} from './touchup/runner.js';
+import {publicTouchupText,TOUCHUP_TIMEOUT_MS} from './touchup/runner.js';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {ControlFailure} from './local-control-protocol.js';
@@ -100,8 +100,8 @@ export class ModelAccessService {
       try {
         const path = join(dir,'request.json');
         // No caller environment or redaction secrets cross into the keyed helper.
-        await writeFile(path,JSON.stringify({args:inv.args,cwd:inv.cwd,mcpConfig:inv.mcpConfig,timeoutMs:options.timeoutMs,maxToolCalls:options.maxToolCalls}),{mode:0o600});
-        const result = await this.worker(choice,['project',path],{signal:options.signal,timeoutMs:(options.timeoutMs ?? 900000)+15000,onProgress:options.onProgress});
+        await writeFile(path,JSON.stringify({args:inv.args,cwd:inv.cwd,mcpConfig:inv.mcpConfig,timeoutMs:options.timeoutMs,inactivityMs:options.inactivityMs,maxToolCalls:options.maxToolCalls}),{mode:0o600});
+        const result = await this.worker(choice,['project',path],{signal:options.signal,timeoutMs:(options.timeoutMs ?? TOUCHUP_TIMEOUT_MS)+15000,onProgress:options.onProgress});
         if (result.exitCode !== 0) throw new Error('The selected AI worker could not start. Check its login or API key in Settings.');
         const run = JSON.parse(result.stdout) as WorkerRun;
         if (!run || typeof run.toolCalls !== 'number' || typeof run.seconds !== 'number') throw new Error('Invalid model worker response');
