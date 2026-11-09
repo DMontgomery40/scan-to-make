@@ -66,8 +66,8 @@ import CounterpartKit
 
     func reconcile(_ snapshots: [PrintActivitySnapshot], mayStart: Bool) async {
         guard let app, !app.needsMac, ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        // The widget can't reach the Mac: put each live print's picture where it can read it before the
-        // activity starts or updates, so its first frame already shows the project.
+        // Refresh artwork independently. ActivityKit applies the received state now using the cached
+        // project picture or the mark, even when this phone cannot reach the Mac.
         await artwork.refresh(app.projects.projects.filter { project in
             project.state == .ready || snapshots.contains { $0.attributes.projectId == project.id && $0.content.canStart }
         }, mac: app.projects.mac)
