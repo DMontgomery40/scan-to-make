@@ -126,7 +126,7 @@ The Mac leaves update/end alerts out for pauses, ends and problems: the phone's 
 delivers the event with its camera frame. Progress milestones are the exception (PRD §9.1): while the
 activity runs on every known paired recipient, they alert on it. The Mac persists the recipient
 decision before sending, respects saved phone choices, and retains distinct milestone alerts through
-retries and restart. A missing registration resolves after a 30-second grace period on recovery.
+retries and restart. Network failures and short 429/503 waits retain the alert for up to three attempts; unconfigured relays and long waits resolve the recipient as failed. A missing registration resolves after a 30-second grace period on recovery.
 Push-to-start retries always retain their mandatory alert. Once every
 recipient finishes, it writes the account-wide CloudKit fallback only if all failed; partial success
 logs each missed device and never falls back onto devices already alerted. `ev-started` is silent because ActivityKit requires the start alert. The server

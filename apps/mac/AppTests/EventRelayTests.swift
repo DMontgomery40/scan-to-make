@@ -314,6 +314,24 @@ final class EventRelayTests: XCTestCase {
         XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(event.id))
     }
 
+    @MainActor func testABusyRelayRetriesTheMilestoneBeforeChoosingCloudKit() async throws {
+        let harness = try MilestoneHarness { _, index in (index == 0 ? 503 : 200, ["Retry-After": "1"]) }
+        defer { harness.close() }
+        let relay = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        var cloudFallbacks = 0
+        relay.undelivered = { _ in cloudFallbacks += 1; return true }
+        let milestone = event("print.milestone", id: "busy-halfway", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        XCTAssertTrue(relay.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init()))
+        await eventually { harness.requestCount >= 1 }
+        XCTAssertEqual(cloudFallbacks, 0, "a busy relay has not exhausted its retry attempts")
+        XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
+        await eventually(timeout: 3) { harness.acceptedTitles == ["Halfway"] }
+        XCTAssertEqual(harness.acceptedTitles, ["Halfway"], "the retry must retain its milestone alert")
+        XCTAssertEqual(cloudFallbacks, 0)
+        XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
+    }
+
     @MainActor func testAllMilestoneTokensFailBeforeCloudKitFallbackIsChosen() async throws {
         let harness = try MilestoneHarness { _, index in (index == 0 ? 429 : 410, ["Retry-After": "1"]) }
         defer { harness.close() }

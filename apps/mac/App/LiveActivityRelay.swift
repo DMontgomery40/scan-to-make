@@ -289,7 +289,11 @@ import ControlKit
                 pausedUntil = Date().addingTimeInterval(min(max(retry, 1), 900))
                 lastResult = "The relay is busy; trying again soon."
             }
-            queue(withoutAlert(push), retry: true)
+            // A short busy response is retryable just like the token-interval limit. Keep
+            // its milestone pending until the bounded attempts finish; an unconfigured
+            // relay or a long wait still resolves this recipient promptly.
+            let retryMilestone = error != "not_configured" && retry <= 30 && attempt > 0 && attempt < 3
+            queue(retryMilestone ? push : withoutAlert(push), retry: true)
             if let pausedUntil { scheduleFlush(at: pausedUntil) }
         default:
             _ = withoutAlert(push)
