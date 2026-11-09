@@ -106,7 +106,7 @@ These are from Argon's geometry review of the Nov 8 capture, and from the code.
 | Item | Today | Apple-only needs |
 |---|---|---|
 | Images | 24 spread photos as `photo` kind (`MacConnection.swift:206-220`) | **Every** image in the session's `Images/` folder, as `capture` kind, with the bytes unchanged so Apple's metadata, depth and camera data travel with them. See "Image names" below. |
-| Manifest | `{version: 1, images, depthRequired, …}`; unknown keys are dropped (`service.ts:135-158`) | **Exactly:** `{"version": 1, "images": ["0000.heic", …], "depthRequired": false, "source": "object-capture"}`, with `cameraMetadataRequired` and `scaleQualificationRequired` **absent**. See "Why this manifest" below. |
+| Manifest | `{version: 1, images, depthRequired, …}`; unknown keys are dropped (`service.ts:135-158`) | **Exactly:** `{"version": 1, "images": ["0001.heic", …], "depthRequired": false, "source": "object-capture"}`, with `cameraMetadataRequired` and `scaleQualificationRequired` **absent**. See "Why this manifest" below. |
 | Checkpoint | Not sent | **Not sent.** The Mac starts from scratch (§2.5) [A8]. If a later measurement shows otherwise, it needs a new folder route, and none exists. |
 | Depth | `capture-depth` route for `NNNN.depth.plist` | **None.** It is inside Apple's HEIC. |
 | Scan USDZ | Required by `sendCapture` | **Not sent.** No on-device rebuild. |
@@ -114,10 +114,15 @@ These are from Argon's geometry review of the Nov 8 capture, and from the code.
 
 **Image names.**
 - Apple's session names the files in `Images/`, and Apple doesn't document the pattern.
-- No observed names are recorded in this repo. Our sample declares `IMG_` and `HEIC` constants (`CaptureFolderManager.swift:122-123`) but never uses them to name files.
-- Before the rename is written, read the names from a real folder **[measure]**: the Nov 8 run on the iPhone (`Documents/NativeCaptures/<run>/Images`), or the Nov 2 backup on the Mac (`~/scan-to-make-work/davica3-counterpart-backup-20261102-0401/Documents/NativeCaptures/ce42012e-ed16-4f6f-9268-5c9f9ac7bb8b/Images`).
-- **Rename rule:** strip the non-digit prefix and lowercase the extension. The result must match `parseCaptureManifest`'s `^[0-9]{4}\.(heic\|jpe?g\|png)$` (`service.ts:135-148`) and be unique.
-- **Otherwise the send fails loudly:** the phone refuses to send, keeps the capture, and says "This scan's files aren't in the expected form", with the offending name in the log. It never guesses or skips a file.
+- **Measured (Nov 8): seconds since the session started**, zero-padded, such as `00032.467183875.HEIC`.
+  - The Nov 2 backup on the Mac (`~/scan-to-make-work/davica3-counterpart-backup-20261102-0401/Documents/NativeCaptures/*/Images`) has 157 images in 20 sessions, and every one has this shape. Nothing else is in any `Images` folder.
+  - The Nov 8 rig scan's 24 photos on the Mac (`00041.732011084.HEIC` … `00422.451878250.HEIC`) have it too.
+  - Our sample's `IMG_` constant (`CaptureFolderManager.swift:122-123`) is never used.
+- **Name rule: number in capture order.** The names sort in capture order, so the phone sends the n-th as `NNNN.heic` (`0001.heic`, `0002.heic`…), with the extension lower-cased and the bytes unchanged (`ProjectUploader.captureFrames`).
+  - Capture time stays in each HEIC.
+  - The result matches `parseCaptureManifest`'s `^[0-9]{4}\.(heic\|jpe?g\|png)$`, which stays as strict as before.
+  - Stripping a non-digit prefix would leave `00032.467183875.heic`, which fails that rule.
+- **Otherwise the send fails loudly:** a file in `Images/` that isn't a HEIC, JPEG or PNG stops the send. The phone keeps the capture and says "This scan has a file Counterpart can't send (<name>). Scan it again." It never guesses or skips a file.
 
 **Why this manifest.**
 - `#start` compares the uploaded depth files against `expectedDepth`, which is one `NNNN.depth.plist` per image when `depthRequired` is true (`service.ts:1211-1213`). `false` keeps start from waiting for depth files Apple never writes; the depth is inside the HEIC.
@@ -135,11 +140,25 @@ These are from Argon's geometry review of the Nov 8 capture, and from the code.
 - `featureSensitivity = .high` [A9];
 - one request: `.modelFile(url:detail: .full)` [A10].
 
-This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-folder> <output.usdz> full`, `main.swift`). It changes from `featureSensitivity = .normal` to `.high`. It sets `sampleOrdering = .sequential` already, which is an Apple option and harmless for a walk-around.
+This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-folder> <output.usdz> full`, `main.swift`). It changes from `featureSensitivity = .normal` to `.high`.
+
+**Keep Apple's default (unordered) sample ordering, not `.sequential`.** Measured Nov 8 on copies of the 24 rig-scan photos, with `.high`, Apple's masks and the box kept:
+- `.sequential` placed 7, 5 and 7 of 24 photos in three runs. That left a backdrop sheet (3,902 points) or part of the sign (14,844 and 10,824 faces).
+- Unordered placed 9 of 24 in four runs, giving 28,672–29,279 faces and a box within 1.3 mm between runs.
+- Apple says the ordering "has no impact on the quality", but these frames are spread picks, not adjacent shots.
+- Receipts: `~/scan-to-make-work/mac-reconstruction-2026-11-08/`.
 
 - **The companion** runs that mode for `source: "object-capture"`, keeps stdout and stderr (as `reconstruct.ts` already does for `samples`), and hands the USDZ to the existing touch-up and printer MCP path unchanged.
 - **Mac time:** about 60–90 s for 100–120 12 MP HEICs at `.full`. Measured Nov 2 on the Mac (117 → 74.3 s; 120 → 63.4 s, [audit](../../../status/capture-reconstruction-audit-2026-11-02.md)). `.high` is slower **[measure]**.
-- **Images that carry a box** (Nov 8 and earlier object-mode captures): rebuild with `ignoreBoundingBox = true`, masking still on [A9]. Whether that brings back the clipped D's is the open question Stage 0 answers (§4).
+- **Images that carry a box** (Nov 8 and earlier object-mode captures): rebuild with `ignoreBoundingBox = true`, masking still on [A9].
+  - **Stage 0 answer (Nov 8, the 24 photos that reached the Mac): both D's come back.**
+    - Two runs gave 24,128 and 23,475 points, with 11 of 24 photos placed.
+    - The full line "A son's first hero, a daughter's first love." reads.
+    - With the box kept, the last "D" is cut off.
+  - The costs:
+    - Apple's masks keep the green backdrop between the letters;
+    - a scrap of the rig's platform stays under the base;
+    - the back stays open from 24 frames.
 
 ### 3.4 What the person sees (PRD §10)
 
