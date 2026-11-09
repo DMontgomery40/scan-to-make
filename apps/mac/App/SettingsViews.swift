@@ -814,7 +814,7 @@ struct AdvancedSettings: View {
                 }
                 Toggle(isOn:$relayOn) {
                     Text("Live Activity relay")
-                    Text("Keeps your phone's Live Activity moving while it's locked, and puts progress milestones on it, through counterpart.dtmont.com. It stores nothing.")
+                    Text("Keeps your phone's Live Activity moving while it's locked, through counterpart.dtmont.com. It stores nothing.")
                 }
                 if relayOn {
                     TextField("Relay address", text:$relayURL, prompt:Text(verbatim:LiveActivityRelay.defaultURL))

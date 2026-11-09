@@ -160,7 +160,7 @@ import ControlKit
             let error = (try? JSONDecoder().decode([String: JSONValue].self, from: data))?["error"]?.string
             if error == "not_configured" {
                 pausedUntil = Date().addingTimeInterval(retry > 0 ? retry : 3600)
-                lastResult = "The relay has no APNs key yet; your phone updates its Live Activity itself."
+                lastResult = "The relay has no APNs key yet. Your phone's Live Activity catches up when you open Counterpart."
             } else {
                 pausedUntil = Date().addingTimeInterval(min(max(retry, 1), 900))
                 lastResult = "The relay is busy; trying again soon."
