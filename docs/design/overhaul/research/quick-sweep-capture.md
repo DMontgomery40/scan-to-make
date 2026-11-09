@@ -52,7 +52,11 @@ These are from Argon's geometry review of the Nov 8 capture, and from the code.
    - `beginNewScanPass()` and `beginNewScanPassAfterFlip()`: "only valid in object-centric scanning" [A3].
    - `userCompletedScanPass` turns true after "a full circular scan pass around the bounding box" [A3]. Without a box there is no dial event **[inference from that wording]**.
    - So in freeform, "segments" don't exist, and Finish is ours to offer.
-3. **Finish any time.** `finish()` works in `.capturing`, then the session goes `.finishing` → `.completed` [A2]. Apple sets no minimum shot count. Our sample uses 10 (`AppDataModel.minNumImages`, line 92).
+3. **Finish any time; pause while something covers the view.**
+   - `finish()` works in `.capturing`, then the session goes `.finishing` → `.completed` [A2]. Apple sets no minimum shot count. Our sample uses 10 (`AppDataModel.minNumImages`, line 92).
+   - `pause()`: "Call this when object capture view is not visible, such as when a help screen is shown". `resume()`: "Call this method… after pause() is called to show another view temporarily" [A2b].
+   - Our sample pauses and resumes by hand around any sheet that covers the view (`AppDataModel.setShowOverlaySheets`, lines 263-275: "the session doesn't pause. We need to pause/resume the session by hand").
+   - The sample calls `finish()` from its paused review sheet (`OnboardingButtonView.swift:72`). `isPaused` is a separate property from `state` [A2b], so `state` stays `.capturing` while paused **[inference]**.
 4. **Over-capture is for the Mac.** `isOverCaptureEnabled` lets capture continue past `maximumNumberOfInputImages`, "meant for use when the images are intended to be transferred to macOS" [A4]. WWDC23: the extra shots "are stored in the Images folder" [S1].
 5. **The checkpoint does not help the Mac.**
    - `PhotogrammetrySession.Configuration.checkpointDirectory`: "For macOS reconstruction… Reconstruction starts from scratch, and does not resume from previous checkpoints. For iOS reconstruction, if you pass the same checkpointDirectory used by an ObjectCaptureSession… [it] tries to use the saved checkpoint" [A8].
@@ -61,7 +65,7 @@ These are from Argon's geometry review of the Nov 8 capture, and from the code.
    - **So the checkpoint stays on the phone** and is not sent. That narrows what the lead asked for, and it is Apple's own statement.
 6. **The Mac uses the depth inside Apple's images.** WWDC23: "Mac reconstruction also utilizes the LiDAR data we save in our images" [S1]. The images also carry Apple's per-image camera data [A7].
 7. **Masking on the Mac.** With `isObjectMaskingEnabled = true` and no supplied masks, "RealityKit attempts to automatically create a mask… If it's unable… reverts to… the entire image" [A9].
-8. **`ignoreBoundingBox`** (macOS 15) "ignores any bounding box information embedded in the input images and instead returns all possible geometry". To keep separating the object, leave `isObjectMaskingEnabled = true`. Apple says to set it to false only "to recover the entire scene" [A9].
+8. **`ignoreBoundingBox`** (macOS 15) "ignores any bounding box information embedded in the input images and instead returns all possible geometry". Apple's note: "to recover the entire scene geometry as well as ignore the box, `isObjectMaskingEnabled` should also be set to false". We want the object, not the scene, so `isObjectMaskingEnabled` stays `true` [A9].
 9. **`featureSensitivity = .high`** is "a slower, more sensitive algorithm to detect landmarks", for low contrast or detail [A9].
 10. **Exposure is Apple's.**
     - `ObjectCaptureSession.Configuration` has only `checkpointDirectory` and `isOverCaptureEnabled` [A5].
@@ -83,11 +87,16 @@ These are from Argon's geometry review of the Nov 8 capture, and from the code.
 3. **Record** calls `startCapturing()` from `.ready` [A2]. Never `startDetecting()`. **There is no box at any point.**
 4. `shouldPlayHaptics = false` [A4]. `isAutoCaptureEnabled` stays at Apple's default (on) [A4].
 5. **One card, one line:** "Go round it twice: low, then high. Keep the room in view." On the rig: "Clamp low, swing round; clamp high, swing again." This follows Apple's guide, "taking photographs from different angles at different heights" [S6], and the reviewers' two-heights finding: one height leaves the camera centres on a flat circle.
-6. **Done** appears once `numberOfShotsTaken` ≥ 10 [A4]. It opens `ObjectCapturePointCloudView(session:)` to review [A12], then calls `finish()` [A2].
-   - Done stays available after one pass. There are no segments to complete.
+6. **Done → pause → review → Use scan or Keep scanning.**
+   - Done appears once `numberOfShotsTaken` ≥ 10 [A4]. It stays available after one pass; there are no segments to complete.
+   - **Done** calls `pause()` first [A2b]. The review sheet covers the capture view, and Apple says to pause "when object capture view is not visible" (§2.3).
+   - The sheet then shows `ObjectCapturePointCloudView(session:)` [A12].
+   - **Use scan** (prominent) calls `finish()` [A2], as the sample does from its paused review sheet.
+   - **Keep scanning** closes the sheet and calls `resume()` [A2b]. Capture continues into the same `Images` folder, and Done can be pressed again later.
 7. **Apple's feedback is shown as Apple sends it**, one line at a time [A6]:
-   - `movingTooFast`, `outOfFieldOfView`;
+   - `movingTooFast` ("may be paused to ensure quality");
    - `environmentLowLight` / `environmentTooDark`, with the remedy in the words: "More light on the object" (§1: it was true).
+   - **Not used:** `outOfFieldOfView`. Apple defines it as "The bounding box of the object is not in the field of view", so in freeform it may never arrive. Stage 1 logs whether it does **[measure]**.
 8. **No on-device reconstruction.** The Mac rebuilds at `.full`. WWDC23: "we support only the reduced detail level on iOS" [S1].
 
 **Removed from our UI:** the Area/Object switch (`AppDataModel.captureMode`, `TopOverlayButtons.swift:128-132`), the box step, the orbit and flip onboarding states, and the tutorial video. These were our sample app's choices, not Apple's requirements.
@@ -96,12 +105,25 @@ These are from Argon's geometry review of the Nov 8 capture, and from the code.
 
 | Item | Today | Apple-only needs |
 |---|---|---|
-| Images | 24 spread photos as `photo` kind (`MacConnection.swift:206-220`) | **Every** `Images/IMG_NNNN.HEIC` (`CaptureFolderManager.swift:122-123`) as `capture` kind. Each is renamed to `NNNN.heic` on upload, because `parseCaptureManifest` accepts only `^[0-9]{4}\.(heic\|jpe?g\|png)$` (`service.ts:135-148`). The bytes are unchanged, so Apple's metadata, depth and camera data travel with them. |
-| Manifest | `{version: 1, images, depthRequired, …}`; unknown keys are dropped (`service.ts:135-158`) | Add `source: "object-capture"`, parsed and bound into `captureDigest`. Today an unmarked capture goes to `mac-reconstruct samples` with our masks and cleared gravity (`reconstruct.ts:116`, `Samples.swift:30`), which is wrong for Apple images. |
+| Images | 24 spread photos as `photo` kind (`MacConnection.swift:206-220`) | **Every** image in the session's `Images/` folder, as `capture` kind, with the bytes unchanged so Apple's metadata, depth and camera data travel with them. See "Image names" below. |
+| Manifest | `{version: 1, images, depthRequired, …}`; unknown keys are dropped (`service.ts:135-158`) | **Exactly:** `{"version": 1, "images": ["0000.heic", …], "depthRequired": false, "source": "object-capture"}`, with `cameraMetadataRequired` and `scaleQualificationRequired` **absent**. See "Why this manifest" below. |
 | Checkpoint | Not sent | **Not sent.** The Mac starts from scratch (§2.5) [A8]. If a later measurement shows otherwise, it needs a new folder route, and none exists. |
 | Depth | `capture-depth` route for `NNNN.depth.plist` | **None.** It is inside Apple's HEIC. |
 | Scan USDZ | Required by `sendCapture` | **Not sent.** No on-device rebuild. |
 | Uploader | `ProjectUploader`: sequential, in memory, skips what the Mac has (`Uploads.swift:27-80`), on `URLSessionConfiguration.ephemeral` (`Transport.swift:75`). PRD §5.2 says a background session; the code doesn't use one. | Unchanged. A cut-short send resumes by skipping files already sent. |
+
+**Image names.**
+- Apple's session names the files in `Images/`, and Apple doesn't document the pattern.
+- No observed names are recorded in this repo. Our sample declares `IMG_` and `HEIC` constants (`CaptureFolderManager.swift:122-123`) but never uses them to name files.
+- Before the rename is written, read the names from a real folder **[measure]**: the Nov 8 run on the iPhone (`Documents/NativeCaptures/<run>/Images`), or the Nov 2 backup on the Mac (`~/scan-to-make-work/davica3-counterpart-backup-20261102-0401/Documents/NativeCaptures/ce42012e-ed16-4f6f-9268-5c9f9ac7bb8b/Images`).
+- **Rename rule:** strip the non-digit prefix and lowercase the extension. The result must match `parseCaptureManifest`'s `^[0-9]{4}\.(heic\|jpe?g\|png)$` (`service.ts:135-148`) and be unique.
+- **Otherwise the send fails loudly:** the phone refuses to send, keeps the capture, and says "This scan's files aren't in the expected form", with the offending name in the log. It never guesses or skips a file.
+
+**Why this manifest.**
+- `#start` compares the uploaded depth files against `expectedDepth`, which is one `NNNN.depth.plist` per image when `depthRequired` is true (`service.ts:1211-1213`). `false` keeps start from waiting for depth files Apple never writes; the depth is inside the HEIC.
+- `cameraMetadataRequired` would make start wait for a `capture-camera.json` (`service.ts:1214-1215`).
+- `scaleQualificationRequired` is Android's "qualify before accepting" flag.
+- `source` must be parsed and bound into `captureDigest`. Today an unmarked capture goes to `mac-reconstruct samples`, with our masks and cleared gravity (`reconstruct.ts:116`, `Samples.swift:30`). That is wrong for Apple images.
 
 - **Data [estimate; measure]:** 40–100 images × about 3–5 MB = 120–500 MB.
 - **Target:** upload done within 60 s of Done on David's network **[measure]**.
@@ -117,7 +139,7 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
 
 - **The companion** runs that mode for `source: "object-capture"`, keeps stdout and stderr (as `reconstruct.ts` already does for `samples`), and hands the USDZ to the existing touch-up and printer MCP path unchanged.
 - **Mac time:** about 60–90 s for 100–120 12 MP HEICs at `.full`. Measured Nov 2 on the Mac (117 → 74.3 s; 120 → 63.4 s, [audit](../../../status/capture-reconstruction-audit-2026-11-02.md)). `.high` is slower **[measure]**.
-- **Images that carry a box** (Nov 8 and earlier object-mode captures): rebuild with `ignoreBoundingBox = true`, masking still on [A9]. That undoes the clipped D's without touching the phone.
+- **Images that carry a box** (Nov 8 and earlier object-mode captures): rebuild with `ignoreBoundingBox = true`, masking still on [A9]. Whether that brings back the clipped D's is the open question Stage 0 answers (§4).
 
 ### 3.4 What the person sees (PRD §10)
 
@@ -125,7 +147,7 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
 |---|---|---|
 | Open | New → **Scan it**. Apple's camera view with no reticle, and one card line (§3.1 item 5). | The card is read. Record is labelled "Record scan". |
 | Capturing | Apple's own capture view and feedback. Shot count, and Done after 10 shots. | Apple's feedback is announced as it changes. |
-| Review | `ObjectCapturePointCloudView` [A12]. **Use scan** is prominent. | "Scan finished. Review, or use scan." |
+| Review | Done pauses the session [A2b], then shows `ObjectCapturePointCloudView` [A12]. **Use scan** (prominent) calls `finish()`. **Keep scanning** calls `resume()` and goes back to capturing. | "Scan paused. Use scan, or keep scanning." |
 | After | Back to New with the scan attached. The project reads "Your Mac is building it". | — |
 
 - **No haptics** (`shouldPlayHaptics = false`).
@@ -140,8 +162,14 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
 | iPad, regular width | **In scope** on LiDAR iPads (iPad Pro). Apple's view adapts; our card and Done are checked in landscape and portrait. LiDAR-less iPads (David's iPad Air) keep PRD §5.2's disabled tile. | Yes | `LayoutParityUITests` (iPad) |
 | iPhone Duo | No LiDAR: disabled tile (PRD §6) | Yes | — |
 | Mac | No camera scan (existing §6.1 exception) | Yes | `ObjectsModelTests` |
-| Linux | No camera scan (existing §6.1 exception). `linux-reconstruct` reads JPEG and PNG only, so a phone paired to a Linux companion can't rebuild Apple HEICs there; what the phone shows in that case is **[check]**. | Yes | `domain.test.ts` |
+| Linux | No camera scan (existing §6.1 exception). A Linux companion can't rebuild Apple HEICs: `linux-reconstruct` reads JPEG and PNG only. See the **Stage 2 gate** below the table. | Yes | `domain.test.ts`, plus the companion refusal test |
 | Android | **Exception for now** (David's decision, Nov 8/9): no no-box scan in this TestFlight cycle. Android keeps its current ARCore scan until the iPhone path is proven. | Unchanged: Android's existing scan results | `HomeLayoutTests` (unchanged) |
+
+**Stage 2 gate: an iPhone paired with a Linux companion.**
+- The Linux companion refuses `start` for `source: "object-capture"` with a plain sentence: "Scans from iPhone are rebuilt on a Mac. Pair this iPhone with a Mac to use Scan it."
+- The phone shows that sentence on the project's failed card and keeps the images, so the scan can be sent again once a Mac is paired.
+- A companion test covers the refusal.
+- Until this gate passes, Stage 1 runs only against the Mac companion.
 
 **Proposed PRD §6.1 row.** It lands in the PR that ships the user-facing change, using §6.1's own columns:
 
@@ -160,6 +188,12 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
 - **Companion:** `source` in the manifest and digest; route to folder mode; keep output.
 - **Mac:** `.high`.
 - **Tests:** companion manifest tests, and the capture → start → rebuild path with a stored DAD capture.
+
+**Calibration capture, before any Stage 1 run.** This pre-registers criterion 10's sharpness line.
+- Put the DAD sign on the rig under each run's lighting condition. Using the Stage 1 build, stop the arm at 12 positions (every 30°) and hold it still until Apple takes a shot at each.
+- **Line = 0.6 × the lowest calibration value**, measured as the variance of the Laplacian on the sign's region.
+- The value goes into the Stage 1 plan file and into every run's receipt **before** the runs start.
+- It is kept apart from the run images and is never recomputed from the frames it judges.
 
 **Stage 1 runs.** Each run is two scans by hand plus three on the rig, done twice:
 
@@ -181,7 +215,7 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
 | 7 | A and D counters open; no backdrop or platform geometry | PRD §11 (no foreign geometry) + new (holes) |
 | 8 | Underside closed, apart from real holes | PRD §11 |
 | 9 | Repeatability: 2 hand scans within 1%, 3 rig scans within 0.5% | PRD §11, §11.1; part of David's decision (below) |
-| 10 | **Sharpness:** at most 15% of images fall below the sharpness line on the sign's region, measured as the variance of the Laplacian. The line is set from rig frames **[measure]**. Each image's EXIF exposure time and ISO are recorded as evidence. This is an engineering check run on the Mac, not part of the product. | David's decision (below) |
+| 10 | **Sharpness:** at most 15% of images fall below the sharpness line on the sign's region, measured as the variance of the Laplacian. The line is **pre-registered** from the separate calibration capture above. It is never derived from the frames it judges; its value is **[measure]**. Each image's EXIF exposure time and ISO are recorded as evidence. This is an engineering check run on the Mac, not part of the product. | David's decision (below) |
 
 **The shutter rule: David's decision (Nov 8/9).**
 - **What changes.** For Apple's capture path, the fixed "1/250 s or faster" rule is replaced. The scan must pass the measured checks instead:
@@ -196,7 +230,7 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
 - **Only 1-mitigated passes:** ship Apple-only, with the §5 advice in the help text and in the light feedback line.
 - **Both fail:** pick the Appendix item that answers the specific failing criterion. Nothing else.
 
-**Stage 2.** The user-facing change on every layout (§3.5): New shows one **Scan it**, the Walk/In hand/Rig switch goes, the PRD sections in §7 are updated, and the parity tests run.
+**Stage 2.** The user-facing change on every layout (§3.5): New shows one **Scan it**, the Walk/In hand/Rig switch goes, the PRD sections in §7 are updated, the parity tests run, and the Linux-companion gate (§3.5) passes.
 
 **Stage 3.** Remove the object-centric code paths and `sendCapture`'s 24-photo path after ten accepted scans across at least three objects.
 
@@ -227,7 +261,7 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
 - **No coverage dial in freeform** (§2.2). The person relies on the one-line card and Apple's point-cloud review.
 - **The bottom.** Where the object sat on a surface, Apple's masked model has whatever RealityKit infers there. The existing touch-up and printer flow handles it as it does today; criterion 8 measures it.
 - **Unknowns [measure]:**
-  - Apple's freeform shot rate and HEIC size on iPhone 17 Pro;
+  - Apple's freeform shot rate, HEIC size and the image file names (§3.2) on iPhone 17 Pro;
   - `.high` time on the Mac;
   - whether Apple's automatic masking keeps the A and D counters open with a static textured background.
 
@@ -242,7 +276,7 @@ This is the existing folder mode of `mac-reconstruct` (`mac-reconstruct <images-
   - two clamp heights;
   - **the shutter rule (David's decision, Nov 8/9).** Replace "Exposure follows §11: 1/250 s or faster" with:
 
-    > Apple's capture path sets its own exposure. Instead of a fixed shutter, a scan passes the measured checks: sharpness (at most 15% of images below the sharpness line), caliper dimensions within ±1.0 mm or ±1.5%, whichever is larger, and repeat scans that agree (two within 1%; three rig scans within 0.5% on every axis). David, Nov 8/9.
+    > Apple's capture path sets its own exposure. Instead of a fixed shutter, a scan passes the measured checks: sharpness (at most 15% of images below a sharpness line pre-registered from a separate calibration capture), caliper dimensions within ±1.0 mm or ±1.5%, whichever is larger, and repeat scans that agree (two within 1%; three rig scans within 0.5% on every axis). David, Nov 8/9.
 
     In §11.1's pass criteria, "The same as §11" becomes "The same as §11, except the shutter item, which the measured checks above replace".
 - **§6.1:** the row from §3.5, including David's Android exception: "Exception for now: Android keeps its current scan until the iPhone path is proven."
@@ -275,10 +309,11 @@ Apple. Availability is read from `https://developer.apple.com/tutorials/data/doc
 |---|---|---|---|
 | A1 | `ObjectCaptureSession`, `start(imagesDirectory:configuration:)` | iOS 17.0 | https://developer.apple.com/documentation/realitykit/objectcapturesession |
 | A2 | `startCapturing()` ("freeform scanning where the user skips the bounding box selection… from `.ready` directly into `.capturing`"); `startDetecting()`; `finish()` ("ignores this method call if the current state is any value other than `.capturing`") | iOS 17.0 | https://developer.apple.com/documentation/realitykit/objectcapturesession/startcapturing() · https://developer.apple.com/documentation/realitykit/objectcapturesession/startdetecting() · https://developer.apple.com/documentation/realitykit/objectcapturesession/finish() |
+| A2b | `pause()` ("Call this when object capture view is not visible, such as when a help screen is shown"), `resume()` ("after pause() is called to show another view temporarily"), `isPaused` | iOS 17.0 | https://developer.apple.com/documentation/realitykit/objectcapturesession/pause() · https://developer.apple.com/documentation/realitykit/objectcapturesession/resume() · https://developer.apple.com/documentation/realitykit/objectcapturesession/ispaused |
 | A3 | `beginNewScanPass()`, `beginNewScanPassAfterFlip()` ("only valid in object-centric scanning"); `userCompletedScanPass` ("a full circular scan pass around the bounding box") | iOS 17.0 | https://developer.apple.com/documentation/realitykit/objectcapturesession/beginnewscanpass() · https://developer.apple.com/documentation/realitykit/objectcapturesession/usercompletedscanpass |
 | A4 | `Configuration.isOverCaptureEnabled`; `isAutoCaptureEnabled`, `shouldPlayHaptics` (iOS 18.0); `numberOfShotsTaken`, `maximumNumberOfInputImages`, `requestImageCapture()` | iOS 17.0 / 18.0 | https://developer.apple.com/documentation/realitykit/objectcapturesession/configuration-swift.struct/isovercaptureenabled · https://developer.apple.com/documentation/realitykit/objectcapturesession/shouldplayhaptics · https://developer.apple.com/documentation/realitykit/objectcapturesession/isautocaptureenabled |
 | A5 | `ObjectCaptureSession.Configuration` (only `checkpointDirectory` and `isOverCaptureEnabled`); capture `checkpointDirectory` ("speed up on-device reconstruction") | iOS 17.0 | https://developer.apple.com/documentation/realitykit/objectcapturesession/configuration-swift.struct · https://developer.apple.com/documentation/realitykit/objectcapturesession/configuration-swift.struct/checkpointdirectory |
-| A6 | `ObjectCaptureSession.Feedback`: `environmentLowLight` ("Auto-capture still proceeds"), `environmentTooDark`, `movingTooFast` ("may be paused to ensure quality"), `outOfFieldOfView`, `objectTooFar` | iOS 17.0 | https://developer.apple.com/documentation/realitykit/objectcapturesession/feedback-swift.enum |
+| A6 | `ObjectCaptureSession.Feedback`: `environmentLowLight` ("Auto-capture still proceeds"), `environmentTooDark`, `movingTooFast` ("may be paused to ensure quality"), `outOfFieldOfView` ("The bounding box of the object is not in the field of view"), `objectTooFar` | iOS 17.0 | https://developer.apple.com/documentation/realitykit/objectcapturesession/feedback-swift.enum |
 | A7 | `PhotogrammetrySample.init(contentsOf:)`; get-only `camera` (`transform`, `intrinsics`, `calibrationData`), `boundingBox`, `depthConfidenceMap`, `sessionID`, `scanPassID` | iOS 18.0, macOS 15.0 | https://developer.apple.com/documentation/realitykit/photogrammetrysample/init(contentsof:) · https://developer.apple.com/documentation/realitykit/photogrammetrysample/camera-swift.property |
 | A8 | `PhotogrammetrySession.Configuration.checkpointDirectory` ("For macOS reconstruction… starts from scratch, and does not resume from previous checkpoints") | macOS 14.0 | https://developer.apple.com/documentation/realitykit/photogrammetrysession/configuration-swift.struct/checkpointdirectory |
 | A9 | `isObjectMaskingEnabled`; `featureSensitivity` / `.high`; `ignoreBoundingBox` (macOS 15.0) | macOS 12.0 / 15.0 | https://developer.apple.com/documentation/realitykit/photogrammetrysession/configuration-swift.struct/isobjectmaskingenabled · https://developer.apple.com/documentation/realitykit/photogrammetrysession/configuration-swift.struct/featuresensitivity-swift.property · https://developer.apple.com/documentation/realitykit/photogrammetrysession/configuration-swift.struct/ignoreboundingbox |
@@ -297,10 +332,10 @@ Other sources:
 - [S10] Depth Pro: https://github.com/apple/ml-depth-pro
 
 Repository:
-- `apps/mobile/modules/object-capture/GuidedCaptureSample/GuidedCaptureSample/`: `AppDataModel.swift:92,143,418-421,450-452`, `Views/BottomOverlayButtons.swift:110-121`, `Views/TopOverlayButtons.swift:128-132`, `CaptureFolderManager.swift:122-123`.
+- `apps/mobile/modules/object-capture/GuidedCaptureSample/GuidedCaptureSample/`: `AppDataModel.swift:92,143,263-275,418-421,450-452`, `Views/BottomOverlayButtons.swift:110-121`, `Views/OnboardingButtonView.swift:72`, `Views/TopOverlayButtons.swift:128-132`, `CaptureFolderManager.swift:122-123`.
 - `apps/mobile/ios/ScanToMake/Platform/MacConnection.swift:206-220`.
 - `packages/CounterpartKit/Sources/CounterpartKit/Companion/Uploads.swift:27-80`, `Transport.swift:75`.
-- `services/companion/src/objects/service.ts:135-158`, `reconstruct.ts:116`.
+- `services/companion/src/objects/service.ts:135-158,1209-1215`, `reconstruct.ts:116`.
 - `tools/mac-reconstruct/Sources/mac-reconstruct/main.swift`, `Sources/HandheldKit/Samples.swift:30`.
 - `apps/mobile/ios/ScanToMake/Objects/HandheldCapture.swift:47`.
 - PRD §5.2, §5.3, §6.1, §10, §11, §11.1.
