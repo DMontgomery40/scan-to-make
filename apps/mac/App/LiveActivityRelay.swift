@@ -36,12 +36,15 @@ import ControlKit
     private var failures: [String: Int] = [:]
     private var recovery: LiveActivityRecovery
     private let session: URLSession
+    private let now: () -> Date
+    private var phoneChoices: [String: [String: Bool]] = [:]
     private var flushAt: Date?
     private var flushTask: Task<Void, Never>?
     private static let logger = Logger(subsystem: "com.scantomake.mac", category: "MilestoneDelivery")
 
-    init(defaults: UserDefaults = .standard, session: URLSession? = nil) {
+    init(defaults: UserDefaults = .standard, session: URLSession? = nil, now: @escaping () -> Date = Date.init) {
         self.defaults = defaults
+        self.now = now
         self.alerted = AlertedMilestones(defaults: defaults)
         self.milestones = MilestoneDeliveries(defaults: defaults)
         self.recovery = LiveActivityRecovery(defaults: defaults)
@@ -72,27 +75,33 @@ import ControlKit
         guard MilestoneAlert.types.contains(event.type) else { return false }
         let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
         let devices = try? await client.devices()
+        let settings = try? await client.companionSettings()
         return alertMilestone(event, title: title, local: local, cloudTokens: cloudTokens,
-                              pairedDeviceIds: devices.map { Set($0.map(\.deviceId)) })
+                              pairedDeviceIds: devices.map { Set($0.map(\.deviceId)) }, phoneChoices: settings?.notificationsDevices)
     }
 
     func alertMilestone(_ event: CounterpartEvent, title: String, local: LiveActivityTokens, cloudTokens: LiveActivityTokens,
-                        pairedDeviceIds: Set<String>? = nil) -> Bool {
+                        pairedDeviceIds: Set<String>? = nil, phoneChoices: [String: [String: Bool]]? = [:]) -> Bool {
+        if let phoneChoices { self.phoneChoices = phoneChoices }
         // A pending decision must be resumed even if Settings changed or the token disappeared.
         if alerted.contains(event.id) { return true }
         if milestones.entries[event.id] != nil { resumeMilestones(local: local, cloud: cloudTokens); return true }
-        guard enabled, endpoint != nil,
+        guard let phoneChoices, enabled, endpoint != nil,
               let activities = MilestoneAlert.tokens(for: event, relayOn: true, local: local, cloud: cloudTokens,
                                                      dead: dead, pairedDeviceIds: pairedDeviceIds) else { return false }
+        // Preserve the existing CloudKit preference path when any paired recipient opted out.
+        let knownDevices = (pairedDeviceIds ?? []).union(activities.map(\.deviceId))
+        guard !knownDevices.contains(where: { phoneChoices[$0]?[event.type] == false }) else { return false }
         let soon = Date().addingTimeInterval(30)
         if let pausedUntil, pausedUntil > soon { return false }
         if activities.contains(where: { (tokenPausedUntil[$0.token.lowercased()] ?? .distantPast) > soon }) { return false }
-        milestones.begin(event, title: title, devices: activities.map(\.deviceId))
+        milestones.begin(event, title: title, devices: activities.map(\.deviceId), now: now())
         resumeMilestones(local: local, cloud: cloudTokens)
         return true
     }
 
     func recover(client: ControlClient, cloudTokens: LiveActivityTokens) async {
+        if let settings = try? await client.companionSettings(), let choices = settings.notificationsDevices { phoneChoices = choices }
         let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
         recover(local: local, cloud: cloudTokens)
     }
@@ -114,8 +123,16 @@ import ControlKit
                     decide(entry.event.id); continue
                 }
                 let candidates = (local.activities + cloud.activities).filter { $0.deviceId == device && $0.printId == entry.event.printId }
-                guard let token = candidates.max(by: { $0.updatedAt < $1.updatedAt })?.token else { continue }
-                if dead.contains(token.lowercased()) {
+                guard let token = candidates.max(by: { $0.updatedAt < $1.updatedAt })?.token else {
+                    // Dismissed activities remove their tokens permanently. Allow registrations to
+                    // catch up briefly, then finish this recipient rather than stranding the outbox.
+                    if now().timeIntervalSince(entry.firstQueuedAt ?? entry.event.date ?? .distantPast) >= 30 {
+                        milestones.resolve(entry.event.id, device: device, outcome: .failed)
+                        decide(entry.event.id)
+                    }
+                    continue
+                }
+                if phoneChoices[device]?[entry.event.type] == false || dead.contains(token.lowercased()) {
                     milestones.resolve(entry.event.id, device: device, outcome: .failed)
                     decide(entry.event.id); continue
                 }
@@ -211,6 +228,9 @@ import ControlKit
     }
 
     private func withoutAlert(_ push: LiveActivityPush) -> LiveActivityPush {
+        // Starts require their own alert, and pauses/ends keep their original priority. Only a
+        // milestone's optional alert participates in the fallback decision.
+        guard push.alertEventId != nil else { return push }
         resolved(push, .failed)
         var plain = push
         plain.alert = nil; plain.alertEventId = nil; plain.alertDeviceId = nil; plain.priority = 5

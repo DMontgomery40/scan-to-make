@@ -125,7 +125,9 @@ Which token to use, from PRD §8.8:
 The Mac leaves update/end alerts out for pauses, ends and problems: the phone's CloudKit subscription
 delivers the event with its camera frame. Progress milestones are the exception (PRD §9.1): while the
 activity runs on every known paired recipient, they alert on it. The Mac persists the recipient
-decision before sending and retains distinct milestone alerts through retries and restart. Once every
+decision before sending, respects saved phone choices, and retains distinct milestone alerts through
+retries and restart. A missing registration resolves after a 30-second grace period on recovery.
+Push-to-start retries always retain their mandatory alert. Once every
 recipient finishes, it writes the account-wide CloudKit fallback only if all failed; partial success
 logs each missed device and never falls back onto devices already alerted. `ev-started` is silent because ActivityKit requires the start alert. The server
 still accepts optional update/end alerts as part of its wire contract. If an activity token arrives

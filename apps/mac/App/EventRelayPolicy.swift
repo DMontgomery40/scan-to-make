@@ -384,6 +384,7 @@ struct MilestoneDeliveries {
         var outcomes: [String: Outcome]
         var attempts: [String: Int] = [:]
         var fallback = false
+        var firstQueuedAt: Date?
         var complete: Bool { !outcomes.values.contains(.pending) }
         var hasSuccess: Bool { outcomes.values.contains(.succeeded) }
     }
@@ -394,9 +395,9 @@ struct MilestoneDeliveries {
         self.defaults = defaults
         entries = defaults.data(forKey: Self.key).flatMap { try? JSONDecoder().decode([String: Entry].self, from: $0) } ?? [:]
     }
-    mutating func begin(_ event: CounterpartEvent, title: String, devices: [String]) {
+    mutating func begin(_ event: CounterpartEvent, title: String, devices: [String], now: Date) {
         guard entries[event.id] == nil else { return }
-        entries[event.id] = Entry(event: event, title: title, outcomes: Dictionary(uniqueKeysWithValues: devices.map { ($0, .pending) }))
+        entries[event.id] = Entry(event: event, title: title, outcomes: Dictionary(uniqueKeysWithValues: devices.map { ($0, .pending) }), firstQueuedAt: now)
         save()
     }
     mutating func attempt(_ id: String, device: String) -> Int {

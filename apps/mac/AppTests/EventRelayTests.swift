@@ -406,6 +406,70 @@ final class EventRelayTests: XCTestCase {
         XCTAssertEqual(harness.acceptedProgress, [70], "retrying the older request must preserve the newer state that arrived in flight")
     }
 
+    @MainActor func testADismissedTokenAfterRestartReachesFallbackAfterABoundedWait() async throws {
+        let harness = try MilestoneHarness { _, _ in (429, ["Retry-After": "30"]) }
+        defer { harness.close() }
+        var clock = Date()
+        var relay: LiveActivityRelay? = LiveActivityRelay(defaults: harness.defaults, session: harness.session, now: { clock })
+        let milestone = event("print.milestone", id: "dismissed", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init()))
+        await eventually { relay!.lastResult.hasPrefix("Waiting:") }
+        relay = nil
+        var fallbacks = 0
+        let restarted = LiveActivityRelay(defaults: harness.defaults, session: harness.session, now: { clock })
+        restarted.undelivered = { _ in fallbacks += 1; return true }
+        restarted.recover(local: .init(), cloud: .init())
+        XCTAssertEqual(fallbacks, 0, "allow token registration to catch up before declaring a miss")
+        clock = clock.addingTimeInterval(31)
+        restarted.recover(local: .init(), cloud: .init())
+        await eventually { fallbacks == 1 && AlertedMilestones(defaults: harness.defaults).contains(milestone.id) }
+        XCTAssertEqual(fallbacks, 1, "dismissed tokens need not return; the event must leave pending")
+        XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
+    }
+
+    @MainActor func testARetriedStartKeepsItsMandatoryAlert() async throws {
+        let harness = try MilestoneHarness { _, index in (index == 0 ? 503 : 200, ["Retry-After": "1"]) }
+        defer { harness.close() }
+        let relay = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        let local = LiveActivityTokens(pushToStart: [.init(deviceId: "phone", token: "aa", updatedAt: "")])
+        relay.deliver(event("print.started", printId: "print-1"), title: "Mic mount", local: local, cloudTokens: .init())
+        await eventually(timeout: 3) { harness.requestCount >= 2 }
+        XCTAssertEqual(harness.acceptedTitles, ["Mic mount is printing"], "the relay contract requires an alert on every start, including retries")
+    }
+
+    @MainActor func testSavedPhoneChoicesPreventAnActivityMilestoneAlert() async throws {
+        let harness = try MilestoneHarness { _, _ in (200, [:]) }
+        defer { harness.close() }
+        let relay = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        let milestone = event("print.milestone", id: "muted-phone", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        let onActivity = relay.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init(),
+            pairedDeviceIds: ["phone"], phoneChoices: ["phone": ["print.milestone": false]])
+        if onActivity { await eventually { AlertedMilestones(defaults: harness.defaults).contains(milestone.id) } }
+        XCTAssertFalse(onActivity, "preserve the existing CloudKit notification-choice path")
+        XCTAssertTrue(harness.acceptedTitles.isEmpty, "a saved opt-out must not be bypassed by ActivityKit")
+    }
+
+    @MainActor func testSavedPhoneChoiceAlsoAppliesWithoutAPushToStartRegistration() async throws {
+        let harness = try MilestoneHarness { _, _ in (200, [:]) }
+        defer { harness.close() }
+        let relay = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        let milestone = event("print.milestone", id: "muted-without-start-token", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa")])
+        let onActivity = relay.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init(),
+            phoneChoices: ["phone": ["print.milestone": false]])
+        if onActivity { await eventually { AlertedMilestones(defaults: harness.defaults).contains(milestone.id) } }
+        XCTAssertFalse(onActivity)
+        XCTAssertTrue(harness.acceptedTitles.isEmpty)
+    }
+
+    func testSavedPhoneChoicesDecodeFromTheCompanionsSettings() throws {
+        let data = Data(#"{"milestones":"50","notifications":{"mac":{},"devices":{"phone":{"print.milestone":false}}}}"#.utf8)
+        let settings = try JSONDecoder().decode(CompanionSettings.self, from: data)
+        XCTAssertEqual(settings.notificationsDevices?["phone"]?["print.milestone"], false)
+    }
+
     @MainActor private func eventually(timeout: TimeInterval = 2, _ condition: () -> Bool) async {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
