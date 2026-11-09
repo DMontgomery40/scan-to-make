@@ -12,7 +12,11 @@ import SwiftUI
 final class FeedbackMessages {
     /// Returns the human readable string to display for the given feedback.  If there are more than one feedback entries, they
     /// will be concatenated together on multi-lines ('\n\ separated).
-    static func getFeedbackString(for feedback: ObjectCaptureSession.Feedback, captureMode: AppDataModel.CaptureMode) -> String? {
+    /// In freeform there is no box, so the box-only messages (too far, too close, out of view) are left out
+    /// (quick-sweep-capture.md §3.1 item 7). Apple's motion and light messages are shown as Apple sends them.
+    static func getFeedbackString(for feedback: ObjectCaptureSession.Feedback, captureMode: AppDataModel.CaptureMode,
+                                  freeform: Bool = false) -> String? {
+           if freeform, [.objectTooFar, .objectTooClose, .outOfFieldOfView].contains(feedback) { return nil }
            switch feedback {
                case .objectTooFar:
                    if captureMode == .area { return nil }

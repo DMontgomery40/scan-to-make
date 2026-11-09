@@ -1,5 +1,7 @@
 import XCTest
 import CoreGraphics
+import ModelIO
+import AppKit
 @testable import HandheldKit
 
 final class HandheldKitTests: XCTestCase {
@@ -75,5 +77,57 @@ final class HandheldKitTests: XCTestCase {
         try invalid.write(to: dir.appendingPathComponent("0000.depth.plist"))
         XCTAssertThrowsError(try exactDepth(for: image))
         XCTAssertThrowsError(try loadSample(image))
+    }
+
+    /// A triangle with an index outside the mesh is dropped whole; the triangles after it keep their own corners.
+    func testABadIndexDropsItsWholeTriangleOnly() {
+        XCTAssertEqual(wholeTriangles([0, 1, 2, 3, 9, 4, 4, 5, 6, 7], vertexCount: 8), [[0, 1, 2], [4, 5, 6]])
+        XCTAssertEqual(wholeTriangles([0, 1], vertexCount: 8), [])
+        XCTAssertEqual(wholeTriangles([0, 1, -1], vertexCount: 8), [])
+    }
+
+    /// A Y-up model in metres becomes the STL a project keeps: millimetres, Z up, centred, resting on z = 0.
+    func testSTLIsInMillimetresWithEveryTriangle() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("handheldkit-stl-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // A box 40 wide, 20 tall (Y up) and 10 deep, in metres the way PhotogrammetrySession writes, moved off the origin.
+        let box = MDLMesh(boxWithExtent: [0.04, 0.02, 0.01], segments: [1, 1, 1], inwardNormals: false,
+                          geometryType: .triangles, allocator: nil)
+        box.transform = MDLTransform(matrix: matrix_float4x4(columns: ([1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0.5, 0.3, -0.2, 1])))
+        let asset = MDLAsset(); asset.add(box)
+        let model = dir.appendingPathComponent("box.obj")
+        try asset.export(to: model)
+        let stl = dir.appendingPathComponent("box.stl")
+        let summary = try writeSTL(model: model, to: stl)
+        XCTAssertEqual(summary.triangles, 12)
+        XCTAssertEqual(summary.sizeMm.x, 40, accuracy: 0.01)
+        XCTAssertEqual(summary.sizeMm.y, 10, accuracy: 0.01)
+        XCTAssertEqual(summary.sizeMm.z, 20, accuracy: 0.01, "its height is on Z, as a slicer expects")
+        let bytes = try Data(contentsOf: stl)
+        XCTAssertEqual(bytes.count, 84 + 12 * 50)
+        XCTAssertEqual(bytes.subdata(in: 80..<84).withUnsafeBytes { $0.load(as: UInt32.self) }, 12)
+        var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
+        for t in 0..<12 { for k in 0..<3 {
+            let p = bytes.subdata(in: (84 + t * 50 + 12 + k * 12)..<(84 + t * 50 + 24 + k * 12)).withUnsafeBytes { SIMD3($0.load(fromByteOffset: 0, as: Float.self), $0.load(fromByteOffset: 4, as: Float.self), $0.load(fromByteOffset: 8, as: Float.self)) }
+            low = simd_min(low, p); high = simd_max(high, p)
+        } }
+        XCTAssertEqual(low.z, 0, accuracy: 0.001, "it rests on the bed")
+        XCTAssertEqual(low.x + high.x, 0, accuracy: 0.001); XCTAssertEqual(low.y + high.y, 0, accuracy: 0.001)
+        // Faces still point outwards after the turn: the first facet's stored normal agrees with its winding.
+        let floats = bytes.subdata(in: 84..<132).withUnsafeBytes { raw in (0..<12).map { raw.load(fromByteOffset: $0 * 4, as: Float.self) } }
+        let n = SIMD3(floats[0], floats[1], floats[2]), a = SIMD3(floats[3], floats[4], floats[5])
+        let b = SIMD3(floats[6], floats[7], floats[8]), c = SIMD3(floats[9], floats[10], floats[11])
+        let centre = (a + b + c) / 3
+        XCTAssertGreaterThan(simd_dot(n, centre - SIMD3(0, 0, 10)), 0, "the normal points away from the box's centre")
+        XCTAssertThrowsError(try writeSTL(model: dir.appendingPathComponent("missing.usdz"), to: dir.appendingPathComponent("x.stl")))
+
+        // The project page's picture of it: drawn, not just the stage's background.
+        let picture = dir.appendingPathComponent("overview.png")
+        try renderOverview(model: model, to: picture, pixels: 300)
+        let image = try XCTUnwrap(NSBitmapImageRep(data: try Data(contentsOf: picture)))
+        XCTAssertEqual(image.pixelsWide, 300)
+        let corner = image.colorAt(x: 2, y: 2)!, middle = image.colorAt(x: 150, y: 150)!
+        XCTAssertGreaterThan(abs(middle.brightnessComponent - corner.brightnessComponent), 0.05, "the box shows on the stage")
     }
 }

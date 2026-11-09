@@ -13,7 +13,7 @@ import {tempDir} from './support/temp.mjs';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function fixture(t, {denied = [], reconstruct, reportsCompletion, camera, printers, printerCatalog, print} = {}) {
+async function fixture(t, {denied = [], reconstruct, reportsCompletion, camera, printers, printerCatalog, print, mac = false} = {}) {
   const root = await tempDir('objects-http-');
   const store = new ObjectStore(join(root, 'objects'));
   const inputs = [];
@@ -25,6 +25,7 @@ async function fixture(t, {denied = [], reconstruct, reportsCompletion, camera, 
   };
   const events = [];
   const service = new ObjectService({store, runTouchup, reportsCompletion, camera, printers, printerCatalog, ...(print ? {print} : {}), stlInfo: async () => [60.6, 45.2, 21.7], claudePath: '/c', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, ...(reconstruct ? {reconstruct} : {}),
+    ...(mac ? {objectCaptureRebuild: true, scanToStl: async (_scan, stl) => { await writeFile(stl, STL); }} : {}),
     events: {emit: async draft => { events.push(draft); }}});
   const routes = createObjectRoutes(service);
   const scopes = [], devices = [];
@@ -113,7 +114,7 @@ test('another authorized phone cannot start an uploaded pair prefix and the sour
     await writeFile(input.output, 'usdz');
   }});
   t.after(() => release.resolve());
-  const id = (await call('POST', '/v1/objects', {})).json.object.id;
+  const id = (await call('POST', '/v1/objects', {instructions: 'Copy this.'})).json.object.id;
   const path = `/v1/objects/${id}`;
   const full = {captureManifest: {version: 1, images: ['0000.heic', '0001.heic'], depthRequired: true}};
   const sendPair = async stem => {
@@ -139,6 +140,37 @@ test('another authorized phone cannot start an uploaded pair prefix and the sour
   assert.equal(builds, 1, 'manifest retries do not replay a completed start');
   assert.ok(devices.includes('source-phone') && devices.includes('other-paired-phone'));
   assert.equal(scopes.at(-1), 'captures:import');
+});
+
+test('a walk-around declares its images before any frame, marks its preview, and no other phone can start it early', async t => {
+  const builds = [];
+  const {call, service} = await fixture(t, {mac: true, reconstruct: async input => { builds.push(input); await writeFile(input.output, 'usdz'); return {status: 'done'}; }});
+  const id = (await call('POST', '/v1/objects', {})).json.object.id;
+  const path = `/v1/objects/${id}`;
+  const manifest = {version: 1, images: ['0001.heic', '0002.heic'], depthRequired: false, source: 'object-capture'};
+  assert.equal((await call('POST', `${path}/capture-manifest`, {...manifest, cameraMetadataRequired: false})).status, 400, 'exactly four fields');
+  assert.equal((await call('POST', `${path}/capture-manifest`, {...manifest, images: ['00041.732011084.HEIC']})).status, 400);
+  assert.equal((await call('POST', `${path}/capture-manifest`, manifest)).status, 200);
+  assert.equal((await call('POST', `${path}/capture?name=0001.heic`, Buffer.from('a'))).status, 200);
+  assert.equal((await call('POST', `${path}/capture?name=0003.heic`, Buffer.from('c'))).status, 409, 'not one of the declared images');
+  const early = await call('POST', path + '/start', undefined, undefined, 'other-paired-phone');
+  assert.equal(early.status, 409);
+  assert.match(early.json.error.message, /phone that recorded it/);
+  assert.equal(builds.length, 0);
+  assert.equal((await call('POST', `${path}/capture?name=0002.heic`, Buffer.from('b'))).status, 200);
+  assert.equal((await call('PUT', `${path}/scan?preview=true`, Buffer.from('usdz'), 'model/vnd.usdz+zip')).status, 200);
+  assert.equal((await service.get(id)).scanSource, 'phone-preview');
+  assert.equal((await call('POST', path + '/start', {captureManifest: manifest})).status, 200);
+  assert.equal((await service.settled(id)).state, 'ready');
+  assert.equal(builds.length, 1);
+  assert.equal(builds[0].objectCapture, true);
+
+  // A computer without Apple's rebuild (Linux) refuses an iPhone walk-around in words.
+  const linux = await fixture(t);
+  const other = (await linux.call('POST', '/v1/objects', {})).json.object.id;
+  const refused = await linux.call('POST', `/v1/objects/${other}/capture-manifest`, manifest);
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.error.message, 'Scans from iPhone are rebuilt on a Mac. Pair this iPhone with a Mac to use Scan it.');
 });
 
 test('start validates the bounded manifest and requires capture import scope', async t => {
@@ -175,7 +207,7 @@ test('original scan export preserves every supported retained model format', asy
 
 test('scan, photos, start, then the ready model and renders download', async t => {
   const {call, service} = await fixture(t);
-  const id = (await call('POST', '/v1/objects', {})).json.object.id;
+  const id = (await call('POST', '/v1/objects', {instructions: 'Copy this.'})).json.object.id;   // asked for: a touch-up runs
   assert.equal((await call('PUT', `/v1/objects/${id}/scan`, Buffer.from('usdz'), 'model/vnd.usdz+zip')).status, 200);
   assert.equal((await call('POST', `/v1/objects/${id}/photos?name=IMG_0001.HEIC`, Buffer.from('heic'), 'image/heic')).status, 200);
   const started = await call('POST', `/v1/objects/${id}/start`);

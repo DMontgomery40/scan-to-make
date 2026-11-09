@@ -161,7 +161,7 @@ test('a structured Ask: one question, its picture with the region, and the answe
     {status: 'needs_closeup', result: {closeup: 'the clip', ask: {question: 'Can you take a close-up of the clip on the left?', photo: 'photo-01.jpg', region: {x: 0.1, y: 0.2, width: 0.3, height: 0.3}}}},
     {result: {summary: 'Done.', title: 'Clip holder'}},
   ]);
-  const object = await f.service.create(undefined, 'copy');
+  const object = await f.service.create('Copy this clip holder.', 'copy');   // asked for: a touch-up runs (PRD §5.3)
   await f.store.addFile(object.id, 'scan', 'scan.usdz', Buffer.from('usdz'));
   await f.store.update(object.id, o => ({...o, scan: 'scan.usdz', photos: ['front.jpg']}));
   await f.store.addFile(object.id, 'photos', 'front.jpg', JPEG);

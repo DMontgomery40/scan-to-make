@@ -49,9 +49,12 @@ struct ChosenPhoto: Equatable { var id: String }
         return savedRun
     }
     func finishedScan(_ id: String) async -> String? { savedRun }
-    func sendCapture(_ id: String, run: String) async throws {
+    var manifests: [[String: Any]?] = []
+    func sendCapture(_ id: String, run: String) async throws -> [String: Any]? {
         events.append("send-walkaround:\(run)")
-        try upload((0..<3).map { "\(run)-frame-\($0)" })
+        let frames = (0..<3).map { "\(run)-frame-\($0)" }
+        try upload(frames)
+        return ["version": 1, "images": frames, "depthRequired": false, "source": "object-capture"]
     }
     func sendHandheld(_ id: String) async throws -> StmObject {
         events.append("send-handheld")
@@ -74,8 +77,9 @@ struct ChosenPhoto: Equatable { var id: String }
             }
         }
     }
-    func start(_ id: String) async throws -> StmObject {
+    func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject {
         events.append("start")
+        manifests.append(captureManifest)
         if (HandheldCapture.isFinished || savedRun != nil) && received.count < 3 { startedWithIncompleteCapture = true }
         if !expectedPhotos.isSubset(of: photos) { startedWithoutPhotos = true }
         return StmObject(state: .touchingUp)
@@ -205,6 +209,9 @@ struct ChosenPhoto: Equatable { var id: String }
         check(walkaround.store.mac.received == [0: "run-1-frame-0", 1: "run-1-frame-1", 2: "run-1-frame-2"],
               "walkaround retry mixed or omitted original photos")
         check(!walkaround.store.mac.startedWithIncompleteCapture, "Send started an incomplete saved capture")
+        check(walkaround.store.mac.manifests.last??["source"] as? String == "object-capture"
+              && walkaround.store.mac.manifests.last??["images"] as? [String] == ["run-1-frame-0", "run-1-frame-1", "run-1-frame-2"],
+              "a walk-around started without naming every image it sent")
 
         // Photos chosen in New survive a send cut short, and the project page sends the rest before start.
         HandheldCapture.reset()

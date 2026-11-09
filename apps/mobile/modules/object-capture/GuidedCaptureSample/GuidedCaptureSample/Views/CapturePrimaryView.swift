@@ -19,11 +19,16 @@ struct CapturePrimaryView: View {
         ZStack {
             ObjectCaptureView(session: session,
                               cameraFeedOverlay: { GradientBackground() })
-            .hideObjectReticle(appModel.captureMode == .area)
+            // Freeform has no box at any point: "Hides the object selection reticle when the session is in `.ready`".
+            .hideObjectReticle(appModel.isFreeform || appModel.captureMode == .area)
             .blur(radius: appModel.showOverlaySheets ? 45 : 0)
             .transition(.opacity)
 
-            CaptureOverlayView(session: session)
+            if appModel.isFreeform {
+                FreeformCaptureOverlay(session: session)
+            } else {
+                CaptureOverlayView(session: session)
+            }
         }
         .overlay(alignment: .topLeading) {
             CaptureStopButton { appModel.stopCapture() }

@@ -7,7 +7,13 @@ import HandheldKit
 // `.reduced` are available (WWDC23 10191, WWDC24 10107).
 //
 //   mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
-//       An Object Capture photo folder (walk-around scan).
+//       An Object Capture photo folder (walk-around scan): the iPhone's own HEICs, each carrying its LiDAR depth,
+//       gravity and the capture box, which PhotogrammetrySession reads itself. Before building it prints
+//       {"images":N,"depth":D}: how many photos carry depth, which is where the model's real-world size comes from.
+//   mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>]
+//       Writes the model's triangles as a binary STL in millimetres, Z up, centred and resting on z = 0
+//       (PhotogrammetrySession writes metres, Y up). --render also draws the model for the project page; a model
+//       that can't be drawn still gets its STL, and the {"done":…} line names the picture only when there is one.
 //   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
 //                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 //       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
@@ -26,10 +32,28 @@ func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
 
 let usage = """
 usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
+       mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>]
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 
 """
 var args = Array(CommandLine.arguments.dropFirst())
+if args.first == "stl" {
+    var render: String?
+    if let i = args.firstIndex(of: "--render"), i + 1 < args.count { render = args[i + 1]; args.removeSubrange(i...(i + 1)) }
+    guard args.count == 3 else { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
+    do {
+        let model = URL(fileURLWithPath: args[1])
+        let summary = try writeSTL(model: model, to: URL(fileURLWithPath: args[2]))
+        var done: [String: Any] = ["done": args[2], "triangles": summary.triangles, "vertices": summary.vertices,
+                                   "sizeMm": [summary.sizeMm.x, summary.sizeMm.y, summary.sizeMm.z].map { ($0 * 10).rounded() / 10 }]
+        if let render {
+            do { try renderOverview(model: model, to: URL(fileURLWithPath: render)); done["render"] = render }
+            catch { FileHandle.standardError.write(Data("render: \(error)\n".utf8)) }
+        }
+        emit(done)
+        exit(0)
+    } catch { fail(String(describing: error)) }
+}
 let samplesMode = args.first == "samples"
 if samplesMode { args.removeFirst() }
 func option(_ name: String) -> String? {
@@ -53,9 +77,20 @@ let detail = details[args.count > 2 ? args[2] : "full"] ?? .full
 guard PhotogrammetrySession.isSupported else { fail("Photogrammetry isn't supported on this Mac.") }
 
 var configuration = PhotogrammetrySession.Configuration()
-configuration.sampleOrdering = .sequential      // photos are in capture order
-configuration.featureSensitivity = .normal
 configuration.isObjectMaskingEnabled = !noObjectMasking   // the object, not what's around it
+if samplesMode {
+    configuration.sampleOrdering = .sequential  // the handheld recorder's photos are adjacent, in capture order
+    configuration.featureSensitivity = .normal
+} else {
+    // An Object Capture folder, Apple's way: its own per-photo camera, depth, gravity and capture box, its own masks.
+    // .high: Apple's setting "for challenging images" (dim 1/60 s rig frames, a plain backdrop). The ordering stays
+    // Apple's default: on David's rig scan, .sequential with .high placed 5–7 of 24 photos and left part of the sign
+    // in three runs, against 9 of 24 and the same front of the sign in three runs unordered.
+    configuration.featureSensitivity = .high
+    // Apple's capture box is not trusted to trim the object: on David's rig scan it was fitted to the script on the
+    // base and cut the letters. Apple's object masking (on above) still separates the object from the room.
+    configuration.ignoreBoundingBox = true
+}
 
 let started = Date()
 
@@ -130,6 +165,11 @@ do {
         }
         session = try PhotogrammetrySession(input: samples, configuration: configuration)
     } else {
+        // Apple: "If your source images contain depth data, RealityKit uses it to calculate the real-world size of
+        // the scanned object." Say how many do, so the size's source is on record.
+        let files = try photos(in: input)
+        guard !files.isEmpty else { fail("No photos in \(input.path).") }
+        emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count, "stage": "reconstructing"])
         session = try PhotogrammetrySession(input: input, configuration: configuration)
     }
     try session.process(requests: [.modelFile(url: output, detail: detail)])
@@ -147,6 +187,10 @@ do {
             emit(["skipped": id, "reason": reason])
         case .skippedSample(let id):
             emit(["skipped": id, "reason": "not used"])
+        case .stitchingIncomplete:
+            emit(["warning": "stitching-incomplete"])
+        case .automaticDownsampling:
+            emit(["warning": "downsampled"])
         case .processingCancelled:
             fail("cancelled")
         default:

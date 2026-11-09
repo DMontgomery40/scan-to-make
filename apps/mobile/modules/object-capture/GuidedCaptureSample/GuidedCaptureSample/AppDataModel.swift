@@ -141,6 +141,11 @@ class AppDataModel: Identifiable {
     }
 
     var captureMode: CaptureMode = .object { didSet { record("capture-mode", detail: String(describing: captureMode)) } }
+
+    /// Apple's freeform capture with no box and no mode (quick-sweep-capture.md §3.1), behind `-STMFreeformCapture YES`.
+    /// It never sets `captureMode = .area`: area mode turns object masking off, and the Mac rebuild keeps it on.
+    let isFreeform: Bool
+    private(set) var freeformFlow = FreeformCaptureFlow()
     private var evaluationBuffer = CaptureEvaluationEventBuffer()
     private var lastObservedTracking: String?
     private var lastObservedPause: Bool?
@@ -166,8 +171,9 @@ class AppDataModel: Identifiable {
     var tutorialPlayedOnce = false
 
     // Postpone creating ObjectCaptureSession and PhotogrammetrySession until necessary.
-    init(captureDirectory: URL? = nil) {
+    init(captureDirectory: URL? = nil, freeform: Bool = FreeformCaptureFlow.isEnabled()) {
         self.captureDirectory = captureDirectory
+        self.isFreeform = freeform
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(handleAppTermination(notification:)),
                                                name: UIApplication.willTerminateNotification,
@@ -352,6 +358,12 @@ extension AppDataModel {
                     watchdog = CaptureWatchdog()
                     continue
                 }
+                // Reviewing the point cloud pauses the session on purpose; the person ends it with Use scan or
+                // Keep scanning, never the watchdog.
+                guard !self.freeformFlow.isReviewing else {
+                    watchdog = CaptureWatchdog()
+                    continue
+                }
                 let reason = watchdog.observe(tracking: AppDataModel.watchdogTracking(model.cameraTracking),
                                               paused: model.isPaused,
                                               capturing: model.state == .capturing,
@@ -404,8 +416,9 @@ extension AppDataModel {
         evaluationStarted = Date()
         passCount = 1
         flipCount = 0
+        freeformFlow = FreeformCaptureFlow()
         objectCaptureSession = ObjectCaptureSession()
-        record("started")
+        record("started", detail: isFreeform ? "freeform" : "")
 
         guard let session = objectCaptureSession else {
             preconditionFailure("startNewCapture() got unexpectedly nil session!")
@@ -415,7 +428,11 @@ extension AppDataModel {
             preconditionFailure("captureFolderManager unexpectedly nil!")
         }
 
+        // PRD §10 allows a success haptic when a result is ready and a warning on a plate alert, nothing else.
+        // Only the quick scan changes it; the guided path stays as it was until the flag graduates.
+        if isFreeform { session.shouldPlayHaptics = false }
         var configuration = ObjectCaptureSession.Configuration()
+        // Every image goes to the Mac: "meant for use when the images are intended to be transferred to macOS".
         configuration.isOverCaptureEnabled = true
         configuration.checkpointDirectory = captureFolderManager.checkpointFolder
         // Starts the initial segment and sets the output locations.
@@ -607,7 +624,7 @@ extension AppDataModel {
         // Find the feedbacks that are not active anymore.
         let feedbackToRemove = currentFeedback.subtracting(persistentFeedback)
         for thisFeedback in feedbackToRemove {
-            if let feedbackString = FeedbackMessages.getFeedbackString(for: thisFeedback, captureMode: captureMode) {
+            if let feedbackString = FeedbackMessages.getFeedbackString(for: thisFeedback, captureMode: captureMode, freeform: isFreeform) {
                 messageList.remove(feedbackString)
             }
         }
@@ -615,7 +632,7 @@ extension AppDataModel {
         // Find the new feedbacks.
         let feebackToAdd = feedback.subtracting(persistentFeedback)
         for thisFeedback in feebackToAdd {
-            if let feedbackString = FeedbackMessages.getFeedbackString(for: thisFeedback, captureMode: captureMode) {
+            if let feedbackString = FeedbackMessages.getFeedbackString(for: thisFeedback, captureMode: captureMode, freeform: isFreeform) {
                 messageList.add(feedbackString)
             }
         }
@@ -718,7 +735,8 @@ extension AppDataModel {
         evaluationBuffer.append(entry)
         let manifest: [String: Any] = [
             "formatVersion": "0.1", "createdAt": ISO8601DateFormatter().string(from: evaluationStarted),
-            "captureMode": String(describing: captureMode), "hideObjectReticle": captureMode == .area,
+            "captureMode": isFreeform ? "freeform" : String(describing: captureMode),
+            "hideObjectReticle": isFreeform || captureMode == .area,
             "objectCaptureSupported": ObjectCaptureSession.isSupported,
             "photogrammetrySupported": PhotogrammetrySession.isSupported,
             "sceneDepthSupported": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
@@ -756,5 +774,55 @@ extension AppDataModel {
         passCount += 1
         if flipped { flipCount += 1 }
         record("new-pass", detail: flipped ? "beginNewScanPassAfterFlip" : "beginNewScanPass")
+    }
+}
+
+// The quick scan's buttons. Each asks the flow which session call to make, so the steps stay in one tested place.
+extension AppDataModel {
+    func freeformRecord() {
+        guard isFreeform, let session = objectCaptureSession, case .ready = session.state,
+              let call = freeformFlow.record(sessionReady: true, trackingNormal: session.cameraTracking == .normal)
+        else { return }
+        perform(call, on: session)
+    }
+
+    func freeformDone() {
+        guard isFreeform, let session = objectCaptureSession,
+              let call = freeformFlow.done(shots: session.numberOfShotsTaken,
+                                           trackingNormal: session.cameraTracking == .normal && !session.isPaused)
+        else { return }
+        perform(call, on: session)
+    }
+
+    func freeformKeepScanning() {
+        guard isFreeform, let session = objectCaptureSession, let call = freeformFlow.keepScanning() else { return }
+        perform(call, on: session)
+    }
+
+    func freeformUseScan() {
+        guard isFreeform, let session = objectCaptureSession, let call = freeformFlow.useScan() else { return }
+        perform(call, on: session)
+    }
+
+    /// Stop from the review sheet: the same stop as the capture screen's, files kept.
+    func freeformStop() {
+        guard isFreeform, freeformFlow.stop() else { return }
+        stopCapture()
+    }
+
+    private func perform(_ call: FreeformCaptureFlow.SessionCall, on session: ObjectCaptureSession) {
+        record("freeform", detail: String(describing: call))
+        switch call {
+        case .startCapturing:
+            session.startCapturing()
+        case .pause:
+            // The review sheet covers the capture view: "Call this when object capture view is not visible".
+            setShowOverlaySheets(to: true)
+        case .resume:
+            setShowOverlaySheets(to: false)
+        case .finish:
+            // As Apple's sample does from its paused review sheet; the session saves every image, then completes.
+            session.finish()
+        }
     }
 }

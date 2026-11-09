@@ -10,9 +10,11 @@ public struct UploadFile: Equatable, Sendable {
     public var name: String
     public var source: Source
     public var type: String
+    /// A scan that is only the phone's own on-device model of a capture: the Mac keeps it marked as a preview.
+    public var preview: Bool
 
-    public init(kind: Kind, name: String, source: Source, type: String) {
-        self.kind = kind; self.name = name; self.source = source; self.type = type
+    public init(kind: Kind, name: String, source: Source, type: String, preview: Bool = false) {
+        self.kind = kind; self.name = name; self.source = source; self.type = type; self.preview = preview
     }
 
     public static func image(_ url: URL, name: String? = nil, kind: Kind = .photo) -> UploadFile {
@@ -33,9 +35,11 @@ public actor ProjectUploader {
     public func isSending(_ projectId: String) -> Bool { sending.contains(projectId) }
 
     /// Sends whatever of `files` the Mac doesn't have yet, one after another, stopping at the first failure.
-    /// Returns how many photos or frames were sent (the scan isn't counted).
+    /// Returns how many photos or frames were sent (the scan isn't counted). `progress` gets the share of `files`
+    /// on the Mac, 0…1: what it already had first, then after each file, so a resumed send starts where it stopped.
     @discardableResult
-    public func send(_ files: [UploadFile], to projectId: String, forMessage: Bool = false) async throws -> Int {
+    public func send(_ files: [UploadFile], to projectId: String, forMessage: Bool = false,
+                     progress: (@Sendable (Double) -> Void)? = nil) async throws -> Int {
         guard !sending.contains(projectId) else { throw CompanionError(code: "busy", message: "This is already being sent.") }
         sending.insert(projectId)
         defer { sending.remove(projectId) }
@@ -52,7 +56,9 @@ public actor ProjectUploader {
             case .depth: !depths.contains(file.name)
             }
         }
-        var sent = 0
+        var sent = 0, arrived = files.count - missing.count
+        func report() { if !files.isEmpty { progress?(Double(arrived) / Double(files.count)) } }
+        report()
         for file in missing {
             let bytes: Data?
             switch file.source {
@@ -64,7 +70,7 @@ public actor ProjectUploader {
                 throw CompanionError(code: "unreadable-file", message: "A file from this scan couldn't be read.")
             }
             let path: String, method: String
-            if file.kind == .scan { path = "/v1/objects/\(projectId)/scan"; method = "PUT" }
+            if file.kind == .scan { path = "/v1/objects/\(projectId)/scan" + (file.preview ? "?preview=true" : ""); method = "PUT" }
             else {
                 let route = file.kind == .depth ? "capture-depth" : file.kind == .capture ? "capture" : "photos"
                 let name = file.name.addingPercentEncoding(withAllowedCharacters: Self.queryValue) ?? file.name
@@ -77,6 +83,8 @@ public actor ProjectUploader {
                     : CompanionError(code: "upload-failed", message: "Your Mac didn't accept a file from this scan. Try again.")
             }
             if file.kind != .scan { sent += 1 }
+            arrived += 1
+            report()
         }
         return sent
     }
@@ -90,6 +98,25 @@ public actor ProjectUploader {
         set.remove(charactersIn: "+&=#")
         return set
     }()
+
+    /// Every image of an Object Capture session's Images folder, in capture order, with the name the Mac keeps it under:
+    /// NNNN and its own extension in lower case, as the Mac's capture frames are named. Apple names them by seconds since
+    /// the session started ("00041.732011084.HEIC"), which sorts in capture order. The bytes go as they are; the capture
+    /// time stays in each HEIC. Anything else in the folder stops the send, in words.
+    public static func captureFrames(_ entries: [String]) throws -> [(file: String, name: String)] {
+        let files = entries.filter { !$0.hasPrefix(".") }.sorted()
+        guard files.count <= 9999 else {
+            throw CompanionError(code: "capture-too-large", message: "This scan has more photos than Counterpart can send (\(files.count)). Scan it again with fewer.")
+        }
+        return try files.enumerated().map { index, file in
+            let ext = (file as NSString).pathExtension.lowercased()
+            let name = String(format: "%04d.", index + 1) + ext   // the Mac takes ^[0-9]{4}\.(heic|jpe?g|png)$ only
+            guard ["heic", "jpg", "jpeg", "png"].contains(ext), !file.contains("/"), !file.contains("..") else {
+                throw CompanionError(code: "unsendable-capture", message: "This scan has a file Counterpart can't send (\(file)). Scan it again.")
+            }
+            return (file, name)
+        }
+    }
 
     /// Evenly spread picks from first to last, so every side of the object stays represented.
     public static func spread<T>(_ items: [T], count: Int) -> [T] {

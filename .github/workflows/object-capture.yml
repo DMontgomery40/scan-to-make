@@ -38,6 +38,8 @@ jobs:
           swift --version
       - name: Run capture watchdog policy checks
         run: ./tests/watchdog/run_watchdog_checks.sh
+      - name: Run quick scan (freeform) step checks
+        run: ./tests/freeform/run_freeform_checks.sh
       - name: Run exporter tests
         run: python3 -m unittest discover -s tests -v
       - name: Run native lifecycle checks

@@ -91,14 +91,25 @@ export interface StmObject {
   ask?: Ask;
   /** File name under scan/. */
   scan?: string;
+  /**
+   * Where `scan` came from when the phone sent an Object Capture session's photos with it: `phone-preview` is the
+   * phone's own quick model, kept until this Mac rebuilds from the photos (and kept as the scan, said in words, when
+   * it can't); `mac` is that rebuild, with the phone's preview kept as scan/phone-preview.usdz.
+   */
+  scanSource?: 'phone-preview' | 'mac';
   /** File names under photos/, in upload order. */
   photos: string[];
-  /** A handheld scan: its photos under capture/ (with depth), rebuilt into scan/scan.usdz on this Mac. */
+  /**
+   * Photos for a rebuild on this Mac, under capture/: a handheld scan's (with depth), or every image of an iPhone
+   * Object Capture session (`captureCompletion.source`), rebuilt into scan/scan.usdz.
+   */
   capture?: string[];
   /** Lossless depth/calibration companions under capture/, separate from viewable images. */
   captureDepth?: string[];
   /** The source phone confirmed the entire finished capture; the digest binds its retained file names. */
-  captureCompletion?: {version: 1; depthRequired: boolean; cameraMetadataRequired?: boolean; scaleQualificationRequired?: boolean; frameCount: number; sha256: string; completedAtMs: number};
+  /** A walk-around's images, declared by the phone before it sends any; cleared when its start completes the capture. */
+  captureDeclared?: {source: 'object-capture'; images: string[]};
+  captureCompletion?: {version: 1; depthRequired: boolean; cameraMetadataRequired?: boolean; scaleQualificationRequired?: boolean; source?: 'object-capture'; frameCount: number; sha256: string; completedAtMs: number};
   /** capture-camera v1 was supplied and bound to the saved photos; only its digest is public. */
   captureCamera?: {sha256: string; frameCount: number};
   /** A rebuild waiting on the person (which part is the object, or how big it is). Public, path-free. */

@@ -45,7 +45,8 @@ async function setup({reconstruct} = {}) {
   const service = new ObjectService({store, runTouchup, stlInfo: async () => [10, 10, 10], claudePath: '/c',
     handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
     reconstruct: reconstruct ?? (async input => { builds.push(input); await writeFile(input.output, 'usdz'); return {status: 'done'}; })});
-  const object = await service.create();
+  // A request: these reviews happen on the way to a touch-up the person asked for (PRD §5.3).
+  const object = await service.create('Copy this.', 'copy');
   return {service, store, object, touchups, builds, root};
 }
 
