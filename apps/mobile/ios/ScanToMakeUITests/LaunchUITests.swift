@@ -549,7 +549,7 @@ final class LayoutParityUITests: XCTestCase {
         app.launchEnvironment["COUNTERPART_LIMIT_FIXTURES"] = String(data: try JSONSerialization.data(withJSONObject: selected), encoding: .utf8)
         app.launch()
         let words = NSPredicate(format: "label CONTAINS %@", "Stopped after 600 seconds without worker activity")
-        let listed = app.descendants(matching: .any).matching(words).firstMatch
+        let listed = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "limit-inactivity")).firstMatch
         XCTAssertTrue(listed.waitForExistence(timeout: 20))
         listed.tap()
         XCTAssertTrue(app.buttons["Try Again"].waitForExistence(timeout: 10))

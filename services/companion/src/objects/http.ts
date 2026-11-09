@@ -77,10 +77,11 @@ export function projectSettingsView(object: StmObject) {
 
 export function publicObject(object: StmObject): PublicObject {
   const failure = currentFailureText(object.failure);
-  // Pass activity is omitted below. Carry the current capped failure's retry decision to both apps;
-  // a later printer failure must not inherit Retry from an older capped pass.
+  // Carry this worker stop's retry decision to every client, without exposing its local recovery fields.
+  // A later printer failure must not inherit Retry from an older worker stop.
   const lastPass = object.passes.at(-1);
-  const canRetryCleanup = object.state === 'failed' && lastPass?.status === 'capped'
+  const canRetryCleanup = object.state === 'failed' && (lastPass?.status === 'capped'
+    || (!!lastPass?.sessionId && lastPass.resumable !== false && ['failed', 'interrupted'].includes(lastPass.status ?? '')))
     && !!object.failure && lastPass.activity?.at(-1)?.text === object.failure;
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
   // The companion's decision (copy, new design or published), so neither app re-derives it.

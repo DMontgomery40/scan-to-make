@@ -404,6 +404,7 @@ for (const status of ['capped', 'failed']) test(`the next project request resume
   await f.service.start(object.id);
   const stopped = await f.service.settled(object.id), pass = stopped.passes.at(-1);
   assert.equal(pass.sessionId, 'recover-me');
+  assert.equal(publicObject(stopped).canRetryCleanup, true);
   assert.deepEqual(pass.limit, {kind:'inactivity',value:600000});
   assert.equal(pass.toolCalls, 2);
   assert.deepEqual(pass.checkpoints, []);
@@ -444,4 +445,12 @@ test('closing the companion interrupts a worker without attributing it to the pe
  const stopped=await f.store.get(o.id);
  assert.equal(stopped.passes.at(-1).status,'interrupted');assert.equal(stopped.passes.at(-1).resumable,true);
  assert.match(stopped.failure,/Interrupted/);assert.doesNotMatch(stopped.failure,/cancelled/i);
+});
+
+test('a request after restart resumes the interrupted session from the saved cwd', async t => {
+ const f=await setup(t,[{status:'done'}]),o=await f.service.create('A unicorn','fit');
+ await f.store.update(o.id,old=>({...old,state:'touching-up',passes:[{startedAtMs:1,sessionId:'interrupted-session',sessionCwd:'/first/pass',dir:'/latest/pass'}]}));
+ await f.store.recoverInterrupted();
+ await f.service.start(o.id);await f.service.settled(o.id);
+ assert.deepEqual(f.inputs[0].resume,{sessionId:'interrupted-session',passDir:'/latest/pass',sessionCwd:'/first/pass'});
 });

@@ -1,0 +1,38 @@
+name: Android and Linux client checks
+on:
+  pull_request:
+    branches: [main]
+    paths: ['android/**', 'apps/linux/**', 'packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/**', 'packages/contracts/fixtures/**', '.github/workflows/clients.yml']
+  push:
+    branches: [main]
+    paths: ['android/**', 'apps/linux/**', 'packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/**', 'packages/contracts/fixtures/**', '.github/workflows/clients.yml']
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Android unit and layout tests
+        working-directory: android
+        run: |
+          export JAVA_HOME="${JAVA_HOME_17_X64:-/usr/lib/jvm/java-17-openjdk-amd64}"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+          ./gradlew --no-daemon :app:testDebugUnitTest
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+      - run: npm ci --prefix apps/linux --ignore-scripts
+      - run: npm test --prefix apps/linux
+      - run: npm run build --prefix apps/linux

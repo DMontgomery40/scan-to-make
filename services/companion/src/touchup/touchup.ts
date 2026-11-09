@@ -284,6 +284,9 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   if (input.resume) {
     // Use the session's original working directory: Claude stores -p sessions by cwd.
     inv.cwd = input.resume.sessionCwd ?? input.resume.passDir;
+    // Session lookup keeps its original cwd; relative output names must still belong to this new attempt.
+    const rules = inv.args.indexOf('--append-system-prompt') + 1;
+    inv.args[rules] += `\nFor this resumed attempt, resolve every out/... output name in these rules and the result schema against ${pass.dir}, not the session working directory. Write final files only to ${pass.outDir} and checkpoints only to ${pass.checkpointsDir}, using absolute paths. The previous pass folder is a recovery source: do not overwrite its files.`;
     inv.args[inv.args.length - 1] = `Continue from where you stopped. The previous checkpoints folder is ${join(input.resume.passDir, 'out', 'checkpoints')}. Restore the latest valid checkpoint if needed. Save this pass's checkpoints in ${pass.checkpointsDir} and final files in ${pass.outDir}. The modeling engine is prepared for this pass; use its current MCP binding. You already have the original request and photos in this session.${input.note ? ` New request: ${input.note}` : ''}${input.resume.photos?.length ? ` New photos for this request: ${input.resume.photos.map(path => pass.photoPaths[input.photos.indexOf(path)]).filter(Boolean).join(', ')}.` : ''}`;
   }
   const runOptions = {
@@ -295,7 +298,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   input.onProgress?.({seconds: 0, toolCalls: 0, passDir: pass.dir, sessionCwd: inv.cwd, ...(input.resume ? {sessionId: input.resume.sessionId} : {})});
   let result = await (deps.run ?? runTouchupWorker)(inv, pass, runOptions);
   if (input.resume) {
-    const unavailable = result.status === 'failed' && !result.sessionId && result.stats.toolCalls === 0
+    const unavailable = result.status === 'failed' && !result.worker && result.stats.toolCalls === 0
       && /no conversation found with session ID|session[^\n]*(?:not found|does not exist|unavailable)|invalid session (?:id|identifier)/i.test(result.reason ?? '');
     if (unavailable && !input.signal?.aborted) {
       const reason = 'The previous Claude Code session is unavailable. Started again from the saved project inputs.';

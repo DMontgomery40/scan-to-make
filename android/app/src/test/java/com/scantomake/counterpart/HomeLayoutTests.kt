@@ -120,18 +120,26 @@ class HomeLayoutTests {
 
     @Test fun limitStopsNameTheLimitWithProjectsPresent() {
         val rows = WireJson.parseToJsonElement(kitFixture("capped-projects.json").readText()).jsonArray
-        val stopped = rows.filter { it.jsonObject["name"]!!.jsonPrimitive.content.startsWith("limit-") }
-            .map { requireNotNull(Project.decode(it.jsonObject["expected"]!!.jsonObject)) }
-        state.projects.value = listOf(project("other", "Existing project", "ready")) + stopped
-        state.loaded.value = true
-        home()
-        stopped.forEach { p ->
-            val words = requireNotNull(p.failure)
-            compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(words))
-            compose.onNodeWithText(words).assertExists()
-            assertEquals(words, com.scantomake.counterpart.api.ProjectWords(p).status)
-            org.junit.Assert.assertTrue(com.scantomake.counterpart.api.ProjectAction.Retry in com.scantomake.counterpart.api.ProjectWords(p).actions)
+        val data = rows.first { it.jsonObject["name"]!!.jsonPrimitive.content == "limit-inactivity" }.jsonObject["expected"]!!.jsonObject
+        val stopped = requireNotNull(Project.decode(data))
+        val transport = FakeTransport { request, _ ->
+            if (request.url.endsWith("/v1/objects/${stopped.id}")) HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
         }
+        app.pairing = PairingClient(app.pairingStore, transport)
+        app.companion = CompanionClient(app.pairing, transport, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), stopped)
+        state.loaded.value = true
+        compose.setContent { WithApp {
+            var selected by remember { mutableStateOf<String?>(null) }
+            if (selected == null) HomeScreen(open = { id, _ -> selected = id }, newProject = {}, printers = {}, settings = {})
+            else com.scantomake.counterpart.ui.ProjectScreen(selected!!, back = { selected = null }, print = {}, printing = {}, scan = {})
+        } }
+        val title = com.scantomake.counterpart.api.ProjectWords(stopped).title
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(title))
+        compose.onNodeWithText(title).performClick()
+        compose.onNodeWithText(requireNotNull(stopped.failure)).performScrollTo().assertExists()
+        compose.onNodeWithText("Try Again").performScrollTo().assertIsEnabled()
     }
 
     @Test fun theStartersStayOnHomeWhileProjectsExist() {

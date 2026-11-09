@@ -271,15 +271,15 @@ test('every worker event resets inactivity so active work can run beyond 900 sec
 
 test('a crashed worker without a final answer remains resumable, while a person cancel does not', async t => {
   const {EventEmitter} = await import('node:events');const {PassThrough} = await import('node:stream');
-  for (const cancelled of [false,true]) {
+  for (const cancelled of [false,true,'error']) {
     const {pass,inv}=await setup('hang'),controller=new AbortController();
     const child=Object.assign(new EventEmitter(),{pid:99999999,stdout:new PassThrough(),stderr:new PassThrough()});
     t.mock.method(process,'kill',()=>{queueMicrotask(()=>child.emit('close',null));return true;});
     const pending=runTouchupWorker(inv,pass,{spawn:()=>child,signal:controller.signal});
     child.stdout.write('{"type":"system","subtype":"init","session_id":"crash-session"}\n');
-    if(cancelled)controller.abort();else child.emit('close',1);
+    if(cancelled === true)controller.abort();else if(cancelled === 'error')child.emit('error',new Error('worker pipe failed'));else child.emit('close',1);
     const result=await pending;
-    assert.equal(result.status,'failed');assert.equal(result.sessionId,'crash-session');assert.equal(result.resumable,!cancelled);
-    if(cancelled)assert.equal(result.reason,'cancelled');
+    assert.equal(result.status,'failed');assert.equal(result.sessionId,'crash-session');assert.equal(result.resumable,cancelled !== true);
+    if(cancelled === true)assert.equal(result.reason,'cancelled');
   }
 });
