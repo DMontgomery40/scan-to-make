@@ -426,13 +426,6 @@ struct AlertedMilestones {
     }
 }
 
-/// Whether the relay is on (David, Nov 8: on by default in production-signed Mac builds). A choice made in Settings
-/// always wins. Development-signed builds stay off by default: their phones' tokens are Sandbox ones, which the production
-/// relay would reject (and deny for 30 days).
-enum RelayDefault {
-    static func enabled(stored: Bool?, apsEnvironment: String?) -> Bool { stored ?? (apsEnvironment == "production") }
-}
-
 /// How long to wait before resending when the relay cannot be reached. An end keeps trying for about an hour;
 /// starts and updates are soon replaced by newer state.
 enum RelayRetry {

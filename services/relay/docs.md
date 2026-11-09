@@ -115,7 +115,7 @@ Which token to use, from PRD §8.8:
 |---|---|---|---|
 | `print.started` | `start` | 10 | required, e.g. "*Title* is printing" |
 | `print.status` | `update` | 5 | none |
-| `print.first-layer` / `print.milestone` | `update` | 10 while the print's activity runs on every device that shows activities (then no CloudKit event); otherwise 5 with no alert, and CloudKit alerts | the notification's own title and body; `sound: "default"` except the passive first layer (PRD §9.1, David, Nov 8) |
+| `print.first-layer` / `print.milestone` | `update` | 10 when every known paired device has this print's activity (then no CloudKit event unless all recipients fail); otherwise 5 with no alert, and CloudKit alerts | the notification's own title and body; `sound: "default"` except the passive first layer (PRD §9.1, David, Nov 8) |
 | `print.resumed` | `update` | 5 | none |
 | `print.paused` | `update` | 10 | none; CloudKit owns the alert |
 | `print.done` | `end` | 10 | none; CloudKit owns the alert |
@@ -124,8 +124,10 @@ Which token to use, from PRD §8.8:
 
 The Mac leaves update/end alerts out for pauses, ends and problems: the phone's CloudKit subscription
 delivers the event with its camera frame. Progress milestones are the exception (PRD §9.1): while the
-activity runs they alert on it, and the Mac writes the CloudKit event only if that alert can't go out
-promptly. `ev-started` is silent because ActivityKit requires the start alert. The server
+activity runs on every known paired recipient, they alert on it. The Mac persists the recipient
+decision before sending and retains distinct milestone alerts through retries and restart. Once every
+recipient finishes, it writes the account-wide CloudKit fallback only if all failed; partial success
+logs each missed device and never falls back onto devices already alerted. `ev-started` is silent because ActivityKit requires the start alert. The server
 still accepts optional update/end alerts as part of its wire contract. If an activity token arrives
 after an event, the Mac recovers the latest saved state on its next poll; a retry ends the earlier
 activity for the same project, including when that earlier token arrives late.

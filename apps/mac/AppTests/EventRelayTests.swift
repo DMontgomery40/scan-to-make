@@ -397,14 +397,6 @@ final class EventRelayTests: XCTestCase {
         while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
-    func testTheRelayIsOnByDefaultOnlyInProductionSignedBuildsAndAChoiceWins() {
-        XCTAssertTrue(RelayDefault.enabled(stored: nil, apsEnvironment: "production"))
-        XCTAssertFalse(RelayDefault.enabled(stored: nil, apsEnvironment: "development"), "Sandbox phones' tokens would be denied by the production relay")
-        XCTAssertFalse(RelayDefault.enabled(stored: nil, apsEnvironment: nil))
-        XCTAssertFalse(RelayDefault.enabled(stored: false, apsEnvironment: "production"), "turned off in Settings stays off")
-        XCTAssertTrue(RelayDefault.enabled(stored: true, apsEnvironment: "development"))
-    }
-
     func testNotStartedEndsTheActivityDespiteTheLastPreparingReport() throws {
         let push = try XCTUnwrap(LiveActivityPush.make(for: event("print.not-started", data: .init(state: "preparing"), printId: "print-1"),
                                                       token: "aa", title: "Mic mount", now: now))
