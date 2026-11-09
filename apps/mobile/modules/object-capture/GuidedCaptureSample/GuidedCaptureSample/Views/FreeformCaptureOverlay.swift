@@ -2,9 +2,10 @@
 import RealityKit
 import SwiftUI
 
-/// The quick scan over Apple's capture view (quick-sweep-capture.md §3.1, §3.4): one card, Record, and Done after ten
-/// photos, which pauses the session and shows Apple's point cloud to review. There is no box, no Area/Object switch,
-/// no segments or flips and no tutorial video; those were our sample app's choices, not Apple's requirements.
+/// The scan over Apple's capture view (quick-sweep-capture.md §3.1, §3.4): one card, Record, one line of progress, and
+/// Done once the photos are enough to rebuild (60, from two heights), which pauses the session and shows Apple's point
+/// cloud to review. There is no box, no Area/Object switch, no segments or flips and no tutorial video; those were our
+/// sample app's choices, not Apple's requirements.
 struct FreeformCaptureOverlay: View {
     @Environment(AppDataModel.self) private var appModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -13,7 +14,7 @@ struct FreeformCaptureOverlay: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            if appModel.freeformFlow.step != .finishing {
+            if appModel.freeformFlow.step == .ready {
                 card
             }
             FeedbackView(messageList: appModel.messageList)
@@ -85,22 +86,35 @@ struct FreeformCaptureOverlay: View {
             .accessibilityLabel("Record scan")
             .accessibilityIdentifier("capture.record")
         case .capturing, .review:
-            HStack(spacing: 12) {
-                Text("\(session.numberOfShotsTaken) photos")
+            VStack(spacing: 12) {
+                // One plain line: the count and what to do next ("42 photos · now go higher and look down").
+                Text(appModel.captureCoverage.line)
                     .font(.headline.monospacedDigit())
                     .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal, 16).padding(.vertical, 12)
                     .glassEffect(.regular.tint(.black.opacity(0.35)), in: .capsule)
                     .accessibilityIdentifier("capture.shots")
-                Spacer(minLength: 0)
-                if appModel.freeformFlow.canFinish(shots: session.numberOfShotsTaken,
-                                                   trackingNormal: trackingNormal && !session.isPaused) {
+                HStack(spacing: 12) {
+                    // Apple's manual shot, beside its automatic capture (`requestImageCapture()`).
+                    Button { appModel.freeformTakePhoto() } label: {
+                        Label("Take a photo", systemImage: "camera.circle.fill")
+                            .labelStyle(.iconOnly)
+                            .font(.title)
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.extraLarge)
+                    .disabled(!session.canRequestImageCapture)
+                    .accessibilityIdentifier("capture.shutter")
+                    Spacer(minLength: 0)
+                    // Done is offered only once the photos are enough to rebuild: 60, from two heights.
                     Button("Done") { appModel.freeformDone() }
                         .font(.headline)
                         .buttonStyle(.glassProminent)
                         .controlSize(.extraLarge)
+                        .disabled(!appModel.freeformFlow.canFinish(coverage: appModel.captureCoverage,
+                                                                   trackingNormal: trackingNormal && !session.isPaused))
                         .accessibilityIdentifier("capture.done")
-                        .transition(reduceMotion ? .identity : .opacity.combined(with: .scale(scale: 0.9)))
                 }
             }
         case .finishing:

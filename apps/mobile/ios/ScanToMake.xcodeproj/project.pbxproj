@@ -28,10 +28,8 @@
 		0BD8AEC09ADE28FC961ABB7A /* FreeformCaptureOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8C629A04150986650F52AB /* FreeformCaptureOverlay.swift */; };
 		0ED20A84ACE088A53ADA5D05 /* AppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED64475EDD04E226538AB4A1 /* AppTests.swift */; };
 		0FF63D52C1E702ED46E8156F /* ProjectImages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D4CA906C988EDF604286EEE /* ProjectImages.swift */; };
-		10770C9A31C8CFE359F72200 /* HelpPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E777495FA1F9594154E2C39 /* HelpPageView.swift */; };
 		176F46A2163B9E73E9346BF7 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 8552441AB54E2F389FDC741F /* PrivacyInfo.xcprivacy */; };
 		1DF0290DD312A98B2576BA48 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFEE621E7C7B88738E9C985B /* HomeView.swift */; };
-		1F22AB6FE04BE297D4F58BA8 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B88A65EE36387AD3C5997FA /* OnboardingView.swift */; };
 		269E3E488DA512B46B982D3C /* PrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DB3E61A3AFC43FEDA78B362 /* PrimaryView.swift */; };
 		28BB7B45004C189F6684F0A4 /* ScanPasses-iPad-FixedHeight-2.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 90BDC8608CF3C935FD0A810C /* ScanPasses-iPad-FixedHeight-2.mp4 */; };
 		294DC83CF0B3ED9E064A1B0F /* FeedbackMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD8ABB3B1C441AA2F83873BF /* FeedbackMessages.swift */; };
@@ -46,7 +44,6 @@
 		397660EB412CA4FDCED48062 /* GuidedObjectCapture.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9D2907A997F1327C99EDBFE1 /* GuidedObjectCapture.framework */; };
 		3B8C86D96E40CFA0E3A89A66 /* CapturePrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEC1CB1BEA42C7C0DEC8500C /* CapturePrimaryView.swift */; };
 		3ED148F8FD2D8C058FF37C49 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5882DB1849BF79794D593E7B /* Design.swift */; };
-		3FFDF6C0F464EE022BC227A4 /* OnboardingTutorialView+LocalizedString.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35553F95E01C091DF9206F7 /* OnboardingTutorialView+LocalizedString.swift */; };
 		409469D34AC4D190993E6F60 /* ModelStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DE67E84E9BAB798590CFEE6 /* ModelStage.swift */; };
 		424EF33DB939FB08D89CAE79 /* ScanPasses-iPhone-FixedHeight-2.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = E8387F4BCF55830449FB51CA /* ScanPasses-iPhone-FixedHeight-2.mp4 */; };
 		4365BA8A690868D5B00F9159 /* AppDataModel+Orbit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BEA440CD42BB2FD917F9FEE /* AppDataModel+Orbit.swift */; };
@@ -54,20 +51,16 @@
 		451618A3C2377383F4895633 /* AddPrinterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E46B72D9936A00D3BCEB76B /* AddPrinterView.swift */; };
 		4DCD99C6397EA55B63AA5030 /* PrintActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586EDFD70C34B0EBC02B0A04 /* PrintActivityWidget.swift */; };
 		4DD922974705BF4C9D953A24 /* NativeCaptureDraftStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB6F1E4471FB2873747B61B6 /* NativeCaptureDraftStore.swift */; };
-		51F14113CD4A69CE351F9A52 /* BottomOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35448431D0EDF07FB21DAA88 /* BottomOverlayButtons.swift */; };
 		5329F95F0621A5807E8F42B7 /* TimedMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B853771AAFFE9BF14BB4AC13 /* TimedMessageList.swift */; };
 		53440DCB3AC6D40D1B9C74BC /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9F3E533A0189E34B9FA18B0C /* Images.xcassets */; };
 		5353ABD77357EE49947D8D97 /* Fixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD84D2AFBCE4D6A6AA2583E2 /* Fixtures.swift */; };
 		54B41807E6403360CEFF31EF /* FindYourMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5279E748BC72D18A9AB6030A /* FindYourMacView.swift */; };
 		5573661353F309EB71AB5A57 /* CounterpartWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C9B98A581AD8940E82DA9D6F /* CounterpartWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		569A773710F907BED1093E76 /* ScanPasses-iPhone-FixedHeight-unflippable-low.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 8019B8C2DFCB98298CC19BAA /* ScanPasses-iPhone-FixedHeight-unflippable-low.mp4 */; };
-		59129171B4B57108952B47AF /* TutorialPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46AE4309AD317B3F657446FD /* TutorialPageView.swift */; };
 		59E8B59B2A2963442C6EE762 /* MobileActivities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ACADAE858EFBB6362005544 /* MobileActivities.swift */; };
-		5AE89AB46AF2D9748887BE39 /* TopOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E4F8B04A4554B0D7B91815 /* TopOverlayButtons.swift */; };
 		5CA799DC6C7B84CC87D76374 /* NativeCaptureCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B999A5665CBF001C5AC9CC /* NativeCaptureCoordinator.swift */; };
 		5FBCC45C9150320FCEC6C698 /* PrintConfirm.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F2F11831E109C8EF539549 /* PrintConfirm.swift */; };
 		6453F4EEE08D4E674E108CFB /* ProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E61C749D5F1EADE65AE4DFB /* ProjectsStore.swift */; };
-		69CA831F2418049F1EB4C35D /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10654E67672E75DE1DACFDE6 /* PlayerView.swift */; };
 		6D9C5EEB90E3D5CB3D7E75ED /* LaunchUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30C8F1DB07E2FA648BB08A7F /* LaunchUITests.swift */; };
 		6EF67B69E2802B4EC8C9BE4A /* ScanTutorial-iPhone-Area.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = B3503A30A379B1423E074090 /* ScanTutorial-iPhone-Area.mp4 */; };
 		70CB3352849D93D2CD3488EA /* ProjectsRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70942A5A041BBA3161770EF /* ProjectsRoot.swift */; };
@@ -79,17 +72,14 @@
 		8963AD76E6AF168A7BCCEFDF /* en.lproj in Resources */ = {isa = PBXBuildFile; fileRef = D2D8EFDBF2FE8D2707C3D914 /* en.lproj */; };
 		8BBCE6DAF3C3E380DE48CF0C /* ProjectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 537F64BA1E548A72D13E2062 /* ProjectView.swift */; };
 		8C76723B95B011E124D71A3F /* NativeCaptureHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A0A638A403B1B56044E5757 /* NativeCaptureHostView.swift */; };
-		8D64B96F04B085FA80D28D95 /* OnboardingButtonView+LocalizedString.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F88F155C15E9DAE97A1D968 /* OnboardingButtonView+LocalizedString.swift */; };
 		8EACD047144D4EFC19731165 /* MacConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0B246D96705968A1DF938A /* MacConnection.swift */; };
 		8F26AFE65ED0BD6954AA6AFD /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668B7EE5735002D15D701BD0 /* AppModel.swift */; };
 		93685534F09197BA1BCF8051 /* ScanPasses-iPad-FixedHeight-1.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 5C9ED6057C31B2020C3A594C /* ScanPasses-iPad-FixedHeight-1.mp4 */; };
 		97F29FD653425B6D574628EA /* ProgressBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E841C2B38AE2D69622809C0A /* ProgressBarView.swift */; };
 		9E228DCC3A050844AE21787B /* ScanPasses-iPhone-FixedHeight-3.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = F5B6C8A8F2EC960651BD9CA1 /* ScanPasses-iPhone-FixedHeight-3.mp4 */; };
 		9F0C179B8891D8B4CCA32931 /* ScanPasses-iPhone-FixedHeight-unflippable-high.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = FF186480D5365063EF26C687 /* ScanPasses-iPhone-FixedHeight-unflippable-high.mp4 */; };
-		9F7453F350780E39E173BF95 /* OnboardingTutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4339C608931E0159BDC44447 /* OnboardingTutorialView.swift */; };
 		A76FADA1F330E00A3087BF5E /* HandheldDepthRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14EA6DBE40E129A8FD34A66 /* HandheldDepthRecorder.swift */; };
 		A84099C9B08CAD482E32B2CC /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9352BF4575650D407AC8EEF4 /* NotificationService.swift */; };
-		ABA6AD6AC67857F7359D79E9 /* TutorialVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F59E8C7324CD980150910FD /* TutorialVideoView.swift */; };
 		AC0A2C5E26F46ADB470C83F8 /* PrintStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 510069BB85EC1645E845D872 /* PrintStatus.swift */; };
 		AD50A761FCB76CF9CC0C29AE /* GuidedObjectCapture.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 9D2907A997F1327C99EDBFE1 /* GuidedObjectCapture.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		B15E942B8EB2B262DE6FADC9 /* ScanTutorial-iPad-Area.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 72D780A8AF2666F5A12F293C /* ScanTutorial-iPad-Area.mp4 */; };
@@ -100,13 +90,10 @@
 		BDB193C6E13C04A0DB41A061 /* PrintersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835B280F8D54D99191129EA2 /* PrintersView.swift */; };
 		BDDE40224A2D4E2C6D66DAD0 /* NewProjectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FB944AB913161CA44843077 /* NewProjectView.swift */; };
 		C13097908B7F944446B112DB /* HandheldCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA888917D0BB09DAE7339F2 /* HandheldCapture.swift */; };
-		C2DB2A82C5B41A33C3AA0A5E /* OnboardingButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2181C73CED27FF7EB7FFEBE /* OnboardingButtonView.swift */; };
 		C3202F6A8E38A4996E116621 /* MobileCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10833FF6A86261EBDBAA5C8C /* MobileCloud.swift */; };
 		C4FE3E5822B7566BB80D80C2 /* CaptureWatchdog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BA4C6D6E797818CF5E5147F /* CaptureWatchdog.swift */; };
-		C629A1937DFF2FC101C3CDA8 /* OnboardingStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B243DA4559B80A720D8FEA1 /* OnboardingStateMachine.swift */; };
 		CB815787D2B9E367A631E873 /* MobileNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 112C07AA000291F742893F36 /* MobileNotifications.swift */; };
 		CEA335799263D564121C819A /* PrintingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E83FA80CCD9E3C6EC327839 /* PrintingView.swift */; };
-		D0BC0961B3EE0484588B383B /* CaptureOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 734A7560D792799195C81953 /* CaptureOverlayView.swift */; };
 		D5158848C8163F8E67E6FB0C /* example-fit.stl in Resources */ = {isa = PBXBuildFile; fileRef = BEBD9320D217A2B678AF82E3 /* example-fit.stl */; };
 		D5AF02B6011FFF964AB4F778 /* ScanPasses-iPad-FixedHeight-3.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 25F7609A135C8EE6DB3F8655 /* ScanPasses-iPad-FixedHeight-3.mp4 */; };
 		E1C0DC46EDF7E1A1A126B96B /* ReconstructionPrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D886630D48544F53D4F3EBB /* ReconstructionPrimaryView.swift */; };
@@ -192,8 +179,6 @@
 /* Begin PBXFileReference section */
 		09C0C6AF585976E2695DC983 /* CounterpartApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CounterpartApp.swift; sourceTree = "<group>"; };
 		0BA4C6D6E797818CF5E5147F /* CaptureWatchdog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureWatchdog.swift; sourceTree = "<group>"; };
-		0F59E8C7324CD980150910FD /* TutorialVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialVideoView.swift; sourceTree = "<group>"; };
-		10654E67672E75DE1DACFDE6 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		10833FF6A86261EBDBAA5C8C /* MobileCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileCloud.swift; sourceTree = "<group>"; };
 		112C07AA000291F742893F36 /* MobileNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileNotifications.swift; sourceTree = "<group>"; };
 		14F78441601D6F6ECA5D0E42 /* PrintSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintSheet.swift; sourceTree = "<group>"; };
@@ -203,15 +188,11 @@
 		25F7609A135C8EE6DB3F8655 /* ScanPasses-iPad-FixedHeight-3.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-3.mp4"; sourceTree = "<group>"; };
 		2D4CA906C988EDF604286EEE /* ProjectImages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectImages.swift; sourceTree = "<group>"; };
 		30C8F1DB07E2FA648BB08A7F /* LaunchUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchUITests.swift; sourceTree = "<group>"; };
-		35448431D0EDF07FB21DAA88 /* BottomOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomOverlayButtons.swift; sourceTree = "<group>"; };
 		3984B4B77D3A7FACF67B75BC /* PhotoSources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoSources.swift; sourceTree = "<group>"; };
 		3A0A638A403B1B56044E5757 /* NativeCaptureHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCaptureHostView.swift; sourceTree = "<group>"; };
 		3A3F63B53DC48176E21E79EA /* ScanToMakeUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ScanToMakeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3DB3E61A3AFC43FEDA78B362 /* PrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryView.swift; sourceTree = "<group>"; };
-		3F88F155C15E9DAE97A1D968 /* OnboardingButtonView+LocalizedString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingButtonView+LocalizedString.swift"; sourceTree = "<group>"; };
 		3FB944AB913161CA44843077 /* NewProjectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewProjectView.swift; sourceTree = "<group>"; };
-		4339C608931E0159BDC44447 /* OnboardingTutorialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTutorialView.swift; sourceTree = "<group>"; };
-		46AE4309AD317B3F657446FD /* TutorialPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPageView.swift; sourceTree = "<group>"; };
 		46F948354535E6E98DF60988 /* CaptureEmbeddingNamespace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureEmbeddingNamespace.swift; sourceTree = "<group>"; };
 		4843D51331A8EA5A180A6EEB /* CloudPairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudPairingView.swift; sourceTree = "<group>"; };
 		4AA888917D0BB09DAE7339F2 /* HandheldCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HandheldCapture.swift; sourceTree = "<group>"; };
@@ -232,13 +213,9 @@
 		6E83FA80CCD9E3C6EC327839 /* PrintingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintingView.swift; sourceTree = "<group>"; };
 		70A7D0DBA9EE3A73FD25D09F /* ConversationBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationBubble.swift; sourceTree = "<group>"; };
 		72D780A8AF2666F5A12F293C /* ScanTutorial-iPad-Area.mp4 */ = {isa = PBXFileReference; path = "ScanTutorial-iPad-Area.mp4"; sourceTree = "<group>"; };
-		734A7560D792799195C81953 /* CaptureOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureOverlayView.swift; sourceTree = "<group>"; };
-		7B243DA4559B80A720D8FEA1 /* OnboardingStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStateMachine.swift; sourceTree = "<group>"; };
 		7C0B246D96705968A1DF938A /* MacConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacConnection.swift; sourceTree = "<group>"; };
-		7E777495FA1F9594154E2C39 /* HelpPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpPageView.swift; sourceTree = "<group>"; };
 		8019B8C2DFCB98298CC19BAA /* ScanPasses-iPhone-FixedHeight-unflippable-low.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-unflippable-low.mp4"; sourceTree = "<group>"; };
 		835B280F8D54D99191129EA2 /* PrintersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintersView.swift; sourceTree = "<group>"; };
-		83E4F8B04A4554B0D7B91815 /* TopOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopOverlayButtons.swift; sourceTree = "<group>"; };
 		8552441AB54E2F389FDC741F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		8D4965A66484FC46855A3AAC /* CounterpartNotificationService.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CounterpartNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		8D886630D48544F53D4F3EBB /* ReconstructionPrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconstructionPrimaryView.swift; sourceTree = "<group>"; };
@@ -248,7 +225,6 @@
 		9352BF4575650D407AC8EEF4 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		94B999A5665CBF001C5AC9CC /* NativeCaptureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCaptureCoordinator.swift; sourceTree = "<group>"; };
 		9835F23960CC5E6BC8DCA961 /* Onboarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Onboarding.swift; sourceTree = "<group>"; };
-		9B88A65EE36387AD3C5997FA /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		9BEA440CD42BB2FD917F9FEE /* AppDataModel+Orbit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDataModel+Orbit.swift"; sourceTree = "<group>"; };
 		9D2907A997F1327C99EDBFE1 /* GuidedObjectCapture.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = GuidedObjectCapture.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		9F3E533A0189E34B9FA18B0C /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Images.xcassets; sourceTree = "<group>"; };
@@ -264,12 +240,10 @@
 		CB0CBEF9ED82408AA61CE61A /* CaptureFolderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureFolderManager.swift; sourceTree = "<group>"; };
 		CFEE621E7C7B88738E9C985B /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		D12329112CFEE819F508653A /* ScanToMake.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ScanToMake.entitlements; sourceTree = "<group>"; };
-		D2181C73CED27FF7EB7FFEBE /* OnboardingButtonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingButtonView.swift; sourceTree = "<group>"; };
 		D2D8EFDBF2FE8D2707C3D914 /* en.lproj */ = {isa = PBXFileReference; path = en.lproj; sourceTree = "<group>"; };
 		DEC1CB1BEA42C7C0DEC8500C /* CapturePrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePrimaryView.swift; sourceTree = "<group>"; };
 		E0E1BC6DF676254261850DAB /* CounterpartNotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CounterpartNotificationService.entitlements; sourceTree = "<group>"; };
 		E18DE1728EDA573CA4AEDB22 /* THIRD_PARTY_NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = THIRD_PARTY_NOTICES.md; sourceTree = "<group>"; };
-		E35553F95E01C091DF9206F7 /* OnboardingTutorialView+LocalizedString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingTutorialView+LocalizedString.swift"; sourceTree = "<group>"; };
 		E6D13F2A86633F4FB30BD9CB /* ScanPasses-iPad-FixedHeight-unflippable-high.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-unflippable-high.mp4"; sourceTree = "<group>"; };
 		E8387F4BCF55830449FB51CA /* ScanPasses-iPhone-FixedHeight-2.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-2.mp4"; sourceTree = "<group>"; };
 		E841C2B38AE2D69622809C0A /* ProgressBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressBarView.swift; sourceTree = "<group>"; };
@@ -352,9 +326,6 @@
 				0BA4C6D6E797818CF5E5147F /* CaptureWatchdog.swift */,
 				BD8ABB3B1C441AA2F83873BF /* FeedbackMessages.swift */,
 				F7409C33F65503785E1072D6 /* FreeformCaptureFlow.swift */,
-				3F88F155C15E9DAE97A1D968 /* OnboardingButtonView+LocalizedString.swift */,
-				7B243DA4559B80A720D8FEA1 /* OnboardingStateMachine.swift */,
-				E35553F95E01C091DF9206F7 /* OnboardingTutorialView+LocalizedString.swift */,
 				B853771AAFFE9BF14BB4AC13 /* TimedMessageList.swift */,
 				4FA017C87133CEB2F8143398 /* UntilProcessingCompleteFilter.swift */,
 				9E955C3FD67423CDADC1414A /* Resources */,
@@ -572,24 +543,14 @@
 		DC728A95CCD90186B582583E /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				35448431D0EDF07FB21DAA88 /* BottomOverlayButtons.swift */,
-				734A7560D792799195C81953 /* CaptureOverlayView.swift */,
 				DEC1CB1BEA42C7C0DEC8500C /* CapturePrimaryView.swift */,
 				FCE242966FF14140A8FD3AA7 /* ContentView.swift */,
 				A85058EDC491CA2A28BDA599 /* FeedbackView.swift */,
 				8E8C629A04150986650F52AB /* FreeformCaptureOverlay.swift */,
-				7E777495FA1F9594154E2C39 /* HelpPageView.swift */,
 				F3CA28C4E4604B8027F493BD /* ModelView.swift */,
-				D2181C73CED27FF7EB7FFEBE /* OnboardingButtonView.swift */,
-				4339C608931E0159BDC44447 /* OnboardingTutorialView.swift */,
-				9B88A65EE36387AD3C5997FA /* OnboardingView.swift */,
-				10654E67672E75DE1DACFDE6 /* PlayerView.swift */,
 				3DB3E61A3AFC43FEDA78B362 /* PrimaryView.swift */,
 				E841C2B38AE2D69622809C0A /* ProgressBarView.swift */,
 				8D886630D48544F53D4F3EBB /* ReconstructionPrimaryView.swift */,
-				83E4F8B04A4554B0D7B91815 /* TopOverlayButtons.swift */,
-				46AE4309AD317B3F657446FD /* TutorialPageView.swift */,
-				0F59E8C7324CD980150910FD /* TutorialVideoView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -836,10 +797,8 @@
 			files = (
 				4365BA8A690868D5B00F9159 /* AppDataModel+Orbit.swift in Sources */,
 				B8BF4A410E764E9DE5970D5D /* AppDataModel.swift in Sources */,
-				51F14113CD4A69CE351F9A52 /* BottomOverlayButtons.swift in Sources */,
 				2A7610BA8C0975F87444C556 /* CaptureEmbeddingNamespace.swift in Sources */,
 				7A05ABF0127E4BBB53F77A5C /* CaptureFolderManager.swift in Sources */,
-				D0BC0961B3EE0484588B383B /* CaptureOverlayView.swift in Sources */,
 				3B8C86D96E40CFA0E3A89A66 /* CapturePrimaryView.swift in Sources */,
 				C4FE3E5822B7566BB80D80C2 /* CaptureWatchdog.swift in Sources */,
 				E46F5048FE02E1C55FC84053 /* ContentView.swift in Sources */,
@@ -847,25 +806,14 @@
 				FAFEA209D8004343946B34AC /* FeedbackView.swift in Sources */,
 				29E907FDFE561C574DDE9FF9 /* FreeformCaptureFlow.swift in Sources */,
 				0BD8AEC09ADE28FC961ABB7A /* FreeformCaptureOverlay.swift in Sources */,
-				10770C9A31C8CFE359F72200 /* HelpPageView.swift in Sources */,
 				FF5372D8FE35D1C542526BC0 /* ModelView.swift in Sources */,
 				5CA799DC6C7B84CC87D76374 /* NativeCaptureCoordinator.swift in Sources */,
 				4DD922974705BF4C9D953A24 /* NativeCaptureDraftStore.swift in Sources */,
 				8C76723B95B011E124D71A3F /* NativeCaptureHostView.swift in Sources */,
-				8D64B96F04B085FA80D28D95 /* OnboardingButtonView+LocalizedString.swift in Sources */,
-				C2DB2A82C5B41A33C3AA0A5E /* OnboardingButtonView.swift in Sources */,
-				C629A1937DFF2FC101C3CDA8 /* OnboardingStateMachine.swift in Sources */,
-				3FFDF6C0F464EE022BC227A4 /* OnboardingTutorialView+LocalizedString.swift in Sources */,
-				9F7453F350780E39E173BF95 /* OnboardingTutorialView.swift in Sources */,
-				1F22AB6FE04BE297D4F58BA8 /* OnboardingView.swift in Sources */,
-				69CA831F2418049F1EB4C35D /* PlayerView.swift in Sources */,
 				269E3E488DA512B46B982D3C /* PrimaryView.swift in Sources */,
 				97F29FD653425B6D574628EA /* ProgressBarView.swift in Sources */,
 				E1C0DC46EDF7E1A1A126B96B /* ReconstructionPrimaryView.swift in Sources */,
 				5329F95F0621A5807E8F42B7 /* TimedMessageList.swift in Sources */,
-				5AE89AB46AF2D9748887BE39 /* TopOverlayButtons.swift in Sources */,
-				59129171B4B57108952B47AF /* TutorialPageView.swift in Sources */,
-				ABA6AD6AC67857F7359D79E9 /* TutorialVideoView.swift in Sources */,
 				2D2151DBEFFD33B117F83785 /* UntilProcessingCompleteFilter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

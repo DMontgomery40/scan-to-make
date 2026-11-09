@@ -9,29 +9,19 @@
 /* Begin PBXBuildFile section */
 		648C27652BFEA9EE002DBFF1 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 648C27642BFEA9EE002DBFF1 /* README.md */; };
 		64A07DC62BFE7CCB00FDE113 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 64A07DC52BFE7CCB00FDE113 /* Preview Assets.xcassets */; };
-		64A07DE42BFE7CDA00FDE113 /* OnboardingTutorialView+LocalizedString.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07DDA2BFE7CDA00FDE113 /* OnboardingTutorialView+LocalizedString.swift */; };
-		64A07DE52BFE7CDA00FDE113 /* OnboardingStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07DD82BFE7CDA00FDE113 /* OnboardingStateMachine.swift */; };
 		64A07DE62BFE7CDA00FDE113 /* AppDataModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07DCC2BFE7CDA00FDE113 /* AppDataModel.swift */; };
 		64A07DE82BFE7CDA00FDE113 /* GuidedCaptureSampleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07DD32BFE7CDA00FDE113 /* GuidedCaptureSampleApp.swift */; };
 		64A07DF22BFE7CDA00FDE113 /* TimedMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07DE12BFE7CDA00FDE113 /* TimedMessageList.swift */; };
-		64A07DF42BFE7CDA00FDE113 /* OnboardingButtonView+LocalizedString.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07DD72BFE7CDA00FDE113 /* OnboardingButtonView+LocalizedString.swift */; };
 		64A07DF52BFE7CDA00FDE113 /* UntilProcessingCompleteFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07DE32BFE7CDA00FDE113 /* UntilProcessingCompleteFilter.swift */; };
 		64A07DF72BFE7CDA00FDE113 /* CaptureFolderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07DCD2BFE7CDA00FDE113 /* CaptureFolderManager.swift */; };
 		64A07DF82BFE7CDA00FDE113 /* FeedbackMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07DD12BFE7CDA00FDE113 /* FeedbackMessages.swift */; };
 		64A07E102BFE9E0F00FDE113 /* FeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E032BFE9C7700FDE113 /* FeedbackView.swift */; };
-		64A07E112BFE9E0F00FDE113 /* TutorialVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E0D2BFE9C7700FDE113 /* TutorialVideoView.swift */; };
 		64A07E122BFE9E0F00FDE113 /* ProgressBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E0B2BFE9C7700FDE113 /* ProgressBarView.swift */; };
 		64A07E132BFE9E0F00FDE113 /* CapturePrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E012BFE9C7700FDE113 /* CapturePrimaryView.swift */; };
-		64A07E142BFE9E0F00FDE113 /* HelpPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E042BFE9C7700FDE113 /* HelpPageView.swift */; };
 		64A07E152BFE9E0F00FDE113 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E022BFE9C7700FDE113 /* ContentView.swift */; };
-		64A07E162BFE9E0F00FDE113 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E092BFE9C7700FDE113 /* PlayerView.swift */; };
 		64A07E172BFE9E0F00FDE113 /* ModelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E052BFE9C7700FDE113 /* ModelView.swift */; };
-		64A07E182BFE9E0F00FDE113 /* CaptureOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E002BFE9C7700FDE113 /* CaptureOverlayView.swift */; };
-		64A07E192BFE9E0F00FDE113 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E082BFE9C7700FDE113 /* OnboardingView.swift */; };
 		64A07E1A2BFE9E0F00FDE113 /* PrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E0A2BFE9C7700FDE113 /* PrimaryView.swift */; };
 		64A07E1B2BFE9E0F00FDE113 /* ReconstructionPrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E0C2BFE9C7700FDE113 /* ReconstructionPrimaryView.swift */; };
-		64A07E1C2BFE9E0F00FDE113 /* OnboardingTutorialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E072BFE9C7700FDE113 /* OnboardingTutorialView.swift */; };
-		64A07E1D2BFE9E0F00FDE113 /* OnboardingButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64A07E062BFE9C7700FDE113 /* OnboardingButtonView.swift */; };
 		64C12FB52BFEB1EB002D3E7E /* ScanTutorial-iPad-Area.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 64C12FB12BFEB1EB002D3E7E /* ScanTutorial-iPad-Area.mp4 */; };
 		64C12FBD2BFEB1EB002D3E7E /* ScanTutorial-iPhone-Area.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 64C12FB22BFEB1EB002D3E7E /* ScanTutorial-iPhone-Area.mp4 */; };
 		64C12FCA2BFEB4A4002D3E7E /* ScanPasses-iPhone-FixedHeight-3.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 64C12FC72BFEB4A4002D3E7E /* ScanPasses-iPhone-FixedHeight-3.mp4 */; };
@@ -48,10 +38,7 @@
 		8DB8EB4A2C095965004F3E19 /* AppDataModel+Orbit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB492C09595F004F3E19 /* AppDataModel+Orbit.swift */; };
 		5CA7D0620A1B2C3D4E5F6071 /* CaptureWatchdog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7D0610A1B2C3D4E5F6071 /* CaptureWatchdog.swift */; };
 		5CA7D0640A1B2C3D4E5F6071 /* FreeformCaptureFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7D0630A1B2C3D4E5F6071 /* FreeformCaptureFlow.swift */; };
-		8DB8EB4C2C0A46ED004F3E19 /* BottomOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB4B2C0A46E4004F3E19 /* BottomOverlayButtons.swift */; };
 		5CA7D0660A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7D0650A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift */; };
-		8DB8EB4E2C0A5945004F3E19 /* TopOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB4D2C0A5940004F3E19 /* TopOverlayButtons.swift */; };
-		8DB8EB502C0A6023004F3E19 /* TutorialPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB4F2C0A601C004F3E19 /* TutorialPageView.swift */; };
 		F9432A622C17AB7000D540FD /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = F9432A612C17AB6F00D540FD /* Settings.bundle */; };
 		F9432A642C17AC0500D540FD /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F9432A632C17AC0500D540FD /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
@@ -65,25 +52,15 @@
 		64A07DCD2BFE7CDA00FDE113 /* CaptureFolderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureFolderManager.swift; sourceTree = "<group>"; };
 		64A07DD12BFE7CDA00FDE113 /* FeedbackMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackMessages.swift; sourceTree = "<group>"; };
 		64A07DD32BFE7CDA00FDE113 /* GuidedCaptureSampleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuidedCaptureSampleApp.swift; sourceTree = "<group>"; };
-		64A07DD72BFE7CDA00FDE113 /* OnboardingButtonView+LocalizedString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingButtonView+LocalizedString.swift"; sourceTree = "<group>"; };
-		64A07DD82BFE7CDA00FDE113 /* OnboardingStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStateMachine.swift; sourceTree = "<group>"; };
-		64A07DDA2BFE7CDA00FDE113 /* OnboardingTutorialView+LocalizedString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingTutorialView+LocalizedString.swift"; sourceTree = "<group>"; };
 		64A07DE12BFE7CDA00FDE113 /* TimedMessageList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimedMessageList.swift; sourceTree = "<group>"; };
 		64A07DE32BFE7CDA00FDE113 /* UntilProcessingCompleteFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UntilProcessingCompleteFilter.swift; sourceTree = "<group>"; };
-		64A07E002BFE9C7700FDE113 /* CaptureOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureOverlayView.swift; sourceTree = "<group>"; };
 		64A07E012BFE9C7700FDE113 /* CapturePrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePrimaryView.swift; sourceTree = "<group>"; };
 		64A07E022BFE9C7700FDE113 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		64A07E032BFE9C7700FDE113 /* FeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackView.swift; sourceTree = "<group>"; };
-		64A07E042BFE9C7700FDE113 /* HelpPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpPageView.swift; sourceTree = "<group>"; };
 		64A07E052BFE9C7700FDE113 /* ModelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelView.swift; sourceTree = "<group>"; };
-		64A07E062BFE9C7700FDE113 /* OnboardingButtonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingButtonView.swift; sourceTree = "<group>"; };
-		64A07E072BFE9C7700FDE113 /* OnboardingTutorialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTutorialView.swift; sourceTree = "<group>"; };
-		64A07E082BFE9C7700FDE113 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
-		64A07E092BFE9C7700FDE113 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		64A07E0A2BFE9C7700FDE113 /* PrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrimaryView.swift; sourceTree = "<group>"; };
 		64A07E0B2BFE9C7700FDE113 /* ProgressBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressBarView.swift; sourceTree = "<group>"; };
 		64A07E0C2BFE9C7700FDE113 /* ReconstructionPrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconstructionPrimaryView.swift; sourceTree = "<group>"; };
-		64A07E0D2BFE9C7700FDE113 /* TutorialVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialVideoView.swift; sourceTree = "<group>"; };
 		64A07E202BFEA1F100FDE113 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		64C12FB12BFEB1EB002D3E7E /* ScanTutorial-iPad-Area.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ScanTutorial-iPad-Area.mp4"; sourceTree = "<group>"; };
 		64C12FB22BFEB1EB002D3E7E /* ScanTutorial-iPhone-Area.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ScanTutorial-iPhone-Area.mp4"; sourceTree = "<group>"; };
@@ -101,10 +78,7 @@
 		8DB8EB492C09595F004F3E19 /* AppDataModel+Orbit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDataModel+Orbit.swift"; sourceTree = "<group>"; };
 		5CA7D0610A1B2C3D4E5F6071 /* CaptureWatchdog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureWatchdog.swift; sourceTree = "<group>"; };
 		5CA7D0630A1B2C3D4E5F6071 /* FreeformCaptureFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeformCaptureFlow.swift; sourceTree = "<group>"; };
-		8DB8EB4B2C0A46E4004F3E19 /* BottomOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomOverlayButtons.swift; sourceTree = "<group>"; };
 		5CA7D0650A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeformCaptureOverlay.swift; sourceTree = "<group>"; };
-		8DB8EB4D2C0A5940004F3E19 /* TopOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopOverlayButtons.swift; sourceTree = "<group>"; };
-		8DB8EB4F2C0A601C004F3E19 /* TutorialPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPageView.swift; sourceTree = "<group>"; };
 		CD61D7696BF8262EF4D5A1D7 /* SampleCode.xcconfig */ = {isa = PBXFileReference; name = SampleCode.xcconfig; path = ../Configuration/SampleCode.xcconfig; sourceTree = "<group>"; };
 		F9432A612C17AB6F00D540FD /* Settings.bundle */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.plug-in"; path = Settings.bundle; sourceTree = "<group>"; };
 		F9432A632C17AC0500D540FD /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -153,9 +127,6 @@
 				64A07DCD2BFE7CDA00FDE113 /* CaptureFolderManager.swift */,
 				64A07DD12BFE7CDA00FDE113 /* FeedbackMessages.swift */,
 				64A07DD32BFE7CDA00FDE113 /* GuidedCaptureSampleApp.swift */,
-				64A07DD72BFE7CDA00FDE113 /* OnboardingButtonView+LocalizedString.swift */,
-				64A07DD82BFE7CDA00FDE113 /* OnboardingStateMachine.swift */,
-				64A07DDA2BFE7CDA00FDE113 /* OnboardingTutorialView+LocalizedString.swift */,
 				64A07DE12BFE7CDA00FDE113 /* TimedMessageList.swift */,
 				64A07DE32BFE7CDA00FDE113 /* UntilProcessingCompleteFilter.swift */,
 				64F43E512BFEB06E0069D4F3 /* Assets.xcassets */,
@@ -177,24 +148,14 @@
 		64A07E0F2BFE9C7E00FDE113 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				64A07E002BFE9C7700FDE113 /* CaptureOverlayView.swift */,
-				8DB8EB4D2C0A5940004F3E19 /* TopOverlayButtons.swift */,
-				8DB8EB4B2C0A46E4004F3E19 /* BottomOverlayButtons.swift */,
 				5CA7D0650A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift */,
 				64A07E012BFE9C7700FDE113 /* CapturePrimaryView.swift */,
 				64A07E022BFE9C7700FDE113 /* ContentView.swift */,
 				64A07E032BFE9C7700FDE113 /* FeedbackView.swift */,
-				64A07E042BFE9C7700FDE113 /* HelpPageView.swift */,
-				8DB8EB4F2C0A601C004F3E19 /* TutorialPageView.swift */,
 				64A07E052BFE9C7700FDE113 /* ModelView.swift */,
-				64A07E062BFE9C7700FDE113 /* OnboardingButtonView.swift */,
-				64A07E072BFE9C7700FDE113 /* OnboardingTutorialView.swift */,
-				64A07E082BFE9C7700FDE113 /* OnboardingView.swift */,
-				64A07E092BFE9C7700FDE113 /* PlayerView.swift */,
 				64A07E0A2BFE9C7700FDE113 /* PrimaryView.swift */,
 				64A07E0B2BFE9C7700FDE113 /* ProgressBarView.swift */,
 				64A07E0C2BFE9C7700FDE113 /* ReconstructionPrimaryView.swift */,
-				64A07E0D2BFE9C7700FDE113 /* TutorialVideoView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -321,33 +282,20 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				64A07DE42BFE7CDA00FDE113 /* OnboardingTutorialView+LocalizedString.swift in Sources */,
-				64A07DE52BFE7CDA00FDE113 /* OnboardingStateMachine.swift in Sources */,
 				64A07DE62BFE7CDA00FDE113 /* AppDataModel.swift in Sources */,
 				64A07DE82BFE7CDA00FDE113 /* GuidedCaptureSampleApp.swift in Sources */,
 				64A07DF22BFE7CDA00FDE113 /* TimedMessageList.swift in Sources */,
-				64A07DF42BFE7CDA00FDE113 /* OnboardingButtonView+LocalizedString.swift in Sources */,
 				64A07E102BFE9E0F00FDE113 /* FeedbackView.swift in Sources */,
-				64A07E112BFE9E0F00FDE113 /* TutorialVideoView.swift in Sources */,
-				8DB8EB502C0A6023004F3E19 /* TutorialPageView.swift in Sources */,
 				64A07E122BFE9E0F00FDE113 /* ProgressBarView.swift in Sources */,
 				64A07E132BFE9E0F00FDE113 /* CapturePrimaryView.swift in Sources */,
-				64A07E142BFE9E0F00FDE113 /* HelpPageView.swift in Sources */,
 				8DB8EB4A2C095965004F3E19 /* AppDataModel+Orbit.swift in Sources */,
 				5CA7D0620A1B2C3D4E5F6071 /* CaptureWatchdog.swift in Sources */,
 				5CA7D0640A1B2C3D4E5F6071 /* FreeformCaptureFlow.swift in Sources */,
 				64A07E152BFE9E0F00FDE113 /* ContentView.swift in Sources */,
-				64A07E162BFE9E0F00FDE113 /* PlayerView.swift in Sources */,
 				64A07E172BFE9E0F00FDE113 /* ModelView.swift in Sources */,
-				8DB8EB4E2C0A5945004F3E19 /* TopOverlayButtons.swift in Sources */,
-				64A07E182BFE9E0F00FDE113 /* CaptureOverlayView.swift in Sources */,
-				64A07E192BFE9E0F00FDE113 /* OnboardingView.swift in Sources */,
 				64A07E1A2BFE9E0F00FDE113 /* PrimaryView.swift in Sources */,
-				8DB8EB4C2C0A46ED004F3E19 /* BottomOverlayButtons.swift in Sources */,
 				5CA7D0660A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift in Sources */,
 				64A07E1B2BFE9E0F00FDE113 /* ReconstructionPrimaryView.swift in Sources */,
-				64A07E1C2BFE9E0F00FDE113 /* OnboardingTutorialView.swift in Sources */,
-				64A07E1D2BFE9E0F00FDE113 /* OnboardingButtonView.swift in Sources */,
 				64A07DF52BFE7CDA00FDE113 /* UntilProcessingCompleteFilter.swift in Sources */,
 				64A07DF72BFE7CDA00FDE113 /* CaptureFolderManager.swift in Sources */,
 				64A07DF82BFE7CDA00FDE113 /* FeedbackMessages.swift in Sources */,
