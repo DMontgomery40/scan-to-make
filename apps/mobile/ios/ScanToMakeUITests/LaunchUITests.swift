@@ -606,6 +606,8 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10))
         resize(app, to: "compact")
         XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "fold keeps the project")
+        // The split really collapsed: Home sits under the project, not beside it.
+        XCTAssertFalse(app.buttons["new-project"].isHittable, "folded, the project covers Home")
         resize(app, to: "regular")
         XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "unfold keeps the project")
         resize(app, to: "compact")
