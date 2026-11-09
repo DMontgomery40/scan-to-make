@@ -152,6 +152,12 @@ class AppDataModel: Identifiable {
                                      heightsKnown: motion.isDeviceMotionAvailable)
     }
     private var evaluationBuffer = CaptureEvaluationEventBuffer()
+    /// The newest evaluation.json, built when its event was recorded and not yet on disk (see ``record(_:detail:)``).
+    private var evaluationPending: (folder: URL, manifest: [String: Any])?
+    private var evaluationLastWrite = -Double.infinity
+    private var evaluationFlushTask: Task<Void, Never>?
+    /// The session's shutter and image limit, read once it has started.
+    private var evaluationSession: [String: Any]?
     private var lastObservedTracking: String?
     private var lastObservedPause: Bool?
     var evaluationStarted = Date()
@@ -429,8 +435,11 @@ extension AppDataModel {
             throw NSError(domain: "CaptureEvaluation", code: 1, userInfo: [NSLocalizedDescriptionKey: "Object Capture is unavailable on this device."])
         }
 
+        // The last run's unwritten events go to its own folder before the folder changes.
+        flushEvaluation()
         captureFolderManager = try CaptureFolderManager(captureDirectory: captureDirectory)
         evaluationBuffer = CaptureEvaluationEventBuffer()
+        evaluationSession = nil
         evaluationStarted = Date()
         passCount = 1
         flipCount = 0
@@ -474,6 +483,8 @@ extension AppDataModel {
             logger.error("Got error starting session! \(String(describing: error))")
             switchToErrorState(error: error)
         } else {
+            evaluationSession = ["isAutoCaptureEnabled": session.isAutoCaptureEnabled,
+                                 "maximumNumberOfInputImages": session.maximumNumberOfInputImages]
             state = .capturing
         }
     }
@@ -600,6 +611,7 @@ extension AppDataModel {
         logger.info("reset() called...")
         photogrammetrySession = nil
         objectCaptureSession = nil
+        flushEvaluation()
         captureFolderManager = nil
         showOverlaySheets = false
         orbit = .orbit1
@@ -718,6 +730,19 @@ extension AppDataModel {
 
 // Evaluation metadata never promotes capture coverage into mechanical-fit evidence.
 extension AppDataModel {
+    /// evaluation.json is written at most this often while events stream in (feedback changes many times a second).
+    static let evaluationWriteInterval: TimeInterval = 2
+
+    /// Events written at once: a run that ends, fails, stops or changes state must be on disk even if the app dies next.
+    static func isDurableEvaluationEvent(_ event: String, detail: String) -> Bool {
+        event.hasPrefix("reconstruction") || event.contains("failed")
+            || ["started", "interrupted", "cancel-requested", "cancel-terminal", "cancel-still-pending", "capture-state",
+                "new-pass", "auto-capture-fallback"].contains(event)
+            || (event == "freeform" && detail == String(describing: FreeformCaptureFlow.SessionCall.finish))
+    }
+
+    /// Adds the event and builds the report as it stands now. The file is written at once for a durable event or when
+    /// the last write is 2 s old; otherwise one write is scheduled for when it is, so a killed run loses at most ~2 s.
     func record(_ event: String, detail: String = "") {
         guard let folder = captureFolderManager?.captureFolder else { return }
         var entry: [String: Any] = [
@@ -736,7 +761,7 @@ extension AppDataModel {
                 .sorted().prefix(32).map { $0 }
         }
         evaluationBuffer.append(entry)
-        let manifest: [String: Any] = [
+        var manifest: [String: Any] = [
             "formatVersion": "0.1", "createdAt": ISO8601DateFormatter().string(from: evaluationStarted),
             "captureMode": "freeform",
             "hideObjectReticle": true,
@@ -757,6 +782,27 @@ extension AppDataModel {
                                   "droppedEvents": evaluationBuffer.droppedEvents,
                                   "initialObservationRetained": evaluationBuffer.events.first?["event"] as? String == "session-initial"]
         ]
+        if let evaluationSession { manifest["session"] = evaluationSession }
+        evaluationPending = (folder, manifest)
+        let now = ProcessInfo.processInfo.systemUptime
+        if Self.isDurableEvaluationEvent(event, detail: detail) || now - evaluationLastWrite >= Self.evaluationWriteInterval {
+            flushEvaluation()
+        } else if evaluationFlushTask == nil {
+            let delay = Self.evaluationWriteInterval - (now - evaluationLastWrite)
+            evaluationFlushTask = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                self?.flushEvaluation()
+            }
+        }
+    }
+
+    /// Writes the pending evaluation.json, if any, to the folder of the run it describes.
+    func flushEvaluation() {
+        evaluationFlushTask?.cancel()
+        evaluationFlushTask = nil
+        guard let (folder, manifest) = evaluationPending else { return }
+        evaluationPending = nil
+        evaluationLastWrite = ProcessInfo.processInfo.systemUptime
         do {
             let bytes = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
             guard bytes.count <= 128 * 1024 else {
