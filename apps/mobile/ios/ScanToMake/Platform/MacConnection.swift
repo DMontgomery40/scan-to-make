@@ -200,7 +200,7 @@ typealias MacError = CompanionError
 
     /// A scan that was stopped (or failed, or cut off) after it kept photos: it stays on this phone until it is sent or
     /// scanned again, and its project says so. Only the newest run of each project counts: a finished one after it
-    /// wins. Runs that kept no photos are discarded here, silently.
+    /// wins. Runs that kept no photos are not listed; nothing here deletes a capture.
     struct StoppedScan: Equatable { let run: String; let photos: Int }
 
     func stoppedScans() -> [String: StoppedScan] {
@@ -223,7 +223,7 @@ typealias MacError = CompanionError
             let folder = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)", directoryHint: .isDirectory)
             let stopped = ["stopped", "failed", "interrupted"].contains(status)
             let photos = stopped ? Self.imageNames(in: folder.appending(path: "Images", directoryHint: .isDirectory)).count : 0
-            if stopped && photos == 0 { try? FileManager.default.removeItem(at: folder); continue }
+            if stopped && photos == 0 { continue }
             guard newest[project] == nil else { continue }
             newest[project] = stopped ? StoppedScan(run: run, photos: photos) : .some(nil)
         }
