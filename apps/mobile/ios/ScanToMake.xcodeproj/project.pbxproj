@@ -25,6 +25,7 @@
 /* Begin PBXBuildFile section */
 		07B1C13B94675AFFC17CC1A5 /* QRScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A063F0AF1467023BC266CD3 /* QRScanner.swift */; };
 		082318AF8AAA16FF57964526 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C0B9B093AA0DA530B8D30EE /* SettingsView.swift */; };
+		0BD8AEC09ADE28FC961ABB7A /* FreeformCaptureOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8C629A04150986650F52AB /* FreeformCaptureOverlay.swift */; };
 		0ED20A84ACE088A53ADA5D05 /* AppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED64475EDD04E226538AB4A1 /* AppTests.swift */; };
 		0FF63D52C1E702ED46E8156F /* ProjectImages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D4CA906C988EDF604286EEE /* ProjectImages.swift */; };
 		10770C9A31C8CFE359F72200 /* HelpPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E777495FA1F9594154E2C39 /* HelpPageView.swift */; };
@@ -34,6 +35,7 @@
 		269E3E488DA512B46B982D3C /* PrimaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DB3E61A3AFC43FEDA78B362 /* PrimaryView.swift */; };
 		28BB7B45004C189F6684F0A4 /* ScanPasses-iPad-FixedHeight-2.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = 90BDC8608CF3C935FD0A810C /* ScanPasses-iPad-FixedHeight-2.mp4 */; };
 		294DC83CF0B3ED9E064A1B0F /* FeedbackMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD8ABB3B1C441AA2F83873BF /* FeedbackMessages.swift */; };
+		29E907FDFE561C574DDE9FF9 /* FreeformCaptureFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7409C33F65503785E1072D6 /* FreeformCaptureFlow.swift */; };
 		2A4CCC26A0FE6891BFF77BF0 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 1CF24A1A23C137ADF38A2C45 /* LaunchScreen.storyboard */; };
 		2A7610BA8C0975F87444C556 /* CaptureEmbeddingNamespace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46F948354535E6E98DF60988 /* CaptureEmbeddingNamespace.swift */; };
 		2A929BEAFFD3030C188C14A3 /* MacSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD28B8C6794C839BCDA98B9 /* MacSettings.swift */; };
@@ -241,6 +243,7 @@
 		8D4965A66484FC46855A3AAC /* CounterpartNotificationService.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CounterpartNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		8D886630D48544F53D4F3EBB /* ReconstructionPrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconstructionPrimaryView.swift; sourceTree = "<group>"; };
 		8DE67E84E9BAB798590CFEE6 /* ModelStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStage.swift; sourceTree = "<group>"; };
+		8E8C629A04150986650F52AB /* FreeformCaptureOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeformCaptureOverlay.swift; sourceTree = "<group>"; };
 		90BDC8608CF3C935FD0A810C /* ScanPasses-iPad-FixedHeight-2.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-2.mp4"; sourceTree = "<group>"; };
 		9352BF4575650D407AC8EEF4 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		94B999A5665CBF001C5AC9CC /* NativeCaptureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCaptureCoordinator.swift; sourceTree = "<group>"; };
@@ -278,6 +281,7 @@
 		F3CA28C4E4604B8027F493BD /* ModelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelView.swift; sourceTree = "<group>"; };
 		F5B6C8A8F2EC960651BD9CA1 /* ScanPasses-iPhone-FixedHeight-3.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-3.mp4"; sourceTree = "<group>"; };
 		F70942A5A041BBA3161770EF /* ProjectsRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsRoot.swift; sourceTree = "<group>"; };
+		F7409C33F65503785E1072D6 /* FreeformCaptureFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeformCaptureFlow.swift; sourceTree = "<group>"; };
 		F75EABD59D72AFE6318BE2E8 /* AppDataModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDataModel.swift; sourceTree = "<group>"; };
 		FCE242966FF14140A8FD3AA7 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		FF186480D5365063EF26C687 /* ScanPasses-iPhone-FixedHeight-unflippable-high.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-unflippable-high.mp4"; sourceTree = "<group>"; };
@@ -347,6 +351,7 @@
 				CB0CBEF9ED82408AA61CE61A /* CaptureFolderManager.swift */,
 				0BA4C6D6E797818CF5E5147F /* CaptureWatchdog.swift */,
 				BD8ABB3B1C441AA2F83873BF /* FeedbackMessages.swift */,
+				F7409C33F65503785E1072D6 /* FreeformCaptureFlow.swift */,
 				3F88F155C15E9DAE97A1D968 /* OnboardingButtonView+LocalizedString.swift */,
 				7B243DA4559B80A720D8FEA1 /* OnboardingStateMachine.swift */,
 				E35553F95E01C091DF9206F7 /* OnboardingTutorialView+LocalizedString.swift */,
@@ -572,6 +577,7 @@
 				DEC1CB1BEA42C7C0DEC8500C /* CapturePrimaryView.swift */,
 				FCE242966FF14140A8FD3AA7 /* ContentView.swift */,
 				A85058EDC491CA2A28BDA599 /* FeedbackView.swift */,
+				8E8C629A04150986650F52AB /* FreeformCaptureOverlay.swift */,
 				7E777495FA1F9594154E2C39 /* HelpPageView.swift */,
 				F3CA28C4E4604B8027F493BD /* ModelView.swift */,
 				D2181C73CED27FF7EB7FFEBE /* OnboardingButtonView.swift */,
@@ -839,6 +845,8 @@
 				E46F5048FE02E1C55FC84053 /* ContentView.swift in Sources */,
 				294DC83CF0B3ED9E064A1B0F /* FeedbackMessages.swift in Sources */,
 				FAFEA209D8004343946B34AC /* FeedbackView.swift in Sources */,
+				29E907FDFE561C574DDE9FF9 /* FreeformCaptureFlow.swift in Sources */,
+				0BD8AEC09ADE28FC961ABB7A /* FreeformCaptureOverlay.swift in Sources */,
 				10770C9A31C8CFE359F72200 /* HelpPageView.swift in Sources */,
 				FF5372D8FE35D1C542526BC0 /* ModelView.swift in Sources */,
 				5CA799DC6C7B84CC87D76374 /* NativeCaptureCoordinator.swift in Sources */,

@@ -47,7 +47,9 @@
 		64F43E522BFEB06E0069D4F3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 64F43E512BFEB06E0069D4F3 /* Assets.xcassets */; };
 		8DB8EB4A2C095965004F3E19 /* AppDataModel+Orbit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB492C09595F004F3E19 /* AppDataModel+Orbit.swift */; };
 		5CA7D0620A1B2C3D4E5F6071 /* CaptureWatchdog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7D0610A1B2C3D4E5F6071 /* CaptureWatchdog.swift */; };
+		5CA7D0640A1B2C3D4E5F6071 /* FreeformCaptureFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7D0630A1B2C3D4E5F6071 /* FreeformCaptureFlow.swift */; };
 		8DB8EB4C2C0A46ED004F3E19 /* BottomOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB4B2C0A46E4004F3E19 /* BottomOverlayButtons.swift */; };
+		5CA7D0660A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CA7D0650A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift */; };
 		8DB8EB4E2C0A5945004F3E19 /* TopOverlayButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB4D2C0A5940004F3E19 /* TopOverlayButtons.swift */; };
 		8DB8EB502C0A6023004F3E19 /* TutorialPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB8EB4F2C0A601C004F3E19 /* TutorialPageView.swift */; };
 		F9432A622C17AB7000D540FD /* Settings.bundle in Resources */ = {isa = PBXBuildFile; fileRef = F9432A612C17AB6F00D540FD /* Settings.bundle */; };
@@ -98,7 +100,9 @@
 		64F43E512BFEB06E0069D4F3 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8DB8EB492C09595F004F3E19 /* AppDataModel+Orbit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDataModel+Orbit.swift"; sourceTree = "<group>"; };
 		5CA7D0610A1B2C3D4E5F6071 /* CaptureWatchdog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureWatchdog.swift; sourceTree = "<group>"; };
+		5CA7D0630A1B2C3D4E5F6071 /* FreeformCaptureFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeformCaptureFlow.swift; sourceTree = "<group>"; };
 		8DB8EB4B2C0A46E4004F3E19 /* BottomOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomOverlayButtons.swift; sourceTree = "<group>"; };
+		5CA7D0650A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeformCaptureOverlay.swift; sourceTree = "<group>"; };
 		8DB8EB4D2C0A5940004F3E19 /* TopOverlayButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopOverlayButtons.swift; sourceTree = "<group>"; };
 		8DB8EB4F2C0A601C004F3E19 /* TutorialPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TutorialPageView.swift; sourceTree = "<group>"; };
 		CD61D7696BF8262EF4D5A1D7 /* SampleCode.xcconfig */ = {isa = PBXFileReference; name = SampleCode.xcconfig; path = ../Configuration/SampleCode.xcconfig; sourceTree = "<group>"; };
@@ -145,6 +149,7 @@
 				64A07DCC2BFE7CDA00FDE113 /* AppDataModel.swift */,
 				8DB8EB492C09595F004F3E19 /* AppDataModel+Orbit.swift */,
 				5CA7D0610A1B2C3D4E5F6071 /* CaptureWatchdog.swift */,
+				5CA7D0630A1B2C3D4E5F6071 /* FreeformCaptureFlow.swift */,
 				64A07DCD2BFE7CDA00FDE113 /* CaptureFolderManager.swift */,
 				64A07DD12BFE7CDA00FDE113 /* FeedbackMessages.swift */,
 				64A07DD32BFE7CDA00FDE113 /* GuidedCaptureSampleApp.swift */,
@@ -175,6 +180,7 @@
 				64A07E002BFE9C7700FDE113 /* CaptureOverlayView.swift */,
 				8DB8EB4D2C0A5940004F3E19 /* TopOverlayButtons.swift */,
 				8DB8EB4B2C0A46E4004F3E19 /* BottomOverlayButtons.swift */,
+				5CA7D0650A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift */,
 				64A07E012BFE9C7700FDE113 /* CapturePrimaryView.swift */,
 				64A07E022BFE9C7700FDE113 /* ContentView.swift */,
 				64A07E032BFE9C7700FDE113 /* FeedbackView.swift */,
@@ -329,6 +335,7 @@
 				64A07E142BFE9E0F00FDE113 /* HelpPageView.swift in Sources */,
 				8DB8EB4A2C095965004F3E19 /* AppDataModel+Orbit.swift in Sources */,
 				5CA7D0620A1B2C3D4E5F6071 /* CaptureWatchdog.swift in Sources */,
+				5CA7D0640A1B2C3D4E5F6071 /* FreeformCaptureFlow.swift in Sources */,
 				64A07E152BFE9E0F00FDE113 /* ContentView.swift in Sources */,
 				64A07E162BFE9E0F00FDE113 /* PlayerView.swift in Sources */,
 				64A07E172BFE9E0F00FDE113 /* ModelView.swift in Sources */,
@@ -337,6 +344,7 @@
 				64A07E192BFE9E0F00FDE113 /* OnboardingView.swift in Sources */,
 				64A07E1A2BFE9E0F00FDE113 /* PrimaryView.swift in Sources */,
 				8DB8EB4C2C0A46ED004F3E19 /* BottomOverlayButtons.swift in Sources */,
+				5CA7D0660A1B2C3D4E5F6071 /* FreeformCaptureOverlay.swift in Sources */,
 				64A07E1B2BFE9E0F00FDE113 /* ReconstructionPrimaryView.swift in Sources */,
 				64A07E1C2BFE9E0F00FDE113 /* OnboardingTutorialView.swift in Sources */,
 				64A07E1D2BFE9E0F00FDE113 /* OnboardingButtonView.swift in Sources */,
