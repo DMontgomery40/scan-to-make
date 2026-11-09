@@ -19,6 +19,8 @@ struct FreeformCaptureFlow: Equatable {
         case review
         /// `finish()` was called; Apple saves the images and the session goes `.finishing` → `.completed`.
         case finishing
+        /// Stopped from the review sheet; the capture screen's stop takes over and the files are kept.
+        case stopped
     }
 
     /// The session call each step asks for. The model makes it; the flow never touches RealityKit.
@@ -40,20 +42,24 @@ struct FreeformCaptureFlow: Equatable {
         defaults.bool(forKey: launchArgument)
     }
 
-    /// Record is offered only while Apple's session is `.ready`.
-    func canRecord(sessionReady: Bool) -> Bool { step == .ready && sessionReady }
+    /// Record is offered only while Apple's session is `.ready` and tracking is normal: otherwise Apple's coaching
+    /// overlay has the screen ("the app may need to hide its UI at this time").
+    func canRecord(sessionReady: Bool, trackingNormal: Bool) -> Bool { step == .ready && sessionReady && trackingNormal }
 
-    /// Done appears after ten shots. There are no segments in freeform, so one pass is enough.
-    func canFinish(shots: Int) -> Bool { step == .capturing && shots >= Self.minimumShots }
+    /// Done appears after ten shots while tracking is normal and the session isn't paused. There are no segments in
+    /// freeform, so one pass is enough.
+    func canFinish(shots: Int, trackingNormal: Bool) -> Bool {
+        step == .capturing && trackingNormal && shots >= Self.minimumShots
+    }
 
-    mutating func record(sessionReady: Bool) -> SessionCall? {
-        guard canRecord(sessionReady: sessionReady) else { return nil }
+    mutating func record(sessionReady: Bool, trackingNormal: Bool) -> SessionCall? {
+        guard canRecord(sessionReady: sessionReady, trackingNormal: trackingNormal) else { return nil }
         step = .capturing
         return .startCapturing
     }
 
-    mutating func done(shots: Int) -> SessionCall? {
-        guard canFinish(shots: shots) else { return nil }
+    mutating func done(shots: Int, trackingNormal: Bool) -> SessionCall? {
+        guard canFinish(shots: shots, trackingNormal: trackingNormal) else { return nil }
         step = .review
         return .pause
     }
@@ -68,6 +74,13 @@ struct FreeformCaptureFlow: Equatable {
         guard step == .review else { return nil }
         step = .finishing
         return .finish
+    }
+
+    /// Stop from review. Returns whether the capture should stop; the session's own stop does the rest.
+    mutating func stop() -> Bool {
+        guard step == .review else { return false }
+        step = .stopped
+        return true
     }
 
     /// While the person reviews, the session is paused on purpose; the watchdog must not stop it.

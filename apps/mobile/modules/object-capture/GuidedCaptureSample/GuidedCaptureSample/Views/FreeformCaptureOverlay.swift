@@ -15,13 +15,15 @@ struct FreeformCaptureOverlay: View {
         VStack(spacing: 16) {
             if appModel.freeformFlow.step != .finishing {
                 card
-                    // Apple's coaching overlay needs the screen while tracking recovers.
-                    .opacity(session.cameraTracking == .normal ? 1 : 0)
             }
             FeedbackView(messageList: appModel.messageList)
             Spacer()
             controls
         }
+        // Apple's coaching overlay has the screen while tracking recovers ("the app may need to hide its UI at this
+        // time"), as the guided overlay does; Record and Done are also refused by the flow until tracking is normal.
+        .opacity(showsOverlay ? 1 : 0)
+        .allowsHitTesting(showsOverlay)
         .padding(.horizontal, 16)
         .padding(.top, 76)      // below Stop capture
         .padding(.bottom, 24)
@@ -40,6 +42,12 @@ struct FreeformCaptureOverlay: View {
     private var reviewing: Binding<Bool> {
         Binding(get: { appModel.freeformFlow.isReviewing },
                 set: { shown in if !shown { appModel.freeformKeepScanning() } })
+    }
+
+    private var trackingNormal: Bool { session.cameraTracking == .normal }
+
+    private var showsOverlay: Bool {
+        appModel.freeformFlow.step == .finishing || (trackingNormal && !session.isPaused) || appModel.freeformFlow.isReviewing
     }
 
     private var sessionReady: Bool {
@@ -73,7 +81,7 @@ struct FreeformCaptureOverlay: View {
             }
             .buttonStyle(.glassProminent)
             .controlSize(.extraLarge)
-            .disabled(!appModel.freeformFlow.canRecord(sessionReady: sessionReady))
+            .disabled(!appModel.freeformFlow.canRecord(sessionReady: sessionReady, trackingNormal: trackingNormal))
             .accessibilityLabel("Record scan")
             .accessibilityIdentifier("capture.record")
         case .capturing, .review:
@@ -85,7 +93,8 @@ struct FreeformCaptureOverlay: View {
                     .glassEffect(.regular.tint(.black.opacity(0.35)), in: .capsule)
                     .accessibilityIdentifier("capture.shots")
                 Spacer(minLength: 0)
-                if appModel.freeformFlow.canFinish(shots: session.numberOfShotsTaken) {
+                if appModel.freeformFlow.canFinish(shots: session.numberOfShotsTaken,
+                                                   trackingNormal: trackingNormal && !session.isPaused) {
                     Button("Done") { appModel.freeformDone() }
                         .font(.headline)
                         .buttonStyle(.glassProminent)
@@ -99,6 +108,8 @@ struct FreeformCaptureOverlay: View {
                 .padding(16)
                 .environment(\.colorScheme, .dark)
                 .glassEffect(.regular.tint(.black.opacity(0.35)), in: .rect(cornerRadius: 22))
+        case .stopped:
+            EmptyView()
         }
     }
 }
@@ -138,6 +149,13 @@ private struct FreeformReviewSheet: View {
             .padding(16)
             .navigationTitle("\(session.numberOfShotsTaken) photos")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    // The same stop as the capture screen's; the files are kept.
+                    Button("Stop capture", role: .cancel) { appModel.freeformStop() }
+                        .accessibilityIdentifier("capture.review.stop")
+                }
+            }
         }
         .interactiveDismissDisabled()
         .onAppear {

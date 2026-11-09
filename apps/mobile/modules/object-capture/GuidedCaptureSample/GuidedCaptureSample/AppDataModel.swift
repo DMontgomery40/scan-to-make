@@ -429,7 +429,8 @@ extension AppDataModel {
         }
 
         // PRD §10 allows a success haptic when a result is ready and a warning on a plate alert, nothing else.
-        session.shouldPlayHaptics = false
+        // Only the quick scan changes it; the guided path stays as it was until the flag graduates.
+        if isFreeform { session.shouldPlayHaptics = false }
         var configuration = ObjectCaptureSession.Configuration()
         // Every image goes to the Mac: "meant for use when the images are intended to be transferred to macOS".
         configuration.isOverCaptureEnabled = true
@@ -780,13 +781,16 @@ extension AppDataModel {
 extension AppDataModel {
     func freeformRecord() {
         guard isFreeform, let session = objectCaptureSession, case .ready = session.state,
-              let call = freeformFlow.record(sessionReady: true) else { return }
+              let call = freeformFlow.record(sessionReady: true, trackingNormal: session.cameraTracking == .normal)
+        else { return }
         perform(call, on: session)
     }
 
     func freeformDone() {
         guard isFreeform, let session = objectCaptureSession,
-              let call = freeformFlow.done(shots: session.numberOfShotsTaken) else { return }
+              let call = freeformFlow.done(shots: session.numberOfShotsTaken,
+                                           trackingNormal: session.cameraTracking == .normal && !session.isPaused)
+        else { return }
         perform(call, on: session)
     }
 
@@ -798,6 +802,12 @@ extension AppDataModel {
     func freeformUseScan() {
         guard isFreeform, let session = objectCaptureSession, let call = freeformFlow.useScan() else { return }
         perform(call, on: session)
+    }
+
+    /// Stop from the review sheet: the same stop as the capture screen's, files kept.
+    func freeformStop() {
+        guard isFreeform, freeformFlow.stop() else { return }
+        stopCapture()
     }
 
     private func perform(_ call: FreeformCaptureFlow.SessionCall, on session: ObjectCaptureSession) {
