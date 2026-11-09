@@ -8,13 +8,24 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   First it prints `{"images":N,"depth":D}`: how many photos carry LiDAR depth, where the model's real-world size
   comes from. Apple's `stitchingIncomplete` and `automaticDownsampling` come out as `{"warning":…}`. It runs Apple's
   way with Apple's settings: each photo's own camera, depth and gravity, Apple's own object masking (always on),
-  `featureSensitivity = .high`, the default (unordered) sample ordering, and `ignoreBoundingBox = true`. Apple's capture
-  box was fitted to the script on David's sign and cut off the letters; the masks still separate the object from the room. On David's rig scan, `.sequential` with
+  `featureSensitivity = .high`, the default (unordered) sample ordering, and `ignoreBoundingBox = true`; the first
+  line names both. `--feature normal|high` and `--honor-box` (`ignoreBoundingBox = false`) change those two without
+  changing the defaults. The companion reruns a failed rebuild once with `--feature normal` (on Apple's own 33 unicorn
+  photos `.high` failed 6 of 6 times; `.normal` placed 27–28); `--honor-box` is for diagnostics only. Apple's capture box was fitted to the script on David's sign and cut off the letters; the masks still separate the object from the room. On David's rig scan, `.sequential` with
   `.high` placed 5–7 of 24 photos in three runs, against 9 of 24 unordered. The companion runs it at `full` on every
   image a walk-around sent (`ReconstructInput.objectCapture`).
-- `mac-reconstruct stl <model.usdz> <output.stl>` writes the model's triangles as a binary STL in millimetres
-  (PhotogrammetrySession writes metres, `metersPerUnit = 1`), each mesh placed by its composed transform. The
-  companion uses it to keep a scan as the project's model without a touch-up.
+- `mac-reconstruct stl <model.usdz> <output.stl> [--render <png>] [--remove-support]` writes the model's triangles as a
+  binary STL in millimetres (PhotogrammetrySession writes metres, `metersPerUnit = 1`), each mesh placed by its
+  composed transform. The companion uses it to keep a scan as the project's model without a touch-up.
+  `--remove-support` (the companion passes it for every Object Capture scan) cuts away whatever the object stood on
+  that Apple's masking kept: a table, a desk, the floor, a plate, any platform. Nothing assumes what it was
+  (`HandheldKit/SupportCut.swift`): the support is the dominant upward plane in the bottom half (leaning at most 15°),
+  everything up to 0.5 mm above it goes, the largest part standing on it is kept, and the support's own low scraps
+  outside that part's footprint go too. It only counts as a support when most of it, and at least 50 cm², lies
+  outside the footprint of what stands on it, so an object's own step (a sign's plank under its letters) is never
+  cut. The result is levelled on the plane, turned so its long side runs along x, and drawn for the project page.
+  The `{"done":…}` line then carries `"support"`. On David's Nov 9 rescan (28 photos) it took the rebuild from
+  185 × 230 × 125 mm (half a round plate) to the sign alone, 204 × 58 × 101 mm.
 - `mac-reconstruct samples <images-folder> <output.usdz> [detail] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]`
   rebuilds a handheld scan: the phone stays still and the object turns in the hand. Each photo becomes a
   `PhotogrammetrySample` with its embedded depth (metres), EXIF and calibration, and no gravity (the object moves

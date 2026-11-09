@@ -166,6 +166,7 @@ struct FixtureMessages { mutating func removeAll() {} }
     var events: [String] = []; var starts = 0; var completions = 0
     var fixtureRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     func record(_ event: String, detail: String = "") { events.append(event) }
+    func flushEvaluation() {}
     func detachListeners() {}
     func startNewCapture() throws {
         starts += 1; objectCaptureSession = ObjectCaptureSession()

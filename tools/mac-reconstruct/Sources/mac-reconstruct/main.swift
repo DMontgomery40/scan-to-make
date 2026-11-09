@@ -9,11 +9,17 @@ import HandheldKit
 //   mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
 //       An Object Capture photo folder (walk-around scan): the iPhone's own HEICs, each carrying its LiDAR depth,
 //       gravity and the capture box, which PhotogrammetrySession reads itself. Before building it prints
-//       {"images":N,"depth":D}: how many photos carry depth, which is where the model's real-world size comes from.
-//   mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>]
+//       {"images":N,"depth":D,"featureSensitivity":…,"ignoreBoundingBox":…}: how many photos carry depth, which is
+//       where the model's real-world size comes from, and the two settings that differ from Apple's defaults.
+//       Defaults unchanged: --feature normal|high sets featureSensitivity (default high; the companion reruns a failed
+//       rebuild once at normal); diagnostics only:
+//       --honor-box lets Apple's capture box trim the model (ignoreBoundingBox = false; default true).
+//   mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>] [--remove-support]
 //       Writes the model's triangles as a binary STL in millimetres, Z up, centred and resting on z = 0
 //       (PhotogrammetrySession writes metres, Y up). --render also draws the model for the project page; a model
 //       that can't be drawn still gets its STL, and the {"done":…} line names the picture only when there is one.
+//       --remove-support cuts away the surface the object stood on (a rig's plate, a patch of table) when there is
+//       one, stands the object where it stood, and draws the cut model; {"done":…} then carries "support".
 //   mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw]
 //                   [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 //       Handheld photos: the camera stays still and the object turns in the hand. Each photo becomes a
@@ -31,8 +37,8 @@ func emit(_ value: [String: Any]) {
 func fail(_ message: String) -> Never { emit(["error": message]); exit(1) }
 
 let usage = """
-usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw]
-       mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>]
+usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw] [--feature normal|high] [--honor-box]
+       mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>] [--remove-support]
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
 
 """
@@ -40,14 +46,20 @@ var args = Array(CommandLine.arguments.dropFirst())
 if args.first == "stl" {
     var render: String?
     if let i = args.firstIndex(of: "--render"), i + 1 < args.count { render = args[i + 1]; args.removeSubrange(i...(i + 1)) }
+    let cutSupport = args.contains("--remove-support"); args.removeAll { $0 == "--remove-support" }
     guard args.count == 3 else { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
     do {
-        let model = URL(fileURLWithPath: args[1])
-        let summary = try writeSTL(model: model, to: URL(fileURLWithPath: args[2]))
+        let model = URL(fileURLWithPath: args[1]), stl = URL(fileURLWithPath: args[2])
+        let summary = try writeSTL(model: model, to: stl, removeSupport: cutSupport)
         var done: [String: Any] = ["done": args[2], "triangles": summary.triangles, "vertices": summary.vertices,
                                    "sizeMm": [summary.sizeMm.x, summary.sizeMm.y, summary.sizeMm.z].map { ($0 * 10).rounded() / 10 }]
+        if let support = summary.support {
+            done["support"] = ["tiltDegrees": (support.tiltDegrees * 10).rounded() / 10, "areaMm2": Int(support.supportAreaMm2.rounded()),
+                               "trianglesBefore": support.trianglesBefore, "trianglesAfter": support.trianglesAfter]
+        }
         if let render {
-            do { try renderOverview(model: model, to: URL(fileURLWithPath: render)); done["render"] = render }
+            // The picture shows what prints: the cut STL when the support went, else the model with its textures.
+            do { try renderOverview(model: summary.support == nil ? model : stl, to: URL(fileURLWithPath: render), zUp: summary.support != nil); done["render"] = render }
             catch { FileHandle.standardError.write(Data("render: \(error)\n".utf8)) }
         }
         emit(done)
@@ -67,6 +79,12 @@ let masksOnly = args.contains("--masks-only"); args.removeAll { $0 == "--masks-o
 // Diagnostics for tests: switch off Apple's own object masking, or drop the photos' depth.
 let noObjectMasking = args.contains("--no-object-masking"); args.removeAll { $0 == "--no-object-masking" }
 let noDepth = args.contains("--no-depth"); args.removeAll { $0 == "--no-depth" }
+// An Object Capture folder only: the two settings that differ from Apple's defaults (the companion's retry uses --feature).
+let featureOption = option("--feature")
+let honorBox = args.contains("--honor-box"); args.removeAll { $0 == "--honor-box" }
+let featureSensitivities: [String: PhotogrammetrySession.Configuration.FeatureSensitivity] = ["normal": .normal, "high": .high]
+if samplesMode && (featureOption != nil || honorBox) { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
+if let featureOption, featureSensitivities[featureOption] == nil { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
 guard args.count >= 2 else { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
 
 let input = URL(fileURLWithPath: args[0], isDirectory: true)
@@ -86,10 +104,10 @@ if samplesMode {
     // .high: Apple's setting "for challenging images" (dim 1/60 s rig frames, a plain backdrop). The ordering stays
     // Apple's default: on David's rig scan, .sequential with .high placed 5–7 of 24 photos and left part of the sign
     // in three runs, against 9 of 24 and the same front of the sign in three runs unordered.
-    configuration.featureSensitivity = .high
+    configuration.featureSensitivity = featureSensitivities[featureOption ?? "high"]!
     // Apple's capture box is not trusted to trim the object: on David's rig scan it was fitted to the script on the
     // base and cut the letters. Apple's object masking (on above) still separates the object from the room.
-    configuration.ignoreBoundingBox = true
+    configuration.ignoreBoundingBox = !honorBox
 }
 
 let started = Date()
@@ -169,7 +187,9 @@ do {
         // the scanned object." Say how many do, so the size's source is on record.
         let files = try photos(in: input)
         guard !files.isEmpty else { fail("No photos in \(input.path).") }
-        emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count, "stage": "reconstructing"])
+        emit(["images": files.count, "depth": files.filter { embeddedDepth(in: $0) != nil }.count, "stage": "reconstructing",
+              "featureSensitivity": featureOption ?? "high",
+              "ignoreBoundingBox": configuration.ignoreBoundingBox])
         session = try PhotogrammetrySession(input: input, configuration: configuration)
     }
     try session.process(requests: [.modelFile(url: output, detail: detail)])

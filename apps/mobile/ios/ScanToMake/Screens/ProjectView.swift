@@ -140,7 +140,8 @@ struct ProjectView: View {
         guard !working else { return }
         working = true; problem = nil
         Task {
-            defer { working = false }
+            // A scan started, stopped or sent here changes what this phone still holds for the project.
+            defer { working = false; store.refreshStoppedScans() }
             do { let ticket = store.startRequest(); if let next = try await body() { store.replace(next, ticket: ticket) } else { await reload() } }
             catch let failure as CompanionError {
                 if failure.code == "cancelled" { return }
@@ -429,6 +430,7 @@ struct ProjectView: View {
                             openConfirmation: { confirming = object.printConfirmation.map { IdentifiedProject(id: $0.id) } })
         case .needsYou: askCard(object)
         case .failed: failedCard(object, words)
+        case .draft where store.stoppedScanWords(object) != nil: stoppedScanCard(object)
         case .draft: draftCard(object, words)
         case .sent: sentCard(words)
         // After a finished print (PRD §5.4), on a Mac that keeps the answer.
@@ -639,6 +641,40 @@ struct ProjectView: View {
     }
 
     /// A project that hasn't been sent: finish sending it, or add what it needs.
+    /// A scan stopped after it kept photos: send what's there (the Mac rebuilds it and says plainly if it's too few), or
+    /// scan it again. The same card on iPhone and iPad.
+    private func stoppedScanCard(_ object: Project) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(store.stoppedScanWords(object) ?? "", systemImage: "photo.stack").font(.headline)
+                .accessibilityIdentifier("stopped-scan")
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    Button {
+                        act {
+                            guard let stopped = store.stoppedScans[object.id] else { return nil }
+                            return try await store.mac.sendStoppedScan(object.id, run: stopped.run)
+                        }
+                    } label: {
+                        Label("Send to your Mac", systemImage: "arrow.up.circle").frame(maxWidth: .infinity).frame(height: 30)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .accessibilityIdentifier("stopped-scan.send")
+                    if store.canScan {
+                        Button { act { try await scan(object, handheld: false) } } label: {
+                            Label("Scan again", systemImage: "cube.transparent").frame(maxWidth: .infinity).frame(height: 30)
+                        }
+                        .buttonStyle(.glass)
+                        .accessibilityIdentifier("stopped-scan.again")
+                    }
+                }
+                .controlSize(.large).font(.subheadline)
+                .disabled(working)
+            }
+        }
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+
     private func draftCard(_ object: Project, _ words: ProjectWords) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(words.status, systemImage: "square.and.pencil").font(.headline)

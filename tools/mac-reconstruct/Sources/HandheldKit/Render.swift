@@ -6,11 +6,18 @@ import SceneKit
 import SceneKit.ModelIO
 
 /// A picture of a model for the project page, the way the apps show a project before it is turned: its own textures,
-/// from the front and a little above, on the dark stage the apps use. Y is up, as in Apple's USDZ.
-public func renderOverview(model: URL, to output: URL, pixels: Int = 900) throws {
+/// from the front and a little above, on the dark stage the apps use. Y is up, as in Apple's USDZ; `zUp` draws a
+/// project STL (millimetres, Z up) turned the same way.
+public func renderOverview(model: URL, to output: URL, pixels: Int = 900, zUp: Bool = false) throws {
     let asset = MDLAsset(url: model)
     asset.loadTextures()
     let scene = SCNScene(mdlAsset: asset)
+    if zUp {
+        let turned = SCNNode()
+        for child in scene.rootNode.childNodes { child.removeFromParentNode(); turned.addChildNode(child) }
+        turned.eulerAngles.x = -.pi / 2
+        scene.rootNode.addChildNode(turned)
+    }
     let (low, high) = scene.rootNode.boundingBox
     let centre = SIMD3<Double>(Double(low.x + high.x) / 2, Double(low.y + high.y) / 2, Double(low.z + high.z) / 2)
     let radius = simd_length(SIMD3<Double>(Double(high.x - low.x), Double(high.y - low.y), Double(high.z - low.z))) / 2

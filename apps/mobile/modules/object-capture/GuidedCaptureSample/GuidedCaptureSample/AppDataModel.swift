@@ -9,6 +9,7 @@ A data model for maintaining the app state, including the underlying object capt
 import RealityKit
 import Darwin
 import ARKit
+import CoreMotion
 import SwiftUI
 import os
 
@@ -89,8 +90,6 @@ class AppDataModel: Identifiable {
         }
     }
 
-    static let minNumImages = 10
-
     /// Once we are headed to reconstruction portion, we will hold the session here.
     private(set) var photogrammetrySession: PhotogrammetrySession?
 
@@ -135,18 +134,30 @@ class AppDataModel: Identifiable {
         return !session.feedback.contains(.objectNotFlippable)
     }
 
-    enum CaptureMode: Equatable {
-        case object
-        case area
-    }
-
-    var captureMode: CaptureMode = .object { didSet { record("capture-mode", detail: String(describing: captureMode)) } }
-
-    /// Apple's freeform capture with no box and no mode (quick-sweep-capture.md §3.1), behind `-STMFreeformCapture YES`.
-    /// It never sets `captureMode = .area`: area mode turns object masking off, and the Mac rebuild keeps it on.
-    let isFreeform: Bool
+    /// Apple's freeform capture with no box and no mode is the only capture (quick-sweep-capture.md §3.1). There is no
+    /// Area mode: it turns object masking off, and the Mac rebuild keeps it on.
     private(set) var freeformFlow = FreeformCaptureFlow()
+    /// How far the camera looked down for each photo, from the device's gravity when the shot count went up. Apple's
+    /// session reports the count (`numberOfShotsTakenUpdates`) but not each shot's camera, so the phone's own motion
+    /// sensor says which height each photo came from.
+    private(set) var shotLookDowns: [Double] = []
+    /// One motion manager for the app, as Apple asks ("Create only one CMMotionManager object for your app").
+    private let motion = CMMotionManager()
+    /// When the app takes the next photo (``FreeformCaptureFlow/ShotPacer``), while it paces the shots at all.
+    private var pacer = FreeformCaptureFlow.ShotPacer()
+    private var pacing = false
+    /// What the photos so far cover, which gates Done (``FreeformCaptureFlow/Coverage``).
+    var captureCoverage: FreeformCaptureFlow.Coverage {
+        FreeformCaptureFlow.Coverage(shots: objectCaptureSession?.numberOfShotsTaken ?? 0, lookDowns: shotLookDowns,
+                                     heightsKnown: motion.isDeviceMotionAvailable)
+    }
     private var evaluationBuffer = CaptureEvaluationEventBuffer()
+    /// The newest evaluation.json, built when its event was recorded and not yet on disk (see ``record(_:detail:)``).
+    private var evaluationPending: (folder: URL, manifest: [String: Any])?
+    private var evaluationLastWrite = -Double.infinity
+    private var evaluationFlushTask: Task<Void, Never>?
+    /// The session's shutter and image limit, read once it has started.
+    private var evaluationSession: [String: Any]?
     private var lastObservedTracking: String?
     private var lastObservedPause: Bool?
     var evaluationStarted = Date()
@@ -171,9 +182,8 @@ class AppDataModel: Identifiable {
     var tutorialPlayedOnce = false
 
     // Postpone creating ObjectCaptureSession and PhotogrammetrySession until necessary.
-    init(captureDirectory: URL? = nil, freeform: Bool = FreeformCaptureFlow.isEnabled()) {
+    init(captureDirectory: URL? = nil) {
         self.captureDirectory = captureDirectory
-        self.isFreeform = freeform
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(handleAppTermination(notification:)),
                                                name: UIApplication.willTerminateNotification,
@@ -316,6 +326,19 @@ extension AppDataModel {
             }
         })
         tasks.append(Task<Void, Never> { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(33))
+                guard !Task.isCancelled, let self, self.objectCaptureSession?.id == model.id else { return }
+                self.paceShot(model)
+            }
+        })
+        tasks.append(Task<Void, Never> { [weak self] in
+            for await shots in model.numberOfShotsTakenUpdates {
+                guard !Task.isCancelled, let self, self.objectCaptureSession?.id == model.id else { return }
+                self.noteShots(shots)
+            }
+        })
+        tasks.append(Task<Void, Never> { [weak self] in
             for await paused in model.isPausedUpdates {
                 guard !Task.isCancelled, let self, self.objectCaptureSession?.id == model.id else { return }
                 guard paused != self.lastObservedPause else { continue }
@@ -392,6 +415,7 @@ extension AppDataModel {
             task.cancel()
         }
         tasks.removeAll()
+        motion.stopDeviceMotionUpdates()
         lastObservedTracking = nil
         lastObservedPause = nil
     }
@@ -411,14 +435,27 @@ extension AppDataModel {
             throw NSError(domain: "CaptureEvaluation", code: 1, userInfo: [NSLocalizedDescriptionKey: "Object Capture is unavailable on this device."])
         }
 
+        // The last run's unwritten events go to its own folder before the folder changes.
+        flushEvaluation()
         captureFolderManager = try CaptureFolderManager(captureDirectory: captureDirectory)
         evaluationBuffer = CaptureEvaluationEventBuffer()
+        evaluationSession = nil
         evaluationStarted = Date()
         passCount = 1
         flipCount = 0
         freeformFlow = FreeformCaptureFlow()
+        shotLookDowns = []
+        pacer = FreeformCaptureFlow.ShotPacer()
+        pacing = motion.isDeviceMotionAvailable
         objectCaptureSession = ObjectCaptureSession()
-        record("started", detail: isFreeform ? "freeform" : "")
+        // After the session is set (setting it detaches the last one's listeners and stops motion). Gravity-vertical
+        // attitude for the shutter and each photo's height; device motion needs no permission (NSMotionUsageDescription
+        // covers only CMSensorRecorder, CMPedometer, CMMotionActivityManager and CMMovementDisorderManager).
+        if motion.isDeviceMotionAvailable {
+            motion.deviceMotionUpdateInterval = 1.0 / 60
+            motion.startDeviceMotionUpdates(using: .xArbitraryZVertical)
+        }
+        record("started", detail: "freeform")
 
         guard let session = objectCaptureSession else {
             preconditionFailure("startNewCapture() got unexpectedly nil session!")
@@ -429,8 +466,10 @@ extension AppDataModel {
         }
 
         // PRD §10 allows a success haptic when a result is ready and a warning on a plate alert, nothing else.
-        // Only the quick scan changes it; the guided path stays as it was until the flag graduates.
-        if isFreeform { session.shouldPlayHaptics = false }
+        session.shouldPlayHaptics = false
+        // The app takes the photos (ShotPacer): "If disabled, only manually triggered shots are taken". Without a motion
+        // sensor there is nothing to pace by, so Apple's auto-capture stays on.
+        session.isAutoCaptureEnabled = !pacing
         var configuration = ObjectCaptureSession.Configuration()
         // Every image goes to the Mac: "meant for use when the images are intended to be transferred to macOS".
         configuration.isOverCaptureEnabled = true
@@ -444,6 +483,8 @@ extension AppDataModel {
             logger.error("Got error starting session! \(String(describing: error))")
             switchToErrorState(error: error)
         } else {
+            evaluationSession = ["isAutoCaptureEnabled": session.isAutoCaptureEnabled,
+                                 "maximumNumberOfInputImages": session.maximumNumberOfInputImages]
             state = .capturing
         }
     }
@@ -465,9 +506,6 @@ extension AppDataModel {
         }
         record("reconstruction-started", detail: "iOS reduced; native scale unchanged")
         var configuration = PhotogrammetrySession.Configuration()
-        if captureMode == .area {
-            configuration.isObjectMaskingEnabled = false
-        }
 
         guard let captureFolderManager else {
             preconditionFailure("captureFolderManager unexpectedly nil!")
@@ -573,13 +611,13 @@ extension AppDataModel {
         logger.info("reset() called...")
         photogrammetrySession = nil
         objectCaptureSession = nil
+        flushEvaluation()
         captureFolderManager = nil
         showOverlaySheets = false
         orbit = .orbit1
         isObjectFlipped = false
         currentFeedback = []
         messageList.removeAll()
-        captureMode = .object
         state = .ready
         isSaveDraftEnabled = false
         tutorialPlayedOnce = false
@@ -624,7 +662,7 @@ extension AppDataModel {
         // Find the feedbacks that are not active anymore.
         let feedbackToRemove = currentFeedback.subtracting(persistentFeedback)
         for thisFeedback in feedbackToRemove {
-            if let feedbackString = FeedbackMessages.getFeedbackString(for: thisFeedback, captureMode: captureMode, freeform: isFreeform) {
+            if let feedbackString = FeedbackMessages.getFeedbackString(for: thisFeedback) {
                 messageList.remove(feedbackString)
             }
         }
@@ -632,7 +670,7 @@ extension AppDataModel {
         // Find the new feedbacks.
         let feebackToAdd = feedback.subtracting(persistentFeedback)
         for thisFeedback in feebackToAdd {
-            if let feedbackString = FeedbackMessages.getFeedbackString(for: thisFeedback, captureMode: captureMode, freeform: isFreeform) {
+            if let feedbackString = FeedbackMessages.getFeedbackString(for: thisFeedback) {
                 messageList.add(feedbackString)
             }
         }
@@ -688,33 +726,23 @@ extension AppDataModel {
             }
         }
     }
-
-    func determineCurrentOnboardingState() -> OnboardingState? {
-        guard let session = objectCaptureSession else { return nil }
-
-        switch captureMode {
-            case .object:
-                let orbitCompleted = session.userCompletedScanPass
-                var currentState = OnboardingState.tooFewImages
-                if session.numberOfShotsTaken >= AppDataModel.minNumImages {
-                    switch orbit {
-                        case .orbit1:
-                            currentState = orbitCompleted ? .firstSegmentComplete : .firstSegmentNeedsWork
-                        case .orbit2:
-                            currentState = orbitCompleted ? .secondSegmentComplete : .secondSegmentNeedsWork
-                        case .orbit3:
-                            currentState = orbitCompleted ? .thirdSegmentComplete : .thirdSegmentNeedsWork
-                        }
-                }
-                return currentState
-            case .area:
-                return .captureInAreaMode
-        }
-    }
 }
 
 // Evaluation metadata never promotes capture coverage into mechanical-fit evidence.
 extension AppDataModel {
+    /// evaluation.json is written at most this often while events stream in (feedback changes many times a second).
+    static let evaluationWriteInterval: TimeInterval = 2
+
+    /// Events written at once: a run that ends, fails, stops or changes state must be on disk even if the app dies next.
+    static func isDurableEvaluationEvent(_ event: String, detail: String) -> Bool {
+        event.hasPrefix("reconstruction") || event.contains("failed")
+            || ["started", "interrupted", "cancel-requested", "cancel-terminal", "cancel-still-pending", "capture-state",
+                "new-pass", "auto-capture-fallback"].contains(event)
+            || (event == "freeform" && detail == String(describing: FreeformCaptureFlow.SessionCall.finish))
+    }
+
+    /// Adds the event and builds the report as it stands now. The file is written at once for a durable event or when
+    /// the last write is 2 s old; otherwise one write is scheduled for when it is, so a killed run loses at most ~2 s.
     func record(_ event: String, detail: String = "") {
         guard let folder = captureFolderManager?.captureFolder else { return }
         var entry: [String: Any] = [
@@ -733,10 +761,11 @@ extension AppDataModel {
                 .sorted().prefix(32).map { $0 }
         }
         evaluationBuffer.append(entry)
-        let manifest: [String: Any] = [
+        var manifest: [String: Any] = [
             "formatVersion": "0.1", "createdAt": ISO8601DateFormatter().string(from: evaluationStarted),
-            "captureMode": isFreeform ? "freeform" : String(describing: captureMode),
-            "hideObjectReticle": isFreeform || captureMode == .area,
+            "captureMode": "freeform",
+            "hideObjectReticle": true,
+            "shotsLow": captureCoverage.low, "shotsFromAbove": captureCoverage.high,
             "objectCaptureSupported": ObjectCaptureSession.isSupported,
             "photogrammetrySupported": PhotogrammetrySession.isSupported,
             "sceneDepthSupported": ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
@@ -753,6 +782,27 @@ extension AppDataModel {
                                   "droppedEvents": evaluationBuffer.droppedEvents,
                                   "initialObservationRetained": evaluationBuffer.events.first?["event"] as? String == "session-initial"]
         ]
+        if let evaluationSession { manifest["session"] = evaluationSession }
+        evaluationPending = (folder, manifest)
+        let now = ProcessInfo.processInfo.systemUptime
+        if Self.isDurableEvaluationEvent(event, detail: detail) || now - evaluationLastWrite >= Self.evaluationWriteInterval {
+            flushEvaluation()
+        } else if evaluationFlushTask == nil {
+            let delay = Self.evaluationWriteInterval - (now - evaluationLastWrite)
+            evaluationFlushTask = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                self?.flushEvaluation()
+            }
+        }
+    }
+
+    /// Writes the pending evaluation.json, if any, to the folder of the run it describes.
+    func flushEvaluation() {
+        evaluationFlushTask?.cancel()
+        evaluationFlushTask = nil
+        guard let (folder, manifest) = evaluationPending else { return }
+        evaluationPending = nil
+        evaluationLastWrite = ProcessInfo.processInfo.systemUptime
         do {
             let bytes = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
             guard bytes.count <= 128 * 1024 else {
@@ -780,34 +830,71 @@ extension AppDataModel {
 // The quick scan's buttons. Each asks the flow which session call to make, so the steps stay in one tested place.
 extension AppDataModel {
     func freeformRecord() {
-        guard isFreeform, let session = objectCaptureSession, case .ready = session.state,
+        guard let session = objectCaptureSession, case .ready = session.state,
               let call = freeformFlow.record(sessionReady: true, trackingNormal: session.cameraTracking == .normal)
         else { return }
         perform(call, on: session)
     }
 
     func freeformDone() {
-        guard isFreeform, let session = objectCaptureSession,
-              let call = freeformFlow.done(shots: session.numberOfShotsTaken,
+        guard let session = objectCaptureSession,
+              let call = freeformFlow.done(coverage: captureCoverage,
                                            trackingNormal: session.cameraTracking == .normal && !session.isPaused)
         else { return }
         perform(call, on: session)
     }
 
     func freeformKeepScanning() {
-        guard isFreeform, let session = objectCaptureSession, let call = freeformFlow.keepScanning() else { return }
+        guard let session = objectCaptureSession, let call = freeformFlow.keepScanning() else { return }
         perform(call, on: session)
     }
 
     func freeformUseScan() {
-        guard isFreeform, let session = objectCaptureSession, let call = freeformFlow.useScan() else { return }
+        guard let session = objectCaptureSession, let call = freeformFlow.useScan() else { return }
         perform(call, on: session)
     }
 
     /// Stop from the review sheet: the same stop as the capture screen's, files kept.
     func freeformStop() {
-        guard isFreeform, freeformFlow.stop() else { return }
+        guard freeformFlow.stop() else { return }
         stopCapture()
+    }
+
+    /// The app's shutter, checked 30 times a second while capturing: Apple's `requestImageCapture()` ("request an image
+    /// be manually captured at the current location") each time the view has turned 5° since the last photo, at most 3 a
+    /// second, only while Apple can take one (`canRequestImageCapture`), tracking is normal, the session isn't paused,
+    /// and Apple isn't saying `movingTooFast` ("the capturing may be paused to ensure quality").
+    fileprivate func paceShot(_ session: ObjectCaptureSession) {
+        guard pacing, freeformFlow.step == .capturing, case .capturing = session.state, !session.isPaused,
+              session.cameraTracking == .normal, session.canRequestImageCapture,
+              !session.feedback.contains(.movingTooFast), let reading = motion.deviceMotion else { return }
+        let m = reading.attitude.rotationMatrix
+        let direction = FreeformCaptureFlow.ShotPacer.cameraDirection(
+            rotation: [m.m11, m.m12, m.m13, m.m21, m.m22, m.m23, m.m31, m.m32, m.m33],
+            gravity: .init(x: reading.gravity.x, y: reading.gravity.y, z: reading.gravity.z))
+        let now = ProcessInfo.processInfo.systemUptime
+        // Apple isn't taking the photos asked for: give the shutter back to its auto-capture rather than end with none.
+        if pacer.needsAutoCapture(at: now) {
+            session.isAutoCaptureEnabled = true
+            pacing = false
+            record("auto-capture-fallback", detail: "\(pacer.unanswered) requests unanswered")
+            return
+        }
+        guard pacer.isDue(direction, at: now) else { return }
+        pacer.requested(direction, at: now)
+        session.requestImageCapture()
+    }
+
+    /// Notes how far the camera looks down for each new photo. The count can jump by more than one between updates;
+    /// each new photo gets the latest reading.
+    fileprivate func noteShots(_ count: Int) {
+        guard count > shotLookDowns.count else { return }
+        pacer.shotTaken(at: ProcessInfo.processInfo.systemUptime)
+        let lookDown = motion.deviceMotion.map {
+            FreeformCaptureFlow.lookDownDegrees(gravityX: $0.gravity.x, y: $0.gravity.y, z: $0.gravity.z)
+        }
+        guard let lookDown else { return }
+        shotLookDowns += Array(repeating: lookDown, count: count - shotLookDowns.count)
     }
 
     private func perform(_ call: FreeformCaptureFlow.SessionCall, on session: ObjectCaptureSession) {
@@ -815,6 +902,8 @@ extension AppDataModel {
         switch call {
         case .startCapturing:
             session.startCapturing()
+            // Again once capturing, in case starting it reset the shutter: the app paces the photos.
+            if pacing { session.isAutoCaptureEnabled = false }
         case .pause:
             // The review sheet covers the capture view: "Call this when object capture view is not visible".
             setShowOverlaySheets(to: true)

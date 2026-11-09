@@ -7,6 +7,8 @@ public struct STLSummary: Equatable {
     public var triangles: Int
     public var vertices: Int
     public var sizeMm: SIMD3<Double>
+    /// The surface it stood on, when `removeSupport` was asked for and found one (see `removeSupport(_:)`).
+    public var support: SupportCut? = nil
 }
 
 /// A triangle list's indices three at a time. A triangle with any index outside the mesh is skipped whole, so one
@@ -25,8 +27,11 @@ public func wholeTriangles(_ indices: [Int], vertexCount: Int) -> [[Int]] {
 /// slicers and the printer MCPs read millimetres with Z up. Y-up becomes Z-up by turning (x, y, z) into (x, −z, y), a
 /// rotation, so faces keep their winding. Each mesh is placed with its full composed transform first, so the STL is
 /// what the model shows. Textures are dropped; a printer only needs the shape.
+///
+/// With `removeSupport`, the surface the object stood on (a rig's plate, a patch of table) is cut away first and the
+/// object stands on where it stood (`removeSupport(_:)`); when there is no such surface the model is kept as it is.
 @discardableResult
-public func writeSTL(model: URL, to output: URL, metresPerUnit: Double = 1) throws -> STLSummary {
+public func writeSTL(model: URL, to output: URL, metresPerUnit: Double = 1, removeSupport cutSupport: Bool = false) throws -> STLSummary {
     let asset = MDLAsset(url: model)
     var corners: [SIMD3<Float>] = []
     var vertices = 0
@@ -56,18 +61,20 @@ public func writeSTL(model: URL, to output: URL, metresPerUnit: Double = 1) thro
         for child in object.children.objects { visit(child) }
     }
     for index in 0..<asset.count { visit(asset.object(at: index)) }
-    let triangles = corners.count / 3
-    guard triangles > 0 else { throw HandheldError.io("\(model.lastPathComponent) has no triangles") }
+    guard corners.count / 3 > 0 else { throw HandheldError.io("\(model.lastPathComponent) has no triangles") }
 
     let scale = Float(metresPerUnit * 1000)
     // Only an asset that says Z is up stays as it is; Apple's USDZ (and a file with no up axis) is Y up.
     let yUp = abs(asset.upAxis.z) < 0.5
-    var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
     for i in corners.indices {
         let p = corners[i] * scale
         corners[i] = yUp ? SIMD3(p.x, -p.z, p.y) : p
-        low = simd_min(low, corners[i]); high = simd_max(high, corners[i])
     }
+    var support: SupportCut?
+    if cutSupport, let cut = removeSupport(corners) { corners = cut.corners; support = cut.cut }
+    let triangles = corners.count / 3
+    var low = SIMD3<Float>(repeating: .infinity), high = SIMD3<Float>(repeating: -.infinity)
+    for corner in corners { low = simd_min(low, corner); high = simd_max(high, corner) }
     let offset = SIMD3<Float>(-(low.x + high.x) / 2, -(low.y + high.y) / 2, -low.z)
     var data = Data(count: 80)
     var count = UInt32(triangles).littleEndian
@@ -83,5 +90,5 @@ public func writeSTL(model: URL, to output: URL, metresPerUnit: Double = 1) thro
     }
     try data.write(to: output, options: .atomic)
     let size = high - low
-    return STLSummary(triangles: triangles, vertices: vertices, sizeMm: SIMD3(Double(size.x), Double(size.y), Double(size.z)))
+    return STLSummary(triangles: triangles, vertices: vertices, sizeMm: SIMD3(Double(size.x), Double(size.y), Double(size.z)), support: support)
 }

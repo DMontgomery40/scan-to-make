@@ -35,7 +35,7 @@ Files → On My iPhone → Capture Evaluation contains each unique run folder:
 
 - `Images/`: original images and their embedded capture metadata, unchanged.
 - `Models/model-mobile.usdz`: actual reconstruction output, unchanged.
-- `evaluation.json`: raw event and provenance record. Missing/guessed regions, metric accuracy and complete-object/physical fit remain unassessed or false.
+- `evaluation.json`: raw event and provenance record. Missing/guessed regions, metric accuracy and complete-object/physical fit remain unassessed or false. It is rewritten at most every 2 s while events stream in, and at once when the run starts, stops, fails, changes capture state or reconstructs, so a killed run loses at most about 2 s of events. `session` records the session's `isAutoCaptureEnabled` and `maximumNumberOfInputImages` as read once it started.
 
 Quick Look displays the model and supports native sharing. Share the whole folder through Files to preserve original capture references; sharing only the USDZ is insufficient for scale audit. On a Mac, package a copied folder with:
 

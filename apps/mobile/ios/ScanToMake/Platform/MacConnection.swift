@@ -198,6 +198,52 @@ typealias MacError = CompanionError
         return (try? model.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true ? model : nil
     }
 
+    /// A scan that was stopped (or failed, or cut off) after it kept photos: it stays on this phone until it is sent or
+    /// scanned again, and its project says so. Only the newest run of each project counts: a finished one after it
+    /// wins. Runs that kept no photos are not listed; nothing here deletes a capture.
+    struct StoppedScan: Equatable { let run: String; let photos: Int }
+
+    func stoppedScans() -> [String: StoppedScan] {
+        #if DEBUG
+        // UI tests: "<project id>:<photos>".
+        if Fixtures.folder != nil {
+            guard let value = ProcessInfo.processInfo.environment["COUNTERPART_STOPPED_SCAN"],
+                  let colon = value.lastIndex(of: ":"), let photos = Int(value[value.index(after: colon)...]) else { return [:] }
+            return [String(value[..<colon]): StoppedScan(run: "fixture", photos: photos)]
+        }
+        #endif
+        let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
+        let active = NativeCaptureCoordinator.status()["activeRunID"] as? String
+        var newest: [String: StoppedScan?] = [:]
+        // Newest first (the store sorts by creation time).
+        for draft in drafts {
+            guard let run = draft["runID"] as? String, UUID(uuidString: run) != nil, run == run.lowercased(), run != active,
+                  let project = (draft["origin"] as? [String: Any])?["projectId"] as? String,
+                  let status = draft["status"] as? String else { continue }
+            let folder = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)", directoryHint: .isDirectory)
+            let stopped = ["stopped", "failed", "interrupted"].contains(status)
+            let photos = stopped ? Self.imageNames(in: folder.appending(path: "Images", directoryHint: .isDirectory)).count : 0
+            if stopped && photos == 0 { continue }
+            guard newest[project] == nil else { continue }
+            newest[project] = stopped ? StoppedScan(run: run, photos: photos) : .some(nil)
+        }
+        return newest.compactMapValues { $0 }
+    }
+
+    private static func imageNames(in images: URL) -> [String] {
+        let pattern = /[A-Za-z0-9][A-Za-z0-9._ -]{0,122}\.(HEIC|heic|JPG|jpg|JPEG|jpeg|PNG|png)/
+        return ((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? [])
+            .filter { $0.wholeMatch(of: pattern) != nil && !$0.contains("..") }.sorted()
+    }
+
+    /// Sends a stopped scan's photos as they are; the Mac rebuilds from what's there and says plainly if it's too few.
+    func sendStoppedScan(_ id: String, run: String) async throws -> StmObject {
+        guard let manifest = try await sendCapture(id, run: run, modelRequired: false) else {
+            throw MacError(code: "needs-update", message: "Update Counterpart on your Mac to rebuild a scan from its photos.")
+        }
+        return try await start(id, captureManifest: manifest)
+    }
+
     func sendScan(_ id: String, run: String) async throws -> StmObject {
         let manifest = try await sendCapture(id, run: run)
         return try await start(id, captureManifest: manifest)
@@ -217,17 +263,19 @@ typealias MacError = CompanionError
     ///
     /// Returns the start manifest that names every image. A Mac that can't rebuild them (an older Counterpart, or a
     /// computer without Apple's reconstruction) gets the model and 24 of the photos, as before, and no manifest.
-    func sendCapture(_ id: String, run: String) async throws -> [String: Any]? {
+    /// A stopped scan (`modelRequired: false`) has photos and no phone model: it sends the photos alone, and only to a
+    /// Mac that rebuilds from them.
+    func sendCapture(_ id: String, run: String, modelRequired: Bool = true) async throws -> [String: Any]? {
         guard UUID(uuidString: run) != nil, run == run.lowercased() else { throw MacError(code: "invalid-request", message: "That request isn't allowed.") }
         let folder = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)", directoryHint: .isDirectory)
         let model = folder.appending(path: "Models/model-mobile.usdz")
-        guard (try? model.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+        let hasModel = (try? model.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        guard hasModel || !modelRequired else {
             throw MacError(code: "no-model", message: "The scan didn't finish making a model. Scan it again.")
         }
         let images = folder.appending(path: "Images", directoryHint: .isDirectory)
-        let pattern = /[A-Za-z0-9][A-Za-z0-9._ -]{0,122}\.(HEIC|heic|JPG|jpg|JPEG|jpeg|PNG|png)/
-        let names = ((try? FileManager.default.contentsOfDirectory(atPath: images.path)) ?? [])
-            .filter { $0.wholeMatch(of: pattern) != nil && !$0.contains("..") }.sorted()
+        let names = Self.imageNames(in: images)
+        guard hasModel || !names.isEmpty else { throw MacError(code: "no-photos", message: "The scan has no photos. Scan it again.") }
         // Marked as the phone's preview on every path, so a Mac never mistakes it for a full scan.
         let preview = UploadFile(kind: .scan, name: "scan.usdz", source: .file(model), type: "model/vnd.usdz+zip", preview: true)
         let report = onSendProgress
@@ -240,6 +288,7 @@ typealias MacError = CompanionError
         else if held.scan != nil || names.isEmpty { rebuilds = false }
         else { rebuilds = try await client.capabilities().contains("objectCaptureImages") }
         guard rebuilds else {
+            guard hasModel else { return nil }
             let files = [preview] + ProjectUploader.spread(names, count: 24).map { UploadFile.image(images.appending(path: $0), name: $0) }
             try await uploader.send(files, to: id, progress: progress)
             return nil
@@ -249,7 +298,7 @@ typealias MacError = CompanionError
         // Every image is named before any is sent: no client can start the Mac on part of them.
         _ = try await client.declareCapture(id, manifest: manifest)
         // Then the images: the Mac takes capture frames only until a scan is there.
-        let files = frames.map { UploadFile.image(images.appending(path: $0.file), name: $0.name, kind: .capture) } + [preview]
+        let files = frames.map { UploadFile.image(images.appending(path: $0.file), name: $0.name, kind: .capture) } + (hasModel ? [preview] : [])
         try await uploader.send(files, to: id, progress: progress)
         return manifest
     }

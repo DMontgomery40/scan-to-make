@@ -60,12 +60,11 @@ struct NewObjectView: View {
                         Text("Your Mac will get the designer’s file and keep its credit.").font(.footnote).foregroundStyle(.secondary)
                     }
                     Text("Show it").font(.headline)
-                    RigTile(enabled: store.canScan && working == nil, scan: { Task { await scan(handheld: false) } },
-                            printRig: { openURL(CounterpartIdentifiers.scanRig) })
+                    // One way to scan: walking round it and the scan rig are the same capture (David, Nov 9).
+                    ScanTile(enabled: store.canScan && working == nil, canScan: store.canScan,
+                             scan: { Task { await scan(handheld: false) } },
+                             printRig: { openURL(CounterpartIdentifiers.scanRig) })
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        SourceTile(symbol: "cube.transparent", title: "Scan it", detail: store.canScan ? "Walk around it. LiDAR measures it." : "Needs an iPhone or iPad with LiDAR.",
-                                   tint: .filament, enabled: store.canScan && working == nil) { Task { await scan(handheld: false) } }
-                            .accessibilityIdentifier("scan-object")
                         // Scan in hand is off until it's rebuilt on Apple's still-photo capture: its LiDAR session
                         // left the phone's camera black (KAN-217 P0, Davica3 2026-11-02 02:07).
                         if HandheldCapture.offered {
@@ -268,33 +267,45 @@ struct NewObjectView: View {
     }
 }
 
-/// On a scan rig (PRD §5.2, §11.1): the best-quality way, with Kass 3D's rig credited and linked.
-struct RigTile: View {
+/// Scan it (PRD §5.2, §11.1): the one scan, walking round it or swinging round it on a scan rig, with Kass 3D's rig
+/// credited and linked underneath. Both run Apple's same freeform capture, so there is one tile, not two modes.
+struct ScanTile: View {
     let enabled: Bool
+    /// This phone or iPad has LiDAR (an iPhone Duo or a LiDAR-less iPad doesn't).
+    let canScan: Bool
     let scan: () -> Void
     let printRig: () -> Void
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "rotate.3d.fill").font(.title2.weight(.semibold)).foregroundStyle(Color.okGreen)
-                .frame(width: 44, height: 44)
-                .glassEffect(.regular.tint(Color.okGreen.opacity(0.25)), in: .circle)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) { Text("On a scan rig").font(.headline); Text("BEST QUALITY").font(.caption2.weight(.bold)).foregroundStyle(Color.okGreen) }
-                Text(enabled ? "Clamp your phone to the 360° rig and swing it around." : "Needs an iPhone or iPad with LiDAR.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button(action: printRig) { Text("Don't have one? Print the rig by Kass 3D →").font(.caption.weight(.semibold)).foregroundStyle(Color.filament) }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Opens the rig's page on MakerWorld")
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: scan) {
+                HStack(spacing: 14) {
+                    Image(systemName: "cube.transparent").font(.title2.weight(.semibold)).foregroundStyle(Color.filament)
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.tint(Color.filament.opacity(0.25)), in: .circle)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Scan it").font(.headline).foregroundStyle(.primary)
+                        Text(canScan ? "Walk round it, or use a scan rig. LiDAR measures it." : "Needs an iPhone or iPad with LiDAR.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(.rect)
             }
-            Spacer(minLength: 0)
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.55)
+            .accessibilityIdentifier("scan-object")
+            Button(action: printRig) {
+                Text("No scan rig? Print one by Kass 3D →").font(.caption.weight(.semibold)).foregroundStyle(Color.filament)
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 58)
+            .accessibilityHint("Opens the rig's page on MakerWorld")
+            .accessibilityIdentifier("scan-rig-link")
         }
         .padding(14)
-        .contentShape(.rect)
-        .onTapGesture { if enabled { scan() } }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
-        .opacity(enabled ? 1 : 0.55)
-        .accessibilityElement(children: .contain)
-        .accessibilityAction(named: "Scan on a rig") { if enabled { scan() } }
     }
 }
 
