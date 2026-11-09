@@ -125,17 +125,37 @@ export function progressWords(line: Record<string, unknown>): string | undefined
  * into a clean mesh. `.raw` is "unprocessed" and meant "only if you plan to export the model to a 3D software
  * package" (PhotogrammetrySession.Request.Detail), and an STL keeps none of the extra texture maps either way.
  */
-export function macReconstructArgs(input: Pick<ReconstructInput, 'photosDir' | 'output' | 'masksDir' | 'objectCapture'>): string[] {
+export function macReconstructArgs(input: Pick<ReconstructInput, 'photosDir' | 'output' | 'masksDir' | 'objectCapture'>,
+  feature?: 'normal'): string[] {
   return input.objectCapture
-    ? [input.photosDir, input.output, 'full']
+    ? [input.photosDir, input.output, 'full', ...(feature ? ['--feature', feature] : [])]
     : ['samples', input.photosDir, input.output, 'full', '--save-masks', input.masksDir];
 }
 
-/** Runs `mac-reconstruct … full` and resolves when the model is written. Errors are plain sentences. */
+/**
+ * Runs `mac-reconstruct … full` and resolves when the model is written. Errors are plain sentences.
+ *
+ * An Object Capture folder whose rebuild fails is rebuilt once more at Apple's normal feature sensitivity
+ * (`--feature normal`), and that second outcome is final. On Apple's own 33 unicorn photos `.high` failed with
+ * processError in 6 of 6 runs, while `.normal` with the capture box ignored built that set's best model (27–28 of 33
+ * placed). The first attempt keeps the default, `.high` (Apple's setting "for challenging images").
+ */
 export function macReconstructRunner(binary: string | null = findMacReconstruct() ?? null): Reconstruct {
-  return input => new Promise<ReconstructOutcome>((resolve, reject) => {
+  const attempt = macReconstructAttempt(binary);
+  return async input => {
+    try {
+      return await attempt(input);
+    } catch (failure) {
+      if (!input.objectCapture || input.signal?.aborted || !(failure instanceof Error) || failure.message !== FAILED) throw failure;
+      return attempt(input, 'normal');
+    }
+  };
+}
+
+function macReconstructAttempt(binary: string | null) {
+  return (input: ReconstructInput, feature?: 'normal') => new Promise<ReconstructOutcome>((resolve, reject) => {
     if (!binary) { reject(new Error(NOT_INSTALLED)); return; }
-    const child = spawn(binary, macReconstructArgs(input),
+    const child = spawn(binary, macReconstructArgs(input, feature),
       {stdio: ['ignore', 'pipe', 'pipe'], ...(input.signal ? {signal: input.signal} : {})});
     let buffered = '', error: string | undefined, done = false, lastWords = '', spawnFailed = false;
     let inputs: ReconstructInputs | undefined;

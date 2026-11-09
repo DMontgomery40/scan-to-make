@@ -9,8 +9,9 @@ macOS command-line tools for rebuilding and checking scans on the Mac.
   comes from. Apple's `stitchingIncomplete` and `automaticDownsampling` come out as `{"warning":…}`. It runs Apple's
   way with Apple's settings: each photo's own camera, depth and gravity, Apple's own object masking (always on),
   `featureSensitivity = .high`, the default (unordered) sample ordering, and `ignoreBoundingBox = true`; the first
-  line names both. For diagnostics only, `--feature normal|high` and `--honor-box` (`ignoreBoundingBox = false`)
-  change those two without changing the defaults. Apple's capture box was fitted to the script on David's sign and cut off the letters; the masks still separate the object from the room. On David's rig scan, `.sequential` with
+  line names both. `--feature normal|high` and `--honor-box` (`ignoreBoundingBox = false`) change those two without
+  changing the defaults. The companion reruns a failed rebuild once with `--feature normal` (on Apple's own 33 unicorn
+  photos `.high` failed 6 of 6 times; `.normal` placed 27–28); `--honor-box` is for diagnostics only. Apple's capture box was fitted to the script on David's sign and cut off the letters; the masks still separate the object from the room. On David's rig scan, `.sequential` with
   `.high` placed 5–7 of 24 photos in three runs, against 9 of 24 unordered. The companion runs it at `full` on every
   image a walk-around sent (`ReconstructInput.objectCapture`).
 - `mac-reconstruct stl <model.usdz> <output.stl> [--render <png>] [--remove-support]` writes the model's triangles as a

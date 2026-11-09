@@ -11,7 +11,8 @@ import HandheldKit
 //       gravity and the capture box, which PhotogrammetrySession reads itself. Before building it prints
 //       {"images":N,"depth":D,"featureSensitivity":…,"ignoreBoundingBox":…}: how many photos carry depth, which is
 //       where the model's real-world size comes from, and the two settings that differ from Apple's defaults.
-//       Diagnostics (defaults unchanged): --feature normal|high sets featureSensitivity (default high);
+//       Defaults unchanged: --feature normal|high sets featureSensitivity (default high; the companion reruns a failed
+//       rebuild once at normal); diagnostics only:
 //       --honor-box lets Apple's capture box trim the model (ignoreBoundingBox = false; default true).
 //   mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>] [--remove-support]
 //       Writes the model's triangles as a binary STL in millimetres, Z up, centred and resting on z = 0
@@ -78,7 +79,7 @@ let masksOnly = args.contains("--masks-only"); args.removeAll { $0 == "--masks-o
 // Diagnostics for tests: switch off Apple's own object masking, or drop the photos' depth.
 let noObjectMasking = args.contains("--no-object-masking"); args.removeAll { $0 == "--no-object-masking" }
 let noDepth = args.contains("--no-depth"); args.removeAll { $0 == "--no-depth" }
-// Diagnostics for an Object Capture folder only, to separate the two settings that differ from Apple's defaults.
+// An Object Capture folder only: the two settings that differ from Apple's defaults (the companion's retry uses --feature).
 let featureOption = option("--feature")
 let honorBox = args.contains("--honor-box"); args.removeAll { $0 == "--honor-box" }
 let featureSensitivities: [String: PhotogrammetrySession.Configuration.FeatureSensitivity] = ["normal": .normal, "high": .high]

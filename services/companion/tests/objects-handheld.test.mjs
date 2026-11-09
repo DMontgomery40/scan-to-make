@@ -323,6 +323,8 @@ test('a walk-around without a request on an older phone (model and photos, no se
 test("the companion rebuilds an Object Capture session from Apple's images folder, reads its depth count, and makes STLs", async t => {
   assert.deepEqual(macReconstructArgs({photosDir: '/p', output: '/o.usdz', masksDir: '/m', objectCapture: true}), ['/p', '/o.usdz', 'full']);
   assert.deepEqual(macReconstructArgs({photosDir: '/p', output: '/o.usdz', masksDir: '/m'}), ['samples', '/p', '/o.usdz', 'full', '--save-masks', '/m']);
+  assert.deepEqual(macReconstructArgs({photosDir: '/p', output: '/o.usdz', masksDir: '/m', objectCapture: true}, 'normal'), ['/p', '/o.usdz', 'full', '--feature', 'normal']);
+  assert.deepEqual(macReconstructArgs({photosDir: '/p', output: '/o.usdz', masksDir: '/m'}, 'normal'), ['samples', '/p', '/o.usdz', 'full', '--save-masks', '/m']);
   await assert.rejects(linuxReconstructRunner('/bin/true')({photosDir: '/p', output: '/o', masksDir: '/m', objectCapture: true}), {message: OBJECT_CAPTURE_NEEDS_MAC});
 
   const root = await tempDir('mac-reconstruct-folder-');
@@ -624,6 +626,60 @@ test('mac-reconstruct output becomes progress words and plain errors', async t =
   assert.ok((await readdir(root)).includes('ok'));
 });
 
+
+test("a failed Object Capture rebuild is retried once at normal feature sensitivity, and only that rebuild", async t => {
+  const root = await tempDir('mac-reconstruct-retry-');
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const calls = join(root, 'calls');
+  // Each call appends its arguments; a call with --feature normal does what `normal` says, any other does what `high` says.
+  const fake = async (name, high, normal) => {
+    const path = join(root, name);
+    await writeFile(path, `#!/bin/sh\necho "$@" >> '${calls}'\ncase "$*" in *"--feature normal"*) ${normal} ;; *) ${high} ;; esac\n`);
+    await chmod(path, 0o755);
+    return path;
+  };
+  const runs = async () => (await readFile(calls, 'utf8')).trim().split('\n');
+  const input = {photosDir: '/in', output: join(root, 'scan', 'out.usdz'), masksDir: '/m', objectCapture: true};
+  const fails = `echo '{"images":33,"depth":33,"stage":"reconstructing"}'; echo '{"error":"processError"}'; exit 1`;
+
+  const rescued = await fake('rescued', fails, `echo '{"images":33,"depth":33,"stage":"reconstructing"}'; echo '{"skipped":7}'; echo '{"done":"/x.usdz"}'`);
+  const seen = [];
+  assert.deepEqual(await macReconstructRunner(rescued)({...input, onProgress: words => seen.push(words)}),
+    {status: 'done', inputs: {images: 33, depth: 33, skipped: 1}});
+  assert.deepEqual(await runs(), [`/in ${input.output} full`, `/in ${input.output} full --feature normal`]);
+  // Each attempt reports its own progress, so the second one is seen starting again.
+  assert.deepEqual(seen, ['Building the model from your photos.', 'Building the model from your photos.']);
+
+  await rm(calls);
+  const healthy = await fake('healthy', `echo '{"done":"/x.usdz"}'`, 'exit 9');
+  assert.deepEqual(await macReconstructRunner(healthy)(input), {status: 'done'});
+  assert.deepEqual(await runs(), [`/in ${input.output} full`]);
+
+  await rm(calls);
+  const hopeless = await fake('hopeless', fails, `echo '{"error":"still failing"}'; echo 'SECOND' >&2; exit 1`);
+  await assert.rejects(macReconstructRunner(hopeless)(input), {message: RECONSTRUCTION_FAILED});
+  assert.equal((await runs()).length, 2);
+  const kept = await readFile(join(root, 'scan', '.reconstruction-diagnostics', 'last-failure.log'), 'utf8');
+  assert.match(kept, /"error":"still failing"/);
+  assert.ok(kept.endsWith('SECOND\n'));
+
+  await rm(calls);
+  const old = await fake('old', `echo '{"error":"needs-macos-27"}'; exit 3`, `echo '{"done":"/x.usdz"}'`);
+  await assert.rejects(macReconstructRunner(old)(input), {message: NEEDS_MACOS_27});
+  assert.equal((await runs()).length, 1);
+
+  await rm(calls);
+  await assert.rejects(macReconstructRunner(hopeless)({...input, objectCapture: false}), {message: RECONSTRUCTION_FAILED});
+  assert.equal((await runs()).length, 1);
+
+  await rm(calls);
+  const controller = new AbortController();
+  const aborting = await fake('aborting', 'exec sleep 5', `echo '{"done":"/x.usdz"}'`);
+  const pending = macReconstructRunner(aborting)({...input, signal: controller.signal});
+  setTimeout(() => controller.abort(), 200);
+  await assert.rejects(pending, {name: 'AbortError'});
+  assert.equal((await runs()).length, 1);
+});
 
 async function diagnosticFixture(t, script) {
   const root = await tempDir('reconstruct-diagnostic-');
