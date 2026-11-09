@@ -4,6 +4,7 @@ import type {
   Filament,
   PrintOptions,
   Project,
+  Printer,
   Question,
   RawQuestion,
   SetupOptions,
@@ -54,6 +55,66 @@ export function projectThumbnail(p: Project): string | undefined {
   if (p.photos[0]) return `photos/${p.photos[0]}`;
   if (p.capture?.[0]) return `capture/${p.capture[0]}`;
   return p.current?.renders[0] ?? p.credit?.thumbnail;
+}
+
+/** What Needs Changes puts before the person's words, as on the iPhone, iPad, Android and Mac (PRD §5.4). */
+export const AFTER_PRINTING = "After printing: ";
+
+/**
+ * "Did it fit?" (PRD §5.4) on a project whose print the printer says finished, until it's answered here or with any
+ * status in Project settings: the same condition as the other clients (`ProjectWords`, printed + monitor done).
+ */
+export function didItFitQuestion(p: Project): string | undefined {
+  if (p.state !== "printed" || p.print?.monitor?.endState !== "done") return undefined;
+  const status = p.settings?.status ?? p.outcome;
+  if (status !== undefined && status !== "printed") return undefined;
+  return p.kind === "published" ? "Did it come out right?" : "Did it fit?";
+}
+
+/** Sidebar groups describe what the person needs to do, not a second selection state. */
+export function projectGroups(projects: Project[]) {
+  const groups = ["Now", "Needs you", "Ready", "Printed", "Done", "Drafts"];
+  const group = (p: Project) => {
+    if (["printing", "touching-up", "sending"].includes(p.state)) return "Now";
+    if (["needs-closeup", "failed"].includes(p.state)) return "Needs you";
+    if (p.state === "ready") return "Ready";
+    if (["printed", "sent"].includes(p.state)) return "Printed";
+    if (p.state === "confirmed") return "Done";
+    return "Drafts";
+  };
+  return groups
+    .map((title) => ({
+      title,
+      projects: projects.filter((p) => !p.archived && group(p) === title),
+    }))
+    .filter((g) => g.projects.length > 0);
+}
+
+export function printerSummary(printers: Printer[], projects: Project[]) {
+  const problems = printers.filter(
+    (p) => p.state === "offline" || p.capabilities?.update != null,
+  ).length;
+  const printing = printers.filter((printer) =>
+    projects.some(
+      (p) =>
+        p.state === "printing" &&
+        p.print?.monitor?.phase !== "ended" &&
+        (p.print?.destinationId ?? p.print?.destination?.id) === printer.id,
+    ),
+  );
+  const ready = printers.filter((p) => p.state === "ready").length;
+  return {
+    problems,
+    label: problems
+      ? `Printers, ${problems} ${problems === 1 ? "needs" : "need"} attention`
+      : "Printers",
+    status:
+      printing.length === 1
+        ? `${printing[0].model ?? printing[0].name} printing`
+        : printing.length > 1
+          ? `${printing.length} printers printing`
+          : `${ready} ${ready === 1 ? "printer" : "printers"} ready`,
+  };
 }
 
 export function searchProject(p: Project, query: string) {

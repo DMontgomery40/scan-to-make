@@ -9,11 +9,14 @@ import UIKit
 @available(iOS 26.0, macOS 26.0, *)
 public struct StarterProjectsView: View {
     private let actionTitle: String
+    /// Shown beside the action before any tap, e.g. when the store already knows the Mac isn't answering (F6).
+    private let unavailableMessage: String?
     private let start: (StarterProject) async throws -> Void
     @State private var opened: StarterProject?
 
-    public init(actionTitle: String = "Add to Projects", start: @escaping (StarterProject) async throws -> Void) {
-        self.actionTitle = actionTitle; self.start = start
+    public init(actionTitle: String = "Add to Projects", unavailableMessage: String? = nil,
+                start: @escaping (StarterProject) async throws -> Void) {
+        self.actionTitle = actionTitle; self.unavailableMessage = unavailableMessage; self.start = start
     }
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -40,7 +43,7 @@ public struct StarterProjectsView: View {
             }
         }
         .sheet(item: $opened) { project in
-            StarterDetail(project: project, actionTitle: actionTitle, start: start)
+            StarterDetail(project: project, actionTitle: actionTitle, unavailableMessage: unavailableMessage, start: start)
         }
     }
 }
@@ -71,9 +74,11 @@ public struct StarterDetail: View {
     @Environment(\.dismiss) private var dismiss
     let project: StarterProject
     let actionTitle: String
+    let unavailableMessage: String?
     let start: (StarterProject) async throws -> Void
-    public init(project: StarterProject, actionTitle: String = "Add to Projects", start: @escaping (StarterProject) async throws -> Void) {
-        self.project = project; self.actionTitle = actionTitle; self.start = start
+    public init(project: StarterProject, actionTitle: String = "Add to Projects", unavailableMessage: String? = nil,
+                start: @escaping (StarterProject) async throws -> Void) {
+        self.project = project; self.actionTitle = actionTitle; self.unavailableMessage = unavailableMessage; self.start = start
     }
     @State private var busy = false
     @State private var problem: String?
@@ -90,24 +95,33 @@ public struct StarterDetail: View {
                     Link("\(project.designer) · \(project.site)", destination: project.url)
                     Text(project.licence).font(.caption).foregroundStyle(.secondary)
                     if let credit = project.imageCredit { Text(credit).font(.caption2).foregroundStyle(.secondary) }
-                    if let problem { Label(problem, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
                 }.padding(20).frame(maxWidth: 620)
             }
             .navigationTitle(project.title)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() }.disabled(busy) } }
+            // The error sits beside the button that caused it, inside the always-visible bottom bar —
+            // never at the end of the scroll, behind this bar (F6). Before any tap, a Mac the caller
+            // already knows is unreachable says so here too.
             .safeAreaInset(edge: .bottom) {
-                Button {
-                    busy = true; problem = nil
-                    Task {
-                        defer { busy = false }
-                        do { try await start(project); dismiss() }
-                        catch let error as CompanionError { problem = error.message }
-                        catch { problem = error.localizedDescription }
+                VStack(spacing: 10) {
+                    if let problem = problem ?? unavailableMessage {
+                        Label(problem, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityIdentifier("starter-problem")
                     }
-                } label: {
-                    HStack { if busy { ProgressView() }; Text(actionTitle).fontWeight(.semibold) }.frame(maxWidth: .infinity).padding(.vertical, 8)
-                }.buttonStyle(.glassProminent).disabled(busy).padding(20)
-                    .accessibilityIdentifier("starter-add")
+                    Button {
+                        busy = true; problem = nil
+                        Task {
+                            defer { busy = false }
+                            do { try await start(project); dismiss() }
+                            catch let error as CompanionError { problem = error.message }
+                            catch { problem = error.localizedDescription }
+                        }
+                    } label: {
+                        HStack { if busy { ProgressView() }; Text(actionTitle).fontWeight(.semibold) }.frame(maxWidth: .infinity).padding(.vertical, 8)
+                    }.buttonStyle(.glassProminent).disabled(busy)
+                        .accessibilityIdentifier("starter-add")
+                }.padding(20)
             }
         }
         #if os(macOS)

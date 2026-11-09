@@ -1,5 +1,8 @@
 package com.scantomake.counterpart.ui
 
+import androidx.compose.ui.platform.testTag
+import com.scantomake.counterpart.api.ProjectStatus
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -430,6 +433,20 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
         do { state.reload(id); if (followPrint) delay(10_000) } while (followPrint)
     }
     LaunchedEffect(id, printEnded) { if (printEnded) confirmStop = false }
+    DisposableEffect(id) { state.showing(id, true); onDispose { state.showing(id, false) } }
+
+    /** "Did it fit?" answered here, as on the project (PRD §5.4). Needs Changes goes on to the project to say what. */
+    fun answer(status: ProjectStatus, then: () -> Unit = {}) {
+        if (working) return
+        working = true; problem = null
+        scope.launch {
+            try { app.companion.setStatus(id, status)?.let(state::show) ?: state.reload(id); then() }
+            catch (e: CancellationException) { throw e }
+            catch (e: CompanionException) { problem = e.message }
+            catch (e: Exception) { problem = CompanionException.unreachable.message }
+            finally { working = false }
+        }
+    }
 
     fun control(action: CompanionClient.PrintControl) {
         val latest = state.projects.value.firstOrNull { it.id == id } ?: return
@@ -476,6 +493,12 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
                 Text(listOfNotNull(t.nozzle?.let { "Nozzle ${Format.temperature(it.actual)}" }, t.bed?.let { "Bed ${Format.temperature(it.actual)}" }).joinToString(" · "), color = Palette.secondary, fontSize = 13.sp)
             }
             live?.problems?.forEach { Text("${it.code}\n${it.message}", color = Palette.needsYou, fontSize = 13.sp) }
+            // A finished print's next step: "Did it fit?" and the project (Print Again, changes, files), not old temperatures.
+            if (printEnded) {
+                if (ProjectAction.ItWorks in words.actions) DidItFitCard(p, enabled = !working,
+                    itWorks = { answer(ProjectStatus.Works) }, needsChanges = { answer(ProjectStatus.NeedsChanges, project) })
+                PrimaryButton("Open Project", Modifier.fillMaxWidth().testTag("open-project"), icon = CIcons.Cube, onClick = project)
+            }
             if (!printEnded) p.printConfirmation?.let { PrintConfirmationCard(p, it) { body -> scope.launch { try { state.show(app.companion.answerPrintConfirmation(id, body)) } catch (e: CompanionException) { problem = e.message } } } }
             problem?.let { Text(it, color = Palette.failed) }
         }

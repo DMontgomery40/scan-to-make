@@ -12,6 +12,11 @@ struct CounterpartApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                #if DEBUG
+                .transformEnvironment(\.horizontalSizeClass) { value in
+                    if let width = app.fixtureWidth { value = width }
+                }
+                #endif
                 .environment(app)
                 .tint(.filament)
                 .onOpenURL { app.open($0) }

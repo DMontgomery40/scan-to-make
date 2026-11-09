@@ -60,8 +60,29 @@ public enum AppRoute: Equatable, Sendable {
         let ended = ["print.done", "print.failed", "print.cancelled", "print.not-started", "print.sent"]
         if action == "PRINT" { self = .print(project) }
         else if action == "CAMERA" { self = .camera(project) }
+        // Try Again on a print that failed or never started opens Print, where the person presses Print: a
+        // notification button never starts a print by itself. On a failed pass it opens the project's Try Again.
+        else if action == "TRY_AGAIN" { self = type.hasPrefix("print.") ? .print(project) : .project(project) }
+        // Each Open button goes where it says; only a plain tap follows the event type.
+        else if action == "OPEN" { self = .project(project) }
+        else if action == "OPEN_PRINT" { self = .printing(project) }
         else if type.hasPrefix("print.") && !ended.contains(type) { self = .printing(project) }
         else { self = .project(project) }
+    }
+
+    /// The notification's project id and event type, from its `userInfo` or a CloudKit query notification's fields.
+    public static func notificationFields(_ userInfo: [AnyHashable: Any]) -> (projectId: String?, type: String?, eventId: String?) {
+        let fields = (userInfo["ck"] as? [String: Any])?["qry"].flatMap { ($0 as? [String: Any])?["af"] as? [String: Any] } ?? [:]
+        func value(_ key: String) -> String? { (userInfo[key] as? String ?? fields[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
+        return (value("projectId"), value("type"), value("eventId"))
+    }
+
+    /// The project this route shows, if any.
+    public var projectId: String? {
+        switch self {
+        case .project(let id), .print(let id), .camera(let id), .printing(let id): id
+        case .home, .printers, .newProject, .pair: nil
+        }
     }
 
     /// From a `counterpart://` or `scantomake://` URL: `scantomake://pair?…` pairs; `counterpart://project/<id>`

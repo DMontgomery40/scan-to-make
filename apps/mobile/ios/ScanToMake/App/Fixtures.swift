@@ -181,7 +181,8 @@ enum Fixtures {
         var shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
         // `-CounterpartScreen printer-connection`: the P1S idle, so its Settings → Printers choices can be changed.
         if idlePrinter { shown = shown.filter { $0["state"] as? String != "printing" } }
-        return (stopped + shown + duplicates).map(withStatus).map(withPreparing).map(withFinished).map { original in
+        // A status set on this run applies last, so It Works on the finished print (Printing screen) makes it Done.
+        return (stopped + shown + duplicates).map(withPreparing).map(withFinished).map(withStatus).map { original in
             guard let id = original["id"] as? String else { return original }
             var object = original
             if let title = titles[id] { object["title"] = title }
@@ -235,7 +236,7 @@ enum Fixtures {
         } else {
             object["archived"] = nil; object["outcome"] = nil
             switch status {
-            case "works": object["state"] = "confirmed"; object["outcome"] = "works"
+            case "works": object["state"] = "confirmed"; object["outcome"] = "works"; object["status"] = nil
             case "printed": object["state"] = "printed"
             case "not-printed": object["state"] = "ready"
             case "needs-changes": object["outcome"] = "needs-changes"; if object["state"] as? String == "confirmed" { object["state"] = "printed" }
@@ -338,6 +339,8 @@ struct FixtureTransport: HTTPTransport {
     let folder: URL
 
     func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        // An `offline` file in the folder: the Mac isn't answering. A UI test deletes it to bring the Mac back (Try Again).
+        if FileManager.default.fileExists(atPath: folder.appending(path: "offline").path) { throw TransportError("network") }
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
         func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }

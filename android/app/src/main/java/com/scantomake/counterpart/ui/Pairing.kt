@@ -1,7 +1,9 @@
 package com.scantomake.counterpart.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -132,6 +134,8 @@ fun FindYourMacScreen(replace: Boolean = false, onPaired: () -> Unit, cancel: ((
         Text("Find your computer", fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Text(if (replace) "This phone is connected to a computer. Connecting to another one replaces it."
             else "Your computer keeps your projects, makes your parts and runs your printer. On your computer, open Counterpart and point your camera at the code it shows.", color = Palette.secondary, textAlign = TextAlign.Center)
+        if (!replace) Text("Get Counterpart for your computer", color = Palette.filament, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clickable { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://counterpart.dtmont.com/beta.html"))) }.padding(8.dp))
 
         Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(28.dp)).background(Palette.card).border(2.dp, Palette.filament.copy(alpha = 0.6f), RoundedCornerShape(28.dp)),
             contentAlignment = Alignment.Center) {

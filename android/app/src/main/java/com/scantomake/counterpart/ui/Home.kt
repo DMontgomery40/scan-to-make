@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -57,7 +59,7 @@ import kotlinx.coroutines.launch
 /** Home (PRD §5.1): what's running now, what needs you, and every project as a real render. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, printers: () -> Unit, settings: () -> Unit) {
+fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, printers: () -> Unit, settings: () -> Unit, pairAgain: () -> Unit = settings) {
     val state = AppState.of(LocalContext.current)
     val projects by state.projects.collectAsState()
     val loaded by state.loaded.collectAsState()
@@ -79,19 +81,33 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
     val done = visible.filter { phase(it) == ProjectPhase.Confirmed }.sortedByDescending { it.updatedAtMs }
     val running = visible.filter { phase(it) in setOf(ProjectPhase.Printing, ProjectPhase.Preparing) } +
         visible.filter { phase(it) in setOf(ProjectPhase.Working, ProjectPhase.Sending) }
-    val needsYou = visible.filter { phase(it) == ProjectPhase.NeedsYou }
+    val needsYou = visible.filter { phase(it) in setOf(ProjectPhase.NeedsYou, ProjectPhase.Failed) }
     val grid = visible.filter { phase(it) != ProjectPhase.Confirmed }.sortedWith(compareByDescending<Project> { phase(it) == ProjectPhase.Ready }.thenByDescending { it.updatedAtMs })
 
     val mac = macName ?: "Your computer"
-    val subtitle = when (reachable) { false -> "$mac isn't answering"; true -> "$mac connected"; else -> mac } +
-        (catalog?.destinations?.size?.takeIf { it > 0 }?.let { " · $it printer" + if (it == 1) "" else "s" } ?: "")
+    val connection = when (reachable) { false -> "$mac isn't answering"; true -> "$mac connected"; else -> mac }
+    val printing = catalog?.destinations.orEmpty().filter { printer ->
+        projects.any { p -> phase(p) == ProjectPhase.Printing && (p.print?.destinationId ?: p.print?.destination?.id ?: p.printerDestinationId) == printer.id }
+    }
+    val ready = catalog?.destinations.orEmpty().count { it.state == "ready" }
+    val subtitle = connection + when {
+        printing.size == 1 -> " · ${printing[0].model ?: printing[0].name} printing"
+        printing.size > 1 -> " · ${printing.size} printers printing"
+        ready > 0 -> " · $ready ${if (ready == 1) "printer" else "printers"} ready"
+        else -> ""
+    }
+    val problems = catalog?.destinations.orEmpty().count { it.state == "offline" || it.capabilities?.update != null }
+    val printersLabel = if (problems == 0) "Printers" else "Printers, $problems ${if (problems == 1) "needs" else "need"} attention"
+
 
     Scaffold(containerColor = Color.Black, topBar = {
         TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black), title = {
             Column { Text("Projects", fontWeight = FontWeight.Bold); Text(subtitle, fontSize = 12.sp, color = Palette.secondary) }
         }, actions = {
             IconButton(onClick = { searching = !searching; if (!searching) query = "" }) { Icon(CIcons.Search, "Search") }
-            IconButton(onClick = printers) { Icon(CIcons.Printer, "Printers") }
+            IconButton(onClick = printers) {
+                BadgedBox(badge = { if (problems > 0) Badge { Text("$problems") } }) { Icon(CIcons.Printer, printersLabel) }
+            }
             IconButton(onClick = settings) { Icon(CIcons.Gear, "Settings") }
         })
     }, floatingActionButton = {
@@ -110,7 +126,8 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
             }
         PullToRefreshBox(refreshing, onRefresh = { scope.launch { refreshing = true; state.load(); state.loadPrinters(); refreshing = false } }, Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                error?.let { e -> item { ConnectionBanner(e.message, e.needsPairing) } }
+                error?.let { e -> item { ConnectionBanner(e.message, e.needsPairing,
+                    retry = { scope.launch { state.load(); state.loadPrinters() } }, connectDifferent = pairAgain) } }
                 if (query.isBlank()) item { StarterProjects { open(it, false) } }
                 if (loaded && projects.isEmpty() && error == null) {
                     item { EmptyHome(newProject) }
@@ -155,11 +172,18 @@ private fun androidx.compose.foundation.lazy.LazyListScope.gridItems(list: List<
 }
 
 @Composable
-fun ConnectionBanner(message: String, pair: Boolean) {
+fun ConnectionBanner(message: String, pair: Boolean, retry: () -> Unit = {}, connectDifferent: () -> Unit = {}) {
     GlassCard(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(CIcons.Warning, null, tint = Palette.needsYou); Spacer(Modifier.width(10.dp))
-            Text(if (pair) "$message Open Settings → Connect a Different Computer." else message, fontSize = 14.sp)
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(CIcons.Warning, null, tint = Palette.needsYou); Spacer(Modifier.width(10.dp))
+                Text(message, fontSize = 14.sp)
+            }
+            // "…then try again" needs the button it names (F6); pairing again is one tap away, not a Settings hunt.
+            Row {
+                TextButton(onClick = retry) { Text("Try Again") }
+                TextButton(onClick = connectDifferent) { Text(if (pair) "Connect to Your Computer" else "Connect a Different Computer") }
+            }
         }
     }
 }

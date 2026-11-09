@@ -75,6 +75,15 @@ struct ProjectView: View {
             await resumeSavedCapture()
         }
         .modifier(PrinterQuestion(store: store, project: object, confirming: $confirming))
+        // Needs Changes pressed on the finished Printing screen: the change starts here, as it does from this page's card.
+        .onChange(of: store.askAfterPrinting, initial: true) { _, asked in
+            guard asked == id else { return }
+            store.askAfterPrinting = nil
+            if !note.hasPrefix(Self.afterPrinting) { note = Self.afterPrinting + note }
+            writing = true
+        }
+        .onAppear { app.showing(id, true) }
+        .onDisappear { app.showing(id, false) }
         // Photos dropped from Files or Safari join the project; the Mac uses them in its next pass (PRD §6).
         .dropDestination(for: Data.self) { items, _ in
             // One action at a time: a drop while something runs is refused, not quietly lost.
@@ -444,31 +453,9 @@ struct ProjectView: View {
 
     /// "Did it fit?" (PRD §5.4): It works moves it to Done; Needs changes opens Ask for changes, started for you.
     private func didItFitCard(_ object: Project) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(ProjectWords.outcomeQuestion(object), systemImage: "ruler").font(.headline)
-            Text("Try it where it goes. Your answer stays with the project on \(store.macName ?? "your Mac").")
-                .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
-                    Button { act { try await store.mac.client.setStatus(object.id, .works) } } label: {
-                        Label("It Works", systemImage: "checkmark").font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
-                            .frame(maxWidth: .infinity).frame(height: 36)
-                    }
-                    .buttonStyle(.glassProminent).tint(.okGreen)
-                    .accessibilityIdentifier("it-works")
-                    Button { needsChanges(object) } label: {
-                        Label("Needs Changes", systemImage: "pencil").font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
-                            .frame(maxWidth: .infinity).frame(height: 36)
-                    }
-                    .buttonStyle(.glass)
-                    .accessibilityIdentifier("needs-changes")
-                }
-                .disabled(working)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        DidItFitCard(project: object, macName: store.macName, working: working,
+                     itWorks: { act { try await store.mac.client.setStatus(object.id, .works) } },
+                     needsChanges: { needsChanges(object) })
     }
 
     /// Says so on the Mac, then starts the change in Ask for changes.
@@ -477,7 +464,7 @@ struct ProjectView: View {
         if !note.hasPrefix(Self.afterPrinting) { note = Self.afterPrinting + note }
         writing = true
     }
-    static let afterPrinting = "After printing: "
+    static let afterPrinting = NotificationActions.afterPrinting
 
     /// Status (Not printed, Printed, Done, Needs changes), then Hide from Home apart from it: in ••• and on the capsule.
     @ViewBuilder private func statusChoices(_ object: Project, _ words: ProjectWords, inline: Bool = false) -> some View {
@@ -1103,5 +1090,42 @@ private struct PhoneProjectSettings: View {
         return .init(printers: catalog.destinations.map { .init(id: $0.id, name: $0.name,
             quality: $0.offersQuality, strength: $0.offersStrength, copies: $0.capabilities?.copies == true, materialChoice: $0.capabilities?.materialChoice == true) },
             defaultPrinter: catalog.defaultDestinationId, colours: colours, fusionAvailable: ["connected", "not-running"].contains(fusion ?? ""), filamentProblem: filamentProblem)
+    }
+}
+
+/// "Did it fit?" after a finished print (PRD §5.4), on the project page and the finished Printing screen alike.
+struct DidItFitCard: View {
+    let project: Project
+    let macName: String?
+    let working: Bool
+    let itWorks: () -> Void
+    let needsChanges: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(ProjectWords.outcomeQuestion(project), systemImage: "ruler").font(.headline)
+            Text("Try it where it goes. Your answer stays with the project on \(macName ?? "your Mac").")
+                .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            GlassEffectContainer(spacing: 10) {
+                HStack(spacing: 10) {
+                    Button(action: itWorks) {
+                        Label("It Works", systemImage: "checkmark").font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
+                            .frame(maxWidth: .infinity).frame(height: 36)
+                    }
+                    .buttonStyle(.glassProminent).tint(.okGreen)
+                    .accessibilityIdentifier("it-works")
+                    Button(action: needsChanges) {
+                        Label("Needs Changes", systemImage: "pencil").font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.85)
+                            .frame(maxWidth: .infinity).frame(height: 36)
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityIdentifier("needs-changes")
+                }
+                .disabled(working)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
     }
 }

@@ -705,6 +705,20 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertLessThanOrEqual(zip(oldBytes, newBytes).map { abs(Int($0) - Int($1)) }.max() ?? 0, 1, "Only GPU channel rounding may differ; keep geometry, lighting and transparency")
     }
 
+    func testSidebarPrinterAttentionAndPrintingRemainVisibleWithProjects() async throws {
+        let companion = FakeObjects()
+        await companion.enableDiscovery()
+        let printer = try JSONDecoder().decode(PrinterDestination.self, from: Data(#"{"id":"p1","name":"P1S","backend":"test","state":"ready","aliases":["old"]}"#.utf8))
+        let offline = try JSONDecoder().decode(PrinterDestination.self, from: Data(#"{"id":"p2","name":"Desk","backend":"test","state":"offline"}"#.utf8))
+        await companion.setPrinters([printer, offline])
+        await companion.set([item("clip", "printing", ["print": ["bundleId": "clip", "monitor": ["phase": "watching"], "destination": ["id": "old", "name": "P1S"]]])])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertEqual(model.printerProblems, 1)
+        XCTAssertEqual(model.sidebarPrinterStatus(printer), "P1S printing")
+        XCTAssertEqual(model.sidebarPrinterStatus(offline), "Desk")
+    }
+
     func testTheSidebarGroupsEveryProjectAndStartsAtTheTop() async {
         let companion = FakeObjects()
         await companion.set([item("p", "printed"), item("r", "ready"), item("n", "needs-closeup"), item("w", "touching-up"),

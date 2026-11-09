@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  AFTER_PRINTING,
+  didItFitQuestion,
+  projectGroups,
+  printerSummary,
   ReadOrder,
   estimateRequest,
   freezePlate,
@@ -53,6 +57,72 @@ test("a project thumbnail is the real object before any render", () => {
   assert.equal(projectThumbnail({ ...rendered, capture: ["0001.heic"] }), "capture/0001.heic");
   assert.equal(projectThumbnail(rendered), "renders/overview.png");
 });
+
+test("a finished print asks Did it fit? until it's answered, as the other clients do", () => {
+  const done = {
+    ...project,
+    state: "printed",
+    print: { monitor: { phase: "ended", endState: "done" } },
+  } as unknown as Project;
+  assert.equal(didItFitQuestion(done), "Did it fit?");
+  assert.equal(didItFitQuestion({ ...done, kind: "published" }), "Did it come out right?");
+  assert.equal(
+    didItFitQuestion({ ...done, settings: { status: "printed", archived: false } }),
+    "Did it fit?",
+  );
+  for (const status of ["works", "needs-changes", "not-printed"])
+    assert.equal(didItFitQuestion({ ...done, settings: { status, archived: false } }), undefined, status);
+  assert.equal(didItFitQuestion({ ...done, outcome: "works" }), undefined);
+  // Accepted by the printer isn't finished; a cancelled print isn't asked about.
+  assert.equal(didItFitQuestion({ ...done, print: { monitor: { phase: "watching" } } } as unknown as Project), undefined);
+  assert.equal(didItFitQuestion({ ...done, print: { monitor: { phase: "ended", endState: "cancelled" } } } as unknown as Project), undefined);
+  assert.equal(AFTER_PRINTING, "After printing: ");
+});
+
+test("sidebar failures need you, ready is a group rather than a selection", () => {
+  const rows = ["ready", "failed", "needs-closeup", "printed"].map(
+    (state, i) => ({ ...project, id: String(i), state }),
+  );
+  assert.deepEqual(
+    projectGroups(rows).map((g) => [g.title, g.projects.map((p) => p.id)]),
+    [
+      ["Needs you", ["1", "2"]],
+      ["Ready", ["0"]],
+      ["Printed", ["3"]],
+    ],
+  );
+  assert.equal(projectGroups([{ ...rows[1], archived: true }]).length, 0);
+});
+
+test("printer summary keeps the attention badge and active print with projects present", () => {
+  const printers = [
+    {
+      id: "p1",
+      name: "P1S",
+      model: "Bambu Lab P1S",
+      backend: "",
+      state: "ready",
+    },
+    { id: "p2", name: "Desk", backend: "", state: "offline" },
+  ];
+  const rows = [
+    { ...project, state: "printing", print: { destinationId: "p1" } },
+  ];
+  assert.deepEqual(printerSummary(printers, rows), {
+    problems: 1,
+    label: "Printers, 1 needs attention",
+    status: "Bambu Lab P1S printing",
+  });
+  assert.equal(printerSummary([], rows).problems, 0);
+  assert.equal(
+    printerSummary(
+      printers.map((p) => ({ ...p, state: "offline" })),
+      rows,
+    ).label,
+    "Printers, 2 need attention",
+  );
+});
+
 test("a print sheet rejects a changed plate and never adopts it", () => {
   const frozen = freezePlate(project);
   assert.equal(frozen, "a:1");

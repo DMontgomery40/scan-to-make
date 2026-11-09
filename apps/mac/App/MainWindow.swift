@@ -268,16 +268,29 @@ private struct Sidebar: View {
                 }
             }
             if let printers = model.printerCatalog?.destinations, !printers.isEmpty {
-                Section("Printers") {
+                Section {
                     ForEach(printers) { printer in
                         Button { shownPrinter = printer } label: {
                             Label {
-                                HStack { Text(printer.name); Spacer(); ReadyDot(state: printer.state) }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack { Text(model.sidebarPrinterStatus(printer)).fixedSize(horizontal: false, vertical: true); Spacer(); ReadyDot(state: printer.state) }
+                                    if printer.state == "offline" || printer.capabilities?.update != nil {
+                                        Label("Needs attention", systemImage: "exclamationmark.circle.fill").font(.caption).foregroundStyle(.red)
+                                    }
+                                }
                             } icon: { Image(systemName: printer.mcpName == "bambu-printer-mcp" ? "printer.fill" : "printer").foregroundStyle(.blue) }
                         }
                         .buttonStyle(.plain)
                         .selectionDisabled()
                         .help("Open \(printer.name)")
+                    }
+                } header: {
+                    HStack {
+                        Text("Printers")
+                        if model.printerProblems > 0 {
+                            Text("\(model.printerProblems)").foregroundStyle(.white).padding(.horizontal, 5).background(.red, in: .capsule)
+                                .accessibilityLabel("\(model.printerProblems) \(model.printerProblems == 1 ? "needs" : "need") attention")
+                        }
                     }
                 }
             }

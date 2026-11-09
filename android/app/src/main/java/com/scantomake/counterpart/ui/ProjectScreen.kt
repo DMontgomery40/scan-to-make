@@ -37,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +84,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
     val failures by state.sendFailures.collectAsState()
     val sending by state.sending.collectAsState()
     val project = projects.firstOrNull { it.id == id }
+    // While this shows, its notifications aren't posted again (the page already shows the change).
+    DisposableEffect(id) { state.showing(id, true); onDispose { state.showing(id, false) } }
     var working by remember { mutableStateOf<String?>(null) }
     var problem by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf("") }
@@ -245,13 +248,9 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             }
 
             // Did it fit?
-            if (ProjectAction.ItWorks in words.actions) GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(ProjectWords.outcomeQuestion(project), fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PrimaryButton("It Works", Modifier.weight(1f), enabled = working == null) { run("fit") { app.companion.setStatus(id, ProjectStatus.Works)?.let(state::show) ?: state.reload(id) } }
-                    SecondaryButton("Needs Changes", Modifier.weight(1f), enabled = working == null) { run("fit") { app.companion.setStatus(id, ProjectStatus.NeedsChanges)?.let(state::show) ?: state.reload(id) } }
-                }
-            } }
+            if (ProjectAction.ItWorks in words.actions) DidItFitCard(project, enabled = working == null,
+                itWorks = { run("fit") { app.companion.setStatus(id, ProjectStatus.Works)?.let(state::show) ?: state.reload(id) } },
+                needsChanges = { run("fit") { app.companion.setStatus(id, ProjectStatus.NeedsChanges)?.let(state::show) ?: state.reload(id) } })
 
             if (ProjectAction.Print in words.actions || ProjectAction.PrintChecked in words.actions) PrimaryButton("Print", Modifier.fillMaxWidth(), icon = CIcons.Printer, enabled = working == null, onClick = print)
             if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth(), enabled = working == null) {
@@ -340,6 +339,18 @@ fun PrintConfirmationCard(project: Project, confirmation: PrintConfirmation, ans
                 confirmation.response("accept", content, System.currentTimeMillis())?.let(answer)
             }
             SecondaryButton("Don't Print", Modifier.weight(1f)) { confirmation.response("cancel", emptyMap(), System.currentTimeMillis())?.let(answer) }
+        }
+    } }
+}
+
+/** "Did it fit?" after a finished print (PRD §5.4), on the project and on the finished Printing screen alike. */
+@Composable
+fun DidItFitCard(project: Project, enabled: Boolean, itWorks: () -> Unit, needsChanges: () -> Unit) {
+    GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(ProjectWords.outcomeQuestion(project), fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PrimaryButton("It Works", Modifier.weight(1f), enabled = enabled, onClick = itWorks)
+            SecondaryButton("Needs Changes", Modifier.weight(1f), enabled = enabled, onClick = needsChanges)
         }
     } }
 }

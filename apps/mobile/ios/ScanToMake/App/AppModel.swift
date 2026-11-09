@@ -32,18 +32,16 @@ import CounterpartKit
     var debugFirstRun: String?
     /// DEBUG: the Settings page `-CounterpartScreen notifications` or `about` opens.
     var debugSettings: String?
+    #if DEBUG
+    var fixtureWidth: UserInterfaceSizeClass?
+    #endif
     private var lastLink: (url: String, at: Date)?
     private var observer: NSObjectProtocol?
 
     init(store: SecureStore = KeychainStore()) {
-        var store = store
-        var transport: HTTPTransport = PinnedTransport()
-        #if DEBUG
-        if let folder = Fixtures.folder { store = Fixtures.store(); transport = FixtureTransport(folder: folder) }
-        #endif
-        let pairingStore = PairingStore(store: store)
-        pairing = PairingClient(store: pairingStore, transport: transport)
-        companion = CompanionClient(pairing: pairing, transport: transport, deviceName: pairing.store.userAssignedName())
+        let (pairing, companion, transport) = Self.clients(store: store)
+        self.pairing = pairing
+        self.companion = companion
         nearby = NearbyPairing(client: pairing, transport: transport)
         projects = ProjectsStore(mac: MacConnection(client: companion), pairing: pairing)
         observer = NotificationCenter.default.addObserver(forName: PairingStore.changed, object: nil, queue: .main) { [weak self] _ in
@@ -57,6 +55,30 @@ import CounterpartKit
         #if DEBUG
         debugRoute()
         #endif
+    }
+
+    /// The pairing and the companion client, from the stored pairing (or the debug build's canned Mac). Also used
+    /// alone by a notification button pressed while the app isn't running, before any window exists.
+    static func clients(store: SecureStore = KeychainStore()) -> (PairingClient, CompanionClient, HTTPTransport) {
+        var store = store
+        var transport: HTTPTransport = PinnedTransport()
+        #if DEBUG
+        if let folder = Fixtures.folder { store = Fixtures.store(); transport = FixtureTransport(folder: folder) }
+        #endif
+        let pairing = PairingClient(store: PairingStore(store: store), transport: transport)
+        return (pairing, CompanionClient(pairing: pairing, transport: transport, deviceName: pairing.store.userAssignedName()), transport)
+    }
+
+    /// Projects whose page or Printing screen is showing now, counted, so a push then a pop never loses one.
+    /// A notification about one of them isn't shown again as a banner: the screen already shows it (PRD §9.2).
+    private(set) var onScreen: [String: Int] = [:]
+    /// A sheet (Settings, Printers, New, Print) covers the page: a page under a sheet doesn't disappear, but isn't seen.
+    var sheetUp = false
+    /// The project whose page or Printing screen the person is looking at now, for `willPresent`.
+    func isShowing(_ id: String) -> Bool { !sheetUp && onScreen[id] != nil }
+    func showing(_ id: String, _ visible: Bool) {
+        let count = (onScreen[id] ?? 0) + (visible ? 1 : -1)
+        onScreen[id] = count > 0 ? count : nil
     }
 
     /// No usable pairing: Find your Mac is the first screen.
@@ -104,6 +126,12 @@ import CounterpartKit
 
     /// A link that opened the app. A cold start can deliver the same pairing link twice within moments.
     func open(_ url: URL) {
+        #if DEBUG
+        if Fixtures.folder != nil, UserDefaults.standard.bool(forKey: "CounterpartLayoutTesting"), url.host == "fixture-width" {
+            fixtureWidth = url.path == "/compact" ? .compact : .regular
+            return
+        }
+        #endif
         guard let route = AppRoute(url: url) else { return }
         if case .pair(let link) = route {
             let now = Date()
