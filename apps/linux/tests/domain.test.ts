@@ -1,8 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { gallery, lightStage } from "../src/gallery";
 import {
   codeEngineRow,
+  passEnding,
+  stageMark,
+  passHeading,
+  sizeFields,
+  sizesAnswer,
+  sizesUnchanged,
+  sizeSource,
+  KNOWN_ASK_KINDS,
+  rowWords,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -58,11 +68,37 @@ const project = {
   plates: [{ id: "a:1", selected: true }],
   directory: "/private/needle",
 } as unknown as Project;
-test("a project thumbnail is the real object before any render", () => {
-  const rendered = { ...project, current: { model: "m.stl", renders: ["renders/overview.png"] } } as unknown as Project;
-  assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "photos/bottle.jpg");
-  assert.equal(projectThumbnail({ ...rendered, capture: ["0001.heic"] }), "capture/0001.heic");
-  assert.equal(projectThumbnail(rendered), "renders/overview.png");
+// David, Nov 10: "of ALL THE OPTIONS ... the photograph including everything in it is by far the worst".
+test("a project's picture is the object alone on the stage, never a photo of the room", () => {
+  const rendered = { ...project, plates: undefined, current: { model: "current/model.stl", renders: ["current/renders/overview.png"] } } as unknown as Project;
+  assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "current/renders/overview.png", "until the computer draws it: the render");
+  assert.equal(projectThumbnail({ ...rendered, picture: "pictures/part-1.png" }), "pictures/part-1.png");
+  assert.equal(projectThumbnail({ ...project, plates: undefined, photos: ["bottle.jpg"], capture: ["0001.heic"] } as unknown as Project), undefined, "the placeholder, never the room");
+});
+
+// PRD §5.4 Pictures: the same entries as CounterpartKit and Android, from the shared cases.
+test("every client derives the same pictures from the shared gallery cases", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-gallery.json", import.meta.url), "utf8"));
+  assert.ok(doc.cases.length >= 8);
+  for (const item of doc.cases) {
+    const entries = gallery(item.project as Project);
+    assert.deepEqual(entries.map((e) => e.id), item.entries.map((e: { id: string }) => e.id), item.name);
+    entries.forEach((entry, index) => {
+      const want = item.entries[index];
+      assert.equal(entry.kind, want.kind, item.name);
+      assert.equal(entry.label, want.label, item.name);
+      assert.equal(entry.measures, want.measures, item.name);
+      assert.equal(entry.colour, want.colour, item.name);
+      assert.deepEqual(entry.sizeMm, want.sizeMm, item.name);
+      assert.deepEqual(entry.photos ?? [], want.photos ?? [], item.name);
+      const drawing = "assembly" in entry.drawing
+        ? { assembly: { part: entry.drawing.assembly.part, object: entry.drawing.assembly.object, seats: entry.drawing.assembly.seats.length } }
+        : entry.drawing;
+      assert.deepEqual(drawing, want.drawing, item.name);
+    });
+  }
+  const many = doc.cases.find((c: { name: string }) => c.name.includes("six plates"));
+  assert.equal(gallery(many.project).length, 6, "a designer's six plates: six labelled entries");
 });
 
 test("a finished print asks Did it fit? until it's answered, as the other clients do", () => {
@@ -610,6 +646,9 @@ test("all three shared limit reasons survive project words with projects present
   const projects = [project, ...stopped.map((row: {expected: Project}) => row.expected)];
   assert.equal(projects.length, 4);
   for (const row of stopped) {
+    // The pass's own line is the companion's words too, never the wire status ("capped").
+    assert.equal(passHeading(row.expected.passes.at(-1), 0), `Pass 1 · ${reasons[row.name]}`);
+    assert.equal(passHeading({}, 1), "Pass 2 · Working");
     assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
@@ -706,3 +745,63 @@ test("a search result whose title lacks the words says where it matched (first l
   assert.equal(searchSnippet(hanger, "  "), undefined);
 });
 
+// A part stays readable on its stage: the same rule as CounterpartKit StageContrast.
+test("black and a dark blue grey move to the light stage; white, yellow and the neutral stay dark", () => {
+  assert.equal(lightStage("#000000"), true);
+  assert.equal(lightStage("#5B6579"), true);
+  assert.equal(lightStage("#FFFFFF"), false);
+  assert.equal(lightStage("#FEC600"), false);
+  assert.equal(lightStage("neutral"), false);
+  assert.equal(lightStage("own"), false);
+});
+
+test("a pass that stopped to ask or stopped short never reads as all ticks", () => {
+  const stages = [{ id: "preparing", words: "Getting ready", endedAtMs: 2 }, { id: "working", words: "Designing it", endedAtMs: 3 }];
+  const marks = (status: string | undefined, endedAtMs: number | undefined = 3) => stages.map((_, i) => stageMark({ endedAtMs, status, stages }, i));
+  assert.deepEqual(marks("done"), ["✓", "✓"]);
+  assert.deepEqual(marks("unchanged"), ["✓", "✓"]);
+  assert.deepEqual(marks("needs_closeup"), ["✓", "?"]);
+  assert.deepEqual(marks("needs_file"), ["✓", "?"]);
+  for (const status of ["capped", "failed", "interrupted"]) assert.deepEqual(marks(status), ["✓", "✕"], status);
+  assert.equal(passEnding({ status: "failed" }), undefined, "a running pass has not ended");
+  assert.deepEqual(stages.map((_, i) => stageMark({ stages: [stages[0], { id: "working", words: "Designing it" }] }, i)), ["✓", "◌"]);
+});
+
+test("a size question is number fields with the companion's labels, prefilled, with projects present", () => {
+  const ask = {
+    kind: "sizes",
+    sizes: [
+      { id: "size-1", label: "width at the widest point", mm: 64, from: "scan" },
+      { id: "size-2", label: "width at the waist", mm: 53.5, from: "scan" },
+      { id: "size-3", label: "height to the cap tip", mm: 107, from: "published" },
+    ],
+  };
+  const fields = sizeFields(ask)!;
+  assert.deepEqual(fields.map((f) => [f.label, f.text]), [["width at the widest point", "64"], ["width at the waist", "53.5"], ["height to the cap tip", "107"]]);
+  assert.equal(sizesUnchanged(fields), true);
+  assert.deepEqual(sizesAnswer(fields), [{ id: "size-1", mm: 64 }, { id: "size-2", mm: 53.5 }, { id: "size-3", mm: 107 }]);
+  // A correction with a comma, and a size the person doesn't know left out (never sent as confirmed).
+  const edited = fields.map((f, i) => (i === 0 ? { ...f, text: " 63,2 " } : i === 2 ? { ...f, text: "" } : f));
+  assert.equal(sizesUnchanged(edited), false);
+  assert.deepEqual(sizesAnswer(edited), [{ id: "size-1", mm: 63.2 }, { id: "size-2", mm: 53.5 }]);
+  // Nothing is sent while a field isn't a number, or all are blank.
+  for (const bad of ["about 60", "0", "-4", "10001", "6 3", "1e3"]) assert.equal(sizesAnswer(fields.map((f, i) => (i === 0 ? { ...f, text: bad } : f))), undefined, bad);
+  assert.equal(sizesAnswer(fields.map((f) => ({ ...f, text: " " }))), undefined);
+  // Only a sizes question with sizes is one; every other kind keeps its own card.
+  assert.equal(sizeFields({ kind: "closeup", sizes: ask.sizes }), undefined);
+  assert.equal(sizeFields({ kind: "sizes", sizes: [] }), undefined);
+  assert.equal(sizeFields(undefined), undefined);
+  assert.equal(sizeSource("published"), "from the maker");
+  assert.equal(sizeSource("scan"), "from your scan");
+  assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
+});
+
+test("a row under its phase heading shows the companion's detail, never the heading again, with projects present", () => {
+  const asking = { ...project, id: "a", state: "needs-closeup", status: { phase: "needs-you", tint: "orange", text: "Needs you · Can you confirm these sizes?", detail: "Can you confirm these sizes?" } } as Project;
+  const ready = { ...project, id: "b", state: "ready", status: { phase: "ready", tint: "accent", text: "Ready to print · 68.4 × 34.6 × 149.2 mm", detail: "68.4 × 34.6 × 149.2 mm" } } as Project;
+  const failed = { ...project, id: "c", state: "failed", status: { phase: "failed", tint: "red", text: "The printer stopped." } } as Project;
+  assert.equal(rowWords(asking), "Can you confirm these sizes?");
+  assert.equal(rowWords(ready), "68.4 × 34.6 × 149.2 mm");
+  assert.equal(rowWords(failed), "The printer stopped.", "no detail: the line as it is");
+  for (const p of [asking, ready]) assert.doesNotMatch(rowWords(p), /^(Needs you|Ready to print)/);
+});

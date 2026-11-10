@@ -156,15 +156,19 @@ private struct ActivityTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(object.passes.enumerated().reversed()), id: \.offset) { index, pass in
-                PassHeader(title: "Pass \(index + 1) · \(Self.trigger(pass, first: index == 0))", detail: Self.span(pass),
+                // When it ran and how it ended, in the companion's words.
+                PassHeader(title: "Pass \(index + 1) · \(Self.trigger(pass, first: index == 0))",
+                           detail: [Self.span(pass), pass.endingWords].compactMap { $0 }.joined(separator: " · "),
                            current: index == object.passes.count - 1)
                 if let note = pass.note, !note.isEmpty {
                     StageRow(title: "Read your note", detail: "“\(note)”", time: Self.clock(pass.startedAtMs), done: true)
                 }
                 if let stages = pass.stages, !stages.isEmpty {
-                    ForEach(Array(stages.enumerated()), id: \.offset) { _, stage in
+                    ForEach(Array(stages.enumerated()), id: \.offset) { offset, stage in
+                        // The last stage carries how the pass ended: asked or stopped is never a green tick.
                         StageRow(title: stage.words, detail: "", time: Self.clock(stage.startedAtMs),
-                                 done: stage.endedAtMs != nil, running: stage.endedAtMs == nil && pass.endedAtMs == nil)
+                                 done: stage.endedAtMs != nil, running: stage.endedAtMs == nil && pass.endedAtMs == nil,
+                                 ending: offset == stages.count - 1 ? pass.ending : nil)
                     }
                 } else {
                     StageRow(title: pass.endedAtMs == nil ? "Working on it" : Self.outcome(pass), detail: pass.summary.map(Self.firstSentence) ?? "",
@@ -198,15 +202,8 @@ private struct ActivityTab: View {
         let minutes = max(1, Int(((ended - pass.startedAtMs) / 60_000).rounded()))
         return "\(clock(ended)) · \(minutes) min"
     }
-    static func outcome(_ pass: Project.Pass) -> String {
-        switch pass.status {
-        case "done"?, "ready"?: return "Finished"
-        case "needs-closeup"?: return "Asked for a close-up"
-        case "interrupted"?: return "Stopped when your Mac restarted"
-        case let status?: return status.replacingOccurrences(of: "_", with: " ").capitalized
-        case nil: return "Finished"
-        }
-    }
+    /// The companion's words for how the pass ended (`passes[].words`), the same on every client.
+    static func outcome(_ pass: Project.Pass) -> String { pass.endingWords ?? "Finished" }
     static func firstSentence(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
         return line.count > 140 ? String(line.prefix(139)) + "…" : line
@@ -229,10 +226,14 @@ private struct StageRow: View {
     let title: String, detail: String, time: String
     var done = true
     var running = false
+    /// For a pass's last stage: how the pass ended there.
+    var ending: Project.Pass.Ending? = nil
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Group {
                 if running { ProgressView().controlSize(.mini) }
+                else if ending == .asked { Image(systemName: "questionmark.circle.fill").foregroundStyle(.orange) }
+                else if ending == .stopped { Image(systemName: "xmark.circle.fill").foregroundStyle(.red) }
                 // A step still to come is dashed: an empty circle reads as a checkbox to click.
                 else { Image(systemName: done ? "checkmark.circle.fill" : "circle.dashed").foregroundStyle(done ? Color.green : .secondary) }
             }

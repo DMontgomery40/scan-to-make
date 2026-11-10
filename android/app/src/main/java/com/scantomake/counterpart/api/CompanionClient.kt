@@ -84,7 +84,7 @@ class CompanionClient(
                     if (m("/v1/objects(?:/printers)?") || m(one) || m("$one/passes/(0|[1-9][0-9]{0,15})/activity")) return "projects:read"
                     if (m("/healthz")) return "generation:health"
                     if (m("/v1/events") || m("/v1/settings") || m("/v1/settings/cad") || m("/v1/devices")) return "projects:read"
-                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
+                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
                     if (m("$one/(filaments|colour-mapping|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                 }
@@ -100,7 +100,7 @@ class CompanionClient(
                 "PUT" -> if (m("$one/scan")) return "captures:import"
                 "POST" -> {
                     if (m("/v1/blender/(check|update)")) return "projects:write"
-                    if (m("/v1/objects") || m("$one/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
+                    if (m("/v1/objects") || m("$one/(start|duplicate|locate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
                     if (m("$one/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)")) return "printer-handoff:use"
                     if (m("/v1/devices/live-activity-tokens")) return "projects:write"
                     if (m("/v1/settings/(ai/test|fusion/setup|cad/setup)")) return "projects:write"
@@ -235,16 +235,22 @@ class CompanionClient(
     suspend fun start(id: String, captureManifest: JsonObject? = null): Project =
         one(request("POST", "/v1/objects/$id/start", if (captureManifest != null) jsonOf("captureManifest" to captureManifest) else JsonObject(emptyMap())))
     /** Ask for changes: a new pass with your text. Upload new photos first. */
-    suspend fun correct(id: String, note: String, photoNames: List<String>? = null): Project =
-        one(request("POST", "/v1/objects/$id/corrections", jsonOf("note" to note, "photoNames" to photoNames)))
+    /** [messageId] is this note's own id ([NoteAttempt]): the Mac records a note once per id. */
+    suspend fun correct(id: String, note: String, photoNames: List<String>? = null, messageId: String? = null): Project =
+        one(request("POST", "/v1/objects/$id/corrections", jsonOf("note" to note, "photoNames" to photoNames, "messageId" to messageId)))
     /** Answers the open Ask with uploaded photos, a best guess, or words. */
-    suspend fun answerAsk(id: String, bestGuess: Boolean = false, text: String? = null, photoNames: List<String> = emptyList()): Project {
+    /** `sizes`: a size question's numbers (`AskSizesForm.answer`), which may go with words and photos. */
+    suspend fun answerAsk(id: String, bestGuess: Boolean = false, text: String? = null, photoNames: List<String> = emptyList(), sizes: List<AskSizesForm.Answer> = emptyList()): Project {
         val json = LinkedHashMap<String, Any?>()
         if (bestGuess) json["bestGuess"] = true
         text?.let { json["text"] = it }
         json["photoNames"] = photoNames
+        if (sizes.isNotEmpty()) json["sizes"] = sizes.map { mapOf("id" to it.id, "mm" to wholeOrDecimal(it.mm)) }
         return one(request("POST", "/v1/objects/$id/closeup", com.scantomake.counterpart.core.toJson(json) as JsonObject))
     }
+    /** A whole number goes out as `64`, not `64.0`, as the other clients send it. */
+    private fun wholeOrDecimal(mm: Double): Number =
+        if (mm % 1.0 == 0.0 && kotlin.math.abs(mm) < 1e15) mm.toLong() else mm
     suspend fun choosePublishedPlate(id: String, askId: String, choice: String): Project =
         one(request("POST", "/v1/objects/$id/ask", jsonOf("askId" to askId, "choices" to listOf(choice))))
     suspend fun addModelFile(id: String, name: String, bytes: ByteArray): Project {
@@ -265,6 +271,8 @@ class CompanionClient(
     suspend fun setArchived(id: String, archived: Boolean) = changeProjectSettings(id, jsonOf("archived" to archived))
     suspend fun rename(id: String, title: String) = changeProjectSettings(id, jsonOf("title" to title))
     suspend fun duplicate(id: String) = one(request("POST", "/v1/objects/$id/duplicate", JsonObject(emptyMap())))
+    /** Where the scanned object sits in a fit part made before passes said: a short pass that changes no geometry (docs/protocols/seats.md). */
+    suspend fun locate(id: String) = one(request("POST", "/v1/objects/$id/locate", JsonObject(emptyMap())))
 
     /**
      * capture-camera v1 for the frames already uploaded (`POST …/capture-camera`, ≤ 4 MiB). Sent as raw
@@ -363,7 +371,7 @@ class CompanionClient(
 
     // MARK: Files
 
-    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}""")
+    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png""")
 
     /** Downloads one project file into the cache, once per project version, and returns where it is. */
     suspend fun download(project: Project, name: String): File {

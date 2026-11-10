@@ -211,6 +211,15 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.buttons["needs-changes"].exists)
         works.tap()
         XCTAssertTrue(app.buttons["Print Another"].waitForExistence(timeout: 10), "Done keeps Print, as Print Another")
+        // The main action keeps its whole label beside the ask field ("Print Ano…", lead review Nov 10): the field gives way.
+        let another = app.buttons["Print Another"], ask = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertGreaterThanOrEqual(another.frame.width, 150, "Print Another is not cut off")
+        if ask.exists { XCTAssertLessThanOrEqual(ask.frame.maxX, another.frame.minX + 1, "the field never runs under the button") }
+        XCTAssertLessThanOrEqual(another.frame.maxX, app.windows.firstMatch.frame.maxX, "the button is on screen")
+        // And the narrowed field's placeholder fits whole: a shorter phrase beside Print Another on the phone, never "Ask for cha…".
+        if UIDevice.current.userInterfaceIdiom == .phone, ask.exists {
+            XCTAssertNotEqual(ask.placeholderValue, "Ask for changes…", "beside Print Another the phone's field takes the shorter placeholder")
+        }
         XCTAssertTrue(app.staticTexts["Done"].exists, "the Done capsule")
         XCTAssertFalse(app.buttons["it-works"].exists, "answered: the card goes")
         app.navigationBars.buttons.firstMatch.tap()
@@ -747,6 +756,19 @@ final class LayoutParityUITests: XCTestCase {
     // The hinge itself is looked at on the iPhone Duo simulator with `agent-device fold open|closed`, and
     // `scantomake://fixture-width/<compact|regular>` (with `-CounterpartLayoutTesting YES`) still resizes a fixture run.
 
+    /// David's iPad, Nov 10: every row under Needs you began "Needs you · " and was cut off before the question. The
+    /// row shows the Mac's own detail for it, whole, and never its section's heading again.
+    func testASidebarRowSaysItsQuestionNotItsHeadingWithProjectsPresent() throws {
+        try XCTSkipUnless(regular, "the phone's Home has cards, not a sidebar grouped by phase")
+        let app = launch()
+        // A selectable list row, not a button.
+        let row = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        XCTAssertTrue(row.label.contains("Plush, underside"), row.label)
+        XCTAssertTrue(row.label.contains("Can you send a close-up of the underside? The scan never saw the bottom."), row.label)
+        XCTAssertFalse(row.label.contains("Needs you"), row.label)
+    }
+
     func testPrinterAttentionAndPrintingSummaryAtBothWidths() {
         let app = launch()
         XCTAssertTrue(app.buttons["Printers, 1 needs attention"].waitForExistence(timeout: 20))
@@ -796,6 +818,45 @@ final class LayoutParityUITests: XCTestCase {
     /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
     /// on them". Plate 1's start couldn't be confirmed; on the iPhone and the iPad every plate stays choosable on the
     /// project and inside Print, and only plate 1 asks for the printer check again.
+    /// PRD §5.4 Pictures (David, Nov 9: "i am no longer allowed to see the scanned object, anywhere, ever"; Nov 10: "now
+    /// you're beyond the hardcoded three things"). The project page shows each thing that will print and what was scanned,
+    /// chosen with labels under the stage; a designer's six plates are six labels in a row that scrolls.
+    func testTheProjectGalleryShowsEachThingAndTheProjectPictureIsTheObject() throws {
+        let app = launch(screen: "printed")
+        let result = app.buttons["gallery-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 20), "the thing that will print is the first picture")
+        let scan = app.buttons["gallery-scan-0"]
+        XCTAssertTrue(scan.exists, "what was scanned stays reachable once there is a result")
+        XCTAssertTrue(result.isSelected)
+        scan.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: scan)
+        XCTAssertEqual(XCTWaiter().wait(for: [selected], timeout: 5), .completed)
+        app.terminate()
+
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let rig = try String(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/six-plate-unconfirmed.json"), encoding: .utf8)
+        let plates = XCUIApplication()
+        plates.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "plates-unconfirmed",
+                                  "-CounterpartScreen", "ready"]
+        plates.launchEnvironment["COUNTERPART_RIG_FIXTURE"] = rig
+        plates.launch()
+        let labels = plates.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "gallery-plate-"))
+        XCTAssertTrue(labels.firstMatch.waitForExistence(timeout: 20))
+        XCTAssertEqual(labels.count, 6, "one label per plate")
+        let last = labels.element(boundBy: 5)
+        // A plate off the edge has no hit point: swipe the row on a label that is on screen until the last one is.
+        let window = plates.windows.firstMatch.frame
+        for _ in 0..<5 where !window.contains(last.frame) {
+            guard let shown = (0..<6).map({ labels.element(boundBy: $0) }).first(where: { window.contains($0.frame) }) else { break }
+            shown.swipeLeft()
+        }
+        XCTAssertTrue(window.contains(last.frame), "the row scrolls to the last plate")
+        last.tap()
+        let chosen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: last)
+        XCTAssertEqual(XCTWaiter().wait(for: [chosen], timeout: 5), .completed, "the last plate's picture is shown")
+    }
+
     func testEveryPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() throws {
         // The shared fixture the companion's own tests check (packages/contracts/fixtures/six-plate-unconfirmed.json).
         var root = URL(fileURLWithPath: #filePath)
@@ -1092,7 +1153,7 @@ final class LayoutParityUITests: XCTestCase {
 
     /// David's Nov 9 bottle project (Mac 30a2a33c), with generated pictures in place of his photos. A 4:3 picture, so a
     /// square crop would show here as a wrong aspect ratio, and 130 scan frames, each logged when the canned Mac serves it.
-    private func launchBottle(noPhoto: Bool = false, askFileMissing: Bool = false) throws -> (XCUIApplication, URL) {
+    private func launchBottle(noPhoto: Bool = false, askFileMissing: Bool = false, sizes: Bool = false) throws -> (XCUIApplication, URL) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("bottle-capture"), withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
@@ -1108,6 +1169,7 @@ final class LayoutParityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ask-bottle", "-CounterpartScreen", "ask"]
         if noPhoto { app.launchEnvironment["COUNTERPART_ASK_NO_PHOTO"] = "1" }
+        if sizes { app.launchEnvironment["COUNTERPART_ASK_SIZES"] = "1" }
         app.launch()
         return (app, folder)
     }
@@ -1116,6 +1178,37 @@ final class LayoutParityUITests: XCTestCase {
     private func servedFrames(_ folder: URL) -> Set<String> {
         let log = (try? String(contentsOf: folder.appendingPathComponent("served.log"), encoding: .utf8)) ?? ""
         return Set(log.split(separator: "\n").compactMap { $0.split(separator: " ").first.map(String.init) }.filter { $0.contains("/capture/") })
+    }
+
+    /// A size question is number fields, not a camera (David answered one in a paragraph of caliper readings, Nov 10):
+    /// one field per size the Mac asked about, in its words and prefilled, with Confirm as the obvious action; words
+    /// and a caliper photo stay for what the numbers don't say.
+    func testASizeQuestionShowsItsNumbersPrefilledWithConfirmWithProjectsPresent() throws {
+        let (app, _) = try launchBottle(sizes: true)
+        let confirm = app.buttons["ask-sizes-confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 20), app.debugDescription)
+        for _ in 0..<8 where !confirm.isHittable { app.swipeUp() }
+        XCTAssertEqual(confirm.label, "Confirm These Sizes")
+        XCTAssertTrue(confirm.isEnabled)
+        let values = ["size-1": "64", "size-2": "53.5", "size-3": "32", "size-4": "107"]
+        for (id, value) in values {
+            let field = app.textFields["ask-size-\(id)"]
+            XCTAssertTrue(field.exists, id)
+            XCTAssertEqual(field.value as? String, value, id)
+        }
+        XCTAssertTrue(app.staticTexts["Width at the waist"].exists, "the Mac's own label for each size")
+        XCTAssertFalse(app.buttons["Best guess"].exists, "a size is confirmed or measured, never guessed")
+        XCTAssertFalse(app.buttons["Photos"].exists)
+        XCTAssertTrue(app.buttons["Caliper photo"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["ask-text"].exists, "words for what the numbers don't say")
+        // Changing a number changes what the button says it will do; a field that isn't a number sends nothing.
+        let waist = app.textFields["ask-size-size-2"]
+        // Tapping a number selects it, so typing replaces the Mac's figure.
+        waist.tap()
+        waist.typeText("53")
+        XCTAssertEqual(waist.value as? String, "53")
+        XCTAssertEqual(confirm.label, "Send These Sizes")
+        XCTAssertTrue(confirm.isEnabled)
     }
 
     /// David, Nov 9, on his iPad: "the area it's highlighting is almost impossible to see, and this is on ipad, can't

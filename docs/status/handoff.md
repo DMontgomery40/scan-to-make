@@ -12,8 +12,8 @@ One screen, updated in place; git history keeps the rest. This is the only hando
 
 | Where | Installed |
 |---|---|
-| Mac, iPhone Davica3, iPad Air | **202611100845** from main `be56f060` (#443 and #456, both Nov 10 trains). Receipts `~/scan-to-make-work/mac-202611100845/`, `iphone-202611100845/`, `ipad-202611100845/`. Mac rollback: `Counterpart-202611100531.app` in the Mac receipt folder. |
-| Mac MCP copies | mcp-3d-printer-server 1.2.65 (updated Nov 10 through the companion's own update); bambu-printer-mcp 1.1.77 until 1.1.81–1.1.84 finish publishing (board I12; publishing is the lead's call since Nov 10). |
+| Mac, iPhone Davica3, iPad Air | **202611101110** from main `93006ec2` (the three Nov 10 trains, #443, #456, #487). Receipts `~/scan-to-make-work/mac-202611101110/`, `iphone-202611101110/`, `ipad-202611101110/`. Mac rollback: `Counterpart-202611100845.app` in the Mac receipt folder. |
+| Mac MCP copies | bambu-printer-mcp 1.1.81 (updated by itself after a print ended, Nov 10 11:41Z: automatic updates are on by default since #464), mcp-3d-printer-server 1.2.65. bambu 1.1.82–1.1.84 are being published (board I12; publishing is the lead's call since Nov 10). |
 | Android, Linux (agents-136) | Nov 5 builds. Stale. |
 | Public | Mac beta 6 and TestFlight 2.0 (4), both from `30e3afdd` (Nov 6). |
 

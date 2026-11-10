@@ -338,7 +338,11 @@ struct SidebarRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(words.title).font(.body.weight(.semibold)).lineLimit(1)
                 // A scan still on this phone, as on Home's card.
-                Text(store.localScanWords(project) ?? words.line).font(.caption).foregroundStyle(prominence == .increased ? .white.opacity(0.9) : words.phase.color).lineLimit(1)
+                // Under its section's heading the row shows only what differs, on two lines so it isn't cut off
+                // where the meaning is (David's iPad, Nov 10).
+                Text(store.localScanWords(project) ?? ProjectWords.row(project, line: words.line)).font(.caption)
+                    .foregroundStyle(prominence == .increased ? .white.opacity(0.9) : words.phase.color).lineLimit(2)
+                    .accessibilityIdentifier("sidebar-line-\(project.id)")
             }
         }
         .accessibilityElement(children: .combine)

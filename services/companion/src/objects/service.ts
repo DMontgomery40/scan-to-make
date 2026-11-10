@@ -37,10 +37,16 @@ import type {PrintHandoffServices} from '../print-handoff-http.js';
 import {InvalidAnswerError, printQuestion, validateAnswer, type ConfirmationValue} from './confirmation.js';
 import {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './errors.js';
 import type {TouchupInput} from '../touchup/touchup.js';
+import {carriedSeats, scanBoundsFromObj, seatsProblem, stlBounds, stlFileBounds, type Bounds, type Seat} from './seats.js';
+import {createCaptureConverter} from '../capture-converter.js';
+import {ProjectPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
-import type {Fit} from '@scan-to-make/contracts/counterpart';
+import {answeredSizes, askKind, InvalidSizesError, sizesNote} from './asks.js';
+/** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
+export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
+import {AskSchema, type Fit} from '@scan-to-make/contracts/counterpart';
 import {passResume, withPassEnded, type PassEnd} from './pass-end.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
 import {defaultReconstructRunner, RECONSTRUCTION_FAILED, ReconstructionReviewNeeded, type Reconstruct, type ReconstructInputs, type ScanToStl} from './reconstruct.js';
@@ -222,6 +228,13 @@ export interface ObjectServiceDeps {
    * computer) such a scan is touched up as before.
    */
   scanToStl?: ScanToStl;
+  /**
+   * Draws a project's pictures, the object alone on the stage (PRD §5.1; `mac-reconstruct picture` on a Mac). Without
+   * it the clients show a project's render, or a neutral placeholder, and never a photo of the room.
+   */
+  drawPicture?: DrawPicture;
+  /** The scan's box in the seat frame (docs/protocols/seats.md), for the seats' nonsense check; the capture converter by default. */
+  scanBounds?: (scanPath: string) => Promise<Bounds | undefined>;
   /** This computer has Apple's PhotogrammetrySession and the bundled `mac-reconstruct` (a Mac). */
   objectCaptureRebuild?: boolean;
   print?: {
@@ -290,6 +303,31 @@ export interface FilamentChoice {slot: number; colour: string; material: string;
   feed?: string; suggested?: boolean}
 /** A loaded tray; `profile` is absent when the MCP resolves no slicer profile for it (usable for a sliced file, not for slicing). */
 type LiveFilament = FilamentChoice & {profile?: string};
+/**
+ * The spool a print uses, as the printer MCP reported it when the print was sent: what the project's result is drawn
+ * in afterwards (PRD §5.4). `index` is the model's 1-based filament for a multi-part model; absent for one spool.
+ */
+export interface PrintSpool {index?: number; colour: string; material?: string; name?: string}
+const spool = (tray: FilamentChoice, index?: number): PrintSpool | undefined => {
+  const colour = /^#?([0-9A-Fa-f]{6})/.exec(tray.colour.trim());
+  return colour ? {...(index !== undefined ? {index} : {}), colour: `#${colour[1]!.toUpperCase()}`, ...(tray.material ? {material: tray.material} : {}), ...(tray.name ? {name: tray.name} : {})} : undefined;
+};
+/** A part made to fit a scanned object, with a model: the only kind whose model has places for that object. */
+export const canLocate = (object: StmObject): boolean => passKind(object) === 'fit' && !!object.scan && !!object.current;
+
+/** The scan's box in the seat frame: an STL scan as it is (millimetres, Z up); a capture through the capture converter. */
+async function defaultScanBounds(path: string): Promise<Bounds | undefined> {
+  if (/\.stl$/i.test(path)) return stlBounds(await readFile(path));
+  if (!/\.(usdz|usdc|usda)$/i.test(path)) return undefined;
+  const converter = createCaptureConverter({executable: process.env.SCAN_TO_MAKE_CAPTURE_PYTHON ?? 'python3', temporaryRoot: tmpdir(), timeoutMs: 120_000});
+  const converted = await converter.convert(await readFile(path));
+  const report = JSON.parse(converted.report.toString('utf8')) as {metersPerUnit?: unknown; upAxis?: unknown};
+  if (typeof report.metersPerUnit !== 'number' || typeof report.upAxis !== 'string') return undefined;
+  return scanBoundsFromObj(converted.derived.toString('utf8'), report.metersPerUnit, report.upAxis);
+}
+
+const withSpool = (tray: FilamentChoice): {spools?: PrintSpool[]} => { const one = spool(tray); return one ? {spools: [one]} : {}; };
+const spools = (list: (PrintSpool | undefined)[]): PrintSpool[] | undefined => list.length && list.every(Boolean) ? list as PrintSpool[] : undefined;
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 /** The installed MCP lacks a capability this needs: the person is asked to update it, never given a fallback. */
 class McpUpdateNeeded extends InvalidStateError {}
@@ -464,7 +502,19 @@ export class ObjectService {
   /** One action at a time per object, so a double tap can't start the same work twice. */
   readonly #gates = new Map<string, Promise<unknown>>();
   #closed = false;
-  constructor(deps: ObjectServiceDeps) { this.#deps = deps; }
+  constructor(deps: ObjectServiceDeps) {
+    this.#deps = deps;
+    this.#pictures = new ProjectPictures(deps.drawPicture, async (id, names) => {
+      // A redrawn picture is not news: the project keeps its place on Home and in the sidebar.
+      const updated = await deps.store.update(id, o => ({...o, pictures: names, picture: leadPicture(names, o)}), {keepUpdatedAt: true}).catch(() => undefined);
+      if (!updated) return;
+      deps.onChange?.(updated);
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['picture']}});
+    });
+  }
+  readonly #pictures: ProjectPictures;
+  /** Waits for the pictures being drawn (tests). */
+  picturesDrawn(): Promise<void> { return this.#pictures.idle(); }
 
   #gate<T>(id: string, action: () => Promise<T>): Promise<T> {
     const next = (this.#gates.get(id) ?? Promise.resolve()).catch(() => undefined).then(() => {
@@ -616,13 +666,13 @@ export class ObjectService {
    * its own recipe is the same (`recipeKey`).
    */
   async #sliceRecipe(id: string, object: StmObject, options: PrintOptions, selection: PrinterSelection | undefined, backend: PrinterHandoffConfig['backend'], destination?: {destinationId?: string}) {
-    const {selection: colourSelection, slicer, chosenTrays} = await this.#colour(id, options, selection, backend, destination);
+    const {selection: colourSelection, slicer, chosenTrays, spools} = await this.#colour(id, options, selection, backend, destination);
     const selected = object.publishedSelection ? {...colourSelection, plateIndex: object.publishedSelection.plateIndex} : colourSelection;
     const overrides = object.publishedSelection?.sliced
       ? {repetitions: 1, ...(options.pauseBeforeLayers?.length ? {pauseAtLayers: options.pauseBeforeLayers} : {})}
       : sliceOverrides(options);
     const sliced = {...slicer, ...overrides, ...designedSupports(object)};
-    return {selected, overrides, sliced, ...(chosenTrays ? {chosenTrays} : {})};
+    return {selected, overrides, sliced, ...(chosenTrays ? {chosenTrays} : {}), ...(spools ? {spools} : {})};
   }
 
   /**
@@ -715,7 +765,7 @@ export class ObjectService {
           console.error(`starter ${starterId}: no download pass for project ${created.id}: ${this.#publicText(error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').slice(0, 400)}`);
           // No worker to download with (AI is off, or its settings are unavailable): the project stays, and the person
           // adds the designer's files, as a pasted link asks when they can't be fetched.
-          const ask = {id: randomUUID(), type: 'file' as const, question: starterFileQuestion(starter),
+          const ask = {id: randomUUID(), type: 'file' as const, kind: 'file' as const, question: starterFileQuestion(starter),
             url: starter.url, modelName: starter.title, site: starter.site, accepts: ['3mf' as const],
             answers: ['file' as const], status: 'open' as const, askedAtMs: Date.now()};
           return this.#changed(await store.update(created.id, o => ({...o, state: 'needs-closeup', ask})));
@@ -743,6 +793,8 @@ export class ObjectService {
     for (const object of objects) if (object.state !== 'new') this.#title(object, {backfill: true});
     // Whether each 3MF prints with its own settings, asked once per file and in the background.
     for (const object of objects) void this.#askOwnSettings(object);
+    // Each project's picture, drawn once when what it shows changes (PRD §5.1).
+    for (const object of objects) this.#pictures.ensure(object, this.dir(object.id));
     return objects;
   }
 
@@ -1095,7 +1147,7 @@ export class ObjectService {
    * or (with no explicit choices) when the printer's filament can't be read: the MCP's own defaults then apply.
    */
   async #multipartColour(object: StmObject, options: PrintOptions, selection: PrinterSelection | undefined,
-      _backend: PrinterHandoffConfig['backend'], destinationOverride?: {destinationId?: string}): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]} | undefined> {
+      _backend: PrinterHandoffConfig['backend'], destinationOverride?: {destinationId?: string}): Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]; spools?: PrintSpool[]} | undefined> {
     const {filaments: model, slots, version} = await this.#modelData(object, destinationOverride);
     // Explicit choices are validated even when this model's filaments can't be read:
     // falling back to the MCP's defaults would silently drop the person's spools.
@@ -1142,10 +1194,12 @@ export class ObjectService {
     const mapped: PrinterSelection = {...selection,
       useAms: model.some(filament => feeds.get(at(filament.index).slot) === 'ams'),
       amsMapping, amsSlots: undefined, autoMatchAms: false};
-    if (sliced) return {selection: mapped, chosenTrays: allTrays};
+    // Each of the model's colours on the spool it prints from, for the result's picture afterwards.
+    const used = spools(model.map(filament => spool(at(filament.index), filament.index)));
+    if (sliced) return {selection: mapped, chosenTrays: allTrays, ...(used ? {spools: used} : {})};
     if (Array.from({length: slots}, (_, i) => at(i + 1)).some(tray => !tray.profile))
       throw new InvalidStateError('A chosen spool has no slicing profile on this Mac. Choose another spool.');
-    return {selection: mapped, chosenTrays: allTrays, slicer: {
+    return {selection: mapped, chosenTrays: allTrays, ...(used ? {spools: used} : {}), slicer: {
       loadFilaments: Array.from({length: slots}, (_, i) => at(i + 1).profile!).join(';'),
       filamentColours: Array.from({length: slots}, (_, i) => at(i + 1).colour.slice(0, 7).toUpperCase()).join(';'),
     }};
@@ -1436,9 +1490,27 @@ export class ObjectService {
   }
 
   /** Asks for changes; `photos` are files on this Mac added first (the Mac app's drop target). */
-  correct(id: string, note: string, photos: string[] = [], photoNames?: string[]): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note, photos, photoNames)); }
-  async #correct(id: string, note: string, photos: string[], photoNames?: string[]): Promise<StmObject> {
+  /** `messageId` is the client's own id for this note: asking again with it never records the note twice. */
+  correct(id: string, note: string, photos: string[] = [], photoNames?: string[], messageId?: string): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note, photos, photoNames, messageId)); }
+
+  /**
+   * Where the scanned object sits in a fit part made before passes said (docs/protocols/seats.md): a short pass that
+   * reports seats only and changes no geometry. An answer that comes with a model is refused, and the model stays.
+   */
+  locate(id: string): Promise<StmObject> { return this.#gate(id, () => this.#locate(id)); }
+  async #locate(id: string): Promise<StmObject> {
+    const object = await this.get(id);
+    if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
+    if (!canLocate(object)) throw new InvalidStateError('Only a part made to fit a scanned object has a place for it.');
+    return this.#pass(object, {trigger: 'locate', locate: true});
+  }
+  async #correct(id: string, note: string, photos: string[], photoNames?: string[], messageId?: string): Promise<StmObject> {
     let object = await this.get(id);
+    // The same note arriving again (its first reply was lost, or the client queued it and sent it when the step
+    // ended): it is already recorded and its pass has started or ended. Answer with the project as it is. A message
+    // still held for a retry (its intent couldn't be checked) is not that: it goes on below.
+    const recorded = messageId ? object.messages?.find(message => message.clientId === messageId) : undefined;
+    if (recorded && recorded.id !== object.pendingMessageId) return object;
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
     const imported: string[] = [];
@@ -1450,7 +1522,7 @@ export class ObjectService {
     const held = object.messages?.find(message => message.id === object.pendingMessageId && message.text === note.trim());
     // A retry owns its original evidence; later uploads belong to the next message unless explicitly selected.
     const attached = [...new Set([...(photoNames ?? held?.photos ?? object.pendingPhotos ?? []), ...imported])];
-    object = await this.#message(object, note.trim(), attached);
+    object = await this.#message(object, note.trim(), attached, true, messageId);
     const message = object.messages!.find(item => item.id === object.pendingMessageId)!;
     // Photos can document a successful print too. They must not force a mesh-changing pass.
     if (object.current && !object.question && object.ask?.status !== 'open' && this.#deps.reportsCompletion) {
@@ -1480,12 +1552,12 @@ export class ObjectService {
   }
 
   /** Record only known attachment ownership. Retry of a held message keeps its identity and timestamp. */
-  async #message(object: StmObject, text: string, photos: string[], reusePending = true): Promise<StmObject> {
+  async #message(object: StmObject, text: string, photos: string[], reusePending = true, clientId?: string): Promise<StmObject> {
     if (photos.some(name => !object.photos.includes(name))) throw new InvalidFileError('That photo is not in this project.');
     return this.#deps.store.update(object.id, o => {
       const previous = reusePending ? o.messages?.find(item => item.id === o.pendingMessageId && item.text === text) : undefined;
-      const message = previous ? {...previous, photos: [...new Set([...previous.photos, ...photos])]}
-        : {id: randomUUID(), text, photos, atMs: Date.now()};
+      const message = previous ? {...previous, photos: [...new Set([...previous.photos, ...photos])], ...(clientId && !previous.clientId ? {clientId} : {})}
+        : {id: randomUUID(), text, photos, atMs: Date.now(), ...(clientId ? {clientId} : {})};
       return {...o, messages: [...(o.messages ?? []).filter(item => item.id !== message.id), message],
         pendingFollowup: text, pendingMessageId: message.id,
         pendingPhotos: (o.pendingPhotos ?? []).filter(name => !photos.includes(name))};
@@ -1493,8 +1565,8 @@ export class ObjectService {
   }
 
   /** Answers the open Ask: with a photo (uploaded first), Best guess, or the person's own words. */
-  answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
-  async #answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> {
+  answerCloseup(id: string, answer: AskAnswer): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
+  async #answerCloseup(id: string, answer: AskAnswer): Promise<StmObject> {
     // Claim the install before consuming the Ask or its photos. The admitted pass takes its own
     // counted reservation through worker cleanup; this one only covers the answer transaction.
     let release = () => {};
@@ -1504,7 +1576,7 @@ export class ObjectService {
     finally { release(); }
   }
 
-  async #reservedAnswerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> {
+  async #reservedAnswerCloseup(id: string, answer: AskAnswer): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
     // A reconstruction review is not a close-up: Best Guess, words or photos must not approve it.
@@ -1513,13 +1585,23 @@ export class ObjectService {
     // Only this answer's explicit attachments belong to it. Other pending photos may already
     // be reserved by a correction queued on either client; Best Guess and text claim none.
     const photos = [...new Set(answer.photoNames ?? [])];
-    if (!photos.length && !answer.bestGuess && !answer.text?.trim()) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
+    // Numbers for a sizes question: the ones it listed, confirmed or corrected. They may come with words and a photo.
+    let sizes: ReturnType<typeof answeredSizes> | undefined;
+    if (answer.sizes !== undefined) {
+      try { sizes = answeredSizes(askKind(object) === 'sizes' ? object.ask : undefined, answer.sizes); }
+      catch (error) { if (error instanceof InvalidSizesError) throw new InvalidStateError(error.message); throw error; }
+    }
+    if (!photos.length && !answer.bestGuess && !answer.text?.trim() && !sizes) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
     if (photos.some(name => !object.photos.includes(name))) throw new InvalidStateError('That photo is not in this project.');
     const asked = object.passes.at(-1)?.note;
     const said = answer.text?.trim() ? `Answer to "${object.ask?.question ?? object.question?.closeup ?? 'your question'}": ${answer.text.trim()}` : undefined;
-    const parts = [asked, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
-    if (object.ask) await this.#deps.store.update(id, o => o.ask ? {...o, ask: {...o.ask, status: 'answered'}} : o);
-    const updated = await this.#message(await this.get(id), answer.text?.trim() ?? (answer.bestGuess ? 'Use your best guess.' : ''), photos, false);
+    const parts = [asked, sizes ? sizesNote(sizes) : undefined, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
+    // The person's numbers become the project's measured sizes, so every later pass designs to them too.
+    const measured = sizes?.map(({id: sizeId, label, mm}) => ({id: sizeId, label, mm}));
+    if (object.ask) await this.#deps.store.update(id, o => o.ask ? {...o, ask: {...o.ask, status: 'answered'},
+      ...(measured && passKind(o) === 'fit' ? {fit: {sizeSource: 'measured' as const, measured}} : {})} : o);
+    const shown = answer.text?.trim() ?? (sizes ? sizes.map(size => `${size.label}: ${size.mm} mm`).join('\n') : answer.bestGuess ? 'Use your best guess.' : '');
+    const updated = await this.#message(await this.get(id), shown, photos, false);
     const message = updated.messages!.find(item => item.id === updated.pendingMessageId)!;
     return this.#pass(updated, {...(parts.length ? {note: parts.join('\n')} : {}), messageId: message.id, photos: message.photos, trigger: 'ask-answer'});
   }
@@ -1582,7 +1664,7 @@ export class ObjectService {
     const printDestination = destination ? {id: destination.id, name: destination.name} : undefined;
     const {store: bundles, relay, runner} = printing.services;
     const recipe = await this.#sliceRecipe(id, object, options, services.selection, runner.backend);
-    const {selected, overrides, sliced, chosenTrays} = recipe;
+    const {selected, overrides, sliced, chosenTrays, spools: used} = recipe;
     // Slicing and confirmation can take minutes: re-read the spools at dispatch, so a spool
     // swapped in between can't silently take the mapping (the MCPs check material, not colour).
     const recheckTrays = chosenTrays?.length ? async () => {
@@ -1613,7 +1695,7 @@ export class ObjectService {
     const printId = randomUUID();
     const plate = selectedPlateIdentity(object);
     const print = {bundleId: manifest.id, printId, ...(plate ? {plate} : {}), ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
-      ...(Object.keys(settings).length ? {settings} : {})};
+      ...(Object.keys(settings).length ? {settings} : {}), ...(used?.length ? {spools: used} : {})};
     // PRD §8.10: held from here until the dispatch ends, so the printer's MCP isn't updated under it.
     let release: () => void = () => undefined;
     try { release = this.#deps.printGate?.hold(gated) ?? release; }
@@ -1713,7 +1795,7 @@ export class ObjectService {
 
   /** The print sheet's colour, as the MCP's own selection and slicing options (PRD §8.5 colour v1). */
   async #colour(id: string, options: PrintOptions, selection: PrinterSelection | undefined, backend: PrinterHandoffConfig['backend'], destination?: {destinationId?: string})
-    : Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]}> {
+    : Promise<{selection?: PrinterSelection; slicer?: PrinterSlicer; chosenTrays?: LiveFilament[]; spools?: PrintSpool[]}> {
     const object = await this.get(id);
     // Per-colour choices for a model that is no longer a multi-part 3MF are stale, never ignored.
     if (options.filaments?.length && !isMultipart(object))
@@ -1730,7 +1812,7 @@ export class ObjectService {
       if (!live) throw new InvalidStateError('The chosen filament changed. Choose a current spool and try again.');
       if (!live.profile) throw new InvalidStateError('That spool has no slicing profile on this Mac. Choose another spool.');
       return {selection: {...selection, material:live.material, useAms:live.slot !== 254 && live.slot !== 255, amsSlots:[live.slot], amsMapping:undefined, autoMatchAms:false},
-        slicer: {loadFilaments:live.profile, filamentColours:live.colour}};
+        slicer: {loadFilaments:live.profile, filamentColours:live.colour}, ...withSpool(live)};
     }
     const colour = options.colour;
     if (!colour) return {...(selection ? {selection} : {})};
@@ -1747,7 +1829,7 @@ export class ObjectService {
         const match = live.find(item => item.profile && item.material.toLowerCase() === material.toLowerCase());
         // A loaded spool of that material: print from it with its own profile.
         if (match) return {selection: {...selection, material: match.material, useAms: match.slot !== 254 && match.slot !== 255,
-          amsSlots: [match.slot], amsMapping: undefined, autoMatchAms: false}, slicer: {loadFilaments: match.profile!, filamentColours: match.colour}};
+          amsSlots: [match.slot], amsMapping: undefined, autoMatchAms: false}, slicer: {loadFilaments: match.profile!, filamentColours: match.colour}, ...withSpool(match)};
         // No spool reports it (the external spool counts once the printer knows its type): there is no profile to
         // slice it with, and slicing with the preset's filament would print the wrong material's settings.
         throw new InvalidStateError(`The printer doesn't report a ${material} spool. Set the external spool to ${material} on the printer, or load ${material} in the AMS, then try again.`);
@@ -1764,13 +1846,13 @@ export class ObjectService {
     if ('external' in colour) {
       const tray = live.find(item => item.slot === 254 || item.slot === 255);
       return {selection: {...selection, useAms: false, amsSlots: undefined, amsMapping: undefined, autoMatchAms: false, ...(tray ? {material: tray.material} : {})},
-        ...(tray?.profile ? {slicer: {loadFilaments: tray.profile, filamentColours: tray.colour}} : {})};
+        ...(tray?.profile ? {slicer: {loadFilaments: tray.profile, filamentColours: tray.colour}} : {}), ...(tray ? withSpool(tray) : {})};
     }
     const tray = live.find(item => item.slot === colour.amsSlot);
     if (!tray) throw new InvalidStateError('That AMS slot is empty now. Choose a loaded spool and try again.');
     if (!tray.profile) throw new InvalidStateError('That spool has no slicing profile on this Mac. Choose another spool.');
     return {selection: {...selection, material: tray.material, useAms: true, amsSlots: [tray.slot], amsMapping: undefined, autoMatchAms: false},
-      slicer: {loadFilaments: tray.profile, filamentColours: tray.colour}};
+      slicer: {loadFilaments: tray.profile, filamentColours: tray.colour}, ...withSpool(tray)};
   }
 
   /**
@@ -2387,7 +2469,7 @@ export class ObjectService {
     return (await this.#running.get(id)) ?? this.get(id);
   }
 
-  async #pass(object: StmObject, opts: {note?: string; messageId?: string; photos?: string[]; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}): Promise<StmObject> {
+  async #pass(object: StmObject, opts: {note?: string; messageId?: string; photos?: string[]; trigger?: NonNullable<StmObject['passes'][number]['trigger']>; locate?: boolean}): Promise<StmObject> {
     // Design/cleanup workers use the current MCP too. Reserve before any await so an update cannot
     // swap its files while this pass is admitted, queued, running, saving, or closing its helper.
     let release = () => {};
@@ -2397,7 +2479,7 @@ export class ObjectService {
     catch (error) { release(); throw error; }
   }
 
-  async #reservedPass(object: StmObject, opts: {note?: string; messageId?: string; photos?: string[]; trigger?: NonNullable<StmObject['passes'][number]['trigger']>}, release: () => void): Promise<StmObject> {
+  async #reservedPass(object: StmObject, opts: {note?: string; messageId?: string; photos?: string[]; trigger?: NonNullable<StmObject['passes'][number]['trigger']>; locate?: boolean}, release: () => void): Promise<StmObject> {
     await this.#requireCaptureCompletion(object);
     const kind: PassKind = passKind(object);
     const touchup = this.#touchupAsked(object, opts.note, kind);
@@ -2415,18 +2497,20 @@ export class ObjectService {
     // A capture is rebuilt into scan/scan.usdz on this Mac first, once: a handheld scan, or every photo of an iPhone
     // Object Capture session, whose phone-made model is only a preview until then. Its photos also show the touch-up the object.
     const objectCapture = object.captureCompletion?.source === 'object-capture';
-    const build = kind !== 'published' && !fromCurrent && (object.capture?.length ?? 0) > 0
+    const build = kind !== 'published' && !fromCurrent && !opts.locate && (object.capture?.length ?? 0) > 0
       && (!object.scan || (objectCapture && object.scanSource === 'phone-preview'));
     const capturePhotos = (object.capture ?? []).map(name => join(dir, 'capture', name));
     // Preserve the original/prior context, but never let a later queued message's uploads influence this pass.
     const pending = new Set(object.pendingPhotos ?? []);
     const photos = spreadPick([...object.photos.filter(name => !pending.has(name)).map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
-    const startedAtMs = Date.now();
+    const startedAtMs = Date.now(), stateBefore = object.state;
+    // A locate pass designs nothing: it says what it is doing (docs/protocols/seats.md).
+    const passWords = (id: StageId, chosen: DesignEngine, passKindNow: PassKind) => opts.locate && id === 'working' ? 'Finding where the object sits' : stageWords(id, chosen, passKindNow);
     // PRD §8.9: copies are cleaned up in Blender; a new design may use Fusion (the touch-up decides).
     const plan: StageId[] = passPlan(build, touchup);
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
-    const first: PassStage = {id: plan[0]!, words: stageWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
+    const first: PassStage = {id: plan[0]!, words: passWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
     const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined, pendingMessageId: undefined,
       ...(o.completion ? {completion: {...o.completion, undone: true}} : {}),
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
@@ -2448,7 +2532,7 @@ export class ObjectService {
         const previous = latest?.stages?.at(-1);
         if (previous?.id === id) {
           // The pass chose its engine after this stage began (the code engine is ready, say): say what it is doing.
-          const words = stageWords(id, engine, kind);
+          const words = passWords(id, engine, kind);
           if (previous.words !== words) {
             this.#changed(await store.update(object.id, o => ({...o, passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, engine,
               stages: (p.stages ?? []).map((item, index, all) => index === all.length - 1 ? {...item, words, typicalSec: typical[id]} : item)})})));
@@ -2457,7 +2541,7 @@ export class ObjectService {
           return;
         }
         if (previous && previous.endedAtMs === undefined) void this.#deps.passTimings?.record(kind, engine, previous.id, (now - previous.startedAtMs) / 1000).catch(() => undefined);
-        const next: PassStage = {id, words: stageWords(id, engine, kind), startedAtMs: now, typicalSec: typical[id]};
+        const next: PassStage = {id, words: passWords(id, engine, kind), startedAtMs: now, typicalSec: typical[id]};
         const stages = [...(latest?.stages ?? []).map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), next];
         const estimate = passEstimate(stages, plan, typical, now);
         this.#changed(await store.update(object.id, o => ({...o, passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, stages, estimate, engine})})));
@@ -2504,7 +2588,8 @@ export class ObjectService {
       const designer = designerFile(object, kind, scanName);
       // A multi-colour design is revised from its merged mesh; Fusion passes also get the parametric design.
       const currentMesh = object.current && isMultipart(object) && object.kind !== 'published' ? join('current', 'model.stl') : object.current?.model;
-      const scan = designer
+      const scan = opts.locate ? [join(dir, 'current', 'model.stl'), join(dir, 'scan', scanName!)]
+        : designer
         ? [...new Set([fromCurrent && isMultipart(object) ? object.current!.model : designer, designer])].map(path => join(dir, path))
         : fromCurrent ? [join(dir, currentMesh!)] : scanName ? [join(dir, 'scan', scanName)] : [];
       const previous = object.passes.at(-1);
@@ -2512,17 +2597,21 @@ export class ObjectService {
       const resume = continued
         ? {...continued,
           ...(opts.photos?.length ? {photos: photos.filter(path => opts.photos!.includes(basename(path)))} : {})} : undefined;
-      const input: TouchupInput = {worker, ...(resume ? {resume} : {}), root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent && !designer, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
+      const input: TouchupInput = {worker, ...(resume && !opts.locate ? {resume} : {}), root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent && !designer, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
+        ...(opts.locate ? {locate: true, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {}),
+        // A change restates where the scanned object sits (docs/protocols/seats.md).
+        ...(fromCurrent && object.current?.seats?.length ? {seats: object.current.seats} : {}),
         ...(designer ? {designerCopy: true} : {}),
         kind, ...(object.preferences?.designEngine && object.preferences.designEngine !== 'auto' ? {preferredEngine: object.preferences.designEngine} : {}), onStage: (id, chosen) => stage(id, chosen),
-        ...(fromCurrent && object.current?.design ? designInput(dir, object.current.engine, object.current.design) : {}),
+        ...(fromCurrent && !opts.locate && object.current?.design ? designInput(dir, object.current.engine, object.current.design) : {}),
         ...(workerRequest(object) ? {instructions: workerRequest(object)!} : {}),
         ...(opts.note !== undefined ? {note: opts.note, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {})};
       try { return await this.#deps.runTouchup({...input, signal: controller.signal, onProgress}); }
       finally { stage('saving'); await writing; }
     })()
-      .then(result => this.#finish(object.id, startedAtMs, result, kind))
-      .catch(error => error instanceof ReconstructionReviewNeeded
+      .then(result => opts.locate ? this.#finishLocate(object.id, startedAtMs, result, stateBefore) : this.#finish(object.id, startedAtMs, result, kind))
+      .catch(error => opts.locate ? this.#finishLocate(object.id, startedAtMs, {error}, stateBefore)
+        : error instanceof ReconstructionReviewNeeded
           ? this.#finishReconstructionReview(object.id, startedAtMs, error)
           : this.#fail(object.id, startedAtMs, error))
       .finally(() => { release(); this.#running.delete(object.id); this.#controllers.delete(object.id); });
@@ -2598,7 +2687,7 @@ export class ObjectService {
       const modelName = result.model?.title ?? object.credit?.title;
       // A starter asks for its print profile's 3MF (the designer's plates) and names the button; any other link takes a 3MF or STL.
       const starter = object.starterId ? this.#starter(object.starterId) : undefined;
-      const ask = {id: randomUUID(), type: 'file' as const, question: (starter ? starterFileQuestion(starter) : `Download ${modelName ?? 'the model'} from ${site ?? 'its page'} and share it here.`).slice(0, 300),
+      const ask = {id: randomUUID(), type: 'file' as const, kind: 'file' as const, question: (starter ? starterFileQuestion(starter) : `Download ${modelName ?? 'the model'} from ${site ?? 'its page'} and share it here.`).slice(0, 300),
         ...(url ? {url} : {}), ...(modelName ? {modelName} : {}), ...(site ? {site} : {}), accepts: starter ? ['3mf' as const] : ['3mf' as const, 'stl' as const],
         ...(result.candidate ? {candidate: {path: result.candidate, name: basename(result.candidate)}} : {}),
         answers: ['file' as const], status: 'open' as const, askedAtMs: now};
@@ -2693,7 +2782,8 @@ export class ObjectService {
   /** Starts again a project whose only open question is the Downloads-access one, once macOS allows the folder. */
   async #resumeDownloads(object: StmObject): Promise<StmObject | undefined> {
     if (object.state !== 'needs-closeup' || object.ask?.status !== 'open' || object.ask.type !== 'file' || object.current) return undefined;
-    if (object.ask.question !== downloadsDeniedQuestion(!!object.starterId)) return undefined;
+    // The ask says why it is open. One saved before `reason` existed is told by its sentence, as it was then.
+    if (object.ask.reason !== 'downloads-access' && (object.ask.reason !== undefined || object.ask.kind !== undefined || object.ask.question !== downloadsDeniedQuestion(!!object.starterId))) return undefined;
     if (await folderAccess(this.#downloads()) !== 'ok') return undefined;
     console.error(`project ${object.id}: Downloads is readable now; going on`);
     return this.start(object.id);
@@ -2706,7 +2796,7 @@ export class ObjectService {
     const store = this.#deps.store, object = await store.get(id), now = Date.now();
     const starter = object.starterId ? this.#starter(object.starterId) : undefined;
     if (!this.#downloadsDeniedLogged) { this.#downloadsDeniedLogged = true; console.error(`published project ${id}: macOS refused the companion ${this.#downloads()} (EPERM); asking for access or the file instead of downloading`); }
-    const ask = {id: randomUUID(), type: 'file' as const, question: downloadsDeniedQuestion(!!starter),
+    const ask = {id: randomUUID(), type: 'file' as const, kind: 'file' as const, reason: 'downloads-access' as const, question: downloadsDeniedQuestion(!!starter),
       ...(object.credit?.url ? {url: object.credit.url} : {}), ...(object.credit?.title ? {modelName: object.credit.title} : {}), ...(object.credit?.site ? {site: object.credit.site} : {}),
       accepts: starter ? ['3mf' as const] : ['3mf' as const, 'stl' as const], answers: ['file' as const], status: 'open' as const, askedAtMs: now};
     const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined, failure: undefined, question: undefined, ask,
@@ -2848,7 +2938,7 @@ export class ObjectService {
     const credit = {...(first.credit ?? info.credit), ...(first.designer ? {designer: first.designer} : {}), ...(first.licence ? {licence: first.licence} : {})};
     // A starter keeps all its files and plates (the rig's six plates; the caliper and its depth gauge), each printed
     // from the plate picker, so it is ready without a question. Any other published model asks which to print.
-    const ask = options.length > 1 && !object.starterId ? {id: randomUUID(), type: 'choice' as const, question: 'Which file and plate would you like to print?', options,
+    const ask = options.length > 1 && !object.starterId ? {id: randomUUID(), type: 'choice' as const, kind: 'choice' as const, question: 'Which file and plate would you like to print?', options,
       multiple: false, answers: ['choice' as const], status: 'open' as const, askedAtMs: now} : undefined;
     const updated = await store.update(id, o => ({...o, ...(o.print ? {plateProgress: retainedPlateProgress(o)} : {}), print: undefined, printConfirmation: undefined, state: ask ? 'needs-closeup' : 'ready', progress: undefined, failure: undefined, kind: 'published', current, files: published,
       publishedSelection: {fileIndex: 0, plateIndex: firstPlate?.index ?? 0, sliced: firstPlate?.sliced ?? false},
@@ -3079,7 +3169,8 @@ export class ObjectService {
     const question = needed.review.kind === 'region'
       ? 'Which part of this model is the object you scanned? Check the preview, then confirm it or choose the right part.'
       : 'How big is the object? Measure one side of it and enter the size in millimetres.';
-    const ask: NonNullable<StmObject['ask']> = {id: randomUUID(), question, type: 'choice',
+    // Named for what it asks; it is still answered through the reconstruction review's own route.
+    const ask: NonNullable<StmObject['ask']> = {id: randomUUID(), question, type: 'choice', kind: needed.review.kind === 'region' ? 'region' : 'scale',
       answers: ['choice'], status: 'open', askedAtMs: now};
     const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined,
       failure: undefined, ask, reconstructionReview: review,
@@ -3141,7 +3232,7 @@ export class ObjectService {
       summary: result.summary === undefined ? undefined : this.#publicText(result.summary),
       reason: result.reason === undefined ? undefined : this.#publicText(result.reason),
       closeup: result.closeup === undefined ? undefined : this.#publicText(result.closeup)};
-    let current: StmObject['current'] | undefined;
+    let current: StmObject['current'] | undefined, seats: Seat[] | undefined, seatNote: string | undefined;
     if (result.model) {
       const currentDir = join(dir, 'current'), rendersDir = join(currentDir, 'renders');
       await rm(rendersDir, {recursive: true, force: true});
@@ -3171,9 +3262,17 @@ export class ObjectService {
       }
       if (result.parts) await copyFile(result.parts, join(currentDir, 'model.3mf'));
       else await rm(join(currentDir, 'model.3mf'), {force: true});
+      // Where the scanned object sits: stated by this pass, or kept from a model this pass didn't change; never guessed.
+      const before = await store.get(id);
+      if (passKind(before) === 'fit' && before.scan) {
+        seats = carriedSeats(before.current?.seats, result.seats, result.status === 'unchanged');
+        const problem = result.seats?.length ? await this.#seatsProblem(before, result.seats, join(currentDir, 'model.stl')) : undefined;
+        if (problem) { seats = undefined; seatNote = problem; }
+      }
       current = {model: join('current', result.parts ? 'model.3mf' : 'model.stl'), renders, ...(sizeMm ? {sizeMm} : {}), ...(summary ? {summary} : {}),
         ...(result.parts && result.partColours?.length ? {filaments: result.partColours} : {}),
-        ...(result.changes?.length ? {changes: result.changes} : {}), ...(result.supports ? {supports: result.supports} : {}), engine, ...(design ? {design} : {})};
+        ...(result.changes?.length ? {changes: result.changes} : {}), ...(result.supports ? {supports: result.supports} : {}), engine, ...(design ? {design} : {}),
+        ...(seats?.length ? {seats} : {})};
     }
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
@@ -3201,7 +3300,8 @@ export class ObjectService {
       ...(state === 'failed' ? {failure, failedPass: startedAtMs} : {}),
       passes: withPassEnded(o.passes, startedAtMs, end, now, p => ({
         ...(result.engine ? {engine: result.engine} : {}), ...(result.note ? {engineNote: this.#publicText(result.note)} : {}),
-        ...(state === 'failed' ? {activity: this.#activity(p.activity, [{atMs: Date.now(), kind: 'message', text: failure}])} : {}),
+        ...(state === 'failed' || seatNote ? {activity: this.#activity(p.activity, [...(seatNote ? [{atMs: Date.now(), kind: 'message' as const, text: seatNote}] : []),
+          ...(state === 'failed' ? [{atMs: Date.now(), kind: 'message' as const, text: failure}] : [])])} : {}),
         ...(result.summary ? {summary: result.summary} : {}), seconds: result.stats.seconds, toolCalls: result.stats.toolCalls,
         ...(result.sessionId ? {sessionId: result.sessionId} : {}), ...(result.sessionCwd ? {sessionCwd: result.sessionCwd} : {}), checkpoints: result.checkpoints,
         ...(result.resume ? {resume: result.resume} : {}),
@@ -3230,8 +3330,64 @@ export class ObjectService {
         if (await mkdir(join(this.dir(id), 'asks'), {recursive: true}).then(() => askPicture(source, join(this.dir(id), target))).then(() => true, () => false)) { photo = target; break; }
       }
     }
-    return {id: askId, question: question.slice(0, 300), ...(photo ? {photo} : {}), ...(photo && result.ask?.region ? {region: result.ask.region} : {}),
-      answers: ['camera', 'photos', 'best-guess', 'text'], status: 'open', askedAtMs: Date.now()};
+    // Sizes to confirm or correct are their own kind: number fields, with words and a caliper photo beside them.
+    // `type` is left absent, so a client from before kinds shows the question and takes the answer in words.
+    // Checked against the contract here too: sizes that aren't whole never reach a client, and the question stands as words.
+    const listed = AskSchema.shape.sizes.safeParse(result.ask?.sizes?.map((size, index) => ({id: `size-${index + 1}`, label: size.label, mm: size.mm, from: size.from})));
+    const sizes = listed.success ? listed.data : undefined;
+    const base = {id: askId, question: question.slice(0, 300), ...(photo ? {photo} : {}), ...(photo && result.ask?.region ? {region: result.ask.region} : {}),
+      status: 'open' as const, askedAtMs: Date.now()};
+    const ask: NonNullable<StmObject['ask']> = sizes?.length ? {...base, kind: 'sizes', sizes, answers: ['sizes', 'text', 'camera']}
+      : {...base, kind: 'closeup', answers: ['camera', 'photos', 'best-guess', 'text']};
+    return ask;
+  }
+
+  /**
+   * A locate pass's ending (docs/protocols/seats.md): its seats join the current model when they make sense, and the
+   * project goes back to where it was. Nothing else of it is kept: an answer that comes with a model is refused.
+   */
+  async #finishLocate(id: string, startedAtMs: number, outcome: (TouchupResult & {passDir?: string; engine?: DesignEngine}) | {error: unknown}, before: StmObject['state']): Promise<StmObject> {
+    const store = this.#deps.store, now = Date.now();
+    let seats: Seat[] | undefined, reason: string | undefined;
+    if ('error' in outcome) reason = this.#closed ? 'Interrupted when your computer stopped Counterpart.' : this.#publicText(outcome.error instanceof Error ? outcome.error.message : String(outcome.error));
+    else if (outcome.model || outcome.parts) reason = 'The Mac changed the model while it was only finding where the object sits, so nothing from this pass was kept. The model is unchanged.';
+    else if (outcome.status !== 'done') reason = this.#publicText(outcome.reason ?? 'It couldn’t work out where the object sits.');
+    else if (!outcome.seats?.length) reason = 'It didn’t say where the object sits.';
+    else {
+      const object = await store.get(id);
+      reason = await this.#seatsProblem(object, outcome.seats, join(this.dir(id), 'current', 'model.stl'));
+      if (!reason) seats = outcome.seats;
+    }
+    const result = 'error' in outcome ? undefined : outcome;
+    const summary = seats ? (result?.summary ? this.#publicText(result.summary) : undefined) : reason;
+    const updated = await store.update(id, o => ({...o, state: o.state === 'touching-up' ? before : o.state, progress: undefined,
+      ...(seats && o.current ? {current: {...o.current, seats}} : {}),
+      // Closed through endPass like every pass; a locate pass never continues its session.
+      passes: withPassEnded(o.passes, startedAtMs, seats ? {status: 'done'} : {status: this.#closed ? 'interrupted' : 'failed', resumable: false}, now, p => ({
+        ...(result?.engine ? {engine: result.engine} : {}), ...(summary ? {summary} : {}),
+        ...(reason ? {activity: this.#activity(p.activity, [{atMs: now, kind: 'message', text: reason}])} : {}),
+        ...(result ? {seconds: result.stats.seconds, toolCalls: result.stats.toolCalls, ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {})} : {}),
+        ...(result?.passDir ? {dir: result.passDir} : {})}))}));
+    await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['current', 'passes']}});
+    return this.#changed(updated);
+  }
+
+  /** The companion's nonsense check on a worker's seats (docs/protocols/seats.md), in words for the pass's activity. */
+  async #seatsProblem(object: StmObject, seats: Seat[], partPath: string): Promise<string | undefined> {
+    const part = await stlFileBounds(partPath);
+    const scan = object.scan ? await this.#scanBounds(join(this.dir(object.id), 'scan', object.scan)) : undefined;
+    const problem = seatsProblem(seats, part, scan);
+    return problem ? `Counterpart didn’t keep where the object sits: ${problem}` : undefined;
+  }
+
+  readonly #scanBoxes = new Map<string, Bounds | undefined>();
+  /** The scan's box in the seat frame, once per scan file. */
+  async #scanBounds(path: string): Promise<Bounds | undefined> {
+    const info = await stat(path).catch(() => undefined);
+    if (!info) return undefined;
+    const key = `${path}#${info.mtimeMs}#${info.size}`;
+    if (!this.#scanBoxes.has(key)) this.#scanBoxes.set(key, await (this.#deps.scanBounds ?? defaultScanBounds)(path).catch(() => undefined));
+    return this.#scanBoxes.get(key);
   }
 
   async #fail(id: string, startedAtMs: number, error: unknown): Promise<StmObject> {
@@ -3258,5 +3414,9 @@ export class ObjectService {
   #handoff(): PrinterHandoffConfig { return this.#deps.runningHandoff?.() ?? this.#deps.handoff; }
   #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#handoff().process.env}); }
 
-  #changed(object: StmObject): StmObject { this.#deps.onChange?.(object); return object; }
+  #changed(object: StmObject): StmObject {
+    this.#deps.onChange?.(object);
+    if (object.state !== 'touching-up') this.#pictures.ensure(object, this.dir(object.id));
+    return object;
+  }
 }

@@ -1,4 +1,4 @@
-import type {WorkerLimit} from '../touchup/runner.js';
+import {limitWords, type WorkerLimit} from '../touchup/runner.js';
 import type {ObjectPass, StmObject} from './store.js';
 
 /** How a design pass ended, as stored and as every client reads it (`passes[].status`). A pass with none is running. */
@@ -61,4 +61,25 @@ export function failedPass(object: Pick<StmObject, 'state' | 'failure' | 'failed
   if (object.failedPass !== undefined || object.state !== 'failed' || !object.failure) return object.failedPass;
   const last = object.passes.at(-1);
   return last?.endedAtMs !== undefined && last.activity?.at(-1)?.text === object.failure ? last.startedAtMs : undefined;
+}
+
+/**
+ * How an ended pass reads in a project's history, on every client (`passes[].words`); undefined while it runs. The
+ * clients used to word the status themselves: the Mac matched spellings the companion never wrote and the phone and
+ * Linux printed the raw status ("needs_closeup", "capped").
+ */
+export function passWords(pass: Pick<ObjectPass, 'endedAtMs' | 'status' | 'limit'>): string | undefined {
+  if (pass.endedAtMs === undefined) return undefined;
+  switch (pass.status) {
+    case 'unchanged': return 'Nothing needed changing';
+    // Any question, not only a close-up: this status also ends a pass that asked to confirm sizes or pick a part
+    // (Nov 10: a size question read "Asked for a close-up" on real data).
+    case 'needs_closeup': return 'Asked you a question';
+    case 'needs_file': return "Asked for the designer's file";
+    case 'capped': return pass.limit ? limitWords(pass.limit) : 'Stopped at a limit';
+    case 'failed': return 'Stopped before it finished';
+    case 'interrupted': return 'Stopped when Counterpart restarted';
+    // `done`, and a pass from before statuses were kept.
+    default: return 'Finished';
+  }
 }

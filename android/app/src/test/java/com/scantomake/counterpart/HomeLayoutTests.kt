@@ -46,6 +46,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.isHeading
@@ -194,6 +198,42 @@ class HomeLayoutTests {
         assertEquals("Your project’s picture. No picture came with this question.", AskPicture.caption(null))
     }
 
+    /** A size question is number fields, not a camera (David answered one in a paragraph of caliper readings, Nov 10):
+     *  one field per size the computer asked about, in its words and prefilled, with Confirm; the numbers go back as
+     *  numbers, with projects present. */
+    @Test fun aSizeQuestionShowsItsNumbersPrefilledAndSendsNumbersWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"
+        val data = WireJson.parseToJsonElement(
+            """{"id":"$id","title":"Wall holder for three","instructions":"Make something that holds three of these","state":"needs-closeup","kind":"fit",
+               "createdAtMs":1,"updatedAtMs":2,"photos":[],"passes":[{"startedAtMs":1,"endedAtMs":2,"status":"needs_closeup"}],
+               "ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Can you confirm or correct what the scan reads?",
+                      "kind":"sizes","answers":["sizes","text","camera"],"status":"open",
+                      "sizes":[{"id":"size-1","label":"width at the widest point","mm":64,"from":"scan"},
+                               {"id":"size-2","label":"width at the waist","mm":53.5,"from":"scan"}]}}""").jsonObject
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        var sent: String? = null
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id/closeup") -> { sent = request.body?.toString(Charsets.UTF_8); HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray()) }
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNode(hasTestTag("ask-size-size-1")).performScrollTo().assertTextContains("64")
+        compose.onNode(hasTestTag("ask-size-size-2")).performScrollTo().assertTextContains("53.5")
+        compose.onNodeWithText("Width at the waist").assertExists()
+        compose.onAllNodes(hasText("Make Your Best Guess")).assertCountEquals(0)
+        compose.onAllNodes(hasText("Choose")).assertCountEquals(0)
+        compose.onNodeWithText("Caliper Photo").assertExists()
+        compose.onNode(hasTestTag("ask-sizes-confirm")).performScrollTo().assertTextContains("Confirm These Sizes").performClick()
+        compose.waitUntil(5_000) { sent != null }
+        val body = WireJson.parseToJsonElement(sent!!).jsonObject
+        assertEquals(WireJson.parseToJsonElement("""[{"id":"size-1","mm":64},{"id":"size-2","mm":53.5}]"""), body["sizes"])
+    }
+
     /** Review F2 on #456: a question picture that fails to load (the computer asleep) draws nothing, not an empty box
      *  under "The outlined part is what this question is about."; the question and its answers stay. */
     @Test fun aQuestionPictureThatFailsToLoadDrawsNothing() {
@@ -259,16 +299,37 @@ class HomeLayoutTests {
         compose.onNodeWithText("Needs you").assertExists()
     }
 
+    @Test fun aCardsLineNeverRepeatsItsPhaseWithProjectsPresent() {
+        val asking = requireNotNull(Project.decode(WireJson.parseToJsonElement(
+            """{"id":"asking","title":"Wall holder","instructions":"A useful part","state":"needs-closeup","createdAtMs":1,"updatedAtMs":2,""" +
+                """"status":{"phase":"needs-you","text":"Needs you · Can you confirm these sizes?","detail":"Can you confirm these sizes?","symbol":"hand.raised","tint":"orange"}}"""
+        ).jsonObject))
+        state.projects.value = listOf(asking, project("other", "Mic mount", "ready"))
+        state.loaded.value = true
+        home()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Wall holder"))
+        // The card is clickable and merges its children, so its line's tag is in the unmerged tree.
+        compose.onNodeWithTag("row-line-asking", useUnmergedTree = true).assertTextEquals("Can you confirm these sizes?")
+        compose.onAllNodes(SemanticsMatcher("text starts with the phase") { node ->
+            node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text.startsWith("Needs you · ") }
+        }, useUnmergedTree = true).assertCountEquals(0)
+        // With no detail from the computer (an older one), the line shows as before.
+        val plain = project("plain", "Cable clip", "ready")
+        assertEquals("Ready to print", com.scantomake.counterpart.api.rowLine(plain, "Ready to print"))
+    }
+
     @Test fun anOngoingPrintShowsTheCounterpartMarkAndTheRealObjectsPicture() = kotlinx.coroutines.runBlocking {
+        // The project's picture is the object alone, as the computer drew it; never the photo of the room (David, Nov 10).
         val p = project("4a4c5c44-7379-4a92-8a20-11a4710331a2", "Bottle holder", "printing")
-            .copy(photos = listOf("bottle.jpg"), capture = listOf("0001.heic"))
+            .copy(photos = listOf("bottle.jpg"), capture = listOf("0001.heic"),
+                raw = kotlinx.serialization.json.JsonObject(mapOf("picture" to kotlinx.serialization.json.JsonPrimitive("pictures/part-0123456789abcdef.png"))))
         state.projects.value = listOf(p, project("other", "Another project", "ready"))
         val folder = File(app.cacheDir, "${p.id}/${p.mediaVersion}").apply { mkdirs() }
-        val photo = File(folder, "photos_bottle.jpg")
+        val photo = File(folder, "pictures_part-0123456789abcdef.png")
         val bitmap = android.graphics.Bitmap.createBitmap(40, 40, android.graphics.Bitmap.Config.ARGB_8888)
         photo.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         try {
-            assertEquals("photos/bottle.jpg", p.posterName())
+            assertEquals("pictures/part-0123456789abcdef.png", p.posterName())
             org.junit.Assert.assertNotNull(com.scantomake.counterpart.app.NotificationPictures.refresh(p))
             val service = org.robolectric.Robolectric.buildService(com.scantomake.counterpart.app.WatchService::class.java).get()
             val notification = service.ongoing("Bottle holder", "Printing · 50%", p)

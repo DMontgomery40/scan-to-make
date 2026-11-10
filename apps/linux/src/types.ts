@@ -48,9 +48,20 @@ export interface RawQuestion {
   url?: string;
   requestedSchema?: unknown;
 }
+/** One size a question asks about, in millimetres. `id` is opaque; `label` says what to measure. */
+export interface AskSize {
+  id: string;
+  label: string;
+  mm: number;
+  from: "scan" | "published" | string;
+}
 export interface Ask {
   id: string;
   question: string;
+  /** closeup, file, choice, region, scale, sizes: what the project is waiting on the person for. */
+  kind?: string;
+  /** `sizes`: the sizes to confirm or correct, prefilled. */
+  sizes?: AskSize[];
   photo?: string;
   region?: { x: number; y: number; width: number; height: number };
   answers: string[];
@@ -117,6 +128,8 @@ export interface Pass {
   photos?: string[];
   summary?: string;
   status?: string;
+  /** How it ended, in the companion's words; absent while it runs. */
+  words?: string;
   activityCount?: number;
   stages?: { id: string; words: string; endedAtMs?: number }[];
 }
@@ -161,13 +174,20 @@ export interface Project {
     changes?: { tag: string; text: string }[];
     /** This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. */
     ownSettings?: boolean;
+    /** A fit's places for the scanned object (docs/protocols/seats.md). */
+    seats?: { name?: string; translationMm: number[]; rotationDeg: number[] }[];
   };
+  scan?: string;
+  /** The project's picture (PRD §5.1): the object alone on the stage, drawn by the computer. */
+  picture?: string;
+  pictures?: { part?: string; scan?: string; together?: string; photo?: string };
   files?: { original: string[] };
   plates?: Plate[];
   ask?: Ask;
   reconstructionReview?: ReconstructionReview;
   question?: { closeup: string };
-  status?: { text: string; phase: string; tint: string };
+  /** `detail`: what a list row shows under its phase's heading, never the heading again. */
+  status?: { text: string; phase: string; tint: string; detail?: string };
   printerDestinationId?: string;
   settings?: {
     status: string;
@@ -203,8 +223,11 @@ export interface Project {
         stage?: string;
       };
       problems: { code: string; message: string }[];
+      activeFilament?: { slot?: string; material?: string; color?: string };
     };
     events?: { atMs: number; message: string }[];
+    /** The spools this print uses (PRD §5.4). */
+    spools?: { index?: number; colour: string; material?: string; name?: string }[];
   };
 }
 export interface Printer {

@@ -377,7 +377,12 @@ struct AskButtons: View {
                 // slabs the floating New button lands on (F13).
                 HStack(alignment: .top, spacing: 8) {
                     if answers.contains("camera") {
-                        Button { answer(camera: true) } label: { StackLabel(text: "Camera", symbol: "camera.fill") }.buttonStyle(.glassProminent)
+                        // A size question's obvious action is Confirm; the camera is there for a caliper photo.
+                        if project.openAsk?.kind == "sizes" {
+                            Button { answer(camera: true) } label: { StackLabel(text: "Caliper photo", symbol: "camera") }.buttonStyle(.glass)
+                        } else {
+                            Button { answer(camera: true) } label: { StackLabel(text: "Camera", symbol: "camera.fill") }.buttonStyle(.glassProminent)
+                        }
                     }
                     if answers.contains("photos") {
                         Button { answer(camera: false) } label: { StackLabel(text: "Photos", symbol: "photo") }.buttonStyle(.glass)

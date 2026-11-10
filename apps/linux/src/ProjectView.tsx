@@ -4,6 +4,11 @@ import {
   AFTER_PRINTING,
   activePrint,
   askCaption,
+  KNOWN_ASK_KINDS,
+  sizeFields,
+  sizesAnswer,
+  sizeSource,
+  sizesUnchanged,
   canSelectPlate,
   clampRegion,
   projectThumbnail,
@@ -11,6 +16,8 @@ import {
   scanWords,
   didItFitQuestion,
   duration,
+  passHeading,
+  stageMark,
   words,
 } from "./domain";
 import { Picture, Stage } from "./Stage";
@@ -18,6 +25,7 @@ import { Question } from "./Question";
 import { PrintSheet } from "./PrintSheet";
 import { ReconstructionReviewCard } from "./ReconstructionReview";
 import { Action, Modal } from "./ui";
+import { noteAttempt } from "./queue";
 import type { useChangeQueue } from "./useChangeQueue";
 import type { Project, Printer, Ask } from "./types";
 type Mutate = (
@@ -133,6 +141,9 @@ function AskCard({
   const [selected, setSelected] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
+  // A size question's fields, prefilled once per question; what is sent is `sizesAnswer`'s rule.
+  const [fields, setFields] = useState(() => sizeFields(ask));
+  const sizes = fields && sizesAnswer(fields);
   return (
     <section className="question">
       <div className="eyebrow">Needs you</div>
@@ -198,9 +209,50 @@ function AskCard({
           Use selection
         </Action>
       )}
+      {fields && (
+        <div className="ask-sizes">
+          {fields.map((field, index) => (
+            <label className="field ask-size" key={field.id}>
+              <span>
+                {field.label.charAt(0).toUpperCase() + field.label.slice(1)}
+                <small> {sizeSource(field.from)}</small>
+              </span>
+              <span className="ask-size-input">
+                <input
+                  inputMode="decimal"
+                  aria-label={`${field.label}, millimetres`}
+                  data-testid={`ask-size-${field.id}`}
+                  value={field.text}
+                  onChange={(e) => setFields(fields.map((f, i) => (i === index ? { ...f, text: e.target.value } : f)))}
+                />{" "}
+                mm
+              </span>
+            </label>
+          ))}
+          {!sizes && <p className="hint">Enter each size in millimetres, or leave one empty if you don’t know it.</p>}
+          <Action
+            className="primary"
+            disabled={!sizes}
+            run={() =>
+              mutate("objects.answerCloseup", {
+                id: project.id,
+                bestGuess: false,
+                sizes,
+                ...(text.trim() ? { text: text.trim() } : {}),
+                ...(photos.length ? { photoNames: photos } : {}),
+              })
+            }
+          >
+            {sizesUnchanged(fields) ? "Confirm these sizes" : "Send these sizes"}
+          </Action>
+        </div>
+      )}
+      {ask.kind && !KNOWN_ASK_KINDS.includes(ask.kind) && (
+        <p className="hint">Update Counterpart on this computer to answer this kind of question here.</p>
+      )}
       {ask.answers.includes("text") && (
         <label className="field">
-          Your answer
+          {fields ? "Anything the numbers don’t say" : "Your answer"}
           <textarea
             value={text}
             maxLength={2000}
@@ -217,12 +269,12 @@ function AskCard({
             if (result.errors.length) throw new Error(result.errors.join("\n"));
           }}
         >
-          Add close-up photos…{photos.length ? ` (${photos.length})` : ""}
+          {fields ? "Add a caliper photo…" : "Add close-up photos…"}{photos.length ? ` (${photos.length})` : ""}
         </Action>
       )}
       {(text.trim() || photos.length > 0) && (
         <Action
-          className="primary"
+          className={fields ? undefined : "primary"}
           run={() =>
             mutate("objects.answerCloseup", {
               id: project.id,
@@ -311,6 +363,8 @@ export function ProjectView({
   const [camera, setCamera] = useState(false);
   const [stop, setStop] = useState(false);
   const [uncertain, setUncertain] = useState(false);
+  // This note's id across every try at sending it (queue.ts noteAttempt).
+  const attempt = useRef<{ text: string; id: string } | undefined>(undefined);
   const [error, setError] = useState("");
   const [activity, setActivity] = useState<
     Record<
@@ -356,7 +410,7 @@ export function ProjectView({
       </header>
       <div className="project-layout">
         <div className="project-main">
-          <Stage project={p} />
+          <Stage project={p} locate={() => void mutate("objects.locate", { id: p.id })} />
           {fit && (
             // After the print (Nov 8 walkthrough F1, PRD §5.4): the same question and answers as the other clients.
             <section className="question" aria-label={fit}>
@@ -597,7 +651,7 @@ export function ProjectView({
                             {item.pass.summary ??
                               item.pass.stages?.find((s) => !s.endedAtMs)
                                 ?.words ??
-                              item.pass.status ??
+                              item.pass.words ??
                               "Working…"}
                           </p>
                         </div>
@@ -683,11 +737,15 @@ export function ProjectView({
                         return;
                       }
                       try {
+                        const sending = noteAttempt(attempt.current, note.trim());
+                        attempt.current = sending;
                         await mutate("objects.correct", {
                           id: p.id,
                           note: note.trim(),
                           photoNames: attached,
+                          messageId: sending.id,
                         });
+                        attempt.current = undefined;
                         setNote("");
                         setAttached([]);
                       } catch (e) {
@@ -749,11 +807,12 @@ export function ProjectView({
               {p.passes.map((pass, i) => (
                 <section key={i}>
                   <h3>
-                    Pass {i + 1} · {pass.status ?? "Working"}
+                    {passHeading(pass, i)}
                   </h3>
-                  {pass.stages?.map((s) => (
+                  {pass.note && <p className="hint">Your change: “{pass.note}”</p>}
+                  {pass.stages?.map((s, stage) => (
                     <p key={s.id}>
-                      {s.endedAtMs ? "✓" : "◌"} {s.words}
+                      {stageMark(pass, stage)} {s.words}
                     </p>
                   ))}
                   <p>{pass.summary}</p>

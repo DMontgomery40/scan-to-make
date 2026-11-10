@@ -122,7 +122,8 @@ public struct ObjectWords: Sendable, Equatable {
         // The companion's own words when it sends them ("Getting ready · Heating", "The printer stopped: …"): never a
         // percent built here from the printer's raw progress, which can read 3% before printing has begun.
         let said = object.status?.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        status = draft ? Self.draftLine : said?.isEmpty == false ? said! : done ? "It works" : words.line
+        // The sidebar groups rows by phase, so a row never repeats its section's heading.
+        status = draft ? Self.draftLine : said?.isEmpty == false ? said! : done ? "It works" : ProjectWords.row(object, line: words.line)
         // A new project waits on the phone; the Mac can't tell an upload from an abandoned draft, so it isn't busy
         // (it would keep the Mac awake and polling for good).
         busy = object.state == .new ? false : words.busy || words.phase.isRunning

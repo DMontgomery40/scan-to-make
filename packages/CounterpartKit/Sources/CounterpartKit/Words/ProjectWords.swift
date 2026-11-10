@@ -88,6 +88,14 @@ public struct ProjectWords: Equatable, Sendable {
     public let size: String?
     public let actions: [ProjectAction]
 
+    /// The line under a project's title in a list grouped by phase (the iPad and Mac sidebars): the Mac's own detail
+    /// for that row, which never repeats the section's heading ("Needs you · …" under Needs you). Without one, the
+    /// card line as it is.
+    public static func row(_ project: Project, line: String) -> String {
+        guard let detail = project.status?.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty else { return line }
+        return detail
+    }
+
     /// The question after a finished print: "Did it fit?", or for a published model "Did it come out right?".
     public static func outcomeQuestion(_ project: Project) -> String {
         project.kind == "published" ? "Did it come out right?" : "Did it fit?"

@@ -113,7 +113,8 @@ data class Project(
     @Serializable data class Settings(val status: String? = null, val archived: Boolean? = null, val printerDestinationId: String? = null,
                                       val designEngine: String? = null, val notifications: String? = null)
     /** The companion's state line (`ObjectStatus`). Show `text` as is. */
-    @Serializable data class Status(val phase: String, val text: String, val symbol: String = "", val tint: String = "secondary")
+    /** `detail`: what a list row shows under its phase's heading or capsule, never the heading again. */
+    @Serializable data class Status(val phase: String, val text: String, val symbol: String = "", val tint: String = "secondary", val detail: String? = null)
     @Serializable data class Activity(val atMs: Double, val kind: String, val text: String)
     @Serializable data class Stage(val id: String, val words: String, val startedAtMs: Double, val endedAtMs: Double? = null, val typicalSec: Double? = null)
     @Serializable data class Estimate(val remainingSec: Double, val endsAtMs: Double)
@@ -126,14 +127,28 @@ data class Project(
     @Serializable data class Result(val model: String, val renders: List<String> = emptyList(), val sizeMm: List<Double>? = null,
                                     val summary: String? = null, val changes: List<Change>? = null, val engine: String? = null,
                                     /** This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. */
-                                    val ownSettings: Boolean? = null)
+                                    val ownSettings: Boolean? = null,
+                                    /** A fit's places for the scanned object, as its pass said (docs/protocols/seats.md). */
+                                    val seats: List<Seat>? = null)
+    /** The scan turned about the fixed X, then Y, then Z axes (`rotationDeg`), then moved (`translationMm`), into the part's frame. */
+    @Serializable data class Seat(val name: String? = null, val translationMm: List<Double>, val rotationDeg: List<Double>)
+    /** A spool a print used, as the printer MCP reported it when the print was sent. */
+    @Serializable data class Spool(val index: Int? = null, val colour: String, val material: String? = null, val name: String? = null)
     @Serializable data class Question(val closeup: String? = null)
     @Serializable data class Region(val x: Double, val y: Double, val width: Double, val height: Double)
     @Serializable data class Ask(
         val id: String, val question: String, val type: String? = null, val url: String? = null, val options: List<Option>? = null,
         val photo: String? = null, val region: Region? = null, val answers: List<String> = emptyList(), val status: String = "open",
         val askedAtMs: Double? = null,
-    ) { @Serializable data class Option(val id: String, val label: String, val detail: String? = null, val thumbnail: String? = null) }
+        /** closeup, file, choice, region, scale, sizes: what the project is waiting on the person for. */
+        val kind: String? = null,
+        /** `sizes`: the sizes to confirm or correct, prefilled. */
+        val sizes: List<Size>? = null,
+    ) {
+        @Serializable data class Option(val id: String, val label: String, val detail: String? = null, val thumbnail: String? = null)
+        /** One size in millimetres. `id` is opaque; `label` says what to measure; `from` is `scan` or `published`. */
+        @Serializable data class Size(val id: String, val label: String, val mm: Double, val from: String = "scan")
+    }
     @Serializable data class PrintDestination(val id: String, val name: String)
     @Serializable data class PrintEstimate(val seconds: Double? = null, val grams: Double? = null)
     @Serializable data class PrintMonitor(val phase: String, val startedAt: String? = null, val lastReportAt: String? = null,
@@ -143,15 +158,23 @@ data class Project(
         val estimate: PrintEstimate? = null, val printId: String? = null, val destinationId: String? = null,
         val dispatchedAt: String? = null, val jobName: String? = null, val live: PrintLive? = null, val monitor: PrintMonitor? = null,
         val sentVia: String? = null,
+        /** The spools this print uses (PRD §5.4): the result is drawn in them. */
+        val spools: List<Spool>? = null,
     )
+
+    /** The project's picture (PRD §5.1): the object alone on the stage, as the computer drew it (`pictures/…png`). */
+    val picture: String? get() = raw["picture"].str
+    /** Each gallery picture the computer drew: `part`, `scan`, `together`, `photo`. */
+    val pictures: Map<String, String> get() = raw["pictures"].obj?.mapNotNull { (key, value) -> value.str?.let { key to it } }?.toMap() ?: emptyMap()
 }
 
 /** The latest normalized printer report for a print (`PrintLive`). */
 @Serializable
 data class PrintLive(
     val state: String, val job: Job? = null, val observedAt: String? = null, val endsAt: String? = null, val temps: Temps? = null,
-    val problems: List<Problem>? = null,
+    val problems: List<Problem>? = null, val activeFilament: ActiveFilament? = null,
 ) {
+    @Serializable data class ActiveFilament(val slot: String? = null, val material: String? = null, val color: String? = null)
     @Serializable data class Job(val name: String = "", val progress: Double? = null, val elapsedSec: Double? = null, val remainingSec: Double? = null,
                                  val layer: Int? = null, val totalLayers: Int? = null, val stage: String? = null)
     @Serializable data class Temperature(val actual: Double, val target: Double)
