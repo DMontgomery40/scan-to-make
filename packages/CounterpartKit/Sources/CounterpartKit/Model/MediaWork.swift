@@ -9,6 +9,8 @@ import Foundation
     }
     private final class Entry {
         let generation = UUID()
+        let context = MediaTrace.context
+        let trace = MediaTrace.destination ?? .shared
         var waiters: [UUID: Waiter] = [:]
         var worker: Task<Void, Never>?
         var deadline: Task<Void, Never>?
@@ -29,7 +31,7 @@ import Foundation
                 // Cancellation marks demand synchronously, before its actor cleanup is enqueued.
                 // A reopen in that gap must not join an operation with no remaining demand.
                 if let entry = entries[key] {
-                    for id in entry.waiters.keys where entry.waiters[id]?.demand.cancelled == true { cancel(key, waiter: id) }
+                    for id in Array(entry.waiters.keys) where entry.waiters[id]?.demand.cancelled == true { cancel(key, waiter: id) }
                 }
                 if let entry = entries[key] {
                     MediaTrace.record("\(label).join", ["owner": entry.generation.uuidString])
@@ -45,6 +47,7 @@ import Foundation
                 entries[key] = entry
                 MediaTrace.record("\(label).new", ["owner": entry.generation.uuidString])
                 entry.worker = Task { [weak self] in
+                    guard !Task.isCancelled else { return }
                     let value = await operation()
                     self?.finish(key, generation: entry.generation, value: value, reason: value == nil ? "failed" : "ready")
                 }
@@ -67,13 +70,13 @@ import Foundation
         guard let entry = entries[key], entry.generation == generation else { return }
         entries[key] = nil
         entry.deadline?.cancel(); entry.worker?.cancel()
-        MediaTrace.record("\(label).\(reason)", ["owner": generation.uuidString])
+        entry.trace.record("\(label).\(reason)", ["owner": generation.uuidString], context: entry.context)
         let waiters = entry.waiters.values; entry.waiters = [:]
         for waiter in waiters { waiter.continuation.resume(returning: waiter.demand.cancelled ? nil : value) }
         entry.worker = nil; entry.deadline = nil
     }
     func cancelAll() {
-        for (key, entry) in entries { finish(key, generation: entry.generation, value: nil, reason: "deferred") }
+        for (key, entry) in Array(entries) { finish(key, generation: entry.generation, value: nil, reason: "deferred") }
     }
 }
 

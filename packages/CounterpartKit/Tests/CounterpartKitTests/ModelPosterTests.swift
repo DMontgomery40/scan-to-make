@@ -10,6 +10,12 @@ final class ModelPosterTests: XCTestCase {
         ModelEntity(mesh: .generateBox(size: 0.1), materials: [SimpleMaterial(color: .orange, isMetallic: false)])
     }
 
+    @MainActor private static func waitUntil(_ condition: () -> Bool) async {
+        let end = ContinuousClock.now.advanced(by: .seconds(2))
+        while !condition(), ContinuousClock.now < end { try? await Task.sleep(for: .milliseconds(1)) }
+        XCTAssertTrue(condition(), "The operation must start within two seconds")
+    }
+
     @MainActor func testEmptyEntityAndTransparentPixelsAreFailures() async {
         let cache = ModelEntityCache(limit: 1)
         let empty = await cache.load(key: "empty") { Entity() }
@@ -26,7 +32,7 @@ final class ModelPosterTests: XCTestCase {
         let cache = ModelEntityCache(limit: 2, timeout: .milliseconds(30))
         var late: CheckedContinuation<Entity?, Never>?
         let hung = Task { await cache.load(key: "same") { await withCheckedContinuation { late = $0 } } }
-        while late == nil { await Task.yield() }
+        await Self.waitUntil { late != nil }
         let other = await cache.load(key: "other") { Self.box() }
         XCTAssertNotNil(other, "One stuck mesh must not monopolize the owner")
         let expired = await hung.value
@@ -43,7 +49,7 @@ final class ModelPosterTests: XCTestCase {
         let cache = ModelEntityCache(limit: 2)
         var late: CheckedContinuation<Entity?, Never>?
         let page = Task { await cache.load(key: "same") { await withCheckedContinuation { late = $0 } } }
-        while late == nil { await Task.yield() }
+        await Self.waitUntil { late != nil }
         page.cancel()
         let cancelled = await page.value
         XCTAssertNil(cancelled, "Cancellation settles without waiting for the framework")
@@ -57,7 +63,7 @@ final class ModelPosterTests: XCTestCase {
             let work = MediaWork<Int>(label: label)
             var late: CheckedContinuation<Int?, Never>?
             let pending = Task { await work.run(key: "same") { await withCheckedContinuation { late = $0 } } }
-            while late == nil { await Task.yield() }
+            await Self.waitUntil { late != nil }
             work.cancelAll()
             let deferred = await pending.value
             XCTAssertNil(deferred)
@@ -80,6 +86,62 @@ final class ModelPosterTests: XCTestCase {
         let settled = await page.value
         XCTAssertFalse(settled)
         cancelled.finish(true)
+    }
+
+    @MainActor func testAllTransparentRendererOutputIsNotCachedAsSuccess() async throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal is unavailable on this host") }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let trace = MediaTrace(url: folder.appendingPathComponent("media-trace.ndjson"))
+        let context = MediaTrace.Context(project: "transparent", version: "1", generation: "render", scene: "active")
+        var material = PhysicallyBasedMaterial()
+        material.blending = .transparent(opacity: .init(floatLiteral: 0))
+        let invisible = ModelEntity(mesh: .generateBox(size: 0.1), materials: [material])
+        let results = await MediaTrace.$destination.withValue(trace) {
+            await MediaTrace.$context.withValue(context) {
+                let empty = await ModelPoster.image(key: "transparent-retry", model: invisible, yaw: 0, pitch: 0, fit: 0.2)
+                let repaired = await ModelPoster.image(key: "transparent-retry", model: Self.box(), yaw: 0, pitch: 0, fit: 0.2)
+                return (empty, repaired)
+            }
+        }
+        XCTAssertNil(results.0)
+        XCTAssertNotNil(results.1, "A transparent output must remain retryable with visible geometry")
+        let rows = try String(contentsOf: trace.url, encoding: .utf8).split(separator: "\n").map {
+            try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: String]
+        }
+        for event in ["poster.renderer-made", "poster.submitted", "poster.whenScheduled", "poster.onComplete", "poster.readback"] {
+            XCTAssertTrue(rows.contains { $0["event"] == event && $0["project"] == "transparent" && $0["generation"] == "render" })
+        }
+        XCTAssertTrue(rows.contains { $0["event"] == "poster.readback" && $0["visiblePixels"] == "0" })
+        XCTAssertTrue(rows.contains { $0["event"] == "poster.failed" })
+        XCTAssertTrue(rows.contains { $0["event"] == "poster.ready" })
+    }
+
+    @MainActor func testSceneDeferralOutsideTaskContextRetainsOperationCorrelation() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let trace = MediaTrace(url: folder.appendingPathComponent("media-trace.ndjson"))
+        let work = MediaWork<Int>(label: "mesh")
+        let context = MediaTrace.Context(project: "p", version: "9", generation: "cancel-me")
+        var finish: CheckedContinuation<Int?, Never>?
+        let pending = Task {
+            await MediaTrace.$destination.withValue(trace) {
+                await MediaTrace.$context.withValue(context) {
+                    await work.run(key: "same") { await withCheckedContinuation { finish = $0 } }
+                }
+            }
+        }
+        await Self.waitUntil { finish != nil }
+        work.cancelAll() // SwiftUI scene callbacks have no task-local media context.
+        let result = await pending.value
+        XCTAssertNil(result)
+        finish?.resume(returning: 1)
+        let text = try String(contentsOf: trace.url, encoding: .utf8)
+        XCTAssertTrue(text.contains("mesh.deferred"))
+        let last = try XCTUnwrap(text.split(separator: "\n").last)
+        let row = try JSONSerialization.jsonObject(with: Data(last.utf8)) as! [String: String]
+        XCTAssertEqual(row["generation"], "cancel-me")
+        XCTAssertEqual(row["project"], "p")
     }
 
     @MainActor func testARExportProducesANonemptyFileOnDemand() async throws {
@@ -142,7 +204,7 @@ final class ModelPosterTests: XCTestCase {
             starts += 1
             return await withCheckedContinuation { finishOld = $0 }
         } }
-        while finishOld == nil { await Task.yield() }
+        await Self.waitUntil { finishOld != nil }
         let peer = Task { @MainActor in await cache.load(key: "old") { starts += 1; return nil } }
         await Task.yield()
         old.cancel()
@@ -178,7 +240,7 @@ final class ModelPosterTests: XCTestCase {
         let old = Task { @MainActor in await cache.load(key: "model") {
             await withCheckedContinuation { finishOld = $0 }
         } }
-        while finishOld == nil { await Task.yield() }
+        await Self.waitUntil { finishOld != nil }
         old.cancel()
         cache.removeAll()
         let started = expectation(description: "Reopened window starts its own load")
