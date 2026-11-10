@@ -103,7 +103,7 @@ def drawn(image, area: tuple[float, float, float, float], scale: float, exclude:
         xs = [x for x in range(2, w - 2) if pixels[x, y]]
         spans.append((xs[-1] - xs[0]) if len(xs) >= 6 else 0)
     spans.sort(reverse=True)
-    length = sum(1 for v in edges.crop((3, 3, w - 3, h - 3)).getdata() if v) / scale  # the crop's own border is no drawing
+    length = sum(1 for v in edges.crop((3, 3, w - 3, h - 3)).get_flattened_data() if hasattr(edges, 'get_flattened_data') else edges.crop((3, 3, w - 3, h - 3)).getdata() if v) / scale  # the crop's own border is no drawing
     return length, (spans[min(4, len(spans) - 1)] if spans else 0) / scale  # the fifth-widest row, not one stray row
 
 
@@ -151,23 +151,29 @@ def check_frame(png: Path, tree) -> list[str]:
     problems = stage_states(image, elements, scale, width, screen_h)
     has_state = any(n['id'] == 'gallery-stage-picture' for n in elements)
     controls = [n for n in elements if STAGE_CONTROL.search(n['label'].strip()) and n['rect']['height'] < 80]
-    if controls and not has_state:
-        bottom = max(n['rect']['y'] + n['rect']['height'] for n in controls)
-        top_of_controls = min(n['rect']['y'] for n in controls)
-        left = min(n['rect']['x'] for n in controls) - 16
-        right = max(n['rect']['x'] + n['rect']['width'] for n in controls) + 16
-        # The stage: the full width of its controls' row, from well above them down to just over them.
-        area = (max(0.0, left), max(0.0, top_of_controls - 220), min(width, right), max(0.0, top_of_controls - 4))
-        within = [n for n in elements if inside(n['rect'], (area[0], area[1], area[2], bottom))]
+    # The model stage: on main the whole stage is one large "Explore in 3D" element; otherwise it is the area above the
+    # chips along its bottom (the size chip, "N photos", "AR"). Its small "Explore in 3D" label sits at its top.
+    big = [n for n in elements if n['label'].strip().lower() == 'explore in 3d' and n['rect']['height'] >= 150]
+    bottom_controls = [n for n in controls if n['label'].strip().lower() != 'explore in 3d']
+    area = None
+    if big:
+        r = big[0]['rect']
+        area = (max(0.0, r['x']), max(0.0, r['y']), min(width, r['x'] + r['width']), min(screen_h, r['y'] + r['height']))
+    elif bottom_controls:
+        top = min(n['rect']['y'] for n in bottom_controls)
+        left = min(n['rect']['x'] for n in bottom_controls) - 16
+        right = max(n['rect']['x'] + n['rect']['width'] for n in bottom_controls) + 16
+        area = (max(0.0, left), max(0.0, top - 220), min(width, right), max(0.0, top - 4))
+    if area and not has_state and area[3] - area[1] > 60:
+        within = [n for n in elements if n not in big and inside(n['rect'], area)]
         busy = [n for n in within if PROGRESS.search(n['role']) or PROGRESS.search(n['label'])]
-        words = [n for n in within if TEXT.search(n['role']) and n['label'].strip() and not STAGE_CONTROL.search(n['label'].strip())
-                 and n['rect']['y'] < area[3]]
-        if area[3] - area[1] > 60 and not busy and not words:
-            edge, _ = measure(image, area, scale, [n for n in within if n['rect']['y'] < area[3]])
-            if edge < EDGE_BLANK:
-                labels = ', '.join(sorted({n['label'].strip() for n in controls}))
-                problems.append(f'empty stage: nothing drawn above its controls ({labels}), no progress and no words '
-                                f'(detail {edge:.2f} < {EDGE_BLANK})')
+        words = [n for n in within if TEXT.search(n['role']) and n['label'].strip() and not STAGE_CONTROL.search(n['label'].strip())]
+        overlays = [n for n in within if n['rect']['height'] < 60]
+        length, _ = drawn(image, area, scale, overlays)
+        if not busy and not words and length < SHOWN_MIN_PT:
+            labels = ', '.join(sorted({n['label'].strip() for n in controls}))
+            problems.append(f'empty stage: nothing drawn on it ({length:.0f} pt of drawn edge; its controls: {labels}), '
+                            f'no progress and no words')
     for node in elements:
         r = node['rect']
         # A content picture: unlabelled (labelled images are symbols and icons), at least 64 pt, wholly on screen.
