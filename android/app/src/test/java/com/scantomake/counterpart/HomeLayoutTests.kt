@@ -35,6 +35,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsOff
@@ -387,6 +388,23 @@ class HomeLayoutTests {
         compose.onNodeWithTag("send").assertTextContains("Save this scan")
     }
 
+    /** Review F4: a fit with words and "I measured" but no measurement: Send focuses the first field and says what's missing there. */
+    @Config(qualifiers = "w411dp-h891dp")
+    @Test fun sendOnAFitMissingItsMeasurementGoesToTheFields() {
+        app.prefs.edit().putString("CounterpartNewDraftId", "scan-draft").commit()
+        val capture = File(File(app.filesDir, "Captures"), "scan-draft").apply { mkdirs() }
+        File(capture, "finished").writeText("")
+        File(capture, "0000.jpg").writeBytes(byteArrayOf(1))
+        compose.setContent { WithApp { NewProjectScreen(job = null, close = {}, started = {}, scan = {}) } }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("scan-use")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("scan-use-fit").performScrollTo().performClick()
+        compose.onNodeWithTag("describe").performScrollTo().performTextInput("A wall holder for it")
+        compose.onNodeWithTag("fit-size-measured").performScrollTo().performClick()
+        compose.onNodeWithTag("send").performClick()
+        compose.onNodeWithTag("fit-size-missing").assertIsDisplayed().assertTextContains("Enter at least one measurement in millimetres.")
+        compose.onNodeWithTag("fit-size-longest").assertIsFocused()
+    }
+
     /** First look U14 (Nov 10): the second starter was cut off at the margin. Two fit whole on a phone; a third peeks. */
     @Test fun starterCardsFitWholeOrPeekDeliberately() {
         assertTrue(com.scantomake.counterpart.ui.starterCardWidth(800.dp, 2) == 256.dp)
@@ -414,6 +432,46 @@ class HomeLayoutTests {
         compose.onNodeWithText("Projects, printers, notes").performTextInput("holder")
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("search-reason")).fetchSemanticsNodes().isNotEmpty() }
         compose.onAllNodes(hasTestTag("search-reason")).assertCountEquals(1)
+    }
+
+    /** Review F2: a project's printer saved under its other MCP's id is still that printer, as iOS and the print sheet resolve it. */
+    @Test fun aPrinterSavedUnderItsOtherMcpsIdIsStillThatPrinter() {
+        val catalog = PrinterCatalog(listOf(PrinterDestination(id = "current", name = "P1S", backend = "bambu-printer-mcp",
+            mcps = listOf(PrinterDestination.McpChoice("bambu-printer-mcp", "current"), PrinterDestination.McpChoice("mcp-3d-printer-server", "mcp-1a2b")))), "current")
+        assertTrue(catalog.resolved("mcp-1a2b")?.id == "current")
+        assertTrue(catalog.resolved(null)?.id == "current")
+        assertTrue(catalog.resolved("gone") == null)
+        state.catalog.value = catalog
+        assertTrue(state.printerName(project("a", "Clip", "ready").copy(printerDestinationId = "mcp-1a2b")) == "P1S")
+    }
+
+    /** Review F5: a project without a title still explains its match; a cut never splits an emoji; archived results explain too. */
+    @Test fun searchReasonsSurviveNoTitleEmojiAndArchive() {
+        val untitled = project("u", "x", "ready").copy(title = null, instructions = "A hook for the stroller handle")
+        val reason = requireNotNull(com.scantomake.counterpart.ui.searchSnippet(untitled, "stroller") { null })
+        assertTrue(reason.text, reason.text.contains("stroller handle"))
+        val emoji = "\uD83D\uDE42".repeat(40)
+        val noisy = project("n", "Clip", "ready").copy(instructions = emoji + "holder" + emoji)
+        val cut = requireNotNull(com.scantomake.counterpart.ui.searchSnippet(noisy, "holder") { null })
+        assertTrue(cut.text.substring(cut.start, cut.end) == "holder")
+        assertTrue("no half of a surrogate pair: ${cut.text}", cut.text.indices.none { i ->
+            (Character.isHighSurrogate(cut.text[i]) && (i + 1 >= cut.text.length || !Character.isLowSurrogate(cut.text[i + 1]))) ||
+                (Character.isLowSurrogate(cut.text[i]) && (i == 0 || !Character.isHighSurrogate(cut.text[i - 1])))
+        })
+        // On Home: an archived project matched only in its instructions carries the reason too.
+        val archived = requireNotNull(Project.decode(WireJson.parseToJsonElement(
+            """{"id":"z","title":"Old hanger","instructions":"The main holder hooks over the desk","state":"ready","createdAtMs":1,"updatedAtMs":2,"settings":{"archived":true}}"""
+        ).jsonObject))
+        state.projects.value = listOf(archived, project("w", "Wall holder for three", "ready"))
+        state.loaded.value = true
+        home()
+        compose.onNodeWithContentDescription("Search").performClick()
+        compose.onNodeWithText("Projects, printers, notes").performTextInput("holder")
+        // Home is a LazyColumn: the archived section is below the matching card, so bring its row into view first.
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Old hanger"))
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("search-reason")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodes(hasTestTag("search-reason")).assertCountEquals(1)
+        compose.onNodeWithTag("search-reason").assertTextContains("holder", substring = true)
     }
 
     @Test fun theStartersAreOnTheEmptyHomeToo() {

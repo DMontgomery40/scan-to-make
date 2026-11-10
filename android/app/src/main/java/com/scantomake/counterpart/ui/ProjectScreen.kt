@@ -77,6 +77,7 @@ import com.scantomake.counterpart.api.Format
 import com.scantomake.counterpart.api.NoteAttempt
 import com.scantomake.counterpart.api.PrintConfirmation
 import com.scantomake.counterpart.api.Project
+import com.scantomake.counterpart.api.MainAction
 import com.scantomake.counterpart.api.ProjectAction
 import com.scantomake.counterpart.api.ProjectPhase
 import com.scantomake.counterpart.api.ProjectStatus
@@ -313,13 +314,26 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 itWorks = { run("fit") { app.companion.setStatus(id, ProjectStatus.Works)?.let(state::show) ?: state.reload(id) } },
                 needsChanges = { run("fit") { app.companion.setStatus(id, ProjectStatus.NeedsChanges)?.let(state::show) ?: state.reload(id) } })
 
-            if (ProjectAction.Print in words.actions || ProjectAction.PrintChecked in words.actions) PrimaryButton("Print", Modifier.fillMaxWidth(), icon = CIcons.Printer, enabled = working == null, onClick = print)
+            // One filled control on the page, the one `words.page` leads with; everything else is plain.
+            val page = words.page
+            val retry: () -> Unit = { run("retry") { state.show(app.companion.start(id)) } }
+            if (page.main == MainAction.Retry) PrimaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = working == null, onClick = retry)
+            // Print once, under what it is here ("Print the last version", "Print Again", "Print Another"), and never while a change is being made.
+            page.printWords?.let { printWords ->
+                if (page.printIsMain) PrimaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = working == null, onClick = print)
+                else SecondaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = working == null, onClick = print)
+                page.printNote?.let { Text(it, color = Palette.secondary, fontSize = 13.sp) }
+            }
             if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth(), enabled = working == null) {
                 state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) }
             }
-            if (ProjectAction.Scan in words.actions) SecondaryButton(if (Media.captureFinished(context, id)) "Scan Again" else "Scan It", Modifier.fillMaxWidth(), icon = CIcons.Cube, onClick = scan)
-            if (ProjectAction.MakeIt in words.actions) PrimaryButton("Make It", Modifier.fillMaxWidth(), enabled = working == null) { run("start") { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
-            if (ProjectAction.Retry in words.actions) SecondaryButton("Try Again", Modifier.fillMaxWidth(), icon = CIcons.Refresh, enabled = working == null) { run("retry") { state.show(app.companion.start(id)) } }
+            if (ProjectAction.Scan in words.actions) {
+                val label = if (Media.captureFinished(context, id)) "Scan Again" else "Scan It"
+                if (page.main == MainAction.Scan) PrimaryButton(label, Modifier.fillMaxWidth(), icon = CIcons.Cube, onClick = scan)
+                else SecondaryButton(label, Modifier.fillMaxWidth(), icon = CIcons.Cube, onClick = scan)
+            }
+            if (ProjectAction.MakeIt in words.actions) SecondaryButton("Make It", Modifier.fillMaxWidth(), enabled = working == null) { run("start") { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
+            if (ProjectAction.Retry in words.actions && page.main != MainAction.Retry) SecondaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = working == null, onClick = retry)
 
             // Ask for changes: a new pass with your words (and photos).
             if (ProjectAction.Correct in words.actions) GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -331,7 +345,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     }
                     if (messagePhotos.value.isNotEmpty()) Text("${messagePhotos.value.size} photo(s)", color = Palette.secondary)
                 }
-                PrimaryButton("Send Changes", Modifier.fillMaxWidth(), enabled = note.isNotBlank() && working == null, icon = CIcons.Send) {
+                // Sends the typed note; not a page action, so it stays plain beside the page's one filled control.
+                SecondaryButton("Send Changes", Modifier.fillMaxWidth(), enabled = note.isNotBlank() && working == null, icon = CIcons.Send) {
                     run("correct") {
                         val attempt = NoteAttempt.of(noteAttempt, note.trim(), messagePhotos.value.map { it.path }).also { noteAttempt = it }
                         val names = Media.sendPhotos(app.uploader, id, messagePhotos.value, forMessage = true)

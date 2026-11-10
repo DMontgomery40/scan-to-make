@@ -20,8 +20,8 @@ internal fun searchProjects(projects: List<Project>, query: String, printerName:
         query.isBlank() || searchValues(p, printerName).any { it.contains(query.trim(), ignoreCase = true) }
     }
 
-/** Every value a search reads, the title first. */
-private fun searchValues(p: Project, printerName: (Project) -> String?): List<String> = listOfNotNull(p.title, p.instructions, printerName(p))
+/** Every value a search reads, the title first, always in first place, so a project without one keeps its other values (review F5). */
+private fun searchValues(p: Project, printerName: (Project) -> String?): List<String> = listOf(p.title ?: "") + listOfNotNull(p.instructions, printerName(p))
 
 /** A search result's reason: a short line with the match at [start, end). */
 internal data class SearchSnippet(val text: String, val start: Int, val end: Int)
@@ -41,6 +41,9 @@ internal fun searchSnippet(p: Project, query: String, printerName: (Project) -> 
         var end = minOf(line.length, at + needle.length + 70)
         if (start > 0) { val space = line.indexOf(' ', start); if (space in 0 until at) start = space + 1 }
         if (end < line.length) { val space = line.lastIndexOf(' ', end); if (space > at + needle.length) end = space }
+        // Never inside a character: an emoji is two UTF-16 units (review F5).
+        if (start in 1 until line.length && Character.isLowSurrogate(line[start])) start -= 1
+        if (end in 1 until line.length && Character.isLowSurrogate(line[end])) end += 1
         val lead = if (start > 0) "…" else ""
         val text = lead + line.substring(start, end) + if (end < line.length) "…" else ""
         return SearchSnippet(text, lead.length + at - start, lead.length + at - start + needle.length)

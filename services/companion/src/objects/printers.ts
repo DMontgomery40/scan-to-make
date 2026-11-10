@@ -188,13 +188,17 @@ async function metadata(config: PrinterHandoffConfig, envPath?: string) {
 }
 
 /**
- * The name a printer gets when nobody named it: its model, else where it is. Never a bare brand ("Bambu printer"), which
- * says nothing when it's the only line about the printer (first look U9, Nov 10). Once its MCP reports the model
- * (`counterpart_printer_info`), the printer list uses that instead (`PrinterDirectory.list`).
+ * The name of a printer nobody named, until its MCP reports one (`counterpart_printer_info`, shown exactly as given by
+ * `PrinterDirectory.list`): "Your printer", and "Printer 2", "Printer 3" in the order they were added when several are
+ * unnamed at once. Never an address (lead, Nov 10: it tells a person nothing, changes with the router, and a name travels to
+ * read-only clients, notifications and the Live Activity), and never a brand, model or casing the companion composes.
  */
-export function defaultName(backend: PrinterBackend, model?: string, address?: string): string {
-  if (model) return `${backend === 'bambu-printer-mcp' ? 'Bambu Lab ' : ''}${model.toUpperCase()}`;
-  return address ? `Printer at ${address}` : 'Your printer';
+export const UNNAMED_PRINTER = 'Your printer';
+
+/** Every name the companion makes, or older builds made, for a printer nobody named. A person's own name is none of these. */
+export function isGeneratedName(name: string): boolean {
+  return name === UNNAMED_PRINTER || /^Printer \d+$/.test(name) || name.startsWith('Printer at ')
+    || name === 'Bambu printer' || name === 'Configured printer';
 }
 
 function profileEntries(document: RecordValue, scope: string[] = []): {key: string; name: string; value: unknown}[] {
@@ -313,7 +317,7 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
     && currentConfig.process.args[0] === options.placeholderEntryPoint
     && !currentConfig.process.cwd && !currentConfig.process.env && !currentConfig.selection
     && currentMetadata.keys.length === 0 && !currentMetadata.model;
-  const candidates: Candidate[] = [{id: 'current', name: defaultName(currentConfig.backend, currentMetadata.model, currentMetadata.address), backend: currentConfig.backend,
+  const candidates: Candidate[] = [{id: 'current', name: UNNAMED_PRINTER, backend: currentConfig.backend,
     ...(currentMetadata.model ? {model: currentMetadata.model} : {}), ...(currentMetadata.address ? {address: currentMetadata.address} : {}),
     source: 'current', origin: 'printer-handoff', keys: currentMetadata.keys, bambuKind: currentMetadata.bambuKind,
     ...(currentMetadata.serial ? {serial: currentMetadata.serial} : {}), config: currentConfig}];
@@ -384,7 +388,7 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
       };
       const id = `mcp-${createHash('sha256').update(`${path}\0${key}`).digest('hex').slice(0, 24)}`;
       const label = name.trim().replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120);
-      candidates.push({id, name: label || defaultName(backend, meta.model, meta.address), backend, address: meta.address,
+      candidates.push({id, name: label || UNNAMED_PRINTER, backend, address: meta.address,
         ...(meta.model ? {model: meta.model} : {}), source: 'mcp-profile', origin, keys: meta.keys, bambuKind: meta.bambuKind,
         ...(meta.serial ? {serial: meta.serial} : {}), config});
     }
@@ -440,8 +444,10 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
   }
   const listed = candidates.filter(candidate => chosen.get(candidate) === candidate && !(placeholder && candidate.id === 'current'));
   const defaultDestinationId = (placeholder ? listed[0]?.id : undefined) ?? canonical.get('current')!;
+  // Printers nobody named, in the order they were added: "Your printer", then "Printer 2", "Printer 3".
+  const unnamed = new Map(listed.filter(item => isGeneratedName(item.name)).map((item, index) => [item.id, index === 0 ? UNNAMED_PRINTER : `Printer ${index + 1}`]));
   const destinations: PrinterDestination[] = [...listed.filter(item => item.id === defaultDestinationId), ...listed.filter(item => item.id !== defaultDestinationId)]
-    .map(({id, name, backend, model, address, source, origin, folder, incomplete}) => ({id, name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin,
+    .map(({id, name, backend, model, address, source, origin, folder, incomplete}) => ({id, name: unnamed.get(id) ?? name, backend, ...(model ? {model} : {}), ...(address ? {address} : {}), source, origin,
       ...(aliases.has(id) ? {aliases: aliases.get(id)!} : {}),
       ...(alternatives.has(id) ? {mcps: alternatives.get(id)!} : {}), ...(origin === 'counterpart' && folder ? {folder} : {}), ...(incomplete ? {incomplete} : {})}));
   return {defaultDestinationId, destinations, configs, canonical, candidates, choiceKeys};

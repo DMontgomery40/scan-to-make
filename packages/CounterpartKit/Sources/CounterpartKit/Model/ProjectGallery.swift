@@ -164,6 +164,31 @@ extension Project {
             && (current?.seats ?? []).isEmpty && state != .printing && state != .touchingUp
     }
 
+    /// What a stage fetches to draw a scan (PRD §5.4). Nov 10: every "What you scanned" on David's phone was blank; one
+    /// rebuild was 192 MB, the Mac refused it, and the stage had nothing else to draw.
+    public enum ScanModel: Equatable, Sendable {
+        /// A file this device may fetch: `scan/<name>`.
+        case file(String)
+        /// Every file of this scan is larger than this device takes: its picture stays, and says so.
+        case tooLarge
+        /// No scan model to fetch.
+        case none
+    }
+
+    /// The scan model a stage draws, never a file over `limit` (the bytes this device downloads). What you scanned draws
+    /// the phone's own model when a Mac rebuild sits beside it: made to be shown on a phone, a few MB where the rebuild
+    /// can be hundreds. Together draws the scan itself, the frame its seats are in (docs/protocols/seats.md); the two
+    /// models' frames differ. A Mac that doesn't list its scan files is asked for the scan as before; a refusal leaves
+    /// the picture.
+    public func scanModel(together: Bool = false, limit: Double) -> ScanModel {
+        guard let scan, ["usdz", "usdc", "usda", "stl"].contains((scan as NSString).pathExtension.lowercased()) else { return .none }
+        guard let files = scanFiles else { return .file("scan/\(scan)") }
+        for name in together ? [scan] : ["phone-preview.usdz", scan] {
+            if let file = files.first(where: { $0.name == name }), file.bytes <= limit { return .file("scan/\(name)") }
+        }
+        return files.contains { $0.name == scan } ? .tooLarge : .none
+    }
+
     /// The page's picture when the gallery has nothing yet (photos sent, no scan model or result): the subject the Mac
     /// cut out of the photo, the same picture the project's card shows.
     public var photoPicture: String? { pictures?["photo"] }

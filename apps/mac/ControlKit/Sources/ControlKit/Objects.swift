@@ -619,6 +619,13 @@ public struct PrinterCatalog: Decodable, Sendable, Equatable {
     public func destination(for id: String) -> PrinterDestination? {
         destinations.first { $0.id == id } ?? destinations.first { $0.aliases?.contains(id) == true }
     }
+    /// The printer a saved id stands for now, as the print sheet resolves it: itself, a recorded alias, or the printer it
+    /// is listed under when the id is its id through its other MCP (review F2: matched exactly, a project's printer read
+    /// as gone when it was only listed under the other MCP). Nil for no id or an id nothing lists; the caller falls back.
+    public func resolved(_ id: String?) -> PrinterDestination? {
+        guard let id else { return nil }
+        return destination(for: id) ?? destinations.first { $0.mcps?.contains { $0.destinationId == id } == true }
+    }
 }
 
 public extension PrintSettings {

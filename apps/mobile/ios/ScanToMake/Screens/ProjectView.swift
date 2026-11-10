@@ -33,12 +33,14 @@ struct ProjectView: View {
     @State private var resumed = false
     @State private var confirmDelete = false
     @State private var modelURL: URL?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var arURL: URL?
     @State private var scanURL: URL?
     @State private var captureWarning: String?
     @State private var askWorking = false
     @State private var askProblem: String?
     @State private var askText = ""
+    @Environment(\.horizontalSizeClass) private var widthClass
     /// The size card's fields as they stand (`AskSizesFields` reports them), for the card's other answers.
     @State private var askSizes: AskSizesForm?
     @State private var notice: String?
@@ -184,6 +186,9 @@ struct ProjectView: View {
 
     @ViewBuilder private func page(_ object: Project) -> some View {
         let words = store.words(object)
+        // The page's content ends where the bottom bar begins (lead, Nov 10, as New and first run): Activity's lines never
+        // read through or around "Ask for changes…" and Print, on any tab, with the keyboard up too.
+        VStack(spacing: 0) {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 hero(object, words)
@@ -295,7 +300,8 @@ struct ProjectView: View {
                 }
                 .padding(.horizontal, 16)
             }
-            .padding(.bottom, 120)
+            // The bar is below the scroll now, not over it: only a little room after the last line.
+            .padding(.bottom, 24)
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
         }
@@ -334,10 +340,12 @@ struct ProjectView: View {
                 .accessibilityLabel("More")
             }
         }
-        .safeAreaBar(edge: .bottom) {
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
-            if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) { bottomBar(object, words) }
+            if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) {
+                bottomBar(object, words).padding(.top, 8)
+            }
         }
+        .background(Color.black)
         .fileImporter(isPresented: $choosingModelFiles, allowedContentTypes: [UTType(filenameExtension: "3mf") ?? .data, UTType(filenameExtension: "stl") ?? .data], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let files): act {
@@ -368,11 +376,15 @@ struct ProjectView: View {
                 }
             }
         } message: { Text("Its model, photos and activity are removed from your Mac.") }
-        .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(object.spoolColour ?? "")") {
-            modelURL = nil; arURL = nil
-            guard object.current != nil, let url = try? await store.mac.download(object, "model.stl") else { return }
-            modelURL = url
-            if !object.preservesPublishedFilaments { arURL = await ARModel.usdz(fromSTL: url, tint: object.spoolColour) }
+        .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(scenePhase)") {
+            // The store fetches it, so leaving the page never stops the download (Nov 10); back in the app, one that
+            // failed meanwhile starts again.
+            if object.current != nil, scenePhase == .active { store.models.want(object, "model.stl") }
+        }
+        .task(id: "\(store.models.file(object, "model.stl")?.path ?? "")#\(object.spoolColour ?? "")") {
+            modelURL = store.models.file(object, "model.stl"); arURL = nil
+            guard let url = modelURL, !object.preservesPublishedFilaments else { return }
+            arURL = await ARModel.usdz(fromSTL: url, tint: object.spoolColour)
         }
     }
 
@@ -588,19 +600,31 @@ struct ProjectView: View {
                     Text(todo).font(.subheadline).foregroundStyle(.secondary)
                 }
             }
+            if let note = words.page.printNote {
+                Text(note).font(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("failed-print-note")
+            }
             GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
+                // On a phone's width two buttons side by side cut the second one's name ("Print the last v…", seen
+                // with a real project): there they stack, each with the card's whole width.
+                let stacked = widthClass == .compact && words.actions.contains(.retry) && words.page.printPlace == .card
+                let row = stacked ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+                row {
+                    // One filled control, the page's main action (`PageActions`): Try Again when a pass stopped, or
+                    // printing again when the print failed. Printing is offered here under its true name, and then
+                    // not in the bar.
                     if words.actions.contains(.retry) {
                         Button { act { try await store.mac.start(object.id) } } label: {
                             Label("Try Again", systemImage: "arrow.clockwise").fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
                         }
-                        .buttonStyle(.glassProminent)
+                        .mainAction(words.page.main == .retry)
+                        .accessibilityIdentifier("failed-retry")
                     }
-                    if words.actions.contains(.print) || words.actions.contains(.printChecked) {
+                    if words.page.printPlace == .card, let print = words.page.printWords {
                         Button { openPrint(object.id) } label: {
-                            Label("Print Again", systemImage: "printer").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
+                            Label(print, systemImage: "printer").fontWeight(words.page.printIsMain ? .semibold : .regular).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
                         }
-                        .buttonStyle(.glass)
+                        .mainAction(words.page.printIsMain)
+                        .accessibilityIdentifier("failed-print")
                     }
                 }
                 .controlSize(.large).font(.subheadline)
@@ -703,7 +727,9 @@ struct ProjectView: View {
     @ViewBuilder private func bottomBar(_ object: Project, _ words: ProjectWords) -> some View {
         // While the Mac works, a change waits and goes in when this pass finishes.
         let canCorrect = object.canAskForChanges
-        let canPrint = words.actions.contains(.print) || words.actions.contains(.printChecked)
+        // Print is in the bar only where the page's one decision puts it there, and filled only when it leads
+        // (`PageActions`): never beside a card that already offers it.
+        let canPrint = words.page.printInBar
         if canCorrect || canPrint {
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
@@ -740,10 +766,10 @@ struct ProjectView: View {
                         // The page's main action never truncates ("Print Ano…", lead review Nov 10): it keeps its whole
                         // label and the ask field gives way.
                         Button { openPrint(object.id) } label: {
-                            Label(words.phase == .confirmed ? "Print Another" : "Print", systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
+                            Label(words.page.printWords ?? "Print", systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
                                 .fixedSize().padding(.horizontal, 8).frame(height: 36)
                         }
-                        .buttonStyle(.glassProminent)
+                        .mainAction(words.page.printIsMain)
                         .controlSize(.large)
                         .fixedSize()
                         .layoutPriority(1)
@@ -877,14 +903,42 @@ struct ResultSection: View {
     }
 
     /// No printer to print on: say so, with the way to choose one. Nothing while the Mac's printers are still loading.
+    /// Review F3: a printer chosen for this project that's no longer on the Mac says so, and Choose a Printer opens this
+    /// project's print sheet, whose picker sets its printer. With no printers at all, Add a Printer opens Printers.
     @ViewBuilder private var noPrinter: some View {
-        if store.catalog != nil {
+        if let catalog = store.catalog {
+            let none = catalog.destinations.isEmpty
             HStack(spacing: 12) {
                 Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
-                Text("No printer chosen yet.").font(.headline)
+                Text(none ? "No printer set up yet." : "The printer chosen for this project isn’t on your Mac anymore.")
+                    .font(.headline).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("result-no-printer")
                 Spacer(minLength: 8)
-                Button("Choose a Printer") { app.route = .printers }.buttonStyle(.glass)
+                Button(none ? "Add a Printer" : "Choose a Printer") { app.route = none ? .printers : .print(project.id) }
+                    .buttonStyle(.glass)
                     .accessibilityIdentifier("result-choose-printer")
+            }
+            .padding(14)
+            .background(Color.card, in: .rect(cornerRadius: 20))
+        } else if let problem = store.printerProblem {
+            // Review F3: the printer list can't be had: say so, with the way to try again; never an empty row.
+            HStack(spacing: 12) {
+                Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
+                Text(problem).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("result-printers-problem")
+                Spacer(minLength: 8)
+                Button("Try Again") { Task { await store.loadPrinters() } }.buttonStyle(.glass)
+                    .accessibilityIdentifier("result-printers-retry")
+            }
+            .padding(14)
+            .background(Color.card, in: .rect(cornerRadius: 20))
+        } else {
+            // While the printer list is on its way: one plain line that says so.
+            HStack(spacing: 12) {
+                ProgressView().frame(width: 28)
+                Text("Asking your Mac about its printers…").font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("result-printers-loading")
+                Spacer(minLength: 0)
             }
             .padding(14)
             .background(Color.card, in: .rect(cornerRadius: 20))
@@ -1197,6 +1251,14 @@ struct DidItFitCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+}
+
+extension View {
+    /// The page's one filled control when `main`, a plain glass button otherwise. Views never choose the fill
+    /// themselves: it comes from `PageActions.main`.
+    @ViewBuilder func mainAction(_ main: Bool) -> some View {
+        if main { buttonStyle(.glassProminent) } else { buttonStyle(.glass) }
     }
 }
 

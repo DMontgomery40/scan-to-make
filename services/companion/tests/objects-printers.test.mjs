@@ -88,7 +88,7 @@ test('current destination inherits metadata without rewriting its working SSH co
   const f = await fixture(t);
   const catalog = await loadPrinterCatalog(f.current, f.options([]));
   assert.equal(catalog.defaultDestinationId, 'current');
-  assert.deepEqual(catalog.destinations, [{id: 'current', name: 'Bambu Lab P1S', backend: 'bambu-printer-mcp', model: 'p1s', address: '192.0.2.1', source: 'current', origin: 'printer-handoff'}]);
+  assert.deepEqual(catalog.destinations, [{id: 'current', name: 'Your printer', backend: 'bambu-printer-mcp', model: 'p1s', address: '192.0.2.1', source: 'current', origin: 'printer-handoff'}]);
   assert.deepEqual(catalog.resolve('current'), f.current);
   const retained = catalog.resolve('current');
   retained.process.env.MCP_TRANSPORT = 'changed';
@@ -298,7 +298,8 @@ test('one printer is one destination: keyed by Bambu serial, else host and port,
   }});
   const catalog = await loadPrinterCatalog(f.current, f.options([claude, cursor]));
   assert.deepEqual(catalog.destinations.map(d => [d.name, d.backend, d.origin]), [
-    ['Bambu Lab P1S', 'bambu-printer-mcp', 'printer-handoff'],
+    // Nobody named it: "Your printer" until its MCP says what it is (no address, no brand from the config's model).
+    ['Your printer', 'bambu-printer-mcp', 'printer-handoff'],
     ['Voron', 'mcp-3d-printer-server', 'claude-code'],
     ['Octo on same host', 'mcp-3d-printer-server', 'claude-code'],
     ['A1', 'bambu-printer-mcp', 'cursor'],
@@ -383,8 +384,8 @@ test('Add printer: found MCP folders and the printers each MCP finds; Check; Add
   // Found first: the clone (one click), the P1S already a printer, the new A1, the OctoPrint. No secret anywhere.
   const discovery = await setup.discover();
   assert.deepEqual(discovery.found.map(item => [item.source, item.name, item.added]), [
-    ['folder', 'Bambu Lab P1S', false], ['ssdp', 'Workshop P1S', true], ['ssdp', 'A1', false], ['bonjour', 'OctoPi', false]]);
-  assert.deepEqual(discovery.found[0], {id: `folder:${clone}`, source: 'folder', name: 'Bambu Lab P1S', backend: 'mcp-3d-printer-server',
+    ['folder', 'P1S', false], ['ssdp', 'Workshop P1S', true], ['ssdp', 'A1', false], ['bonjour', 'OctoPi', false]]);
+  assert.deepEqual(discovery.found[0], {id: `folder:${clone}`, source: 'folder', name: 'P1S', backend: 'mcp-3d-printer-server',
     printerType: 'bambu', host: '192.0.2.1', serial: '01P00A123456789', model: 'p1s', folder: clone, added: false});
   assert.ok(!JSON.stringify(discovery).includes('55550000'), 'never an access code');
   // The brand list, models and serial table are the MCP's own (counterpart_setup_fields), never the app's.
@@ -451,7 +452,7 @@ test('Add printer: found MCP folders and the printers each MCP finds; Check; Add
   assert.equal((await stat(join(folder, '.env'))).mode & 0o777, 0o600);
   assert.equal((await stat(folder)).mode & 0o777, 0o700);
   const added = catalog.destinations.find(item => item.id === octo.id);
-  assert.deepEqual([added.name, added.backend, added.address, added.origin, added.folder], ['OctoPrint at octopi.local', 'mcp-3d-printer-server', 'octopi.local', 'counterpart', folder]);
+  assert.deepEqual([added.name, added.backend, added.address, added.origin, added.folder], ['Printer 2', 'mcp-3d-printer-server', 'octopi.local', 'counterpart', folder]);
   assert.deepEqual(catalog.resolve(octo.id).process, {command: '/usr/local/bin/node', args: [join(env.appPrinters, 'generic/lib/node_modules/mcp-3d-printer-server/dist/index.js')], cwd: folder});
   assert.ok(!(await readFile(profilesPath, 'utf8')).includes('octo-key'), 'the list keeps no settings');
   // Bambu through bambu-printer-mcp needs that MCP on this Mac first.
@@ -528,7 +529,7 @@ test('a found install missing the model its MCP needs: Counterpart fills only BA
   // Offered with what Counterpart will add: the model from the serial (01P → P1S), and nothing else.
   let found = (await setup.discover()).found;
   const p1s = found.find(item => item.folder === clone);
-  assert.deepEqual([p1s.name, p1s.model, p1s.missing, p1s.fill], ['Bambu Lab P1S', 'p1s', ['BAMBU_MODEL'], {BAMBU_MODEL: 'p1s'}]);
+  assert.deepEqual([p1s.name, p1s.model, p1s.missing, p1s.fill], ['P1S', 'p1s', ['BAMBU_MODEL'], {BAMBU_MODEL: 'p1s'}]);
   const unknown = found.find(item => item.folder === other);
   assert.deepEqual([unknown.missing, unknown.fill, unknown.model], [['BAMBU_MODEL', 'BAMBU_TOKEN'], {}, undefined], 'a secret is never filled; an unknown serial needs the dropdown');
   // The printer's own announcement (DevModel) outranks the serial.

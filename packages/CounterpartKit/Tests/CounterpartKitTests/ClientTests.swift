@@ -644,6 +644,10 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(catalog.listed("current"), "current")
         XCTAssertEqual(catalog.listed("mcp-1a2b"), "current")
         XCTAssertNil(catalog.listed("gone"))
+        // Review F2: the Result row and every name resolve a saved id the way the print sheet does.
+        XCTAssertEqual(catalog.resolved("mcp-1a2b")?.id, "current", "listed under its other MCP's id: still on the Mac")
+        XCTAssertEqual(catalog.resolved(nil)?.id, "current", "no id: the default printer")
+        XCTAssertNil(catalog.resolved("gone"), "really gone")
     }
 
     func testPrinterConnectionReadsTheMCPsOwnWordsAndChangesGoThroughTheMac() async throws {
@@ -686,6 +690,21 @@ final class CompanionClientTests: XCTestCase {
         catch let error as CompanionError { XCTAssertEqual(error.message, "This printer is printing. Change its connection when the print finishes.") }
     }
 
+    /// Nov 10: a 192 MB scan was refused (413) and the phone's stage stayed blank with nothing said. A refusal says what
+    /// it is, and a fetched file lands whole at its cached place.
+    func testAFileTooLargeForThePhoneSaysSoAndAFetchedOneLandsWhole() async throws {
+        let p = Project(id: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", createdAtMs: 1, updatedAtMs: 2, state: .ready, scan: "scan.usdz")
+        let refused = try client(FakeTransport { _, _ in json(413, ["error": ["code": "file-too-large", "message": "file-too-large"]]) })
+        do { _ = try await refused.download(p, "scan/scan.usdz"); XCTFail("refused") }
+        catch let error as CompanionError { XCTAssertEqual(error.code, "file-too-large") }
+        let bytes = Data(repeating: 7, count: 300_000)
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) }
+        let file = try await client(fake).download(p, "scan/phone-preview.usdz")
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+        XCTAssertTrue(file.lastPathComponent.hasSuffix("scan_phone-preview.usdz"))
+        XCTAssertEqual(fake.calls.last?.request.url?.path, "/v1/objects/\(p.id)/scan/phone-preview.usdz")
+    }
+
     func testDownloadsAreCachedPerVersion() async throws {
         let data = try fixture("objects.json")
         struct List: Decodable { var objects: [Project] }
@@ -709,6 +728,26 @@ final class CompanionClientTests: XCTestCase {
         _ = try await client(located).locate(p.id)
         XCTAssertEqual(located.calls.last?.request.httpMethod, "POST")
         XCTAssertEqual(located.calls.last?.request.url?.path, "/v1/objects/\(p.id)/locate")
+    }
+
+    /// Review of #527, part 2, F2: downloads outlive their page, so a slow download for an earlier version of a project
+    /// can finish after a newer version's files have landed. It tidies older folders only, never the newer one.
+    func testALateDownloadForAnOlderVersionLeavesTheNewerVersionsFiles() async throws {
+        func project(_ ended: Int) throws -> Project {
+            try JSONDecoder().decode(Project.self, from: Data(#"{"id":"0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a12","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[{"startedAtMs":1,"endedAtMs":\#(ended),"status":"done"}],"current":{"model":"current/model.stl","renders":["current/renders/1_overview.png"]}}"#.utf8))
+        }
+        let older = try project(1000), newer = try project(2000)
+        XCTAssertLessThan(older.mediaVersion, newer.mediaVersion)
+        let c = try client(FakeTransport { _, _ in HTTPReply(status: 200, body: Data("png".utf8)) })
+        let kept = try await c.download(newer, "renders/1_overview.png")
+        defer { try? FileManager.default.removeItem(at: kept.deletingLastPathComponent().deletingLastPathComponent()) }
+        let late = try await c.download(older, "renders/1_overview.png")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path), "the newer version's file is still there")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: late.path))
+        // The tidying itself still happens: the next download for the newer version removes the older folder.
+        _ = try await c.download(newer, "pictures/part-0123456789abcdef.png")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: late.path), "an older version's files go when a newer one lands")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
     }
 
     func testDesignedMultiColour3MFExportDoesNotMasqueradeAsSTL() async throws {

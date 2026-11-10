@@ -141,6 +141,10 @@ export function searchSnippet(p: Project, query: string) {
     let end = Math.min(line.length, at + needle.length + 70);
     if (start > 0) { const space = line.indexOf(" ", start); if (space >= 0 && space < at) start = space + 1; }
     if (end < line.length) { const space = line.lastIndexOf(" ", end); if (space > at + needle.length) end = space; }
+    // Never inside a character: an emoji is two UTF-16 units (review F5).
+    const low = (i: number) => { const c = line.charCodeAt(i); return c >= 0xdc00 && c <= 0xdfff; };
+    if (start > 0 && start < line.length && low(start)) start -= 1;
+    if (end > 0 && end < line.length && low(end)) end += 1;
     const lead = start > 0 ? "…" : "";
     return {
       text: lead + line.slice(start, end) + (end < line.length ? "…" : ""),
@@ -150,10 +154,12 @@ export function searchSnippet(p: Project, query: string) {
   return undefined;
 }
 
-/** Every value a search reads, the title first. */
+/** Every value a search reads, the title first and always in first place, so a project without one keeps its others (review F5). */
 function searchValues(p: Project) {
+  return [p.title ?? "", ...searchedFields(p)];
+}
+function searchedFields(p: Project) {
   return [
-    p.title,
     p.instructions,
     p.status?.text,
     p.failure,
@@ -870,4 +876,74 @@ export function stageMark(pass: Pick<Pass, "endedAtMs" | "status" | "stages">, i
   if (ending === "asked") return "?";
   if (ending === "stopped") return "✕";
   return stage?.endedAtMs ? "✓" : "◌";
+}
+
+/** What a project's page leads with and what else it offers, as one decision: the port of CounterpartKit
+ *  `PageActions` (PRD §5.4 One main action). One filled control, `main`; an action appears once; Print is in the bar
+ *  only where `printPlace` is "bar", filled only when it is `main`, and in the failed card under its true name
+ *  otherwise. Held to the shared table `main-actions.json`. */
+export interface PageActions {
+  main?: "scan" | "finishSending" | "confirmSizes" | "openCamera" | "chooseFile" | "review" | "print" | "openPrinting" | "itWorks" | "retry";
+  others: string[];
+  printWords?: string;
+  printPlace?: "bar" | "card";
+  printNote?: string;
+}
+const PRINT_NOTES: Record<string, string> = {
+  "Print the last version": "Your last version is still here.",
+  "Print Again": "The same file is sent to the printer again.",
+};
+export function pageActions(p: Project, sending = false): PageActions {
+  const made = p.current ? [p.print?.uncertain ? "printChecked" : "print", "correct"] : [];
+  const printing = (main: PageActions["main"], others: string[], printWords: string, printPlace: "bar" | "card"): PageActions => {
+    if (!p.current) return { main: main === "print" ? undefined : main, others: others.filter((a) => a !== "print" && a !== "printChecked") };
+    return { main, others, printWords, printPlace, ...(PRINT_NOTES[printWords] ? { printNote: PRINT_NOTES[printWords] } : {}) };
+  };
+  const correct = made.filter((a) => a === "correct");
+  // Marked Works: Done, whatever state it was marked in.
+  if (p.state === "confirmed" || p.status?.phase === "confirmed") return printing("print", p.current ? ["correct"] : [], "Print Another", "bar");
+  switch (p.state) {
+    case "new": {
+      if (sending) return { others: [] };
+      if (p.scan || p.capture?.length || p.photos.length) return { main: "finishSending", others: [] };
+      return { main: "scan", others: p.instructions?.trim() ? ["attachPhotos", "makeIt"] : ["attachPhotos"] };
+    }
+    // No Print while a change is being made: the version shown is the one they asked to change.
+    case "touching-up": return { others: [] };
+    case "needs-closeup": {
+      const ask = p.ask;
+      if (ask && !askAnswerable(ask)) return { others: [] };
+      if (sizeFields(ask)) return { main: "confirmSizes", others: ["openCamera"] };
+      if (ask?.type === "file") return { main: "chooseFile", others: [] };
+      if (ask?.type === "choice") return { others: [] };
+      return { main: "openCamera", others: ["attachPhotos", "bestGuess"] };
+    }
+    case "ready": return printing("print", correct, "Print", "bar");
+    case "printing": return { main: p.printConfirmation ? "review" : "openPrinting", others: [] };
+    case "printed": {
+      if (didItFitQuestion(p)) return printing("itWorks", ["needsChanges", ...made], "Print Another", "bar");
+      return printing("print", correct, p.print?.monitor?.endState === "done" ? "Print Another" : "Print", "bar");
+    }
+    case "sent": return printing("print", correct, "Print", "bar");
+    case "failed": {
+      // A pass stopped: with an earlier result, that result still prints, from the card, under its true name.
+      if (!p.current) return { main: "retry", others: ["correct"] };
+      if (p.canRetryCleanup) return printing("retry", made, "Print the last version", "card");
+      // The print failed and the model is fine: the same file goes again; refused before send is not "again".
+      if (p.print) return printing("print", correct, p.print.dispatchedAt ? "Print Again" : "Print", "card");
+      // A pass failed for good. Nothing leads: a filled "Print the last version" would steer the person to print the
+      // very version they asked to change. It is offered plain; Ask for changes stays.
+      return printing(undefined, made, "Print the last version", "card");
+    }
+    default: return { others: [] };
+  }
+}
+
+/**
+ * The printer a saved id stands for now: itself, or the printer it became under its other MCP's id (review F2), as the
+ * print sheet and iOS resolve it.
+ */
+export function resolvedPrinter<P extends { id: string; mcps?: { destinationId: string }[] }>(printers: P[], id: string | undefined) {
+  if (!id) return undefined;
+  return printers.find((x) => x.id === id) ?? printers.find((x) => x.mcps?.some((m) => m.destinationId === id));
 }

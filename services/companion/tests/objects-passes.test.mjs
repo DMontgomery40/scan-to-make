@@ -585,3 +585,62 @@ test('a question with no sizes, or with a size that is not whole, stays a close-
     await assert.rejects(f.service.answerCloseup(object.id, {sizes: [{id: 'size-1', mm: 5}]}), /did not ask for sizes/);
   }
 });
+
+// Board X68: a question is open until it is answered or a pass takes its place. A pass started over an unanswered
+// question used to leave it "open" behind a project that had moved on: ready, with a question nobody could answer
+// and, on Linux, Print disabled for good. Which starts take a question's place, by the pass's trigger:
+//   new (the first pass and Try Again) ........ closes it     (below)
+//   changes (a change instead of an answer) ... closes it     (below)
+//   late-photos (the same, with photos) ....... closes it     (below)
+//   ask-answer (the answer itself) ............ already closed by the answer ('a size question is its own kind…')
+//   locate ("See it together") ................ leaves it     (objects-seats: 'locate leaves an open question exactly as it was')
+test('a question left unanswered is no longer open once a pass takes its place', async t => {
+  const asking = {status: 'needs_closeup', result: {closeup: 'the clip', ask: {question: 'Can you take a close-up of the clip?'}}};
+  // Try Again over the question, with no result yet.
+  const first = await setup(t, [asking, {status: 'done'}]);
+  const a = await first.service.create('A hook', 'fit');
+  await first.service.start(a.id);
+  assert.equal((await first.service.settled(a.id)).ask.status, 'open');
+  await first.service.start(a.id);
+  const retried = await first.service.settled(a.id);
+  assert.equal(retried.state, 'ready');
+  assert.equal(retried.ask.status, 'answered', 'the pass that asked is over');
+  assert.deepEqual(retried.passes.map(pass => pass.trigger), ['new', 'new']);
+  assert.equal(publicObject(retried).status.phase, 'ready');
+  // A change sent instead of an answer, on a project that already has a result.
+  const second = await setup(t, [{status: 'done'}, asking, {status: 'done'}]);
+  const b = await second.service.create('A hook', 'fit');
+  await second.service.start(b.id);
+  await second.service.settled(b.id);
+  await second.service.correct(b.id, 'Make it thicker');
+  assert.equal((await second.service.settled(b.id)).ask.status, 'open');
+  await second.service.correct(b.id, 'Never mind the clip, just make it thicker');
+  const changed = await second.service.settled(b.id);
+  assert.equal(changed.state, 'ready');
+  assert.equal(changed.ask.status, 'answered');
+  assert.deepEqual(changed.passes.map(pass => pass.trigger), ['new', 'changes', 'changes']);
+  // The same with a photo attached.
+  const withPhoto = await setup(t, [{status: 'done'}, asking, {status: 'done'}]);
+  const d = await withPhoto.service.create('A hook', 'fit');
+  await withPhoto.service.start(d.id);
+  await withPhoto.service.settled(d.id);
+  await withPhoto.service.correct(d.id, 'Make it thicker');
+  assert.equal((await withPhoto.service.settled(d.id)).ask.status, 'open');
+  const folder = await tempDir('objects-passes-superseded-');
+  t.after(() => rm(folder, {recursive: true, force: true}));
+  await writeFile(join(folder, 'side.jpg'), JPEG);
+  await withPhoto.service.correct(d.id, 'Use this side view instead', [join(folder, 'side.jpg')]);
+  const photographed = await withPhoto.service.settled(d.id);
+  assert.equal(photographed.passes.at(-1).trigger, 'late-photos');
+  assert.equal(photographed.ask.status, 'answered');
+  // A pass that asks again opens its own question.
+  const third = await setup(t, [asking, {status: 'needs_closeup', result: {closeup: 'the hinge', ask: {question: 'Can you take a close-up of the hinge?'}}}]);
+  const c = await third.service.create('A hook', 'fit');
+  await third.service.start(c.id);
+  const before = (await third.service.settled(c.id)).ask.id;
+  await third.service.start(c.id);
+  const again = await third.service.settled(c.id);
+  assert.equal(again.ask.status, 'open');
+  assert.notEqual(again.ask.id, before);
+  assert.match(again.ask.question, /hinge/);
+});

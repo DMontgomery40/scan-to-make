@@ -309,7 +309,11 @@ final class ProjectScreensUITests: XCTestCase {
     }
 
     func testNewSaysWhatTheMacNeedsBeforeSending() {
-        let app = launch("new")
+        // New keeps its words between openings; another test's typing must not fill this one (an empty draft, as launched).
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
+                               "-CounterpartScreen", "new", "-CounterpartNewDraft", ""]
+        app.launch()
         let send = app.buttons["send"]
         XCTAssertTrue(send.waitForExistence(timeout: 20))
         send.tap()
@@ -561,6 +565,31 @@ final class LayoutParityUITests: XCTestCase {
         return app
     }
 
+    /// PRD §5.4 One main action (board U17), the pair seen with real projects on Nov 10: a pass stopped on a project
+    /// that already had a result, and the page showed Try Again, Print Again and a floating Print at once. Try Again
+    /// leads; the earlier result prints from the card, once, under its true name; the bar keeps Ask for changes.
+    func testAStoppedPassWithAnEarlierResultHasOneMainActionWithProjectsPresent() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/capped-projects.json"))
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let selected = rows.filter { ($0["name"] as? String) == "limit-inactivity" }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "limit-stops"]
+        app.launchEnvironment["COUNTERPART_LIMIT_FIXTURES"] = String(data: try JSONSerialization.data(withJSONObject: selected), encoding: .utf8)
+        app.launch()
+        let listed = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "limit-inactivity")).firstMatch
+        XCTAssertTrue(listed.waitForExistence(timeout: 20))
+        listed.tap()
+        XCTAssertTrue(app.buttons["failed-retry"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.buttons["failed-print"].label, "Print the last version")
+        XCTAssertTrue(app.staticTexts["failed-print-note"].exists)
+        XCTAssertFalse(app.buttons["print"].exists, "no second Print in the bar")
+        XCTAssertFalse(app.buttons["Print Again"].exists, "nothing says this version was printed")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
+        XCTAssertTrue(app.descendants(matching: .any)["ask-for-changes"].exists, "the bar keeps Ask for changes")
+    }
+
     func testLimitStopNamesItsLimitOnHomeAndTheProject() throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
@@ -599,11 +628,14 @@ final class LayoutParityUITests: XCTestCase {
     func testNewAfterAScanOpensOnItsQuestionAndNamesTheChosenAction() {
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
-                               "-CounterpartScreen", "new", "-CounterpartNewScan", "walk-around"]
+                               "-CounterpartScreen", "new", "-CounterpartNewScan", "walk-around", "-CounterpartNewDraft", ""]
         app.launch()
         let question = app.staticTexts["scan-use-question"]
         XCTAssertTrue(question.waitForExistence(timeout: 20), app.debugDescription)
         let send = app.buttons["send"], copy = app.buttons["scan-use-copy"], fit = app.buttons["scan-use-fit"], later = app.buttons["scan-use-later"]
+        // The sheet's own scroll: swipes go to it (the screen's middle can be outside the sheet), and only its content is read
+        // (Home stays in the accessibility tree behind the sheet).
+        let sheet = app.scrollViews.containing(.staticText, identifier: "scan-use-question").firstMatch
         // The scan attaches after the sheet opens and the sheet then scrolls (animated): measure once it has settled. The
         // first run of this test measured before that scroll and passed while the screenshot showed the question under the header.
         Thread.sleep(forTimeInterval: 2)
@@ -619,22 +651,23 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(scan.frame.minY, close.maxY, "the scan is below the header: \(scan.frame)")
         XCTAssertLessThanOrEqual(scan.frame.maxY, copy.frame.minY + 1, "the scan is above the answers")
         XCTAssertLessThanOrEqual(later.frame.maxY, send.frame.minY + 1, "all three answers fit with it, above the button")
-        // The bottom action is a bar the content scrolls under: nothing of the scrolling content can be reached through
-        // the button's frame (lead, Nov 10). Whether anything reads through it is checked by eye on the screenshot below.
+        // The bottom action sits on a bar below the scroll (lead, Nov 10): checked below, and by eye on the screenshot.
         // Kept with the result, so a review can look at the settled sheet on each device (taken before the check below).
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "new-after-a-scan"; shot.lifetime = .keepAlways
         add(shot)
-        func nothingReachableThroughTheButton(_ state: String) {
-            let button = send.frame
-            let under = (app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex).filter {
-                $0.identifier != "send" && $0.label != send.label && $0.frame.intersects(button) && !$0.frame.contains(button)
+        // Review F7: scrolled to the end, where the most content sits against the bar, nothing of the scrolling content is
+        // inside the button's frame at all (the scroll ends where the bar begins), then back to the top for the rest.
+        func nothingInsideTheButton(_ state: String) {
+            for _ in 0..<6 { sheet.swipeUp() }
+            let own = Set(send.descendants(matching: .any).allElementsBoundByIndex.map { NSCoder.string(for: $0.frame) })
+            let inside = (sheet.staticTexts.allElementsBoundByIndex + sheet.buttons.allElementsBoundByIndex + sheet.textFields.allElementsBoundByIndex).filter {
+                $0.identifier != "send" && !own.contains(NSCoder.string(for: $0.frame)) && $0.frame.intersects(send.frame)
             }
-            for element in under {
-                XCTAssertFalse(element.isHittable, "\(state): \(element.identifier) '\(element.label)' can be reached through the button at \(element.frame)")
-            }
+            XCTAssertTrue(inside.isEmpty, "\(state): \(inside.map { "\($0.identifier) '\($0.label)' \($0.frame)" }) inside the button at \(send.frame)")
+            // Back to the top, only as far as needed: a swipe down at the top would dismiss the sheet.
+            for _ in 0..<8 where !(question.isHittable && copy.isHittable) { sheet.swipeDown(velocity: .slow) }
         }
-        nothingReachableThroughTheButton("nothing chosen")
         let describe = app.staticTexts["What do you need?"]
         XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
         for row in [copy, fit, later] {
@@ -642,6 +675,7 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertLessThanOrEqual(row.frame.maxY, send.frame.minY + 1, "\(row.identifier) is clear of the button")
         }
         XCTAssertFalse(send.isEnabled, "nothing chosen: greyed out")
+        nothingInsideTheButton("nothing chosen")
         XCTAssertEqual(send.label, "Choose what this scan becomes")
         copy.tap()
         XCTAssertTrue(send.isEnabled)
@@ -649,25 +683,28 @@ final class LayoutParityUITests: XCTestCase {
         let chosen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         chosen.name = "new-after-a-scan-copy-chosen"; chosen.lifetime = .keepAlways
         add(chosen)
-        nothingReachableThroughTheButton("copy chosen")
+        nothingInsideTheButton("copy chosen")
         fit.tap()
         XCTAssertEqual(send.label, "Continue", "a fit asks for its words first")
-        for _ in 0..<4 where !later.isHittable { app.swipeUp() }
+        for _ in 0..<4 where !later.isHittable { sheet.swipeUp() }
         later.tap()
         XCTAssertEqual(send.label, "Save this scan")
     }
 
     /// First look U9 (Nov 10, iPad): a ready scan's Result showed two "—" cards for print time and filament and a third
     /// that said only "Bambu printer". Before slicing, one row names the printer and says when the numbers come.
-    func testAResultBeforeSlicingNamesItsPrinterAndShowsNoEmptyCards() {
+    /// Review F7: what this proves is the app's half: the row shows the name the printer list gives (the fixture Mac's
+    /// "P1S"), and no time or filament tile exists before slicing. How that name is made is the companion's, tested in
+    /// `printer-directory.test.mjs` (the MCP's display name, exactly; "Your printer" when it can't be asked, never an address).
+    func testAResultBeforeSlicingShowsTheListedPrinterNameAndNoTimeOrFilamentTiles() {
         let app = launch(screen: "printed")
         let row = app.descendants(matching: .any)["result-printer"]
         XCTAssertTrue(row.waitForExistence(timeout: 20), app.debugDescription)
         for _ in 0..<6 where !row.isHittable { app.swipeUp() }
-        XCTAssertTrue(row.label.contains("P1S"), row.label)
+        XCTAssertTrue(row.label.hasPrefix("P1S"), "the listed name, as given: \(row.label)")
         XCTAssertTrue(row.label.contains("once it’s sliced for printing"), row.label)
-        XCTAssertFalse(app.staticTexts["—"].exists, "no card that says nothing")
-        XCTAssertFalse(app.staticTexts["Print time"].exists)
+        XCTAssertFalse(app.staticTexts["Print time"].exists, "no time tile")
+        XCTAssertFalse(app.staticTexts["Filament"].exists, "no filament tile")
     }
 
     /// First look U14 (Nov 10, iPhone): Welcome's second starter was cut off at the margin. Both starters show whole,
@@ -680,21 +717,166 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertEqual(first.frame.minY, second.frame.minY, accuracy: 2, "one row")
         XCTAssertGreaterThanOrEqual(first.frame.minX, window.minX + 15, "\(first.frame)")
         XCTAssertLessThanOrEqual(second.frame.maxX, window.maxX - 15, "the second starter is whole: \(second.frame) in \(window)")
-        XCTAssertTrue(app.buttons["welcome-continue"].isHittable)
+        let continueButton = app.buttons["welcome-continue"]
+        XCTAssertTrue(continueButton.isHittable)
+        // Review F8: the scroll ends where Continue's bar begins, so no card is sliced behind it.
+        let scroll = app.scrollViews.allElementsBoundByIndex.max { $0.frame.height < $1.frame.height }!
+        XCTAssertLessThanOrEqual(scroll.frame.maxY, continueButton.frame.minY, "the scroll \(scroll.frame) ends above Continue \(continueButton.frame)")
     }
 
     /// First look U10 (Nov 10, iPad): "holder" listed projects with no hint why. A result whose title lacks the word says
     /// where it matched, on iPhone Home and in the iPad sidebar.
+    /// The train's iPad gate, Nov 10: New Project steps aside while a search is typed (it covered the results above the
+    /// keyboard). ⌘N comes from a hidden button then; it must still open New with the search field focused.
+    func testCommandNOpensNewWhileTheSearchFieldHasFocusOnTheIPad() throws {
+        guard regular else { throw XCTSkip("the iPad sidebar's New Project bar; iPhone Home's New floats and stays") }
+        let app = launch()
+        let field = app.textFields["project-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        field.tap()
+        field.typeText("clip")
+        XCTAssertTrue(app.buttons["new-project"].waitForNonExistence(timeout: 5), "New Project steps aside while searching")
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(app.navigationBars["New Project"].waitForExistence(timeout: 10), "⌘N opens New with the search field focused")
+    }
+
     func testASearchResultSaysWhereItMatched() {
         let app = launch()
         let field = app.textFields["project-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 20))
         field.tap()
         field.typeText("bigger")
-        // Found by its words: a List cell may read its row and reason as one element.
-        let reason = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Copy this clip, 20% bigger.")).firstMatch
+        // Review F7: the reason itself, by its identifier, and its emphasis as VoiceOver hears it.
+        let reason = app.descendants(matching: .any).matching(identifier: "search-reason").firstMatch
         XCTAssertTrue(reason.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(reason.label, "Found “bigger” in: Copy this clip, 20% bigger.")
         XCTAssertTrue(reason.isHittable, "the reason is on screen")
+    }
+
+    /// Lead, Nov 10 (iPad, Stove gap filler, Activity): the page's red and grey lines read through and around "Ask for
+    /// changes…" and Print. The page's content ends where its bottom bar begins, on every tab, scrolled to the end, and with
+    /// the keyboard up; the bar keeps Print's whole label beside the field (the project-picture work's rule).
+    func testTheProjectPagesContentEndsAtItsBottomBarOnEveryTab() {
+        let app = launch(screen: "ready")
+        let print = app.buttons["print"], ask = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertTrue(print.waitForExistence(timeout: 20), app.debugDescription)
+        func nothingReachesTheBar(_ state: String) {
+            // The bar is what's shown of the ask field and Print (Print gives way while typing).
+            let bar = [print, ask].filter(\.exists).map(\.frame).reduce(CGRect.null) { $0.union($1) }
+            // The bar must be there: with neither part on screen the check below would pass on nothing (review).
+            XCTAssertTrue(ask.exists, "\(state): the bar's ask field is on screen")
+            XCTAssertFalse(bar.isNull, "\(state): the bar is on screen")
+            // The page's scroll ends where the bar begins, so nothing it draws (it clips) can sit under or around the bar.
+            // Accessibility frames are unclipped, so the scroll view's own frame is what proves it; an overlay bar fails here.
+            let page = app.scrollViews.containing(NSPredicate(format: "label == %@", "Activity")).firstMatch
+            XCTAssertTrue(page.exists, "\(state): the page's scroll view")
+            XCTAssertLessThanOrEqual(page.frame.maxY, bar.minY, "\(state): the page \(page.frame) ends above the bar \(bar)")
+        }
+        for tab in ["Result", "What you sent", "Activity"] {
+            let button = app.buttons[tab]
+            for _ in 0..<6 where !button.isHittable { app.swipeDown() }
+            button.tap()
+            for _ in 0..<8 { app.swipeUp() }
+            nothingReachesTheBar("\(tab), scrolled to the end")
+            if tab == "Activity" {
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = "project-activity-end"; shot.lifetime = .keepAlways
+                add(shot)
+            }
+        }
+        ask.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the keyboard is up")
+        nothingReachesTheBar("keyboard up")
+        let typing = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        typing.name = "project-keyboard-up"; typing.lifetime = .keepAlways
+        add(typing)
+    }
+
+    /// Review F4: a fit with words and "I measured" but no measurement: Send takes you to the measurement fields, focuses the
+    /// first, and says there what's missing, instead of seeming to do nothing.
+    func testSendOnAFitMissingItsMeasurementGoesToTheFields() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
+                               "-CounterpartScreen", "new", "-CounterpartNewScan", "walk-around", "-CounterpartFreshDraft", "YES"]
+        app.launch()
+        let fit = app.buttons["scan-use-fit"]
+        XCTAssertTrue(fit.waitForExistence(timeout: 20))
+        // Swipes go to the sheet's own scroll, never past its top (a swipe down there would dismiss the sheet).
+        let sheet = app.scrollViews.containing(.staticText, identifier: "scan-use-question").firstMatch
+        fit.tap()
+        let describe = app.descendants(matching: .any).matching(identifier: "describe").firstMatch
+        for _ in 0..<4 where !describe.isHittable { sheet.swipeUp() }
+        let fitShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        fitShot.name = "new-fit-chosen"; fitShot.lifetime = .keepAlways
+        add(fitShot)
+        describe.tap()
+        describe.typeText("A wall holder for it")
+        let keyboardShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        keyboardShot.name = "new-fit-keyboard-up"; keyboardShot.lifetime = .keepAlways
+        add(keyboardShot)
+        // Put the keyboard away first, or the next tap only dismisses it.
+        app.navigationBars["New Project"].buttons["Done"].tap()
+        let measured = app.buttons["I measured"]
+        for _ in 0..<6 where !(measured.exists && measured.isHittable) { sheet.swipeDown(velocity: .slow) }
+        measured.tap()
+        let chosen = NSPredicate(format: "isSelected == true")
+        if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: measured)], timeout: 3) != .completed { measured.tap() }
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: measured)], timeout: 3) == .completed, "I measured is chosen")
+        // Scroll back down so Send is pressed from where a person would be, below the fields.
+        for _ in 0..<3 { sheet.swipeUp() }
+        let send = app.buttons["send"]
+        XCTAssertTrue(send.label.hasPrefix("Send to"), send.label)
+        send.tap()
+        let missing = app.staticTexts["fit-size-missing"]
+        XCTAssertTrue(missing.waitForExistence(timeout: 5), "it says what's missing")
+        XCTAssertEqual(missing.label, "Enter at least one measurement in millimetres.")
+        XCTAssertTrue(missing.isHittable, "on screen, by the fields")
+        // The field's identifier is on its column, which SwiftUI gives to the field itself; look in both places.
+        let longest = app.textFields["fit-size-longest"].exists ? app.textFields["fit-size-longest"]
+            : app.descendants(matching: .any)["fit-size-longest"].textFields.firstMatch
+        XCTAssertTrue(longest.waitForExistence(timeout: 5))
+        XCTAssertEqual(longest.value(forKey: "hasKeyboardFocus") as? Bool, true, "the first measurement is focused")
+    }
+
+    /// Review F3 (train 2026-11-10e): the Result's printer row is never empty. While the printer list is on its way it says so;
+    /// if the Mac won't give it, it says that with Try Again; with no printers at all, "No printer set up yet." (test above).
+    func testAResultPrinterRowSaysItIsWaitingOrThatTheMacWontSay() {
+        let waiting = launch(set: "printers-slow", screen: "ready")
+        let loading = waiting.staticTexts["result-printers-loading"]
+        for _ in 0..<6 where !(loading.exists && loading.isHittable) { waiting.swipeUp() }
+        XCTAssertTrue(loading.waitForExistence(timeout: 20), waiting.debugDescription)
+        XCTAssertEqual(loading.label, "Asking your Mac about its printers…")
+
+        let refused = launch(set: "printers-refused", screen: "ready")
+        let problem = refused.staticTexts["result-printers-problem"]
+        for _ in 0..<6 where !(problem.exists && problem.isHittable) { refused.swipeUp() }
+        XCTAssertTrue(problem.waitForExistence(timeout: 20), refused.debugDescription)
+        XCTAssertEqual(problem.label, "Couldn't read the printers configured on your Mac.")
+        let retry = refused.buttons["result-printers-retry"]
+        XCTAssertTrue(retry.isHittable, "the way to try again")
+        retry.tap()
+        XCTAssertTrue(problem.waitForExistence(timeout: 10), "still says so after another refusal")
+    }
+
+    /// Review F3: a project whose chosen printer is no longer on the Mac says so (not "No printer chosen yet."), and Choose
+    /// a Printer opens this project's print sheet, where its printer is chosen. With no printers at all, Add a Printer.
+    func testAResultWhosePrinterIsGoneSaysSoAndChoosesOneForThisProject() {
+        let app = launch(set: "stale-printer", screen: "ready")
+        let words = app.staticTexts["result-no-printer"]
+        for _ in 0..<6 where !(words.exists && words.isHittable) { app.swipeUp() }
+        XCTAssertTrue(words.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(words.label, "The printer chosen for this project isn’t on your Mac anymore.")
+        let choose = app.buttons["result-choose-printer"]
+        XCTAssertEqual(choose.label, "Choose a Printer")
+        choose.tap()
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10), "this project's print sheet, with its printer picker")
+
+        let empty = launch(set: "no-printers", screen: "ready")
+        let none = empty.staticTexts["result-no-printer"]
+        for _ in 0..<6 where !(none.exists && none.isHittable) { empty.swipeUp() }
+        XCTAssertTrue(none.waitForExistence(timeout: 20))
+        XCTAssertEqual(none.label, "No printer set up yet.")
+        XCTAssertEqual(empty.buttons["result-choose-printer"].label, "Add a Printer")
     }
 
     /// David, Nov 9: "I SCANNED A PINK UNICORN TOO BUT THE APP IS TOO GLITCHY I DON'T EVEN KNOW WHERE IT IS". A scan
@@ -801,6 +983,22 @@ final class LayoutParityUITests: XCTestCase {
         open.tap()
         XCTAssertTrue(app.buttons["Print Another"].waitForExistence(timeout: 10), "the project page, Done, and still printable")
         XCTAssertFalse(app.buttons["open-project"].exists, "Printing is gone from the stack")
+    }
+
+    /// PRD §5.4 One main action: on a finished print's project page It Works leads; printing another is in the bar,
+    /// once, and (drawn from the same decision) not the filled one.
+    func testAFinishedPrintsProjectPageOffersPrintingOnceBesideDidItFitWithProjectsPresent() throws {
+        try XCTSkipIf(regular, "on the iPad the Printing screen sits beside the project page and has the same card")
+        let app = launch(screen: "print-finished")
+        let open = app.buttons["open-project"]
+        XCTAssertTrue(open.waitForExistence(timeout: 20))
+        open.tap()
+        XCTAssertTrue(app.buttons["it-works"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["needs-changes"].exists)
+        let print = app.buttons["print"]
+        XCTAssertTrue(print.exists)
+        XCTAssertEqual(print.label, "Print Another")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
     }
 
     /// Needs Changes on the finished Printing screen starts the change on the project page, as the project's own card does.
@@ -1271,6 +1469,33 @@ final class LayoutParityUITests: XCTestCase {
         let picture = app.descendants(matching: .any)["ask-picture"]
         XCTAssertTrue(picture.waitForNonExistence(timeout: 10), "no box once the fetch has failed")
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "The outlined part is what this question is about.")).firstMatch.exists)
+    }
+
+    /// Nov 10: every "What you scanned" on David's phone was blank. With projects present: a scan the Mac lists but can't
+    /// send leaves the Mac's picture on the stage and one line with Try Again; a scan too large for a phone keeps its
+    /// picture and says so. Never an empty stage.
+    func testAScanThatCantBeHadKeepsTheMacsPictureAndSaysWhyWithProjectsPresent() {
+        if regular { XCUIDevice.shared.orientation = .landscapeLeft }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = launch(set: "scan-stage")
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Bottle copy")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "projects are present")
+        app.terminate()
+        for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "The 3D view isn’t here yet."),
+                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "This scan is too detailed to show in 3D on a phone. Open it on your Mac to see it from every side.")] {
+            let page = XCUIApplication()
+            page.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
+                                    "-CounterpartOpen", "counterpart://project/\(id)"]
+            page.launch()
+            let picture = page.images["gallery-stage-picture"]
+            XCTAssertTrue(picture.waitForExistence(timeout: 20), "What you scanned shows the Mac's picture, not an empty stage")
+            XCTAssertGreaterThan(picture.frame.height, 150, "the picture fills the stage: \(picture.frame)")
+            let said = page.staticTexts[line]
+            XCTAssertTrue(said.waitForExistence(timeout: 15), "one plain line says why: \(line)")
+            if id.hasSuffix("01") { XCTAssertTrue(page.buttons["gallery-model-retry"].exists, "and how to try again") }
+            else { XCTAssertFalse(page.buttons["gallery-model-retry"].exists, "too large: trying again won't change it") }
+            page.terminate()
+        }
     }
 
     /// A question that came without a picture shows the project's picture at the same size, and says so.

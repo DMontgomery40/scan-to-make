@@ -4,6 +4,7 @@ import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {readFile, realpath, open} from 'node:fs/promises';
+import {pipeline} from 'node:stream/promises';
 import {constants} from 'node:fs';
 import {basename, join, isAbsolute, sep} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
@@ -13,6 +14,7 @@ import {CompanionSettingsPatchSchema, FitSchema, type ObjectStatus, type Project
 import {z} from 'zod';
 import {fitRequest} from './fit.js';
 import {askKind} from './asks.js';
+import {withNotesOnce} from './notes.js';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
@@ -33,20 +35,31 @@ class HttpFailure extends Error {
   constructor(readonly status: number, readonly code: string, message = code) { super(message); }
 }
 
-/** Export only regular files whose canonical location stays in this project. */
-async function exportFile(directory: string, relative: string): Promise<Buffer> {
+/**
+ * Export only regular files whose canonical location stays in this project, streamed from disk with their length: a
+ * scan can be tens of megabytes and is never read into memory whole (Nov 10: the phone's "What you scanned" stayed
+ * blank). Over the limit it is refused before a byte is read.
+ */
+async function exportFile(response: ServerResponse, directory: string, relative: string, headers: Record<string, string>): Promise<void> {
   if (isAbsolute(relative) || relative.split('/').some(part => !part || part === '.' || part === '..')) throw new HttpFailure(404, 'not-found');
+  let file: Awaited<ReturnType<typeof open>>;
+  let size: number;
   try {
     const root = await realpath(directory), path = await realpath(join(root, relative));
     if (!path.startsWith(root + sep)) throw new HttpFailure(404, 'not-found');
-    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      const stat = await file.stat();
-      if (!stat.isFile()) throw new HttpFailure(404, 'not-found');
-      if (stat.size > MAX_SCAN) throw new HttpFailure(413, 'file-too-large');
-      return await file.readFile();
-    } finally { await file.close(); }
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) { if (error instanceof HttpFailure) throw error; throw new HttpFailure(404, 'not-found'); }
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile()) throw new HttpFailure(404, 'not-found');
+    if (stat.size > MAX_SCAN) throw new HttpFailure(413, 'file-too-large');
+    size = stat.size;
+  } catch (error) { await file.close(); if (error instanceof HttpFailure) throw error; throw new HttpFailure(404, 'not-found'); }
+  response.statusCode = 200;
+  for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
+  response.setHeader('content-length', String(size));
+  // The stream closes the file when it ends or the phone goes away; a phone that leaves mid-way is not an error here.
+  await pipeline(file.createReadStream(), response).catch(() => undefined);
 }
 
 async function body(request: IncomingMessage, limit: number): Promise<Buffer> {
@@ -83,7 +96,8 @@ export function projectSettingsView(object: StmObject) {
 export function publicObject(stored: StmObject): PublicObject {
   // What the person typed, and the fit choice as fields: never the brief a client once appended to the request.
   const {typed, fit} = fitRequest(stored);
-  const {instructions: _instructions, fit: _fit, ...rest} = stored;
+  // A note sent again before any result came back is shown once (`withNotesOnce`); the stored record keeps them all.
+  const {instructions: _instructions, fit: _fit, ...rest} = withNotesOnce(stored);
   // Every question says its kind, also one saved before kinds were written.
   const kind = askKind(stored);
   const object: StmObject = {...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {}), ...(rest.ask && kind ? {ask: {...rest.ask, kind}} : {})};
@@ -347,12 +361,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           const extension = path.split('.').at(-1)?.toLowerCase();
           const type = extension === 'stl' ? 'model/stl' : extension === '3mf' ? 'model/3mf' : extension === 'usdz' ? 'model/vnd.usdz+zip' : undefined;
           if (!type) throw new HttpFailure(404, 'not-found');
-          const bytes = await exportFile(service.dir(id), path);
-          response.statusCode = 200;
-          response.setHeader('content-type', type);
-          response.setHeader('cache-control', 'private, no-store');
-          response.setHeader('x-content-type-options', 'nosniff');
-          response.end(bytes);
+          await exportFile(response, service.dir(id), path, {'content-type': type, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff'});
           return;
         }
         if (action.startsWith('photos/') || action.startsWith('capture/') || action.startsWith('scan/')) {
@@ -370,13 +379,9 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             : kind === 'scan' && extension === 'stl' ? 'model/stl'
             : kind === 'scan' && extension === '3mf' ? 'model/3mf' : undefined;
           const object = await service.get(id);
-          if (!type || !(kind === 'scan' ? object.scan === name : object[kind]?.includes(name))) throw new HttpFailure(404, 'not-found');
-          const bytes = await exportFile(service.dir(id), `${kind}/${name}`);
-          response.statusCode = 200;
-          response.setHeader('content-type', type);
-          response.setHeader('x-content-type-options', 'nosniff');
-          response.setHeader('cache-control', 'private, no-store');
-          response.end(bytes);
+          // A scan file is one the project lists (its scan, and the phone's own model kept beside a Mac rebuild).
+          if (!type || !(kind === 'scan' ? object.scanFiles?.some(file => file.name === name) : object[kind]?.includes(name))) throw new HttpFailure(404, 'not-found');
+          await exportFile(response, service.dir(id), `${kind}/${name}`, {'content-type': type, 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store'});
           return;
         }
         if (action.startsWith('pictures/')) {
@@ -448,12 +453,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           if (!/^[0-9a-f-]{36}$/i.test(reviewId)) throw new HttpFailure(404, 'not-found');
           // Only the current review's own preview; the service refuses any other id.
           const relative = await service.reconstructionPreview(id, reviewId);
-          const bytes = await exportFile(service.dir(id), relative);
-          response.statusCode = 200;
-          response.setHeader('content-type', 'model/stl');
-          response.setHeader('cache-control', 'private, no-store');
-          response.setHeader('x-content-type-options', 'nosniff');
-          response.end(bytes);
+          await exportFile(response, service.dir(id), relative, {'content-type': 'model/stl', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff'});
           return;
         }
         if (action === 'model.stl' || action.startsWith('renders/')) {
@@ -463,10 +463,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           const relative = action === 'model.stl' ? object.current?.model
             : [...(object.current?.renders ?? []), ...(object.files?.receipts?.flatMap(file => file.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : [])) ?? [])].find(render => basename(render) === decodeURIComponent(action.slice('renders/'.length)));
           if (!relative) throw new HttpFailure(404, 'not-found');
-          const bytes = await exportFile(service.dir(id), relative);
-          response.statusCode = 200;
-          response.setHeader('content-type', action === 'model.stl' ? (relative?.endsWith('.3mf') ? 'model/3mf' : 'model/stl') : 'image/png');
-          response.end(bytes);
+          await exportFile(response, service.dir(id), relative, {'content-type': action === 'model.stl' ? (relative?.endsWith('.3mf') ? 'model/3mf' : 'model/stl') : 'image/png'});
           return;
         }
         if (method !== (action === 'scan' ? 'PUT' : 'POST')) throw new HttpFailure(405, 'method-not-allowed');

@@ -87,6 +87,8 @@ public struct ProjectWords: Equatable, Sendable {
     /// "W × D × H mm", whole millimetres.
     public let size: String?
     public let actions: [ProjectAction]
+    /// What the page leads with and what else it offers: the one decision every layout draws from (`PageActions`).
+    public let page: PageActions
 
     /// The line under a project's title in a list grouped by phase (the iPad and Mac sidebars): the Mac's own detail
     /// for that row, which never repeats the section's heading ("Needs you · …" under Needs you). Without one, the
@@ -270,6 +272,7 @@ public struct ProjectWords: Equatable, Sendable {
         // except when they're about another phase than the Works shown here.
         let macWords = project.status.flatMap { $0.text.isEmpty || project.state == .new ? nil : $0 }
         if let macWords, !(phase == .confirmed && macWords.phase != ProjectPhase.confirmed.rawValue) { self.line = macWords.text } else { self.line = line }
+        page = PageActions(project, phase: phase, actions: actions, sending: sending, localScan: localScan)
     }
 
     /// The Printing screen (camera, Pause, Stop) is the place for this project: printing, or getting ready on the

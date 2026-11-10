@@ -88,7 +88,7 @@ class AppState(private val app: Counterpart) {
     fun readStatus() { status.value = try { app.pairingStore.status() } catch (_: Exception) { PairingStatus.disconnected } }
 
     fun project(id: String) = projects.value.firstOrNull { it.id == id }
-    fun printerName(p: Project): String? = p.print?.destination?.name ?: catalog.value?.destination(p.printerDestinationId)?.name
+    fun printerName(p: Project): String? = p.print?.destination?.name ?: catalog.value?.resolved(p.printerDestinationId)?.name
     fun words(p: Project) = ProjectWords(p, sending = p.id in sending.value, localScan = Media.captureFinished(app, p.id), printerName = printerName(p))
     val anyRunning: Boolean get() = projects.value.any { words(it).busy } || sending.value.isNotEmpty()
 
