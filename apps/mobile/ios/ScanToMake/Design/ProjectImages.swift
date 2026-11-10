@@ -8,6 +8,11 @@ import CounterpartKit
     private let cache = NSCache<NSString, UIImage>()
     func image(_ key: String) -> UIImage? { cache.object(forKey: key as NSString) }
     func store(_ image: UIImage, _ key: String) { cache.setObject(image, forKey: key as NSString) }
+    /// A picture of the project this phone has already decoded at any size the lists use (`ProjectImage`'s keys).
+    func anySize(_ project: Project, _ path: String?) -> UIImage? {
+        guard let path else { return nil }
+        return [500, 300, 160, 600, 1200].lazy.compactMap { self.image("\(project.id)#\(Int64(project.mediaVersion))#\(path)#\($0)") }.first
+    }
 
     /// Decode only the pixels a view can show, without expanding a full capture first.
     nonisolated static func thumbnail(at url: URL, maxPixelSize: Int) -> UIImage? {
@@ -47,24 +52,38 @@ struct ProjectImage: View {
     var maxPixelSize = 600
     var contentMode: ContentMode = .fill
     var placeholderSymbol = "cube"
+    /// On a project's stage, never a bare backdrop (review F4 on #525): while the picture loads, the project's list
+    /// picture if this phone already has it, else a quiet progress mark; if it can't be had, `placeholderSymbol`. Says
+    /// which in its accessibility value ("shown" only once a picture is decoded).
+    var onStage = false
+    @Environment(\.scenePhase) private var scenePhase
     @State private var image: UIImage?
+    @State private var shownKey: String?
+    @State private var failed = false
 
     private var key: String { "\(project.id)#\(Int64(project.mediaVersion))#\(path ?? "")#\(maxPixelSize)" }
+    private var early: UIImage? { onStage && image == nil && !failed ? ImageMemory.shared.anySize(project, project.thumbnailPath) : nil }
 
     var body: some View {
-        ZStack {
+        let content = ZStack {
             StageBackground()
-            if let image {
+            if let image = image ?? early {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
-            } else if path == nil {
-                Image(systemName: placeholderSymbol).font(.title2).foregroundStyle(.white.opacity(0.35))
+            } else if path == nil || failed {
+                Image(systemName: placeholderSymbol).font(onStage ? .system(size: 44) : .title2).foregroundStyle(.white.opacity(0.35))
+            } else if onStage {
+                ProgressView().tint(.white.opacity(0.5))
             }
         }
         .clipped()
-        .task(id: key) {
-            if let cached = ImageMemory.shared.image(key) { image = cached; return }
-            image = nil
-            guard let path, let url = try? await app.projects.mac.download(project, path) else { return }
+        // Coming back to the app tries a picture that failed again, as a reopened page does.
+        .task(id: "\(key)#\(scenePhase)") {
+            if let cached = ImageMemory.shared.image(key) { image = cached; shownKey = key; failed = false; return }
+            if shownKey == key, image != nil { return }
+            guard scenePhase == .active else { return }
+            image = nil; failed = false
+            guard let path else { return }
+            guard let url = try? await app.projects.mac.download(project, path) else { if !Task.isCancelled { failed = true }; return }
             let size = maxPixelSize
             // A few at a time: a grid of scan frames decoding two dozen HEICs at once got nothing back (Nov 10).
             var decoded: UIImage?
@@ -72,11 +91,17 @@ struct ProjectImage: View {
                 // CounterpartKit's lane: three at a time, and a cell that scrolled away leaves the queue (review F4).
                 decoded = await DecodeLane.shared.run { ImageMemory.thumbnail(at: url, maxPixelSize: size) } ?? nil
             }
-            guard !Task.isCancelled, let decoded else { return }
+            guard !Task.isCancelled else { return }
+            guard let decoded else { failed = true; return }
             ImageMemory.shared.store(decoded, key)
-            image = decoded
+            image = decoded; shownKey = key
         }
-        .accessibilityHidden(true)
+        if onStage {
+            content.accessibilityElement(children: .ignore)
+                .accessibilityValue(image != nil ? "shown" : failed || path == nil ? "not available" : "loading")
+        } else {
+            content.accessibilityHidden(true)
+        }
     }
 }
 

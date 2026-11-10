@@ -138,6 +138,30 @@ import CounterpartKit
         XCTAssertEqual(after, 5, "a refusal for size is final: one ask")
     }
 
+    /// Review F5 on #525: this phone's own limit met mid-transfer is a size refusal like the Mac's, said as one, not
+    /// retried three times and shown as "not here yet".
+    func testAFileOverThePhonesLimitIsTooLargeNotFailed() async {
+        let counter = Counter()
+        let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready, scan: "scan.usdz")
+        let files = ModelFiles { _, _ in _ = await counter.next(); throw CompanionError(code: "too-large", message: "Too large.") }
+        files.pauses = [Duration.zero, Duration.zero]
+        files.want(project, "scan/scan.usdz")
+        let large = await until(patience) { await MainActor.run { files.fetch(project, "scan/scan.usdz") == .tooLarge } }
+        XCTAssertTrue(large)
+        let asked = await counter.value
+        XCTAssertEqual(asked, 1)
+    }
+
+    /// Review F4 on #525: while the stage's picture loads it shows the project's list picture when this phone has it.
+    func testTheStageFindsTheListsPictureAtAnySize() {
+        let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        XCTAssertNil(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png"))
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4)) }
+        ImageMemory.shared.store(image, "p#\(Int64(project.mediaVersion))#pictures/part-0123456789abcdef.png#300")
+        XCTAssertTrue(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png") === image)
+        XCTAssertNil(ImageMemory.shared.anySize(project, nil))
+    }
+
     func testAnEstimateShowsOnlyForItsOwnSettings() throws {
         var state = EstimateState()
         let estimate = try JSONDecoder().decode(SliceEstimate.self, from: Data(#"{"destinationId":"current","quality":"standard","strength":"standard","seconds":4320,"grams":22,"layers":212}"#.utf8))

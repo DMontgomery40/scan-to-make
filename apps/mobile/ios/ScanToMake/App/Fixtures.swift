@@ -467,6 +467,9 @@ struct FixtureTransport: HTTPTransport {
         // `-CounterpartSlowScan <seconds>`: a scan file takes that long to come (a busy Mac over Wi-Fi), for pictures.
         let slow = UserDefaults.standard.double(forKey: "CounterpartSlowScan")
         if path.contains("/scan/"), slow > 0 { try await Task.sleep(for: .seconds(slow)) }
+        // `-CounterpartSlowPictures <seconds>`: the Mac's pictures take that long too (review F4 on #525).
+        let slowPictures = UserDefaults.standard.double(forKey: "CounterpartSlowPictures")
+        if path.contains("/pictures/"), slowPictures > 0 { try await Task.sleep(for: .seconds(slowPictures)) }
         func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
