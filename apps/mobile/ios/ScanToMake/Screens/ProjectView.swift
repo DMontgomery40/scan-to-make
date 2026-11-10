@@ -35,6 +35,10 @@ struct ProjectView: View {
     @State private var modelURL: URL?
     @Environment(\.scenePhase) private var scenePhase
     @State private var arURL: URL?
+    @State private var arRequested = false
+    @State private var arPreparing = false
+    @State private var arProblem: String?
+    @State private var arGeneration = UUID()
     @State private var scanURL: URL?
     @State private var captureWarning: String?
     @State private var askWorking = false
@@ -369,15 +373,23 @@ struct ProjectView: View {
                 }
             }
         } message: { Text("Its model, photos and activity are removed from your Mac.") }
+        .onDisappear { store.models.releaseDemand(object.id) }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+            if scenePhase == .active { store.models.recover() }
+        }
         .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(scenePhase)") {
             // The store fetches it, so leaving the page never stops the download (Nov 10); back in the app, one that
             // failed meanwhile starts again.
+            store.models.setActive(scenePhase == .active)
             if object.current != nil, scenePhase == .active { store.models.want(object, "model.stl") }
+            let context = store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion)))
+            MediaTrace.record("page.model-begin", ["key": object.current?.model ?? "none", "scene": String(describing: scenePhase)], context: context)
+            MediaTrace.record(Task.isCancelled ? "page.model-cancelled" : "page.model-demanded", ["scene": String(describing: scenePhase)], context: context)
         }
         .task(id: "\(store.models.file(object, "model.stl")?.path ?? "")#\(object.spoolColour ?? "")") {
             modelURL = store.models.file(object, "model.stl"); arURL = nil
-            guard let url = modelURL, !object.preservesPublishedFilaments else { return }
-            arURL = await ARModel.usdz(fromSTL: url, tint: object.spoolColour)
+            MediaTrace.record("page.model-published", ["file": String(modelURL != nil), "scene": String(describing: scenePhase)],
+                              context: store.models.traceContext(object, "model.stl") ?? MediaTrace.Context(project: object.id, version: String(Int64(object.mediaVersion))))
         }
     }
 
@@ -386,15 +398,44 @@ struct ProjectView: View {
     /// The project's pictures (PRD §5.4): what will print, the two together, what was scanned (`ProjectGalleryView`).
     @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords) -> some View {
         // Shorter when a card has to be answered, so its buttons sit above the bottom bar.
-        ProjectGalleryView(store: store, project: object, words: words,
-                           height: words.phase == .failed || words.actions.contains(.itWorks) ? 300 : 380,
-                           modelURL: modelURL, arURL: arURL, localScan: scanURL, working: working,
-                           locate: { act { try await store.mac.client.locate(object.id) } })
-        .task(id: "\(object.id)#\(object.scan ?? "")") {
-            // The scan while it's only on this phone, for Share until the Mac has it.
-            scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
+        VStack(spacing: 8) {
+            ProjectGalleryView(store: store, project: object, words: words,
+                               height: words.phase == .failed || words.actions.contains(.itWorks) ? 300 : 380,
+                               modelURL: modelURL, arURL: nil, localScan: scanURL, working: working,
+                               locate: { act { try await store.mac.client.locate(object.id) } })
+            .task(id: "\(object.id)#\(object.scan ?? "")") {
+                // The scan while it's only on this phone, for Share until the Mac has it.
+                scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
+            }
+            .ignoresSafeArea(edges: .top)
+            if modelURL != nil, !object.preservesPublishedFilaments {
+                Button {
+                    if let arURL { ARModel.show(arURL) } else { arRequested = true }
+                } label: {
+                    HStack {
+                        if arPreparing { ProgressView() }
+                        Label(arPreparing ? "Preparing AR…" : "View part in your space", systemImage: "arkit")
+                    }
+                }
+                .disabled(arPreparing || scenePhase != .active)
+                .accessibilityIdentifier("project-prepare-ar")
+                if let arProblem { Text(arProblem).font(.footnote).foregroundStyle(.secondary) }
+            }
         }
-        .ignoresSafeArea(edges: .top)
+        .task(id: "\(arRequested)#\(scenePhase)#\(modelURL?.path ?? "")#\(object.spoolColour ?? "")") {
+            guard arRequested, scenePhase == .active, let url = modelURL else { return }
+            let generation = UUID()
+            arGeneration = generation; arPreparing = true; arProblem = nil
+            defer { if arGeneration == generation { arPreparing = false } }
+            let prepared = await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: String(describing: scenePhase))) {
+                await ARModel.usdz(fromSTL: url, tint: object.spoolColour)
+            }
+            guard !Task.isCancelled, scenePhase == .active, arGeneration == generation else { return }
+            arURL = prepared
+            if let prepared { ARModel.show(prepared) }
+            else { arProblem = "AR couldn't be prepared. Try again." }
+            arRequested = false
+        }
     }
 
     // MARK: State cards
@@ -1098,7 +1139,8 @@ enum ARModel {
             UIColor(red: CGFloat(($0 >> 16) & 255) / 255, green: CGFloat(($0 >> 8) & 255) / 255, blue: CGFloat($0 & 255) / 255, alpha: 1)
         }
         guard let entity = await ModelStage.load(url, tint: tint, twoTone: false) else { return nil }
-        do { try await entity.write(to: target); return target } catch { return nil }
+        guard !Task.isCancelled else { return nil }
+        return await ModelEntityCache.export(entity, to: target)
     }
 
     @MainActor static func show(_ url: URL) {

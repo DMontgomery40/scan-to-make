@@ -31,6 +31,19 @@ final class TransportDownloadTests: XCTestCase {
         XCTAssertEqual(String(decoding: reply.body, as: UTF8.self), #"{"error":"file-too-large"}"#)
     }
 
+    func testCancellationSettlesARealDownloadWhenTheServerNeverReplies() async throws {
+        let server = try OneReplyServer(status: "200 OK", body: Data(), neverReply: true)
+        defer { server.stop() }
+        let url = try await server.start()
+        let pending = Task {
+            try await PinnedTransport().download(URLRequest(url: url), trust: .nearby(base: url, seen: NearbySeen()), limit: 1000, resourceTimeout: 10)
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        pending.cancel()
+        do { _ = try await pending.value; XCTFail("Cancelled transfer must not return a file") }
+        catch let error as TransportError { XCTAssertEqual(error.code, "cancelled") }
+    }
+
     func testAReplyOverTheLimitIsRefusedAndLeavesNothingBehind() async throws {
         let server = try OneReplyServer(status: "200 OK", body: Data(count: 50_000))
         defer { server.stop() }
@@ -47,15 +60,20 @@ private final class OneReplyServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "transport-download-test")
     private let reply: Data
-    init(status: String, body: Data) throws {
+    private let neverReply: Bool
+    private var peers: [NWConnection] = []
+    init(status: String, body: Data, neverReply: Bool = false) throws {
+        self.neverReply = neverReply
         listener = try NWListener(using: .tcp, on: .any)
         reply = Data("HTTP/1.1 \(status)\r\nContent-Type: application/octet-stream\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8) + body
     }
     func start() async throws -> URL {
         listener.newConnectionHandler = { [self] peer in
+            peers.append(peer)
             peer.start(queue: queue)
             peer.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [self] _, _, _, error in
                 guard error == nil else { peer.cancel(); return }
+                guard !neverReply else { return }
                 peer.send(content: reply, completion: .contentProcessed { _ in peer.cancel() })
             }
         }
@@ -71,5 +89,5 @@ private final class OneReplyServer: @unchecked Sendable {
         }
         return URL(string: "http://127.0.0.1:\(listener.port!.rawValue)")!
     }
-    func stop() { listener.cancel() }
+    func stop() { listener.cancel(); queue.sync { for peer in peers { peer.cancel() }; peers = [] } }
 }

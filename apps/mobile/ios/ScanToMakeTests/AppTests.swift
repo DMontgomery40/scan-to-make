@@ -138,6 +138,34 @@ import CounterpartKit
         XCTAssertEqual(after, 5, "a refusal for size is final: one ask")
     }
 
+    func testForegroundAndLinkRecoveryRetryDemandAndLateOldResultCannotPublish() async throws {
+        let gate = HeldDownload(), counter = Counter()
+        let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        let old = FileManager.default.temporaryDirectory.appendingPathComponent("old-model.stl")
+        let current = FileManager.default.temporaryDirectory.appendingPathComponent("new-model.stl")
+        let files = ModelFiles { _, _ in
+            let call = await counter.next()
+            if call == 1 { return await gate.wait() }
+            if call == 2 { throw CompanionError(code: "device-locked", message: "Unlock your iPhone.") }
+            return current
+        }
+        files.pauses = []
+        files.want(project, "model.stl")
+        let started = await until(patience) { await counter.value == 1 }
+        XCTAssertTrue(started)
+        files.setActive(false)
+        XCTAssertEqual(files.fetch(project, "model.stl"), .failed)
+        files.setActive(true)
+        let locked = await until(patience) { await MainActor.run { files.fetch(project, "model.stl") == .failed } }
+        XCTAssertTrue(locked)
+        files.recover() // link restored / protected data became available
+        let ready = await until(patience) { await MainActor.run { files.file(project, "model.stl") == current } }
+        XCTAssertTrue(ready)
+        await gate.open(old)
+        await Task.yield()
+        XCTAssertEqual(files.file(project, "model.stl"), current, "The abandoned generation cannot overwrite a recovered file")
+    }
+
     /// Review F5 on #525: this phone's own limit met mid-transfer is a size refusal like the Mac's, said as one, not
     /// retried three times and shown as "not here yet".
     func testAFileOverThePhonesLimitIsTooLargeNotFailed() async {
@@ -602,3 +630,10 @@ private actor Counter {
     func next() -> Int { value += 1; return value }
 }
 
+
+/// Ignores task cancellation so an old transfer can deliberately finish after recovery.
+private actor HeldDownload {
+    private var continuation: CheckedContinuation<URL, Never>?
+    func wait() async -> URL { await withCheckedContinuation { continuation = $0 } }
+    func open(_ url: URL) { continuation?.resume(returning: url); continuation = nil }
+}

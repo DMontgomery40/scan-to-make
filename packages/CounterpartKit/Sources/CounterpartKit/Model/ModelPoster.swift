@@ -14,20 +14,27 @@ import simd
         cache.totalCostLimit = 24 * 1024 * 1024
         return cache
     }()
-    private static var pending: [String: Task<CGImage?, Never>] = [:]
+    private static let work = MediaWork<CGImage>(label: "poster", timeout: .seconds(15))
 
     public static func image(key: String, model: Entity, yaw: Float, pitch: Float, fit: Float) async -> CGImage? {
+        guard !Task.isCancelled else { return nil }
         let key = "\(key)#\(yaw)#\(pitch)#\(fit)"
-        if let image = images.object(forKey: key as NSString) { return image }
-        if let task = pending[key] { return await task.value }
-        let task = Task { @MainActor in
-            try? await render(model: model, yaw: yaw, pitch: pitch, fit: fit)
+        if let image = images.object(forKey: key as NSString) { MediaTrace.record("poster.hit"); return image }
+        let image = await work.run(key: key) {
+            guard ModelEntityCache.hasGeometry(model), !Task.isCancelled else { return nil }
+            do { return try await render(model: model, yaw: yaw, pitch: pitch, fit: fit) }
+            catch { MediaTrace.record("poster.render-error", ["code": String((error as NSError).code)]); return nil }
         }
-        pending[key] = task
-        let image = await task.value
-        pending[key] = nil
+        guard !Task.isCancelled else { return nil }
         if let image { images.setObject(image, forKey: key as NSString, cost: image.bytesPerRow * image.height) }
         return image
+    }
+
+    /// End pending demand when its scene deactivates; completed pictures remain usable.
+    public static func deferPending() { work.cancelAll() }
+
+    static func visiblePixels(_ bytes: [UInt8]) -> Int {
+        stride(from: 3, to: bytes.count, by: 4).reduce(0) { $0 + (bytes[$1] > 0 ? 1 : 0) }
     }
 
     /// Shared framing makes the idle still and the interactive model agree.
@@ -58,24 +65,39 @@ import simd
     }
 
     private static func render(model: Entity, yaw: Float, pitch: Float, fit: Float) async throws -> CGImage? {
+        guard !Task.isCancelled else { return nil }
         guard let device = MTLCreateSystemDefaultDevice() else { return nil }
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm_srgb, width: 768, height: 768, mipmapped: false)
         descriptor.usage = [.renderTarget, .shaderRead, .shaderWrite]
         descriptor.storageMode = .shared
         guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
         let renderer = try RealityRenderer()
+        MediaTrace.record("poster.renderer-made")
         renderer.cameraSettings.colorBackground = .color(CGColor(red: 0, green: 0, blue: 0, alpha: 0))
         let (root, _, camera) = scene(model: model, yaw: yaw, pitch: pitch, fit: fit)
         renderer.entities.append(root)
         renderer.activeCamera = camera
         let output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: texture))
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            do {
-                try renderer.updateAndRender(deltaTime: 0, cameraOutput: output, onComplete: { _ in continuation.resume() })
-            } catch { continuation.resume(throwing: error) }
+        guard !Task.isCancelled else { return nil }
+        let completion = MediaCallback(), context = MediaTrace.context, trace = MediaTrace.destination ?? .shared
+        MediaTrace.record("poster.submitted")
+        do {
+            try renderer.updateAndRender(deltaTime: 0, cameraOutput: output,
+                whenScheduled: { _ in trace.record("poster.whenScheduled", [:], context: context) },
+                onComplete: { _ in
+                    trace.record("poster.onComplete", [:], context: context)
+                    completion.finish(true)
+                })
+        } catch {
+            completion.finish(false)
+            MediaTrace.record("poster.submit-error", ["code": String((error as NSError).code)])
         }
+        guard await completion.wait(timeout: .seconds(12)), !Task.isCancelled else { return nil }
         var bytes = [UInt8](repeating: 0, count: 768 * 768 * 4)
         texture.getBytes(&bytes, bytesPerRow: 768 * 4, from: MTLRegionMake2D(0, 0, 768, 768), mipmapLevel: 0)
+        let visible = visiblePixels(bytes)
+        MediaTrace.record("poster.readback", ["visiblePixels": String(visible)])
+        guard visible > 0 else { return nil }
         guard let provider = CGDataProvider(data: Data(bytes) as CFData), let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         return CGImage(width: 768, height: 768, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 768 * 4,
                        space: space, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue).union(.byteOrder32Little),

@@ -77,3 +77,23 @@ test('the shared pairing-link vectors are exactly what the parser answers',async
   assert.deepEqual(answer,item.parsed?{parsed:item.parsed}:{error:item.error},item.link);
  }
 });
+
+test('every phone HTTP response logs one bounded secret-free completion, including auth refusal', async t => {
+ const f=await fixture(t);
+ const server=await startCompanionServer({remoteAuth:f.store,lanTls:{cert:f.cert,key:f.key}});
+ t.after(()=>server.close());
+ const logs=[], original=console.info;
+ console.info=line=>logs.push(line);
+ t.after(()=>{console.info=original;});
+ const invite=await f.store.createPairing('lan');
+ const issued=await f.store.exchange('lan',{code:invite.code,deviceName:'Trace phone'});
+ const headers={authorization:`Bearer ${issued.token}`,'x-scan-device':issued.deviceId};
+ assert.equal((await wire(f.store.baseUrl,f.cert,'/healthz',{headers})).status,200);
+ assert.equal((await wire(f.store.baseUrl,f.cert,'/healthz',{headers:{...headers,authorization:`Bearer ${'x'.repeat(43)}`}})).status,401);
+ const rows=logs.map(line=>JSON.parse(line));
+ assert.equal(rows.length,2);
+ assert.deepEqual(rows.map(row=>row.status),[200,401]);
+ assert.ok(rows.every(row=>row.event==='phone.http'&&row.route==='health'&&row.device===issued.deviceId.slice(-6)&&row.ms>=0&&row.bytes>0));
+ assert.equal(rows[1].refusal,'unauthorized');
+ assert.ok(logs.every(line=>line.length<512&&!line.includes(issued.token)&&!line.includes(issued.deviceId)&&!line.includes(invite.code)));
+});
