@@ -585,3 +585,41 @@ test('a question with no sizes, or with a size that is not whole, stays a close-
     await assert.rejects(f.service.answerCloseup(object.id, {sizes: [{id: 'size-1', mm: 5}]}), /did not ask for sizes/);
   }
 });
+
+// Board X68: a question is open only until the pass that asked it is answered or superseded. A pass started over an
+// unanswered question (Try Again, or a change sent instead of an answer) used to leave it "open" behind a project
+// that had moved on: ready, with a question nobody could answer and, on Linux, Print disabled for good.
+test('a question left unanswered is no longer open once another pass starts', async t => {
+  const asking = {status: 'needs_closeup', result: {closeup: 'the clip', ask: {question: 'Can you take a close-up of the clip?'}}};
+  // Try Again over the question, with no result yet.
+  const first = await setup(t, [asking, {status: 'done'}]);
+  const a = await first.service.create('A hook', 'fit');
+  await first.service.start(a.id);
+  assert.equal((await first.service.settled(a.id)).ask.status, 'open');
+  await first.service.start(a.id);
+  const retried = await first.service.settled(a.id);
+  assert.equal(retried.state, 'ready');
+  assert.equal(retried.ask.status, 'answered', 'the pass that asked is over');
+  assert.equal(publicObject(retried).status.phase, 'ready');
+  // A change sent instead of an answer, on a project that already has a result.
+  const second = await setup(t, [{status: 'done'}, asking, {status: 'done'}]);
+  const b = await second.service.create('A hook', 'fit');
+  await second.service.start(b.id);
+  await second.service.settled(b.id);
+  await second.service.correct(b.id, 'Make it thicker');
+  assert.equal((await second.service.settled(b.id)).ask.status, 'open');
+  await second.service.correct(b.id, 'Never mind the clip, just make it thicker');
+  const changed = await second.service.settled(b.id);
+  assert.equal(changed.state, 'ready');
+  assert.equal(changed.ask.status, 'answered');
+  // A pass that asks again opens its own question.
+  const third = await setup(t, [asking, {status: 'needs_closeup', result: {closeup: 'the hinge', ask: {question: 'Can you take a close-up of the hinge?'}}}]);
+  const c = await third.service.create('A hook', 'fit');
+  await third.service.start(c.id);
+  const before = (await third.service.settled(c.id)).ask.id;
+  await third.service.start(c.id);
+  const again = await third.service.settled(c.id);
+  assert.equal(again.ask.status, 'open');
+  assert.notEqual(again.ask.id, before);
+  assert.match(again.ask.question, /hinge/);
+});

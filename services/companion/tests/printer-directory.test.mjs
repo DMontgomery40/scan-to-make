@@ -215,3 +215,17 @@ test('names older builds generated count as unnamed; a name someone gave stays (
   for (const legacy of ['Bambu printer', 'Configured printer']) assert.equal((await listedName(named(legacy))).after, 'A1 Mini', legacy);
   assert.equal((await listedName(named('Garage printer'))).after, 'Garage printer');
 });
+
+test('a config that names a model still shows what the MCP reports; an MCP that cannot be asked leaves where it is (F1 follow-up)', async () => {
+  // The config says "p1s": the companion composes nothing from it; the MCP's own display name is shown.
+  const withModel = named('Printer at 192.0.2.1');
+  withModel.destinations[0].model = 'p1s';
+  assert.equal((await listedName(withModel)).after, 'A1 Mini');
+  // No counterpart_printer_info (an MCP without the contract, or one that never answers): "Printer at <address>".
+  const d = destination({tools: [tool('get_printer_status')], status: () => ({connected: true, status: 'idle'})});
+  const directory = new PrinterDirectory(named('Printer at 192.0.2.1'), id => id === 'current' ? d.session : undefined, {now: () => 1_000_000});
+  d.set(directory);
+  await directory.refresh('current');
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(directory.list().destinations[0].name, 'Printer at 192.0.2.1');
+});

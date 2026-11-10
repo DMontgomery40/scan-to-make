@@ -119,9 +119,9 @@ export class PrinterDirectory {
    */
   #named(destination: PrinterDestination): Pick<PrinterDestination, 'name'> {
     const reported = this.#models.get(destination.id);
-    const unnamed = destination.name === defaultName(destination.backend, undefined, destination.address)
-      || LEGACY_GENERATED_NAMES.has(destination.name);
-    if (!reported || destination.model || !unnamed) return {name: destination.name};
+    const unnamed = destination.name === defaultName(destination.address) || LEGACY_GENERATED_NAMES.has(destination.name);
+    // Also when its config names a model: what the MCP reports is what's shown, not the config's code ("p1s").
+    if (!reported || !unnamed) return {name: destination.name};
     // The MCP's own display name, exactly as it says it ("A1 Mini", "H2D Pro"): no brand added, nothing reformatted, no
     // branching on which MCP it is (AGENTS.md, "The app staples onto the MCPs"). A brand in the name is the MCPs' to add.
     return {name: reported};

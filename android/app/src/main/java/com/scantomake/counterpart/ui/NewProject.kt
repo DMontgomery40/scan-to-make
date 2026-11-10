@@ -167,6 +167,9 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
 
     // Continue on a fit takes you to the words it still needs.
     val describeFocus = remember { FocusRequester() }
+    // Send on a fit still missing its measurement goes to the fields and says so there (review F4).
+    val measureFocus = remember { FocusRequester() }
+    var measureAsked by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = close, enabled = working != "make") { Icon(CIcons.Close, "Close") }
@@ -201,10 +204,12 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
                         "measured" -> {
                             Text("Measure the outside of the real thing. Leave a side blank if you don't know it.", color = Palette.secondary, fontSize = 13.sp)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(measuredLongest, { measuredLongest = it }, Modifier.weight(1f).testTag("fit-size-longest"), label = { Text("Longest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                                OutlinedTextField(measuredLongest, { measuredLongest = it }, Modifier.weight(1f).focusRequester(measureFocus).testTag("fit-size-longest"), label = { Text("Longest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                                 OutlinedTextField(measuredMiddle, { measuredMiddle = it }, Modifier.weight(1f).testTag("fit-size-middle"), label = { Text("Middle mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                                 OutlinedTextField(measuredShortest, { measuredShortest = it }, Modifier.weight(1f).testTag("fit-size-shortest"), label = { Text("Shortest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
                             }
+                            if (measureAsked && !measuredValid()) Text("Enter at least one measurement in millimetres.", color = Palette.failed, fontSize = 13.sp,
+                                modifier = Modifier.testTag("fit-size-missing"))
                         }
                         "scan" -> Text("Uses the scan's size as an estimate. Best for loose holders; your computer says the clearance it allowed.", color = Palette.secondary, fontSize = 13.sp)
                         else -> Text("Your computer identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.", color = Palette.secondary, fontSize = 13.sp)
@@ -282,6 +287,9 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         PrimaryButton(sendLabel, Modifier.fillMaxWidth().padding(20.dp, 8.dp).testTag("send"),
             enabled = working == null && !(scanned && scanUse == null), icon = sendIcon) {
             if (describeFirst) { describeFocus.requestFocus(); return@PrimaryButton }
+            if (scanned && scanUse == "fit" && dimensionSource == "measured" && !measuredValid()) {
+                measureAsked = true; measureFocus.requestFocus(); return@PrimaryButton
+            }
             if (missing != null) { problem = missing; return@PrimaryButton }
             if (scanned && scanUse == "later") { close(); return@PrimaryButton }
             run("make") {

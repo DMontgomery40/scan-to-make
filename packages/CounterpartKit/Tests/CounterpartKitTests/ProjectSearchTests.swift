@@ -55,6 +55,7 @@ final class ProjectSearchTests: XCTestCase {
         }
         XCTAssertEqual(marked.first?.lowercased(), "holder")
         XCTAssertNotNil(snippet.attributed.runs.first { $0.inlinePresentationIntent == .stronglyEmphasized })
+        XCTAssertEqual(snippet.matchedWords, ["holder"], "what VoiceOver hears as the match")
         // The title has it: no line.
         XCTAssertNil(project.searchSnippet("desk"))
         XCTAssertNil(project.searchSnippet(""))

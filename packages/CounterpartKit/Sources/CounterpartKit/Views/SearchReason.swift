@@ -16,7 +16,8 @@ public struct SearchReason: ViewModifier {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, indent)
-                    .accessibilityLabel("Matches: \(snippet.text)")
+                    // VoiceOver hears which words matched, as the bold shows them (review F7).
+                    .accessibilityLabel("Found \(snippet.matchedWords.map { "“\($0)”" }.joined(separator: ", ")) in: \(snippet.text)")
                     .accessibilityIdentifier("search-reason")
             }
         } else {

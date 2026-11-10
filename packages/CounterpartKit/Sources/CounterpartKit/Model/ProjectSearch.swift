@@ -105,6 +105,16 @@ public struct SearchSnippet: Equatable, Sendable {
         self.marks = marks.sorted { $0.lowerBound < $1.lowerBound }
     }
 
+    /// The words marked in the line, as they appear there, each once: what the bold says, for VoiceOver.
+    public var matchedWords: [String] {
+        var seen: [String] = []
+        for mark in marks {
+            let word = String(text[text.index(text.startIndex, offsetBy: mark.lowerBound)..<text.index(text.startIndex, offsetBy: mark.upperBound)])
+            if !seen.contains(where: { $0.caseInsensitiveCompare(word) == .orderedSame }) { seen.append(word) }
+        }
+        return seen
+    }
+
     /// The line with its searched words in bold, for a `Text`.
     public var attributed: AttributedString {
         var result = AttributedString(text)
