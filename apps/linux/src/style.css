@@ -255,7 +255,14 @@ main > .model-view {
   bottom: 18px;
   right: 22px;
   font-size: 12px;
-  color: #6e7a6d;
+  /* A backing of its own, so the size reads on the dark stage and the light one alike. */
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.dimensions:empty {
+  display: none;
 }
 /* The light stage (gallery.ts lightStage): a black or dark blue-grey part is never a silhouette on the dark stage. */
 .light-stage .model-view .canvas {

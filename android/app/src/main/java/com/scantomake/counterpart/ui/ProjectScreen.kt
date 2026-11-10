@@ -1,5 +1,7 @@
 package com.scantomake.counterpart.ui
 
+import androidx.compose.foundation.clickable
+
 import androidx.compose.ui.semantics.semantics
 
 import androidx.compose.ui.semantics.contentDescription
@@ -182,9 +184,11 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 ProjectImage(project, entry?.let(project::pictureFor), Modifier.fillMaxSize(), ContentScale.Fit)
                 StatusCapsule(words.phase, modifier = Modifier.padding(12.dp))
                 entry?.sizeText()?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
-                if (entry?.kind == ProjectGallery.Kind.Part && project.canLocate) SecondaryButton("See It Together", Modifier.align(Alignment.BottomEnd).padding(12.dp), enabled = working == null) {
-                    run("locate") { state.show(app.companion.locate(id)) }
-                }
+                // On the picture, with the same dark backing as the size and status chips, so it reads on either stage.
+                if (entry?.kind == ProjectGallery.Kind.Part && project.canLocate) Text("See It Together",
+                    Modifier.align(Alignment.BottomEnd).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.62f))
+                        .clickable(enabled = working == null, role = Role.Button) { run("locate") { state.show(app.companion.locate(id)) } }
+                        .padding(14.dp, 8.dp), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             }
             if (gallery.entries.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).semantics { contentDescription = "Pictures" },
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
