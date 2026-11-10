@@ -11,7 +11,7 @@ The one list of open work. [`handoff.md`](handoff.md) is the one-screen summary 
 
 Owners: **Lead** = the lead session (Claude Fable 5.2, Mac, thread "Take Over Scan-to-Make Delivery"). **SM** = the state-machines session (Claude Fable 5.2, thread "Find Implicit State Machines"), which builds and hands PRs to the lead. **D:** a delegate of the lead, named by its T3 thread title. **David** = only he can do it.
 
-Last reconciled: 2026-11-10 07:05Z, main `8ee2a829`, by the lead.
+Last reconciled: 2026-11-10 07:25Z, main `256a22a5`, by the lead.
 
 ## Right now
 
@@ -28,7 +28,8 @@ Last reconciled: 2026-11-10 07:05Z, main `8ee2a829`, by the lead.
 | W4 | Overrule or keep four lead decisions | (a) a tapped notification never replaces a New or Print sheet that is up; (b) with several devices, a progress milestone alerts on the Live Activity only when every device has one, and a missed alert on one device is not re-sent as a notification; (c) scan regularisation is allowed when labelled `assumed`; (d) the boundary check's three low-confidence flags on #439 were recorded as reviewed. |
 | W5 | Fast tiers for delegates that block a landing | Opus 5.5 fast mode, GPT-6.1 Sol priority tier. Costs more; asked Nov 10, no answer. |
 | W6 | Archive the stale agent memory | `~/.claude/projects/-Users-davidmontgomery-fleet-scan-to-make/memory/` (16 files, Oct 30–Nov 1; React Native, KAN branches). Not loaded by this session. |
-| W7 | Questions from the parts design | Arrive with I4's proposal. |
+| W7 | Two questions from the parts design (P1 waits on them) | (1) When you print a project with several parts, should Counterpart start with only the parts that changed since they were last printed ticked, or with everything ticked? (2) When a model or a scan holds several separate pieces, should Counterpart split them into parts by itself and show you, or only when you ask? |
+| W8 | Four buttons in one rail group on the open Duo with a project open (Printers, Settings, Share, More) | SM's judgement call on #445; before/after in `~/scan-to-make-work/state-machines-2026-11-09/duo-rail/`. |
 
 ## In flight
 
@@ -37,11 +38,10 @@ Last reconciled: 2026-11-10 07:05Z, main `8ee2a829`, by the lead.
 | I1 | **Train 2026-11-10**: MCP update journal (#440), one way a pass ends (#441), navigation as one value (#442), the look-at-it rule in operations.md | Lead | PR #443, head `b1f08ea5`. Review done (`~/scan-to-make-work/train-2026-11-10/review-443.md`), fixes merged. | Companion and iPhone/iPad reruns running → `branch_check` → merge → install Mac, iPhone, iPad. |
 | I2 | **The question's photo is unreadable; "What you sent" is a wall of 77 photos** (David, Nov 9) | D: "The question card's photo must be readable…" | No PR yet | Photo large with the region clear, a caption true for any question, a scan shown as one strip with a count; every layout; real-data before/after. |
 | I3 | **Nothing looks at finished screens**: `scripts/ux_screens.sh` (every screen, real project data, iPhone, iPad, Duo, Mac if it can be rendered off screen) and a first whole-app list of what is plainly wrong | D: "Look at the real app…" | No PR yet; output `~/scan-to-make-work/ux-audit-2026-11-10/` | Tool PR + `first-look.md`. Then the lead runs the council scoring (R1) and turns every finding into rows here. |
-| I4 | **A project made of parts** ("we just wanted a new lid, not the whole box again") | D: "Design proposal: a project made of parts…" | `~/scan-to-make-work/parts-design-2026-11-10/proposal.md` | Read it, bring David the model in five sentences, the first slice and the questions (W7); then slice it into rows. |
-| I5 | **The project's picture**: a gallery over a list (not three fixed views); the scan stays viewable; the result wears its filament colour; a Together view with the object in every seat (fit passes record seats; a seats-only action for older projects) | D: "The project's picture…" | No PR yet | PR with real-data screenshots on every layout. |
+| I5 | **The project's picture**: a gallery over a list (not three fixed views); the scan stays viewable; the result wears its filament colour; a Together view with the object in every seat (fit passes record seats; a seats-only action for older projects); **a project's picture everywhere is the object alone on the stage, never a raw photo with the room in it** (David, Nov 10; replaces the Nov 9 "photo first" rule; mockups `docs/design/overhaul/screens/phone-home.jpg`, `mac-main.jpg` are the reference) | D: "The project's picture…" | No PR yet | PR with real-data screenshots on every layout. |
 | I6 | "Is the Mac answering?" as one value, with the Android port (M8) | SM | PR #444 `7f055345` | Next train. |
-| I7 | Duo open: Printers and Settings in the edge rail (David, Nov 9) | SM | PR #445 `9202bde8`, stacked on #442 | Retarget to main after I1 lands; next train; four answers in the body. |
-| I8 | The companion sends the words for how each pass ended; fixtures' wrong spellings fixed (M2 slice 1) | SM | Branch `feat/pass-ending-words`, not pushed | Open as not-ready; real-data captures once I3's tool lands. |
+| I7 | Duo open: Printers and Settings in the edge rail (David, Nov 10 UTC) | SM | PR #445 `9202bde8`, stacked on #442 | Retarget to main after I1 lands; next train; four answers in the body. |
+| I8 | The companion sends the words for how each pass ended; fixtures' wrong spellings fixed (M2 slice 1) | SM | Branch `feat/pass-ending-words` (`b99baecb`, `c301181f`), not pushed until it compiles | Open as not-ready; real-data captures once I3's tool lands. |
 
 ## Queued: owned, not started
 
@@ -54,13 +54,14 @@ Last reconciled: 2026-11-10 07:05Z, main `8ee2a829`, by the lead.
 | Q5 | Phone draft send (M7): a send from the project page never enters `store.sending`, so Home says "Draft saved" and a reopened page can send twice (by reading) | SM | One check on David's phone with his next scan |
 | Q6 | A new TestFlight build and Mac beta from main (the public builds are from Nov 6 and predate the scan fix) | Lead | I1, I2, I5 landed and looked at |
 | Q7 | Refresh Android and Linux installs (Nov 5 builds) | Lead | After Q6 |
+| Q8 | A gate-run check that the real iPad view survives a resize (needs a driver other than XCTest's `open(URL)`), and whether a link opens a second iPad window in the shipped app (Info.plist allows multiple scenes). Starting point: the stash "F5 attempt…" on SM's #442 worktree | SM | After Q3 |
+| P1 | **Parts, slice 1** (proposal: `~/scan-to-make-work/parts-design-2026-11-10/proposal.md`): a project holds a list of parts; "Split into parts" on a model with separate pieces (the pink box `874333ab` is box + lid in one model); each part keeps its own print record ("printed Nov 7, unchanged since"); the Print sheet's Parts menu starts on what changed (Lid only); Ask for changes → To: Lid; a pass may change only the parts it is told to; Works is cleared only on parts a pass changed; old projects read as one part with no migration; all five layouts | Lead (delegate once W7 is answered) | W7; lands after I5 so parts feed the gallery |
+| P2 | Parts, later slices: print any set of parts together (needs `counterpart_make_3mf {layout: "separate"}` in both MCPs); scan a second part into a project; split one scan that holds two things; plates in the parts list (with Q2) | Lead | P1; Q2; I5 |
 
 ## No owner yet (the lead clears this section each session)
 
 | ID | What | Source |
 |---|---|---|
-| X1 | A gate-run check that the real iPad view survives a resize: needs a driver other than XCTest's `open(URL)` | #443 review F5; SM's attempt, stash "F5 attempt…" on its #442 worktree |
-| X2 | Does a link (widget, Live Activity, notification) open a second iPad window in the shipped app? Info.plist allows multiple scenes and nothing says which window takes a link | SM, Nov 10 |
 | X3 | #439 leftovers: the iOS Set Up fixture is not stateful; "latest final run" ties on `completed_at`; a companion stopped mid-pass does not collect that attempt's runs | `~/scan-to-make-work/train-2026-11-10/review-439.md` F5, F7, F3 |
 | X4 | A designer's 3MF sent with no words still runs a pass and gets the scan-cleanup sentence | #430 report |
 | X5 | The gate: split the 22-minute iPhone and iPad job onto two simulators; give the Android job a warm Gradle cache (Maven rate-limited four cold runs; agents-173 ran them instead); `clients.yml`'s Android step assumes a Linux host | Lead, Nov 10; #437 review note 7 |
@@ -75,6 +76,12 @@ Last reconciled: 2026-11-10 07:05Z, main `8ee2a829`, by the lead.
 | X14 | The touch-up rules' "recognise and regularise" have never run in the installed app on a real scan | #430 |
 | X15 | The Bambu Studio crash record the lead moved aside on Nov 10 is in `/Volumes/Spillover/stm-cleanup-2026-11-09/bambu-studio-crash-state/`; until #137 is published, a new Studio crash can bring the slice hang back | Lead, Nov 10 |
 | X16 | agents-173's only Android emulator image was deleted in cleanup; the next emulator test recreates it | agents-173 cleanup report |
+| X18 | mcp-3D-printer-server's main has no `counterpart_make_3mf` and no `list_3mf_plate_objects`, so a multi-colour design cannot be made through it today, and parts slice P2 needs them ported | Parts proposal, Nov 10 |
+| X19 | Unverified in the Nov 10 train, as SM reported: #440's restart-mid-update was never reproduced on the real Mac (tests use a fake disk) and the per-journal catch in `recover()` has no test; #442's print sheet through a fold was not looked at on the Duo (unit test only) | SM, Nov 10 |
+| X20 | Unverified in the next train: #445's last merge commit was not rebuilt and it has not been seen on a real Duo; #444 was not looked at on a device and its Android port has unit tests only, no emulator run | SM, Nov 10 |
+| X21 | Two projects in David's list are both titled "Your scan": a scan sent with no words gets no name of its own | Lead, from David's Nov 10 screenshot |
+| X22 | The parts proposal's "pieces add up exactly" check assumes the code engine rebuilds an unchanged part identically (true for Blender on the box; not run on the code engine); no part of a multi-part design has been sliced on its own yet | Parts proposal, Nov 10 |
+| X23 | SM's cleanup owed when its PRs are past review: worktrees under `~/.t3/worktrees/scan-to-make/` (mcp-update-journal, projects-navigation, pass-end, mac-link, duo-rail, pass-words) and derived data in `/private/tmp` (`stm-nav-dd`, `stm-link-dd`, `stm-rail-dd`, `stm-words-mac-dd`) | SM, Nov 10 (owner: SM) |
 | X17 | Older T3 worktrees in the MCP repos that are not this session's: mcp-3D `feat-bambu-parity-pauses`, `feat-tool-annotations`; bambu `feat-control-route-pr`, `research-control-refusal` | Lead, Nov 10 |
 
 ## Carried from before Nov 9 (still open)
@@ -109,6 +116,8 @@ Last reconciled: 2026-11-10 07:05Z, main `8ee2a829`, by the lead.
 | Nov 9 | "don't hardcode it to three views … we just wanted a new lid" | I5 (gallery over a list), I4 (parts) |
 | Nov 9 | Together view: "a perfect idea … it's generally painfully obvious where the object should be" | I5 |
 | Nov 9 | "how are you keeping track of this?? what is just getting forgotten" | This file |
+| Nov 9 11:58 pm | Projects grid of raw photos: "this option, of the photograph including everything in it is by far the worst ... it certainly doesn't match our mockups ... don't use it as gospel at this point" | I5 (the object alone on the stage, everywhere) |
+| Nov 9 11:58 pm | "i dunno how to update ui acceptance" | R2 |
 | (seen by the lead in his screenshots) | A "Fit brief:" block he never wrote is shown as his request | Q3 |
 | (seen by the lead) | A size question offers Camera, Photos, Best guess | Q3 |
 
@@ -117,6 +126,7 @@ Last reconciled: 2026-11-10 07:05Z, main `8ee2a829`, by the lead.
 | ID | What | When |
 |---|---|---|
 | R1 | Council scoring of real-data screenshots (four questions; nine or more from each reviewer) for every train that changes what a person sees | From the first train after I3 lands; I2 and I5 carry their own before/after sets meanwhile |
+| R2 | **A reference for every screen.** The 48 mockups in `docs/design/overhaul/screens/` showed the app David wants and nothing compares the real app with them. After I3's first run: put each real-data screenshot beside its mockup; sort every difference into a decision made since (update the mockup), a regression (a row here, fix the app), or a mockup that was wrong (the 64-point question thumbnail is in `phone-ask.jpg` too); keep an index of screen → reference → date confirmed. R1 then scores against the reference, not only the four questions | Lead (delegate after I3) |
 
 ## Ideas for later (not committed work)
 
@@ -124,6 +134,7 @@ Last reconciled: 2026-11-10 07:05Z, main `8ee2a829`, by the lead.
 |---|---|---|
 | L1 | A small geometry kernel written from scratch on distance fields (watertight by construction, no 640 MB environment, could run in the MCP or on the phone), tried against the same holder and unicorn cases once the code engine has shipped | David, Nov 9 |
 | L2 | The Together view shows the clearance per seat ("0.8 mm clear") from the code engine's fit check | Lead, Nov 10; David: "note that for later" |
+| L4 | Parts: scanning a part into an existing project and the Mac telling two things in one scan apart are in the proposal as later slices | Parts proposal |
 | L3 | Jira instead of this file: the lead's Atlassian connector is not authorised in this kind of session; a markdown board in the repo is readable by every agent on every machine | David, Nov 10 |
 
 ## Done since Nov 9 (proof in each PR)
