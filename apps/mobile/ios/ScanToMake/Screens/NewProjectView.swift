@@ -213,7 +213,8 @@ struct NewObjectView: View {
             }
             // Send on a fit still missing its measurement takes you to the fields that need it (review F4).
             .onChange(of: measuring) { _, now in
-                if now { withAnimation { proxy.scrollTo("fit-dimensions", anchor: .center) } }
+                // The fields themselves, with the line above them, into the room the keyboard leaves.
+                if now { withAnimation { proxy.scrollTo("fit-sizes", anchor: .center) } }
             }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -309,15 +310,17 @@ struct NewObjectView: View {
             case .measured:
                 Text("Measure the outside of the real thing. Leave a side blank if you don't know it.")
                     .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                // What's missing sits right above the fields: below them, the number keyboard covered it (iPad Air, landscape).
+                if askedForDescription, measurementMissing, let missing {
+                    Text(missing).font(.footnote).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("fit-size-missing")
+                }
                 HStack(spacing: 8) {
                     measuredField("Longest", text: $measuredLongest, identifier: "fit-size-longest", focus: $measuring)
                     measuredField("Middle", text: $measuredMiddle, identifier: "fit-size-middle")
                     measuredField("Shortest", text: $measuredShortest, identifier: "fit-size-shortest")
                 }
-                if askedForDescription, measurementMissing, let missing {
-                    Text(missing).font(.footnote).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("fit-size-missing")
-                }
+                .id("fit-sizes")
             case .scan:
                 Text("Uses the scan's size as an estimate. Best for loose holders; your Mac says the clearance it allowed.")
                     .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
