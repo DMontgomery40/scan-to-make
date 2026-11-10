@@ -619,22 +619,23 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(scan.frame.minY, close.maxY, "the scan is below the header: \(scan.frame)")
         XCTAssertLessThanOrEqual(scan.frame.maxY, copy.frame.minY + 1, "the scan is above the answers")
         XCTAssertLessThanOrEqual(later.frame.maxY, send.frame.minY + 1, "all three answers fit with it, above the button")
-        // The bottom action is a bar the content scrolls under: nothing of the scrolling content can be reached through
-        // the button's frame (lead, Nov 10). Whether anything reads through it is checked by eye on the screenshot below.
+        // The bottom action sits on a bar below the scroll (lead, Nov 10): checked below, and by eye on the screenshot.
         // Kept with the result, so a review can look at the settled sheet on each device (taken before the check below).
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "new-after-a-scan"; shot.lifetime = .keepAlways
         add(shot)
-        func nothingReachableThroughTheButton(_ state: String) {
-            let button = send.frame
-            let under = (app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex).filter {
-                $0.identifier != "send" && $0.label != send.label && $0.frame.intersects(button) && !$0.frame.contains(button)
+        // Review F7: scrolled to the end, where the most content sits against the bar, nothing of the scrolling content is
+        // inside the button's frame at all (the scroll ends where the bar begins), then back to the top for the rest.
+        func nothingInsideTheButton(_ state: String) {
+            for _ in 0..<6 { app.swipeUp() }
+            let own = Set(send.descendants(matching: .any).allElementsBoundByIndex.map { NSCoder.string(for: $0.frame) })
+            let inside = (app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex + app.textFields.allElementsBoundByIndex).filter {
+                $0.identifier != "send" && !own.contains(NSCoder.string(for: $0.frame)) && $0.frame.intersects(send.frame)
             }
-            for element in under {
-                XCTAssertFalse(element.isHittable, "\(state): \(element.identifier) '\(element.label)' can be reached through the button at \(element.frame)")
-            }
+            XCTAssertTrue(inside.isEmpty, "\(state): \(inside.map { "\($0.identifier) '\($0.label)' \($0.frame)" }) inside the button at \(send.frame)")
+            for _ in 0..<6 { app.swipeDown() }
         }
-        nothingReachableThroughTheButton("nothing chosen")
+        nothingInsideTheButton("nothing chosen")
         let describe = app.staticTexts["What do you need?"]
         XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
         for row in [copy, fit, later] {
@@ -649,7 +650,7 @@ final class LayoutParityUITests: XCTestCase {
         let chosen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         chosen.name = "new-after-a-scan-copy-chosen"; chosen.lifetime = .keepAlways
         add(chosen)
-        nothingReachableThroughTheButton("copy chosen")
+        nothingInsideTheButton("copy chosen")
         fit.tap()
         XCTAssertEqual(send.label, "Continue", "a fit asks for its words first")
         for _ in 0..<4 where !later.isHittable { app.swipeUp() }
@@ -659,15 +660,18 @@ final class LayoutParityUITests: XCTestCase {
 
     /// First look U9 (Nov 10, iPad): a ready scan's Result showed two "—" cards for print time and filament and a third
     /// that said only "Bambu printer". Before slicing, one row names the printer and says when the numbers come.
-    func testAResultBeforeSlicingNamesItsPrinterAndShowsNoEmptyCards() {
+    /// Review F7: what this proves is the app's half: the row shows the name the printer list gives (the fixture Mac's
+    /// "P1S"), and no time or filament tile exists before slicing. How that name is made is the companion's, tested in
+    /// `printer-directory.test.mjs` (the MCP's display name, exactly; "Printer at <address>" when it can't be asked).
+    func testAResultBeforeSlicingShowsTheListedPrinterNameAndNoTimeOrFilamentTiles() {
         let app = launch(screen: "printed")
         let row = app.descendants(matching: .any)["result-printer"]
         XCTAssertTrue(row.waitForExistence(timeout: 20), app.debugDescription)
         for _ in 0..<6 where !row.isHittable { app.swipeUp() }
-        XCTAssertTrue(row.label.contains("P1S"), row.label)
+        XCTAssertTrue(row.label.hasPrefix("P1S"), "the listed name, as given: \(row.label)")
         XCTAssertTrue(row.label.contains("once it’s sliced for printing"), row.label)
-        XCTAssertFalse(app.staticTexts["—"].exists, "no card that says nothing")
-        XCTAssertFalse(app.staticTexts["Print time"].exists)
+        XCTAssertFalse(app.staticTexts["Print time"].exists, "no time tile")
+        XCTAssertFalse(app.staticTexts["Filament"].exists, "no filament tile")
     }
 
     /// First look U14 (Nov 10, iPhone): Welcome's second starter was cut off at the margin. Both starters show whole,
@@ -680,7 +684,11 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertEqual(first.frame.minY, second.frame.minY, accuracy: 2, "one row")
         XCTAssertGreaterThanOrEqual(first.frame.minX, window.minX + 15, "\(first.frame)")
         XCTAssertLessThanOrEqual(second.frame.maxX, window.maxX - 15, "the second starter is whole: \(second.frame) in \(window)")
-        XCTAssertTrue(app.buttons["welcome-continue"].isHittable)
+        let continueButton = app.buttons["welcome-continue"]
+        XCTAssertTrue(continueButton.isHittable)
+        // Review F8: the scroll ends where Continue's bar begins, so no card is sliced behind it.
+        let scroll = app.scrollViews.allElementsBoundByIndex.max { $0.frame.height < $1.frame.height }!
+        XCTAssertLessThanOrEqual(scroll.frame.maxY, continueButton.frame.minY, "the scroll \(scroll.frame) ends above Continue \(continueButton.frame)")
     }
 
     /// First look U10 (Nov 10, iPad): "holder" listed projects with no hint why. A result whose title lacks the word says
@@ -691,9 +699,10 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 20))
         field.tap()
         field.typeText("bigger")
-        // Found by its words: a List cell may read its row and reason as one element.
-        let reason = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Copy this clip, 20% bigger.")).firstMatch
+        // Review F7: the reason itself, by its identifier, and its emphasis as VoiceOver hears it.
+        let reason = app.descendants(matching: .any).matching(identifier: "search-reason").firstMatch
         XCTAssertTrue(reason.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(reason.label, "Found “bigger” in: Copy this clip, 20% bigger.")
         XCTAssertTrue(reason.isHittable, "the reason is on screen")
     }
 
@@ -709,8 +718,14 @@ final class LayoutParityUITests: XCTestCase {
         fit.tap()
         let describe = app.descendants(matching: .any).matching(identifier: "describe").firstMatch
         for _ in 0..<4 where !describe.isHittable { app.swipeUp() }
+        let fitShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        fitShot.name = "new-fit-chosen"; fitShot.lifetime = .keepAlways
+        add(fitShot)
         describe.tap()
         describe.typeText("A wall holder for it")
+        let keyboardShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        keyboardShot.name = "new-fit-keyboard-up"; keyboardShot.lifetime = .keepAlways
+        add(keyboardShot)
         let measured = app.segmentedControls.buttons["I measured"]
         for _ in 0..<4 where !measured.isHittable { app.swipeDown() }
         measured.tap()
