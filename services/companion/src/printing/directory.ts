@@ -5,6 +5,8 @@ import {
 import {defaultName, type PrinterCatalog, type PrinterDestination} from '../objects/printers.js';
 
 export type Readiness = ReturnType<typeof readiness>;
+/** Names older builds generated for a printer nobody named; a saved profile may still carry one (review F6). */
+const LEGACY_GENERATED_NAMES = new Set(['Bambu printer', 'Configured printer']);
 export interface PublicDestination extends PrinterDestination {
   state?: Readiness;
   stateCheckedAt?: string;
@@ -117,8 +119,12 @@ export class PrinterDirectory {
    */
   #named(destination: PrinterDestination): Pick<PrinterDestination, 'name'> {
     const reported = this.#models.get(destination.id);
-    if (!reported || destination.model || destination.name !== defaultName(destination.backend, undefined, destination.address)) return {name: destination.name};
-    return {name: defaultName(destination.backend, reported)};
+    const unnamed = destination.name === defaultName(destination.backend, undefined, destination.address)
+      || LEGACY_GENERATED_NAMES.has(destination.name);
+    if (!reported || destination.model || !unnamed) return {name: destination.name};
+    // The MCP's own display name, exactly as it says it ("A1 Mini", "H2D Pro"): no brand added, nothing reformatted, no
+    // branching on which MCP it is (AGENTS.md, "The app staples onto the MCPs"). A brand in the name is the MCPs' to add.
+    return {name: reported};
   }
 
   /** Any report for the destination (the monitor's, a list refresh) updates its readiness. */

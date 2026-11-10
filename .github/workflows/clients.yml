@@ -16,6 +16,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      # A persistent Gradle home: on agents-171 a cold cache meant re-downloading Robolectric's 158 MB native
+      # runtime every gate, and Maven Central answers that jar with 429. ci_local links this to a stable folder
+      # under CI_LOCAL_CACHE; Gradle's own file locks make it safe for two jobs at once.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: gradle-cache
+        with:
+          path: ${{ runner.temp }}/gradle
+          key: gradle-android-v1
       - name: Prepare Java 17 and Android SDK 35
         run: |
           set -euo pipefail
