@@ -65,6 +65,12 @@ final class AskSizesFormTests: XCTestCase {
         XCTAssertEqual(form.carried, AskSizesForm.Carried.none, "every size unknown: the other answer goes alone")
     }
 
+    /// The same forms on every client (train #499 review, F8): Swift's `Double` alone took "1e3", ".5" and "5.".
+    func testANumberIsDigitsWithAtMostOneDecimalPart() {
+        for good in ["64", "53.5", " 53,25 ", "0.5", "10000"] { XCTAssertNotNil(AskSizesForm.millimetres(good), good) }
+        for bad in ["1e3", ".5", "5.", "5.5.5", "+5", "-4", "0", "10001", "6 3", "about 60", "", "٥"] { XCTAssertNil(AskSizesForm.millimetres(bad), bad) }
+    }
+
     func testOnlyASizesQuestionWithSizesIsOne() {
         XCTAssertNil(AskSizesForm(ask(kind: "closeup", waisted)))
         XCTAssertNil(AskSizesForm(ask(nil)))

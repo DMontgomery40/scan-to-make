@@ -729,6 +729,10 @@ test("a size question is number fields with the companion's labels, prefilled, w
   assert.equal(sizeSource("published"), "from the maker");
   assert.equal(sizeSource("scan"), "from your scan");
   assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
+  // The same forms on every client (F8): digits with at most one decimal part.
+  const typed = (text: string) => sizesAnswer([{ ...fields[0], text }])?.[0].mm;
+  for (const good of ["64", "53.5", " 53,25 ", "0.5", "10000"]) assert.notEqual(typed(good), undefined, good);
+  for (const bad of ["1e3", ".5", "5.", "5.5.5", "+5", "-4", "0", "10001", "6 3", "about 60", "٥"]) assert.equal(typed(bad), undefined, bad);
   // Train #499 review, F3: another answer from the card carries the numbers as they stand, or does not go.
   assert.deepEqual(sizesCarried(fields), sizesAnswer(fields));
   assert.deepEqual(sizesCarried(edited), [{ id: "size-1", mm: 63.2 }, { id: "size-2", mm: 53.5 }]);

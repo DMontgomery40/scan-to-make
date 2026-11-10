@@ -39,7 +39,10 @@ public struct AskSizesForm: Equatable, Sendable {
     /// The number a field holds, when it is one (a comma or a point for the decimal; over zero, at most 10 m).
     public static func millimetres(_ text: String) -> Double? {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
-        guard !typed.isEmpty, let mm = Double(typed), mm.isFinite, mm > 0, mm <= 10_000 else { return nil }
+        // Digits with at most one decimal part, as the Kotlin and Linux forms take it: never "1e3", ".5" or "5.",
+        // which `Double` alone would accept here and nowhere else.
+        guard typed.range(of: #"^[0-9]+(\.[0-9]+)?$"#, options: .regularExpression) != nil,
+              let mm = Double(typed), mm.isFinite, mm > 0, mm <= 10_000 else { return nil }
         return mm
     }
 
