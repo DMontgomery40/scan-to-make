@@ -375,8 +375,6 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertNil(WorkProgress(project(["state": "touching-up", "passes": [["startedAtMs": 1]]])).fraction, "no stages, no made-up progress")
     }
 
-    }
-
     /// In a list grouped by phase the row shows the Mac's detail, never its section's heading again (David's iPad,
     /// Nov 10: "Needs you · Kroger doesn't publi…" under Needs you, "Ready to print · 68.4 × 34.6 × 149…" under Ready).
     func testARowUnderItsHeadingShowsOnlyWhatDiffers() throws {
@@ -391,6 +389,8 @@ final class ProjectWordsTests: XCTestCase {
         let failed = try project(#"{"phase":"failed","text":"The printer stopped.","symbol":"exclamationmark.triangle","tint":"red"}"#)
         XCTAssertEqual(ProjectWords.row(failed, line: "The printer stopped."), "The printer stopped.")
         XCTAssertEqual(ProjectWords.row(try project(#"{"phase":"ready","text":"Ready to print","detail":"  ","symbol":"","tint":"accent"}"#), line: "Ready to print"), "Ready to print")
+    }
+
     /// How a pass ended is the Mac's own words on every client; an older Mac's status is worded here, with the
     /// spelling it really sends (`needs_closeup`, never `needs-closeup`).
     func testAPassEndsInTheMacsWords() throws {
