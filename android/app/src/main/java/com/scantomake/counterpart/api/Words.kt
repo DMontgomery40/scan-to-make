@@ -257,3 +257,32 @@ class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolea
         line = if (mac != null && !(phase == ProjectPhase.Confirmed && mac.phase != ProjectPhase.Confirmed.wire)) mac.text else l
     }
 }
+
+/** The words under a question's picture, true for any question (CounterpartKit `AskPicture`; David, Nov 9). */
+object AskPicture {
+    fun caption(ask: Project.Ask?): String = when {
+        ask?.photo == null -> "Your project’s picture. No picture came with this question."
+        ask.region?.let(::clamped) != null -> "The outlined part is what this question is about."
+        else -> "The picture that goes with this question."
+    }
+
+    /** Inside the picture, or null when nothing of it is. */
+    fun clamped(r: Project.Region): Project.Region? {
+        if (!listOf(r.x, r.y, r.width, r.height).all { it.isFinite() }) return null
+        val left = r.x.coerceIn(0.0, 1.0); val top = r.y.coerceIn(0.0, 1.0)
+        val right = (r.x + r.width).coerceIn(0.0, 1.0); val bottom = (r.y + r.height).coerceIn(0.0, 1.0)
+        return if (right - left > 0.001 && bottom - top > 0.001) Project.Region(left, top, right - left, bottom - top) else null
+    }
+}
+
+/** A scan's frames as one thing: five round the orbit and the count (CounterpartKit `ScanPhotos`; David, Nov 9). */
+object ScanPhotos {
+    const val SHOWN = 5
+    /** 130 frames give 0, 32, 65, 97, 129, as on the iPhone, Mac and Linux. */
+    fun sample(count: Int, shown: Int = SHOWN): List<Int> = when {
+        count <= shown -> (0 until count).toList()
+        shown <= 1 -> listOf(0)
+        else -> (0 until shown).map { (it * (count - 1) + (shown - 1) / 2) / (shown - 1) }
+    }
+    fun words(count: Int) = if (count == 1) "1 photo" else "$count photos"
+}

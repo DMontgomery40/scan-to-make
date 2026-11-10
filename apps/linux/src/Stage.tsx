@@ -7,11 +7,14 @@ export function Picture({
   path,
   alt,
   className = "",
+  onFailed,
 }: {
   id: string;
   path?: string;
   alt: string;
   className?: string;
+  /** Called when the picture can't be fetched or decoded, so a caller can hide what it framed (review F2 on #456). */
+  onFailed?: () => void;
 }) {
   const [src, setSrc] = useState<string>();
   const [failed, setFailed] = useState(false);
@@ -38,7 +41,10 @@ export function Picture({
           setSrc(url);
         },
         () => {
-          if (live) setFailed(true);
+          if (live) {
+            setFailed(true);
+            onFailed?.();
+          }
         },
       );
     return () => {
@@ -47,7 +53,16 @@ export function Picture({
     };
   }, [id, path]);
   return src ? (
-    <img className={className} src={src} alt={alt} />
+    <img
+      className={className}
+      src={src}
+      alt={alt}
+      onError={() => {
+        setFailed(true);
+        setSrc(undefined);
+        onFailed?.();
+      }}
+    />
   ) : (
     <div className={`picture-placeholder ${className}`} aria-label={alt}>
       {failed ? "Preview unavailable" : path ? "Loading preview…" : "◇"}

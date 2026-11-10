@@ -55,12 +55,17 @@ enum Fixtures {
         return memory
     }
 
+    /// When this run started: the bottle set's times hold still, so its pictures' version (`mediaVersion`) does too and
+    /// each picture is fetched once, as from a real Mac.
+    static let launched = Date()
+
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
         // `-CounterpartFixtureSet real`: a throwaway copy of real projects, as the companion serves them, for screenshots
         // with real data (`objects.json` in the folder, each project's files under `objects/<id>/`). Never the Mac's own.
         if set == "real", let base = folder, let data = try? Data(contentsOf: base.appending(path: "objects.json")),
            let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] { return rows }
+        let now = set == "ask-bottle" ? launched : now
         if set == "limit-stops", let json = ProcessInfo.processInfo.environment["COUNTERPART_LIMIT_FIXTURES"],
            let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
             return rows.enumerated().compactMap { index, row in
@@ -187,6 +192,10 @@ enum Fixtures {
         } ?? []
         // `-CounterpartFixtureSet grid`: only the projects Home shows as cards, so the grid is at the top.
         var shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
+        // `-CounterpartFixtureSet ask-bottle`: the plush is David's Nov 9 fit project (Mac 30a2a33c): a size question
+        // whose picture boxes the whole bottle, and a scan of 130 frames. The pictures are `ask-bottle.jpg` and
+        // `bottle-capture/NNNN.heic` in the assets folder, never in Git. `COUNTERPART_ASK_NO_PHOTO` drops the ask's picture.
+        if set == "ask-bottle" { shown = shown.map { $0["id"] as? String == ids.plush ? bottle(ago) : $0 } }
         // `-CounterpartScreen printer-connection`: the P1S idle, so its Settings → Printers choices can be changed.
         if idlePrinter { shown = shown.filter { $0["state"] as? String != "printing" } }
         // A status set on this run applies last, so It Works on the finished print (Printing screen) makes it Done.
@@ -339,8 +348,36 @@ enum Fixtures {
         ["slot": 3, "colour": "#6B7385", "material": "PLA", "name": "Blue Gray PLA Basic", "filamentId": "GFA00", "destinationId": "current", "label": "A4", "feed": "ams"],
     ]
 
+    static let bottleAsk = "1af638c1-ec63-46fc-aa2f-e74cd29df231"
+
+    /// Appends `<path> <bytes>` to `served.log` in the assets folder.
+    static func logServed(_ path: String, bytes: Int, in folder: URL) {
+        let log = folder.appending(path: "served.log")
+        let line = Data("\(path) \(bytes)\n".utf8)
+        if let handle = try? FileHandle(forWritingTo: log) { _ = try? handle.seekToEnd(); try? handle.write(contentsOf: line); try? handle.close() }
+        else { try? line.write(to: log) }
+    }
+
+    /// David's "Wall holder for three" while it asked for the bottle's size (object.json of Mac project 30a2a33c).
+    static func bottle(_ ago: (Double) -> Double) -> [String: Any] {
+        var ask: [String: Any] = ["id": bottleAsk,
+            "question": "Kroger doesn't publish this bottle's size. The scan reads about 64 mm wide, 32 mm thick and 107 mm tall. Can you confirm, or send ruler or caliper readings of those three?",
+            "photo": "asks/\(bottleAsk).jpg", "region": ["x": 0.42, "y": 0.3, "width": 0.28, "height": 0.34],
+            "answers": ["camera", "photos", "best-guess", "text"], "status": "open", "askedAtMs": ago(4)]
+        if ProcessInfo.processInfo.environment["COUNTERPART_ASK_NO_PHOTO"] != nil { ask["photo"] = nil; ask["region"] = nil }
+        return ["id": ids.plush, "createdAtMs": ago(25), "updatedAtMs": ago(4), "state": "needs-closeup", "kind": "fit",
+                "title": "Wall holder for three", "scan": "scan.usdz", "photos": [], "requestPhotos": [], "messages": [],
+                "instructions": "Make something that holds three of these, on a wall. I don’t care if it’s in front of each other or side to side whatever makes more sense just need three of them in a holder thing that I screwed to drywall\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size.",
+                "capture": (1...130).map { String(format: "%04d.heic", $0) },
+                "passes": [["startedAtMs": ago(20), "endedAtMs": ago(4), "status": "needs_closeup",
+                            "summary": "This is a Kroger Hydrate water enhancer, 3.11 fl oz (92 mL), but Kroger doesn't publish the bottle's size."]],
+                "question": ["closeup": "the bottle's size"], "ask": ask]
+    }
+
     /// The file a fixture path serves, from the assets folder.
     static func file(_ path: String) -> String? {
+        if path.hasSuffix("/asks/\(bottleAsk).jpg") { return "ask-bottle.jpg" }
+        if let range = path.range(of: #"/capture/[0-9]{4}\.heic$"#, options: .regularExpression) { return "bottle-capture/" + path[range].dropFirst("/capture/".count) }
         if path.hasSuffix("/model.stl") { return "mic.stl" }
         if path.hasSuffix("/camera.jpg") { return "bed.jpg" }
         if path.contains("/renders/mic.png") { return "thumb-mic.png" }
@@ -520,6 +557,8 @@ struct FixtureTransport: HTTPTransport {
             }
             if method == "GET", let name = Fixtures.file(path) {
                 let data = try Data(contentsOf: folder.appending(path: name))
+                // Each picture served, one line with its size, so a UI test can count what a screen fetched.
+                Fixtures.logServed(path, bytes: data.count, in: folder)
                 var reply = HTTPReply(status: 200, body: data)
                 if path.hasSuffix("camera.jpg") { reply.headers["X-Captured-At"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3)) }
                 return reply
