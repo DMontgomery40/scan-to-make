@@ -595,8 +595,15 @@ final class LayoutParityUITests: XCTestCase {
         let question = app.staticTexts["scan-use-question"]
         XCTAssertTrue(question.waitForExistence(timeout: 20), app.debugDescription)
         let send = app.buttons["send"], copy = app.buttons["scan-use-copy"], fit = app.buttons["scan-use-fit"], later = app.buttons["scan-use-later"]
+        // The scan attaches after the sheet opens and the sheet then scrolls (animated): measure once it has settled. The
+        // first run of this test measured before that scroll and passed while the screenshot showed the question under the header.
+        Thread.sleep(forTimeInterval: 2)
         let bar = app.navigationBars["New Project"].frame
         XCTAssertGreaterThanOrEqual(question.frame.minY, bar.maxY - 1, "the question isn't under the header: \(question.frame) \(bar)")
+        // The glass header's Close button is the header's real bottom: the question and the first answer sit below it.
+        let close = app.navigationBars["New Project"].buttons.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(question.frame.minY, close.maxY, "the question is below the header's Close: \(question.frame) \(close)")
+        XCTAssertGreaterThanOrEqual(copy.frame.minY, question.frame.maxY, "the first answer is whole, below its question")
         let describe = app.staticTexts["What do you need?"]
         XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
         for row in [copy, fit, later] {

@@ -29,6 +29,9 @@ struct NewObjectView: View {
     @State private var measuredShortest = ""
     @State private var captureWarning: String?
     @FocusState private var describing: Bool
+    /// The scroll's own position, so "the top" is the top of the content below the glass header, not the scroll view's
+    /// edge under it (`proxy.scrollTo(_, anchor: .top)` put the question under the header on the iPhone).
+    @State private var scrollPosition = ScrollPosition(edge: .top)
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
@@ -201,8 +204,9 @@ struct NewObjectView: View {
             }
             // A scan arrives after the sheet opens (a saved draft resolves, or a capture returns while the Scan tile is
             // in view): back to the top, where its question now is.
+            .scrollPosition($scrollPosition)
             .onChange(of: attached) { _, now in
-                if now != nil { withAnimation { proxy.scrollTo("scan-use", anchor: .top) } }
+                if now != nil { withAnimation { scrollPosition.scrollTo(edge: .top) } }
             }
             // Continue on a fit takes you to the words it still needs.
             .onChange(of: describing) { _, now in
