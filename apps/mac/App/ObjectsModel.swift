@@ -22,6 +22,7 @@ protocol ObjectsCompanion: Sendable {
     func correct(_ id: String, note: String, photoNames: [String]) async throws -> Project
     func correct(_ id: String, note: String, photos: [String], photoNames: [String]) async throws -> Project
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project
+    func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project
     func print(_ id: String, checked: Bool) async throws -> Project
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project
     func start(_ id: String) async throws -> Project
@@ -137,6 +138,7 @@ struct SocketObjects: ObjectsCompanion {
     }
     func correct(_ id: String, note: String) async throws -> Project { try await ControlClient(socketPath:path, timeout:30).correctObject(id, note:note) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
+    func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project { try await ControlClient(socketPath:path).answerSizes(id, sizes: sizes) }
     func print(_ id: String, checked: Bool) async throws -> Project { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project {
         try await ControlClient(socketPath:path).answerPrintConfirmation(id, confirmationId:confirmationId, answer:answer)
@@ -707,6 +709,24 @@ struct SocketObjects: ObjectsCompanion {
         if let note = corrections.entries[project.id]?.first { corrections.sent(note, for: project.id) }
         if problem?.id == project.id { problem = nil }
         sendQueuedNote(project)
+    }
+
+    /// Sends a size question's numbers. One at a time per project, like every other action on it.
+    @discardableResult func answerSizes(_ sizes: [AskSizesForm.Answer], on id: String) async -> Bool {
+        guard !working.contains(id), !sizes.isEmpty else { return false }
+        operations.insert(id)
+        defer { operations.remove(id) }
+        if problem?.id == id { problem = nil }
+        do {
+            applyReply(try await companion.answerSizes(id, sizes: sizes))
+            wake()
+            return true
+        } catch {
+            problem = Problem(id:id, text:Self.sentence(for:error))
+            // A refusal usually means the object moved on (another device, or a finished step): show where it is now.
+            await refresh()
+            return false
+        }
     }
 
     @discardableResult func perform(_ action: ObjectAction, on id: String, note: String = "", photos: [URL] = []) async -> Bool {

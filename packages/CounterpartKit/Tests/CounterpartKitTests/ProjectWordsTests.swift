@@ -375,6 +375,8 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertNil(WorkProgress(project(["state": "touching-up", "passes": [["startedAtMs": 1]]])).fraction, "no stages, no made-up progress")
     }
 
+    }
+
     /// In a list grouped by phase the row shows the Mac's detail, never its section's heading again (David's iPad,
     /// Nov 10: "Needs you · Kroger doesn't publi…" under Needs you, "Ready to print · 68.4 × 34.6 × 149…" under Ready).
     func testARowUnderItsHeadingShowsOnlyWhatDiffers() throws {
@@ -389,5 +391,30 @@ final class ProjectWordsTests: XCTestCase {
         let failed = try project(#"{"phase":"failed","text":"The printer stopped.","symbol":"exclamationmark.triangle","tint":"red"}"#)
         XCTAssertEqual(ProjectWords.row(failed, line: "The printer stopped."), "The printer stopped.")
         XCTAssertEqual(ProjectWords.row(try project(#"{"phase":"ready","text":"Ready to print","detail":"  ","symbol":"","tint":"accent"}"#), line: "Ready to print"), "Ready to print")
+    /// How a pass ended is the Mac's own words on every client; an older Mac's status is worded here, with the
+    /// spelling it really sends (`needs_closeup`, never `needs-closeup`).
+    func testAPassEndsInTheMacsWords() throws {
+        func pass(_ json: String) throws -> Project.Pass { try JSONDecoder().decode(Project.Pass.self, from: Data(json.utf8)) }
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"capped","words":"Stopped at the 120 tool-call limit"}"#).endingWords, "Stopped at the 120 tool-call limit")
+        XCTAssertNil(try pass(#"{"startedAtMs":1,"status":"done","words":"Finished"}"#).endingWords, "a running pass has not ended")
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"needs_closeup"}"#).endingWords, "Asked you a question")
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"done"}"#).endingWords, "Finished")
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2}"#).endingWords, "Finished")
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"needs_file"}"#).endingWords, "Needs File")
+    }
+
+    /// A pass that stopped to ask, or stopped short, must never read as all green ticks (seen on real data Nov 10:
+    /// a failed pass and a pass waiting on a question each showed three ticks), and a change says what was asked.
+    func testAPassSaysHowItLeftThingsAndWhatItWasAsked() throws {
+        func pass(_ json: String) throws -> Project.Pass { try JSONDecoder().decode(Project.Pass.self, from: Data(json.utf8)) }
+        XCTAssertNil(try pass(#"{"startedAtMs":1,"status":"failed"}"#).ending, "still running")
+        for (status, ending) in [("done", Project.Pass.Ending.finished), ("unchanged", .finished), ("needs_closeup", .asked), ("needs_file", .asked),
+                                 ("capped", .stopped), ("failed", .stopped), ("interrupted", .stopped)] {
+            XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"\#(status)"}"#).ending, ending, status)
+        }
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2}"#).ending, .finished)
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"changes","note":"  make it thicker "}"#).requestedChange, "make it thicker")
+        XCTAssertNil(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"ask-answer","note":"Answer to \"Q?\": yes"}"#).requestedChange, "an answer is not a change")
+        XCTAssertNil(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"new"}"#).requestedChange)
     }
 }

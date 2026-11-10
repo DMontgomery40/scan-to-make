@@ -196,6 +196,42 @@ class HomeLayoutTests {
         assertEquals("Your project’s picture. No picture came with this question.", AskPicture.caption(null))
     }
 
+    /** A size question is number fields, not a camera (David answered one in a paragraph of caliper readings, Nov 10):
+     *  one field per size the computer asked about, in its words and prefilled, with Confirm; the numbers go back as
+     *  numbers, with projects present. */
+    @Test fun aSizeQuestionShowsItsNumbersPrefilledAndSendsNumbersWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"
+        val data = WireJson.parseToJsonElement(
+            """{"id":"$id","title":"Wall holder for three","instructions":"Make something that holds three of these","state":"needs-closeup","kind":"fit",
+               "createdAtMs":1,"updatedAtMs":2,"photos":[],"passes":[{"startedAtMs":1,"endedAtMs":2,"status":"needs_closeup"}],
+               "ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Can you confirm or correct what the scan reads?",
+                      "kind":"sizes","answers":["sizes","text","camera"],"status":"open",
+                      "sizes":[{"id":"size-1","label":"width at the widest point","mm":64,"from":"scan"},
+                               {"id":"size-2","label":"width at the waist","mm":53.5,"from":"scan"}]}}""").jsonObject
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        var sent: String? = null
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id/closeup") -> { sent = request.body?.toString(Charsets.UTF_8); HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray()) }
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNode(hasTestTag("ask-size-size-1")).performScrollTo().assertTextContains("64")
+        compose.onNode(hasTestTag("ask-size-size-2")).performScrollTo().assertTextContains("53.5")
+        compose.onNodeWithText("Width at the waist").assertExists()
+        compose.onAllNodes(hasText("Make Your Best Guess")).assertCountEquals(0)
+        compose.onAllNodes(hasText("Choose")).assertCountEquals(0)
+        compose.onNodeWithText("Caliper Photo").assertExists()
+        compose.onNode(hasTestTag("ask-sizes-confirm")).performScrollTo().assertTextContains("Confirm These Sizes").performClick()
+        compose.waitUntil(5_000) { sent != null }
+        val body = WireJson.parseToJsonElement(sent!!).jsonObject
+        assertEquals(WireJson.parseToJsonElement("""[{"id":"size-1","mm":64},{"id":"size-2","mm":53.5}]"""), body["sizes"])
+    }
+
     /** Review F2 on #456: a question picture that fails to load (the computer asleep) draws nothing, not an empty box
      *  under "The outlined part is what this question is about."; the question and its answers stay. */
     @Test fun aQuestionPictureThatFailsToLoadDrawsNothing() {

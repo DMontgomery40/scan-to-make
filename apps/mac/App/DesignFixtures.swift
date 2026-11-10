@@ -81,7 +81,7 @@ import ControlKit
              "directory": folder("c2", ["photos/potato.png": "thumb-potato.png", "scan/scan.usdz": "scanB.usdz"])],
             ["id": "0b6f0f43-7c35-4b8a-9a3c-000000000004", "createdAtMs": now - 3_000, "updatedAtMs": now - 720_000, "title": "Plush, underside",
              "instructions": "Copy this plush, including the bottom.", "state": "needs-closeup", "scan": "scan.usdz",
-             "question": ["closeup": "the underside"], "passes": [["startedAtMs": now - 900_000, "endedAtMs": now - 720_000, "status": "needs-closeup"]],
+             "question": ["closeup": "the underside"], "passes": [["startedAtMs": now - 900_000, "endedAtMs": now - 720_000, "status": "needs_closeup", "words": "Asked you a question"]],
              "photos": ["plush.png"],
              "directory": folder("c4", ["photos/plush.png": "thumb-potato.png", "scan/scan.usdz": "scanB.usdz"])],
             ["id": micID, "createdAtMs": now - 4_000, "updatedAtMs": now - 120_000, "title": "Mic mount",
@@ -224,6 +224,7 @@ actor FixtureObjects: ObjectsCompanion {
     }
     func correct(_ id: String, note: String) async throws -> Project { try change(id, ["state": "touching-up"]) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try change(id, ["state": "touching-up"]) }
+    func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project { try change(id, ["state": "touching-up"]) }
     func print(_ id: String, checked: Bool) async throws -> Project { try change(id, ["state": "printing"]) }
     func start(_ id: String) async throws -> Project { try change(id, ["state": "touching-up"]) }
     func delete(_ id: String) async throws { items.removeAll { $0["id"] as? String == id } }
