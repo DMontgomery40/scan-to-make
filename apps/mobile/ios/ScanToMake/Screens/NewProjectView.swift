@@ -207,13 +207,17 @@ struct NewObjectView: View {
             }
             }
             .scrollDismissesKeyboard(.interactively)
+            // The content scrolls under the bottom action behind the system's nearly opaque edge, so nothing reads through
+            // the button, disabled or not (lead, Nov 10: "Scan it" and its link showed through "Choose what this scan
+            // becomes"). The same treatment as Welcome's Continue and the sidebar's New Project.
+            .scrollEdgeEffectStyle(.hard, for: .bottom)
             .navigationTitle("New Project")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(role: .close) { dismiss() }.disabled(working == "make") }
                 if describing { ToolbarItem(placement: .confirmationAction) { Button("Done") { describing = false } } }
             }
-            .safeAreaInset(edge: .bottom) {
+            .safeAreaBar(edge: .bottom) {
                 Button { Task { await make() } } label: {
                     Group {
                         if let sendSymbol { Label(sendLabel, systemImage: sendSymbol) } else { Text(sendLabel) }

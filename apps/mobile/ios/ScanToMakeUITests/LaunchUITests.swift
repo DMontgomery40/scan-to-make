@@ -610,6 +610,18 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(scan.frame.minY, close.maxY, "the scan is below the header: \(scan.frame)")
         XCTAssertLessThanOrEqual(scan.frame.maxY, copy.frame.minY + 1, "the scan is above the answers")
         XCTAssertLessThanOrEqual(later.frame.maxY, send.frame.minY + 1, "all three answers fit with it, above the button")
+        // The bottom action is a bar the content scrolls under: nothing of the scrolling content can be reached through
+        // the button's frame (lead, Nov 10). Whether anything reads through it is checked by eye on the screenshot below.
+        func nothingReachableThroughTheButton(_ state: String) {
+            let button = send.frame
+            let under = (app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex).filter {
+                $0.identifier != "send" && $0.label != send.label && $0.frame.intersects(button) && !$0.frame.contains(button)
+            }
+            for element in under {
+                XCTAssertFalse(element.isHittable, "\(state): \(element.identifier) '\(element.label)' can be reached through the button at \(element.frame)")
+            }
+        }
+        nothingReachableThroughTheButton("nothing chosen")
         // Kept with the result, so a review can look at the settled sheet on each device.
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "new-after-a-scan"; shot.lifetime = .keepAlways
@@ -625,6 +637,10 @@ final class LayoutParityUITests: XCTestCase {
         copy.tap()
         XCTAssertTrue(send.isEnabled)
         XCTAssertEqual(send.label, "Copy this object")
+        nothingReachableThroughTheButton("copy chosen")
+        let chosen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        chosen.name = "new-after-a-scan-copy-chosen"; chosen.lifetime = .keepAlways
+        add(chosen)
         fit.tap()
         XCTAssertEqual(send.label, "Continue", "a fit asks for its words first")
         for _ in 0..<4 where !later.isHittable { app.swipeUp() }
