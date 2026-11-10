@@ -180,4 +180,39 @@ extension CameraStreamTests {
         await fulfillment(of: [disconnected], timeout: 5)
         try await task.value
     }
+
+    /// Nov 10: the app died 24 times in simulators with an Objective-C exception from URLSession, each time in
+    /// `cameraFrames`: a camera view went away as its stream started, the cancel invalidated the session, and the
+    /// request was then made on it. A stream cancelled before it starts, or at any moment while it starts, throws
+    /// `cancelled`. (Before the fix this test does not fail: it kills the test process.)
+    func testPinnedTransportCancelledAsItStartsThrowsCancelledAndNeverRaises() async throws {
+        let server = try CameraHTTPFixture()
+        defer { server.stop() }
+        let url = try await server.start { }
+        @Sendable func stream() async throws {
+            try await PinnedTransport().lines(URLRequest(url: url), trust: .nearby(base: url, seen: NearbySeen()), lineLimit: 65_536,
+                response: { _ in }, line: { _ in })
+        }
+        // Cancelled before the first line of `lines` runs.
+        for _ in 0..<20 {
+            let task = Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                do { try await stream(); XCTFail("a cancelled task makes no request") }
+                catch let error as TransportError { XCTAssertEqual(error.code, "cancelled") }
+            }
+            try await task.value
+        }
+        // Cancelled from outside at once and a little later, so the cancel lands before, during and after the request is made.
+        for delay in [0, 0, 0, 50, 200, 1_000, 5_000, 20_000] as [UInt64] {
+            for _ in 0..<10 {
+                let task = Task {
+                    do { try await stream(); XCTFail("the server holds the request open") }
+                    catch let error as TransportError { XCTAssertEqual(error.code, "cancelled") }
+                }
+                if delay > 0 { try await Task.sleep(nanoseconds: delay * 1_000) }
+                task.cancel()
+                try await task.value
+            }
+        }
+    }
 }
