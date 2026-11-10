@@ -97,13 +97,13 @@ def log(*parts: object) -> None:
 
 def resolve_id(objects: Path, prefix: str) -> str:
     found = [p.name for p in objects.iterdir() if p.name.startswith(prefix)]
-    if len(found) != 1: raise SystemExit(f'expected one project starting {prefix} in {objects}, found {found}')
+    if len(found) != 1: raise SystemExit(f'The copy needs exactly one project whose id starts {prefix} in {objects}; found {len(found)}.')
     return found[0]
 
 
 def clone(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(['cp', '-cR', str(src), str(dst)], check=True)
+    subprocess.run(['cp', '-cR' if sys.platform == 'darwin' else '-R', str(src), str(dst)], check=True)
 
 
 def synth_question(objects: Path, source: str) -> str:
@@ -167,6 +167,8 @@ def prepare(source: Path, data: Path) -> dict:
                                                if not any(x.encode() in line for x in EXCLUDE) and not any(w in line for w in EXCLUDE_WORDS)))
         else: clone(source / rel, state / rel)
     objects = state / 'capture/objects'
+    if not objects.is_dir() or not any(objects.iterdir()):
+        raise SystemExit(f'The copy needs exactly one project whose id starts {PROJECTS[0][1]} in {objects}; there are no projects at {source}.')
     ids = {}
     for name, prefix, _ in PROJECTS:
         if not prefix.startswith('synth:'): ids[name] = resolve_id(objects, prefix)
@@ -201,13 +203,17 @@ class Companion:
     def __init__(self, state: Path, log_path: Path):
         dist = REPO / 'services/companion/dist'
         if not (dist / 'server-cli.js').exists():
-            raise SystemExit('build the companion first: npm ci --ignore-scripts in packages/contracts, services/project, '
+            raise SystemExit('The companion is not built. Build it first: npm ci --ignore-scripts in packages/contracts, services/project, '
                              'services/printer-handoff, services/companion; then npm run build in packages/contracts and services/companion')
         self.log = open(log_path, 'w')
         self.proc = subprocess.Popen(['node', str(REPO / 'scripts/ux_screens/companion.mjs'), '--state', str(state), '--dist', str(dist)],
                                      stdout=subprocess.PIPE, stderr=self.log, text=True)
         line = self.proc.stdout.readline()
-        if not line: raise SystemExit(f'companion did not start; see {log_path}')
+        if not line:
+            self.proc.wait(10)
+            self.log.flush()
+            tail = log_path.read_text()[-600:].strip().replace('\n', ' ')
+            raise SystemExit(f'The capture companion did not start, so nothing was captured: {tail or "no output"} (log: {log_path})')
         self.info = json.loads(line)
 
     def processes(self) -> list[str]:
@@ -478,7 +484,7 @@ def write_index(out: Path, info: dict, manifest: dict, minutes: float, processes
     (out / 'index.md').write_text('\n'.join(lines))
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('out', type=Path)
     parser.add_argument('--work', type=Path, help='scratch: the data copy and build (default: <out>/../ux-screens-work)')
@@ -491,17 +497,16 @@ def main() -> None:
                         help="only this project's Result, What you sent and Activity, by id (any project in the copy; repeatable)")
     parser.add_argument('--redo', action='store_true', help='capture the selected screens again (with --devices/--screens)')
     args = parser.parse_args()
-    if not args.prepare_only and not lane.nested_holder():
-        # Every hold that boots a simulator takes the whole lane (both slots), labelled, in arrival order.
-        python = sys.executable
-        os.execv(python, [python, str(REPO / 'scripts/lane.py'), '--exclusive', '--label', f'ux-screens: {args.devices}',
-                          '--max-minutes', str(args.max_minutes), '--', python, str(Path(__file__).resolve()), *sys.argv[1:]])
     out, work = args.out.resolve(), (args.work or args.out.resolve().parent / 'ux-screens-work').resolve()
     keys = [k for k in args.devices.split(',') if k]
-    if any(k not in DEVICES for k in keys): raise SystemExit(f'devices: {", ".join(DEVICES)}')
-    if REAL in work.parents or work == REAL or REAL in out.parents: raise SystemExit('the work and out folders must be outside the real state')
+    if any(k not in DEVICES for k in keys): raise SystemExit(f'Unknown device; choose from {", ".join(DEVICES)}.')
+    if REAL in work.parents or work == REAL or REAL in out.parents: raise SystemExit('The work and out folders must be outside the real state.')
+    held = os.environ.get('UX_SCREENS_COMPANION')
+    if held and lane.nested_holder():
+        return capture(args, out, work, keys, json.loads(Path(held).read_text()))
     out.mkdir(parents=True, exist_ok=True); work.mkdir(parents=True, exist_ok=True)
 
+    # Everything that can fail without a simulator happens here, before the lane is taken.
     data = work / 'data'
     manifest = json.loads((data / 'manifest.json').read_text()) if (data / 'manifest.json').exists() else prepare(args.source.resolve(), data)
     state, ids = data / 'state', manifest['ids']
@@ -514,42 +519,74 @@ def main() -> None:
         info = companion.info
         served = {o['id'] for o in info['objects']}
         missing = [name for name, _, _ in PROJECTS if ids[name] not in served]
-        if info.get('objectsStatus') != 200 or missing: raise SystemExit(f'companion is missing projects {missing} (status {info.get("objectsStatus")})')
+        if info.get('objectsStatus') != 200 or missing:
+            raise SystemExit(f'The companion does not serve every project the screens need (missing {missing}, status {info.get("objectsStatus")}).')
         time.sleep(6)  # the companion reads its printer MCPs 5 s after start: check what it started
         processes = companion.processes()
-        if any(re.search(r'\bssh\b|bambu|mcp-3d|printer-mcp', p, re.I) for p in processes): raise SystemExit(f'companion started {processes}')
+        if any(re.search(r'\bssh\b|bambu|mcp-3d|printer-mcp', p, re.I) for p in processes):
+            raise SystemExit(f'The companion started a printer process, so the run stopped: {processes}')
         log(f'companion serves {len(served)} projects; children: {processes}')
-        record = json.dumps(info['record'], separators=(',', ':'))
-        offline_record = json.dumps({**info['record'], 'baseUrl': 'https://127.0.0.1:9079'}, separators=(',', ':'))
         if args.prepare_only:
             for o in info['objects']: print(f"  {o['id'][:8]}  {o['state']:<14} {o['title']}")
-            return
-        items = screens(ids, record, offline_record, fixtures, offline)
-        if args.screens: items = [i for i in items if any(s in i['name'] for s in args.screens.split(','))]
-        if args.project:
-            unknown = [p for p in args.project if p not in served]
-            if unknown: raise SystemExit(f'not in the copy: {unknown}')
-            items = [item for pid in args.project for item in project_screens(pid[:8], pid, 'by id', 'real', record)]
-        done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
-        if args.redo: done -= {(k, i['name']) for k in keys for i in items}
-        def record(kind: str, row: dict) -> None:
-            with open(out / f'{kind}.jsonl', 'a') as file: file.write(json.dumps(row) + '\n')
+            return 0
+        if args.project and (unknown := [p for p in args.project if p not in served]):
+            raise SystemExit(f'These projects are not in the copy: {unknown}.')
+        handoff = work / 'companion-info.json'
+        handoff.write_text(json.dumps({'info': info, 'manifest': manifest, 'processes': processes, 'served': sorted(served)}))
+        items, done = select(args, out, keys, handoff_context(json.loads(handoff.read_text()), work))
         if all((k, i['name']) in done for k in keys for i in items):
             log('every screen is captured; --redo captures them again')
             write_index(out, info, manifest, 0, processes)
-            return
-        # Inside the lane (see main's re-run through scripts/lane.py --exclusive): screens stop starting a minute and a
-        # half before --max-minutes, leaving time to delete the simulator.
-        log('holding the lane')
-        app = build_app(work)
-        left = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90)
-        minutes = (time.time() - STARTED) / 60
-        write_index(out, info, manifest, minutes, processes)
-        log(f'{len(read_jsonl(out / "results.jsonl"))} images so far; {left} screens left' + (' (run the same command again)' if left else '') + f': {out / "index.md"}')
-        log(f'the copy of the projects is in {data}; move {work} to /Volumes/Spillover when done')
+            return 0
+        # Only the simulator part takes the lane: every hold that boots a simulator takes both slots, in arrival order.
+        python = sys.executable
+        code = subprocess.call([python, str(REPO / 'scripts/lane.py'), '--exclusive', '--label', f'ux-screens: {args.devices}',
+                                '--max-minutes', str(args.max_minutes), '--', python, str(Path(__file__).resolve()), *sys.argv[1:]],
+                               env=dict(os.environ, UX_SCREENS_COMPANION=str(handoff)))
+        if code: raise SystemExit(f'The capture inside the lane failed (exit {code}); see the lines above.')
+        return 0
     finally:
         companion.stop()
 
 
+def handoff_context(held: dict, work: Path) -> dict:
+    info, manifest = held['info'], held['manifest']
+    record = json.dumps(info['record'], separators=(',', ':'))
+    offline_record = json.dumps({**info['record'], 'baseUrl': 'https://127.0.0.1:9079'}, separators=(',', ':'))
+    return {**held, 'record': record, 'offline_record': offline_record, 'ids': manifest['ids'],
+            'fixtures': work / 'fixtures', 'offline': work / 'fixtures-offline'}
+
+
+def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set]:
+    items = screens(ctx['ids'], ctx['record'], ctx['offline_record'], ctx['fixtures'], ctx['offline'])
+    if args.screens: items = [i for i in items if any(s in i['name'] for s in args.screens.split(','))]
+    if args.project: items = [item for pid in args.project for item in project_screens(pid[:8], pid, 'by id', 'real', ctx['record'])]
+    done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
+    if args.redo: done -= {(k, i['name']) for k in keys for i in items}
+    return items, done
+
+
+def capture(args, out: Path, work: Path, keys: list[str], held: dict) -> int:
+    """Inside the lane: build, then create, drive and delete the simulators. The companion keeps running outside."""
+    ctx = handoff_context(held, work)
+    items, done = select(args, out, keys, ctx)
+    def record(kind: str, row: dict) -> None:
+        with open(out / f'{kind}.jsonl', 'a') as file: file.write(json.dumps(row) + '\n')
+    # Screens stop starting a minute and a half before --max-minutes, leaving time to delete the simulator.
+    log('holding the lane')
+    app = build_app(work)
+    left = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90)
+    minutes = (time.time() - STARTED) / 60
+    write_index(out, ctx['info'], ctx['manifest'], minutes, ctx['processes'])
+    log(f'{len(read_jsonl(out / "results.jsonl"))} images so far; {left} screens left' + (' (run the same command again)' if left else '') + f': {out / "index.md"}')
+    log(f'the copy of the projects is in {work / "data"}; move {work} to /Volumes/Spillover when done')
+    return 0
+
+
 if __name__ == '__main__':
-    main()
+    try:
+        sys.exit(main())
+    except (SystemExit, KeyboardInterrupt):
+        raise
+    except Exception as failure:  # a plain sentence and a non-zero exit, never a traceback alone
+        sys.exit(f'ux_screens stopped before capturing: {type(failure).__name__}: {failure}')

@@ -10,7 +10,7 @@
 import {spawn} from 'node:child_process';
 import {createServer, request} from 'node:http';
 import {randomBytes} from 'node:crypto';
-import {mkdir, writeFile, access} from 'node:fs/promises';
+import {mkdir, writeFile, access, mkdtemp, rm} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 
@@ -33,6 +33,9 @@ await writeFile(handoffConfig, JSON.stringify({backend: 'bambu-printer-mcp', pro
 const home = join(state, 'home');
 await mkdir(home, {recursive: true});
 
+// The control socket sits in a short private folder of its own: a socket path over ~104 bytes (a long --work) makes
+// the server's local control fail to start.
+const socketDir = await mkdtemp('/tmp/uxs-');
 const env = {
   PATH: '/usr/bin:/bin:/usr/sbin:/sbin', HOME: home, TMPDIR: join(state, 'tmp'),
   SCAN_TO_MAKE_REMOTE_AUTH_DIR: authDir,
@@ -40,6 +43,7 @@ const env = {
   SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG: handoffConfig,
   SCAN_TO_MAKE_PRINTER_HANDOFF_DIR: handoffDir,
   SCAN_TO_MAKE_GENERATION_PORT: String(port),
+  SCAN_TO_MAKE_CONTROL_SOCKET: join(socketDir, 'control.sock'),
 };
 await mkdir(env.TMPDIR, {recursive: true});
 const server = spawn(process.execPath, [join(dist, 'server-cli.js')], {env, cwd: state, stdio: ['ignore', 'pipe', 'pipe']});
@@ -49,6 +53,11 @@ const started = await new Promise((done, fail) => {
   server.stdout.on('data', chunk => { log += chunk; if (/ready at (\S+)/.test(log)) done(log.match(/ready at (\S+)/)[1]); });
   server.on('exit', code => fail(new Error(`server-cli exited ${code}: ${log.slice(-2000)}`)));
   setTimeout(() => fail(new Error(`server-cli did not start: ${log.slice(-2000)}`)), 60_000);
+}).catch(async error => {
+  server.kill('SIGTERM');
+  await rm(socketDir, {recursive: true, force: true}).catch(() => {});
+  process.stderr.write(`${error.message}\n`);
+  process.exit(1);
 });
 
 const proxy = createServer((req, res) => {
@@ -75,7 +84,8 @@ const listed = await fetch(`${base}/v1/objects`, {headers: {authorization: `Bear
 const objects = listed.ok ? (await listed.json()).objects.map(object => ({id: object.id, state: object.state, title: object.title ?? null})) : [];
 process.stdout.write(JSON.stringify({ready: true, url: base, server: started, pid: server.pid, record, objects, objectsStatus: listed.status}) + '\n');
 
-const stop = () => { proxy.close(); server.kill('SIGTERM'); setTimeout(() => process.exit(0), 3000).unref(); };
+const cleanUp = () => rm(socketDir, {recursive: true, force: true}).catch(() => {});
+const stop = () => { proxy.close(); server.kill('SIGTERM'); setTimeout(() => cleanUp().then(() => process.exit(0)), 3000).unref(); };
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
-server.on('exit', () => { proxy.close(); process.exit(0); });
+server.on('exit', () => { proxy.close(); cleanUp().then(() => process.exit(0)); });
