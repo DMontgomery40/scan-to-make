@@ -356,6 +356,9 @@ test('the composed rules for a code pass: the MCP\'s cad_design prompt plus only
   assert.ok(fit.includes(RULE_SECTIONS.newDesign) && fit.includes(RULE_SECTIONS.fitSizes));
   assert.equal(fit.includes(RULE_SECTIONS.captured), false);
   assert.match(fit, /cad_check_fit/, 'a fit can check itself against the scan');
+  assert.doesNotMatch(fit, /out\/touched\.stl/, 'a code worker writes no files itself: the touched run is the whole model');
+  assert.match(fit, /counterpart_make_3mf into out\/touched\.3mf/, 'several colours still combine into the 3MF');
+  assert.match(systemRules({kind: 'fit', request: true}), /Still export the whole model to out\/touched\.stl\./);
   assert.match(fit, /never rescale/i, 'interference with an oversized scan is reported, not fixed by rescaling it');
   // The captured-object rules stay Counterpart's, and apply to a code cleanup pass.
   assert.ok(copy.includes(RULE_SECTIONS.captured));
