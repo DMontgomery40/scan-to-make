@@ -1213,6 +1213,11 @@ final class LayoutParityUITests: XCTestCase {
             }
         }
         if !askFileMissing { try picture(CGSize(width: 2048, height: 1536), .brown).write(to: folder.appendingPathComponent("ask-bottle.jpg")) }
+        // The project's picture as the Mac draws it (#451): the object alone on the dark stage, square.
+        try UIGraphicsImageRenderer(size: CGSize(width: 720, height: 720), format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }()).pngData { context in
+            UIColor(red: 0.13, green: 0.14, blue: 0.17, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 720, height: 720))
+            UIColor.white.setFill(); context.fill(CGRect(x: 290, y: 150, width: 140, height: 420))
+        }.write(to: folder.appendingPathComponent("bottle-picture.png"))
         let frame = picture(CGSize(width: 240, height: 320), .darkGray)
         for i in 1...130 { try frame.write(to: folder.appendingPathComponent(String(format: "bottle-capture/%04d.heic", i))) }
         let app = XCUIApplication()
