@@ -314,6 +314,24 @@ final class EventRelayTests: XCTestCase {
         XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(event.id))
     }
 
+    @MainActor func testRemovingACarriedMilestoneAlertPreservesPausePriority() async throws {
+        let harness = try MilestoneHarness { _, index in
+            if index == 0 { return (200, ["X-Test-Delay": "0.1"]) }
+            return (index < 4 ? 503 : 200, ["Retry-After": "1"])
+        }
+        defer { harness.close() }
+        let relay = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        relay.undelivered = { _ in true }
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        relay.deliver(event("print.status", id: "moving", printId: "print-1"), title: "Mic mount", local: local, cloudTokens: .init())
+        await eventually { harness.requestCount == 1 }
+        XCTAssertTrue(relay.alertMilestone(event("print.milestone", id: "halfway-pause", printId: "print-1"),
+                                          title: "Mic mount", local: local, cloudTokens: .init()))
+        relay.deliver(event("print.paused", id: "paused", printId: "print-1"), title: "Mic mount", local: local, cloudTokens: .init())
+        await eventually(timeout: 5) { harness.acceptedPriorities.count == 2 }
+        XCTAssertEqual(harness.acceptedPriorities, [5, 10], "removing the optional milestone must keep the paused update immediate")
+    }
+
     @MainActor func testABusyRelayRetriesTheMilestoneBeforeChoosingCloudKit() async throws {
         let harness = try MilestoneHarness { _, index in (index == 0 ? 503 : 200, ["Retry-After": "1"]) }
         defer { harness.close() }
@@ -710,8 +728,10 @@ private final class MilestoneHarness: @unchecked Sendable {
     private let lock = NSLock()
     private var accepted: [String] = []
     private var progress: [Double] = []
+    private var priorities: [Int] = []
     private var count = 0
     private let response: (URLRequest, Int) -> (Int, [String: String])
+    var acceptedPriorities: [Int] { lock.lock(); defer { lock.unlock() }; return priorities }
     var acceptedProgress: [Double] { lock.lock(); defer { lock.unlock() }; return progress }
     var requestCount: Int { lock.lock(); defer { lock.unlock() }; return count }
     var acceptedTitles: [String] { lock.lock(); defer { lock.unlock() }; return accepted }
@@ -728,6 +748,8 @@ private final class MilestoneHarness: @unchecked Sendable {
     func answer(_ request: URLRequest) -> (Int, [String: String]) {
         lock.lock(); defer { lock.unlock() }
         let result = response(request, count); count += 1
+        if result.0 == 200, let object = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any],
+           let priority = object["priority"] as? Int { priorities.append(priority) }
         if result.0 == 200, let object = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any],
            let alert = object["alert"] as? [String: Any], let title = alert["title"] as? String { accepted.append(title) }
         if result.0 == 200, let object = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any],
