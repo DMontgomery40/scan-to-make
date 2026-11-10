@@ -169,15 +169,17 @@ class HomeLayoutTests {
     }
 
     @Test fun anOngoingPrintShowsTheCounterpartMarkAndTheRealObjectsPicture() = kotlinx.coroutines.runBlocking {
+        // The project's picture is the object alone, as the computer drew it; never the photo of the room (David, Nov 10).
         val p = project("4a4c5c44-7379-4a92-8a20-11a4710331a2", "Bottle holder", "printing")
-            .copy(photos = listOf("bottle.jpg"), capture = listOf("0001.heic"))
+            .copy(photos = listOf("bottle.jpg"), capture = listOf("0001.heic"),
+                raw = kotlinx.serialization.json.JsonObject(mapOf("picture" to kotlinx.serialization.json.JsonPrimitive("pictures/part-0123456789abcdef.png"))))
         state.projects.value = listOf(p, project("other", "Another project", "ready"))
         val folder = File(app.cacheDir, "${p.id}/${p.mediaVersion}").apply { mkdirs() }
-        val photo = File(folder, "photos_bottle.jpg")
+        val photo = File(folder, "pictures_part-0123456789abcdef.png")
         val bitmap = android.graphics.Bitmap.createBitmap(40, 40, android.graphics.Bitmap.Config.ARGB_8888)
         photo.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         try {
-            assertEquals("photos/bottle.jpg", p.posterName())
+            assertEquals("pictures/part-0123456789abcdef.png", p.posterName())
             org.junit.Assert.assertNotNull(com.scantomake.counterpart.app.NotificationPictures.refresh(p))
             val service = org.robolectric.Robolectric.buildService(com.scantomake.counterpart.app.WatchService::class.java).get()
             val notification = service.ongoing("Bottle holder", "Printing · 50%", p)

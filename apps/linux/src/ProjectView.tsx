@@ -273,7 +273,7 @@ export function ProjectView({
       </header>
       <div className="project-layout">
         <div className="project-main">
-          <Stage project={p} />
+          <Stage project={p} locate={() => void mutate("objects.locate", { id: p.id })} />
           {fit && (
             // After the print (Nov 8 walkthrough F1, PRD §5.4): the same question and answers as the other clients.
             <section className="question" aria-label={fit}>

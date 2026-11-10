@@ -1,5 +1,19 @@
 package com.scantomake.counterpart.ui
 
+import androidx.compose.ui.semantics.semantics
+
+import androidx.compose.ui.semantics.contentDescription
+
+import androidx.compose.ui.semantics.Role
+
+import androidx.compose.foundation.selection.selectable
+
+import com.scantomake.counterpart.api.canLocate
+
+import com.scantomake.counterpart.api.pictureFor
+
+import com.scantomake.counterpart.api.ProjectGallery
+
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -159,16 +173,27 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
         if (project == null) { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading…", color = Palette.secondary) }; return@Column }
         val words = state.words(project)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            // The model's renders, else what was sent.
-            val renders = project.current?.renders?.map { "renders/" + it.substringAfterLast('/') } ?: emptyList()
-            val pictures = renders.ifEmpty { project.photos.take(6).map { "photos/$it" } }
+            // The project's pictures (PRD §5.4): what will print in its spool, the two together, what was scanned. The
+            // computer draws each once; a row of labels under the stage chooses one (none for one, a scrolling row for many).
+            val gallery = remember(project) { ProjectGallery.of(project) }
+            var chosen by remember(id) { mutableStateOf<String?>(null) }
+            val entry = gallery.entries.firstOrNull { it.id == chosen } ?: gallery.first
             Box(Modifier.fillMaxWidth().aspectRatio(1.1f).clip(RoundedCornerShape(28.dp))) {
-                if (pictures.size <= 1) ProjectImage(project, pictures.firstOrNull(), Modifier.fillMaxSize(), ContentScale.Fit)
-                else Row(Modifier.fillMaxSize().horizontalScroll(rememberScrollState())) {
-                    pictures.forEach { ProjectImage(project, it, Modifier.fillMaxHeight().aspectRatio(1.1f), ContentScale.Fit) }
-                }
+                ProjectImage(project, entry?.let(project::pictureFor), Modifier.fillMaxSize(), ContentScale.Fit)
                 StatusCapsule(words.phase, modifier = Modifier.padding(12.dp))
-                words.size?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
+                entry?.sizeText()?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
+                if (entry?.kind == ProjectGallery.Kind.Part && project.canLocate) SecondaryButton("See It Together", Modifier.align(Alignment.BottomEnd).padding(12.dp), enabled = working == null) {
+                    run("locate") { state.show(app.companion.locate(id)) }
+                }
+            }
+            if (gallery.entries.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).semantics { contentDescription = "Pictures" },
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                gallery.entries.forEach { item ->
+                    val selected = item.id == entry?.id
+                    Text(item.label, Modifier.clip(RoundedCornerShape(50)).background(if (selected) Color.White else Color.White.copy(alpha = 0.10f))
+                        .selectable(selected = selected, role = Role.Tab) { chosen = item.id }.padding(14.dp, 8.dp),
+                        color = if (selected) Color.Black else Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+                }
             }
             Text(words.status, fontSize = 17.sp)
             ProjectPlates(project, working != null,

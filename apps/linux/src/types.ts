@@ -161,7 +161,13 @@ export interface Project {
     changes?: { tag: string; text: string }[];
     /** This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. */
     ownSettings?: boolean;
+    /** A fit's places for the scanned object (docs/protocols/seats.md). */
+    seats?: { name?: string; translationMm: number[]; rotationDeg: number[] }[];
   };
+  scan?: string;
+  /** The project's picture (PRD §5.1): the object alone on the stage, drawn by the computer. */
+  picture?: string;
+  pictures?: { part?: string; scan?: string; together?: string; photo?: string };
   files?: { original: string[] };
   plates?: Plate[];
   ask?: Ask;
@@ -203,8 +209,11 @@ export interface Project {
         stage?: string;
       };
       problems: { code: string; message: string }[];
+      activeFilament?: { slot?: string; material?: string; color?: string };
     };
     events?: { atMs: number; message: string }[];
+    /** The spools this print uses (PRD §5.4). */
+    spools?: { index?: number; colour: string; material?: string; name?: string }[];
   };
 }
 export interface Printer {

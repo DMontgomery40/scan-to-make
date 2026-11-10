@@ -272,6 +272,8 @@ class CompanionClient(
     suspend fun setArchived(id: String, archived: Boolean) = changeProjectSettings(id, jsonOf("archived" to archived))
     suspend fun rename(id: String, title: String) = changeProjectSettings(id, jsonOf("title" to title))
     suspend fun duplicate(id: String) = one(request("POST", "/v1/objects/$id/duplicate", JsonObject(emptyMap())))
+    /** Where the scanned object sits in a fit part made before passes said: a short pass that changes no geometry (docs/protocols/seats.md). */
+    suspend fun locate(id: String) = one(request("POST", "/v1/objects/$id/locate", JsonObject(emptyMap())))
 
     /**
      * capture-camera v1 for the frames already uploaded (`POST …/capture-camera`, ≤ 4 MiB). Sent as raw
@@ -370,7 +372,7 @@ class CompanionClient(
 
     // MARK: Files
 
-    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}""")
+    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png""")
 
     /** Downloads one project file into the cache, once per project version, and returns where it is. */
     suspend fun download(project: Project, name: String): File {

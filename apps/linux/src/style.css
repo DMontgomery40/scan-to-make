@@ -257,6 +257,27 @@ main > .model-view {
   font-size: 12px;
   color: #6e7a6d;
 }
+/* The gallery's labels (PRD §5.4 Pictures): under the stage's top controls, a row that scrolls for a dozen plates. */
+.gallery-labels {
+  position: absolute;
+  top: 54px;
+  left: 20px;
+  right: 20px;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.gallery-labels button {
+  flex: none;
+  border-radius: 999px;
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+.gallery-labels button[aria-selected="true"] {
+  background: #dde7d8;
+  border-color: #b2c1ab;
+}
 .render-picker {
   position: absolute;
   bottom: 18px;

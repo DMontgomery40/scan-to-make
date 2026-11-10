@@ -1,5 +1,7 @@
 package com.scantomake.counterpart.ui
 
+import com.scantomake.counterpart.api.picturePath
+
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.background
@@ -214,9 +216,7 @@ fun ProjectImage(project: Project, name: String?, modifier: Modifier = Modifier,
 }
 
 /** The project's picture: the real thing first (a photo or scan frame), else its model render. */
-fun Project.posterName(): String? = photos.firstOrNull()?.let { "photos/$it" }
-    ?: capture?.firstOrNull()?.let { "capture/$it" }
-    ?: current?.renders?.firstOrNull()?.substringAfterLast('/')?.let { "renders/$it" }
+fun Project.posterName(): String? = picturePath()
 
 @Composable
 fun Dot(color: Color, size: Dp = 10.dp) = Box(Modifier.size(size).clip(CircleShape).background(color))

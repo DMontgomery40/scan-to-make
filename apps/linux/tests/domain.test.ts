@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { gallery } from "../src/gallery";
 import {
   codeEngineRow,
   AFTER_PRINTING,
@@ -53,11 +54,37 @@ const project = {
   plates: [{ id: "a:1", selected: true }],
   directory: "/private/needle",
 } as unknown as Project;
-test("a project thumbnail is the real object before any render", () => {
-  const rendered = { ...project, current: { model: "m.stl", renders: ["renders/overview.png"] } } as unknown as Project;
-  assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "photos/bottle.jpg");
-  assert.equal(projectThumbnail({ ...rendered, capture: ["0001.heic"] }), "capture/0001.heic");
-  assert.equal(projectThumbnail(rendered), "renders/overview.png");
+// David, Nov 10: "of ALL THE OPTIONS ... the photograph including everything in it is by far the worst".
+test("a project's picture is the object alone on the stage, never a photo of the room", () => {
+  const rendered = { ...project, plates: undefined, current: { model: "current/model.stl", renders: ["current/renders/overview.png"] } } as unknown as Project;
+  assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "current/renders/overview.png", "until the computer draws it: the render");
+  assert.equal(projectThumbnail({ ...rendered, picture: "pictures/part-1.png" }), "pictures/part-1.png");
+  assert.equal(projectThumbnail({ ...project, plates: undefined, photos: ["bottle.jpg"], capture: ["0001.heic"] } as unknown as Project), undefined, "the placeholder, never the room");
+});
+
+// PRD §5.4 Pictures: the same entries as CounterpartKit and Android, from the shared cases.
+test("every client derives the same pictures from the shared gallery cases", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-gallery.json", import.meta.url), "utf8"));
+  assert.ok(doc.cases.length >= 8);
+  for (const item of doc.cases) {
+    const entries = gallery(item.project as Project);
+    assert.deepEqual(entries.map((e) => e.id), item.entries.map((e: { id: string }) => e.id), item.name);
+    entries.forEach((entry, index) => {
+      const want = item.entries[index];
+      assert.equal(entry.kind, want.kind, item.name);
+      assert.equal(entry.label, want.label, item.name);
+      assert.equal(entry.measures, want.measures, item.name);
+      assert.equal(entry.colour, want.colour, item.name);
+      assert.deepEqual(entry.sizeMm, want.sizeMm, item.name);
+      assert.deepEqual(entry.photos ?? [], want.photos ?? [], item.name);
+      const drawing = "assembly" in entry.drawing
+        ? { assembly: { part: entry.drawing.assembly.part, object: entry.drawing.assembly.object, seats: entry.drawing.assembly.seats.length } }
+        : entry.drawing;
+      assert.deepEqual(drawing, want.drawing, item.name);
+    });
+  }
+  const many = doc.cases.find((c: { name: string }) => c.name.includes("six plates"));
+  assert.equal(gallery(many.project).length, 6, "a designer's six plates: six labelled entries");
 });
 
 test("a finished print asks Did it fit? until it's answered, as the other clients do", () => {

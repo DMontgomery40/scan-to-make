@@ -1,3 +1,4 @@
+import { filePath, picturePath } from "./gallery";
 import type {
   Estimate,
   Field,
@@ -50,11 +51,10 @@ export function startersShown(view: { search: string; filter: string }) {
   return view.search.trim() === "" && view.filter === "all";
 }
 
-/** The project's picture: the real thing first (a photo or scan frame), else its render or designer thumbnail. */
+/** The project's picture: the object alone on the stage, never a photo of the room (David, Nov 10; `gallery.ts`). */
 export function projectThumbnail(p: Project): string | undefined {
-  if (p.photos[0]) return `photos/${p.photos[0]}`;
-  if (p.capture?.[0]) return `capture/${p.capture[0]}`;
-  return p.current?.renders[0] ?? p.credit?.thumbnail;
+  const path = picturePath(p);
+  return path ? filePath(p, path) : undefined;
 }
 
 /** What Needs Changes puts before the person's words, as on the iPhone, iPad, Android and Mac (PRD §5.4). */
