@@ -6,7 +6,7 @@ import {PrinterDirectory, READINESS_REFRESH_MS} from '../dist/printing/directory
 const tool = (name, properties = {}) => ({name, inputSchema: {type: 'object', properties}});
 const until = async check => { for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
 // What bambu-printer-mcp answers for a P1S (counterpart/1): its capabilities, and its reports as counterpart_print_progress.
-const INFO = {contract: 'counterpart/1', server: {name: 'bambu-printer-mcp', version: '1.1.61'}, printer: {kind: 'bambu', host: '192.0.2.1', model: 'p1s'},
+const INFO = {contract: 'counterpart/1', server: {name: 'bambu-printer-mcp', version: '1.1.61'}, printer: {kind: 'bambu', host: '192.0.2.1', model: 'A1 Mini'},
   capabilities: {progress: true, layers: true, camera: 'bambu-tcp', filaments: 'ams', pause: true, resume: false, cancel: true, print3mf: true, gcode: true}};
 const CONTRACT = [tool('counterpart_printer_info'), tool('counterpart_print_progress')];
 const progress = state => ({contract: 'counterpart/1', observedAt: new Date().toISOString(), state, problems: []});
@@ -190,22 +190,28 @@ test('concurrent fresh camera requests share one snapshot, while a later fresh r
   camera.close();
 });
 
-test('a printer nobody named is listed by the model its MCP reports, never a bare brand; a name someone gave stays (first look U9)', async () => {
-  const unnamed = {defaultDestinationId: 'current', destinations: [{id: 'current', name: 'Printer at 192.0.2.1', address: '192.0.2.1', backend: 'bambu-printer-mcp', source: 'current', origin: 'printer-handoff'}],
-    resolve: () => undefined, canonical: id => id === 'current' ? 'current' : undefined};
-  const d = destination({tools: [...CONTRACT], status: () => progress('idle')});
-  const directory = new PrinterDirectory(unnamed, id => id === 'current' ? d.session : undefined, {now: () => 1_000_000});
+const named = (name, backend = 'bambu-printer-mcp') => ({defaultDestinationId: 'current',
+  destinations: [{id: 'current', name, address: '192.0.2.1', backend, source: 'current', origin: 'printer-handoff'}],
+  resolve: () => undefined, canonical: id => id === 'current' ? 'current' : undefined});
+async function listedName(catalog, info = INFO) {
+  const d = destination({tools: [...CONTRACT], status: () => progress('idle'), info});
+  const directory = new PrinterDirectory(catalog, id => id === 'current' ? d.session : undefined, {now: () => 1_000_000});
   d.set(directory);
-  assert.equal(directory.list().destinations[0].name, 'Printer at 192.0.2.1', 'before its MCP answers: where it is');
+  const before = directory.list().destinations[0].name;
   await directory.refresh('current');
   await until(() => directory.capabilities('current')?.contract);
-  assert.equal(directory.list().destinations[0].name, 'Bambu Lab P1S', 'then the model its MCP reports');
+  return {before, after: directory.list().destinations[0].name};
+}
 
-  const named = {...unnamed, destinations: [{...unnamed.destinations[0], name: 'Garage printer'}]};
-  const e = destination({tools: [...CONTRACT], status: () => progress('idle')});
-  const kept = new PrinterDirectory(named, id => id === 'current' ? e.session : undefined, {now: () => 1_000_000});
-  e.set(kept);
-  await kept.refresh('current');
-  await until(() => kept.capabilities('current')?.contract);
-  assert.equal(kept.list().destinations[0].name, 'Garage printer');
+test('a printer nobody named is listed by the display name its MCP reports, exactly as reported (first look U9, review F1)', async () => {
+  // bambu-printer-mcp's own display name, as its counterpart_printer_info gives it: no brand added, nothing uppercased.
+  assert.deepEqual(await listedName(named('Printer at 192.0.2.1')), {before: 'Printer at 192.0.2.1', after: 'A1 Mini'});
+  // mcp-3D-printer-server's shape: another kind and a mixed-case model, passed through the same way.
+  const prusa = {...INFO, server: {name: 'mcp-3D-printer-server', version: '1.2.40'}, printer: {kind: 'prusa', host: '192.0.2.1', model: 'Original Prusa MK4S'}};
+  assert.equal((await listedName(named('Printer at 192.0.2.1', 'mcp-3d-printer-server'), prusa)).after, 'Original Prusa MK4S');
+});
+
+test('names older builds generated count as unnamed; a name someone gave stays (review F6)', async () => {
+  for (const legacy of ['Bambu printer', 'Configured printer']) assert.equal((await listedName(named(legacy))).after, 'A1 Mini', legacy);
+  assert.equal((await listedName(named('Garage printer'))).after, 'Garage printer');
 });
