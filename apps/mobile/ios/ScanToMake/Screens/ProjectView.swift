@@ -1163,12 +1163,7 @@ struct AskSizesFields: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: 4) {
-                        TextField("", text: $field.text)
-                            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
-                            .font(.title3.monospacedDigit().weight(.semibold))
-                            .frame(width: 84)
-                            .accessibilityLabel("\(field.label), millimetres")
-                            .accessibilityIdentifier("ask-size-\(field.id)")
+                        AskSizeNumber(text: $field.text, label: field.label, id: field.id)
                         Text("mm").font(.subheadline).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 12).padding(.vertical, 8)
@@ -1186,5 +1181,28 @@ struct AskSizesFields: View {
                 Text("Enter each size in millimetres, or leave one empty if you don't know it.").font(.footnote).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// One size's number. Tapping it selects the whole number, so typing replaces the Mac's figure instead of landing
+/// in front of it.
+private struct AskSizeNumber: View {
+    @Binding var text: String
+    let label: String
+    let id: String
+    @State private var selection: TextSelection?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: $text, selection: $selection)
+            .focused($focused)
+            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+            .font(.title3.monospacedDigit().weight(.semibold))
+            .frame(width: 84)
+            .accessibilityLabel("\(label), millimetres")
+            .accessibilityIdentifier("ask-size-\(id)")
+            .onChange(of: focused) { _, now in
+                if now, !text.isEmpty { selection = TextSelection(range: text.startIndex..<text.endIndex) }
+            }
     }
 }
