@@ -374,4 +374,31 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertEqual(ProjectWords.workingLine(p, fallback: "Making it", now: now), "Matching your photos · about 2 min")
         XCTAssertNil(WorkProgress(project(["state": "touching-up", "passes": [["startedAtMs": 1]]])).fraction, "no stages, no made-up progress")
     }
+
+    /// How a pass ended is the Mac's own words on every client; an older Mac's status is worded here, with the
+    /// spelling it really sends (`needs_closeup`, never `needs-closeup`).
+    func testAPassEndsInTheMacsWords() throws {
+        func pass(_ json: String) throws -> Project.Pass { try JSONDecoder().decode(Project.Pass.self, from: Data(json.utf8)) }
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"capped","words":"Stopped at the 120 tool-call limit"}"#).endingWords, "Stopped at the 120 tool-call limit")
+        XCTAssertNil(try pass(#"{"startedAtMs":1,"status":"done","words":"Finished"}"#).endingWords, "a running pass has not ended")
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"needs_closeup"}"#).endingWords, "Asked you a question")
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"done"}"#).endingWords, "Finished")
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2}"#).endingWords, "Finished")
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"needs_file"}"#).endingWords, "Needs File")
+    }
+
+    /// A pass that stopped to ask, or stopped short, must never read as all green ticks (seen on real data Nov 10:
+    /// a failed pass and a pass waiting on a question each showed three ticks), and a change says what was asked.
+    func testAPassSaysHowItLeftThingsAndWhatItWasAsked() throws {
+        func pass(_ json: String) throws -> Project.Pass { try JSONDecoder().decode(Project.Pass.self, from: Data(json.utf8)) }
+        XCTAssertNil(try pass(#"{"startedAtMs":1,"status":"failed"}"#).ending, "still running")
+        for (status, ending) in [("done", Project.Pass.Ending.finished), ("unchanged", .finished), ("needs_closeup", .asked), ("needs_file", .asked),
+                                 ("capped", .stopped), ("failed", .stopped), ("interrupted", .stopped)] {
+            XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"\#(status)"}"#).ending, ending, status)
+        }
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2}"#).ending, .finished)
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"changes","note":"  make it thicker "}"#).requestedChange, "make it thicker")
+        XCTAssertNil(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"ask-answer","note":"Answer to \"Q?\": yes"}"#).requestedChange, "an answer is not a change")
+        XCTAssertNil(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"new"}"#).requestedChange)
+    }
 }

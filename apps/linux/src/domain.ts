@@ -13,6 +13,7 @@ import type {
   ReconstructionReview,
   ReconstructionSelection,
   Vec3,
+  Pass,
 } from "./types";
 /** Issue tickets before reads AND mutations. Late reads cannot roll the UI back. */
 export class ReadOrder {
@@ -737,3 +738,25 @@ export function scanSample(count: number, shown = 5): number[] {
 }
 
 export const scanWords = (count: number) => (count === 1 ? "1 photo" : `${count} photos`);
+
+/** A pass in the project's history: how it ended in the companion's words (`passes[].words`), or that it is running. */
+export function passHeading(pass: Pick<Pass, "words">, index: number): string {
+  return `Pass ${index + 1} · ${pass.words ?? "Working"}`;
+}
+
+/** How an ended pass left things (CounterpartKit `Pass.ending`): finished, stopped to ask, or stopped short. */
+export function passEnding(pass: Pick<Pass, "endedAtMs" | "status">): "finished" | "asked" | "stopped" | undefined {
+  if (!pass.endedAtMs) return undefined;
+  if (pass.status === "needs_closeup" || pass.status === "needs_file") return "asked";
+  if (pass.status === "capped" || pass.status === "failed" || pass.status === "interrupted") return "stopped";
+  return "finished";
+}
+
+/** The mark beside a stage. The last stage carries how the pass ended: asked or stopped is never a tick. */
+export function stageMark(pass: Pick<Pass, "endedAtMs" | "status" | "stages">, index: number): string {
+  const stage = pass.stages?.[index];
+  const ending = index === (pass.stages?.length ?? 0) - 1 ? passEnding(pass) : undefined;
+  if (ending === "asked") return "?";
+  if (ending === "stopped") return "✕";
+  return stage?.endedAtMs ? "✓" : "◌";
+}
