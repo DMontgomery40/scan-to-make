@@ -328,21 +328,30 @@ class Device:
                 time.sleep(1.5)
             except Exception as failure:  # the screen is still captured, with what happened
                 error = str(failure)
-        previous = b''
+        previous: Path | None = None
         for page in range(1, item['pages'] + 1):
             path = self.out / f'{item["name"]}-p{page}.png'
             self.ad('screenshot', str(path), '--pixel-density', '2', '--normalize-status-bar')
-            image = path.read_bytes()
-            if image == previous:  # the scroll didn't move: this page repeats the last one
+            if previous and same_screen(previous, path):  # the scroll didn't move: this page repeats the last one
                 path.unlink()
                 break
-            previous = image
+            previous = path
             self.record('results', {**item, 'args': [], 'device': self.key, 'image': str(path), 'page': page, 'error': error})
             if page == item['pages']: break
             try: moved = json.dumps(self.ad('scroll', 'down', '0.7'))
             except Exception: break
             if '"unchanged"' in moved: break
             time.sleep(1)
+
+
+def same_screen(a: Path, b: Path) -> bool:
+    """Two captures of one screen: equal, or (with Pillow) under 1% mean pixel difference, so a spinner or a
+    blinking caret doesn't count as a new page."""
+    if a.read_bytes() == b.read_bytes(): return True
+    try: from PIL import Image, ImageChops, ImageStat
+    except ImportError: return False
+    x, y = (Image.open(p).convert('L').resize((200, 400)) for p in (a, b))
+    return sum(ImageStat.Stat(ImageChops.difference(x, y)).mean) < 2.55
 
 
 def simctl(*args: str, check: bool = True) -> str:
