@@ -86,19 +86,24 @@ async function setup(t, outcomes, {scanBox = BOTTLE} = {}) {
   const runTouchup = async input => {
     inputs.push(input);
     const outcome = outcomes[inputs.length - 1];
+    // The worker moves through its stages as a real pass does, so the stage times are offered for the estimates.
+    for (const id of outcome.stages ?? []) { input.onStage?.(id); await new Promise(resolve => setTimeout(resolve, 5)); }
     const passDir = join(root, `pass-${inputs.length}`), out = join(passDir, 'out');
     await mkdir(out, {recursive: true});
     const model = join(out, 'touched.stl');
     if (outcome.model !== false) await writeFile(model, HOLDER);
     return {renders: [], checkpoints: [], stats: {seconds: 3, toolCalls: 2}, passDir, ...(outcome.model !== false ? {model} : {}), status: outcome.status ?? 'done', ...outcome.result};
   };
+  // The real timings, with every stage time it is given written down here too.
+  const timings = new PassTimings(join(root, 'timings.json')), recorded = [];
+  const passTimings = {typical: (...args) => timings.typical(...args), record: async (...args) => { recorded.push(args); }};
   const service = new ObjectService({store, runTouchup, stlInfo: async () => [213, 43, 82], claudePath: '/unused', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
-    events: {emit: async () => {}}, passTimings: new PassTimings(join(root, 'timings.json')), scanBounds: async () => scanBox});
+    events: {emit: async () => {}}, passTimings, scanBounds: async () => scanBox});
   t.after(() => service.close());
   const object = await service.create('A wall holder for three of these', 'fit');
   await store.addFile(object.id, 'scan', 'scan.usdz', Buffer.from('usdz'));
   await store.update(object.id, o => ({...o, scan: 'scan.usdz'}));
-  return {service, store, object, inputs};
+  return {service, store, object, inputs, recorded};
 }
 
 test('a fit pass\'s seats are kept with its model, served to every client, and restated by a change', async t => {
@@ -149,6 +154,21 @@ test('locate finds where the object sits in an existing part, changes nothing, a
   assert.equal(refused.passes.at(-1).status, 'failed');
   assert.match(refused.passes.at(-1).activity.at(-1).text, /changed the model .* nothing from this pass was kept/);
   assert.equal(refused.state, 'printed');
+});
+
+// Review of #451, item 5: a locate pass's time says nothing about how long a design takes.
+test('a locate pass never feeds the stage times that estimate a design', async t => {
+  const f = await setup(t, [{stages: ['working', 'saving'], result: {summary: 'Three pockets.'}},
+    {stages: ['working', 'saving'], model: false, result: {summary: 'One bottle in each pocket.', seats: SEATS}}]);
+  await f.service.start(f.object.id);
+  await f.service.settled(f.object.id);
+  assert.ok(f.recorded.length > 0, 'a design pass records its stage times');
+  const before = f.recorded.length;
+  await f.service.locate(f.object.id);
+  const located = await f.service.settled(f.object.id);
+  assert.deepEqual(located.current.seats, SEATS);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(f.recorded.length, before, 'the locate pass recorded nothing');
 });
 
 test('locate is only for a part made to fit a scanned object', async t => {
