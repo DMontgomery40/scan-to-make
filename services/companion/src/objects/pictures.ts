@@ -1,3 +1,4 @@
+import {projectPlates} from './plates.js';
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {mkdir, readdir, rename, rm, stat} from 'node:fs/promises';
@@ -52,17 +53,30 @@ export function spoolColour(object: Pick<StmObject, 'print'>): string | undefine
 const isModelScan = (name: string | undefined) => !!name && /\.(usdz|usdc|usda|stl)$/i.test(name);
 
 /**
+ * The colour a 3MF is drawn in when the file gives none: the project's first colour (a spool its print recorded, else
+ * the first the design asked for), else neutral. Which part prints on which filament is the printer MCP's to say, so a
+ * multi-colour part is drawn in one colour until an installed MCP reports it (AGENTS.md, "The app staples onto the MCPs").
+ */
+export function firstColour(object: Pick<StmObject, 'print' | 'current'>): string | undefined {
+  return spoolColour(object) ?? hex(object.print?.spools?.[0]?.colour) ?? hex(object.current?.filaments?.[0]?.colour);
+}
+
+/**
  * What each of the project's pictures draws (CounterpartKit `ProjectGallery`'s entries, for clients that show pictures).
- * A designer's plates and a multi-colour 3MF keep their own pictures, which carry their colours.
+ * Every model file gets one, a 3MF like an STL (Nov 10: a 3MF with four objects had none and David couldn't tell what
+ * the project was), drawn as its objects sit in the file. A designer's file that carries its own plate pictures keeps
+ * them and gets none drawn; a multi-plate file is drawn whole until the MCP reports which objects sit on which plate.
  */
 export function pictureSpecs(object: StmObject): Partial<Record<PictureRole, PictureSpec>> {
   const specs: Partial<Record<PictureRole, PictureSpec>> = {};
-  const current = object.current, published = object.kind === 'published' || !!current?.model.toLowerCase().endsWith('.3mf');
+  const current = object.current, published = object.kind === 'published';
+  const model = current?.model, threeMF = !!model?.toLowerCase().endsWith('.3mf');
   const scan = isModelScan(object.scan) ? `scan/${object.scan}` : undefined;
-  if (current && !published) {
-    const tint = spoolColour(object);
-    specs.part = {model: 'current/model.stl', zUp: true, ...(tint ? {tint} : {})};
-    if (scan && /\.usdz$/i.test(scan) && current.seats?.length) specs.together = {...specs.part, object: scan, seats: current.seats.map(seat => seatMatrix(seat))};
+  const ownPlatePictures = published && projectPlates(object).some(plate => plate.thumbnail);
+  if (current && model && /\.(stl|3mf)$/i.test(model) && !ownPlatePictures) {
+    const tint = threeMF ? firstColour(object) : spoolColour(object);
+    specs.part = {model: published || threeMF ? model : 'current/model.stl', zUp: true, ...(tint ? {tint} : {})};
+    if (!published && !threeMF && scan && /\.usdz$/i.test(scan) && current.seats?.length) specs.together = {...specs.part, object: scan, seats: current.seats.map(seat => seatMatrix(seat))};
   }
   if (scan && object.kind !== 'published') specs.scan = /\.stl$/i.test(scan) ? {model: scan, zUp: true} : {model: scan};
   // No model yet (photos still uploading, a rebuild still running): a photo's subject, cut out of its room.
