@@ -21,7 +21,7 @@ import org.junit.Test
 /** PRD §5.4 One main action (board U17). The table is CounterpartKit's `Fixtures/main-actions.json`, read by the
  *  iPhone, Mac and Linux suites too: the same decision on every layout. */
 class PageActionsTests {
-    private data class Row(val number: Int, val name: String, val sending: Boolean, val project: Project, val main: String?, val others: List<String>,
+    private data class Row(val number: Int, val name: String, val sending: Boolean, val projectSettings: Boolean, val project: Project, val main: String?, val others: List<String>,
                            val printWords: String?, val printPlace: String?, val printNote: String?)
 
     private fun JsonObject.text(key: String) = this[key]?.takeIf { it != JsonNull }?.jsonPrimitive?.contentOrNull
@@ -31,6 +31,7 @@ class PageActionsTests {
         val expected = row["expected"]!!.jsonObject
         val name = row.text("name")!!
         Row(row["row"]!!.jsonPrimitive.intOrNull ?: 0, name, row["sending"]?.jsonPrimitive?.booleanOrNull ?: false,
+            row["projectSettings"]?.jsonPrimitive?.booleanOrNull ?: true,
             requireNotNull(Project.decode(row["project"]!!.jsonObject)) { "$name: not decodable on Android" },
             expected.text("main"), expected["others"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
             expected.text("printWords"), expected.text("printPlace"), expected.text("printNote"))
@@ -44,7 +45,7 @@ class PageActionsTests {
         assertEquals(document["rows"]!!.jsonArray.size, rows.size)
         assertEquals("one row at least for each state of the table", (1..16).toSet(), rows.map { it.number }.toSet())
         for (row in rows) {
-            val page = ProjectWords(row.project, sending = row.sending).page
+            val page = ProjectWords(row.project, sending = row.sending, projectSettings = row.projectSettings).page
             assertEquals("${row.name}: main", row.main, page.main?.let(::wire))
             assertEquals("${row.name}: others", row.others, page.others.map(::wire))
             assertEquals("${row.name}: what printing is called", row.printWords, page.printWords)
@@ -56,7 +57,7 @@ class PageActionsTests {
     /** The rule the table follows, held for every row: one lead, each action once, Print filled only when it leads. */
     @Test fun anActionAppearsOnceAndPrintIsFilledOnlyWhenItLeads() {
         for (row in rows) {
-            val page = ProjectWords(row.project, sending = row.sending).page
+            val page = ProjectWords(row.project, sending = row.sending, projectSettings = row.projectSettings).page
             assertEquals("${row.name}: an action twice", page.others.size, page.others.toSet().size)
             val prints = page.others.filter { it == ProjectAction.Print || it == ProjectAction.PrintChecked }
             assertEquals("${row.name}: printing is named exactly when it is offered", page.printWords != null, page.printIsMain || prints.isNotEmpty())

@@ -89,7 +89,9 @@ enum class Tone { Working, NeedsYou, Accent, Printing, Secondary, Failed }
 enum class ProjectAction { FinishSending, Scan, AttachPhotos, MakeIt, Print, PrintChecked, Correct, OpenCamera, BestGuess, Retry, ItWorks, NeedsChanges }
 
 /** A project in plain words: the one source of status words. Port of CounterpartKit `ProjectWords`. */
-class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolean = false, printerName: String? = null, nowMs: Long = System.currentTimeMillis()) {
+/** [projectSettings]: the Mac keeps a project's status; on an older Mac a printed project asks nothing and Print leads (review S2), as on iOS. */
+class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolean = false, printerName: String? = null, projectSettings: Boolean = true,
+                   nowMs: Long = System.currentTimeMillis()) {
     val title: String = title(project, localScan)
     val phase: ProjectPhase = phase(project, sending)
     val status: String
@@ -231,7 +233,7 @@ class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolea
             Project.State.Printed -> {
                 val finished = project.print?.monitor?.endState == "done"
                 val endedAt = Iso.parse(project.print?.monitor?.endedAt) ?: project.updatedAtMs.toLong()
-                val ask = finished && project.projectStatus in setOf(null, ProjectStatus.Printed)
+                val ask = finished && projectSettings && project.projectStatus in setOf(null, ProjectStatus.Printed)
                 s = if (finished) "Printed" else "Print request accepted"; b = false
                 a = if (ask) listOf(ProjectAction.ItWorks, ProjectAction.NeedsChanges) + made else made
                 l = if (finished) "Printed " + Format.whenInSentence(endedAt, nowMs) else "Sent to " + (project.print?.destination?.name ?: "your printer")

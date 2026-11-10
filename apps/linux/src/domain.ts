@@ -893,7 +893,8 @@ const PRINT_NOTES: Record<string, string> = {
   "Print the last version": "Your last version is still here.",
   "Print Again": "The same file is sent to the printer again.",
 };
-export function pageActions(p: Project, sending = false): PageActions {
+/** `projectSettings`: the Mac keeps a project's status; on an older Mac a printed project asks nothing and Print leads (review S2). */
+export function pageActions(p: Project, sending = false, projectSettings = true): PageActions {
   const made = p.current ? [p.print?.uncertain ? "printChecked" : "print", "correct"] : [];
   const printing = (main: PageActions["main"], others: string[], printWords: string, printPlace: "bar" | "card"): PageActions => {
     if (!p.current) return { main: main === "print" ? undefined : main, others: others.filter((a) => a !== "print" && a !== "printChecked") };
@@ -921,7 +922,7 @@ export function pageActions(p: Project, sending = false): PageActions {
     case "ready": return printing("print", correct, "Print", "bar");
     case "printing": return { main: p.printConfirmation ? "review" : "openPrinting", others: [] };
     case "printed": {
-      if (didItFitQuestion(p)) return printing("itWorks", ["needsChanges", ...made], "Print Another", "bar");
+      if (projectSettings && didItFitQuestion(p)) return printing("itWorks", ["needsChanges", ...made], "Print Another", "bar");
       return printing("print", correct, p.print?.monitor?.endState === "done" ? "Print Another" : "Print", "bar");
     }
     case "sent": return printing("print", correct, "Print", "bar");

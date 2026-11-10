@@ -860,7 +860,7 @@ test("every project state has its one main action, as on every layout (main-acti
   const numbers: number[] = doc.rows.map((row: { row: number }) => row.row);
   assert.deepEqual([...new Set(numbers)].sort((a, b) => a - b), Array.from({ length: 16 }, (_, i) => i + 1));
   for (const row of doc.rows) {
-    const page = pageActions({ title: "", ...row.project } as Project, row.sending === true);
+    const page = pageActions({ title: "", ...row.project } as Project, row.sending === true, row.projectSettings !== false);
     assert.equal(page.main ?? null, row.expected.main, `${row.name}: main`);
     assert.deepEqual(page.others, row.expected.others, `${row.name}: others`);
     assert.equal(page.printWords ?? null, row.expected.printWords, `${row.name}: what printing is called`);

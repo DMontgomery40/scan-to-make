@@ -92,7 +92,8 @@ import CounterpartKit
     func project(_ id: String) -> Project? { projects.first { $0.id == id } }
 
     func words(_ project: Project) -> ProjectWords {
-        ProjectWords(project, sending: sending.contains(project.id), localScan: readyScans.contains(project.id), printerName: printerName(project))
+        ProjectWords(project, sending: sending.contains(project.id), localScan: readyScans.contains(project.id), printerName: printerName(project),
+                     projectSettings: projectSettings)
     }
 
     /// Spools for the printers, read fresh each time (spools get swapped): the Mac reports them for a project's

@@ -4,7 +4,7 @@ import XCTest
 /// PRD §5.4 One main action (board U17). The table is `Fixtures/main-actions.json`, read by the Android and Linux
 /// suites too: the same decision on every layout.
 final class PageActionsTests: XCTestCase {
-    private struct Row { let number: Int; let name: String; let sending: Bool; let project: Project; let main: String?; let others: [String]; let printWords: String?; let printPlace: String?; let printNote: String? }
+    private struct Row { let number: Int; let name: String; let sending: Bool; let projectSettings: Bool; let project: Project; let main: String?; let others: [String]; let printWords: String?; let printPlace: String?; let printNote: String? }
 
     private func rows() throws -> [Row] {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/main-actions.json")
@@ -12,7 +12,8 @@ final class PageActionsTests: XCTestCase {
         return try (document["rows"] as? [[String: Any]] ?? []).map { row in
             let expected = try XCTUnwrap(row["expected"] as? [String: Any])
             let project = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: try XCTUnwrap(row["project"])))
-            return Row(number: row["row"] as? Int ?? 0, name: row["name"] as? String ?? "", sending: row["sending"] as? Bool ?? false, project: project,
+            return Row(number: row["row"] as? Int ?? 0, name: row["name"] as? String ?? "", sending: row["sending"] as? Bool ?? false,
+                       projectSettings: row["projectSettings"] as? Bool ?? true, project: project,
                        main: expected["main"] as? String, others: expected["others"] as? [String] ?? [],
                        printWords: expected["printWords"] as? String, printPlace: expected["printPlace"] as? String, printNote: expected["printNote"] as? String)
         }
@@ -22,7 +23,7 @@ final class PageActionsTests: XCTestCase {
         let rows = try rows()
         XCTAssertEqual(Set(rows.map(\.number)), Set(1...16), "one row at least for each state of the table")
         for row in rows {
-            let page = ProjectWords(row.project, sending: row.sending).page
+            let page = ProjectWords(row.project, sending: row.sending, projectSettings: row.projectSettings).page
             XCTAssertEqual(page.main?.rawValue, row.main, "\(row.name): main")
             XCTAssertEqual(page.others.map { "\($0)" }, row.others, "\(row.name): others")
             XCTAssertEqual(page.printWords, row.printWords, "\(row.name): what printing is called")
@@ -35,7 +36,7 @@ final class PageActionsTests: XCTestCase {
     /// and never in the bar when a card already offers it.
     func testAnActionAppearsOnceAndPrintIsFilledOnlyWhenItLeads() throws {
         for row in try rows() {
-            let words = ProjectWords(row.project, sending: row.sending)
+            let words = ProjectWords(row.project, sending: row.sending, projectSettings: row.projectSettings)
             let page = words.page
             XCTAssertEqual(Set(page.others.map { "\($0)" }).count, page.others.count, "\(row.name): an action twice")
             let prints = page.others.filter { $0 == .print || $0 == .printChecked }

@@ -179,7 +179,9 @@ public struct ProjectWords: Equatable, Sendable {
         return "Can you send me a close-up of \(part.isEmpty ? "the part I missed" : part)? I can't see what's happening there."
     }
 
-    public init(_ project: Project, sending: Bool = false, localScan: Bool = false, printerName: String? = nil, now: Date = Date()) {
+    /// `projectSettings`: the Mac keeps a project's status (`/healthz` capability). An older Mac can't keep the "Did it fit?"
+    /// answer, so a printed project there offers neither It Works nor Needs Changes, and Print leads (review S2).
+    public init(_ project: Project, sending: Bool = false, localScan: Bool = false, printerName: String? = nil, projectSettings: Bool = true, now: Date = Date()) {
         title = Self.title(project, localScan: localScan)
         size = project.current?.sizeMm.flatMap(Format.size)
         phase = Self.phase(project, sending: sending)
@@ -239,8 +241,8 @@ public struct ProjectWords: Equatable, Sendable {
                 // A print request accepted isn't a print finished; only the print monitor says it finished.
                 let finished = project.print?.monitor?.endState == "done"
                 let endedAt = project.print?.monitor?.endedAt.flatMap(ISO.date) ?? project.updatedAt
-                // "Did it fit?" until you answer it, here or with any status in Project Settings.
-                let ask = finished && [nil, .printed].contains(project.projectStatus)
+                // "Did it fit?" until you answer it, here or with any status in Project Settings, on a Mac that keeps it.
+                let ask = finished && projectSettings && [nil, .printed].contains(project.projectStatus)
                 (status, busy, actions) = (finished ? "Printed" : "Print request accepted", false, ask ? [.itWorks, .needsChanges] + made : made)
                 line = finished ? "Printed " + Format.whenInSentence(endedAt, now: now)
                     : "Sent to " + (project.print?.destination?.name ?? "your printer")

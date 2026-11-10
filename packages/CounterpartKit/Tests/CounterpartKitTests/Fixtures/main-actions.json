@@ -452,6 +452,44 @@
    }
   },
   {
+   "row": 10,
+   "name": "printed-older-mac",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printed",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "print": {
+     "bundleId": "b",
+     "dispatchedAt": "2026-11-09T10:00:00Z",
+     "monitor": {
+      "phase": "ended",
+      "endState": "done",
+      "endedAt": "2026-11-09T11:00:00Z",
+      "milestonesSent": [],
+      "firstLayerSent": true
+     }
+    }
+   },
+   "expected": {
+    "main": "print",
+    "others": [
+     "correct"
+    ],
+    "printWords": "Print Another",
+    "printPlace": "bar",
+    "printNote": null
+   },
+   "projectSettings": false,
+   "why": "A Mac that does not report projectSettings cannot keep the answer, so no \"Did it fit?\" card shows: Print leads (review S2)."
+  },
+  {
    "row": 11,
    "name": "sent-cannot-follow",
    "project": {
