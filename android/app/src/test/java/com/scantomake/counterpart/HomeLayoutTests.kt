@@ -20,6 +20,8 @@ import com.scantomake.counterpart.api.PrinterDestination
 import com.scantomake.counterpart.ui.PrintersScreen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertTextContains
@@ -138,7 +140,8 @@ class HomeLayoutTests {
         } }
         val title = com.scantomake.counterpart.api.ProjectWords(stopped).title
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(title))
-        compose.onNodeWithText(title).performClick()
+        // Home names a stopped project twice: its Needs you card (which already says why it stopped) and its tile.
+        compose.onAllNodesWithText(title, substring = true).onFirst().performClick()
         compose.onNodeWithText("Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.").performScrollTo().assertExists()
         compose.onNodeWithText("Try Again").performScrollTo().assertIsEnabled()
     }
