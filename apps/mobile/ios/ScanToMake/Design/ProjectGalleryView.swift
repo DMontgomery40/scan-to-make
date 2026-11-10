@@ -104,7 +104,7 @@ struct ProjectGalleryView: View {
             }
             .accessibilityElement(children: .contain).accessibilityIdentifier("gallery-model-unavailable")
         case .tooLarge?:
-            Text("This scan is too large to turn on a phone. The picture is your Mac’s.").font(.footnote).foregroundStyle(.secondary)
+            Text("This scan is too detailed to show in 3D on a phone. Open it on your Mac to see it from every side.").font(.footnote).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 16).accessibilityIdentifier("gallery-model-unavailable")
         default: EmptyView()
         }
@@ -167,7 +167,7 @@ struct ProjectGalleryView: View {
                             .accessibilityHint("Places it at true size in your room")
                     }
                     if entry.kind == .scan, !entry.photos.isEmpty {
-                        Button { showingPhotos = true } label: { Label("\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
+                        Button { showingPhotos = true } label: { Label(entry.photos.count == 1 ? "1 photo" : "\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
                             .stageButton(light: light).accessibilityIdentifier("gallery-photos")
                     }
                     if entry.kind == .part, let locate, project.canLocate {
