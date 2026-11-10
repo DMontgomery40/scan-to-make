@@ -60,19 +60,19 @@ The lead looked at the images for U3–U5 himself. Each row lands on every layou
 |---|---|---|---|
 | U1 | Every fit project prints the hidden "Fit brief:" instructions under its title as if the person wrote them, pushing the Mac's question below the fold | SM | #459 (I10), next train |
 | U2 | "What you sent" for a scan is 30+ blank grey tiles | Lead | Fixed on main by #449 (one strip of five; decodes three at a time); confirm on the next capture run |
-| U3 | Two projects are both titled "Your scan" with the same picture (was X21) | SM | With U4: a wordless scan needs a name of its own |
-| U4 | Sidebar and Home status lines are cut off where the meaning is ("Needs you · Kroger doesn't publi…", "Stopped after 10 minutes without…", every Ready line's size), and each line repeats its section's heading ("Needs you ·" under Needs you, "Ready to print ·" under Ready) | SM | Words and states are SM's; drop the repeated prefix, show the part that differs |
-| U5 | New after a scan (iPad): a small card over a dimmed Home, already scrolled so its own tiles are cut off under the header; the big orange button says "Choose what to make" while nothing is chosen, so the instruction looks like the action | D: "First look fixes…" | Not started |
-| U6 | A project whose pass stopped to ask a question shows that pass in Activity as four green ticks; nothing says it stopped to ask | SM | With #452 (how a pass ended) |
-| U7 | Activity repeats the same three stage names for every pass and never says what changed in each | SM | With #452 |
-| U8 | The guitar pick's "What you sent" shows the same message twice in a row | SM | Find whether it was sent twice or is shown twice |
-| U9 | A ready scan's Result shows empty "—" cards for print time and filament, and a printer card that says only "Bambu printer": three cards that say nothing | D: "First look fixes…" | Not started |
-| U10 | Search lists projects with no visible reason for the match | D: "First look fixes…" | Not started |
-| U11 | The connection line is tiny dark grey on near-black; "Done" sits under the New Project button with nothing hinting it is there | D: "First look fixes…" | Not started |
-| U12 | Done projects carry a "Plate preview · 3D and AR unavailable" badge on the picture: developer wording about what cannot be done | D: "First look fixes…" | Not started; check against I5's gallery (#451) |
+| U3 | Two projects are both titled "Your scan" with the same picture (was X21) | SM | Its own PR after #452, starting in the companion's `projectTitle` / `objectStatus` (events/words.ts); the clients stop prefixing |
+| U4 | Sidebar and Home status lines are cut off where the meaning is ("Needs you · Kroger doesn't publi…", "Stopped after 10 minutes without…", every Ready line's size), and each line repeats its section's heading ("Needs you ·" under Needs you, "Ready to print ·" under Ready) | SM | With U3 |
+| U5 | New after a scan (iPad): a small card over a dimmed Home, already scrolled so its own tiles are cut off under the header; the big orange button says "Choose what to make" while nothing is chosen, so the instruction looks like the action | D: "First look fixes…" | Running (branch `fix/first-look-1`), with U9–U12, U14, U15 |
+| U6 | A project whose pass stopped to ask a question shows that pass in Activity as four green ticks; nothing says it stopped to ask | SM | Into #452 before it leaves draft: each pass's line says how it ended and what it was asked to change, from the companion |
+| U7 | Activity repeats the same three stage names for every pass and never says what changed in each | SM | Into #452, same line as U6 |
+| U8 | The guitar pick's "What you sent" shows the same message twice in a row | SM | Answered Nov 10: sent twice, 98 s apart (project `a2bfa85a`); the first pass failed, the second finished. The screen is true to the data and still reads as a bug because nothing says the first try failed: fixed by U6/U7. SM also checks whether a held-note retry (`sendQueuedNote`) can re-post a note the companion already recorded (M7/Q5) |
+| U9 | A ready scan's Result shows empty "—" cards for print time and filament, and a printer card that says only "Bambu printer": three cards that say nothing | D: "First look fixes…" | Running (`fix/first-look-1`) |
+| U10 | Search lists projects with no visible reason for the match | D: "First look fixes…" | Running (`fix/first-look-1`) |
+| U11 | The connection line is tiny dark grey on near-black; "Done" sits under the New Project button with nothing hinting it is there | D: "First look fixes…" | Running (`fix/first-look-1`) |
+| U12 | Done projects carry a "Plate preview · 3D and AR unavailable" badge on the picture: developer wording about what cannot be done | D: "First look fixes…" | Running (`fix/first-look-1`); smallest change that does not collide with #451 |
 | U13 | The question's picture is about 40 points wide | Lead | Fixed on main by #449 |
-| U14 | First run: Continue covers the "Make something that fits" card and the second starter is cut off at the edge | D: "First look fixes…" | Not started |
-| U15 | The first pairing screen leads with "This build isn't signed for iCloud." | D: "First look fixes…" | Check whether a release build shows it; if only debug, close |
+| U14 | First run: Continue covers the "Make something that fits" card and the second starter is cut off at the edge | D: "First look fixes…" | Running (`fix/first-look-1`) |
+| U15 | The first pairing screen leads with "This build isn't signed for iCloud." | D: "First look fixes…" | Running (`fix/first-look-1`) |
 
 ## Queued: owned, not started
 
