@@ -86,6 +86,7 @@ struct ModelStage: View {
                         Spacer()
                         Button { wake() } label: { Label("Explore in 3D", systemImage: "rotate.3d") }
                             .buttonStyle(.glass).padding(.top, 108).padding(.trailing, 24)
+                            .environment(\.colorScheme, lightStage ? .light : .dark)
                     }
                     Spacer()
                 }

@@ -51,22 +51,24 @@ struct ProjectDetail: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             stage
-                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24) }
+                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24).environment(\.colorScheme, stageScheme) }
                 .overlay(alignment: .topTrailing) {
                     if let entry, let size = entry.sizeText(measured[entry.id]) {
                         Text(size).font(.callout.monospacedDigit().weight(.semibold))
                             .padding(.horizontal, 12).padding(.vertical, 7).glassEffect(.regular, in: .capsule)
                             .padding(.top, 64).padding(.trailing, 24)
+                            .environment(\.colorScheme, stageScheme)
                             .accessibilityLabel("\(entry.measures) size \(size)")
                     }
                 }
-                .overlay(alignment: .top) { pictureChooser.padding(.top, 64) }
+                .overlay(alignment: .top) { pictureChooser.padding(.top, 64).environment(\.colorScheme, stageScheme) }
                 .overlay(alignment: .topLeading) {
                     // A fit made before passes said where the object sits: the Mac can work it out, changing nothing.
                     if entry?.kind == .part, object.kind == "fit", object.scan != nil, object.current != nil, !object.preservesPublishedFilaments,
                        (object.current?.seats ?? []).isEmpty, object.state != .printing, object.state != .touchingUp {
                         Button { Task { await model.locate(object.id) } } label: { Label("See It Together", systemImage: "cube.transparent") }
                             .buttonStyle(.glass).disabled(working).padding(.top, 108).padding(.leading, 24)
+                            .environment(\.colorScheme, stageScheme)
                             .help("Your Mac works out where the scanned object sits in this part, without changing it")
                             .accessibilityIdentifier("project-locate")
                     }
@@ -147,6 +149,8 @@ struct ProjectDetail: View {
     // MARK: Stage
 
     private var gallery: ProjectGallery { ProjectGallery(project: object) }
+    /// What floats on the stage reads on it: light glass and dark words on the light stage, as the stage is chosen.
+    private var stageScheme: ColorScheme { entry.map { StageContrast.lightStage(for: $0.colour) } == true ? .light : .dark }
     private var entry: ProjectGallery.Entry? { gallery.entries.first { $0.id == picture } ?? gallery.first }
 
     /// Which picture (PRD §5.4): a segmented control for the common two or three, a pop-up for a designer's many plates

@@ -686,11 +686,16 @@ struct ProjectView: View {
                         .glassEffect(.regular.interactive(), in: .capsule)
                     }
                     if canPrint && !writing {
+                        // The page's main action never truncates ("Print Ano…", lead review Nov 10): it keeps its whole
+                        // label and the ask field gives way.
                         Button { openPrint(object.id) } label: {
-                            Label(words.phase == .confirmed ? "Print Another" : "Print", systemImage: "printer.fill").fontWeight(.semibold).padding(.horizontal, 8).frame(height: 36)
+                            Label(words.phase == .confirmed ? "Print Another" : "Print", systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
+                                .fixedSize().padding(.horizontal, 8).frame(height: 36)
                         }
                         .buttonStyle(.glassProminent)
                         .controlSize(.large)
+                        .fixedSize()
+                        .layoutPriority(1)
                         .keyboardShortcut("p", modifiers: .command)
                         .accessibilityIdentifier("print")
                     }

@@ -81,25 +81,26 @@ struct ProjectGalleryView: View {
 
     @ViewBuilder private var controls: some View {
         if let entry {
+            let light = StageContrast.lightStage(for: entry.colour)
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
                     if let ar = arTarget(entry) {
-                        Button { ARModel.show(ar) } label: { Label("AR", systemImage: "arkit") }.buttonStyle(.glass)
+                        Button { ARModel.show(ar) } label: { Label("AR", systemImage: "arkit") }.stageButton(light: light)
                             .accessibilityHint("Places it at true size in your room")
                     }
                     if entry.kind == .scan, !entry.photos.isEmpty {
                         Button { showingPhotos = true } label: { Label("\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
-                            .buttonStyle(.glass).accessibilityIdentifier("gallery-photos")
+                            .stageButton(light: light).accessibilityIdentifier("gallery-photos")
                     }
                     if entry.kind == .part, let locate, project.canLocate {
                         Button(action: locate) { Label("See it together", systemImage: "cube.transparent") }
-                            .buttonStyle(.glass).disabled(working).accessibilityIdentifier("gallery-locate")
+                            .stageButton(light: light).disabled(working).accessibilityIdentifier("gallery-locate")
                             .accessibilityHint("Your Mac works out where the scanned object sits in this part, without changing it")
                     }
                     Spacer(minLength: 0)
                     if let size = entry.sizeText(measured[entry.id]) {
                         Text(size).font(.caption.monospacedDigit().weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                            .padding(.horizontal, 12).padding(.vertical, 8).glassEffect(.regular, in: .capsule)
+                            .padding(.horizontal, 12).padding(.vertical, 8).stageChip(light: light)
                             .accessibilityLabel("\(entry.measures) size \(size)")
                     }
                 }

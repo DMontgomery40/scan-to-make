@@ -211,6 +211,11 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.buttons["needs-changes"].exists)
         works.tap()
         XCTAssertTrue(app.buttons["Print Another"].waitForExistence(timeout: 10), "Done keeps Print, as Print Another")
+        // The main action keeps its whole label beside the ask field ("Print Ano…", lead review Nov 10): the field gives way.
+        let another = app.buttons["Print Another"], ask = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertGreaterThanOrEqual(another.frame.width, 150, "Print Another is not cut off")
+        if ask.exists { XCTAssertLessThanOrEqual(ask.frame.maxX, another.frame.minX + 1, "the field never runs under the button") }
+        XCTAssertLessThanOrEqual(another.frame.maxX, app.windows.firstMatch.frame.maxX, "the button is on screen")
         XCTAssertTrue(app.staticTexts["Done"].exists, "the Done capsule")
         XCTAssertFalse(app.buttons["it-works"].exists, "answered: the card goes")
         app.navigationBars.buttons.firstMatch.tap()

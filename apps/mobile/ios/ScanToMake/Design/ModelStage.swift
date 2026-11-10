@@ -52,7 +52,7 @@ struct ModelStage: View {
                 Text("This model couldn't be shown.").font(.footnote).foregroundStyle(.secondary)
             } else if url != nil { ProgressView() }
             if interactive && url != nil && !live {
-                VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }.buttonStyle(.glass) }; Spacer() }.padding(16)
+                VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }.stageButton(light: lightStage) }; Spacer() }.padding(16)
             }
         }
         .contentShape(Rectangle())
@@ -215,6 +215,19 @@ struct ModelStage: View {
         return (positions, normals)
     }
 
+}
+
+/// What floats on the stage stays readable on both stages (lead review, Nov 10: orange on glass over the light stage
+/// was nearly invisible): clear glass on the dark stage; on the light stage a dark backing with white words.
+extension View {
+    @ViewBuilder func stageButton(light: Bool) -> some View {
+        if light { self.buttonStyle(.glassProminent).tint(Color.black.opacity(0.62)).foregroundStyle(.white) }
+        else { self.buttonStyle(.glass) }
+    }
+    func stageChip(light: Bool) -> some View {
+        self.foregroundStyle(light ? Color.white : Color.primary)
+            .glassEffect(light ? .regular.tint(Color.black.opacity(0.62)) : .regular, in: .capsule)
+    }
 }
 
 /// Keeps the pivot between RealityView's make and update closures.
