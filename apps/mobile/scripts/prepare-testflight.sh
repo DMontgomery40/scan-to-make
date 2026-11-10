@@ -22,12 +22,15 @@ with open(sys.argv[1], 'wb') as output:
         'uploadSymbols': True,
     }, output)
 PY
-xcodebuild archive -project "$repo/apps/mobile/ios/ScanToMake.xcodeproj" \
+# Each xcodebuild holds one build-lane slot on the Mac (scripts/README.md, "The Mac's build lane").
+lane=("python3" "$repo/scripts/lane.py")
+"${lane[@]}" --label "prepare-testflight: archive build $BUILD_NUMBER" -- xcodebuild archive -project "$repo/apps/mobile/ios/ScanToMake.xcodeproj" \
   -scheme ScanToMake -configuration Release -destination 'generic/platform=iOS' \
   -archivePath "$RELEASE_DIR/Counterpart.xcarchive" -derivedDataPath "$RELEASE_DIR/DerivedData" \
   DEVELOPMENT_TEAM=X7F5F9LR24 CURRENT_PROJECT_VERSION="$BUILD_NUMBER" -allowProvisioningUpdates
 # Apple's rsync must find its matching peer, not Homebrew's incompatible rsync.
-PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/xcodebuild -exportArchive -archivePath "$RELEASE_DIR/Counterpart.xcarchive" \
+"${lane[@]}" --label "prepare-testflight: export build $BUILD_NUMBER" -- \
+  /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin /usr/bin/xcodebuild -exportArchive -archivePath "$RELEASE_DIR/Counterpart.xcarchive" \
   -exportOptionsPlist "$RELEASE_DIR/ExportOptions.plist" -exportPath "$RELEASE_DIR/export" \
   -allowProvisioningUpdates
 shopt -s nullglob

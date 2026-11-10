@@ -29,7 +29,17 @@ typealias MacError = CompanionError
     func selectPrinter(_ id: String, destinationId: String) async throws -> StmObject { try await client.selectPrinter(id, destinationId: destinationId) }
     func list() async throws -> [StmObject] { try await client.list() }
     func get(_ id: String) async throws -> StmObject { try await client.get(id) }
-    func create(_ instructions: String, kind: String? = nil) async throws -> StmObject {
+    /// How a fit's size is settled goes as fields. A Mac that doesn't take them would design without them, so it
+    /// is asked to update instead.
+    private func requireFitFields(_ fit: ProjectFit?) async throws {
+        guard fit != nil else { return }
+        guard try await client.capabilities().contains("fitFields") else {
+            throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac so it knows how this part's size is settled.")
+        }
+    }
+
+    func create(_ instructions: String, kind: String? = nil, fit: ProjectFit? = nil) async throws -> StmObject {
+        try await requireFitFields(fit)
         let link = PublishedModelLink.find(in: instructions)
         if link != nil {
             let capabilities = try await client.capabilities()
@@ -37,9 +47,12 @@ typealias MacError = CompanionError
                 throw CompanionError(code: "published-models-unavailable", message: "Update Counterpart on your Mac to get the designer’s model file.")
             }
         }
-        return try await client.create(instructions, kind: link == nil ? kind : "published", url: link)
+        return try await client.create(instructions, kind: link == nil ? kind : "published", url: link, fit: link == nil ? fit : nil)
     }
-    func updateDraft(_ id: String, instructions: String, kind: String? = nil) async throws -> StmObject { try await client.updateDraft(id, instructions: instructions, kind: kind) }
+    func updateDraft(_ id: String, instructions: String, kind: String? = nil, fit: ProjectFit? = nil) async throws -> StmObject {
+        try await requireFitFields(fit)
+        return try await client.updateDraft(id, instructions: instructions, kind: kind, fit: fit)
+    }
     func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject { try await client.start(id, captureManifest: captureManifest) }
     func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> StmObject { try await client.correct(id, note, photoNames: photoNames) }
     func closeup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> StmObject { try await client.answerAsk(id, bestGuess: bestGuess, photoNames: photoNames) }

@@ -96,6 +96,8 @@ fun PrintersScreen(back: () -> Unit) {
                     PrinterSettingsControls(d, state)
                 } }
             }
+            // Q9: one switch for all the printer software, after the printers whose MCP copies it updates.
+            AutoUpdateMcpsSwitch()
         }
     }
 }

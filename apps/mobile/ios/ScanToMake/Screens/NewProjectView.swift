@@ -116,23 +116,15 @@ struct NewObjectView: View {
         if scanUse == nil, let job { scanUse = job == .fit ? .fit : .copy }
     }
 
-    /// What the Mac is told. For a fit, the brief below the person's words says the scan is the mating
-    /// object and how its exact size is settled before anything fit-critical is designed.
-    private var effectiveInstructions: String {
-        let base = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard attached != nil, scanUse == .fit, !base.isEmpty else { return base }
-        var lines = [base, "", "Fit brief:",
-                     "- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself."]
-        switch dimensionSource {
-        case .lookup:
-            lines.append("- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size.")
-        case .measured:
-            let sizes = measuredValues.map { "\($0.edge) \(String(format: "%g", $0.mm)) mm" }.joined(separator: ", ")
-            lines.append("- Dimensions I measured on the real object: \(sizes). Treat these as the exact overall size. If the scan differs by more than 2 mm or 2%, ask before designing anything fit-critical.")
-        case .scan:
-            lines.append("- Dimensions: use the scan's measured size, say the clearance you allowed, and mark every fit-critical size as estimated.")
-        }
-        return lines.joined(separator: "\n")
+    /// What the person typed: the request, sent and shown as written.
+    private var typedInstructions: String { instructions.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// For a fit made from a scan: how its exact size is settled, sent as fields beside the request. The Mac turns
+    /// them into its worker's brief; nothing is appended to the person's words.
+    private var fitChoice: ProjectFit? {
+        guard attached != nil, scanUse == .fit, !typedInstructions.isEmpty else { return nil }
+        let source = ProjectFit.SizeSource(rawValue: dimensionSource.rawValue) ?? .lookup
+        return ProjectFit(sizeSource: source, measured: measuredValues.map { .init(id: $0.edge, label: "\($0.edge) side", mm: $0.mm) })
     }
 
     var body: some View {
@@ -406,7 +398,7 @@ struct NewObjectView: View {
             // Start may have succeeded even when its reply was lost; never PATCH a started request.
             guard latest.state == .new else { return latest }
             do {
-                let updated = try await store.mac.updateDraft(created.id, instructions: effectiveInstructions, kind: chosenKind)
+                let updated = try await store.mac.updateDraft(created.id, instructions: typedInstructions, kind: chosenKind, fit: fitChoice)
                 if let chosenKind, updated.kind != chosenKind {
                     throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac so a scan can become a fit instead of a copy.")
                 }
@@ -416,7 +408,7 @@ struct NewObjectView: View {
                 throw error
             }
         }
-        let object = try await store.mac.create(effectiveInstructions, kind: kind(scanning: scanning))
+        let object = try await store.mac.create(typedInstructions, kind: kind(scanning: scanning), fit: fitChoice)
         created = object
         draftId = object.id
         return object

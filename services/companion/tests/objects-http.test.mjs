@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
+import {splitFitBrief, workerRequest} from '../dist/objects/fit.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {tempDir} from './support/temp.mjs';
 
@@ -65,6 +66,21 @@ test('an unsent scan draft can change from copy to fit before it starts', async 
   assert.equal(changed.json.object.kind, 'fit');
   assert.equal(changed.json.object.instructions, 'A pegboard holder for this bottle.');
   assert.equal((await call('PATCH', `/v1/objects/${id}`, {kind: 'published'})).status, 400);
+  // How the size is settled travels as fields beside the words, on create and on a draft, and never inside them.
+  const fit = {sizeSource: 'measured', measured: [{id: 'longest', label: 'longest', mm: 107}]};
+  const fitted = await call('PATCH', `/v1/objects/${id}`, {fit});
+  assert.equal(fitted.status, 200);
+  assert.deepEqual(fitted.json.object.fit, fit);
+  assert.equal(fitted.json.object.instructions, 'A pegboard holder for this bottle.');
+  assert.equal((await call('PATCH', `/v1/objects/${id}`, {fit: {sizeSource: 'measured'}})).status, 400);
+  assert.equal((await call('PATCH', `/v1/objects/${id}`, {fit: null})).json.object.fit, undefined, 'null clears it');
+  await call('PATCH', `/v1/objects/${id}`, {fit});
+  assert.equal((await call('PATCH', `/v1/objects/${id}`, {kind: 'copy'})).json.object.fit, undefined, 'a draft that becomes a copy keeps no fit choice');
+  const made = await call('POST', '/v1/objects', {instructions: 'A clip for this.', kind: 'fit', fit: {sizeSource: 'scan'}});
+  assert.equal(made.status, 201);
+  assert.deepEqual(made.json.object.fit, {sizeSource: 'scan'});
+  assert.equal((await call('POST', '/v1/objects', {instructions: 'A clip.', kind: 'fit', fit: {sizeSource: 'nope'}})).status, 400);
+  assert.equal((await call('POST', '/v1/objects', {kind: 'copy', fit: {sizeSource: 'scan'}})).json.object.fit, undefined, 'only a fit with words has one');
   assert.equal((await call('PATCH', `/v1/objects/${id}`, {})).status, 400);
 });
 
@@ -793,6 +809,26 @@ test('original model export reads only recorded model files with read authorizat
   }
   const denied = await fixture(t, {denied: ['projects:read']});
   assert.equal((await denied.call('GET', `/v1/objects/${project.id}/original/0`)).status, 403);
+});
+
+test('a duplicated fit project keeps how its size is settled, whichever way the source stored it', async t => {
+  const {call, service, store} = await fixture(t);
+  const fit = {sizeSource: 'measured', measured: [{id: 'a', label: 'width at the waist', mm: 53}, {id: 'b', label: 'height to the cap tip', mm: 107}]};
+  const fields = await service.create('A pegboard holder for this bottle.', 'fit', undefined, fit);
+  const legacy = await service.create('A pegboard holder for this bottle.', 'fit');
+  for (const project of [fields, legacy]) { await service.start(project.id); await service.settled(project.id); }
+  // A project from before the field: the request with the block a client appended.
+  const worker = workerRequest(await store.get(fields.id));
+  await store.update(legacy.id, o => ({...o, instructions: worker}));
+  for (const project of [fields, legacy]) {
+    const copied = (await call('POST', `/v1/objects/${project.id}/duplicate`, {})).json.object;
+    assert.equal(copied.instructions, 'A pegboard holder for this bottle.');
+    assert.deepEqual(copied.fit, project === fields ? fit : splitFitBrief(worker).fit);
+    const stored = await store.get(copied.id);
+    assert.equal(stored.instructions, 'A pegboard holder for this bottle.', 'the copy is stored as fields');
+    // A change asked of the copy is designed from the same brief as the source.
+    assert.equal(workerRequest(stored), worker);
+  }
 });
 
 test('duplicate keeps legacy print defaults and removes only its own partial copy on failure', async t => {

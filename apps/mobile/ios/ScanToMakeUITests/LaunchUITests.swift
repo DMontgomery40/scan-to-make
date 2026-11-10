@@ -1016,6 +1016,37 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Setting up… 0 s so far."].waitForExistence(timeout: 10))
     }
 
+    /// Q9, PRD §6.1: "Keep printer software up to date" sits in Settings → Printer software, above the MCP copies and
+    /// their Update buttons, with projects present, on the iPhone and the iPad; on, as the companion sends it, and it
+    /// says what it does. `STM_SHOTS` (`TEST_RUNNER_STM_SHOTS` to xcodebuild) saves a screenshot of it there.
+    func testKeepPrinterSoftwareUpToDateIsBesideThePrinterSoftwareWithProjects() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        // The companion's copies of both MCPs, so the switch is shown beside what it updates.
+        try FileManager.default.copyItem(at: root.appendingPathComponent("packages/contracts/fixtures/mcp-profile-copies.json"),
+                                         to: folder.appendingPathComponent("mcp-profile-copies.json"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all", "-CounterpartScreen", "settings"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["mac-status"].waitForExistence(timeout: 20))
+        let toggle = app.switches["auto-update-mcps"]
+        let words = app.staticTexts["auto-update-mcps-words"]
+        for _ in 0..<12 where !(toggle.exists && toggle.isHittable && words.exists && words.isHittable) { app.swipeUp() }
+        XCTAssertTrue(toggle.isHittable, "the switch is reachable with projects present")
+        XCTAssertEqual(toggle.label, "Keep printer software up to date")
+        XCTAssertEqual(toggle.value as? String, "1", "on, as the companion sends it")
+        XCTAssertTrue(words.isHittable)
+        XCTAssertEqual(words.label, "Counterpart updates its printer software by itself when nothing is printing or being designed, and tells you afterwards.", "one sentence")
+        XCTAssertLessThan(toggle.frame.minY, app.staticTexts["Counterpart’s copy 1.2.45"].frame.minY, "above the MCP copies it updates")
+        if let folder = ProcessInfo.processInfo.environment["STM_SHOTS"], !folder.isEmpty {
+            try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            try XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: folder).appendingPathComponent(regular ? "ipad.png" : "iphone.png"))
+        }
+    }
+
     func testNewNeverCoversARow() {
         let app = launch(largeText: true)
         let new = app.buttons["new-project"]

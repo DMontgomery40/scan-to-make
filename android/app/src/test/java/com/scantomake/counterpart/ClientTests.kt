@@ -371,6 +371,32 @@ class ContractTests {
         assertEquals("Sending to the printer… 62%", ProjectWords(sending).status)
     }
 
+    /** New sends how a fit's size is settled as fields; the request is only what the person typed (the shared
+     *  fit-fields.json, which the companion and CounterpartKit read too). */
+    @Test fun aFitsSizeChoiceIsSentAsFieldsNeverInsideTheRequest() {
+        val fixture = com.scantomake.counterpart.core.WireJson.parseToJsonElement(kitFixture("fit-fields.json").readText()).obj!!
+        val typed = fixture["typed"].str!!
+        val fits = mapOf(
+            "lookup" to com.scantomake.counterpart.api.ProjectFit.of("lookup"),
+            "measured" to com.scantomake.counterpart.api.ProjectFit.of("measured", listOf(com.scantomake.counterpart.api.ProjectFit.Size("longest", "longest side", 107.0), com.scantomake.counterpart.api.ProjectFit.Size("middle", "middle side", 63.5))),
+            "scan" to com.scantomake.counterpart.api.ProjectFit.of("scan"))
+        val rows = fixture["cases"].arr!!
+        assertEquals(fits.keys.sorted(), rows.map { it.obj!!["name"].str!! }.sorted())
+        for (row in rows) {
+            val r = row.obj!!
+            val body = com.scantomake.counterpart.api.createBody("  $typed\n", "fit", null, fits[r["name"].str])
+            assertEquals(r["name"].str, r["create"], body)
+            assertEquals(typed, body["instructions"].str)
+        }
+        assertNull(com.scantomake.counterpart.api.createBody("Copy this.", "copy", null, com.scantomake.counterpart.api.ProjectFit.of("scan"))["fit"])
+        assertNull(com.scantomake.counterpart.api.createBody(" ", "fit", null, com.scantomake.counterpart.api.ProjectFit.of("scan"))["fit"])
+        assertNull(com.scantomake.counterpart.api.ProjectFit.of("measured"))
+        assertNull(com.scantomake.counterpart.api.ProjectFit.of("guess"))
+        assertEquals(kotlinx.serialization.json.JsonNull, com.scantomake.counterpart.api.draftBody("Copy this.", "copy", com.scantomake.counterpart.api.ProjectFit.of("scan"))["fit"])
+        assertEquals(kotlinx.serialization.json.JsonNull, com.scantomake.counterpart.api.draftBody("A clip.", "fit", null)["fit"])
+        assertEquals("scan", com.scantomake.counterpart.api.draftBody("A clip.", "fit", com.scantomake.counterpart.api.ProjectFit.of("scan"))["fit"].obj!!["sizeSource"].str)
+    }
+
     @Test fun cappedPassesOfferRetryAndChangesAsTheSwiftDoes() {
         val rows = com.scantomake.counterpart.core.WireJson.parseToJsonElement(kitFixture("capped-projects.json").readText()).arr!!
         assertEquals(8, rows.size)

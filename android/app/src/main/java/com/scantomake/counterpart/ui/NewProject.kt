@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import com.scantomake.counterpart.MainActivity
 import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.Project
+import com.scantomake.counterpart.api.ProjectFit
 import com.scantomake.counterpart.api.PublishedModelLink
 import com.scantomake.counterpart.app.AppState
 import com.scantomake.counterpart.app.Counterpart
@@ -113,19 +114,17 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         val typed = listOf(measuredLongest, measuredMiddle, measuredShortest).count { it.isNotBlank() }
         return typed > 0 && measuredValues().size == typed
     }
-    fun effectiveText(): String {
-        val base = text.trim()
-        if (!scanned || scanUse != "fit" || base.isEmpty()) return base
-        val dimension = when (dimensionSource) {
-            "measured" -> "- Dimensions I measured on the real object: " +
-                measuredValues().joinToString(", ") { "${it.first} ${it.second} mm" } +
-                ". Treat these as the exact overall size. If the scan differs by more than 2 mm or 2%, ask before designing anything fit-critical."
-            "scan" -> "- Dimensions: use the scan's measured size, say the clearance you allowed, and mark every fit-critical size as estimated."
-            else -> "- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size."
-        }
-        return listOf(base, "", "Fit brief:",
-            "- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.",
-            dimension).joinToString("\n")
+    /** For a fit made from a scan: how its exact size is settled, sent as fields beside the request. The computer
+     *  turns them into its worker's brief; nothing is appended to the person's words. */
+    fun fitChoice(): ProjectFit? {
+        if (!scanned || scanUse != "fit" || text.isBlank()) return null
+        return ProjectFit.of(dimensionSource, measuredValues().map { ProjectFit.Size(it.first, "${it.first} side", it.second) })
+    }
+    /** A computer that doesn't take the fields would design without them, so it is asked to update instead. */
+    suspend fun requireFitFields(fit: ProjectFit?) {
+        if (fit == null) return
+        state.loadCapabilities()
+        if ("fitFields" !in state.capabilities.value) throw CompanionException("needs-update", "Update Counterpart on your computer so it knows how this part's size is settled.")
     }
 
     /** The draft this screen made, kept so coming back finishes the same one rather than making another. */
@@ -134,9 +133,11 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
             try {
                 val saved = app.companion.get(draftId)
                 if (saved.state == Project.State.New) {
-                    val wanted = effectiveText(); val wantedKind = chosenKind()
-                    if ((wanted.isNotBlank() && saved.instructions != wanted) || (wantedKind != null && saved.kind != wantedKind)) {
-                        val updated = app.companion.updateDraft(saved.id, wanted, wantedKind)
+                    val wanted = text.trim(); val wantedKind = chosenKind(); val fit = fitChoice()
+                    // The fit choice isn't read back, so a fit draft is always sent again with it.
+                    if ((wanted.isNotBlank() && saved.instructions != wanted) || (wantedKind != null && saved.kind != wantedKind) || wantedKind == "fit") {
+                        requireFitFields(fit)
+                        val updated = app.companion.updateDraft(saved.id, wanted.ifBlank { saved.instructions ?: "" }, wantedKind, fit)
                         if (wantedKind != null && updated.kind != wantedKind) throw CompanionException("needs-update", "Update Counterpart on your computer so a scan can become a fit instead of a copy.")
                         return updated
                     }
@@ -148,7 +149,7 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
             state.loadCapabilities()
             if ("publishedModels" !in state.capabilities.value) throw CompanionException("published-models-unavailable", "Update Counterpart on your computer to get the designer’s file.")
             app.companion.create(text, "published", link)
-        } else app.companion.create(effectiveText(), kind())
+        } else { val fit = fitChoice(); requireFitFields(fit); app.companion.create(text.trim(), kind(), fit = fit) }
         draftId = created.id
         prefs.edit().putString("CounterpartNewDraftId", created.id).apply()
         state.show(created)
