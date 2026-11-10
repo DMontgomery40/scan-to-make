@@ -113,7 +113,7 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 
 | ID | What | Owner |
 |---|---|---|
-| C1 | ~~A large print from Counterpart is unproven~~ **Dropped by David, Nov 10**: "we're past that point lol, thank god." The 213 mm "Wall holder for three" started from Counterpart on Nov 10 and printed past halfway before he said so | David |
+| C1 | ~~A large print from Counterpart is unproven~~ **Removed: the row was wrong.** It was carried from the Nov 9 handoff without being checked. The app's own data on the Mac holds 28 print records across 9 of 16 projects. David, Nov 10: "we've printed a lot of shit, like, a lot." | Lead (the error) |
 | C2 | A send refused before anything was sent must read "not started" | SM, with Q2 |
 | C3 | Move title, designer and licence into `list_3mf_plates` in both MCPs, publish, install, then delete `inspectModelFile`'s 3MF parsing (PRD §8.0 item 9); port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D | No owner yet |
 | C4 | The FULU drain change (pause, resume, stop) was checked only against mocked hosts: check on the P1S the next time David pauses, resumes or stops from Counterpart | Lead |
@@ -149,7 +149,8 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 | Nov 10 | "like many (most?) apps in todays world, there should be an 'auto update' toggle and ours should default to on. would be cool if we could just pull the diff" | Q9 |
 | Nov 10 | "i really hope it's on the todo list everything we talked about around 4pm mst regarding the whole potential replacement or partial replacement of other mcps and the separate kernel build specifically for this app's needs ... i sure hope that's highlighted on your list" | It was not highlighted (it was idea L1). Now K1–K3 at the top, and started |
 | Nov 10 | "it seems like every delegate is just waiting but if every delegate is waiting is everyone waiting on someone and it's gridlocked forever?" | Right now (the lane rule), X5 |
-| Nov 10 | "you don't have to monitor prints once they start. we're past that point lol, thank god. if a print starts, it's fine, and if it's not, it's a slicer issue, and we're not a slicer" | Right now (prints are not watched), C1 dropped, operations.md |
+| Nov 10 | "you don't have to monitor prints once they start. we're past that point lol, thank god. if a print starts, it's fine, and if it's not, it's a slicer issue, and we're not a slicer" | Right now (prints are not watched), C1 removed as wrong, operations.md |
+| Nov 10 | "wtf are you talking about with 'on my word' ?!?! we've printed a lot of shit, like, a lot" (after the lead wrote that a row doubting prints from Counterpart was "dropped on your word") | C1 corrected: the row was stale and unchecked, not a favour from David. Carried rows get checked against the app's data before they are repeated to him |
 | (seen by the lead in his screenshots) | A "Fit brief:" block he never wrote is shown as his request | Q3 |
 | (seen by the lead) | A size question offers Camera, Photos, Best guess | Q3 |
 
