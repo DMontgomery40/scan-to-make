@@ -10,7 +10,9 @@ import type {RemoteScope} from '../remote-auth.js';
 import {InvalidAnswerError, InvalidCaptureCameraError, InvalidCaptureManifestError, InvalidStateError, passKind, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {CompanionSettingsPatchSchema, FitSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
+import {z} from 'zod';
 import {fitRequest} from './fit.js';
+import {askKind} from './asks.js';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
@@ -82,7 +84,9 @@ export function publicObject(stored: StmObject): PublicObject {
   // What the person typed, and the fit choice as fields: never the brief a client once appended to the request.
   const {typed, fit} = fitRequest(stored);
   const {instructions: _instructions, fit: _fit, ...rest} = stored;
-  const object: StmObject = {...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {})};
+  // Every question says its kind, also one saved before kinds were written.
+  const kind = askKind(stored);
+  const object: StmObject = {...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {}), ...(rest.ask && kind ? {ask: {...rest.ask, kind}} : {})};
   const failure = currentFailureText(object.failure);
   // Carry this worker stop's retry decision to every client, without exposing its local recovery fields.
   // A later printer failure must not inherit Retry from an older worker stop.
@@ -532,10 +536,13 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             break;
           }
           case 'closeup': {
-            const input = await json<{bestGuess?: unknown; text?: unknown; photoNames?: unknown}>(request);
+            const input = await json<{bestGuess?: unknown; text?: unknown; photoNames?: unknown; sizes?: unknown}>(request);
             if (input.text !== undefined && (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 2000)) throw new HttpFailure(400, 'invalid-request');
+            // A sizes question's numbers: {id, mm} for the sizes it listed.
+            const sizes = input.sizes === undefined ? undefined : z.array(z.strictObject({id: z.string().min(1).max(64), mm: z.number().positive().max(10_000)})).min(1).max(6).safeParse(input.sizes);
+            if (sizes && !sizes.success) throw new HttpFailure(400, 'invalid-request');
             if (input.photoNames !== undefined && (!Array.isArray(input.photoNames) || input.photoNames.length > 100 || input.photoNames.some(name => typeof name !== 'string' || !name || name.length > 128))) throw new HttpFailure(400, 'invalid-request');
-            object = await service.answerCloseup(id, {photoNames: input.photoNames as string[] | undefined, bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {})});
+            object = await service.answerCloseup(id, {photoNames: input.photoNames as string[] | undefined, bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {}), ...(sizes ? {sizes: sizes.data} : {})});
             break;
           }
           case 'print': {

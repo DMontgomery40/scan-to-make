@@ -40,7 +40,10 @@ import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
-import type {Fit} from '@scan-to-make/contracts/counterpart';
+import {answeredSizes, askKind, InvalidSizesError, sizesNote} from './asks.js';
+/** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
+export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
+import {AskSchema, type Fit} from '@scan-to-make/contracts/counterpart';
 import {passResume, withPassEnded, type PassEnd} from './pass-end.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
 import {defaultReconstructRunner, RECONSTRUCTION_FAILED, ReconstructionReviewNeeded, type Reconstruct, type ReconstructInputs, type ScanToStl} from './reconstruct.js';
@@ -713,7 +716,7 @@ export class ObjectService {
           console.error(`starter ${starterId}: no download pass for project ${created.id}: ${this.#publicText(error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').slice(0, 400)}`);
           // No worker to download with (AI is off, or its settings are unavailable): the project stays, and the person
           // adds the designer's files, as a pasted link asks when they can't be fetched.
-          const ask = {id: randomUUID(), type: 'file' as const, question: starterFileQuestion(starter),
+          const ask = {id: randomUUID(), type: 'file' as const, kind: 'file' as const, question: starterFileQuestion(starter),
             url: starter.url, modelName: starter.title, site: starter.site, accepts: ['3mf' as const],
             answers: ['file' as const], status: 'open' as const, askedAtMs: Date.now()};
           return this.#changed(await store.update(created.id, o => ({...o, state: 'needs-closeup', ask})));
@@ -1491,8 +1494,8 @@ export class ObjectService {
   }
 
   /** Answers the open Ask: with a photo (uploaded first), Best guess, or the person's own words. */
-  answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
-  async #answerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> {
+  answerCloseup(id: string, answer: AskAnswer): Promise<StmObject> { return this.#gate(id, () => this.#answerCloseup(id, answer)); }
+  async #answerCloseup(id: string, answer: AskAnswer): Promise<StmObject> {
     // Claim the install before consuming the Ask or its photos. The admitted pass takes its own
     // counted reservation through worker cleanup; this one only covers the answer transaction.
     let release = () => {};
@@ -1502,7 +1505,7 @@ export class ObjectService {
     finally { release(); }
   }
 
-  async #reservedAnswerCloseup(id: string, answer: {bestGuess?: boolean; text?: string; photoNames?: string[]}): Promise<StmObject> {
+  async #reservedAnswerCloseup(id: string, answer: AskAnswer): Promise<StmObject> {
     const object = await this.get(id);
     if (object.state !== 'needs-closeup') throw new InvalidStateError('No close-up was asked for.');
     // A reconstruction review is not a close-up: Best Guess, words or photos must not approve it.
@@ -1511,13 +1514,23 @@ export class ObjectService {
     // Only this answer's explicit attachments belong to it. Other pending photos may already
     // be reserved by a correction queued on either client; Best Guess and text claim none.
     const photos = [...new Set(answer.photoNames ?? [])];
-    if (!photos.length && !answer.bestGuess && !answer.text?.trim()) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
+    // Numbers for a sizes question: the ones it listed, confirmed or corrected. They may come with words and a photo.
+    let sizes: ReturnType<typeof answeredSizes> | undefined;
+    if (answer.sizes !== undefined) {
+      try { sizes = answeredSizes(askKind(object) === 'sizes' ? object.ask : undefined, answer.sizes); }
+      catch (error) { if (error instanceof InvalidSizesError) throw new InvalidStateError(error.message); throw error; }
+    }
+    if (!photos.length && !answer.bestGuess && !answer.text?.trim() && !sizes) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
     if (photos.some(name => !object.photos.includes(name))) throw new InvalidStateError('That photo is not in this project.');
     const asked = object.passes.at(-1)?.note;
     const said = answer.text?.trim() ? `Answer to "${object.ask?.question ?? object.question?.closeup ?? 'your question'}": ${answer.text.trim()}` : undefined;
-    const parts = [asked, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
-    if (object.ask) await this.#deps.store.update(id, o => o.ask ? {...o, ask: {...o.ask, status: 'answered'}} : o);
-    const updated = await this.#message(await this.get(id), answer.text?.trim() ?? (answer.bestGuess ? 'Use your best guess.' : ''), photos, false);
+    const parts = [asked, sizes ? sizesNote(sizes) : undefined, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
+    // The person's numbers become the project's measured sizes, so every later pass designs to them too.
+    const measured = sizes?.map(({id: sizeId, label, mm}) => ({id: sizeId, label, mm}));
+    if (object.ask) await this.#deps.store.update(id, o => o.ask ? {...o, ask: {...o.ask, status: 'answered'},
+      ...(measured && passKind(o) === 'fit' ? {fit: {sizeSource: 'measured' as const, measured}} : {})} : o);
+    const shown = answer.text?.trim() ?? (sizes ? sizes.map(size => `${size.label}: ${size.mm} mm`).join('\n') : answer.bestGuess ? 'Use your best guess.' : '');
+    const updated = await this.#message(await this.get(id), shown, photos, false);
     const message = updated.messages!.find(item => item.id === updated.pendingMessageId)!;
     return this.#pass(updated, {...(parts.length ? {note: parts.join('\n')} : {}), messageId: message.id, photos: message.photos, trigger: 'ask-answer'});
   }
@@ -2596,7 +2609,7 @@ export class ObjectService {
       const modelName = result.model?.title ?? object.credit?.title;
       // A starter asks for its print profile's 3MF (the designer's plates) and names the button; any other link takes a 3MF or STL.
       const starter = object.starterId ? this.#starter(object.starterId) : undefined;
-      const ask = {id: randomUUID(), type: 'file' as const, question: (starter ? starterFileQuestion(starter) : `Download ${modelName ?? 'the model'} from ${site ?? 'its page'} and share it here.`).slice(0, 300),
+      const ask = {id: randomUUID(), type: 'file' as const, kind: 'file' as const, question: (starter ? starterFileQuestion(starter) : `Download ${modelName ?? 'the model'} from ${site ?? 'its page'} and share it here.`).slice(0, 300),
         ...(url ? {url} : {}), ...(modelName ? {modelName} : {}), ...(site ? {site} : {}), accepts: starter ? ['3mf' as const] : ['3mf' as const, 'stl' as const],
         ...(result.candidate ? {candidate: {path: result.candidate, name: basename(result.candidate)}} : {}),
         answers: ['file' as const], status: 'open' as const, askedAtMs: now};
@@ -2691,7 +2704,8 @@ export class ObjectService {
   /** Starts again a project whose only open question is the Downloads-access one, once macOS allows the folder. */
   async #resumeDownloads(object: StmObject): Promise<StmObject | undefined> {
     if (object.state !== 'needs-closeup' || object.ask?.status !== 'open' || object.ask.type !== 'file' || object.current) return undefined;
-    if (object.ask.question !== downloadsDeniedQuestion(!!object.starterId)) return undefined;
+    // The ask says why it is open. One saved before `reason` existed is told by its sentence, as it was then.
+    if (object.ask.reason !== 'downloads-access' && (object.ask.reason !== undefined || object.ask.kind !== undefined || object.ask.question !== downloadsDeniedQuestion(!!object.starterId))) return undefined;
     if (await folderAccess(this.#downloads()) !== 'ok') return undefined;
     console.error(`project ${object.id}: Downloads is readable now; going on`);
     return this.start(object.id);
@@ -2704,7 +2718,7 @@ export class ObjectService {
     const store = this.#deps.store, object = await store.get(id), now = Date.now();
     const starter = object.starterId ? this.#starter(object.starterId) : undefined;
     if (!this.#downloadsDeniedLogged) { this.#downloadsDeniedLogged = true; console.error(`published project ${id}: macOS refused the companion ${this.#downloads()} (EPERM); asking for access or the file instead of downloading`); }
-    const ask = {id: randomUUID(), type: 'file' as const, question: downloadsDeniedQuestion(!!starter),
+    const ask = {id: randomUUID(), type: 'file' as const, kind: 'file' as const, reason: 'downloads-access' as const, question: downloadsDeniedQuestion(!!starter),
       ...(object.credit?.url ? {url: object.credit.url} : {}), ...(object.credit?.title ? {modelName: object.credit.title} : {}), ...(object.credit?.site ? {site: object.credit.site} : {}),
       accepts: starter ? ['3mf' as const] : ['3mf' as const, 'stl' as const], answers: ['file' as const], status: 'open' as const, askedAtMs: now};
     const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined, failure: undefined, question: undefined, ask,
@@ -2846,7 +2860,7 @@ export class ObjectService {
     const credit = {...(first.credit ?? info.credit), ...(first.designer ? {designer: first.designer} : {}), ...(first.licence ? {licence: first.licence} : {})};
     // A starter keeps all its files and plates (the rig's six plates; the caliper and its depth gauge), each printed
     // from the plate picker, so it is ready without a question. Any other published model asks which to print.
-    const ask = options.length > 1 && !object.starterId ? {id: randomUUID(), type: 'choice' as const, question: 'Which file and plate would you like to print?', options,
+    const ask = options.length > 1 && !object.starterId ? {id: randomUUID(), type: 'choice' as const, kind: 'choice' as const, question: 'Which file and plate would you like to print?', options,
       multiple: false, answers: ['choice' as const], status: 'open' as const, askedAtMs: now} : undefined;
     const updated = await store.update(id, o => ({...o, ...(o.print ? {plateProgress: retainedPlateProgress(o)} : {}), print: undefined, printConfirmation: undefined, state: ask ? 'needs-closeup' : 'ready', progress: undefined, failure: undefined, kind: 'published', current, files: published,
       publishedSelection: {fileIndex: 0, plateIndex: firstPlate?.index ?? 0, sliced: firstPlate?.sliced ?? false},
@@ -3077,7 +3091,8 @@ export class ObjectService {
     const question = needed.review.kind === 'region'
       ? 'Which part of this model is the object you scanned? Check the preview, then confirm it or choose the right part.'
       : 'How big is the object? Measure one side of it and enter the size in millimetres.';
-    const ask: NonNullable<StmObject['ask']> = {id: randomUUID(), question, type: 'choice',
+    // Named for what it asks; it is still answered through the reconstruction review's own route.
+    const ask: NonNullable<StmObject['ask']> = {id: randomUUID(), question, type: 'choice', kind: needed.review.kind === 'region' ? 'region' : 'scale',
       answers: ['choice'], status: 'open', askedAtMs: now};
     const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined,
       failure: undefined, ask, reconstructionReview: review,
@@ -3228,8 +3243,16 @@ export class ObjectService {
         if (await mkdir(join(this.dir(id), 'asks'), {recursive: true}).then(() => askPicture(source, join(this.dir(id), target))).then(() => true, () => false)) { photo = target; break; }
       }
     }
-    return {id: askId, question: question.slice(0, 300), ...(photo ? {photo} : {}), ...(photo && result.ask?.region ? {region: result.ask.region} : {}),
-      answers: ['camera', 'photos', 'best-guess', 'text'], status: 'open', askedAtMs: Date.now()};
+    // Sizes to confirm or correct are their own kind: number fields, with words and a caliper photo beside them.
+    // `type` is left absent, so a client from before kinds shows the question and takes the answer in words.
+    // Checked against the contract here too: sizes that aren't whole never reach a client, and the question stands as words.
+    const listed = AskSchema.shape.sizes.safeParse(result.ask?.sizes?.map((size, index) => ({id: `size-${index + 1}`, label: size.label, mm: size.mm, from: size.from})));
+    const sizes = listed.success ? listed.data : undefined;
+    const base = {id: askId, question: question.slice(0, 300), ...(photo ? {photo} : {}), ...(photo && result.ask?.region ? {region: result.ask.region} : {}),
+      status: 'open' as const, askedAtMs: Date.now()};
+    const ask: NonNullable<StmObject['ask']> = sizes?.length ? {...base, kind: 'sizes', sizes, answers: ['sizes', 'text', 'camera']}
+      : {...base, kind: 'closeup', answers: ['camera', 'photos', 'best-guess', 'text']};
+    return ask;
   }
 
   async #fail(id: string, startedAtMs: number, error: unknown): Promise<StmObject> {
