@@ -822,13 +822,18 @@ final class LayoutParityUITests: XCTestCase {
         fitShot.name = "new-fit-chosen"; fitShot.lifetime = .keepAlways
         add(fitShot)
         describe.tap()
-        describe.typeText("A wall holder for it")
         // The keyboard this test means (X86), set here rather than left to whatever ran before: on the iPad, a hardware
         // keyboard, as on an iPad with its keyboard attached, where the number pad floats beside the focused field. A key
         // pressed on it puts the simulator in that mode (in the gate an earlier test's ⌘N did it, and this test passed alone
-        // and failed there). The arrow only moves the cursor to where it already is. The iPhone keeps the on-screen
-        // keyboard: no iPhone test presses a hardware key.
-        if regular { describe.typeKey(.rightArrow, modifierFlags: []) }
+        // and failed there), so the iPad types the last letter on it. Not an arrow: with the simulator already in that mode
+        // an arrow moves the iPad's keyboard focus and the app never settled. The iPhone keeps the on-screen keyboard: no
+        // iPhone test presses a hardware key.
+        if regular {
+            describe.typeText("A wall holder for i")
+            describe.typeKey("t", modifierFlags: [])
+        } else {
+            describe.typeText("A wall holder for it")
+        }
         let keyboardShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         keyboardShot.name = "new-fit-keyboard-up"; keyboardShot.lifetime = .keepAlways
         add(keyboardShot)
