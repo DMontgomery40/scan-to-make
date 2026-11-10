@@ -2551,7 +2551,10 @@ export class ObjectService {
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
     const first: PassStage = {id: plan[0]!, words: passWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
+    // A question is open until it is answered or the pass that asked it is superseded: once another pass starts,
+    // nobody can answer the old one, and a project that then finishes must not keep it "open".
     const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined, pendingMessageId: undefined,
+      ...(o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
       // A locate pass changes nothing: Marked Done stays marked, and what it clears for the run comes back at its end.
       ...(o.completion && !opts.locate ? {completion: {...o.completion, undone: true}} : {}),
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
@@ -2988,6 +2991,9 @@ export class ObjectService {
       ...(!o.title && (first.title || info.model?.title) ? {title: first.title ?? info.model!.title} : {}), ...(credit.url ? {credit: credit as NonNullable<StmObject['credit']>} : {}),
       ...(ask ? {ask} : o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
       passes: info.startedAtMs === undefined ? o.passes : withPassEnded(o.passes, info.startedAtMs, {status: 'done'}, now, summary ? {summary} : {})}));
+    // The file gave no name: the person's words do (Nov 10: a model-file project sat in the list as its request cut
+    // off mid-sentence, "First plate from Counterpart's own kernel…", because published projects were never titled).
+    this.#title(updated);
     // A starter that is ready keeps the kit it accepted, once per computer: Try Again and a second tap never download it.
     const starter = object.starterId ? this.#starter(object.starterId) : undefined;
     // Only a whole kit (#kit) is recorded as one: a worker's or the person's partial or wrong set is kept as files, never replayed.
@@ -3244,11 +3250,14 @@ export class ObjectService {
   readonly #titling = new Set<string>();
   #backfills: Promise<unknown> = Promise.resolve();
   /**
-   * A quick title for a request, if the project has none yet: at its first pass, or (backfill) when an older
-   * project is listed. Tried once per project per run; backfills run one at a time. Never holds anything up.
+   * A quick title for a request, if the project has none yet: at its first pass, when a model file arrives without
+   * a name of its own, or (backfill) when an older project is listed. Tried once per project per run; backfills run one at a time. Never holds anything up.
    */
   #title(object: StmObject, options: {backfill?: boolean} = {}): void {
-    if (passKind(object) === 'published') return;
+    // A model file's project is named by its source (the file's own title or its page's). Only once the file is
+    // here and brought no name is it named from the person's words like any other project; before that, a generated
+    // title would take the place the source's real name is about to fill.
+    if (passKind(object) === 'published' && !object.current) return;
     // The title comes from the person's words, never from the brief below them.
     const request = fitRequest(object).typed, titleFor = this.#deps.titleFor;
     if (object.title || !request || !titleFor || this.#titling.has(object.id)) return;

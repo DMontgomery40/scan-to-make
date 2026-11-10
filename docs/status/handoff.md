@@ -12,8 +12,8 @@ One screen, updated in place; git history keeps the rest. This is the only hando
 
 | Where | Installed |
 |---|---|
-| Mac, iPhone Davica3, iPad Air | **202611101110** from main `93006ec2` (the first three Nov 10 trains, #443, #456, #487). The fourth train (#499, main `9896c8f3`) merged at 15:57Z and its install on all three is running; the board's "Installed" line has the result. Receipts `~/scan-to-make-work/mac-202611101110/`, `iphone-202611101110/`, `ipad-202611101110/`. Mac rollback: `Counterpart-202611100845.app` in the Mac receipt folder. |
-| Mac MCP copies | bambu-printer-mcp 1.1.84 and mcp-3d-printer-server 1.2.65, the newest of each (all ten MCP pull requests were published Nov 10; automatic updates are on). The code design engine is set up and ready. |
+| Mac, iPhone Davica3, iPad Air | **202611101556** from main `9896c8f3` (the four Nov 10 trains, #443, #456, #487, #499). Receipts `~/scan-to-make-work/mac-202611101556/`, `iphone-202611101556/`, `ipad-202611101556/`. Mac rollback: `Counterpart-202611101110.app` in the Mac receipt folder. |
+| Mac MCP copies | bambu-printer-mcp 1.1.85 and mcp-3d-printer-server 1.2.65 (1.2.66 is published; automatic updates are on and take it at the next check). The code design engine is set up and ready. |
 | Android, Linux (agents-136) | Nov 5 builds. Stale. |
 | Public | Mac beta 6 and TestFlight 2.0 (4), both from `30e3afdd` (Nov 6). |
 
@@ -23,6 +23,6 @@ Printer: P1S, LAN Only + Developer Mode. David starts prints; the lead may start
 
 **How work lands** (operations.md): finished branches go on a train, with one review, one gate, and someone looking at the changed screens filled with real project data. The Mac has two build slots and one simulator session at a time (`scripts/lane.py`; every hold that boots a simulator is `--exclusive`); keep to about three heavy delegates.
 
-**In motion** (detail and the rest on the board): the fourth train's install; the fifth train (#509 the third review's findings, #510 the screenshot tool's hardening, #513 one main action per page); real-data captures of every screen on iPhone, iPad and both Duo poses; Counterpart's own geometry kernel (round 3 on agents-136) and physics engine (round 3 on agents-173), in the private repo `DMontgomery40/counterpart-kernel`; the kernel's second test plate, which prints when David says the bed is clear.
+**In motion** (detail and the rest on the board): the fifth train (#509 the third review's findings, #510 the screenshot tool's hardening, #513 one main action per page, and the fix for a crash when a camera view goes away as its stream starts); real-data captures of every screen on iPhone, iPad and both Duo poses; Counterpart's own geometry kernel (round 3 on agents-136) and physics engine (round 3 on agents-173), in the private repo `DMontgomery40/counterpart-kernel`; the kernel's second test plate, which prints when David says the bed is clear.
 
 Never-landed work is kept as tags: `git ls-remote --tags origin 'archive/*'`. Evidence and receipts: `~/scan-to-make-work/` on the Mac. Releases: [`../distribution.md`](../distribution.md).

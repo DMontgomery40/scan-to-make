@@ -208,6 +208,17 @@ enum Fixtures {
         // whose picture boxes the whole bottle, and a scan of 130 frames. The pictures are `ask-bottle.jpg` and
         // `bottle-capture/NNNN.heic` in the assets folder, never in Git. `COUNTERPART_ASK_NO_PHOTO` drops the ask's picture.
         if set == "ask-bottle" { shown = shown.map { $0["id"] as? String == ids.plush ? bottle(ago) : $0 } }
+        // `-CounterpartFixtureSet stale-printer` / `no-printers` (review F3): the mic mount, never sliced, with a printer
+        // chosen that's no longer on the Mac, or with no printers set up at all.
+        if set == "stale-printer" || set == "no-printers" {
+            shown = shown.map { project in
+                guard project["id"] as? String == ids.mic else { return project }
+                var changed = project
+                changed["print"] = nil
+                changed["printerDestinationId"] = set == "stale-printer" ? "removed-printer" : nil
+                return changed
+            }
+        }
         // `-CounterpartScreen printer-connection`: the P1S idle, so its Settings → Printers choices can be changed.
         if idlePrinter { shown = shown.filter { $0["state"] as? String != "printing" } }
         // A status set on this run applies last, so It Works on the finished print (Printing screen) makes it Done.
@@ -306,7 +317,7 @@ enum Fixtures {
                      ["id": "developer", "label": "Local network, Developer Mode", "available": false, "reason": "Turn on LAN Only and Developer Mode on the printer first."]]]
     }
 
-    static var catalog: [String: Any] { [
+    static var catalog: [String: Any] { Fixtures.set == "no-printers" ? ["defaultDestinationId": "current", "destinations": [[String: Any]]()] : [
         "defaultDestinationId": "current",
         "destinations": [
             ["id": "current", "name": "P1S", "backend": p1sBackend, "model": "Bambu Lab P1S", "source": "current", "state": "ready",

@@ -2,8 +2,9 @@ import XCTest
 @testable import CounterpartKit
 
 /// First look U15 (Nov 10): the first pairing screen led with "This build isn't signed for iCloud." That line shows only
-/// when `CloudBuild.configured` is false. A device build (TestFlight and the App Store are device-only) with the shipped
-/// Info.plist and entitlements is always configured, so a person never sees it; the Simulator and fixtures keep it.
+/// when `CloudBuild.configured` is false. Every *device* build (TestFlight and the App Store are device-only) has the
+/// shipped Info.plist and entitlements, so it is configured and a person never sees the line. Any Simulator build, Release
+/// configuration included, and the fixtures still show it (review F7: what this proves, not "a Release build").
 final class CloudBuildTests: XCTestCase {
     private var ios: URL {
         var root = URL(fileURLWithPath: #filePath)
@@ -16,7 +17,7 @@ final class CloudBuildTests: XCTestCase {
         return try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
     }
 
-    func testAReleaseBuildOnADeviceNeverSaysItIsntSignedForICloud() throws {
+    func testEveryDeviceBuildIsConfiguredForICloudSoNoTestFlightOrAppStoreBuildShowsTheLine() throws {
         let info = try plist("ScanToMake/Info.plist")
         XCTAssertTrue(CloudBuild.configured(simulator: false, fixtures: false, infoValue: info[CloudBuild.infoKey]),
                       "the shipped Info.plist turns iCloud on for every device build")

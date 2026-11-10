@@ -141,6 +141,10 @@ export function searchSnippet(p: Project, query: string) {
     let end = Math.min(line.length, at + needle.length + 70);
     if (start > 0) { const space = line.indexOf(" ", start); if (space >= 0 && space < at) start = space + 1; }
     if (end < line.length) { const space = line.lastIndexOf(" ", end); if (space > at + needle.length) end = space; }
+    // Never inside a character: an emoji is two UTF-16 units (review F5).
+    const low = (i: number) => { const c = line.charCodeAt(i); return c >= 0xdc00 && c <= 0xdfff; };
+    if (start > 0 && start < line.length && low(start)) start -= 1;
+    if (end > 0 && end < line.length && low(end)) end += 1;
     const lead = start > 0 ? "…" : "";
     return {
       text: lead + line.slice(start, end) + (end < line.length ? "…" : ""),
@@ -150,10 +154,12 @@ export function searchSnippet(p: Project, query: string) {
   return undefined;
 }
 
-/** Every value a search reads, the title first. */
+/** Every value a search reads, the title first and always in first place, so a project without one keeps its others (review F5). */
 function searchValues(p: Project) {
+  return [p.title ?? "", ...searchedFields(p)];
+}
+function searchedFields(p: Project) {
   return [
-    p.title,
     p.instructions,
     p.status?.text,
     p.failure,
