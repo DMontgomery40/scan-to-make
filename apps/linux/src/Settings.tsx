@@ -1,4 +1,4 @@
-import { addressField, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls, codeEngineRow, type CodeEngineView } from "./domain";
+import { addressField, AUTO_UPDATE_LABEL, AUTO_UPDATE_WORDS, autoUpdatePatch, autoUpdateSwitch, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls, codeEngineRow, type CodeEngineView } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -667,6 +667,11 @@ function Printers({
   const [options, setOptions] = useState<SetupOptions>();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
+  const [settings, setSettings] = useState<CompanionSettings>();
+  const autoUpdate = autoUpdateSwitch(settings);
+  useEffect(() => {
+    void call<{ settings: CompanionSettings }>("settings.get").then((r) => setSettings(r.settings), () => {});
+  }, []);
   const refresh = async () => {
     const r = await call<{ packages: McpPackage[]; options: SetupOptions }>(
       "printers.mcps",
@@ -705,6 +710,24 @@ function Printers({
         Download and update the published MCP packages. They handle slicing,
         camera and printer controls.
       </p>
+      {autoUpdate.shown && (
+        <>
+          <label className="choice">
+            <input
+              type="checkbox"
+              checked={autoUpdate.on}
+              onChange={(e) =>
+                void call<{ settings: CompanionSettings }>("settings.set", autoUpdatePatch(e.target.checked)).then(
+                  (r) => setSettings(r.settings),
+                  (e) => setError(String(e)),
+                )
+              }
+            />
+            <span>{AUTO_UPDATE_LABEL}</span>
+          </label>
+          <p className="muted">{AUTO_UPDATE_WORDS}</p>
+        </>
+      )}
       {packages.map((pkg) => (
         // One group per MCP: a screen reader names it, and its Move and Update buttons and progress belong to it.
         <section className="package" key={pkg.package} role="group" aria-labelledby={`mcp-${pkg.package}`}>

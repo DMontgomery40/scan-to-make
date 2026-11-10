@@ -2,8 +2,11 @@ package com.scantomake.counterpart.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -14,7 +17,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -29,6 +34,9 @@ import com.scantomake.counterpart.api.printerPrintRoute
 import com.scantomake.counterpart.api.updatePrinterMcp
 import com.scantomake.counterpart.app.AppState
 import com.scantomake.counterpart.app.Counterpart
+import com.scantomake.counterpart.core.bool
+import com.scantomake.counterpart.core.jsonOf
+import com.scantomake.counterpart.core.obj
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -120,6 +128,47 @@ fun PrinterSettingsControls(printer: PrinterDestination, state: AppState) {
     }
 }
 
+
+/** Q9: the same words as iPhone, iPad and the Mac (CounterpartKit `SettingsSchema.autoUpdateMcps`) and Linux (`domain.ts`); Linux's `domain.test.ts` fails if they differ. */
+const val AUTO_UPDATE_MCPS_LABEL = "Keep printer software up to date"
+const val AUTO_UPDATE_MCPS_WORDS = "Counterpart updates its printer software by itself when nothing is printing or being designed, and tells you afterwards."
+
+/**
+ * Q9, `general.autoUpdateMcps`: one switch for all the computer's printer software, under Printers' printer software,
+ * as on iPhone and iPad (Settings → Printer software), the Mac (Settings → Printers) and Linux (Printer tools). Not inside
+ * [McpCopiesPanel], which is drawn once per printer. Shown only when the computer sends the key: an older companion has no
+ * automatic updates, and one whose settings can't be read shows nothing rather than a guess.
+ */
+@Composable
+fun AutoUpdateMcpsSwitch() {
+    val client = Counterpart.instance.companion
+    val scope = rememberCoroutineScope()
+    var on by remember { mutableStateOf<Boolean?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        on = try { client.settings()["general"].obj?.get("autoUpdateMcps").bool }
+        catch (e: CancellationException) { throw e }
+        catch (_: Exception) { null }
+    }
+    val value = on ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().testTag("auto-update-mcps").toggleable(value = value, enabled = !saving, role = Role.Switch) { next ->
+            saving = true; problem = null
+            scope.launch {
+                try { on = client.changeSettings(jsonOf("general" to jsonOf("autoUpdateMcps" to next)))["general"].obj?.get("autoUpdateMcps").bool ?: next }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { problem = e.message ?: "Your computer couldn’t save that change." }
+                finally { saving = false }
+            }
+        }, verticalAlignment = Alignment.CenterVertically) {
+            Text(AUTO_UPDATE_MCPS_LABEL, Modifier.weight(1f))
+            Switch(checked = value, onCheckedChange = null, enabled = !saving)
+        }
+        Text(AUTO_UPDATE_MCPS_WORDS, color = Palette.secondary, fontSize = 12.sp)
+        problem?.let { Text(it, color = Palette.failed, fontSize = 12.sp) }
+    }
+}
 
 @Composable
 fun McpCopiesPanel(printerId: String, state: AppState) {

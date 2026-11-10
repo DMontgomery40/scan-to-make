@@ -39,6 +39,8 @@ import {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './
 import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
+import {fitRequest, workerRequest} from './fit.js';
+import type {Fit} from '@scan-to-make/contracts/counterpart';
 import {passResume, withPassEnded, type PassEnd} from './pass-end.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
 import {defaultReconstructRunner, RECONSTRUCTION_FAILED, ReconstructionReviewNeeded, type Reconstruct, type ReconstructInputs, type ScanToStl} from './reconstruct.js';
@@ -572,7 +574,9 @@ export class ObjectService {
       if (!source.current) throw new InvalidStateError('There is no model to duplicate yet.');
       if (source.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
       const kind = passKind(source);
-      const duplicate = await this.#deps.store.create(source.instructions, kind);
+      // The copy keeps how the size is settled, or a change asked of it would be designed without the measured sizes.
+      const request = fitRequest(source);
+      const duplicate = await this.#deps.store.create(request.typed, kind, request.fit);
       try {
         const current = source.current;
         // A copy keeps the scan it copies, or with nothing scanned its request would read as a new design.
@@ -722,11 +726,12 @@ export class ObjectService {
     return next;
   }
 
-  async create(instructions?: string, kind?: 'fit' | 'copy' | 'published', url?: string) {
+  async create(instructions?: string, kind?: 'fit' | 'copy' | 'published', url?: string, fit?: Fit) {
     const link = url ? publishedLink(url) : undefined;
     if (url && !link) throw new InvalidStateError('Choose a published model page.');
     if (kind === 'published' && !link) throw new InvalidStateError('Add the published model’s link.');
-    const created = await this.#deps.store.create(instructions, link ? 'published' : kind);
+    // How the size is settled belongs to a fit with words; anything else has none to keep.
+    const created = await this.#deps.store.create(instructions, link ? 'published' : kind, !link && kind === 'fit' && instructions?.trim() ? fit : undefined);
     return this.#changed(link ? await this.#deps.store.update(created.id, o => ({...o, credit: {url: link.url, site: link.site}})) : created);
   }
   async list() {
@@ -1162,15 +1167,20 @@ export class ObjectService {
   }
 
   /** An unsent draft may change; once a pass starts its original request is part of the history. */
-  updateDraft(id: string, patch: {instructions?: string; kind?: 'fit' | 'copy'}): Promise<StmObject> {
+  updateDraft(id: string, patch: {instructions?: string; kind?: 'fit' | 'copy'; fit?: Fit | null}): Promise<StmObject> {
     return this.#gate(id, async () => {
       const object = await this.get(id);
       if (object.state !== 'new') throw new InvalidStateError('The description cannot change after work starts. Send a correction instead.');
       if (patch.kind !== undefined && object.kind === 'published')
         throw new InvalidStateError('A published model project can’t become a copy or a new design. Start a new project instead.');
-      return this.#changed(await this.#deps.store.update(id, current => ({...current,
-        ...(patch.instructions !== undefined ? {instructions: patch.instructions.trim() || undefined} : {}),
-        ...(patch.kind !== undefined ? {kind: patch.kind} : {})})));
+      return this.#changed(await this.#deps.store.update(id, current => {
+        const next = {...current,
+          ...(patch.instructions !== undefined ? {instructions: patch.instructions.trim() || undefined} : {}),
+          ...(patch.kind !== undefined ? {kind: patch.kind} : {}),
+          ...(patch.fit !== undefined ? {fit: patch.fit ?? undefined} : {})};
+        // A draft that stops being a fit keeps no fit choice.
+        return next.kind === 'fit' ? next : {...next, fit: undefined};
+      }));
     });
   }
   updateInstructions(id: string, instructions: string): Promise<StmObject> {
@@ -2506,7 +2516,7 @@ export class ObjectService {
         ...(designer ? {designerCopy: true} : {}),
         kind, ...(object.preferences?.designEngine && object.preferences.designEngine !== 'auto' ? {preferredEngine: object.preferences.designEngine} : {}), onStage: (id, chosen) => stage(id, chosen),
         ...(fromCurrent && object.current?.design ? designInput(dir, object.current.engine, object.current.design) : {}),
-        ...(object.instructions ? {instructions: object.instructions} : {}),
+        ...(workerRequest(object) ? {instructions: workerRequest(object)!} : {}),
         ...(opts.note !== undefined ? {note: opts.note, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {})};
       try { return await this.#deps.runTouchup({...input, signal: controller.signal, onProgress}); }
       finally { stage('saving'); await writing; }
@@ -3105,7 +3115,8 @@ export class ObjectService {
    */
   #title(object: StmObject, options: {backfill?: boolean} = {}): void {
     if (passKind(object) === 'published') return;
-    const request = object.instructions?.trim(), titleFor = this.#deps.titleFor;
+    // The title comes from the person's words, never from the brief below them.
+    const request = fitRequest(object).typed, titleFor = this.#deps.titleFor;
     if (object.title || !request || !titleFor || this.#titling.has(object.id)) return;
     this.#titling.add(object.id);
     const save = async (title: string | undefined) => {
