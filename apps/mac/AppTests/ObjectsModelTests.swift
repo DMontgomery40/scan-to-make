@@ -265,6 +265,15 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(setUp?.canSetUp, false, "no second Set Up while it runs")
         let calls = await companion.codeEngineCalls
         XCTAssertEqual(calls, ["cad.status", "cad.setup"])
+        // The row is on screen: the AI tab's settings render the code engine's section through this model (review F4).
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("App/SettingsViews.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains(#"Tab("AI", systemImage:"sparkles", value:.ai) { AISettings(model:cleanup, objects:objects) }"#), "the AI tab shows AISettings with the projects model")
+        let ai = try XCTUnwrap(source.range(of: "struct AISettings: View {"), "AISettings exists")
+        let body = source[ai.upperBound...]
+        let end = body.range(of: "\n}\n")?.lowerBound ?? body.endIndex
+        XCTAssertTrue(body[..<end].contains("CodeEngineSettingsSection { [objects] action in try await objects.codeEngine(action) }"),
+                      "AISettings renders the code design engine's section, wired to ObjectsModel")
     }
 
     func testAddPrinterSlicerControlsComeFromTheChosenMCPWithProjectsPresent() async throws {
