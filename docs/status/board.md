@@ -21,7 +21,7 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 |---|---|---|---|---|
 | K1 | **Counterpart's own geometry kernel**, written from scratch for exactly what this app makes (parts that fit a scanned thing, parameter edits, scan cleanup), with no OpenCascade, no Blender, no Fusion and no 1.4 GB Python environment: small enough to ship inside the MCPs' npm packages and install with nothing. It replaces what sits behind the `cad/1` tools (`cad_run`, `cad_check_fit`) that landed in the MCP PRs on Nov 9–10, so the app does not change when the engine underneath does. The other engines it retires: the Blender bridge, the Fusion bridge and its 93 third-party tools (stage 2, Q4), then build123d itself | Lead; built by a kernel lab on the Linux machines so it never waits for the Mac's build lane | Kernel lab round 1 running since Nov 10 07:33Z on agents-136 (`~/kernel-lab`, its own local git repository; T3 thread "Kernel lab, round 1" in the agents-136 environment; Opus 5.5 xhigh, six-hour budget). From scratch in TypeScript with no geometry libraries, judged by a ten-case benchmark built from David's real parts (bottle holder, +1 mm edit, holder for three, box and separate lid, extruded profile, thin plate, clamp, embossed text, work on a scan, slicer acceptance) against build123d 0.13.0 | First lab report: representation chosen by measurement, the benchmark table, what it cannot do yet. Then loop: each round takes the worst benchmark row |
 | K2 | The seam the kernel slots into: the `cad/1` contract in both MCPs (bambu-printer-mcp #136, mcp-3D-printer-server #92) and the app using it (#439, on main). Waits on I12 to reach David's devices | Lead | Green, unpublished | I12 |
-| K3 | Everything between here and the kernel being David's daily engine: W1 (publish), Q4 (Blender and Fusion leave the app), X6 (the engine edits a designer's 3MF), and the benchmark reaching parity on fit parts | Lead | See those rows | In that order |
+| K3 | Everything between here and the kernel being David's daily engine: I12 (publish), Q4 (Blender and Fusion leave the app), X6 (the engine edits a designer's 3MF), and the benchmark reaching parity on fit parts | Lead | See those rows | In that order |
 
 ## Right now
 
@@ -57,8 +57,8 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 |---|---|---|---|
 | Q1 | #413 generic setup form, then #410 MCP Update rows, as one train (triage: `~/scan-to-make-work/branch-triage-2026-11-09/triage.md`) | Lead | I12 |
 | Q2 | Print attempt and plates as one design: the #404 rework on the MCPs' `printOutcome`, a stalled slice during Print reads "not sent", "printed elsewhere" (M1 + rest of M2) | SM | I12 for the wire half; the in-memory half can start |
-| Q3 | Kinds of "Needs you" (M4), design agreed Nov 10. **A1**: the fit choice travels as fields; the "Fit brief" block leaves both clients and everything shown, including projects that already carry it (next train). **A2**: a question says its kind; a size question shows labelled number fields prefilled from the scan or the published size, plus a text box and Camera (after I2's PR). **B**: the fit rules as a `fit_sizes` prompt in both MCPs (needs W1's kind of publish). **C**: delete the companion's copy of the rules once B is installed | SM | A1 now; A2 after I2; B, C after W1 |
-| Q4 | One engine, stage 2: Blender and Fusion setup, repair, lock and launch leave the app; engine names come from the MCP | Lead | W1, David accepting the code engine on his device, and X6 |
+| Q3 | Kinds of "Needs you" (M4), design agreed Nov 10. **A1**: the fit choice travels as fields; the "Fit brief" block leaves both clients and everything shown, including projects that already carry it (next train). **A2**: a question says its kind; a size question shows labelled number fields prefilled from the scan or the published size, plus a text box and Camera (after I2's PR). **B**: the fit rules as a `fit_sizes` prompt in both MCPs (needs I12's kind of publish). **C**: delete the companion's copy of the rules once B is installed | SM | A1 now; A2 after I2; B, C after I12 |
+| Q4 | One engine, stage 2: Blender and Fusion setup, repair, lock and launch leave the app; engine names come from the MCP | Lead | I12, David accepting the code engine on his device, and X6 |
 | Q5 | Phone draft send (M7): a send from the project page never enters `store.sending`, so Home says "Draft saved" and a reopened page can send twice (by reading) | SM | One check on David's phone with his next scan |
 | Q6 | A new TestFlight build and Mac beta from main (the public builds are from Nov 6 and predate the scan fix) | Lead | I1, I2, I5 landed and looked at |
 | Q7 | Refresh Android and Linux installs (Nov 5 builds) | Lead | After Q6 |
@@ -124,9 +124,9 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 
 | When (local) | His words, shortened | Row |
 |---|---|---|
-| Nov 9 | "clean up all these branches … clean up space on the mac" | Done: nine remote branches → three (all waiting on W1); 50 → 200 GiB free |
+| Nov 9 | "clean up all these branches … clean up space on the mac" | Done: nine remote branches → three (all waiting on I12); 50 → 200 GiB free |
 | Nov 9 | "I was presumably NEVER using the app with all fixes included … squash all the changes together … then run the review" | Done: the train (operations.md); two trains landed |
-| Nov 9 | build123d: "we should include it, and the MCP … put a note in docs and the read me … that they can take it out" | Done in #136/#92 (unpublished: W1) |
+| Nov 9 | build123d: "we should include it, and the MCP … put a note in docs and the read me … that they can take it out" | Done in #136/#92 (unpublished: I12) |
 | Nov 9 | "replace blender as well … get down to one core thing" | Stage 1 done (#439); Q4, X6 |
 | Nov 9 (about 4 pm MST) | "what if these new models are good enough to literally just write it from scratch with nothing ? Or just build our own optimized perfect library?" | **K1**, the goal |
 | Nov 9 | "This all seems weirdly slow" | X5; Mac capped at about three heavy delegates; W5 |
