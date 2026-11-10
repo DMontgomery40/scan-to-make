@@ -33,6 +33,7 @@ struct ProjectView: View {
     @State private var resumed = false
     @State private var confirmDelete = false
     @State private var modelURL: URL?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var arURL: URL?
     @State private var scanURL: URL?
     @State private var captureWarning: String?
@@ -374,11 +375,15 @@ struct ProjectView: View {
                 }
             }
         } message: { Text("Its model, photos and activity are removed from your Mac.") }
-        .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(object.spoolColour ?? "")") {
-            modelURL = nil; arURL = nil
-            guard object.current != nil, let url = try? await store.mac.download(object, "model.stl") else { return }
-            modelURL = url
-            if !object.preservesPublishedFilaments { arURL = await ARModel.usdz(fromSTL: url, tint: object.spoolColour) }
+        .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(scenePhase)") {
+            // The store fetches it, so leaving the page never stops the download (Nov 10); back in the app, one that
+            // failed meanwhile starts again.
+            if object.current != nil, scenePhase == .active { store.models.want(object, "model.stl") }
+        }
+        .task(id: "\(store.models.file(object, "model.stl")?.path ?? "")#\(object.spoolColour ?? "")") {
+            modelURL = store.models.file(object, "model.stl"); arURL = nil
+            guard let url = modelURL, !object.preservesPublishedFilaments else { return }
+            arURL = await ARModel.usdz(fromSTL: url, tint: object.spoolColour)
         }
     }
 
