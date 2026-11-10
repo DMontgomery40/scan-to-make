@@ -228,6 +228,12 @@ struct NewObjectView: View {
                 .disabled(working != nil || awaitingUse)
                 .accessibilityIdentifier("send")
                 .frame(maxWidth: 640)
+                // A full-width bar with the system's bar background: what scrolls under it can't be read or reached
+                // through it, disabled or not (a disabled button lets touches and VoiceOver through to what's beneath).
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(.bar, ignoresSafeAreaEdges: .bottom)
+                .accessibilityElement(children: .contain)
             }
             .interactiveDismissDisabled(working != nil)
             .dropDestination(for: Data.self) { items, _ in

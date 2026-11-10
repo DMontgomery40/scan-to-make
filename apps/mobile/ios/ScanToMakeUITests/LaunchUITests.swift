@@ -621,6 +621,10 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertLessThanOrEqual(later.frame.maxY, send.frame.minY + 1, "all three answers fit with it, above the button")
         // The bottom action is a bar the content scrolls under: nothing of the scrolling content can be reached through
         // the button's frame (lead, Nov 10). Whether anything reads through it is checked by eye on the screenshot below.
+        // Kept with the result, so a review can look at the settled sheet on each device (taken before the check below).
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "new-after-a-scan"; shot.lifetime = .keepAlways
+        add(shot)
         func nothingReachableThroughTheButton(_ state: String) {
             let button = send.frame
             let under = (app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex).filter {
@@ -631,10 +635,6 @@ final class LayoutParityUITests: XCTestCase {
             }
         }
         nothingReachableThroughTheButton("nothing chosen")
-        // Kept with the result, so a review can look at the settled sheet on each device.
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "new-after-a-scan"; shot.lifetime = .keepAlways
-        add(shot)
         let describe = app.staticTexts["What do you need?"]
         XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
         for row in [copy, fit, later] {
@@ -646,10 +646,10 @@ final class LayoutParityUITests: XCTestCase {
         copy.tap()
         XCTAssertTrue(send.isEnabled)
         XCTAssertEqual(send.label, "Copy this object")
-        nothingReachableThroughTheButton("copy chosen")
         let chosen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         chosen.name = "new-after-a-scan-copy-chosen"; chosen.lifetime = .keepAlways
         add(chosen)
+        nothingReachableThroughTheButton("copy chosen")
         fit.tap()
         XCTAssertEqual(send.label, "Continue", "a fit asks for its words first")
         for _ in 0..<4 where !later.isHittable { app.swipeUp() }
