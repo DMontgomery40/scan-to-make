@@ -10,7 +10,7 @@ The app covers capture (LiDAR Object Capture plus close-up stills) and cleanup (
 
 Android app: see [`android/AGENTS.md`](android/AGENTS.md) and [`android/README.md`](android/README.md).
 
-New session? Read the working PRD, [`docs/design/overhaul/PRD.md`](docs/design/overhaul/PRD.md): what is built and accepted, from the code (§0 is the status table). Then [`docs/status/handoff.md`](docs/status/handoff.md) (one screen: owner, installed builds, open list) and [`docs/operations.md`](docs/operations.md) (how to gate, build, install and drive the apps). Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
+New session? Read the working PRD, [`docs/design/overhaul/PRD.md`](docs/design/overhaul/PRD.md): what is built and accepted, from the code (§0 is the status table). Then [`docs/status/handoff.md`](docs/status/handoff.md) (one screen: owner, installed builds, what is in motion), [`docs/status/board.md`](docs/status/board.md) (every open item with its owner and next step; anything David says gets a row there in the same turn) and [`docs/operations.md`](docs/operations.md) (how to gate, build, install and drive the apps). Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
 
 ## One trunk
 
@@ -29,6 +29,7 @@ David, 2026-11-04: "we need to make sure regressions and overwrites dont happen 
 
 David, 2026-11-04: "agents are CONSTANTLY blurring the boundary and adding backend stuff that should be in mcp to the app itself". The MCPs change "basically everyday" for new printers, slicers, firmware and Blender/Fusion; the App Store can't.
 
+- Counterpart is the friendly front end; the MCPs are the back end. David, 2026-11-10: "half of what this app does if not more, is really an update to the mcps and not the app itself, or maybe just a tiny ui tweak to the app and a behavior change to the mcps." The MCPs cover six or more printer brands and can update every six hours (the Bambu fork is checked on that schedule); "DOES THE APP STORE IN IOS TAKE KINDLY TO 4X DAILY UPDATES??? no." So before designing any feature, ask which half is the MCPs' and start there. The companion ships inside the Mac app, so it counts as the app for this rule.
 - Code that would have to change when a printer, slicer, firmware, filament system, Blender or Fusion changes goes in the MCPs (both of them), never in the app. The app calls tools, renders their structured results and passes the person's choices through.
 - In app code: no branching on MCP package or slicer, no printer-model tables, no matching on MCP or printer error codes or wording, no slicer setting keys or presets, no fallbacks for MCPs without the contract. A missing capability means "Update <MCP> in Settings → Printers".
 - Moving code out of the app: extend `counterpart/1` in both MCPs, publish, install through the app's Update, and only then delete the app code. The list and order are in PRD §8.0.
