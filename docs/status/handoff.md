@@ -8,11 +8,13 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 David, 19:55Z, replacing the lead: "It's the earbuds the phone holder and literally everything you've made including what's printing now nothing shows up I have no earthly idea what you're printing this is such a shit show. Write a handoff prompt to a new lead with fresh context window. Please be very detailed and have it actually clean up after its agents and settle threads in t3 code when they're done."
 
-### Since the handoff (20:45Z, the new lead, thread "Take Over Project Recovery Lead")
+### Since the handoff (20:30Z, the new lead, thread "Take Over Project Recovery Lead")
 
 - The previous lead's process is stopped and its thread settled.
 - **A small train goes first: PR #539** (`train/2026-11-10f`, board I19): #520, #525 with its review fixes, #524 and the model-file pictures. Its gate and one review are running. The fifth train (#527) follows with X86's fix.
 - The cause of the empty part stage is with a second lab (board X87); a watcher lists the phone's cache when it wakes.
+- David, 20:25Z: the two parts fail differently on his phone (one looks like it is loading, one does not), and the lead is fixing instances, not the root. The root is the chain the phone must finish before it draws anything (board X92).
+- "A model file with several objects gets no picture" (below, and in X72) was wrong: a model file shows a picture only when its maker put one inside (board X93).
 - Housekeeping runs on the Mac and all three Linux machines (board X88).
 - Delegates are Opus 5.5 (medium by default), GPT-6.1 Sol at xhigh and Muse Wonder Full, not Sonnet (X89). No AI attribution on commits or PRs (X90).
 
