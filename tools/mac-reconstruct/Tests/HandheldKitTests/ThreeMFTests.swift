@@ -16,7 +16,7 @@ final class ThreeMFTests: XCTestCase {
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: folder) }
 
     /// A box mesh `size` millimetres a side, with its lowest corner at `origin`.
-    private func box(_ id: Int, _ name: String, origin: (Double, Double, Double) = (0, 0, 0), size: Double = 10, extra: String = "") -> String {
+    func box(_ id: Int, _ name: String, origin: (Double, Double, Double) = (0, 0, 0), size: Double = 10, extra: String = "") -> String {
         let (x, y, z) = origin
         let v = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
             .map { "<vertex x=\"\(x + Double($0.0) * size)\" y=\"\(y + Double($0.1) * size)\" z=\"\(z + Double($0.2) * size)\"/>" }.joined()
@@ -26,7 +26,7 @@ final class ThreeMFTests: XCTestCase {
     }
 
     /// A 3MF package from its parts, zipped by the system's `zip` as any 3MF tool would.
-    private func package(_ name: String, _ parts: [String: String]) throws -> URL {
+    func package(_ name: String, _ parts: [String: String]) throws -> URL {
         let root = folder.appendingPathComponent(name + "-parts")
         var all = parts
         all["[Content_Types].xml"] = "<?xml version=\"1.0\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\"/></Types>"
@@ -46,7 +46,7 @@ final class ThreeMFTests: XCTestCase {
         return out
     }
 
-    private func model(_ resources: String, build: String, unit: String = "millimeter", extra: String = "") -> String {
+    func model(_ resources: String, build: String, unit: String = "millimeter", extra: String = "") -> String {
         "<?xml version=\"1.0\"?><model unit=\"\(unit)\" xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\" \(extra)><resources>\(resources)</resources><build>\(build)</build></model>"
     }
 
