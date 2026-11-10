@@ -344,7 +344,22 @@ struct ScanStrip: View {
         .accessibilityHint("Shows every photo")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("scan-strip")
-        .sheet(isPresented: $open) { ScanGallery(project: project, scan: scan) }
+        // A fixed page size: a sheet sized to its content measures the whole grid, which fetched every frame on the iPad.
+        .sheet(isPresented: $open) { ScanGallery(project: project, scan: scan).presentationSizing(.page) }
+    }
+}
+
+/// One frame in the full set: fetched once it is on screen, never because the grid built its cell ahead of time (on an
+/// iPad the grid built nearly every cell, which fetched 123 of 130 frames).
+private struct VisibleFrame: View {
+    let project: Project
+    let path: String
+    @State private var seen = false
+    var body: some View {
+        Color.clear.aspectRatio(3 / 4, contentMode: .fit)
+            .overlay { if seen { ProjectImage(project: project, path: path, maxPixelSize: 300) } else { StageBackground() } }
+            .clipShape(.rect(cornerRadius: 6))
+            .onScrollVisibilityChange(threshold: 0.05) { if $0 { seen = true } }
     }
 }
 
@@ -364,15 +379,14 @@ struct ScanGallery: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black)
                                 .navigationTitle("Photo \(index + 1) of \(scan.count)").navigationBarTitleDisplayMode(.inline)
                         } label: {
-                            Color.clear.aspectRatio(3 / 4, contentMode: .fit)
-                                .overlay { ProjectImage(project: project, path: path, maxPixelSize: 300) }
-                                .clipShape(.rect(cornerRadius: 6))
+                            VisibleFrame(project: project, path: path)
                         }
                         .accessibilityLabel("Photo \(index + 1) of \(scan.count)")
                     }
                 }
                 .padding(.horizontal, 4)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("scan-gallery")
             .navigationTitle("Your scan")
             .navigationSubtitle(scan.words)
