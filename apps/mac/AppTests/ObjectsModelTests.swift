@@ -527,6 +527,8 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertFalse(lost)
         let saved = await model.perform(.correct, on: "hook", note: "Thicker walls")
         XCTAssertTrue(saved)
+        // The saved note goes out at the next look at the project, as it does when its step ends.
+        await model.refresh()
         for _ in 0..<200 where await companion.messageIds.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
         let ids = await companion.messageIds
         XCTAssertEqual(ids.count, 3, "the lost try, the refused try and the saved note's own send")
@@ -539,14 +541,23 @@ private func project(_ item: [String: Any]) throws -> Project {
         let later = await companion.messageIds
         XCTAssertEqual(later.count, 4)
         XCTAssertNotEqual(later[3], ids[0])
-        // A companion from before this is sent what it always was.
-        await companion.setCapabilities(.init(messagePhotos: true))
+    }
+
+    func testACompanionFromBeforeNoteIdsIsSentWhatItAlwaysWas() async throws {
+        let suite = "counterpart-note-old-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let companion = FakeObjects()
         await companion.set([item("hook", "ready")])
+        await companion.setCapabilities(.init(messagePhotos: true))
+        let model = ObjectsModel(companion: companion, defaults: defaults)
         await model.refresh()
-        let old = await model.perform(.correct, on: "hook", note: "A chamfer")
-        XCTAssertTrue(old)
-        let unchanged = await companion.messageIds
-        XCTAssertEqual(unchanged.count, 4)
+        let sent = await model.perform(.correct, on: "hook", note: "A chamfer")
+        XCTAssertTrue(sent)
+        let ids = await companion.messageIds
+        XCTAssertEqual(ids, [])
+        let calls = await companion.calls
+        XCTAssertEqual(calls.filter { $0 == "correct:A chamfer" }.count, 1)
     }
 
     func testRetryOfASavedMessageDoesNotSelectLaterUploadedPhotos() async throws {
