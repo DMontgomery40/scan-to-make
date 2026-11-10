@@ -42,7 +42,8 @@ data class ProjectGallery(val entries: List<Entry>) {
             val scans = scanModels(project, scanOnThisDevice)
             val part = parts.singleOrNull()
             val seats = project.current?.seats.orEmpty()
-            if (part != null && part.drawing is Drawing.Model && seats.isNotEmpty() && scans.isNotEmpty())
+            // Only where it is drawn right today: a USDZ scan. A handheld STL scan gets no Together until the project carries its frame.
+            if (part != null && part.drawing is Drawing.Model && seats.isNotEmpty() && scans.isNotEmpty() && scans[0].lowercase(Locale.ROOT).endsWith(".usdz"))
                 entries += Entry("together", Kind.Together, "Together", Drawing.Assembly(part.drawing.path, scans[0], seats), part.colour, "Together")
             scans.forEachIndexed { index, scan ->
                 entries += Entry("scan-$index", Kind.Scan, if (scans.size > 1) "Scan ${index + 1}" else "What you scanned", Drawing.Model(scan), Colour.Own, "Scan",
@@ -113,6 +114,9 @@ data class PrintablePart(
 fun Project.picturePath(): String? = picture ?: selectedPlate?.thumbnail ?: plates?.firstOrNull()?.thumbnail
     ?: current?.renders?.firstOrNull()?.let(ProjectGallery::renderPath)
 
+/** The page's picture while the gallery is empty (photos sent, no model yet): the subject the computer cut out of the photo. */
+fun Project.photoPicture(): String? = pictures["photo"]
+
 /** The computer's picture of one gallery entry. */
 fun Project.pictureFor(entry: ProjectGallery.Entry): String? = when (entry.kind) {
     ProjectGallery.Kind.Part -> (entry.drawing as? ProjectGallery.Drawing.Picture)?.path ?: pictures["part"] ?: current?.renders?.firstOrNull()?.let(ProjectGallery::renderPath)
@@ -121,7 +125,10 @@ fun Project.pictureFor(entry: ProjectGallery.Entry): String? = when (entry.kind)
     ProjectGallery.Kind.Scan -> pictures["scan"] ?: pictures["photo"]
 }
 
-/** A part made to fit a scanned object, made before passes said where it sits: the computer can find it. */
-val Project.canLocate: Boolean get() = kind == "fit" && scan != null && current != null &&
+/**
+ * A part made to fit a scanned object, made before passes said where it sits: the computer can find it. Only for a USDZ
+ * scan, the one frame Together is drawn in today (PRD §6.1).
+ */
+val Project.canLocate: Boolean get() = kind == "fit" && scan?.lowercase(Locale.ROOT)?.endsWith(".usdz") == true && current != null &&
     current.model.lowercase(Locale.ROOT).endsWith(".stl") && current.seats.isNullOrEmpty() &&
     state != Project.State.Printing && state != Project.State.TouchingUp

@@ -12,6 +12,7 @@ import androidx.compose.foundation.selection.selectable
 
 import com.scantomake.counterpart.api.canLocate
 
+import com.scantomake.counterpart.api.photoPicture
 import com.scantomake.counterpart.api.pictureFor
 
 import com.scantomake.counterpart.api.ProjectGallery
@@ -190,7 +191,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             var chosen by remember(id) { mutableStateOf<String?>(null) }
             val entry = gallery.entries.firstOrNull { it.id == chosen } ?: gallery.first
             Box(Modifier.fillMaxWidth().aspectRatio(1.1f).clip(RoundedCornerShape(28.dp))) {
-                ProjectImage(project, entry?.let(project::pictureFor), Modifier.fillMaxSize(), ContentScale.Fit)
+                // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card.
+                ProjectImage(project, entry?.let(project::pictureFor) ?: project.photoPicture(), Modifier.fillMaxSize(), ContentScale.Fit)
                 StatusCapsule(words.phase, modifier = Modifier.padding(12.dp))
                 entry?.sizeText()?.let { Text(it, Modifier.align(Alignment.BottomStart).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.55f)).padding(8.dp, 4.dp), fontSize = 12.sp) }
                 // On the picture, with the same dark backing as the size and status chips, so it reads on either stage.

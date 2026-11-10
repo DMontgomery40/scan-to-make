@@ -75,6 +75,15 @@ enum Fixtures {
                 return project
             }
         }
+        // `-CounterpartFixtureSet photo-only`: photos sent, no scan model or result yet. The page shows the subject the
+        // Mac cut out of the first photo (`pictures.photo`), as the project's card does (review of #451, item 7).
+        if set == "photo-only" {
+            let now = now.timeIntervalSince1970 * 1000
+            return [["id": ids.mic, "createdAtMs": now - 120_000, "updatedAtMs": now, "state": "touching-up",
+                "title": "Mic mount", "kind": "fit", "instructions": "Something that holds this mic on top of my monitor arm pole.",
+                "photos": ["photo1.jpg", "photo2.jpg"], "messages": [], "passes": [["startedAtMs": now - 60_000, "trigger": "new"]],
+                "picture": "pictures/photo-1.png", "pictures": ["photo": "pictures/photo-1.png"]]]
+        }
         // A copy of a designer's 3MF whose printer MCP says it prints with its own settings, saved at Fine/Strong
         // (Nov 5, caliper card 1f1c5515): the sheet must start at Standard and say it prints the designer's settings.
         if set == "designer" {

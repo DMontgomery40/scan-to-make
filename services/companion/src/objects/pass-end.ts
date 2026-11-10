@@ -36,6 +36,14 @@ export function withPassEnded(passes: ObjectPass[], startedAtMs: number, end: Pa
     : endPass(pass, typeof end === 'function' ? end(pass) : end, atMs, typeof details === 'function' ? details(pass) : details));
 }
 
+/**
+ * The last pass that worked on the model. A locate pass (docs/protocols/seats.md) only says where the scanned object
+ * sits and changes nothing, so it is never "the last pass" for Retry, a failure or the session the next request continues.
+ */
+export function lastDesignPass(passes: ObjectPass[]): ObjectPass | undefined {
+  return passes.filter(pass => pass.trigger !== 'locate').at(-1);
+}
+
 /** The session the next request on this project continues, when its last pass ended in a way that allows it. */
 export function passResume(pass: ObjectPass | undefined): {sessionId: string; passDir: string; sessionCwd?: string} | undefined {
   if (!pass || pass.endedAtMs === undefined || pass.resumable !== true || !pass.sessionId || !pass.dir) return undefined;
@@ -48,7 +56,7 @@ export function passResume(pass: ObjectPass | undefined): {sessionId: string; pa
  * when anything else changes the failure (a later printer failure must not inherit Retry from an older worker stop).
  */
 export function canRetryPass(object: Pick<StmObject, 'state' | 'failure' | 'failedPass' | 'passes'>): boolean {
-  const last = object.passes.at(-1);
+  const last = lastDesignPass(object.passes);
   if (object.state !== 'failed' || !object.failure || !last || failedPass(object) !== last.startedAtMs) return false;
   return last.status === 'capped' || ((last.status === 'failed' || last.status === 'interrupted') && last.resumable === true && !!last.sessionId);
 }
@@ -59,7 +67,7 @@ export function canRetryPass(object: Pick<StmObject, 'state' | 'failure' | 'fail
  */
 export function failedPass(object: Pick<StmObject, 'state' | 'failure' | 'failedPass' | 'passes'>): number | undefined {
   if (object.failedPass !== undefined || object.state !== 'failed' || !object.failure) return object.failedPass;
-  const last = object.passes.at(-1);
+  const last = lastDesignPass(object.passes);
   return last?.endedAtMs !== undefined && last.activity?.at(-1)?.text === object.failure ? last.startedAtMs : undefined;
 }
 

@@ -33,7 +33,23 @@ export interface ObjectMessage { id: string; text: string; atMs: number; photos:
    *  never a new one (Nov 10: a note whose reply was lost was sent again and started a second design pass). */
   clientId?: string }
 
+/**
+ * What a locate pass found on the project when it started (docs/protocols/seats.md): it changes nothing, so it gives all
+ * of this back when it ends, however it ends, a restart included.
+ */
+export interface LocateSnapshot {
+  state: StmObject['state'];
+  question?: StmObject['question'];
+  failure?: string;
+  failedPass?: number;
+  pendingFollowup?: string;
+  pendingMessageId?: string;
+  completion?: StmObject['completion'];
+}
+
 export interface ObjectPass {
+  /** A locate pass only: the project as it was before it, restored when it ends. */
+  before?: LocateSnapshot;
   messageId?: string;
   /** Photos explicitly sent with this message, never inferred from old project files. */
   photos?: string[];
@@ -203,6 +219,14 @@ export interface StmObject {
   };
 }
 
+/** The project as a locate pass found it: every field it would otherwise disturb, exactly as it was. */
+export function restoreLocate(o: StmObject, before: LocateSnapshot): StmObject {
+  const {question: _q, failure: _f, failedPass: _p, pendingFollowup: _pf, pendingMessageId: _pm, completion: _c, ...rest} = o;
+  return {...rest, state: before.state, ...(before.question ? {question: before.question} : {}), ...(before.failure !== undefined ? {failure: before.failure} : {}),
+    ...(before.failedPass !== undefined ? {failedPass: before.failedPass} : {}), ...(before.pendingFollowup !== undefined ? {pendingFollowup: before.pendingFollowup} : {}),
+    ...(before.pendingMessageId !== undefined ? {pendingMessageId: before.pendingMessageId} : {}), ...(before.completion ? {completion: before.completion} : {})};
+}
+
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/;
 
@@ -294,6 +318,10 @@ export class ObjectStore {
         const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
         await this.update(object.id, o => {
           const open = o.state === 'touching-up' ? o.passes.at(-1) : undefined;
+          // A locate pass changes nothing, a restart included: the project is given back as it was.
+          if (open?.trigger === 'locate' && open.endedAtMs === undefined && open.before) return {...restoreLocate(o, open.before), progress: undefined,
+            passes: withPassEnded(o.passes, open.startedAtMs, {status: 'interrupted', resumable: false}, atMs,
+              pass => ({activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200)}))};
           if (!open || open.endedAtMs !== undefined) return {...o, state: 'failed', failure, progress: undefined, printConfirmation: undefined};
           // Only a pass whose worker had a live session when the app stopped may continue it.
           return {...o, state: 'failed', failure, failedPass: open.startedAtMs, progress: undefined, printConfirmation: undefined,

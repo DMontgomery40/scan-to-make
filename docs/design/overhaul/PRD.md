@@ -577,6 +577,13 @@ What a person can see and reach, checked in code on `main` Nov 5 (after this PR:
 | First look, Welcome's starters and Continue (U14) | Both starters whole, side by side (shared `StarterProjectsView.cardWidth`: natural width when all fit, both whole when two, a deliberate third-card peek when more; `StarterProjectTests`, `LayoutParityUITests.testWelcomeShowsBothStartersWhole`); Continue's bar has a hard edge so nothing reads through it. **Before: the second starter cut at the margin; the fit card's words showing behind Continue** | the same rule; at iPad width all fit at natural size | the same shared view; at Mac widths, unchanged | Welcome has no starters and Continue is inline at the end; Home's starter row uses the same rule (`starterCardWidth`, `HomeLayoutTests.starterCardsFitWholeOrPeekDeliberately`), uncompiled on the Mac | Starters are a wrapping grid: nothing cut |
 | First look, "This build isn't signed for iCloud." (U15) | Shown only in the Simulator or with fixtures: every device build carries `CounterpartCloudEnabled` and the CloudKit entitlements in the one Info.plist Debug and Release share, so TestFlight and the App Store never show it (`CloudBuildTests`). The same rule covers Settings → Notifications' "iCloud isn't available in this build" | the same | Release (`release.sh`) always signs with the CloudKit profile | No iCloud | No iCloud |
 
+On every layout, Together (and See it together) is offered only for a scan in USDZ: the seats are in that scan's frame
+(`scan.usdz` world ×1000, Y-up → Z-up), the frame every stage draws. A handheld STL or another mesh has a frame of its
+own, so a fit on one shows the part and What you scanned but no Together until a pass records which frame its seats use
+(the shared case "a fit with seats on a handheld STL scan" in `project-gallery.json`). With photos sent and no model yet,
+the page shows the subject the computer cut out of the first photo (`photoPicture`, the shared photo-only case; iPhone
+and iPad in the same UI test).
+
 **Add printer on the phones** (David, 2026-11-06: "adding a printer is filling out a form that hsould be mostly autofilled by discovery"). The iPhone, iPad and Android call the companion's own `printers.discover`, `.check`, `.obtain` and `.add` over `/v1/printers/setup/*` (objects-api.md), so the MCPs still find the printers and declare the fields, and their `.env` files stay on the computer. A found printer opens filled in; the person types only what discovery can't know, such as the access code or API key, or approves it in the printer's own page when the MCP offers that.
 
 **Public site** (`site/public`): Help is in every page's nav. The scan rig is in help.html and index.html; the starters are listed only on beta.html.

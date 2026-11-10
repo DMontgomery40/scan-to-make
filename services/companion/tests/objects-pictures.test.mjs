@@ -61,3 +61,57 @@ test('the companion draws each picture once, records it on the project, and serv
   assert.match(await readFile(join(dir, printed.picture), 'utf8'), /FEC600/);
   await assert.rejects(readFile(join(dir, first.pictures.part)), {code: 'ENOENT'}, 'old pictures go');
 });
+
+// Review of #451, blocker 3: a picture that can't be drawn is tried once per set of inputs, writes nothing and sends
+// no event after that, and a redraw that fails keeps the picture the role had.
+test('a photo whose subject cannot be cut out is tried once: no writes and no events after that', async t => {
+  const root = await tempDir('objects-pictures-fail-');
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects')), events = [];
+  let attempts = 0;
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, events: {emit: async event => { events.push(event); }},
+    drawPicture: async () => { attempts++; return false; }});
+  t.after(() => service.close());
+  const object = await store.create('A clip', 'fit');
+  await store.addFile(object.id, 'photos', 'room.jpg', Buffer.from('jpeg'));
+  await store.update(object.id, o => ({...o, photos: ['room.jpg']}));
+  const stamp = (await store.get(object.id)).updatedAtMs;
+  for (let i = 0; i < 4; i++) { await service.list(); await service.picturesDrawn(); }
+  assert.equal(attempts, 1, 'one attempt for these inputs');
+  const after = await store.get(object.id);
+  assert.equal(after.updatedAtMs, stamp, 'never rewritten');
+  assert.equal(after.picture, undefined);
+  assert.equal(events.filter(event => event.type === 'project.updated').length, 0, 'no project.updated, so nothing feeds a reload');
+  // A new photo is new inputs: tried again, once.
+  await store.addFile(object.id, 'photos', 'clip.jpg', Buffer.from('jpeg2'));
+  await store.update(object.id, o => ({...o, photos: ['clip.jpg', 'room.jpg']}));
+  await service.list(); await service.picturesDrawn(); await service.list(); await service.picturesDrawn();
+  assert.equal(attempts, 2);
+});
+
+test('a redraw that fails keeps the picture the role had, file and name', async t => {
+  const root = await tempDir('objects-pictures-keep-');
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects'));
+  let working = true;
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
+    drawPicture: async (dir, spec, output) => { if (!working) return false; await writeFile(output, `png ${JSON.stringify(spec)}`); return true; }});
+  t.after(() => service.close());
+  const object = await store.create('A holder', 'fit');
+  const dir = store.dir(object.id);
+  await mkdir(join(dir, 'current'), {recursive: true});
+  await writeFile(join(dir, 'current', 'model.stl'), 'solid x\nendsolid x\n');
+  await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
+  await service.list(); await service.picturesDrawn();
+  const first = await service.get(object.id);
+  assert.ok(first.pictures.part);
+  working = false;
+  await store.update(object.id, o => ({...o, state: 'printed', print: {bundleId: 'b', spools: [{colour: '#FEC600'}]}}));
+  await service.list(); await service.picturesDrawn();
+  const after = await service.get(object.id);
+  assert.equal(after.pictures.part, first.pictures.part, 'the old picture stays');
+  assert.equal(after.picture, first.picture);
+  assert.match(await readFile(join(dir, first.pictures.part), 'utf8'), /^png/, 'and its file is still there');
+});

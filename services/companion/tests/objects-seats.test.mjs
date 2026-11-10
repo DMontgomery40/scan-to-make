@@ -86,19 +86,24 @@ async function setup(t, outcomes, {scanBox = BOTTLE} = {}) {
   const runTouchup = async input => {
     inputs.push(input);
     const outcome = outcomes[inputs.length - 1];
+    // The worker moves through its stages as a real pass does, so the stage times are offered for the estimates.
+    for (const id of outcome.stages ?? []) { input.onStage?.(id); await new Promise(resolve => setTimeout(resolve, 5)); }
     const passDir = join(root, `pass-${inputs.length}`), out = join(passDir, 'out');
     await mkdir(out, {recursive: true});
     const model = join(out, 'touched.stl');
     if (outcome.model !== false) await writeFile(model, HOLDER);
     return {renders: [], checkpoints: [], stats: {seconds: 3, toolCalls: 2}, passDir, ...(outcome.model !== false ? {model} : {}), status: outcome.status ?? 'done', ...outcome.result};
   };
+  // The real timings, with every stage time it is given written down here too.
+  const timings = new PassTimings(join(root, 'timings.json')), recorded = [];
+  const passTimings = {typical: (...args) => timings.typical(...args), record: async (...args) => { recorded.push(args); }};
   const service = new ObjectService({store, runTouchup, stlInfo: async () => [213, 43, 82], claudePath: '/unused', handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
-    events: {emit: async () => {}}, passTimings: new PassTimings(join(root, 'timings.json')), scanBounds: async () => scanBox});
+    events: {emit: async () => {}}, passTimings, scanBounds: async () => scanBox});
   t.after(() => service.close());
   const object = await service.create('A wall holder for three of these', 'fit');
   await store.addFile(object.id, 'scan', 'scan.usdz', Buffer.from('usdz'));
   await store.update(object.id, o => ({...o, scan: 'scan.usdz'}));
-  return {service, store, object, inputs};
+  return {service, store, object, inputs, recorded};
 }
 
 test('a fit pass\'s seats are kept with its model, served to every client, and restated by a change', async t => {
@@ -151,7 +156,111 @@ test('locate finds where the object sits in an existing part, changes nothing, a
   assert.equal(refused.state, 'printed');
 });
 
+// Review of #451, item 5: a locate pass's time says nothing about how long a design takes.
+test('a locate pass never feeds the stage times that estimate a design', async t => {
+  const f = await setup(t, [{stages: ['working', 'saving'], result: {summary: 'Three pockets.'}},
+    {stages: ['working', 'saving'], model: false, result: {summary: 'One bottle in each pocket.', seats: SEATS}}]);
+  await f.service.start(f.object.id);
+  await f.service.settled(f.object.id);
+  assert.ok(f.recorded.length > 0, 'a design pass records its stage times');
+  const before = f.recorded.length;
+  await f.service.locate(f.object.id);
+  const located = await f.service.settled(f.object.id);
+  assert.deepEqual(located.current.seats, SEATS);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(f.recorded.length, before, 'the locate pass recorded nothing');
+});
+
 test('locate is only for a part made to fit a scanned object', async t => {
   const f = await setup(t, []);
   await assert.rejects(f.service.locate(f.object.id), /made to fit a scanned object/, 'no model yet');
+});
+
+// Review of #451, item 4: seats are in the USDZ scan's frame; a handheld STL has its own, so no See it together on it.
+test('locate is refused for a part fitted to a handheld STL scan, and runs no pass', async t => {
+  const f = await setup(t, [{result: {summary: 'Three pockets.'}}]);
+  await f.service.start(f.object.id);
+  await f.service.settled(f.object.id);
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.stl'}));
+  await assert.rejects(f.service.locate(f.object.id), /only in a scan from the phone \(USDZ\)/);
+  assert.equal(f.inputs.length, 1, 'no worker ran');
+  assert.equal((await f.service.get(f.object.id)).passes.length, 1);
+});
+
+// Review of #451, blocker 1: See it together is the one pass that changes nothing. It gives back the open question,
+// the failure and its Retry, and Marked Done, and it is never "the last pass" for Retry or the session a request resumes.
+async function locatable(t, outcomes, shape) {
+  const f = await setup(t, [{result: {summary: 'Three pockets.'}}, ...outcomes]);
+  await f.service.start(f.object.id);
+  await f.service.settled(f.object.id);
+  await f.store.update(f.object.id, o => shape(o));
+  return f;
+}
+
+test('locate leaves an open question exactly as it was', async t => {
+  const ask = {id: 'ask-1', question: 'Can you take a close-up of the hook?', answers: ['camera', 'photos'], status: 'open', askedAtMs: 5};
+  const f = await locatable(t, [{model: false, result: {summary: 'In the pockets.', seats: SEATS}}],
+    o => ({...o, state: 'needs-closeup', question: {closeup: 'the hook'}, ask, pendingFollowup: 'Also round the edges', pendingMessageId: 'm-1'}));
+  await f.service.locate(f.object.id);
+  const after = await f.service.settled(f.object.id);
+  assert.equal(after.state, 'needs-closeup');
+  assert.deepEqual(after.question, {closeup: 'the hook'});
+  assert.deepEqual(after.ask, ask);
+  assert.equal(after.pendingFollowup, 'Also round the edges');
+  assert.equal(after.pendingMessageId, 'm-1');
+  assert.deepEqual(after.current.seats, SEATS, 'and its seats join the model');
+});
+
+test('locate leaves a failure and its Retry, and the next request still resumes the stopped pass', async t => {
+  const failure = 'Stopped after 120 tool calls. Try again or review the saved checkpoint.';
+  const f = await locatable(t, [{model: false, result: {summary: 'In the pockets.', seats: SEATS}}, {}], o => {
+    const design = {...o.passes.at(-1), status: 'capped', resumable: true, sessionId: 'session-1', dir: '/tmp/pass-1', limit: {kind: 'tool-calls', value: 120},
+      activity: [{atMs: 9, kind: 'message', text: failure}]};
+    return {...o, state: 'failed', failure, failedPass: design.startedAtMs, passes: [...o.passes.slice(0, -1), design]};
+  });
+  assert.equal(publicObject(await f.service.get(f.object.id)).canRetryCleanup, true);
+  await f.service.locate(f.object.id);
+  const after = await f.service.settled(f.object.id);
+  assert.equal(after.state, 'failed');
+  assert.equal(after.failure, failure);
+  assert.equal(publicObject(after).canRetryCleanup, true, 'Retry still belongs to the stopped design pass');
+  assert.equal(after.passes.at(-1).trigger, 'locate');
+  await f.service.correct(f.object.id, 'Try again with fewer steps');
+  await f.service.settled(f.object.id);
+  assert.equal(f.inputs.at(-1).resume?.sessionId, 'session-1', 'the next request continues the design pass, not the locate pass');
+});
+
+test('locate leaves Marked Done marked', async t => {
+  const completion = {messageId: 'm-2', note: 'It works!', atMs: 7, previousStatus: 'printed'};
+  const f = await locatable(t, [{model: false, result: {summary: 'In the pockets.', seats: SEATS}}],
+    o => ({...o, state: 'confirmed', settings: {status: 'works'}, completion}));
+  await f.service.locate(f.object.id);
+  const after = await f.service.settled(f.object.id);
+  assert.equal(after.state, 'confirmed');
+  assert.deepEqual(after.completion, completion, 'never undone by a pass that changes nothing');
+});
+
+test('a refused or interrupted locate gives the project back too, a restart included', async t => {
+  const failure = 'The printer stopped.';
+  const f = await locatable(t, [{model: false, result: {summary: 'Rebuilt.', seats: SEATS}, status: 'failed'}], o => ({...o, state: 'failed', failure}));
+  await f.service.locate(f.object.id);
+  const refused = await f.service.settled(f.object.id);
+  assert.equal(refused.state, 'failed');
+  assert.equal(refused.failure, failure);
+  // A restart in the middle of a locate pass: the project comes back as it was, not "interrupted".
+  const started = Date.now();
+  await f.store.update(f.object.id, o => ({...o, state: 'touching-up', failure: undefined,
+    passes: [...o.passes, {startedAtMs: started, resumable: false, trigger: 'locate', before: {state: 'failed', failure}}]}));
+  await f.store.recoverInterrupted();
+  const restarted = await f.store.get(f.object.id);
+  assert.equal(restarted.state, 'failed');
+  assert.equal(restarted.failure, failure);
+  assert.equal(restarted.passes.at(-1).status, 'interrupted');
+});
+
+test('locate is refused for a part that already has its seats', async t => {
+  const f = await setup(t, [{result: {summary: 'Three pockets.', seats: SEATS}}]);
+  await f.service.start(f.object.id);
+  await f.service.settled(f.object.id);
+  await assert.rejects(f.service.locate(f.object.id), /already knows where the object sits/);
 });

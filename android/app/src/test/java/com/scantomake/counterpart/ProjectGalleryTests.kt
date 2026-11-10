@@ -2,6 +2,8 @@ package com.scantomake.counterpart
 
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectGallery
+import com.scantomake.counterpart.api.canLocate
+import com.scantomake.counterpart.api.photoPicture
 import com.scantomake.counterpart.api.picturePath
 import com.scantomake.counterpart.core.parseObject
 import kotlinx.serialization.json.*
@@ -23,6 +25,8 @@ class ProjectGalleryTests {
             val expected = item["entries"]!!.jsonArray.map { it.jsonObject }
             val entries = ProjectGallery.of(project).entries
             assertEquals(name, expected.map { it["id"]!!.jsonPrimitive.content }, entries.map { it.id })
+            item["photoPicture"]?.let { assertEquals(name, it.jsonPrimitive.content, project.photoPicture()) }
+            item["canLocate"]?.let { assertEquals(name, it.jsonPrimitive.boolean, project.canLocate) }
             entries.zip(expected).forEach { (entry, want) ->
                 assertEquals(name, want["kind"]!!.jsonPrimitive.content, entry.kind.wire)
                 assertEquals(name, want["label"]!!.jsonPrimitive.content, entry.label)
@@ -44,6 +48,12 @@ class ProjectGalleryTests {
                 }
             }
         }
+    }
+
+    /** Review of #451, finding 5: a locate pass changes no file, so the media version (and the download cache) stays. */
+    @Test fun aLocatePassNeverRollsTheMediaVersionOver() {
+        val p = Project.decode(parseObject("""{"id":"p","createdAtMs":1,"updatedAtMs":2,"state":"ready","passes":[{"startedAtMs":10,"endedAtMs":20,"status":"done","trigger":"new"},{"startedAtMs":30,"endedAtMs":40,"status":"done","trigger":"locate"}]}""")!!)!!
+        assertEquals(20L, p.mediaVersion)
     }
 
     /** David, Nov 10: "the photograph including everything in it is by far the worst". Never a photo or a scan frame. */

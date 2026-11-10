@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { gallery, lightStage } from "../src/gallery";
+import { canLocate, gallery, lightStage, photoPicture } from "../src/gallery";
 import {
   codeEngineRow,
   passEnding,
@@ -86,6 +86,8 @@ test("every client derives the same pictures from the shared gallery cases", () 
   for (const item of doc.cases) {
     const entries = gallery(item.project as Project);
     assert.deepEqual(entries.map((e) => e.id), item.entries.map((e: { id: string }) => e.id), item.name);
+    if (item.photoPicture) assert.equal(photoPicture(item.project as Project), item.photoPicture, item.name);
+    if (item.canLocate !== undefined) assert.equal(canLocate(item.project as Project), item.canLocate, item.name);
     entries.forEach((entry, index) => {
       const want = item.entries[index];
       assert.equal(entry.kind, want.kind, item.name);

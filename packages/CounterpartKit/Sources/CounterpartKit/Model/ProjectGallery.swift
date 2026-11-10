@@ -55,8 +55,10 @@ public struct ProjectGallery: Equatable, Sendable {
         }
         let scans = project.scanModels(onThisDevice: scanOnThisDevice)
         // Together: the one result with the scanned object in every seat, only where the pass said where it sits.
+        // Only where it is drawn right today: a USDZ scan, whose frame (metres, Y up) the stages and the Mac's picture
+        // assume. A scan in another frame (a handheld STL) gets no Together until the project carries its frame.
         if let part = parts.first, parts.count == 1, case .model(let model) = part.drawing,
-           let seats = project.current?.seats, !seats.isEmpty, let scan = scans.first {
+           let seats = project.current?.seats, !seats.isEmpty, let scan = scans.first, scan.lowercased().hasSuffix(".usdz") {
             entries.append(Entry(id: "together", kind: .together, label: "Together", drawing: .assembly(part: model, object: scan, seats: seats),
                                  colour: part.colour, measures: "Together", sizeMm: nil, photos: []))
         }
@@ -113,7 +115,7 @@ extension Project {
     /// it, else the colour the printer reported while printing it. Nil (neutral) until then, and for a print in several spools.
     public var spoolColour: String? {
         if let spools = print?.spools, !spools.isEmpty {
-            let colours = Set(spools.map { $0.colour.uppercased() })
+            let colours = Set(spools.map { Self.hex($0.colour) ?? $0.colour })
             return colours.count == 1 ? Self.hex(spools[0].colour) : nil
         }
         return print?.live?.activeFilament?.color.flatMap(Self.hex)
@@ -154,6 +156,17 @@ extension Project {
         if let render = current?.renders.first { return Self.renderPath(render) }
         return nil
     }
+
+    /// See it together (PRD §5.4): a part made to fit a scanned object, made before passes said where the object sits;
+    /// the Mac can find it, changing nothing. Only for a USDZ scan, the one frame Together is drawn in today (§6.1).
+    public var canLocate: Bool {
+        kind == "fit" && (scan?.lowercased().hasSuffix(".usdz") ?? false) && current != nil && !preservesPublishedFilaments
+            && (current?.seats ?? []).isEmpty && state != .printing && state != .touchingUp
+    }
+
+    /// The page's picture when the gallery has nothing yet (photos sent, no scan model or result): the subject the Mac
+    /// cut out of the photo, the same picture the project's card shows.
+    public var photoPicture: String? { pictures?["photo"] }
 
     /// The Mac's picture of one gallery entry, for layouts that show pictures rather than a model to turn.
     public func picture(for entry: ProjectGallery.Entry) -> String? {

@@ -906,3 +906,18 @@ enum DidItFit {
     }
     static func dismiss(_ object: Project, defaults: UserDefaults = .standard) { defaults.set(true, forKey: key(object)) }
 }
+
+/// What a project's stage offers on the Mac (PRD §5.4): `ProjectDetail` renders these, and ObjectsModelTests asks
+/// them about the projects the model holds.
+enum ProjectStageOffer {
+    /// The pictures the chooser over the stage offers: every gallery entry when there is more than one, none for one.
+    static func pictureChoices(_ object: Project) -> [ProjectGallery.Entry] {
+        let entries = ProjectGallery(project: object).entries
+        return entries.count > 1 ? entries : []
+    }
+
+    /// See It Together sits on the stage while the part is shown, for a part the Mac can locate (`canLocate`).
+    static func seeItTogether(_ object: Project, showing entry: ProjectGallery.Entry?) -> Bool {
+        entry?.kind == .part && object.canLocate
+    }
+}

@@ -64,8 +64,7 @@ struct ProjectDetail: View {
                 .overlay(alignment: .top) { pictureChooser.padding(.top, 64).environment(\.colorScheme, stageScheme) }
                 .overlay(alignment: .topLeading) {
                     // A fit made before passes said where the object sits: the Mac can work it out, changing nothing.
-                    if entry?.kind == .part, object.kind == "fit", object.scan != nil, object.current != nil, !object.preservesPublishedFilaments,
-                       (object.current?.seats ?? []).isEmpty, object.state != .printing, object.state != .touchingUp {
+                    if ProjectStageOffer.seeItTogether(object, showing: entry) {
                         Button { Task { await model.locate(object.id) } } label: { Label("See It Together", systemImage: "cube.transparent") }
                             .buttonStyle(.glass).disabled(working).padding(.top, 108).padding(.leading, 24)
                             .environment(\.colorScheme, stageScheme)
@@ -156,7 +155,7 @@ struct ProjectDetail: View {
     /// Which picture (PRD §5.4): a segmented control for the common two or three, a pop-up for a designer's many plates
     /// (HIG macOS: a segmented control to switch views in a toolbar area; a pop-up button for a long list). None for one.
     @ViewBuilder private var pictureChooser: some View {
-        let entries = gallery.entries
+        let entries = ProjectStageOffer.pictureChoices(object)
         let choice = Binding(get: { entry?.id ?? "" }, set: { picture = $0 })
         if entries.count > 4 {
             Picker("Picture", selection: choice) { ForEach(entries) { Text($0.label).tag($0.id) } }
@@ -194,7 +193,10 @@ struct ProjectDetail: View {
             case .picture(let path):
                 still(object.projectFile(path))
             }
-        } else { still(nil) }
+        } else {
+            // Photos sent, no scan model or result yet: the subject this Mac cut out, as the sidebar shows it.
+            still(object.photoPicture.flatMap(object.projectFile))
+        }
     }
 
     private func still(_ url: URL?) -> some View {

@@ -70,7 +70,8 @@ data class Project(
 
     val hasScan: Boolean get() = scan != null || !capture.isNullOrEmpty()
     /** Cached copies of renders expire only when a pass finishes. */
-    val mediaVersion: Long get() = (passes.lastOrNull { it.endedAtMs != null }?.endedAtMs ?: createdAtMs).toLong()
+    /** A locate pass changes no file (docs/protocols/seats.md), so it never rolls the version over. */
+    val mediaVersion: Long get() = (passes.lastOrNull { it.endedAtMs != null && it.trigger != "locate" }?.endedAtMs ?: createdAtMs).toLong()
     val runningPass: Pass? get() = if (state == State.TouchingUp) passes.lastOrNull { it.endedAtMs == null } else null
     val projectStatus: ProjectStatus? get() = ProjectStatus.of(settings?.status) ?: ProjectStatus.of(outcome)
     val isArchived: Boolean get() = settings?.archived ?: (archived == true || projectStatus == ProjectStatus.Archived)
