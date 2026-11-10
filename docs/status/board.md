@@ -13,6 +13,16 @@ Owners: **Lead** = the lead session (Claude Fable 5.2, Mac, thread "Take Over Sc
 
 Last reconciled: 2026-11-10 07:40Z, main `bf818db8`, by the lead.
 
+## The goal (what David cares about most)
+
+David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everything in the interim is just necessary noise and clutter that must be dealt with, all i want to do is get through all this, and get to our own custom kernel." Until this turn it sat at the bottom of this file as an idea for later. It is the top row now.
+
+| ID | What | Owner | Where | Next |
+|---|---|---|---|---|
+| K1 | **Counterpart's own geometry kernel**, written from scratch for exactly what this app makes (parts that fit a scanned thing, parameter edits, scan cleanup), with no OpenCascade, no Blender, no Fusion and no 1.4 GB Python environment: small enough to ship inside the MCPs' npm packages and install with nothing. It replaces what sits behind the `cad/1` tools (`cad_run`, `cad_check_fit`) that landed in the MCP PRs on Nov 9–10, so the app does not change when the engine underneath does. The other engines it retires: the Blender bridge, the Fusion bridge and its 93 third-party tools (stage 2, Q4), then build123d itself | Lead; built by a kernel lab on the Linux machines so it never waits for the Mac's build lane | Kernel lab started Nov 10 on agents-136 (`~/kernel-lab`), judged by a fixed benchmark of David's real parts against the build123d engine | First lab report: representation chosen by measurement, the benchmark table, what it cannot do yet. Then loop: each round takes the worst benchmark row |
+| K2 | The seam the kernel slots into: the `cad/1` contract in both MCPs (bambu-printer-mcp #136, mcp-3D-printer-server #92) and the app using it (#439, on main). Waits on W1 to reach David's devices | Lead | Green, unpublished | W1 |
+| K3 | Everything between here and the kernel being David's daily engine: W1 (publish), Q4 (Blender and Fusion leave the app), X6 (the engine edits a designer's 3MF), and the benchmark reaching parity on fit parts | Lead | See those rows | In that order |
+
 ## Right now
 
 - **A print is running**: "Wall holder for three" (`30a2a33c`), started from Counterpart 06:49Z, about 2 h 10 m, 410 layers, ends about 09:05Z. Printing beats gating: one simulator or build at a time under `~/.stm-ios.lock`, and the lead checks the print's reports at every wake and owns any failure.
@@ -40,7 +50,7 @@ Last reconciled: 2026-11-10 07:40Z, main `bf818db8`, by the lead.
 | I5 | **The project's picture**: a gallery over a list (not three fixed views); the scan stays viewable; the result wears its filament colour; a Together view with the object in every seat (fit passes record seats; a seats-only action for older projects); **a project's picture everywhere is the object alone on the stage, never a raw photo with the room in it** (David, Nov 10; replaces the Nov 9 "photo first" rule; mockups `docs/design/overhaul/screens/phone-home.jpg`, `mac-main.jpg` are the reference) | D: "The project's picture…" | No PR yet | PR with real-data screenshots on every layout. |
 | I6 | "Is the Mac answering?" as one value, with the Android port (M8) | SM | PR #444 `7f055345` | Next train. |
 | I7 | Duo open: Printers and Settings in the edge rail (David, Nov 10 UTC) | SM | PR #445 `9202bde8`, stacked on #442 | Retarget to main after I1 lands; next train; four answers in the body. |
-| I8 | The companion sends the words for how each pass ended; fixtures' wrong spellings fixed (M2 slice 1) | SM | Branch `feat/pass-ending-words` (`b99baecb`, `c301181f`), not pushed until it compiles | Open as not-ready; real-data captures once I3's tool lands. |
+| I8 | The companion sends the words for how each pass ended; fixtures' wrong spellings fixed (M2 slice 1) | SM | PR #452 (draft, `c301181f`), stacked on #441 | Open as not-ready; real-data captures once I3's tool lands. |
 
 ## Queued: owned, not started
 
@@ -48,7 +58,7 @@ Last reconciled: 2026-11-10 07:40Z, main `bf818db8`, by the lead.
 |---|---|---|---|
 | Q1 | #413 generic setup form, then #410 MCP Update rows, as one train (triage: `~/scan-to-make-work/branch-triage-2026-11-09/triage.md`) | Lead | W1 |
 | Q2 | Print attempt and plates as one design: the #404 rework on the MCPs' `printOutcome`, a stalled slice during Print reads "not sent", "printed elsewhere" (M1 + rest of M2) | SM | W1 for the wire half; the in-memory half can start |
-| Q3 | Kinds of "Needs you" (M4): a size question shows number fields prefilled from the scan and takes numbers back; the "Fit brief" block David never wrote becomes fields, and his request is shown as he wrote it | SM | After I8 |
+| Q3 | Kinds of "Needs you" (M4), design agreed Nov 10. **A1**: the fit choice travels as fields; the "Fit brief" block leaves both clients and everything shown, including projects that already carry it (next train). **A2**: a question says its kind; a size question shows labelled number fields prefilled from the scan or the published size, plus a text box and Camera (after I2's PR). **B**: the fit rules as a `fit_sizes` prompt in both MCPs (needs W1's kind of publish). **C**: delete the companion's copy of the rules once B is installed | SM | A1 now; A2 after I2; B, C after W1 |
 | Q4 | One engine, stage 2: Blender and Fusion setup, repair, lock and launch leave the app; engine names come from the MCP | Lead | W1, David accepting the code engine on his device, and X6 |
 | Q5 | Phone draft send (M7): a send from the project page never enters `store.sending`, so Home says "Draft saved" and a reopened page can send twice (by reading) | SM | One check on David's phone with his next scan |
 | Q6 | A new TestFlight build and Mac beta from main (the public builds are from Nov 6 and predate the scan fix) | Lead | I1, I2, I5 landed and looked at |
@@ -105,7 +115,7 @@ Last reconciled: 2026-11-10 07:40Z, main `bf818db8`, by the lead.
 | Nov 9 | "I was presumably NEVER using the app with all fixes included … squash all the changes together … then run the review" | Done: the train (operations.md); two trains landed |
 | Nov 9 | build123d: "we should include it, and the MCP … put a note in docs and the read me … that they can take it out" | Done in #136/#92 (unpublished: W1) |
 | Nov 9 | "replace blender as well … get down to one core thing" | Stage 1 done (#439); Q4, X6 |
-| Nov 9 | "what if these new models are good enough to literally just write it from scratch" | Idea L1 |
+| Nov 9 (about 4 pm MST) | "what if these new models are good enough to literally just write it from scratch with nothing ? Or just build our own optimized perfect library?" | **K1**, the goal |
 | Nov 9 | "This all seems weirdly slow" | X5; Mac capped at about three heavy delegates; W5 |
 | Nov 9 | Use the wait tool; message other sessions; correct them as they go | Done: operations.md; in use |
 | Nov 9 11:13 pm | "the area it's highlighting is almost impossible to see" | I2 |
@@ -123,6 +133,7 @@ Last reconciled: 2026-11-10 07:40Z, main `bf818db8`, by the lead.
 | Nov 10 | Separate pieces: "that is literally what a slicer does? and we're not a slicer? ... we do what steve jobs would do if he was creating a frontend for an mcp server that can print from like 5 slicers ... don't show the separated objects (which again, the slicer does, so we therefore have them) unless the user separates them" | P1; a standing test for every design here: is this the slicer's job? then it is the MCP's, and the app shows the result |
 | Nov 10 | "counterpart is the glittery friendly frontend ... the backend is the mcps ... half of what this app does if not more, is really an update to the mcps ... DOES THE APP STORE IN IOS TAKE KINDLY TO 4X DAILY UPDATES???" | AGENTS.md "The app staples onto the MCPs" (his words added); every brief states which half is the MCPs'; watch rows Q4 (engine names still in app code), P1 (parts are the MCPs' objects), Q2 (print truth from the MCPs' field) |
 | Nov 10 | "like many (most?) apps in todays world, there should be an 'auto update' toggle and ours should default to on. would be cool if we could just pull the diff" | Q9 |
+| Nov 10 | "i really hope it's on the todo list everything we talked about around 4pm mst regarding the whole potential replacement or partial replacement of other mcps and the separate kernel build specifically for this app's needs ... i sure hope that's highlighted on your list" | It was not highlighted (it was idea L1). Now K1–K3 at the top, and started |
 | (seen by the lead in his screenshots) | A "Fit brief:" block he never wrote is shown as his request | Q3 |
 | (seen by the lead) | A size question offers Camera, Photos, Best guess | Q3 |
 
@@ -137,7 +148,6 @@ Last reconciled: 2026-11-10 07:40Z, main `bf818db8`, by the lead.
 
 | ID | Idea | From |
 |---|---|---|
-| L1 | A small geometry kernel written from scratch on distance fields (watertight by construction, no 640 MB environment, could run in the MCP or on the phone), tried against the same holder and unicorn cases once the code engine has shipped | David, Nov 9 |
 | L2 | The Together view shows the clearance per seat ("0.8 mm clear") from the code engine's fit check | Lead, Nov 10; David: "note that for later" |
 | L4 | Parts: scanning a part into an existing project and the Mac telling two things in one scan apart are in the proposal as later slices | Parts proposal |
 | L6 | The design worker's rules ship inside the companion (so inside the Mac app). The MCPs already serve prompts (`fdm_design`, `fdm_slicing`, `cad_design`); anything in those rules that has to be tuned as printers, slicers or the engine change belongs in an MCP prompt, so it can change without an app release | Lead, Nov 10 |
