@@ -118,7 +118,7 @@ class HomeLayoutTests {
 
     private fun home() = compose.setContent { WithApp { HomeScreen(open = { _, _ -> }, newProject = {}, printers = {}, settings = {}) } }
 
-    @Test fun limitStopsNameTheLimitWithProjectsPresent() {
+    @Test fun inactivityStopShowsItsReasonAfterOpeningTheProjectWithProjectsPresent() {
         val rows = WireJson.parseToJsonElement(kitFixture("capped-projects.json").readText()).jsonArray
         val data = rows.first { it.jsonObject["name"]!!.jsonPrimitive.content == "limit-inactivity" }.jsonObject["expected"]!!.jsonObject
         val stopped = requireNotNull(Project.decode(data))
@@ -138,7 +138,7 @@ class HomeLayoutTests {
         val title = com.scantomake.counterpart.api.ProjectWords(stopped).title
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(title))
         compose.onNodeWithText(title).performClick()
-        compose.onNodeWithText(requireNotNull(stopped.failure)).performScrollTo().assertExists()
+        compose.onNodeWithText("Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.").performScrollTo().assertExists()
         compose.onNodeWithText("Try Again").performScrollTo().assertIsEnabled()
     }
 
