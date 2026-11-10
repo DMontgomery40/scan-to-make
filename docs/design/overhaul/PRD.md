@@ -1206,6 +1206,7 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
 - **Every installed MCP has its row in Settings → Printers**, with its Update or waiting state. If the list can't be read, Settings says so with Try Again, and never shows a shorter list (Nov 6: "now i only see one to update and missing the other one").
 - **After an update:** the companion closes that MCP's sessions, opens one again, re-reads its capabilities (§8.2) and shows the new version.
 - **On failure:** the previous version stays in use (npm and git leave it intact), and the log is attached to `mcp.update.failed`.
+- **A restart in the middle of an update is undone at the next start.** The companion writes each update down before it changes anything (`printers/mcp-updates/`, one file per install: what it is swapping and the overrides as they were). When it starts and finds one, it puts the previous copy and overrides back before any MCP session connects, and sends one `mcp.update.failed` saying what it did, so no app waits on an update that will never report. A git checkout is not rebuilt at start; its sentence says to press Update again. Built; engineering tests only (a companion stopped at each step in `mcp-updates.test.mjs`), not accepted.
 - **The same flow** updates the Fusion MCP pin (§8.9) once a new pin has passed its acceptance check.
 
 ### 8.11 Print a published model

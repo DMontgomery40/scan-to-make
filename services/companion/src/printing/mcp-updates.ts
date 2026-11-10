@@ -1,6 +1,6 @@
 import {spawn, type ChildProcess} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
-import {mkdir, readFile, rename, rm as fsRm, writeFile} from 'node:fs/promises';
+import {mkdir, readdir, readFile, rename, rm as fsRm, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {dirname, join} from 'node:path';
 import {printerBackendSchema, type PrinterHandoffConfig, type PrinterSession} from '@scan-to-make/printer-handoff';
@@ -158,6 +158,12 @@ const STILL_BUSY = (pkg: string, seconds: number) =>
   `Counterpart was still sending, slicing or designing for this printer after ${seconds} seconds, so it didn't update ${pkg}. Try Update again when that finishes.`;
 const NOT_STARTED_BACK = ', so Counterpart put the previous version back. Try Update again.';
 const NOT_STARTED = (pkg: string, seconds: number) => `The updated ${pkg} didn't start within ${seconds} seconds${NOT_STARTED_BACK}`;
+const RESTARTED = (pkg: string) => `Counterpart was restarted while it was updating ${pkg}`;
+const RESTARTED_UNCHANGED = (pkg: string) => `${RESTARTED(pkg)}, before anything changed. The previous version is still in use. Try Update again.`;
+const RESTARTED_BACK = (pkg: string) => `${RESTARTED(pkg)}, so it put the previous version back. Try Update again.`;
+const RESTARTED_CHECKOUT = (pkg: string, dir: string) => `${RESTARTED(pkg)} in ${dir}, so that copy may be half built. Press Update again to finish it.`;
+const RESTARTED_KEPT = (pkg: string, kept: string, live: string) =>
+  `${RESTARTED(pkg)} and couldn't put the previous version back. It is kept in ${kept}: move it to ${live}, or install a fresh copy.`;
 const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.length <= LOG_TAIL_BYTES ? text : bytes.subarray(bytes.length - LOG_TAIL_BYTES).toString('utf8').replace(/^�+/, ''); };
 const newer = newerVersion;
 
@@ -191,6 +197,8 @@ export interface McpUpdaterDeps {
   /** Prints and updates on a printer exclude each other. */
   gate?: PrintGate;
   fs?: UpdateFs;
+  /** Where each update in progress is written down (UpdateJournals), so a restart can undo it. Without it, nothing is. */
+  journal?: string;
 }
 
 /** The file moves an npm update makes (a staged install swapped in). */
@@ -205,6 +213,44 @@ const realFs: UpdateFs = {
   mkdir: async path => { await mkdir(path, {recursive: true}); },
 };
 
+/** The staged swap an npm update makes: `live` set aside as `kept` inside `staging`, then the staged copy moved to `live`. */
+type Swap = {kind: 'npm'; staging: string; live: string; kept: string; hadLive: boolean};
+/**
+ * An update in progress, written before each thing it changes. Until Nov 10 the only record of how far an update had
+ * got was a closure in memory: a companion restarted between the two moves left no live MCP and nothing to put the
+ * previous one back, and no client ever heard how the update ended. `admitted` has changed nothing yet; `changing`
+ * names what is being changed and the overrides as they were saved before it.
+ */
+export type UpdateJournal = {version: 1; mcpId: string; pkg: string; fromVersion?: string; toVersion?: string} & (
+  | {phase: 'admitted'}
+  | {phase: 'changing'; change: Swap | {kind: 'checkout'; dir: string} | {kind: 'none'}; overrides: Record<string, Override | null>});
+
+/** One file per install being updated, each written in full and renamed into place. */
+export class UpdateJournals {
+  readonly #dir: string;
+  constructor(dir: string) { this.#dir = dir; }
+  #path(mcpId: string) { return join(this.#dir, `${createHash('sha256').update(mcpId).digest('hex').slice(0, 24)}.json`); }
+  async write(journal: UpdateJournal): Promise<void> {
+    await mkdir(this.#dir, {recursive: true, mode: 0o700});
+    const path = this.#path(journal.mcpId), temporary = `${path}.${randomUUID()}.tmp`;
+    await writeFile(temporary, JSON.stringify(journal, null, 1) + '\n', {mode: 0o600});
+    await rename(temporary, path);
+  }
+  async remove(mcpId: string): Promise<void> { await fsRm(this.#path(mcpId), {force: true}); }
+  /** Every update that never reached its end. A file that can't be read is not one. */
+  async all(): Promise<UpdateJournal[]> {
+    const names = await readdir(this.#dir).catch(() => [] as string[]);
+    const found: UpdateJournal[] = [];
+    for (const name of names.filter(name => name.endsWith('.json')).sort()) {
+      try {
+        const journal = JSON.parse(await readFile(join(this.#dir, name), 'utf8')) as UpdateJournal;
+        if (journal?.version === 1 && typeof journal.mcpId === 'string' && typeof journal.pkg === 'string' && (journal.phase === 'admitted' || journal.phase === 'changing')) found.push(journal);
+      } catch { /* a torn or foreign file */ }
+    }
+    return found;
+  }
+}
+
 /**
  * PRD §8.10: Update actually updates the installation the companion runs, between jobs,
  * then restarts that MCP's sessions so the new version (and its capabilities) are used.
@@ -214,6 +260,7 @@ export class McpUpdater {
   readonly #run: CommandRunner;
   readonly #now: () => number;
   readonly #fs: UpdateFs;
+  readonly #journals?: UpdateJournals;
   readonly #latest = new Map<string, {atMs: number; version?: string; pending?: Promise<string | undefined>}>();
   /** One operation per install: a second request gets the first one's answer and state. */
   readonly #active = new Map<string, McpUpdate>();
@@ -227,6 +274,59 @@ export class McpUpdater {
   #timer?: ReturnType<typeof setInterval>;
   constructor(deps: McpUpdaterDeps) {
     this.#deps = deps; this.#run = deps.run ?? runCommand; this.#now = deps.now ?? Date.now; this.#fs = deps.fs ?? realFs;
+    if (deps.journal) this.#journals = new UpdateJournals(deps.journal);
+  }
+
+  /** Writes down where an update is. An update never fails because its journal couldn't be written. */
+  async #note(update: McpUpdate, pkg: string, state: {phase: 'admitted'} | {phase: 'changing'; change: Swap | {kind: 'checkout'; dir: string} | {kind: 'none'}; overrides: Record<string, Override | null>}): Promise<void> {
+    await this.#journals?.write({version: 1, mcpId: update.mcpId, pkg, ...(update.fromVersion ? {fromVersion: update.fromVersion} : {}),
+      ...(update.toVersion ? {toVersion: update.toVersion} : {}), ...state}).catch(() => undefined);
+  }
+  /** The update reached an end that a restart has nothing to add to. */
+  async #forget(mcpId: string): Promise<void> { await this.#journals?.remove(mcpId).catch(() => undefined); }
+
+  /**
+   * Puts back what a staged swap displaced, from what is on disk now: true when it changed anything. `kept` exists only
+   * between the two moves and until the update ends, so its presence says the previous copy is not in place.
+   */
+  async #unswap(swap: Swap): Promise<boolean> {
+    const exists = (path: string) => this.#deps.env.exists(path);
+    let changed = false;
+    if (exists(swap.kept)) {
+      if (exists(swap.live)) await this.#fs.rm(swap.live);
+      await this.#fs.rename(swap.kept, swap.live);
+      changed = true;
+    } else if (!swap.hadLive && exists(swap.live)) {
+      // There was no copy before, so this one is the new copy, which never proved it starts.
+      await this.#fs.rm(swap.live);
+      changed = true;
+    }
+    await this.#fs.rm(swap.staging).catch(() => undefined);
+    return changed;
+  }
+
+  /**
+   * At start, before any session connects: ends every update a restart cut short. A half-made swap is undone, the
+   * overrides go back to what was saved before it, and every client hears one mcp.update.failed with what happened,
+   * so none waits on an update that will never report.
+   */
+  async recover(): Promise<void> {
+    for (const journal of await this.#journals?.all() ?? []) {
+      const pkg = journal.pkg;
+      let sentence = RESTARTED_UNCHANGED(pkg), reason: string | undefined, keep = false;
+      if (journal.phase === 'changing') {
+        const change = journal.change;
+        if (change.kind === 'npm') {
+          try { if (await this.#unswap(change)) sentence = RESTARTED_BACK(pkg); }
+          // The journal stays: the next start tries again, and `kept` is still named in it.
+          catch { keep = true; reason = RESTORE_FAILED; sentence = RESTARTED_KEPT(pkg, change.kept, change.live); }
+        } else if (change.kind === 'checkout') sentence = RESTARTED_CHECKOUT(pkg, change.dir);
+        for (const [id, saved] of Object.entries(journal.overrides)) await this.#deps.overrides.set(id, saved ?? undefined).catch(() => undefined);
+      }
+      if (!keep) await this.#forget(journal.mcpId);
+      await this.#emit('mcp.update.failed', pkg, {mcpId: journal.mcpId, state: 'started', ...(journal.fromVersion ? {fromVersion: journal.fromVersion} : {}),
+        ...(journal.toVersion ? {toVersion: journal.toVersion} : {})}, `${sentence}\n`, reason);
+    }
   }
 
   /**
@@ -333,6 +433,8 @@ export class McpUpdater {
   }
   async applyOverrides(): Promise<void> {
     await this.#deps.overrides.load();
+    // Before the sessions get their overrides: an update a restart cut short is undone first.
+    await this.recover();
     for (const entry of this.#destinations()) await this.applyOverride(entry.id);
   }
 
@@ -416,6 +518,7 @@ export class McpUpdater {
     const update: McpUpdate = {mcpId, state: 'started', ...(fromVersion ? {fromVersion} : {}), toVersion: latest};
     this.#active.set(mcpId, update);
     this.#packages.set(mcpId, pkg);
+    await this.#note(update, pkg, {phase: 'admitted'});
     const claiming = this.#claim(mcpId, options);
     const pending = Symbol('checking printers');
     let admissionTimer: ReturnType<typeof setTimeout> | undefined;
@@ -429,12 +532,14 @@ export class McpUpdater {
         // falsely suggests the user should tap Update again while work is still running.
         void claiming.then(value => this.#finishAdmission(mcpId, options, latest, pkg, update, value)).catch(async () => {
           this.#active.delete(mcpId);
+          await this.#forget(mcpId);
           await this.#emit('mcp.update.failed', pkg, update, BUSY_UNKNOWN(pkg));
         });
       } else await this.#finishAdmission(mcpId, options, latest, pkg, update, claimed);
       return update;
     } catch {
       this.#active.delete(mcpId);
+      await this.#forget(mcpId);
       throw new McpUpdateError('unavailable', BUSY_UNKNOWN(pkg));
     } finally { clearTimeout(admissionTimer); }
   }
@@ -485,6 +590,7 @@ export class McpUpdater {
       // Nothing ran and nothing is held: the update ends, saying why.
       const update = this.#active.get(mcpId);
       this.#active.delete(mcpId);
+      await this.#forget(mcpId);
       if (update) await this.#emit('mcp.update.failed', pkg, update, why);
       return;
     }
@@ -523,6 +629,7 @@ export class McpUpdater {
     if (!first) {
       this.#active.delete(mcpId);
       release();
+      await this.#forget(mcpId);
       if (update) await this.#emit('mcp.update.failed', pkg, update, NO_PRINTERS(pkg)).catch(() => undefined);
       return;
     }
@@ -536,6 +643,9 @@ export class McpUpdater {
       return result.output;
     };
     let undo: (() => Promise<void>) | undefined, finish: (() => Promise<void>) | undefined;
+    // Kept past a failed restore of the swap: the next start tries again from it.
+    let keepJournal = false;
+    const saved = Object.fromEntries(members.map(member => [member.id, this.#deps.overrides.saved(member.id) ?? null]));
     try {
       await this.#emit('mcp.update.started', pkg, update);
       const install: McpInstall = options.fresh ? this.#freshInstall(first.config) : first.install;
@@ -547,6 +657,7 @@ export class McpUpdater {
         const live = join(plan.prefix, 'lib', 'node_modules', install.pkg), staged = join(staging, 'lib', 'node_modules', install.pkg), kept = join(staging, 'previous');
         finish = () => this.#fs.rm(staging);
         undo = finish;
+        await this.#note(update, pkg, {phase: 'changing', change: {kind: 'npm', staging, live, kept, hadLive: this.#deps.env.exists(live)}, overrides: saved});
         const output = await run('npm install', plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${install.pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${install.pkg}@${latest}`], undefined, plan.env);
         if (!this.#deps.env.exists(join(staged, 'package.json'))) throw new Error('npm install left no package');
         this.#verifyPostinstall(staged, output);
@@ -554,7 +665,7 @@ export class McpUpdater {
         const hadLive = this.#deps.env.exists(live);
         // A step of putting the previous copy back that fails says so; `staging` (which holds `kept`) then stays.
         const restore = async (step: () => Promise<void>, sentence = `Counterpart couldn't put the previous version back. It is kept in ${kept}: move it to ${live}, or install a fresh copy.`) => {
-          try { await step(); } catch { throw Object.assign(new Error('restore failed'), {restoreFailed: true, sentence}); }
+          try { await step(); } catch { keepJournal = true; throw Object.assign(new Error('restore failed'), {restoreFailed: true, sentence}); }
           await this.#fs.rm(staging).catch(() => undefined);
         };
         if (hadLive) {
@@ -568,6 +679,7 @@ export class McpUpdater {
       } else if (plan.kind === 'checkout') {
         await run('git status', '/bin/sh', ['-c', `test -z "$(${plan.git} -C "$1" status --porcelain)" || { echo "This copy has local changes"; exit 3; }`, 'sh', plan.dir], undefined, process.env);
         const head = (await run('git rev-parse', plan.git, ['-C', plan.dir, 'rev-parse', 'HEAD'], undefined, process.env)).trim().split('\n').at(-1)!;
+        await this.#note(update, pkg, {phase: 'changing', change: {kind: 'checkout', dir: plan.dir}, overrides: saved});
         undo = async () => {
           // Back to the commit that was running, rebuilt; the checkout had no local changes to lose. Each step is
           // checked: if one fails, the failure says the previous version couldn't be put back, rather than claiming it.
@@ -585,7 +697,7 @@ export class McpUpdater {
         await run('git pull', plan.git, ['-C', plan.dir, 'pull', '--ff-only'], undefined, process.env);
         await run('npm ci', plan.npm, ['ci'], plan.dir, plan.env);
         await run('npm run build', plan.npm, ['run', 'build'], plan.dir, plan.env);
-      }
+      } else await this.#note(update, pkg, {phase: 'changing', change: {kind: 'none'}, overrides: saved});
       // npx: each profile runs the new version; fresh: each runs the app's own copy, started the way its own profile
       // started its MCP (its own variables and directory: printers differ by them).
       for (const member of own) {
@@ -609,6 +721,8 @@ export class McpUpdater {
         const connected = session ? await within(session.connect({signal: AbortSignal.timeout(startMs)}), startMs, stuck) : undefined;
         if (member.id === first.id) catalog = connected;
       }
+      // Forgotten before the previous copy goes: a restart from here on has nothing to undo.
+      await this.#forget(mcpId);
       await finish?.().catch(() => undefined);
       this.#active.delete(mcpId);
       await this.#emit('mcp.update.done', pkg, {...update, toVersion: catalog?.server.version ?? latest});
@@ -632,6 +746,7 @@ export class McpUpdater {
         });
       }
       this.#active.delete(mcpId);
+      if (!keepJournal) await this.#forget(mcpId);
       await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)),
         restoreFailed ? RESTORE_FAILED : undefined);
     } finally { release(); }
@@ -668,6 +783,7 @@ export class McpUpdater {
       const update: McpUpdate = {mcpId, state: 'started', ...(fromVersion ? {fromVersion} : {}), toVersion: latest};
       this.#active.set(mcpId, update);
       this.#changing.set(mcpId, mcpId);
+      await this.#note(update, pkg, {phase: 'admitted'});
       void this.#performDownload(install, update, latest);
       return update;
     })().finally(() => this.#starting.delete(mcpId));
@@ -680,12 +796,14 @@ export class McpUpdater {
     let log = '';
     const staging = join(install.prefix, `.counterpart-update-${randomUUID()}`);
     const live = join(install.prefix, 'lib', 'node_modules', pkg), staged = join(staging, 'lib', 'node_modules', pkg), kept = join(staging, 'previous');
+    const swap: Swap = {kind: 'npm', staging, live, kept, hadLive: this.#deps.env.exists(live)};
     try {
       await this.#emit('mcp.update.started', pkg, update);
       const plan = this.#plan(install, latest);
       if ('fail' in plan) throw Object.assign(new Error(plan.fail), {sentence: plan.fail});
       if (plan.kind !== 'npm') throw new Error('not an npm install');
       await this.#fs.mkdir(install.prefix);
+      await this.#note(update, pkg, {phase: 'changing', change: swap, overrides: {}});
       const result = await this.#run(plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${pkg}@${latest}`], {env: plan.env, timeoutMs: MCP_UPDATE_TIMEOUT_MS});
       log += `$ ${[plan.command, ...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${pkg}@${latest}`].join(' ')}\n${result.output}\n`;
       if (result.code !== 0) throw new Error('npm install failed');
@@ -695,12 +813,15 @@ export class McpUpdater {
       // A copy without its package.json (an interrupted install) isn't an install: it is set aside, then removed.
       if (this.#deps.env.exists(live)) await this.#fs.rename(live, kept);
       await this.#fs.rename(staged, live);
+      await this.#forget(update.mcpId);
       await this.#fs.rm(staging).catch(() => undefined);
       this.#active.delete(update.mcpId);
       await this.#emit('mcp.update.done', pkg, {...update, toVersion: installedVersion(install, this.#deps.env) ?? latest});
     } catch (error) {
-      await this.#fs.rm(staging).catch(() => undefined);
+      // A copy set aside goes back before the staging folder (which holds it) is removed.
+      const stuck = await this.#unswap(swap).then(() => false, () => true);
       this.#active.delete(update.mcpId);
+      if (!stuck) await this.#forget(update.mcpId);
       const sentence = (error as {sentence?: string}).sentence;
       await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)));
     } finally {
