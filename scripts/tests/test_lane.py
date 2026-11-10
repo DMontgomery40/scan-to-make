@@ -1,3 +1,4 @@
+import lane_isolation  # noqa: F401  (first: no test may reach the real build lane)
 import json
 import os
 from pathlib import Path

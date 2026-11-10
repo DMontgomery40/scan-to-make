@@ -66,7 +66,12 @@ python3 scripts/lane.py --status                                              # 
   (`mobile/app`, the UI job, holds both), and its wait message prints `--status`. `ci_local.py --ios-lock
   <command>` is the same as `lane.py -- <command>`.
 - Agents: queue a hold as a background command so its exit wakes you, and never end a turn while it is queued or
-  running. Tests use temporary slots (`STM_LANE_SLOT1`, `STM_LANE_SLOT2`, `STM_LANE_DIR`, `STM_LANE_POLL`).
+  running.
+- **Tests never touch the real lane.** Every module in `scripts/tests` starts with `import lane_isolation`, which
+  points `STM_LANE_SLOT1`, `STM_LANE_SLOT2` and `STM_LANE_DIR` at a temporary folder for the whole test process
+  (subprocesses inherit it); `test_lane_isolation.py` fails if a module skips it or a child would see the real
+  paths. A build or install script runs every check that can refuse before it takes the lane, and
+  `test_trunk_guard.py` checks that a refused run never queues.
 
 ## One trunk: `trunk_guard.sh`
 
