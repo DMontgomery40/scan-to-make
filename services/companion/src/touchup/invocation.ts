@@ -68,15 +68,14 @@ const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's f
  * printer MCP's (its cad_design prompt, added below); these lines are only where Counterpart keeps each run.
  */
 const CODE_RULES = `- Build it with the printer MCP's code design engine (its cad_* tools), following its cad_design prompt below. Give every cad_run the design folder from the files list as its output_dir.
-- After each fix, mark the run of the whole model you select as the result so far final: Counterpart files each final run as a checkpoint, the latest one's model, views, script and parameters become this pass's result, and a later change starts from that script and those parameters. Never mark final a run that measures or prepares the scan, or makes one colour's part: it never becomes the model.`;
+- After each fix, mark the run of the whole model you select as the result so far final: Counterpart files each final run as a checkpoint, the latest one's model, views, script and parameters become this pass's result (Counterpart copies them to the output folder), and a later change starts from that script and those parameters. Never mark final a run that measures or prepares the scan, or makes one colour's part: it never becomes the model.`;
 
 /** How the core's checkpoint and final-export lines read for each engine. The code engine's runs are filed by Counterpart. */
 const EXPORT_RULES = {
   app: `- After each fix, export the whole model as an STL to the checkpoints folder (01.stl, 02.stl, …).
 - Render and inspect the candidate from all six sides against the request and reference photos. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the dimensions; revise defects you can see. Successful export alone does not establish that the result works.
 - Export the final model to out/touched.stl and clear PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png).`,
-  code: `- Inspect all six views of each run against the request and reference photos. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the dimensions; revise defects you can see. Successful export alone does not establish that the result works.
-- The latest run marked final is this pass's model; Counterpart copies its model and views to the output folder.`,
+  code: `- Inspect all six views of each run against the request and reference photos. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the dimensions; revise defects you can see. Successful export alone does not establish that the result works.`,
 };
 
 /**
