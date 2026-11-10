@@ -244,9 +244,12 @@ class CompanionClient(
         if (bestGuess) json["bestGuess"] = true
         text?.let { json["text"] = it }
         json["photoNames"] = photoNames
-        if (sizes.isNotEmpty()) json["sizes"] = sizes.map { mapOf("id" to it.id, "mm" to it.mm) }
+        if (sizes.isNotEmpty()) json["sizes"] = sizes.map { mapOf("id" to it.id, "mm" to wholeOrDecimal(it.mm)) }
         return one(request("POST", "/v1/objects/$id/closeup", com.scantomake.counterpart.core.toJson(json) as JsonObject))
     }
+    /** A whole number goes out as `64`, not `64.0`, as the other clients send it. */
+    private fun wholeOrDecimal(mm: Double): Number =
+        if (mm % 1.0 == 0.0 && kotlin.math.abs(mm) < 1e15) mm.toLong() else mm
     suspend fun choosePublishedPlate(id: String, askId: String, choice: String): Project =
         one(request("POST", "/v1/objects/$id/ask", jsonOf("askId" to askId, "choices" to listOf(choice))))
     suspend fun addModelFile(id: String, name: String, bytes: ByteArray): Project {
