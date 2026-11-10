@@ -1,0 +1,661 @@
+{
+ "comment": "PRD §5.4 One main action (board U17). One row per state of the agreed table: the page's one main action, what else it may offer in order, and what printing is called and where. Read by CounterpartKit PageActionsTests, Android PageActionsTests and Linux domain.test.ts: the same decision on every layout.",
+ "rows": [
+  {
+   "row": 1,
+   "name": "draft-empty",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "new"
+   },
+   "expected": {
+    "main": "scan",
+    "others": [
+     "attachPhotos"
+    ],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 1,
+   "name": "draft-described",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "new",
+    "instructions": "A hook"
+   },
+   "expected": {
+    "main": "scan",
+    "others": [
+     "attachPhotos",
+     "makeIt"
+    ],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 2,
+   "name": "draft-with-files",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [
+     "a.jpg"
+    ],
+    "passes": [],
+    "state": "new"
+   },
+   "expected": {
+    "main": "finishSending",
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 3,
+   "name": "sending",
+   "sending": true,
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [
+     "a.jpg"
+    ],
+    "passes": [],
+    "state": "new"
+   },
+   "expected": {
+    "main": null,
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 4,
+   "name": "working-first-pass",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [
+     {
+      "startedAtMs": 1
+     }
+    ],
+    "state": "touching-up"
+   },
+   "expected": {
+    "main": null,
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 5,
+   "name": "working-on-a-change",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [
+     {
+      "startedAtMs": 1,
+      "endedAtMs": 2,
+      "status": "done"
+     },
+     {
+      "startedAtMs": 3
+     }
+    ],
+    "state": "touching-up",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    }
+   },
+   "expected": {
+    "main": null,
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 6,
+   "name": "question-closeup",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "needs-closeup",
+    "ask": {
+     "id": "a",
+     "question": "Q?",
+     "answers": [
+      "camera",
+      "photos",
+      "best-guess"
+     ],
+     "status": "open",
+     "kind": "closeup"
+    }
+   },
+   "expected": {
+    "main": "openCamera",
+    "others": [
+     "attachPhotos",
+     "bestGuess"
+    ],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 6,
+   "name": "question-sizes",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "needs-closeup",
+    "kind": "fit",
+    "ask": {
+     "id": "a",
+     "question": "Q?",
+     "answers": [
+      "sizes",
+      "text",
+      "camera"
+     ],
+     "status": "open",
+     "kind": "sizes",
+     "sizes": [
+      {
+       "id": "size-1",
+       "label": "width",
+       "mm": 64,
+       "from": "scan"
+      }
+     ]
+    }
+   },
+   "expected": {
+    "main": "confirmSizes",
+    "others": [
+     "openCamera"
+    ],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 6,
+   "name": "question-file",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "needs-closeup",
+    "kind": "published",
+    "ask": {
+     "id": "a",
+     "question": "Q?",
+     "answers": [
+      "file"
+     ],
+     "status": "open",
+     "kind": "file",
+     "type": "file"
+    }
+   },
+   "expected": {
+    "main": "chooseFile",
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 6,
+   "name": "question-choice",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "needs-closeup",
+    "kind": "published",
+    "ask": {
+     "id": "a",
+     "question": "Q?",
+     "answers": [],
+     "status": "open",
+     "kind": "choice",
+     "type": "choice",
+     "options": [
+      {
+       "id": "1",
+       "label": "Plate 1"
+      },
+      {
+       "id": "2",
+       "label": "Plate 2"
+      }
+     ]
+    }
+   },
+   "expected": {
+    "main": null,
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 6,
+   "name": "question-unknown-kind",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "needs-closeup",
+    "ask": {
+     "id": "a",
+     "question": "Q?",
+     "answers": [
+      "camera",
+      "photos",
+      "best-guess"
+     ],
+     "status": "open",
+     "kind": "colour"
+    }
+   },
+   "expected": {
+    "main": null,
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 7,
+   "name": "printer-needs-a-yes",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printing",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "printConfirmation": {
+     "id": "9c1f1c1e-2d1e-4c3a-9a51-0e7a0b9e1a09",
+     "expiresAtMs": 9999999999999,
+     "supported": true,
+     "message": "Start a checked print on P1S?",
+     "fields": [
+      {
+       "name": "confirm",
+       "title": "The bed is clear",
+       "required": true
+      }
+     ]
+    }
+   },
+   "expected": {
+    "main": "review",
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 8,
+   "name": "ready",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "ready",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    }
+   },
+   "expected": {
+    "main": "print",
+    "others": [
+     "correct"
+    ],
+    "printWords": "Print",
+    "printPlace": "bar"
+   }
+  },
+  {
+   "row": 9,
+   "name": "printing",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printing",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "print": {
+     "bundleId": "b",
+     "dispatchedAt": "2026-11-09T10:00:00Z",
+     "printId": "x",
+     "live": {
+      "source": "counterpart",
+      "state": "printing"
+     },
+     "monitor": {
+      "phase": "watching",
+      "milestonesSent": [],
+      "firstLayerSent": true
+     }
+    }
+   },
+   "expected": {
+    "main": "openPrinting",
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 10,
+   "name": "printed-did-it-fit",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printed",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "print": {
+     "bundleId": "b",
+     "dispatchedAt": "2026-11-09T10:00:00Z",
+     "monitor": {
+      "phase": "ended",
+      "endState": "done",
+      "endedAt": "2026-11-09T11:00:00Z",
+      "milestonesSent": [],
+      "firstLayerSent": true
+     }
+    }
+   },
+   "expected": {
+    "main": "itWorks",
+    "others": [
+     "needsChanges",
+     "print",
+     "correct"
+    ],
+    "printWords": "Print Another",
+    "printPlace": "bar"
+   }
+  },
+  {
+   "row": 11,
+   "name": "sent-cannot-follow",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "sent",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "print": {
+     "bundleId": "b",
+     "dispatchedAt": "2026-11-09T10:00:00Z"
+    }
+   },
+   "expected": {
+    "main": "print",
+    "others": [
+     "correct"
+    ],
+    "printWords": "Print",
+    "printPlace": "bar"
+   }
+  },
+  {
+   "row": 11,
+   "name": "accepted-not-seen-to-finish",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printed",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "print": {
+     "bundleId": "b",
+     "dispatchedAt": "2026-11-09T10:00:00Z"
+    }
+   },
+   "expected": {
+    "main": "print",
+    "others": [
+     "correct"
+    ],
+    "printWords": "Print",
+    "printPlace": "bar"
+   }
+  },
+  {
+   "row": 12,
+   "name": "done",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "confirmed",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "settings": {
+     "status": "works"
+    }
+   },
+   "expected": {
+    "main": "print",
+    "others": [
+     "correct"
+    ],
+    "printWords": "Print Another",
+    "printPlace": "bar"
+   }
+  },
+  {
+   "row": 13,
+   "name": "pass-stopped-no-result",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [
+     {
+      "startedAtMs": 1,
+      "endedAtMs": 2,
+      "status": "capped"
+     }
+    ],
+    "state": "failed",
+    "failure": "Stopped at the step limit. Try again.",
+    "canRetryCleanup": true
+   },
+   "expected": {
+    "main": "retry",
+    "others": [
+     "correct"
+    ],
+    "printWords": null,
+    "printPlace": null
+   }
+  },
+  {
+   "row": 14,
+   "name": "pass-stopped-earlier-result",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [
+     {
+      "startedAtMs": 1,
+      "endedAtMs": 2,
+      "status": "done"
+     },
+     {
+      "startedAtMs": 3,
+      "endedAtMs": 4,
+      "status": "capped"
+     }
+    ],
+    "state": "failed",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "failure": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.",
+    "canRetryCleanup": true
+   },
+   "expected": {
+    "main": "retry",
+    "others": [
+     "print",
+     "correct"
+    ],
+    "printWords": "Print the last version",
+    "printPlace": "card"
+   }
+  },
+  {
+   "row": 15,
+   "name": "print-failed",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "failed",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "failure": "The printer stopped: Print aborted (0300-4000).",
+    "print": {
+     "bundleId": "b",
+     "dispatchedAt": "2026-11-09T10:00:00Z"
+    }
+   },
+   "expected": {
+    "main": "print",
+    "others": [
+     "correct"
+    ],
+    "printWords": "Print Again",
+    "printPlace": "card"
+   }
+  },
+  {
+   "row": 15,
+   "name": "refused-before-send",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "failed",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "failure": "The printer is busy. Nothing was sent."
+   },
+   "expected": {
+    "main": "print",
+    "others": [
+     "correct"
+    ],
+    "printWords": "Print",
+    "printPlace": "card"
+   }
+  },
+  {
+   "row": 16,
+   "name": "unknown-state",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "something-later"
+   },
+   "expected": {
+    "main": null,
+    "others": [],
+    "printWords": null,
+    "printPlace": null
+   }
+  }
+ ]
+}
