@@ -9,29 +9,37 @@ struct ProjectsRoot: View {
     @Bindable var store: ProjectsStore
     let pairingKey: Int
     @Environment(\.horizontalSizeClass) private var width
-    @State private var preferredColumn = NavigationSplitViewColumn.sidebar
-    @State private var detailPath: [String] = []
-    @State private var selected: String?
-    @State private var newSheet: NewSheetRequest?
-    @State private var printing: IdentifiedProject?
-    @State private var showSettings = false
-    @State private var showPrinters = false
+    /// The open project, the column a collapsed split shows and the one sheet that may be up: one value, whose
+    /// transitions are unit-tested in CounterpartKit (`ProjectsNavigationTests`). Views say what happened.
+    @State private var nav = ProjectsNavigation()
+    /// The device has a hinge (iPhone Duo). Open, its inner display has a rail on the trailing edge where the system
+    /// puts the detail column's toolbar buttons.
+    @State private var hinged = false
+    /// Duo open: Printers and Settings sit in that rail, as they do folded, and not in the sidebar's top bar where
+    /// they crowded the title (David, Nov 10: "with the duo flipped open the settings and profile and print icons
+    /// should go into the side edge"). An iPad has no hinge and no rail: they stay above its sidebar.
+    private var railed: Bool { hinged && width == .regular }
 
     var body: some View {
         split
         .preferredColorScheme(.dark)
-        .sheet(item: $newSheet) { request in
-            NewObjectView(store: store, job: request.job) { project in
-                newSheet = nil
-                open(project.id)
+        // One sheet at a time. A route's sheet takes the place of Settings or Printers, never of New or Print
+        // (`ProjectsNavigation.apply`).
+        .sheet(item: Binding(get: { nav.presented }, set: { if $0 == nil { nav.dismissSheet() } })) { presented in
+            switch presented.sheet {
+            case .new(let job):
+                NewObjectView(store: store, job: job.flatMap(NewProjectJob.init(rawValue:))) { project in
+                    nav.dismissSheet()
+                    nav.open(project.id)
+                }
+                .presentationDetents([.large])
+            case .print(let id): PrintSheet(store: store, projectId: id)
+            case .settings: SettingsView(store: store)
+            case .printers: NavigationStack { PrintersView(store: store) }
             }
-            .presentationDetents([.large])
         }
-        .sheet(item: $printing) { item in PrintSheet(store: store, projectId: item.id) }
-        .sheet(isPresented: $showSettings) { SettingsView(store: store) }
-        .sheet(isPresented: $showPrinters) { NavigationStack { PrintersView(store: store) } }
         // A page under a sheet stays "appeared"; its notifications show while the sheet is up (F7).
-        .onChange(of: showSettings || showPrinters || newSheet != nil || printing != nil, initial: true) { _, up in app.sheetUp = up }
+        .onChange(of: nav.sheet != nil, initial: true) { _, up in app.sheetUp = up }
         .task(id: pairingKey) {
             store.reset()
             HandheldCapture.previewIfAsked()
@@ -50,74 +58,65 @@ struct ProjectsRoot: View {
             await store.follow()
         }
         #if DEBUG
-        .task { if app.debugSettings != nil { showSettings = true } }
+        .task { if app.debugSettings != nil { nav.present(.settings) } }
         #endif
         .onChange(of: app.route, initial: true) { _, route in
             guard let route else { return }
             app.route = nil
-            switch route {
-            case .project(let id), .camera(let id): open(id)
-            case .printing(let id): open(id); detailPath = [Page.printing(id)]
-            case .print(let id): open(id); printing = IdentifiedProject(id: id)
-            case .newProject: newSheet = NewSheetRequest(job: nil)
-            case .printers: showPrinters = true
-            case .home, .pair: closeProject()
-            }
+            nav.apply(route)
         }
-        .onChange(of: preferredColumn) { _, column in
+        .modifier(HingeReader(hinged: $hinged))
+        .onChange(of: nav.column) {
             // The system Back button in the collapsed split returns to Home. Do not resurrect that
             // project when the window expands again (Duo unfold or iPad multitasking).
-            if width == .compact, column == .sidebar { closeProject() }
+            nav.columnChanged(compact: width == .compact)
         }
     }
 
-    /// Opens a project. On iPad the detail's pushed pages belong to the previous project, so they go too:
-    /// otherwise a starter added from the sidebar landed on the old project's Printing screen.
-    private func open(_ id: String) {
-        selected = id
-        detailPath = []
-        preferredColumn = .detail
-    }
+    private func newProject(_ job: NewProjectJob?) { nav.present(.new(job: job?.rawValue)) }
 
-    private func closeProject() {
-        selected = nil
-        detailPath = []
-        preferredColumn = .sidebar
+    private var railButtons: some ToolbarContent {
+        PrintersAndSettingsButtons(store: store, openPrinters: { nav.present(.printers) }, openSettings: { nav.present(.settings) })
     }
 
     /// One split and one detail stack survive every size-class change. Only the leading column's
     /// presentation changes: Home's cards in compact width, grouped rows at regular width.
     private var split: some View {
-        NavigationSplitView(preferredCompactColumn: $preferredColumn) {
+        NavigationSplitView(preferredCompactColumn: Binding(
+            get: { nav.column == .detail ? NavigationSplitViewColumn.detail : .sidebar },
+            set: { nav.show($0 == .detail ? .detail : .sidebar) })) {
             if width == .regular {
                 // Only a row opens a project here. The list clears its selection to nil when the split collapses
                 // (a fold, an iPad resize), and that must not close the project the detail shows; the project
                 // page's own close button and Back in the collapsed split close it.
-                SidebarList(store: store, selection: Binding(get: { selected }, set: { id in
-                    if let id { open(id) }
-                }), newProject: { newSheet = NewSheetRequest(job: nil) },
-                            addStarter: addStarter, openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
+                SidebarList(store: store, selection: Binding(get: { nav.project }, set: { nav.select($0) }),
+                            newProject: { newProject(nil) },
+                            addStarter: addStarter, openPrinters: { nav.present(.printers) }, openSettings: { nav.present(.settings) },
+                            showsToolbarButtons: !railed)
             } else {
                 HomeView(store: store, openProject: { value in
-                    if let id = Page.printingId(value) { open(id); detailPath = [value] }
-                    else { open(value) }
-                }, newProject: { newSheet = NewSheetRequest(job: $0) },
-                         openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
+                    if let id = Page.printingId(value) { nav.openPrinting(id) }
+                    else { nav.open(value) }
+                }, newProject: newProject,
+                         openPrinters: { nav.present(.printers) }, openSettings: { nav.present(.settings) })
             }
         } detail: {
-            NavigationStack(path: $detailPath) {
+            // Invariant: the only value this stack ever pushes is `printing:<open project id>`. `nav.path` is derived
+            // from `nav.detail`, and its setter ignores anything else.
+            NavigationStack(path: $nav.path) {
                 Group {
-                    if let selected { projectPage(selected, close: closeProject) }
+                    if let selected = nav.project { projectPage(selected, close: { nav.close() }) }
                     else {
                         StartPane(hasProjects: !store.projects.isEmpty, unavailableMessage: store.starterUnavailableMessage,
-                                  newProject: { newSheet = NewSheetRequest(job: $0) }, addStarter: addStarter)
+                                  newProject: newProject, addStarter: addStarter)
                     }
                 }
-                .navigationDestination(for: String.self) { id in page(id, close: closeProject) }
+                .toolbar { if railed { railButtons } }
+                .navigationDestination(for: String.self) { id in page(id, close: { nav.close() }).toolbar { if railed { railButtons } } }
             }
             // A new project gets a new stack, built with the path set beside the selection (a Live Activity or print
             // notification opens Printing on top of its project). With only the root keyed, the iPad dropped that push.
-            .id(selected)
+            .id(nav.project)
         }
     }
 
@@ -126,28 +125,50 @@ struct ProjectsRoot: View {
         let ticket = store.startRequest()
         let project = try await store.mac.client.addStarter(starter)
         store.replace(project, ticket: ticket)
-        open(project.id)
+        nav.open(project.id)
     }
 
     private func projectPage(_ id: String, close: @escaping () -> Void) -> some View {
-        ProjectView(store: store, id: id, close: close, openPrint: { printing = IdentifiedProject(id: $0) },
-                    openPrinting: { id in detailPath.append(Page.printing(id)) })
+        ProjectView(store: store, id: id, close: close, openPrint: { nav.present(.print($0)) },
+                    openPrinting: { nav.openPrinting($0) })
     }
 
     /// A pushed page: a project, or a print's Printing screen.
     @ViewBuilder private func page(_ value: String, close: @escaping () -> Void) -> some View {
-        if let id = Page.printingId(value) { PrintingView(store: store, id: id, openProject: { open($0) }) } else { projectPage(value, close: close) }
+        if let id = Page.printingId(value) { PrintingView(store: store, id: id, openProject: { nav.open($0) }) } else { projectPage(value, close: close) }
     }
 }
 
-/// Navigation values are strings: a project id, or `printing:<id>` for its Printing screen.
+/// Navigation values are strings: a project id, or `printing:<id>` for its Printing screen (`ProjectsNavigation`).
 enum Page {
-    static func printing(_ id: String) -> String { "printing:" + id }
-    static func printingId(_ value: String) -> String? { value.hasPrefix("printing:") ? String(value.dropFirst("printing:".count)) : nil }
+    static func printing(_ id: String) -> String { ProjectsNavigation.printingValue(id) }
+    static func printingId(_ value: String) -> String? { ProjectsNavigation.printingProject(value) }
 }
 
-struct NewSheetRequest: Identifiable { let id = UUID(); let job: NewProjectJob? }
 struct IdentifiedProject: Identifiable { let id: String }
+
+/// Printers (with how many need attention) and Settings: above the sidebar, or in the open Duo's trailing rail.
+struct PrintersAndSettingsButtons: ToolbarContent {
+    let store: ProjectsStore
+    let openPrinters: () -> Void
+    let openSettings: () -> Void
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) { Button(action: openPrinters) { Image(systemName: "printer.fill") }.badge(store.printerProblems).accessibilityLabel(store.printersLabel) }
+        ToolbarItem(placement: .topBarTrailing) { Button(action: openSettings) { Image(systemName: "person.crop.circle") }.accessibilityLabel("Settings") }
+    }
+}
+
+/// Whether this device has a hinge (`DeviceHinge`, iOS 27.1). Before 27.1 nothing is known and nothing changes.
+private struct HingeReader: ViewModifier {
+    @Binding var hinged: Bool
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            content.onHingeChange { _, context in hinged = context.hinge != nil }
+        } else {
+            content
+        }
+    }
+}
 
 /// The iPad detail with no project selected: what to start with, never an empty "Choose a project".
 struct StartPane: View {
@@ -178,6 +199,8 @@ struct SidebarList: View {
     let addStarter: (StarterProject) async throws -> Void
     let openPrinters: () -> Void
     let openSettings: () -> Void
+    /// False on an open Duo, where the same two buttons are in the trailing rail.
+    var showsToolbarButtons = true
     @State private var query = ""
     @FocusState private var searching: Bool
     @State private var showArchived = false
@@ -268,10 +291,7 @@ struct SidebarList: View {
 
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .refreshable { await store.load() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { Button(action: openPrinters) { Image(systemName: "printer.fill") }.badge(store.printerProblems).accessibilityLabel(store.printersLabel) }
-            ToolbarItem(placement: .topBarTrailing) { Button(action: openSettings) { Image(systemName: "person.crop.circle") }.accessibilityLabel("Settings") }
-        }
+        .toolbar { if showsToolbarButtons { PrintersAndSettingsButtons(store: store, openPrinters: openPrinters, openSettings: openSettings) } }
     }
 
     @ViewBuilder private func section(_ title: String, _ projects: [Project]) -> some View {

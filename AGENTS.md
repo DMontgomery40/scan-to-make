@@ -10,7 +10,7 @@ The app covers capture (LiDAR Object Capture plus close-up stills) and cleanup (
 
 Android app: see [`android/AGENTS.md`](android/AGENTS.md) and [`android/README.md`](android/README.md).
 
-New session? Read the working PRD, [`docs/design/overhaul/PRD.md`](docs/design/overhaul/PRD.md): what is built and accepted, from the code (§0 is the status table). Then [`docs/status/handoff.md`](docs/status/handoff.md) (one screen: owner, installed builds, open list) and [`docs/operations.md`](docs/operations.md) (how to gate, build, install and drive the apps). Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
+New session? Read the working PRD, [`docs/design/overhaul/PRD.md`](docs/design/overhaul/PRD.md): what is built and accepted, from the code (§0 is the status table). Then [`docs/status/handoff.md`](docs/status/handoff.md) (one screen: owner, installed builds, what is in motion), [`docs/status/board.md`](docs/status/board.md) (every open item with its owner and next step; anything David says gets a row there in the same turn) and [`docs/operations.md`](docs/operations.md) (how to gate, build, install and drive the apps). Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
 
 ## One trunk
 
@@ -29,6 +29,7 @@ David, 2026-11-04: "we need to make sure regressions and overwrites dont happen 
 
 David, 2026-11-04: "agents are CONSTANTLY blurring the boundary and adding backend stuff that should be in mcp to the app itself". The MCPs change "basically everyday" for new printers, slicers, firmware and Blender/Fusion; the App Store can't.
 
+- Counterpart is the friendly front end; the MCPs are the back end. David, 2026-11-10: "half of what this app does if not more, is really an update to the mcps and not the app itself, or maybe just a tiny ui tweak to the app and a behavior change to the mcps." The MCPs cover six or more printer brands and can update every six hours (the Bambu fork is checked on that schedule); "DOES THE APP STORE IN IOS TAKE KINDLY TO 4X DAILY UPDATES??? no." So before designing any feature, ask which half is the MCPs' and start there. The companion ships inside the Mac app, so it counts as the app for this rule.
 - Code that would have to change when a printer, slicer, firmware, filament system, Blender or Fusion changes goes in the MCPs (both of them), never in the app. The app calls tools, renders their structured results and passes the person's choices through.
 - In app code: no branching on MCP package or slicer, no printer-model tables, no matching on MCP or printer error codes or wording, no slicer setting keys or presets, no fallbacks for MCPs without the contract. A missing capability means "Update <MCP> in Settings → Printers".
 - Moving code out of the app: extend `counterpart/1` in both MCPs, publish, install through the app's Update, and only then delete the app code. The list and order are in PRD §8.0.
@@ -56,7 +57,8 @@ Both MCPs are on the Mac: `~/fleet/bambu-printer-mcp` and `~/fleet/mcp-3D-printe
 tstack (github.com/t3dotgg/tstack) is installed in ~/.claude/skills and ~/.codex/skills on the Mac and the Linux boxes: council, full-send, full-stop, sol-loop, file-pr, babysit-pr, takeover, modernize, leaving-pr-comments. In T3 Code they use delegate_task and watch_pull_request.
 - Council members: Claude Opus 5.5 (claude-opus-5-5), Muse Wonder (muse-wonder-1.0), Codex GPT-6.1 Sol (gpt-6.1-sol), each at high reasoning effort. For UI work, council scores screenshots of the real app out of 10, compared with the best apps Apple features, and iterates until every member gives 9 or more.
 - In this repo, full-send's merge gate also includes this repo's own gate: `scripts/ci_local.py` and `scripts/branch_check.py --merge` printing SAFE (hosted Actions have no runner).
-- In bambu-printer-mcp and mcp-3D-printer-server, merging publishes to npm. David lifted the release hold on 2026-11-04 (bambu-printer-mcp 1.1.52, mcp-3D-printer-server 1.2.26 are published), so branch new work from those mains. Before merging there, confirm merge authority for that PR, and leave installing a new version into the app to whoever owns MCP Update.
+- In bambu-printer-mcp and mcp-3D-printer-server, merging publishes to npm. David lifted the release hold on 2026-11-04 (bambu-printer-mcp 1.1.52, mcp-3D-printer-server 1.2.26 are published), so branch new work from those mains. Publishing them is the lead's call (David, 2026-11-10: "NO PUBLISHING IS YOURS TOO ... this codebase is yours, what it's for and how it's built are your call"): the lead decides when a reviewed, green MCP PR merges, follows that repo's own release rules (no agent attribution there), verifies the version on npm, and gets it into the app through the app's own update. A delegate merges there only when the lead's brief says so.
+- Prints: the lead may start one when David has said the bed is clear (David, 2026-11-10: "bed clear and all yours"), after a camera check of the bed, through the companion's own route. Nobody else starts a print, and nobody stops, pauses or resumes his printer outside Counterpart.
 
 ## Local PR checks
 

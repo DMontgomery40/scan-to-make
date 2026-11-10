@@ -33,14 +33,40 @@ The private directory must contain `codex-review-rubric.md` and `cursor-bugbot-r
 The first review uses native `codex review --base origin/main`, which supplies its stock rubric. The second supplies the stored Cursor prompt verbatim plus the diff to Muse Wonder Full at xhigh; for a Muse author it uses Codex in read-only mode instead. `--author` is required so the second review comes from another lab. CLI authentication must already be configured. Review processes run locally and synchronously; they do not push or request GitHub reviews. Read both logs and resolve actionable findings: successful process exit means the review completed, not that it found no bugs.
 
 
-## One iOS job at a time on the Mac
+## The Mac's build lane: `lane.py`
 
-Every `macos`/`xcode-` job, whether started on the Mac or sent from a Linux box, holds `~/.stm-ios.lock` (flock) for its whole run; a second one waits and prints who holds it. Wrap any other xcodebuild or simulator run the same way:
+Every `xcodebuild` and every simulator session on the Mac (boot to shutdown) runs in one of two slots
+(docs/operations.md, "Printing beats gating"):
 
 ```
-python3 scripts/ci_local.py --ios-lock xcodebuild test ...
-/usr/bin/lockf -k ~/.stm-ios.lock xcodebuild test ...   # same lock
+python3 scripts/lane.py --label "<who>: <what>" -- xcodebuild build ...       # one slot
+python3 scripts/lane.py --exclusive --label "<who>: start print" -- <command> # both slots
+python3 scripts/lane.py --status                                              # holders, waiters, ages
 ```
+
+- **Two slots.** Slot 1 is `~/.stm-ios.lock`, slot 2 is `~/.stm-ios-2.lock` (flock(2) locks on the open files).
+  A normal caller takes whichever is free. `--exclusive` takes both: the gate's iPhone/iPad UI test job and
+  anything that starts a print. Anything still calling `/usr/bin/lockf -k ~/.stm-ios.lock` holds slot 1, so it
+  still excludes one slot and blocks an exclusive caller; switch it to `lane.py` so it queues and shows up.
+- **Arrival order.** Each caller takes a numbered ticket in `~/.stm-lane/queue` and waits until it is the
+  oldest live ticket; only then does it take slots. So callers of the same kind go in arrival order, and normal
+  callers that arrive after a waiting exclusive one wait behind it instead of overtaking it.
+- **Who holds it.** Each holder records its label, pid, slots, start time and `--max-minutes` (default 10) in
+  `~/.stm-lane/holders` (an exclusive caller records its first slot while it waits for the second). `--status` (or `--status --json`) prints them with their ages, flags a hold past its
+  `--max-minutes` as overdue (it does not kill it), and lists the waiters in order. A slot held with no record
+  is shown as held by a process outside the lane.
+- **Stale state blocks nobody.** The kernel locks are the truth. A ticket or record counts only while its owner
+  keeps it flock'ed and its pid is alive, so a caller killed even with SIGKILL drops out of the queue and
+  `--status`. If `lane.py` itself is killed, its command keeps running outside the lane (as with `lockf`).
+- **Nested calls.** The command runs with `STM_LANE_HELD=<holder pid>`; a `lane.py` call inside it (an install
+  script run from a gate job) runs straight away instead of waiting behind its own holder.
+- **Exit code** is the command's; a command killed by a signal gives 128 + the signal number. `--output FILE`
+  sends the command's output to a file while the lane's messages stay on the terminal.
+- `ci_local.py` holds a slot for every `macos`/`xcode-` job, whether started on the Mac or sent from a Linux box
+  (`mobile/app`, the UI job, holds both), and its wait message prints `--status`. `ci_local.py --ios-lock
+  <command>` is the same as `lane.py -- <command>`.
+- Agents: queue a hold as a background command so its exit wakes you, and never end a turn while it is queued or
+  running. Tests use temporary slots (`STM_LANE_SLOT1`, `STM_LANE_SLOT2`, `STM_LANE_DIR`, `STM_LANE_POLL`).
 
 ## One trunk: `trunk_guard.sh`
 
@@ -79,6 +105,8 @@ David, 2026-11-01: "make sure ... no one is writing on top of each other and in 
 python3 scripts/branch_check.py                # every live branch: behind main, files it changes, conflicts
 python3 scripts/branch_check.py --merge KAN-x  # exit 0 only if KAN-x is current with main and conflicts with nothing active
 ```
+
+When two active branches conflict, the one that lands first passes `--lands-first "<who agreed, and that the other rebases>"`; the conflict is then printed as a warning with that reason. It excuses nothing else (behind main, conflicts with main, the boundary check). A train uses it for the branches still being built on top of what it carries.
 
 `--merge` also runs `scripts/boundary_check.py` (PRD §8.0). It sends each added chunk of app code (not tests, docs or fixtures) to the configured Jev checker with one question: does it put printer, slicer, firmware, filament-system, Blender or Fusion knowledge into the app? A flagged chunk, or a checker that can't answer, makes the gate NOT SAFE. Move that code to the MCPs, or pass `--boundary-reviewed "<why it belongs in the app>"`, which is printed with the result. Jev's answer is a review signal, not proof. It uses David's Jev provider chain: TypeSafe, then Jev through OpenRouter when TypeSafe answers 401/402/403. Keys come from `TYPESAFE_API_KEY`/`OPENROUTER_API_KEY`, `~/.config/jev/env` or `~/.env`. The 0.3 threshold was calibrated on 14 real hunks; the calibration is noted in the script. The MCP names app code uses are pinned separately by `services/companion/tests/mcp-contract.test.mjs` against `docs/protocols/mcp-contract.md`.
 

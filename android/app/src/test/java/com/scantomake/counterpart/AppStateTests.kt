@@ -11,6 +11,10 @@ import com.scantomake.counterpart.app.Counterpart
 import com.scantomake.counterpart.pairing.MemoryStore
 import com.scantomake.counterpart.pairing.PairingClient
 import com.scantomake.counterpart.pairing.PairingStore
+import com.scantomake.counterpart.net.HttpReply
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -94,5 +98,43 @@ class AppStateTests {
         dispatcher.scheduler.runCurrent()
         assertTrue(state.needsMac)
         assertFalse(state.loaded.value)
+    }
+
+    /** A project refresh reports every failure to the link, not only "didn't answer": pairing lost on a refresh must
+     *  not leave Home saying "connected", and a refusal ends a stale "isn't answering". */
+    @Test fun aProjectRefreshThatFailsForAnyReasonUpdatesTheLink() = kotlinx.coroutines.test.runTest(dispatcher) {
+        pair()
+        dispatcher.scheduler.runCurrent()
+        val id = "d79d4c15-d786-461c-b76e-ec687c8e2dad"
+        state.link.value = com.scantomake.counterpart.api.MacLink.Connected
+        transport.answer = { _, _ -> json(401, mapOf("error" to mapOf("code" to "pairing-changed", "message" to "Refused."))) }
+        val lost = state.reload(id)
+        assertTrue(lost!!.needsPairing)
+        assertTrue(state.link.value is com.scantomake.counterpart.api.MacLink.NeedsPairing)
+        assertTrue(state.error.value!!.needsPairing)
+        state.link.value = com.scantomake.counterpart.api.MacLink.NotAnswering
+        state.error.value = com.scantomake.counterpart.api.CompanionException.unreachable
+        transport.answer = { _, _ -> json(409, mapOf("error" to mapOf("code" to "invalid-state", "message" to "Refused."))) }
+        state.reload(id)
+        assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
+        assertNull(state.error.value)
+        // "Not found" is an answer too, and the project goes.
+        state.link.value = com.scantomake.counterpart.api.MacLink.NotAnswering
+        transport.answer = { _, _ -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "Gone."))) }
+        state.reload(id)
+        assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
+        // No answer at all: the link stops saying connected and the banner says why.
+        transport.answer = { _, _ -> throw com.scantomake.counterpart.net.TransportException("network") }
+        assertTrue(state.reload(id)!!.isUnreachable)
+        assertEquals(com.scantomake.counterpart.api.MacLink.NotAnswering, state.link.value)
+        assertTrue(state.error.value!!.isUnreachable)
+        // A refresh that works is an answer, and clears the "not answering" banner.
+        val objects = com.scantomake.counterpart.core.WireJson.parseToJsonElement(kitFixture("objects.json").readText())
+            .jsonObject["objects"]!!.jsonArray
+        val project = objects[0].jsonObject
+        transport.answer = { _, _ -> HttpReply(200, """{"object":$project}""".toByteArray()) }
+        assertNull(state.reload(project["id"]!!.jsonPrimitive.content))
+        assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
+        assertNull(state.error.value)
     }
 }
