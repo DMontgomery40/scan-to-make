@@ -41,6 +41,15 @@ async function setup(t, outcomes) {
       await writeFile(join(out, 'touched.f3d'), 'f3d'); await writeFile(join(out, 'touched.parameters.json'), '{"width":40}');
       design = {f3d: join(out, 'touched.f3d'), parameters: join(out, 'touched.parameters.json')};
     }
+    if (outcome.engine === 'code') {
+      // One cad_run's folder, as the printer MCP leaves it (PRD §8.9).
+      const run = join(passDir, 'cad', 'cad-touched-1');
+      await mkdir(join(run, 'inputs'), {recursive: true});
+      await writeFile(join(run, 'touched.py'), `# pass ${inputs.length}`); await writeFile(join(run, 'touched.parameters.json'), '{"cup_h":70}');
+      await writeFile(join(run, 'touched.step'), 'STEP'); await writeFile(join(run, 'inputs', 'mesh.obj'), 'mesh');
+      await writeFile(join(run, 'touched.inputs.json'), JSON.stringify({scan: join(run, 'inputs', 'mesh.obj')}));
+      design = {script: join(run, 'touched.py'), parameters: join(run, 'touched.parameters.json'), inputs: join(run, 'touched.inputs.json'), step: join(run, 'touched.step')};
+    }
     if (outcome.answered) input.onProgress?.({seconds: 1, toolCalls: 1, resumable: false});
     if (outcome.throw) throw new Error(outcome.throw);
     return {renders: [], checkpoints: [], stats: {seconds: 3, toolCalls: 2}, passDir, ...(outcome.status !== 'needs_closeup' && outcome.status !== 'failed' ? {model} : {}),
@@ -483,4 +492,41 @@ test('a file-copy throw after the worker answered becomes a non-resumable failed
  assert.equal(failed.state,'failed');assert.equal(failed.passes.at(-1).resumable,false);
  await f.service.start(o.id);await f.service.settled(o.id);
  assert.equal(f.inputs[1].resume,undefined);
+});
+
+test('a code design is kept as the project\'s design source, a change starts from it, and a later Blender pass drops it', async t => {
+  const f = await setup(t, [
+    {engine: 'code', result: {summary: 'A bottle holder.'}},
+    {engine: 'code', result: {summary: 'Taller.'}},
+    {engine: 'blender', result: {summary: 'Smoothed.'}},
+  ]);
+  const object = await f.service.create('A holder for this bottle, 65 x 28 x 145 mm', 'fit');
+  await f.service.start(object.id);
+  const ready = await f.service.settled(object.id);
+  assert.equal(ready.current.engine, 'code');
+  assert.deepEqual(ready.current.design, {script: 'current/design/touched.py', parameters: 'current/design/touched.parameters.json',
+    inputs: 'current/design/touched.inputs.json', step: 'current/design/touched.step'});
+  const dir = f.service.dir(object.id);
+  assert.equal(await readFile(join(dir, 'current', 'design', 'touched.py'), 'utf8'), '# pass 1');
+  assert.equal(await readFile(join(dir, 'current', 'design', 'inputs', 'mesh.obj'), 'utf8'), 'mesh');
+  assert.deepEqual(JSON.parse(await readFile(join(dir, 'current', 'design', 'touched.inputs.json'), 'utf8')), {scan: join(dir, 'current', 'design', 'inputs', 'mesh.obj')},
+    'the saved inputs list points at the project\'s own copies, not the pass folder');
+  // "Ask for changes" starts from the saved script and parameters.
+  await f.service.correct(object.id, 'Make it 1 mm taller');
+  await f.service.settled(object.id);
+  assert.deepEqual(f.inputs[1].design, {script: join(dir, 'current', 'design', 'touched.py'), parameters: join(dir, 'current', 'design', 'touched.parameters.json'),
+    inputs: join(dir, 'current', 'design', 'touched.inputs.json'), step: join(dir, 'current', 'design', 'touched.step')});
+  assert.equal(await readFile(join(dir, 'current', 'design', 'touched.py'), 'utf8'), '# pass 2');
+  // A duplicate keeps the design source too.
+  const copy = await f.service.duplicate(object.id);
+  assert.equal(await readFile(join(f.service.dir(copy.id), 'current', 'design', 'touched.py'), 'utf8'), '# pass 2');
+  assert.equal(await readFile(join(f.service.dir(copy.id), 'current', 'design', 'inputs', 'mesh.obj'), 'utf8'), 'mesh');
+  assert.deepEqual(JSON.parse(await readFile(join(f.service.dir(copy.id), 'current', 'design', 'touched.inputs.json'), 'utf8')),
+    {scan: join(f.service.dir(copy.id), 'current', 'design', 'inputs', 'mesh.obj')}, 'a duplicate\'s inputs are its own');
+  // A pass on another engine replaces the model, so the old script no longer describes it.
+  await f.service.correct(object.id, 'Smooth it');
+  const later = await f.service.settled(object.id);
+  assert.equal(later.current.engine, 'blender');
+  assert.equal(later.current.design, undefined);
+  await assert.rejects(readFile(join(dir, 'current', 'design', 'touched.py')), {code: 'ENOENT'});
 });

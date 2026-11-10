@@ -6,6 +6,7 @@ import {createInterface} from 'node:readline';
 import {inspectModelFile} from '@scan-to-make/printer-handoff';
 import type {TouchupPass} from './inputs.js';
 import type {TouchupInvocation} from './invocation.js';
+import {collectCodeRuns, type DesignSource} from './code-engine.js';
 
 export const TOUCHUP_TIMEOUT_MS = 2 * 60 * 60_000;
 export const TOUCHUP_INACTIVITY_MS = 10 * 60_000;
@@ -32,8 +33,8 @@ export interface TouchupResult {
   changes?: TouchupChange[];
   ask?: TouchupAsk;
   supports?: TouchupSupports;
-  /** Fusion passes: the parametric design and its parameters, from fusion_mcp_export. */
-  design?: {f3d: string; parameters?: string};
+  /** The design source: Fusion's archive and parameters (fusion_mcp_export), or a code pass's script and parameters. */
+  design?: DesignSource;
   reason?: string;
   /** CLI loader rejection, recognized from its terminal event before any model turn. */
   resumeUnavailable?: boolean;
@@ -277,6 +278,9 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const exitCode = run.exitCode, ended = run.error ? {error: run.error} : {} as {error?: NodeJS.ErrnoException};
   const seconds = () => run.seconds;
 
+  // A code pass's worker can't write files: its cad_run folders become the checkpoints, model, renders and design
+  // source here, on every ending (a limit or a crash keeps its last run, as any pass keeps its last checkpoint).
+  const code = inv.engine === 'code' ? await collectCodeRuns(pass, isValidStl).catch(() => ({})) as Awaited<ReturnType<typeof collectCodeRuns>> : undefined;
   const touched = join(pass.outDir, 'touched.stl');
   const checkpoints = await list(pass.checkpointsDir, '.stl');
   const renders = await list(pass.outDir, '.png');
@@ -308,7 +312,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   if (declared) Object.assign(base, {partColours: declared});
   const summary = {...(answer?.summary ? {summary: publicText(answer.summary)} : {}), ...structured(answer, publicText)};
   const f3d = join(pass.outDir, 'touched.f3d'), parameters = join(pass.outDir, 'touched.parameters.json');
-  const design = await stat(f3d).then(info => info.isFile(), () => false)
+  const design = code ? (code.design ? {design: code.design} : {}) : await stat(f3d).then(info => info.isFile(), () => false)
     ? {design: {f3d, ...(await stat(parameters).then(info => info.isFile(), () => false) ? {parameters} : {})}} : {};
   Object.assign(base, design);
 

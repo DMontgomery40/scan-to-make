@@ -5,7 +5,7 @@ import {createHash, randomUUID} from 'node:crypto';
 import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {basename, dirname, extname, isAbsolute, join} from 'node:path';
+import {basename, dirname, extname, isAbsolute, join, relative} from 'node:path';
 import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, type McpModelPlates, readModelFile, type ModelFileInfo, type ModelFilament, packageLabel, readPrintReport, readPrintRoute, routeArgs, setPrintRoute, timeoutsFor, type PrintRoute,
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession, type FilamentProposalInput} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
@@ -20,6 +20,19 @@ import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/words.js';
 import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind, type PassStage, type StageId} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
+import {copyDesign, isCodeDesign, type CodeDesign, type DesignSource} from '../touchup/code-engine.js';
+
+type SavedDesign = NonNullable<NonNullable<StmObject['current']>['design']>;
+const absoluteDesign = (dir: string, design: CodeDesign): CodeDesign => ({script: join(dir, design.script), parameters: join(dir, design.parameters),
+  ...(design.inputs ? {inputs: join(dir, design.inputs)} : {}), ...(design.step ? {step: join(dir, design.step)} : {})});
+const relativeDesign = (dir: string, design: CodeDesign): CodeDesign => ({script: relative(dir, design.script), parameters: relative(dir, design.parameters),
+  ...(design.inputs ? {inputs: relative(dir, design.inputs)} : {}), ...(design.step ? {step: relative(dir, design.step)} : {})});
+/** The saved design a change starts from (PRD §8.9), as absolute paths: a Fusion design's archive, or a code design's script. */
+function designInput(dir: string, engine: DesignEngine | undefined, design: SavedDesign): {design?: DesignSource} {
+  if (engine === 'fusion' && !isCodeDesign(design)) return {design: {f3d: join(dir, design.f3d), ...(design.parameters ? {parameters: join(dir, design.parameters)} : {})}};
+  if (engine === 'code' && isCodeDesign(design)) return {design: absoluteDesign(dir, design)};
+  return {};
+}
 import type {PrintHandoffServices} from '../print-handoff-http.js';
 import {InvalidAnswerError, printQuestion, validateAnswer, type ConfirmationValue} from './confirmation.js';
 import {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './errors.js';
@@ -555,7 +568,7 @@ export class ObjectService {
         const files = receipt ? {original: [receipt.path], current: receipt.path, receipts: [receipt]} : undefined;
         const publishedSelection = source.publishedSelection ? {...source.publishedSelection, fileIndex: 0} : undefined;
         // A designed multi-colour model prints its 3MF but is corrected from the merged mesh beside it: both copy.
-        const paths = [current.model, ...(isMultipart(source) && source.kind !== 'published' ? ['current/model.stl'] : []), ...current.renders, ...(scan ? [`scan/${scan}`] : []), ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
+        const paths = [current.model, ...(isMultipart(source) && source.kind !== 'published' ? ['current/model.stl'] : []), ...current.renders, ...(scan ? [`scan/${scan}`] : []), ...(receipt?.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : []) ?? []), ...(current.design && !isCodeDesign(current.design) ? [current.design.f3d, ...(current.design.parameters ? [current.design.parameters] : [])] : [])];
         for (const path of new Set(paths)) {
           if (isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..')) throw new InvalidFileError('The model has an invalid file path.');
           const target = join(this.dir(duplicate.id), path);
@@ -566,6 +579,8 @@ export class ObjectService {
             await copyFile(join(this.dir(id), path), target).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
           else await copyFile(join(this.dir(id), path), target);
         }
+        // A code design's inputs list names its own snapshots, so the copy gets its own list.
+        if (isCodeDesign(current.design)) await copyDesign(absoluteDesign(this.dir(id), current.design), join(this.dir(duplicate.id), 'current', 'design'));
         const credit = (source as StmObject & {credit?: unknown}).credit;
         const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current,
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
@@ -2466,8 +2481,7 @@ export class ObjectService {
       const input: TouchupInput = {worker, ...(resume ? {resume} : {}), root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent && !designer, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
         ...(designer ? {designerCopy: true} : {}),
         kind, ...(object.preferences?.designEngine && object.preferences.designEngine !== 'auto' ? {preferredEngine: object.preferences.designEngine} : {}), onStage: (id, chosen) => stage(id, chosen),
-        ...(fromCurrent && object.current?.engine === 'fusion' && object.current.design
-          ? {design: {f3d: join(dir, object.current.design.f3d), ...(object.current.design.parameters ? {parameters: join(dir, object.current.design.parameters)} : {})}} : {}),
+        ...(fromCurrent && object.current?.design ? designInput(dir, object.current.engine, object.current.design) : {}),
         ...(object.instructions ? {instructions: object.instructions} : {}),
         ...(opts.note !== undefined ? {note: opts.note, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {})};
       try { return await this.#deps.runTouchup({...input, signal: controller.signal, onProgress}); }
@@ -3113,11 +3127,17 @@ export class ObjectService {
         : result.status === 'capped' ? `${result.limit ? limitWords(result.limit) : result.reason ?? 'Stopped at a limit'}; this is the last saved version.${result.summary ? ' ' + result.summary : ''}`
         : result.summary;
       const engine = result.engine ?? 'blender';
-      let design: {f3d: string; parameters?: string} | undefined;
-      if (engine === 'fusion' && result.design) {
+      let design: NonNullable<StmObject['current']>['design'];
+      // A new model replaces the design source: a code design's folder only describes the model it made.
+      await rm(join(currentDir, 'design'), {recursive: true, force: true});
+      if (engine === 'fusion' && result.design && !isCodeDesign(result.design)) {
         await copyFile(result.design.f3d, join(currentDir, 'design.f3d'));
         if (result.design.parameters) await copyFile(result.design.parameters, join(currentDir, 'parameters.json')).catch(() => undefined);
         design = {f3d: join('current', 'design.f3d'), ...(result.design.parameters ? {parameters: join('current', 'parameters.json')} : {})};
+      }
+      if (engine === 'code' && isCodeDesign(result.design)) {
+        // PRD §8.9: the script and its parameters are the project's design source, as design.f3d is for Fusion.
+        design = relativeDesign(dir, await copyDesign(result.design, join(currentDir, 'design')));
       }
       if (result.parts) await copyFile(result.parts, join(currentDir, 'model.3mf'));
       else await rm(join(currentDir, 'model.3mf'), {force: true});
