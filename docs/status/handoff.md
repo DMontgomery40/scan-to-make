@@ -8,6 +8,14 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 David, 19:55Z, replacing the lead: "It's the earbuds the phone holder and literally everything you've made including what's printing now nothing shows up I have no earthly idea what you're printing this is such a shit show. Write a handoff prompt to a new lead with fresh context window. Please be very detailed and have it actually clean up after its agents and settle threads in t3 code when they're done."
 
+### Since the handoff (20:45Z, the new lead, thread "Take Over Project Recovery Lead")
+
+- The previous lead's process is stopped and its thread settled.
+- **A small train goes first: PR #539** (`train/2026-11-10f`, board I19): #520, #525 with its review fixes, #524 and the model-file pictures. Its gate and one review are running. The fifth train (#527) follows with X86's fix.
+- The cause of the empty part stage is with a second lab (board X87); a watcher lists the phone's cache when it wakes.
+- Housekeeping runs on the Mac and all three Linux machines (board X88).
+- Delegates are Opus 5.5 (medium by default), GPT-6.1 Sol at xhigh and Muse Wonder Full, not Sonnet (X89). No AI attribution on commits or PRs (X90).
+
 ### The one thing that matters first
 
 **On David's iPhone, projects open to an empty stage.** He has reported it three times today (16:45Z the scans; 19:40Z "Forester phone mount"; 19:55Z "literally everything"). What is established:
