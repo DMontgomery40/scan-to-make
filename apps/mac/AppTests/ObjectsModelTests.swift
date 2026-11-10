@@ -118,6 +118,15 @@ private actor FakeObjects: ObjectsCompanion {
         correctionPhotoNames.append(photoNames)
         return try change(id, "correct:\(note)", ["state": "touching-up"])
     }
+    private(set) var messageIds: [String] = []
+    private var correctionFailures: [Error] = []
+    func failNextCorrections(_ errors: [Error]) { correctionFailures = errors }
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]?, messageId: String) async throws -> Project {
+        messageIds.append(messageId)
+        correctionPhotoNames.append(photoNames)
+        if !correctionFailures.isEmpty { calls.append("correct:\(note)"); throw correctionFailures.removeFirst() }
+        return try change(id, "correct:\(note)", ["state": "touching-up"])
+    }
     func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String {
         messageUploadFlags.append(forMessage)
         // The initial worker fails while this queued upload is in flight; another message's photo also arrives.
@@ -125,6 +134,9 @@ private actor FakeObjects: ObjectsCompanion {
         return "renamed-evidence.jpg"
     }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try change(id, "closeup:\(bestGuess)", ["state": "touching-up"]) }
+    func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project {
+        try change(id, "sizes:" + sizes.map { "\($0.id)=\(AskSizesForm.text($0.mm))" }.joined(separator: ","), ["state": "touching-up"])
+    }
     func print(_ id: String, checked: Bool) async throws -> Project { try change(id, "print:\(checked)", ["state": "printing"]) }
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project {
         confirmationAnswer = answer
@@ -271,6 +283,32 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(scan.words, "130 photos")
         XCTAssertEqual(scan.preview.compactMap(bottle.file).map(\.lastPathComponent), ["0001.heic", "0033.heic", "0066.heic", "0098.heic", "0130.heic"])
         XCTAssertEqual(ProjectConversation(project: bottle).entries.first?.photos, [], "frames never come back as single photos")
+    }
+
+    /// A size question reaches the Mac as numbers to confirm, with projects present, and its answer goes back as
+    /// numbers: the fields are the companion's own labels, a correction is sent as typed, and Best Guess is not offered.
+    func testASizeQuestionIsAnsweredWithNumbersOnTheMacWithProjectsPresent() async throws {
+        let ask: [String: Any] = ["id": "1af638c1-ec63-46fc-aa2f-e74cd29df231", "question": "Can you confirm or correct what the scan reads?",
+                                  "answers": ["sizes", "text", "camera"], "status": "open", "kind": "sizes",
+                                  "sizes": [["id": "size-1", "label": "width at the widest point", "mm": 64, "from": "scan"],
+                                            ["id": "size-2", "label": "width at the waist", "mm": 53.5, "from": "scan"]]]
+        let companion = FakeObjects()
+        await companion.set([item("other", "ready"), item("bottle", "needs-closeup", ["kind": "fit", "current": NSNull(), "ask": ask])])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let bottle = try XCTUnwrap(model.objects.first { $0.id == "bottle" })
+        XCTAssertEqual(bottle.words.stage, .needsYou)
+        var form = try XCTUnwrap(bottle.openAsk.flatMap(AskSizesForm.init))
+        XCTAssertEqual(form.fields.map(\.label), ["width at the widest point", "width at the waist"])
+        XCTAssertEqual(form.fields.map(\.text), ["64", "53.5"])
+        form.fields[1].text = "53"
+        let answer = try XCTUnwrap(form.answer)
+        let sent = await model.answerSizes(answer, on: "bottle")
+        XCTAssertTrue(sent)
+        let calls = await companion.calls
+        XCTAssertEqual(calls.last, "sizes:size-1=64,size-2=53")
+        XCTAssertEqual(ControlClient.sizesParams("bottle", answer)["sizes"],
+                       .array([.object(["id": .string("size-1"), "mm": .number(64)]), .object(["id": .string("size-2"), "mm": .number(53)])]))
     }
 
     /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and
@@ -529,6 +567,57 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.objects.first?.state, .touchingUp)
         let after = await companion.calls
         XCTAssertEqual(after.filter { $0 == "correct:Widen the flange" }.count, 1)
+    }
+
+    // Nov 10, "Guitar pick": the reply to a send was lost, the words were sent again, and the project got the note
+    // twice and a design pass for each.
+    func testEveryTryAtOneNoteCarriesTheSameIdIncludingTheQueuedOne() async throws {
+        let suite = "counterpart-note-once-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let companion = FakeObjects()
+        await companion.set([item("hook", "ready")])
+        await companion.setCapabilities(.init(messagePhotos: true, messageIds: true))
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        // The first try's reply never arrives; the second finds a step running, so the note is saved for later.
+        await companion.failNextCorrections([ControlClientError.unavailable,
+            ControlRemoteError(code: "conflict", message: "Wait until the current step finishes.")])
+        let lost = await model.perform(.correct, on: "hook", note: "Thicker walls")
+        XCTAssertFalse(lost)
+        let saved = await model.perform(.correct, on: "hook", note: "Thicker walls")
+        XCTAssertTrue(saved)
+        // The saved note goes out at the next look at the project, as it does when its step ends.
+        await model.refresh()
+        for _ in 0..<200 where await companion.messageIds.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+        let ids = await companion.messageIds
+        XCTAssertEqual(ids.count, 3, "the lost try, the refused try and the saved note's own send")
+        XCTAssertEqual(Set(ids).count, 1, "one note, one id")
+        // The same words written again after that are a new note.
+        await companion.set([item("hook", "ready")])
+        await model.refresh()
+        let again = await model.perform(.correct, on: "hook", note: "Thicker walls")
+        XCTAssertTrue(again)
+        let later = await companion.messageIds
+        XCTAssertEqual(later.count, 4)
+        XCTAssertNotEqual(later[3], ids[0])
+    }
+
+    func testACompanionFromBeforeNoteIdsIsSentWhatItAlwaysWas() async throws {
+        let suite = "counterpart-note-old-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let companion = FakeObjects()
+        await companion.set([item("hook", "ready")])
+        await companion.setCapabilities(.init(messagePhotos: true))
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        let sent = await model.perform(.correct, on: "hook", note: "A chamfer")
+        XCTAssertTrue(sent)
+        let ids = await companion.messageIds
+        XCTAssertEqual(ids, [])
+        let calls = await companion.calls
+        XCTAssertEqual(calls.filter { $0 == "correct:A chamfer" }.count, 1)
     }
 
     func testRetryOfASavedMessageDoesNotSelectLaterUploadedPhotos() async throws {

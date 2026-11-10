@@ -72,13 +72,16 @@ export const parameters = {
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),
   'objects.delete': z.strictObject({id: z.uuid()}),
-  'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), photos: z.array(z.string().min(2).max(4096)).max(24).optional()}),
+  'objects.correct': z.strictObject({id: z.uuid(), note: z.string().trim().min(1).max(4000), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), photos: z.array(z.string().min(2).max(4096)).max(24).optional(),
+    messageId: z.string().regex(/^[A-Za-z0-9-]{8,64}$/).optional()}),
   'objects.addStarter': z.strictObject({starterId: z.enum(['scan-platform', 'long-vernier-caliper'])}),
   'objects.create': z.strictObject({instructions: z.string().max(8000).optional(), kind: z.enum(['fit', 'copy', 'published']).optional(), url: z.string().max(2048).optional()}),
   'objects.selectPlate': z.strictObject({id: z.uuid(), fileIndex: z.number().int().nonnegative(), plateIndex: z.number().int().nonnegative()}),
   'objects.answerAsk': z.strictObject({id: z.uuid(), askId: z.uuid(), choices: z.array(z.string().min(1).max(64)).min(1).max(32)}),
   'objects.addFile': z.strictObject({id: z.uuid(), kind: z.enum(['photos', 'scan', 'model']), path: z.string().min(2).max(4096), forMessage: z.boolean().optional()}),
-  'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean(), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), text: z.string().trim().min(1).max(2000).optional()}),
+  'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean(), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), text: z.string().trim().min(1).max(2000).optional(),
+    // A sizes question's numbers, for the sizes it listed.
+    sizes: z.array(z.strictObject({id: z.string().min(1).max(64), mm: z.number().positive().max(10_000)})).min(1).max(6).optional()}),
   'objects.answerReconstruction': z.strictObject({id: z.uuid(), reviewId: z.uuid(), answer: ReconstructionAnswerSchema}),
   'objects.print': z.strictObject({id: z.uuid(), expectedPlate: z.string().regex(/^[0-9a-f]{64}:[0-9]+$/).optional(), checked: z.boolean().optional(), filament: z.strictObject({
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),

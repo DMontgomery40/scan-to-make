@@ -172,7 +172,7 @@ export function createControlDispatcher(services: ControlServices) {
         case 'status.get': return {protocolVersion:1,companionVersion:services.companionVersion,platform:hostPlatform(),...(services.name?{name:services.name}:{}),transport:auth.transport,
           pairedDeviceCount:(await auth.listDevices()).length,capabilities:{capture:!!capture?.captures,cleanup:!!capture?.scanProcessing,printerHandoff:!!printHandoff,nearbyPairing:!!services.nearby,
             objectsCreate:!!services.objects,printSettings:!!services.objects?.printSettingsAvailable,printControl:!!services.objects?.printSettingsAvailable,
-            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,colourMapping:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,publishedModels:!!services.objects,fitFields:!!services.objects,mcpUpdates:!!services.mcpUpdates,printerSetup:!!services.printerSetup,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable,printerChoices:!!services.objects&&!!services.printerSetup,icloudEnrolment:!!services.icloudToken,reconstructionReviewV1:!!services.objects&&(await reconstructionReadiness()).ok}};
+            events:!!services.events&&!!services.liveActivityTokens,structuredPasses:!!services.objects,genericConfirmations:!!services.objects,materialChoice:!!services.objects,colourMapping:!!services.objects,projectSettings:!!services.objects,projectPreferences:!!services.objects,projectRename:!!services.objects,messagePhotos:!!services.objects,messageIds:!!services.objects,publishedModels:!!services.objects,fitFields:!!services.objects,mcpUpdates:!!services.mcpUpdates,printerSetup:!!services.printerSetup,blenderAddon:!!services.blenderAddon,printCopies:!!services.objects?.printCopiesAvailable,printerChoices:!!services.objects&&!!services.printerSetup,icloudEnrolment:!!services.icloudToken,reconstructionReviewV1:!!services.objects&&(await reconstructionReadiness()).ok}};
         case 'blender.status':
         case 'blender.check':
         case 'blender.update': {
@@ -381,8 +381,8 @@ export function createControlDispatcher(services: ControlServices) {
               return {...receipt, object: local(receipt.object)};
             }
             if (method === 'objects.correct') {
-              const {id, note, photos, photoNames} = parameters[method].parse(raw);
-              return {object: local(await objects.correct(id, note, photos, photoNames))};
+              const {id, note, photos, photoNames, messageId} = parameters[method].parse(raw);
+              return {object: local(await objects.correct(id, note, photos, photoNames, messageId))};
             }
             if (method === 'objects.selectPlate') {
               const {id, fileIndex, plateIndex} = parameters[method].parse(raw);
@@ -404,7 +404,8 @@ export function createControlDispatcher(services: ControlServices) {
             const object = method === 'objects.get' ? await objects.view(params.id)
               : method === 'objects.selectPrinter' ? await objects.selectPrinter(params.id, params.destinationId!)
               : method === 'objects.start' ? await objects.start(params.id)
-              : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!, photoNames: (params as {photoNames?: string[]}).photoNames, ...((params as {text?: string}).text ? {text: (params as {text?: string}).text} : {})})
+              : method === 'objects.answerCloseup' ? await objects.answerCloseup(params.id, {bestGuess: params.bestGuess!, photoNames: (params as {photoNames?: string[]}).photoNames, ...((params as {text?: string}).text ? {text: (params as {text?: string}).text} : {}),
+                ...((params as {sizes?: {id: string; mm: number}[]}).sizes ? {sizes: (params as {sizes?: {id: string; mm: number}[]}).sizes} : {})})
               : await objects.print(params.id, (({id: _id, ...options}) => options)(params));
             return {object: local(object)};
           } catch (error) {

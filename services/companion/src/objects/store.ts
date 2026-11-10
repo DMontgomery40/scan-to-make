@@ -27,7 +27,10 @@ export interface ObjectPrintConfirmation {
   supported: boolean;
 }
 
-export interface ObjectMessage { id: string; text: string; atMs: number; photos: string[] }
+export interface ObjectMessage { id: string; text: string; atMs: number; photos: string[];
+  /** The sending client's own id for this message. A second request carrying it is the same message arriving again,
+   *  never a new one (Nov 10: a note whose reply was lost was sent again and started a second design pass). */
+  clientId?: string }
 
 export interface ObjectPass {
   messageId?: string;

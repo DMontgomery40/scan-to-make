@@ -17,6 +17,13 @@ export const recoverQueue = (queue: QueuedChange[]): QueuedChange[] =>
         }
       : q,
   );
+/** One id for each note a person writes, kept across every try at sending it; changed words are a new note. */
+export const noteAttempt = (
+  last: { text: string; id: string } | undefined,
+  text: string,
+  newId: () => string = () => crypto.randomUUID(),
+) => (last?.text === text ? last : { text, id: newId() });
+
 export const queueReady = (
   queue: QueuedChange[],
   projectId: string,

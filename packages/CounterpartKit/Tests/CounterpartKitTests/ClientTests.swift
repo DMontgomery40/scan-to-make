@@ -1121,6 +1121,11 @@ final class NotificationActionsTests: XCTestCase {
         XCTAssertEqual(calls[2].2["note"] as? String, "After printing: 2 mm wider")
         XCTAssertEqual(calls[5].2["bestGuess"] as? Bool, true)
         XCTAssertEqual(calls[6].2["note"] as? String, "Thicker walls")
+        XCTAssertNil(calls[6].2["messageId"])
+        // A note sent from the project carries its own id, so the Mac records it once.
+        _ = try await client.correct(id, "Thicker walls", messageId: "6F1C0E0A-3B0E-4B55-9B0C-1D3E5A7C9E11")
+        let sent = try XCTUnwrap(fake.calls.last?.request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(sent["messageId"] as? String, "6F1C0E0A-3B0E-4B55-9B0C-1D3E5A7C9E11")
     }
 
     /// Away from home the same buttons go as `CounterpartCommand` records the Mac already runs (PRD §9.3).

@@ -21,6 +21,7 @@ struct ProjectView: View {
     var openPrinting: (String) -> Void = { _ in }
     @State private var section = ProjectSection.result
     @State private var note = ""
+    @State private var attempts = NoteAttempts()
     @State private var showingSettings = false
     @State private var choosingModelFiles = false
     @State private var renaming = false
@@ -498,11 +499,20 @@ struct ProjectView: View {
                 let ask = object.openAsk
                 AskPhoto(project: object, path: path, region: ask?.photo != nil ? ask?.region : nil, caption: AskPicture.caption(ask))
             }
+            // A size question: its numbers, prefilled, with Confirm as the one obvious action. Words and a caliper
+            // photo stay below for whatever the numbers don't say.
+            if let ask = object.openAsk, let form = AskSizesForm(ask) {
+                AskSizesFields(form: form, working: askWorking) { sizes in answerWithSizes(object, sizes) }
+                    .id(ask.id)
+            } else if let kind = object.openAsk?.kind, !ProjectView.knownAskKinds.contains(kind) {
+                Text("Update Counterpart on this \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone") to answer this kind of question here.")
+                    .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("ask-update")
+            }
             AskButtons(store: store, project: object, working: $askWorking, problem: $askProblem)
             // The Mac takes a typed answer when it says so (KAN-214 #204, `answers` includes "text").
             if object.openAsk?.answers.contains("text") == true {
                 HStack(spacing: 8) {
-                    TextField("Or answer in words…", text: $askText, axis: .vertical)
+                    TextField(object.openAsk?.kind == "sizes" ? "Anything the numbers don't say…" : "Or answer in words…", text: $askText, axis: .vertical)
                         .lineLimit(1...4).padding(10).glassEffect(.regular, in: .rect(cornerRadius: 16))
                         .accessibilityIdentifier("ask-text")
                     Button { answerInWords(object) } label: { Image(systemName: "arrow.up").fontWeight(.semibold).frame(width: 36, height: 36) }
@@ -515,6 +525,26 @@ struct ProjectView: View {
         }
         .padding(16)
         .glassEffect(.regular.tint(.orange.opacity(0.15)), in: .rect(cornerRadius: 24))
+    }
+
+    /// The kinds of question this build knows how to answer (contracts `AskSchema.kind`).
+    static let knownAskKinds: Set<String> = ["closeup", "file", "choice", "region", "scale", "sizes"]
+
+    /// A size question's numbers, with whatever is typed in the words box beside them.
+    private func answerWithSizes(_ object: Project, _ sizes: [AskSizesForm.Answer]) {
+        guard !sizes.isEmpty, !askWorking else { return }
+        let text = askText.trimmingCharacters(in: .whitespacesAndNewlines)
+        askWorking = true; askProblem = nil
+        Task {
+            defer { askWorking = false }
+            do {
+                let ticket = store.startRequest()
+                store.replace(try await store.mac.client.answerAsk(object.id, text: text.isEmpty ? nil : String(text.prefix(2000)), sizes: sizes), ticket: ticket)
+                askText = ""
+            }
+            catch let failure as CompanionError { askProblem = failure.message }
+            catch { askProblem = CompanionError.unreachable.message }
+        }
     }
 
     private func answerInWords(_ object: Project) {
@@ -562,7 +592,7 @@ struct ProjectView: View {
             }
             if let pass = object.passes.last {
                 DisclosureGroup("Details") {
-                    Text([pass.status, pass.summary, Format.clock(Date(timeIntervalSince1970: (pass.endedAtMs ?? pass.startedAtMs) / 1000))]
+                    Text([pass.endingWords, pass.summary, Format.clock(Date(timeIntervalSince1970: (pass.endedAtMs ?? pass.startedAtMs) / 1000))]
                         .compactMap { $0 }.joined(separator: " · "))
                         .font(.caption2.monospaced()).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
                         .textSelection(.enabled)
@@ -737,20 +767,25 @@ struct ProjectView: View {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         writing = false
+        // One id for this note across every try, so the Mac never records it twice.
+        let messageId = attempts.id(for: text, in: object.id)
         if object.changesWait {
             // The Mac takes changes between passes; this one is sent the moment the pass ends.
-            store.queue(note: text, for: object.id)
+            store.queue(note: text, for: object.id, messageId: messageId)
+            attempts.settled(object.id)
             note = ""
             return
         }
         act {
             do {
-                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object))
+                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object), messageId: messageId)
                 store.corrections.sent(text, for: object.id)
+                attempts.settled(object.id)
                 note = ""; section = .activity
                 return next
             } catch let failure as CompanionError where CorrectionQueue.waits(failure) {
-                store.queue(note: text, for: object.id)
+                store.queue(note: text, for: object.id, messageId: messageId)
+                attempts.settled(object.id)
                 note = ""
                 return nil
             }
@@ -914,8 +949,11 @@ struct PassTimeline: View {
 
     private var steps: [(title: String, detail: String?, state: StepState)] {
         if let stages = pass.stages, !stages.isEmpty {
-            return stages.map { stage in
-                let state: StepState = stage.endedAtMs != nil ? .done : (pass.failed ? .failed : running ? .current : .done)
+            // The last stage carries how the pass ended: one that stopped to ask or stopped short is never a green tick.
+            let ended: StepState? = pass.ending.map { $0 == .finished ? .done : $0 == .asked ? .asked : .failed }
+            return stages.enumerated().map { offset, stage in
+                let last = offset == stages.count - 1
+                let state: StepState = last && ended != nil ? ended! : stage.endedAtMs != nil ? .done : (pass.failed ? .failed : running ? .current : .done)
                 return (stage.words, nil, state)
             }
         }
@@ -925,9 +963,15 @@ struct PassTimeline: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(index == 0 ? "First pass · \(Format.clock(Date(timeIntervalSince1970: pass.startedAtMs / 1000)))"
-                 : "Pass \(index + 1) · \(Format.clock(Date(timeIntervalSince1970: pass.startedAtMs / 1000)))")
-                .font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 8)
+            // Each pass says when it ran and how it ended, in the Mac's words, and what it was asked to change.
+            Text([index == 0 ? "First pass" : "Pass \(index + 1)", Format.clock(Date(timeIntervalSince1970: pass.startedAtMs / 1000)), pass.endingWords]
+                    .compactMap { $0 }.joined(separator: " · "))
+                .font(.caption.weight(.semibold)).foregroundStyle(pass.ending == .stopped ? Color.red : pass.ending == .asked ? .orange : .secondary)
+                .padding(.bottom, pass.requestedChange == nil ? 8 : 2)
+                .accessibilityIdentifier("pass-\(index + 1)-header")
+            if let change = pass.requestedChange {
+                Text("Your change: “\(change)”").font(.footnote).foregroundStyle(.secondary).lineLimit(3).padding(.bottom, 8)
+            }
             ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
                 HStack(alignment: .top, spacing: 12) {
                     VStack(spacing: 0) {
@@ -969,11 +1013,13 @@ struct PassTimeline: View {
 
 enum StepState: Equatable {
     case done, current, failed, pending
+    /// The pass stopped here to ask the person something.
+    case asked
     var symbol: String {
-        switch self { case .done: "checkmark.circle.fill"; case .current: "circle.dotted.circle"; case .failed: "xmark.circle.fill"; case .pending: "circle" }
+        switch self { case .done: "checkmark.circle.fill"; case .current: "circle.dotted.circle"; case .failed: "xmark.circle.fill"; case .pending: "circle"; case .asked: "questionmark.circle.fill" }
     }
     var color: Color {
-        switch self { case .done: .green; case .current: .blue; case .failed: .red; case .pending: .secondary }
+        switch self { case .done: .green; case .current: .blue; case .failed: .red; case .pending: .secondary; case .asked: .orange }
     }
 }
 
@@ -1094,5 +1140,67 @@ struct DidItFitCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+}
+
+/// A size question's fields (PRD §5.4): one row per size the Mac asked about, in its words, prefilled with its
+/// number, and one button. The rules for what is sent are `AskSizesForm`'s (CounterpartKit).
+struct AskSizesFields: View {
+    @State var form: AskSizesForm
+    let working: Bool
+    let send: ([AskSizesForm.Answer]) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach($form.fields) { $field in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(field.label.prefix(1).uppercased() + field.label.dropFirst()).font(.subheadline.weight(.medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(AskSizesForm.source(field.from)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 4) {
+                        AskSizeNumber(text: $field.text, label: field.label, id: field.id)
+                        Text("mm").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 14))
+                }
+            }
+            Button { if let answer = form.answer { send(answer) } } label: {
+                Label(form.unchanged ? "Confirm These Sizes" : "Send These Sizes", systemImage: "checkmark")
+                    .fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 30)
+            }
+            .buttonStyle(.glassProminent).controlSize(.large)
+            .disabled(working || form.answer == nil)
+            .accessibilityIdentifier("ask-sizes-confirm")
+            if form.answer == nil {
+                Text("Enter each size in millimetres, or leave one empty if you don't know it.").font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// One size's number. Tapping it selects the whole number, so typing replaces the Mac's figure instead of landing
+/// in front of it.
+private struct AskSizeNumber: View {
+    @Binding var text: String
+    let label: String
+    let id: String
+    @State private var selection: TextSelection?
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: $text, selection: $selection)
+            .focused($focused)
+            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+            .font(.title3.monospacedDigit().weight(.semibold))
+            .frame(width: 84)
+            .accessibilityLabel("\(label), millimetres")
+            .accessibilityIdentifier("ask-size-\(id)")
+            .onChange(of: focused) { _, now in
+                if now, !text.isEmpty { selection = TextSelection(range: text.startIndex..<text.endIndex) }
+            }
     }
 }

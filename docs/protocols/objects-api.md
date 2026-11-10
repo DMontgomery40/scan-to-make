@@ -46,7 +46,7 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `POST /v1/objects/<id>/photos?name=<file>` | WRITE | JPEG, PNG or HEIC bytes (≤ 25 MiB); optional `forMessage=true` query for a correction or Ask attachment. | `{object}`. Photos are accepted in every state except while the project is being deleted. Message attachments stay pending even if the initial pass fails during upload. Other photos added after an initial failure with no model join the request evidence for Try Again. |
 | `POST /v1/objects/<id>/capture?name=NNNN.heic`, `…/capture-depth?name=NNNN.depth.plist` | WRITE | In-hand capture frames; or, with `capabilities.objectCaptureImages`, every image of an iPhone Object Capture session, byte for byte, named `NNNN.heic` in capture order (Apple names them by seconds since the session started), sent before its scan | `{object}`; refused once a scan is there |
 | `POST /v1/objects/<id>/start` | WRITE | `{captureManifest?}`. A walk-around's manifest is exactly `{version: 1, images: [every name], depthRequired: false, source: "object-capture"}` (no `cameraMetadataRequired` or `scaleQualificationRequired`): the Mac rebuilds that images folder with Apple's PhotogrammetrySession at `.full` (Apple's own masks), and the scan sent with them is the phone's preview until then (`scanSource`) | `{object}` |
-| `POST /v1/objects/<id>/corrections` | WRITE | `{note: string 1–4000}`. Upload any new photos first with `…/photos`. | `{object}` (a new pass) |
+| `POST /v1/objects/<id>/corrections` | WRITE | `{note: string 1–4000, messageId?: string}`. Upload any new photos first with `…/photos`. `messageId` (8–64 letters, digits or hyphens) is the sender's own id for this note; see "A note is recorded once". | `{object}` (a new pass) |
 | `POST /v1/objects/<id>/model?name=<file>` | WRITE | 3MF or STL bytes, ≤64 MiB; preserves the supplied original | `{object}` (ready or plate/file choice) |
 | `POST /v1/objects/<id>/ask` | WRITE | `{askId, choices: [optionId]}` | `{object}` |
 | `POST /v1/objects/<id>/closeup` | WRITE | `{bestGuess?: boolean, text?: string ≤ 2000, photoNames?: string[] ≤ 100}`. Answers the open Ask: upload photos first, then name those exact files in `photoNames`; or use `{bestGuess: true}` or `{text}`. Omitted names select no photos; queued correction evidence remains pending. Empty answers or missing photos are refused before consuming the Ask. | `{object}` (a new pass) |
@@ -375,6 +375,18 @@ Tokens are stored for the calling device (`X-Scan-Device`) in `<data root>/live-
 ## Events (PR 3)
 
 `GET /v1/events?after=<seq>&wait=<0–25>&limit=<0–500>` (READ). See [events.md](events.md).
+
+### A note is recorded once
+
+A client gives each note a person writes one id and sends it as `messageId` on every try at that note:
+the first send, a second press after a reply that never arrived, and the saved copy that goes when the
+running step ends. The companion keeps the id with the message (never in a reply). A request whose
+`messageId` it has already recorded returns `{object}` as the project is now: no second message, no
+second pass, and no "Wait until the current step finishes." refusal while that note's own pass runs.
+Changed words are a new note with a new id, and so are the same words after a send that worked. A
+request without `messageId` behaves as before. Mac control `objects.correct` takes the same field when
+`capabilities.messageIds` is true. (Nov 10: a project held one note twice, 98 seconds apart, and each
+copy had started a design pass.)
 
 ### Message photo ownership
 

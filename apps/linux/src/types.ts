@@ -48,9 +48,20 @@ export interface RawQuestion {
   url?: string;
   requestedSchema?: unknown;
 }
+/** One size a question asks about, in millimetres. `id` is opaque; `label` says what to measure. */
+export interface AskSize {
+  id: string;
+  label: string;
+  mm: number;
+  from: "scan" | "published" | string;
+}
 export interface Ask {
   id: string;
   question: string;
+  /** closeup, file, choice, region, scale, sizes: what the project is waiting on the person for. */
+  kind?: string;
+  /** `sizes`: the sizes to confirm or correct, prefilled. */
+  sizes?: AskSize[];
   photo?: string;
   region?: { x: number; y: number; width: number; height: number };
   answers: string[];
@@ -117,6 +128,8 @@ export interface Pass {
   photos?: string[];
   summary?: string;
   status?: string;
+  /** How it ended, in the companion's words; absent while it runs. */
+  words?: string;
   activityCount?: number;
   stages?: { id: string; words: string; endedAtMs?: number }[];
 }
@@ -173,7 +186,8 @@ export interface Project {
   ask?: Ask;
   reconstructionReview?: ReconstructionReview;
   question?: { closeup: string };
-  status?: { text: string; phase: string; tint: string };
+  /** `detail`: what a list row shows under its phase's heading, never the heading again. */
+  status?: { text: string; phase: string; tint: string; detail?: string };
   printerDestinationId?: string;
   settings?: {
     status: string;
