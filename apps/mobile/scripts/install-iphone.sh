@@ -22,10 +22,11 @@ mkdir -p "$out"
 printf '{"commit":"%s","build":"%s","device":"%s","builtAt":"%s","override":"%s"}\n' \
   "$head" "$build" "$device" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${STM_TRUNK_OVERRIDE:-}" > "$out/source.json"
 # One build-lane slot on the Mac while xcodebuild runs (scripts/README.md, "The Mac's build lane").
-python3 "$repo/scripts/lane.py" --label "install-iphone: build $build from ${head:0:12}" -- xcodebuild -project "$repo/apps/mobile/ios/ScanToMake.xcodeproj" \
+# The build goes to build.log; the lane's own messages (who holds it, who waits) stay on this terminal.
+python3 "$repo/scripts/lane.py" --label "install-iphone: build $build from ${head:0:12}" --output "$out/build.log" -- xcodebuild -project "$repo/apps/mobile/ios/ScanToMake.xcodeproj" \
   -scheme ScanToMake -configuration Release -destination 'generic/platform=iOS' \
   -derivedDataPath "$out/DerivedData" CURRENT_PROJECT_VERSION="$build" CODE_SIGN_STYLE=Automatic \
-  DEVELOPMENT_TEAM=X7F5F9LR24 -allowProvisioningUpdates build > "$out/build.log" 2>&1 ||
+  DEVELOPMENT_TEAM=X7F5F9LR24 -allowProvisioningUpdates build ||
   { tail -40 "$out/build.log" >&2; exit 1; }
 app="$out/DerivedData/Build/Products/Release-iphoneos/ScanToMake.app"
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Info.plist")" = "$build" ] ||

@@ -103,6 +103,10 @@ class LaneTests(unittest.TestCase):
         self.queued('x')
         self.release('a')
         self.assertTrue(self.stays_false(lambda: self.started('x')), 'exclusive ran while slot 2 was still held')
+        # While it waits for the second slot, the first is shown as x's, not as an unknown process's.
+        self.wait_for(lambda: any((s['holder'] or {}).get('label') == 'x' for s in self.status()['slots']), 'x named on its first slot')
+        self.assertFalse(any('unrecorded' in s for s in self.status()['slots']), self.status_text())
+        self.assertIn('waiting for the other slot', self.status_text())
         self.release('b')
         self.wait_for(lambda: self.started('x'), 'the exclusive caller')
         holder = self.status()['holders'][0]
@@ -190,6 +194,21 @@ class LaneTests(unittest.TestCase):
                               env=self.env, capture_output=True)
         self.assertEqual(done.returncode, 128 + signal.SIGTERM)
 
+    def test_output_sends_the_command_to_a_file_and_keeps_lane_messages_on_stderr(self):
+        self.hold_both_slots()
+        log = self.folder / 'build.log'
+        child = subprocess.Popen([sys.executable, str(LANE), '--label', 'install', '--output', str(log), '--',
+                                  sys.executable, '-c', 'import sys; print("built"); print("warned", file=sys.stderr)'],
+                                 env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        self.children.append(child)
+        self.queued('install')
+        self.release('a')
+        out, err = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 0)
+        self.assertIn('"a"', err); self.assertIn('"b"', err)  # Who held the lane while it waited.
+        self.assertNotIn('built', out + err)
+        self.assertEqual(sorted(log.read_text().split()), ['built', 'warned'])
+
     def test_status_reports_an_overdue_hold_and_the_label(self):
         self.caller('long build', '--max-minutes', '0.001')
         self.wait_for(lambda: self.started('long build'), 'the holder')
@@ -208,6 +227,9 @@ class LaneTests(unittest.TestCase):
         done = subprocess.run([sys.executable, str(LANE), '--', sys.executable, '-c', 'import sys; sys.exit(5)'],
                               env=dict(self.env, STM_LANE_HELD=str(holder_pid)), capture_output=True, timeout=10)
         self.assertEqual(done.returncode, 5)
+        done = subprocess.run([sys.executable, str(LANE), '--', sys.executable, '-c', 'import os,signal; os.kill(os.getpid(), signal.SIGTERM)'],
+                              env=dict(self.env, STM_LANE_HELD=str(holder_pid)), capture_output=True, timeout=10)
+        self.assertEqual(done.returncode, 128 + signal.SIGTERM)
         # A leftover STM_LANE_HELD naming no live holder does not bypass the lane.
         stale = subprocess.Popen([sys.executable, str(LANE), '--', sys.executable, '-c', 'pass'],
                                  env=dict(self.env, STM_LANE_HELD='999999'), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

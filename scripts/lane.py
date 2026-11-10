@@ -64,13 +64,23 @@ class Record:
     """A small JSON file its owner keeps flock'ed for as long as it lives (a queue ticket or a holder record)."""
 
     def __init__(self, folder, name, data):
-        folder.mkdir(parents=True, exist_ok=True)
-        temporary = folder / ('.tmp-' + str(os.getpid()) + '-' + str(time.time_ns()))
-        self.handle = temporary.open('w+')
-        try_lock(self.handle, blocking=True)  # Nobody else knows the name yet: immediate.
-        self.handle.write(json.dumps(data)); self.handle.flush()
         self.path = folder / name
+        self.handle = self._publish(data)
+
+    def _publish(self, data):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.parent / ('.tmp-' + str(os.getpid()) + '-' + str(time.time_ns()))
+        handle = temporary.open('w+')
+        try_lock(handle, blocking=True)  # Nobody else knows the name yet: immediate.
+        handle.write(json.dumps(data)); handle.flush()
         os.rename(temporary, self.path)  # Appears already locked, so no reader sees it as stale.
+        return handle
+
+    def replace(self, data):
+        """Swap in a new description atomically; the old file was unlinked by the rename, so just close it."""
+        old = self.handle
+        self.handle = self._publish(data)
+        old.close()
 
     def close(self):
         with contextlib.suppress(FileNotFoundError):
@@ -117,14 +127,16 @@ def _remove_if_unlocked(path):
             path.unlink()
 
 
-def next_ticket_number(state):
+def enqueue(state, info):
+    """Number a ticket and publish it under the sequence lock, so number order is the order tickets appear."""
     state.mkdir(parents=True, exist_ok=True)
     with (state / 'sequence').open('a+') as handle:
         try_lock(handle, blocking=True)
         handle.seek(0)
         number = int(handle.read().strip() or 0) + 1
         handle.seek(0); handle.truncate(); handle.write(str(number)); handle.flush()
-    return number
+        info['ticket'] = number
+        return Record(state / 'queue', '%012d-%d.json' % (number, os.getpid()), info)
 
 
 def legacy_holder(slot):
@@ -179,6 +191,8 @@ def describe(report):
             text = ('held %s by pid %s%s "%s" (max %sm)' % (
                 _age(holder['ageSeconds']), holder['pid'], ' [exclusive]' if holder['exclusive'] else '',
                 holder['label'], holder['maxMinutes']))
+            if holder.get('acquiring'):
+                text += ', waiting for the other slot'
             if holder['overdue']:
                 text += ' OVERDUE by ' + _age(holder['ageSeconds'] - 60 * holder['maxMinutes'])
         elif row['held']:
@@ -206,10 +220,12 @@ def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None):
     handles = [slot.open('a+') for slot in slots]
     held = []
     record = None
-    number = next_ticket_number(state)
-    info = {'pid': os.getpid(), 'label': label, 'exclusive': exclusive, 'maxMinutes': max_minutes,
-            'since': time.time(), 'ticket': number}
-    ticket = Record(state / 'queue', '%012d-%d.json' % (number, os.getpid()), info)
+    info = {'pid': os.getpid(), 'label': label, 'exclusive': exclusive, 'maxMinutes': max_minutes, 'since': time.time()}
+    ticket = enqueue(state, info)
+    holder_name = ticket.path.name
+
+    def describe_holding(acquiring):
+        return dict(info, slots=sorted(i + 1 for i in held), since=time.time(), acquiring=acquiring)
     announced = False
     try:
         while True:  # Wait until this ticket is the oldest live one.
@@ -226,6 +242,8 @@ def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None):
                         log('lane: waiting for both slots.\n' + describe(status())); announced = True
                     try_lock(handles[index], blocking=True)
                 held.append(index)
+                if len(held) == 1:  # Say who holds this slot while the other one is awaited.
+                    record = Record(state / 'holders', holder_name, describe_holding(True))
         else:
             while not held:
                 for index in (1, 0):  # Slot 2 first, leaving slot 1 to callers still using lockf directly.
@@ -235,8 +253,11 @@ def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None):
                     if not announced:
                         log('lane: waiting for a free slot.\n' + describe(status())); announced = True
                     time.sleep(poll_seconds())
-        info = dict(info, slots=sorted(i + 1 for i in held), since=time.time())
-        record = Record(state / 'holders', '%012d-%d.json' % (number, os.getpid()), info)
+        info = describe_holding(False)
+        if record:
+            record.replace(info)
+        else:
+            record = Record(state / 'holders', holder_name, info)
         ticket.close(); ticket = None
         if announced:
             log('lane: got slot %s for "%s".' % (' and '.join(str(s) for s in info['slots']), label))
@@ -261,9 +282,24 @@ def nested_holder():
     return None
 
 
-def run(command, label, exclusive, max_minutes):
+def exit_code(code):
+    return 128 - code if code < 0 else code
+
+
+def run(command, label, exclusive, max_minutes, output=None):
+    """Run command in the lane. With output, the command's stdout and stderr go to that file, while the
+    lane's own messages (who holds it, who is waiting) stay on this process's stderr."""
+    sink = open(output, 'w') if output else None
+    try:
+        return _run(command, label, exclusive, max_minutes, sink)
+    finally:
+        if sink:
+            sink.close()
+
+
+def _run(command, label, exclusive, max_minutes, sink):
     if nested_holder():
-        return subprocess.call(command)
+        return exit_code(subprocess.call(command, stdout=sink, stderr=sink))
     child = None
     def forward(signum, frame):
         if child and child.poll() is None:
@@ -273,9 +309,9 @@ def run(command, label, exclusive, max_minutes):
     for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(signum, forward)
     with hold(label, exclusive, max_minutes):
-        child = subprocess.Popen(command, env=dict(os.environ, **{HELD_ENV: str(os.getpid())}))
+        child = subprocess.Popen(command, env=dict(os.environ, **{HELD_ENV: str(os.getpid())}), stdout=sink, stderr=sink)
         code = child.wait()
-    return 128 - code if code < 0 else code
+    return exit_code(code)
 
 
 def main(argv=None):
@@ -286,6 +322,7 @@ def main(argv=None):
     parser.add_argument('--label', help='who and what, shown by --status')
     parser.add_argument('--max-minutes', type=float, default=DEFAULT_MAX_MINUTES,
                         help='how long the hold should take; longer is reported as overdue (default 10)')
+    parser.add_argument('--output', help="write the command's stdout and stderr to this file (lane messages stay on stderr)")
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.status:
@@ -296,7 +333,7 @@ def main(argv=None):
     if not command:
         parser.error('give a command after --')
     label = args.label or ' '.join(command)[:120]
-    return run(command, label, args.exclusive, args.max_minutes)
+    return run(command, label, args.exclusive, args.max_minutes, args.output)
 
 
 if __name__ == '__main__':

@@ -52,7 +52,7 @@ python3 scripts/lane.py --status                                              # 
   oldest live ticket; only then does it take slots. So callers of the same kind go in arrival order, and normal
   callers that arrive after a waiting exclusive one wait behind it instead of overtaking it.
 - **Who holds it.** Each holder records its label, pid, slots, start time and `--max-minutes` (default 10) in
-  `~/.stm-lane/holders`. `--status` (or `--status --json`) prints them with their ages, flags a hold past its
+  `~/.stm-lane/holders` (an exclusive caller records its first slot while it waits for the second). `--status` (or `--status --json`) prints them with their ages, flags a hold past its
   `--max-minutes` as overdue (it does not kill it), and lists the waiters in order. A slot held with no record
   is shown as held by a process outside the lane.
 - **Stale state blocks nobody.** The kernel locks are the truth. A ticket or record counts only while its owner
@@ -60,7 +60,8 @@ python3 scripts/lane.py --status                                              # 
   `--status`. If `lane.py` itself is killed, its command keeps running outside the lane (as with `lockf`).
 - **Nested calls.** The command runs with `STM_LANE_HELD=<holder pid>`; a `lane.py` call inside it (an install
   script run from a gate job) runs straight away instead of waiting behind its own holder.
-- **Exit code** is the command's; a command killed by a signal gives 128 + the signal number.
+- **Exit code** is the command's; a command killed by a signal gives 128 + the signal number. `--output FILE`
+  sends the command's output to a file while the lane's messages stay on the terminal.
 - `ci_local.py` holds a slot for every `macos`/`xcode-` job, whether started on the Mac or sent from a Linux box
   (`mobile/app`, the UI job, holds both), and its wait message prints `--status`. `ci_local.py --ios-lock
   <command>` is the same as `lane.py -- <command>`.
