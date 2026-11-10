@@ -414,8 +414,23 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// open, answered
         public var status: String
         public var askedAtMs: Double?
-        public init(id: String, question: String, photo: String? = nil, region: Region? = nil, answers: [String], status: String = "open", askedAtMs: Double? = nil) {
+        /// What the project is waiting on the person for: closeup, file, choice, region, scale, sizes. The Mac sends
+        /// it for every question; nil only from an older Mac.
+        public var kind: String?
+        /// `file`: why, when it isn't simply "send it" (`downloads-access`).
+        public var reason: String?
+        /// `sizes`: the sizes to confirm or correct, prefilled.
+        public var sizes: [Size]?
+        /// One size in millimetres. `id` is opaque; `label` says what to measure; `from` is where the Mac's number
+        /// came from (`scan` or `published`).
+        public struct Size: Codable, Equatable, Sendable, Identifiable {
+            public var id: String; public var label: String; public var mm: Double; public var from: String
+            public init(id: String, label: String, mm: Double, from: String) { self.id = id; self.label = label; self.mm = mm; self.from = from }
+        }
+        public init(id: String, question: String, photo: String? = nil, region: Region? = nil, answers: [String], status: String = "open", askedAtMs: Double? = nil,
+                    kind: String? = nil, sizes: [Size]? = nil) {
             self.id = id; self.question = question; self.photo = photo; self.region = region; self.answers = answers; self.status = status; self.askedAtMs = askedAtMs
+            self.kind = kind; self.sizes = sizes
         }
     }
 
