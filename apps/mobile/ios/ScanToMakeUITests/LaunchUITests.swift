@@ -309,7 +309,11 @@ final class ProjectScreensUITests: XCTestCase {
     }
 
     func testNewSaysWhatTheMacNeedsBeforeSending() {
-        let app = launch("new")
+        // New keeps its words between openings; another test's typing must not fill this one (an empty draft, as launched).
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
+                               "-CounterpartScreen", "new", "-CounterpartNewDraft", ""]
+        app.launch()
         let send = app.buttons["send"]
         XCTAssertTrue(send.waitForExistence(timeout: 20))
         send.tap()
@@ -599,7 +603,7 @@ final class LayoutParityUITests: XCTestCase {
     func testNewAfterAScanOpensOnItsQuestionAndNamesTheChosenAction() {
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
-                               "-CounterpartScreen", "new", "-CounterpartNewScan", "walk-around"]
+                               "-CounterpartScreen", "new", "-CounterpartNewScan", "walk-around", "-CounterpartNewDraft", ""]
         app.launch()
         let question = app.staticTexts["scan-use-question"]
         XCTAssertTrue(question.waitForExistence(timeout: 20), app.debugDescription)
@@ -629,7 +633,9 @@ final class LayoutParityUITests: XCTestCase {
         func nothingInsideTheButton(_ state: String) {
             for _ in 0..<6 { app.swipeUp() }
             let own = Set(send.descendants(matching: .any).allElementsBoundByIndex.map { NSCoder.string(for: $0.frame) })
-            let inside = (app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex + app.textFields.allElementsBoundByIndex).filter {
+            // Only the sheet's own content: Home stays in the accessibility tree behind the sheet.
+            let sheet = app.scrollViews.containing(.staticText, identifier: "scan-use-question").firstMatch
+            let inside = (sheet.staticTexts.allElementsBoundByIndex + sheet.buttons.allElementsBoundByIndex + sheet.textFields.allElementsBoundByIndex).filter {
                 $0.identifier != "send" && !own.contains(NSCoder.string(for: $0.frame)) && $0.frame.intersects(send.frame)
             }
             XCTAssertTrue(inside.isEmpty, "\(state): \(inside.map { "\($0.identifier) '\($0.label)' \($0.frame)" }) inside the button at \(send.frame)")
@@ -764,9 +770,12 @@ final class LayoutParityUITests: XCTestCase {
         let keyboardShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         keyboardShot.name = "new-fit-keyboard-up"; keyboardShot.lifetime = .keepAlways
         add(keyboardShot)
-        let measured = app.segmentedControls.buttons["I measured"]
-        for _ in 0..<4 where !measured.isHittable { app.swipeDown() }
+        // Put the keyboard away first, or the next tap only dismisses it.
+        app.navigationBars["New Project"].buttons["Done"].tap()
+        let measured = app.buttons["I measured"]
+        for _ in 0..<6 where !(measured.exists && measured.isHittable) { app.swipeDown() }
         measured.tap()
+        XCTAssertTrue(measured.isSelected, "I measured is chosen")
         // Scroll back down so Send is pressed from where a person would be, below the fields.
         for _ in 0..<3 { app.swipeUp() }
         let send = app.buttons["send"]
