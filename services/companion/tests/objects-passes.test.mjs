@@ -535,3 +535,53 @@ test('a code design is kept as the project\'s design source, a change starts fro
   assert.equal(later.current.design, undefined);
   await assert.rejects(readFile(join(dir, 'current', 'design', 'touched.py')), {code: 'ENOENT'});
 });
+
+test('a size question is its own kind: numbers on the wire, numbers back, and the worker reads them as measured', async t => {
+  const asked = [{label: 'width at the pink stripe', mm: 64, from: 'scan'}, {label: 'width at the waist', mm: 53, from: 'scan'}, {label: 'height to the cap tip', mm: 107, from: 'published'}];
+  const f = await setup(t, [
+    {status: 'needs_closeup', result: {ask: {question: 'The maker doesn\'t publish this bottle\'s size. Can you confirm or correct these?', sizes: asked}}},
+    {status: 'done'}]);
+  const object = await f.service.create('A wall holder for three of these', 'fit', undefined, {sizeSource: 'lookup'});
+  await f.service.start(object.id);
+  const waiting = await f.service.settled(object.id);
+  assert.equal(waiting.state, 'needs-closeup');
+  const ask = publicObject(waiting).ask;
+  assert.equal(ask.kind, 'sizes');
+  assert.equal(ask.type, undefined, 'a client from before kinds shows the question and its text box');
+  assert.deepEqual(ask.answers, ['sizes', 'text', 'camera']);
+  assert.deepEqual(ask.sizes, asked.map((size, index) => ({id: `size-${index + 1}`, ...size})));
+  // Sizes it didn't ask about, a size twice, or a number that isn't one are refused, and nothing is consumed.
+  for (const bad of [[{id: 'longest', mm: 60}], [{id: 'size-1', mm: 63}, {id: 'size-1', mm: 64}], [{id: 'size-1', mm: 0}], []])
+    await assert.rejects(f.service.answerCloseup(object.id, {sizes: bad}), /sizes|size/i);
+  assert.equal((await f.service.get(object.id)).ask.status, 'open');
+  // Two corrected, one confirmed, with words beside them.
+  await f.service.answerCloseup(object.id, {sizes: [{id: 'size-1', mm: 63}, {id: 'size-2', mm: 53}, {id: 'size-3', mm: 107.5}], text: 'The waist is where it narrows under the label.'});
+  const done = await f.service.settled(object.id);
+  assert.equal(done.state, 'ready');
+  // New's fit choice is kept as it was; the checked sizes are their own list, by the question's labels.
+  assert.deepEqual(done.fit, {sizeSource: 'lookup'});
+  assert.deepEqual(done.checkedSizes, [
+    {label: 'width at the pink stripe', mm: 63, certainty: 'measured'}, {label: 'width at the waist', mm: 53, certainty: 'confirmed'}, {label: 'height to the cap tip', mm: 107.5, certainty: 'measured'}]);
+  assert.equal(publicObject(done).checkedSizes, undefined, 'the companion\'s own record');
+  const note = f.inputs[1].note;
+  assert.match(note, /Treat these as measured:\n- width at the pink stripe: 63 mm \(corrected; you had 64 mm\)\n- width at the waist: 53 mm \(confirmed\)\n- height to the cap tip: 107\.5 mm \(corrected; you had 107 mm\)/);
+  assert.match(note, /The waist is where it narrows under the label\./);
+  // This pass and every later one are told each size by its label and how sure it is, never as "the overall size";
+  // the request is still only the person's words.
+  assert.match(f.inputs[1].instructions, /Sizes the person checked on the real object[^\n]*\n- width at the pink stripe: 63 mm, measured by the person\n- width at the waist: 53 mm, confirmed\n- height to the cap tip: 107\.5 mm, measured by the person$/);
+  assert.doesNotMatch(f.inputs[1].instructions, /exact overall size/);
+  assert.equal(publicObject(done).instructions, 'A wall holder for three of these');
+});
+
+test('a question with no sizes, or with a size that is not whole, stays a close-up question', async t => {
+  for (const sizes of [undefined, [{label: 'width', mm: 64, from: 'guess'}], [{label: '', mm: 64, from: 'scan'}], [{label: 'width', mm: -1, from: 'scan'}]]) {
+    const f = await setup(t, [{status: 'needs_closeup', result: {closeup: 'the clip', ask: {question: 'Can you take a close-up of the clip?', ...(sizes ? {sizes} : {})}}}]);
+    const object = await f.service.create('A hook', 'fit');
+    await f.service.start(object.id);
+    const ask = publicObject(await f.service.settled(object.id)).ask;
+    assert.equal(ask.kind, 'closeup');
+    assert.equal(ask.sizes, undefined);
+    assert.deepEqual(ask.answers, ['camera', 'photos', 'best-guess', 'text']);
+    await assert.rejects(f.service.answerCloseup(object.id, {sizes: [{id: 'size-1', mm: 5}]}), /did not ask for sizes/);
+  }
+});

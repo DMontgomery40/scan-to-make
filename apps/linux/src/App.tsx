@@ -19,8 +19,10 @@ import {
   projectGroups,
   projectThumbnail,
   searchProject,
+  searchSnippet,
   startersShown,
   words,
+  rowWords,
 } from "./domain";
 import { useWorkspace } from "./useWorkspace";
 import { useChangeQueue } from "./useChangeQueue";
@@ -150,7 +152,7 @@ export function App() {
                   onClick={() => setSelected(p.id)}
                 >
                   {p.title}
-                  <small>{words(p)}</small>
+                  <small>{rowWords(p)}</small>
                 </button>
               ))}
             </section>
@@ -374,6 +376,7 @@ export function App() {
                     <div>
                       <h3>{p.title}</h3>
                       <p>{words(p)}</p>
+                      <SearchReason project={p} search={search} />
                     </div>
                   </button>
                 ))}
@@ -666,5 +669,19 @@ function ConfirmationInbox({
       <Question key={raw.id} raw={raw} answer={answer} />
       {error && <p className="error">{error}</p>}
     </Modal>
+  );
+}
+
+/** Why a search found a project whose title doesn't say (first look U10): the matching words, marked. */
+function SearchReason({ project, search }: { project: Project; search: string }) {
+  const snippet = searchSnippet(project, search);
+  if (!snippet) return null;
+  const [from, to] = snippet.match;
+  return (
+    <p className="search-reason" data-testid="search-reason">
+      {snippet.text.slice(0, from)}
+      <mark>{snippet.text.slice(from, to)}</mark>
+      {snippet.text.slice(to)}
+    </p>
   );
 }

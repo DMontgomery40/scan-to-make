@@ -6,6 +6,7 @@ import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -33,6 +34,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsOff
@@ -44,6 +46,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.isHeading
@@ -192,6 +198,42 @@ class HomeLayoutTests {
         assertEquals("Your project’s picture. No picture came with this question.", AskPicture.caption(null))
     }
 
+    /** A size question is number fields, not a camera (David answered one in a paragraph of caliper readings, Nov 10):
+     *  one field per size the computer asked about, in its words and prefilled, with Confirm; the numbers go back as
+     *  numbers, with projects present. */
+    @Test fun aSizeQuestionShowsItsNumbersPrefilledAndSendsNumbersWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"
+        val data = WireJson.parseToJsonElement(
+            """{"id":"$id","title":"Wall holder for three","instructions":"Make something that holds three of these","state":"needs-closeup","kind":"fit",
+               "createdAtMs":1,"updatedAtMs":2,"photos":[],"passes":[{"startedAtMs":1,"endedAtMs":2,"status":"needs_closeup"}],
+               "ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Can you confirm or correct what the scan reads?",
+                      "kind":"sizes","answers":["sizes","text","camera"],"status":"open",
+                      "sizes":[{"id":"size-1","label":"width at the widest point","mm":64,"from":"scan"},
+                               {"id":"size-2","label":"width at the waist","mm":53.5,"from":"scan"}]}}""").jsonObject
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        var sent: String? = null
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id/closeup") -> { sent = request.body?.toString(Charsets.UTF_8); HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray()) }
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.onNode(hasTestTag("ask-size-size-1")).performScrollTo().assertTextContains("64")
+        compose.onNode(hasTestTag("ask-size-size-2")).performScrollTo().assertTextContains("53.5")
+        compose.onNodeWithText("Width at the waist").assertExists()
+        compose.onAllNodes(hasText("Make Your Best Guess")).assertCountEquals(0)
+        compose.onAllNodes(hasText("Choose")).assertCountEquals(0)
+        compose.onNodeWithText("Caliper Photo").assertExists()
+        compose.onNode(hasTestTag("ask-sizes-confirm")).performScrollTo().assertTextContains("Confirm These Sizes").performClick()
+        compose.waitUntil(5_000) { sent != null }
+        val body = WireJson.parseToJsonElement(sent!!).jsonObject
+        assertEquals(WireJson.parseToJsonElement("""[{"id":"size-1","mm":64},{"id":"size-2","mm":53.5}]"""), body["sizes"])
+    }
+
     /** Review F2 on #456: a question picture that fails to load (the computer asleep) draws nothing, not an empty box
      *  under "The outlined part is what this question is about."; the question and its answers stay. */
     @Test fun aQuestionPictureThatFailsToLoadDrawsNothing() {
@@ -257,16 +299,37 @@ class HomeLayoutTests {
         compose.onNodeWithText("Needs you").assertExists()
     }
 
+    @Test fun aCardsLineNeverRepeatsItsPhaseWithProjectsPresent() {
+        val asking = requireNotNull(Project.decode(WireJson.parseToJsonElement(
+            """{"id":"asking","title":"Wall holder","instructions":"A useful part","state":"needs-closeup","createdAtMs":1,"updatedAtMs":2,""" +
+                """"status":{"phase":"needs-you","text":"Needs you · Can you confirm these sizes?","detail":"Can you confirm these sizes?","symbol":"hand.raised","tint":"orange"}}"""
+        ).jsonObject))
+        state.projects.value = listOf(asking, project("other", "Mic mount", "ready"))
+        state.loaded.value = true
+        home()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Wall holder"))
+        // The card is clickable and merges its children, so its line's tag is in the unmerged tree.
+        compose.onNodeWithTag("row-line-asking", useUnmergedTree = true).assertTextEquals("Can you confirm these sizes?")
+        compose.onAllNodes(SemanticsMatcher("text starts with the phase") { node ->
+            node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text.startsWith("Needs you · ") }
+        }, useUnmergedTree = true).assertCountEquals(0)
+        // With no detail from the computer (an older one), the line shows as before.
+        val plain = project("plain", "Cable clip", "ready")
+        assertEquals("Ready to print", com.scantomake.counterpart.api.rowLine(plain, "Ready to print"))
+    }
+
     @Test fun anOngoingPrintShowsTheCounterpartMarkAndTheRealObjectsPicture() = kotlinx.coroutines.runBlocking {
+        // The project's picture is the object alone, as the computer drew it; never the photo of the room (David, Nov 10).
         val p = project("4a4c5c44-7379-4a92-8a20-11a4710331a2", "Bottle holder", "printing")
-            .copy(photos = listOf("bottle.jpg"), capture = listOf("0001.heic"))
+            .copy(photos = listOf("bottle.jpg"), capture = listOf("0001.heic"),
+                raw = kotlinx.serialization.json.JsonObject(mapOf("picture" to kotlinx.serialization.json.JsonPrimitive("pictures/part-0123456789abcdef.png"))))
         state.projects.value = listOf(p, project("other", "Another project", "ready"))
         val folder = File(app.cacheDir, "${p.id}/${p.mediaVersion}").apply { mkdirs() }
-        val photo = File(folder, "photos_bottle.jpg")
+        val photo = File(folder, "pictures_part-0123456789abcdef.png")
         val bitmap = android.graphics.Bitmap.createBitmap(40, 40, android.graphics.Bitmap.Config.ARGB_8888)
         photo.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         try {
-            assertEquals("photos/bottle.jpg", p.posterName())
+            assertEquals("pictures/part-0123456789abcdef.png", p.posterName())
             org.junit.Assert.assertNotNull(com.scantomake.counterpart.app.NotificationPictures.refresh(p))
             val service = org.robolectric.Robolectric.buildService(com.scantomake.counterpart.app.WatchService::class.java).get()
             val notification = service.ongoing("Bottle holder", "Printing · 50%", p)
@@ -290,6 +353,8 @@ class HomeLayoutTests {
         compose.onNodeWithText("Make something that fits").assertDoesNotExist()
     }
 
+    // A phone-sized screen (Pixel 8, 411 × 891 dp): Robolectric's default 320 × 470 dp window is smaller than any phone this ships to.
+    @Config(qualifiers = "w411dp-h891dp")
     @Test fun aFinishedScanAsksCopyFitOrSaveBeforeItCanSend() {
         state.projects.value = listOf(project("a", "Existing project", "ready"))
         app.prefs.edit().putString("CounterpartNewDraftId", "scan-draft").commit()
@@ -298,11 +363,57 @@ class HomeLayoutTests {
         File(capture, "0000.jpg").writeBytes(byteArrayOf(1))
         compose.setContent { WithApp { NewProjectScreen(job = null, close = {}, started = {}, scan = {}) } }
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("scan-use")).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("scan-use-copy").assertExists()
+        // U5: the question is first, above "What do you need?", and its three choices are on screen without scrolling.
+        // Positions are unclipped (positionInRoot + size): boundsInRoot is clipped to the viewport and is Rect.Zero for a node
+        // scrolled out of view, which is where "What do you need?" now starts once the scan sits beside the question.
+        fun top(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().positionInRoot.y
+        fun bottom(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().let { it.positionInRoot.y + it.size.height }
+        assertTrue("the question is above the description", bottom("scan-use") <= top("describe"))
+        // The scan sits beside its question, above the answers (lead, Nov 10)...
+        assertTrue("the scan is above the answers", bottom("scan-use-scan") <= top("scan-use-copy"))
+        // ...and the scan and all three answers are whole on screen together, between the header and the button.
+        for (tag in listOf("scan-use-scan", "scan-use-copy", "scan-use-fit", "scan-use-later")) compose.onNodeWithTag(tag).assertIsDisplayed()
+        assertTrue("the last answer clears the button", bottom("scan-use-later") <= top("send"))
+        compose.onNodeWithText("Added").assertDoesNotExist()
+        // Greyed out, saying what to do, until a use is chosen; then the action for that use.
+        compose.onNodeWithTag("send").assertIsNotEnabled().assertTextContains("Choose what this scan becomes")
+        compose.onNodeWithTag("scan-use-copy").performClick()
+        compose.onNodeWithTag("send").assertIsEnabled().assertTextContains("Copy this object")
         compose.onNodeWithTag("scan-use-fit").performScrollTo().performClick()
+        compose.onNodeWithTag("send").assertIsEnabled().assertTextContains("Continue")
         compose.onNodeWithTag("fit-size-lookup").assertExists()
         compose.onNodeWithTag("fit-caliper-photo").assertExists()
-        compose.onNodeWithTag("scan-use-later").assertExists()
+        compose.onNodeWithTag("scan-use-later").performScrollTo().performClick()
+        compose.onNodeWithTag("send").assertTextContains("Save this scan")
+    }
+
+    /** First look U14 (Nov 10): the second starter was cut off at the margin. Two fit whole on a phone; a third peeks. */
+    @Test fun starterCardsFitWholeOrPeekDeliberately() {
+        assertTrue(com.scantomake.counterpart.ui.starterCardWidth(800.dp, 2) == 256.dp)
+        val phone = com.scantomake.counterpart.ui.starterCardWidth(372.dp, 2)
+        assertTrue("two whole cards on a phone: $phone", phone * 2 + 12.dp <= 372.dp)
+        val three = com.scantomake.counterpart.ui.starterCardWidth(372.dp, 3)
+        val shown = (372.dp - (three + 12.dp) * 2) / three
+        assertTrue("a deliberate peek of the third: $shown", shown > 0.2f && shown < 0.6f)
+    }
+
+    /** First look U10 (Nov 10): "holder" listed projects with no hint why. A result whose title lacks it says where it matched. */
+    @Test fun aSearchResultSaysWhereItMatched() {
+        val hanger = project("h", "AirPods Max desk hanger", "ready").copy(instructions = "The main holder hooks over the desk edge and keeps the cups level while it charges overnight.")
+        val wall = project("w", "Wall holder for three", "ready")
+        assertTrue(com.scantomake.counterpart.ui.searchProjects(listOf(hanger, wall), "holder") { null }.size == 2)
+        val snippet = requireNotNull(com.scantomake.counterpart.ui.searchSnippet(hanger, "holder") { null })
+        assertTrue(snippet.text, snippet.text.contains("main holder hooks"))
+        assertTrue(snippet.text.substring(snippet.start, snippet.end).equals("holder", ignoreCase = true))
+        assertTrue("the title says it", com.scantomake.counterpart.ui.searchSnippet(wall, "holder") { null } == null)
+        // On Home, with projects present.
+        state.projects.value = listOf(hanger, wall)
+        state.loaded.value = true
+        home()
+        compose.onNodeWithContentDescription("Search").performClick()
+        compose.onNodeWithText("Projects, printers, notes").performTextInput("holder")
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("search-reason")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodes(hasTestTag("search-reason")).assertCountEquals(1)
     }
 
     @Test fun theStartersAreOnTheEmptyHomeToo() {

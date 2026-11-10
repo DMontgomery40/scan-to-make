@@ -110,6 +110,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var outcome: String?
     /// Hidden from Home (Archive). Kept beside `settings.status`.
     public var archived: Bool?
+    /// The project's picture (PRD §5.1): the object alone on the stage, drawn once by the Mac (`pictures/…png`).
+    public var picture: String?
+    /// Each gallery picture the Mac drew, for layouts that show pictures: `part`, `scan`, `together`, `photo`.
+    public var pictures: [String: String]?
     /// Published model attribution and files from the companion, retained for shared search.
     public var credit: JSONValue?
     public var files: JSONValue?
@@ -139,7 +143,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -184,6 +188,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         settings = optional(Settings.self, .settings)
         outcome = optional(String.self, .outcome)
         archived = optional(Bool.self, .archived)
+        picture = optional(String.self, .picture)
+        pictures = optional([String: String].self, .pictures)
     }
 
     public var createdAt: Date { Date(timeIntervalSince1970: createdAtMs / 1000) }
@@ -198,7 +204,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// Progress updates do not change saved media. A finished pass can replace the model and renders at the
     /// same paths, so their cached copies expire only when a pass finishes.
-    public var mediaVersion: Double { passes.last(where: { $0.endedAtMs != nil })?.endedAtMs ?? createdAtMs }
+    /// A locate pass changes no file (docs/protocols/seats.md), so it never rolls the version over.
+    public var mediaVersion: Double { passes.last(where: { $0.endedAtMs != nil && $0.trigger != "locate" })?.endedAtMs ?? createdAtMs }
 
     /// The pass in progress, if the Mac is working.
     public var runningPass: Pass? { state == .touchingUp ? passes.last(where: { $0.endedAtMs == nil }) : nil }
@@ -275,6 +282,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// sending, working, needs-you, ready, preparing, printing, printed, sent, failed
         public var phase: String
         public var text: String
+        /// What a list row shows under the title when the row sits under its phase's heading: only what differs
+        /// there (the question, the size, the stage), never the heading again. Nil from an older Mac, or when the
+        /// whole line is already that.
+        public var detail: String?
         public var symbol: String
         /// blue, orange, accent, green, secondary, red
         public var tint: String
@@ -283,6 +294,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             phase = try c.decode(String.self, forKey: .phase); text = try c.decode(String.self, forKey: .text)
+            detail = try? c.decodeIfPresent(String.self, forKey: .detail)
             symbol = try c.decodeIfPresent(String.self, forKey: .symbol) ?? ""; tint = try c.decodeIfPresent(String.self, forKey: .tint) ?? "secondary"
         }
     }
@@ -332,6 +344,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// Your follow-up that started it, if any.
         public var note: String?
         public var status: String?
+        /// How it ended, in the Mac's words ("Asked you a question"); nil while it runs or from an older Mac.
+        public var words: String?
         public var summary: String?
         public var activity: [Activity]?
         public var activityCount: Int?
@@ -350,6 +364,37 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         }
 
         public var count: Int { activityCount ?? activity?.count ?? 0 }
+        /// How an ended pass reads in the project's history: the Mac's own words. An older Mac sends only the status,
+        /// which is worded here as that Mac's window worded it. Nil while the pass runs.
+        public var endingWords: String? {
+            guard endedAtMs != nil else { return nil }
+            if let words, !words.isEmpty { return words }
+            switch status {
+            case "needs_closeup": return "Asked you a question"
+            case "interrupted": return "Stopped when Counterpart restarted"
+            case "done", nil: return "Finished"
+            case let other?: return other.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+        }
+        /// How an ended pass left things, for the mark beside it: it finished, it stopped to ask the person, or it
+        /// stopped short. Nil while it runs. A pass that asked or stopped must never read as all green ticks.
+        public enum Ending: Equatable, Sendable { case finished, asked, stopped }
+        public var ending: Ending? {
+            guard endedAtMs != nil else { return nil }
+            switch status {
+            case "needs_closeup", "needs_file": return .asked
+            case "capped", "failed", "interrupted": return .stopped
+            default: return .finished
+            }
+        }
+        /// The words that started this pass, when it was a change the person asked for ("Your change: …"): a note,
+        /// with photos (`late-photos`) or without (`changes`), or from a Mac older than triggers. Never the first
+        /// request, and never an answer to a question, whose note the Mac composes.
+        public var requestedChange: String? {
+            guard let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty, Self.changeTriggers.contains(trigger) else { return nil }
+            return note
+        }
+        static let changeTriggers: Set<String?> = [nil, "changes", "late-photos"]
         public var failed: Bool { ["failed", "interrupted"].contains(status ?? "") }
         /// The stage running now: the last one started and not ended.
         public var currentStage: Stage? { stages?.last { $0.endedAtMs == nil } }
@@ -370,10 +415,16 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. Nil until asked,
         /// or when the MCP doesn't say.
         public var ownSettings: Bool?
-        public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil, ownSettings: Bool? = nil) {
+        /// A multi-colour design's parts in filament order, with the colour each was asked for (`#RRGGBB`), as the pass declared them.
+        public var filaments: [DeclaredFilament]?
+        /// A fit's places for the scanned object, as the pass that made it said (docs/protocols/seats.md).
+        public var seats: [Seat]?
+        public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil, ownSettings: Bool? = nil,
+                    filaments: [DeclaredFilament]? = nil, seats: [Seat]? = nil) {
             self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes; self.ownSettings = ownSettings
+            self.filaments = filaments; self.seats = seats
         }
-        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings }
+        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings, filaments, seats }
         /// A malformed optional (say, `changes`) is left out; the model and renders still show.
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -384,7 +435,50 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             changes = (try? c.decodeIfPresent([Change].self, forKey: .changes)) ?? nil
             engine = (try? c.decodeIfPresent(String.self, forKey: .engine)) ?? nil
             ownSettings = (try? c.decodeIfPresent(Bool.self, forKey: .ownSettings)) ?? nil
+            filaments = (try? c.decodeIfPresent([DeclaredFilament].self, forKey: .filaments)) ?? nil
+            seats = (try? c.decodeIfPresent([Seat].self, forKey: .seats)) ?? nil
         }
+    }
+
+    /// One part of a multi-colour design, as its pass declared it.
+    public struct DeclaredFilament: Codable, Equatable, Sendable {
+        public var name: String?
+        public var colour: String?
+        public var material: String?
+        public init(name: String? = nil, colour: String? = nil, material: String? = nil) { self.name = name; self.colour = colour; self.material = material }
+    }
+
+    /// Where the scanned object sits in the part (docs/protocols/seats.md): the scan, in millimetres and Z up, turned
+    /// about the fixed X, then Y, then Z axes (`rotationDeg`), then moved (`translationMm`), into the part's frame.
+    public struct Seat: Codable, Equatable, Sendable {
+        public var name: String?
+        public var translationMm: [Double]
+        public var rotationDeg: [Double]
+        public var check: Check?
+        public struct Check: Codable, Equatable, Sendable { public var minimumGapMm: Double?; public var interferenceMm3: Double?; public var clear: Bool? }
+        public init(name: String? = nil, translationMm: [Double], rotationDeg: [Double]) { self.name = name; self.translationMm = translationMm; self.rotationDeg = rotationDeg }
+        /// Row-major 4×4: Rz·Ry·Rx, then the translation (the printer MCP's `cad_check_fit`).
+        public var matrix: [Double] {
+            guard translationMm.count == 3, rotationDeg.count == 3 else { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }
+            let a = rotationDeg.map { $0 * .pi / 180 }
+            let (cx, sx, cy, sy, cz, sz) = (cos(a[0]), sin(a[0]), cos(a[1]), sin(a[1]), cos(a[2]), sin(a[2]))
+            let t = translationMm
+            return [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx, t[0],
+                    sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx, t[1],
+                    -sy, cy * sx, cy * cx, t[2],
+                    0, 0, 0, 1]
+        }
+    }
+
+    /// A spool a print used, as the printer MCP reported it when the print was sent.
+    public struct Spool: Codable, Equatable, Sendable {
+        /// The model's 1-based filament, for a multi-part model; nil for a one-spool print.
+        public var index: Int?
+        /// `#RRGGBB`.
+        public var colour: String
+        public var material: String?
+        public var name: String?
+        public init(index: Int? = nil, colour: String, material: String? = nil, name: String? = nil) { self.index = index; self.colour = colour; self.material = material; self.name = name }
     }
 
     public struct Question: Codable, Equatable, Sendable {
@@ -400,6 +494,12 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// A structured question from the Mac (PRD §4 Ask).
     public struct Ask: Codable, Equatable, Sendable {
+        /// The kinds of question this build knows how to answer (contracts `AskSchema.kind`).
+        public static let knownKinds: Set<String> = ["closeup", "file", "choice", "region", "scale", "sizes"]
+        /// False for a kind this build doesn't know: the card shows the question and says to update, and offers no
+        /// answer at all, because any answer it offered could consume the question wrongly. A question with no
+        /// kind is from a Mac older than kinds and is answered the old way.
+        public var answerable: Bool { kind.map(Self.knownKinds.contains) ?? true }
         public var id: String
         public var question: String
         public var type: String?
@@ -414,8 +514,23 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// open, answered
         public var status: String
         public var askedAtMs: Double?
-        public init(id: String, question: String, photo: String? = nil, region: Region? = nil, answers: [String], status: String = "open", askedAtMs: Double? = nil) {
+        /// What the project is waiting on the person for: closeup, file, choice, region, scale, sizes. The Mac sends
+        /// it for every question; nil only from an older Mac.
+        public var kind: String?
+        /// `file`: why, when it isn't simply "send it" (`downloads-access`).
+        public var reason: String?
+        /// `sizes`: the sizes to confirm or correct, prefilled.
+        public var sizes: [Size]?
+        /// One size in millimetres. `id` is opaque; `label` says what to measure; `from` is where the Mac's number
+        /// came from (`scan` or `published`).
+        public struct Size: Codable, Equatable, Sendable, Identifiable {
+            public var id: String; public var label: String; public var mm: Double; public var from: String
+            public init(id: String, label: String, mm: Double, from: String) { self.id = id; self.label = label; self.mm = mm; self.from = from }
+        }
+        public init(id: String, question: String, photo: String? = nil, region: Region? = nil, answers: [String], status: String = "open", askedAtMs: Double? = nil,
+                    kind: String? = nil, sizes: [Size]? = nil) {
             self.id = id; self.question = question; self.photo = photo; self.region = region; self.answers = answers; self.status = status; self.askedAtMs = askedAtMs
+            self.kind = kind; self.sizes = sizes
         }
     }
 
@@ -474,6 +589,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var fileBase: String?
         /// "bambu-connect" when the print was handed to Bambu Connect on the Mac.
         public var sentVia: String?
+        /// The spools this print uses (PRD §5.4): the result is drawn in them.
+        public var spools: [Spool]?
 
         public init(bundleId: String, uncertain: Bool? = nil, destination: PrintDestination? = nil, sliced: Bool? = nil,
                     estimate: PrintEstimate? = nil, printId: String? = nil, live: PrintLive? = nil, monitor: PrintMonitor? = nil) {

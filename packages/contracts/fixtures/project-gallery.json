@@ -1,0 +1,852 @@
+{
+ "about": "ProjectGallery (PRD §5.4 Pictures): the pictures at the top of a project page, derived from its data. CounterpartKit ProjectGallery.swift, Android ProjectGallery.kt and Linux gallery.ts each read every case. drawing.assembly.seats is the seat count; colour is neutral, own, or the spool's #RRGGBB. photoPicture, when present, is the page's picture while the gallery is empty (photos sent, no model yet): the subject the computer cut out of the first photo. canLocate, when present, is whether See it together is offered (a fit with a USDZ scan, a result and no seats).",
+ "cases": [
+  {
+   "name": "a fit with a scan, its seats and a black spool: the part, together, what you scanned",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printed",
+    "kind": "fit",
+    "scan": "scan.usdz",
+    "capture": [
+     "0001.heic",
+     "0002.heic"
+    ],
+    "current": {
+     "model": "current/model.stl",
+     "renders": [
+      "current/renders/1_overview.png"
+     ],
+     "sizeMm": [
+      213,
+      43,
+      82
+     ],
+     "seats": [
+      {
+       "name": "left",
+       "rotationDeg": [
+        0,
+        0,
+        0
+       ],
+       "translationMm": [
+        38,
+        22,
+        4
+       ]
+      },
+      {
+       "name": "middle",
+       "rotationDeg": [
+        0,
+        0,
+        0
+       ],
+       "translationMm": [
+        106.5,
+        22,
+        4
+       ]
+      },
+      {
+       "name": "right",
+       "rotationDeg": [
+        0,
+        0,
+        0
+       ],
+       "translationMm": [
+        175,
+        22,
+        4
+       ]
+      }
+     ]
+    },
+    "print": {
+     "bundleId": "b",
+     "spools": [
+      {
+       "colour": "#000000",
+       "material": "PLA",
+       "name": "Black PLA Basic"
+      }
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "#000000",
+     "measures": "Part",
+     "sizeMm": [
+      213,
+      43,
+      82
+     ]
+    },
+    {
+     "id": "together",
+     "kind": "together",
+     "label": "Together",
+     "drawing": {
+      "assembly": {
+       "part": "model.stl",
+       "object": "scan/scan.usdz",
+       "seats": 3
+      }
+     },
+     "colour": "#000000",
+     "measures": "Together"
+    },
+    {
+     "id": "scan-0",
+     "kind": "scan",
+     "label": "What you scanned",
+     "drawing": {
+      "model": "scan/scan.usdz"
+     },
+     "colour": "own",
+     "measures": "Scan",
+     "photos": [
+      "capture/0001.heic",
+      "capture/0002.heic"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "the same fit before a spool is chosen, made before passes said where the object sits: neutral, and no Together",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "ready",
+    "kind": "fit",
+    "scan": "scan.usdz",
+    "capture": [
+     "0001.heic",
+     "0002.heic"
+    ],
+    "current": {
+     "model": "current/model.stl",
+     "renders": [
+      "current/renders/1_overview.png"
+     ],
+     "sizeMm": [
+      213,
+      43,
+      82
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "neutral",
+     "measures": "Part",
+     "sizeMm": [
+      213,
+      43,
+      82
+     ]
+    },
+    {
+     "id": "scan-0",
+     "kind": "scan",
+     "label": "What you scanned",
+     "drawing": {
+      "model": "scan/scan.usdz"
+     },
+     "colour": "own",
+     "measures": "Scan",
+     "photos": [
+      "capture/0001.heic",
+      "capture/0002.heic"
+     ]
+    }
+   ],
+   "canLocate": true
+  },
+  {
+   "name": "a scan before any result: only the scan, first",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "touching-up",
+    "kind": "fit",
+    "scan": "scan.usdz",
+    "capture": [
+     "0001.heic",
+     "0002.heic"
+    ]
+   },
+   "entries": [
+    {
+     "id": "scan-0",
+     "kind": "scan",
+     "label": "What you scanned",
+     "drawing": {
+      "model": "scan/scan.usdz"
+     },
+     "colour": "own",
+     "measures": "Scan",
+     "photos": [
+      "capture/0001.heic",
+      "capture/0002.heic"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "printing with no spool recorded: the colour the printer reports",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printing",
+    "kind": "fit",
+    "current": {
+     "model": "current/model.stl",
+     "renders": [],
+     "sizeMm": [
+      20,
+      30,
+      5
+     ]
+    },
+    "print": {
+     "bundleId": "b",
+     "live": {
+      "state": "printing",
+      "activeFilament": {
+       "slot": "0",
+       "material": "PLA",
+       "color": "#fec600"
+      }
+     }
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "#FEC600",
+     "measures": "Part",
+     "sizeMm": [
+      20,
+      30,
+      5
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a copy before a spool is chosen leads with what you scanned, in its own colours (the mockup's potato); the copy beside it",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [
+     "front.jpg"
+    ],
+    "passes": [],
+    "state": "ready",
+    "kind": "copy",
+    "scan": "scan.usdz",
+    "current": {
+     "model": "current/model.stl",
+     "renders": [],
+     "sizeMm": [
+      65,
+      28,
+      145
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "scan-0",
+     "kind": "scan",
+     "label": "What you scanned",
+     "drawing": {
+      "model": "scan/scan.usdz"
+     },
+     "colour": "own",
+     "measures": "Scan",
+     "photos": [
+      "photos/front.jpg"
+     ]
+    },
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your copy",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "neutral",
+     "measures": "Part",
+     "sizeMm": [
+      65,
+      28,
+      145
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a multi-colour design is its pass's picture, in the colours asked for, until the app has each part's mesh",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printed",
+    "kind": "fit",
+    "current": {
+     "model": "current/model.3mf",
+     "renders": [
+      "current/renders/1_overview.png"
+     ],
+     "sizeMm": [
+      166.2,
+      157.4,
+      48.4
+     ],
+     "filaments": [
+      {
+       "name": "body",
+       "colour": "#F5547C"
+      },
+      {
+       "name": "letters",
+       "colour": "#000000"
+      }
+     ]
+    },
+    "print": {
+     "bundleId": "b",
+     "spools": [
+      {
+       "index": 1,
+       "colour": "#F5547C"
+      },
+      {
+       "index": 2,
+       "colour": "#000000"
+      }
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "picture": "renders/1_overview.png"
+     },
+     "colour": "own",
+     "measures": "Part",
+     "sizeMm": [
+      166.2,
+      157.4,
+      48.4
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a designer's file with six plates: one entry each, by the plate's own name; a plate the MCP sent no picture for is still an entry",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "ready",
+    "kind": "published",
+    "current": {
+     "model": "original/x.3mf",
+     "renders": [
+      "renders/x-2.png"
+     ]
+    },
+    "plates": [
+     {
+      "id": "x:0",
+      "fileIndex": 0,
+      "plateIndex": 0,
+      "name": "Screws",
+      "fileName": "x.3mf",
+      "thumbnail": "renders/x-0.png",
+      "selected": false,
+      "sliced": false,
+      "status": "not-printed"
+     },
+     {
+      "id": "x:1",
+      "fileIndex": 0,
+      "plateIndex": 1,
+      "name": "Photography Platform",
+      "fileName": "x.3mf",
+      "thumbnail": "renders/x-1.png",
+      "selected": false,
+      "sliced": false,
+      "status": "not-printed"
+     },
+     {
+      "id": "x:2",
+      "fileIndex": 0,
+      "plateIndex": 2,
+      "name": "Main Framework",
+      "fileName": "x.3mf",
+      "thumbnail": "renders/x-2.png",
+      "selected": true,
+      "sliced": false,
+      "status": "not-printed"
+     },
+     {
+      "id": "x:3",
+      "fileIndex": 0,
+      "plateIndex": 3,
+      "name": "Background Board",
+      "fileName": "x.3mf",
+      "selected": false,
+      "sliced": false,
+      "status": "not-printed"
+     },
+     {
+      "id": "x:4",
+      "fileIndex": 0,
+      "plateIndex": 4,
+      "name": "",
+      "fileName": "x.3mf",
+      "thumbnail": "renders/x-4.png",
+      "selected": false,
+      "sliced": false,
+      "status": "not-printed"
+     },
+     {
+      "id": "x:5",
+      "fileIndex": 0,
+      "plateIndex": 5,
+      "name": "Turntable",
+      "fileName": "x.3mf",
+      "thumbnail": "renders/x-5.png",
+      "selected": false,
+      "sliced": false,
+      "status": "not-printed"
+     }
+    ]
+   },
+   "entries": [
+    {
+     "id": "plate-x:0",
+     "kind": "plate",
+     "label": "Screws",
+     "drawing": {
+      "picture": "renders/x-0.png"
+     },
+     "colour": "own",
+     "measures": "Plate"
+    },
+    {
+     "id": "plate-x:1",
+     "kind": "plate",
+     "label": "Photography Platform",
+     "drawing": {
+      "picture": "renders/x-1.png"
+     },
+     "colour": "own",
+     "measures": "Plate"
+    },
+    {
+     "id": "plate-x:2",
+     "kind": "plate",
+     "label": "Main Framework",
+     "drawing": {
+      "picture": "renders/x-2.png"
+     },
+     "colour": "own",
+     "measures": "Plate"
+    },
+    {
+     "id": "plate-x:3",
+     "kind": "plate",
+     "label": "Background Board",
+     "drawing": {
+      "picture": ""
+     },
+     "colour": "own",
+     "measures": "Plate"
+    },
+    {
+     "id": "plate-x:4",
+     "kind": "plate",
+     "label": "Plate 5",
+     "drawing": {
+      "picture": "renders/x-4.png"
+     },
+     "colour": "own",
+     "measures": "Plate"
+    },
+    {
+     "id": "plate-x:5",
+     "kind": "plate",
+     "label": "Turntable",
+     "drawing": {
+      "picture": "renders/x-5.png"
+     },
+     "colour": "own",
+     "measures": "Plate"
+    }
+   ]
+  },
+  {
+   "name": "a part designed from words alone: one entry, no control",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "ready",
+    "kind": "fit",
+    "current": {
+     "model": "current/model.stl",
+     "renders": [
+      "current/renders/1.png"
+     ],
+     "sizeMm": [
+      10,
+      20,
+      30
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "neutral",
+     "measures": "Part",
+     "sizeMm": [
+      10,
+      20,
+      30
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a designer's 3MF sent as the scan is not a scanned object",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "ready",
+    "kind": "copy",
+    "scan": "scan.3mf",
+    "current": {
+     "model": "current/model.3mf",
+     "renders": [
+      "current/renders/1_overview.png"
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your copy",
+     "drawing": {
+      "picture": "renders/1_overview.png"
+     },
+     "colour": "own",
+     "measures": "Part"
+    }
+   ]
+  },
+  {
+   "name": "a copy printed in a spool leads with the copy in that spool",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [
+     "front.jpg"
+    ],
+    "passes": [],
+    "state": "printed",
+    "kind": "copy",
+    "scan": "scan.usdz",
+    "current": {
+     "model": "current/model.stl",
+     "renders": [],
+     "sizeMm": [
+      65,
+      28,
+      145
+     ]
+    },
+    "print": {
+     "bundleId": "b",
+     "spools": [
+      {
+       "colour": "#FFFFFF"
+      }
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your copy",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "#FFFFFF",
+     "measures": "Part",
+     "sizeMm": [
+      65,
+      28,
+      145
+     ]
+    },
+    {
+     "id": "scan-0",
+     "kind": "scan",
+     "label": "What you scanned",
+     "drawing": {
+      "model": "scan/scan.usdz"
+     },
+     "colour": "own",
+     "measures": "Scan",
+     "photos": [
+      "photos/front.jpg"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a fit with seats on a handheld STL scan offers no Together: its frame isn't the one the stages draw (USDZ only, for now)",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printed",
+    "kind": "fit",
+    "scan": "scan.stl",
+    "capture": [
+     "0001.heic",
+     "0002.heic"
+    ],
+    "current": {
+     "model": "current/model.stl",
+     "renders": [
+      "current/renders/1_overview.png"
+     ],
+     "sizeMm": [
+      213,
+      43,
+      82
+     ],
+     "seats": [
+      {
+       "name": "left",
+       "rotationDeg": [
+        0,
+        0,
+        0
+       ],
+       "translationMm": [
+        38,
+        22,
+        4
+       ]
+      },
+      {
+       "name": "middle",
+       "rotationDeg": [
+        0,
+        0,
+        0
+       ],
+       "translationMm": [
+        106.5,
+        22,
+        4
+       ]
+      },
+      {
+       "name": "right",
+       "rotationDeg": [
+        0,
+        0,
+        0
+       ],
+       "translationMm": [
+        175,
+        22,
+        4
+       ]
+      }
+     ]
+    },
+    "print": {
+     "bundleId": "b",
+     "spools": [
+      {
+       "colour": "#000000",
+       "material": "PLA",
+       "name": "Black PLA Basic"
+      }
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "#000000",
+     "measures": "Part",
+     "sizeMm": [
+      213,
+      43,
+      82
+     ]
+    },
+    {
+     "id": "scan-0",
+     "kind": "scan",
+     "label": "What you scanned",
+     "drawing": {
+      "model": "scan/scan.stl"
+     },
+     "colour": "own",
+     "measures": "Scan",
+     "photos": [
+      "capture/0001.heic",
+      "capture/0002.heic"
+     ]
+    }
+   ],
+   "canLocate": false
+  },
+  {
+   "name": "photos sent and no model yet: no entries, and the page shows the subject the computer cut out of the photo",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [
+     "0001.jpg",
+     "0002.jpg"
+    ],
+    "passes": [],
+    "state": "touching-up",
+    "kind": "fit",
+    "picture": "pictures/photo-k1.png",
+    "pictures": {
+     "photo": "pictures/photo-k1.png"
+    }
+   },
+   "entries": [],
+   "photoPicture": "pictures/photo-k1.png"
+  },
+  {
+   "name": "a fit on a handheld STL scan made before passes said where the object sits: no See it together, the part and what you scanned",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "ready",
+    "kind": "fit",
+    "scan": "scan.stl",
+    "current": {
+     "model": "current/model.stl",
+     "renders": [
+      "current/renders/1_overview.png"
+     ],
+     "sizeMm": [
+      213,
+      43,
+      82
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "neutral",
+     "measures": "Part",
+     "sizeMm": [
+      213,
+      43,
+      82
+     ]
+    },
+    {
+     "id": "scan-0",
+     "kind": "scan",
+     "label": "What you scanned",
+     "drawing": {
+      "model": "scan/scan.stl"
+     },
+     "colour": "own",
+     "measures": "Scan"
+    }
+   ],
+   "canLocate": false
+  }
+ ]
+}

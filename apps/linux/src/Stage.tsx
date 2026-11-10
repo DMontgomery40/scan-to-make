@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { artifact } from "./bridge";
 import type { Project } from "./types";
+import { canLocate, filePath, gallery, lightStage, photoPicture, pictureFor, sizeText } from "./gallery";
 export function Picture({
   id,
   path,
@@ -68,7 +69,8 @@ export function Picture({
     </div>
   );
 }
-export function ModelStage({ bytes }: { bytes: Uint8Array }) {
+/** `tint` is the spool the part prints in (`#RRGGBB`); without one, the neutral material every layout uses. */
+export function ModelStage({ bytes, tint }: { bytes: Uint8Array; tint?: string }) {
   const element = useRef<HTMLDivElement>(null);
   const action = useRef<(a: string) => void>(() => {});
   const [error, setError] = useState("");
@@ -120,7 +122,7 @@ export function ModelStage({ bytes }: { bytes: Uint8Array }) {
           element.current.replaceChildren(canvas);
           const scene = new T.Scene();
           const material = new T.MeshStandardMaterial({
-            color: 0x809778,
+            color: tint ? parseInt(tint.slice(1), 16) : 0x94949a,
             metalness: 0.08,
             roughness: 0.6,
             side: T.DoubleSide,
@@ -214,7 +216,7 @@ export function ModelStage({ bytes }: { bytes: Uint8Array }) {
       disposed = true;
       cleanup();
     };
-  }, [bytes]);
+  }, [bytes, tint]);
   return (
     <div className="model-view">
       <div className="canvas" ref={element} />
@@ -252,24 +254,37 @@ export function ModelStage({ bytes }: { bytes: Uint8Array }) {
     </div>
   );
 }
-export function Stage({ project }: { project: Project }) {
+/**
+ * The project's pictures (PRD §5.4): each entry of its gallery (what will print in its spool, the two together, what
+ * was scanned, a designer's plates), one at a time, chosen by a row of labels under the stage; none for one entry.
+ * The part turns in 3D in its spool; the others show the pictures the computer drew of them.
+ */
+export function Stage({ project, locate }: { project: Project; locate?: () => void }) {
+  const entries = gallery(project);
+  const [chosen, setChosen] = useState<string>();
+  const entry = entries.find((e) => e.id === chosen) ?? entries[0];
   const [mode, setMode] = useState<"still" | "3d">("still");
   const [bytes, setBytes] = useState<Uint8Array>();
   const [error, setError] = useState("");
   const [renderIndex, setRenderIndex] = useState(0);
   const model = project.current?.model;
   const renders = project.current?.renders ?? [];
-  const path = renders[renderIndex] ?? renders[0] ?? project.credit?.thumbnail;
+  const turnable = entry?.kind === "part" && "model" in entry.drawing && !!model;
+  const drawn = entry ? pictureFor(project, entry) : undefined;
+  // The pass's own views stay one click away on the part while the computer hasn't drawn its picture.
+  const showRenders = entry?.kind === "part" && !project.pictures?.part && renders.length > 1;
+  // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card.
+  const path = showRenders ? renders[renderIndex] ?? renders[0] : drawn ? filePath(project, drawn) : project.credit?.thumbnail ?? photoPicture(project);
   useEffect(() => {
     setMode("still");
     setBytes(undefined);
     setError("");
     setRenderIndex(0);
-  }, [project.id, model, project.passes.at(-1)?.endedAtMs]);
+  }, [project.id, model, project.passes.at(-1)?.endedAtMs, entry?.id]);
   useEffect(() => {
-    if (mode !== "3d" || !model) return;
+    if (mode !== "3d" || !turnable) return;
     let live = true;
-    void artifact(project.id, model).then(
+    void artifact(project.id, filePath(project, "model.stl")).then(
       (data) => {
         if (live) setBytes(data);
       },
@@ -281,60 +296,49 @@ export function Stage({ project }: { project: Project }) {
       live = false;
       setBytes(undefined);
     };
-  }, [mode, model, project.id]);
+  }, [mode, turnable, project.id, model]);
+  const tint = entry && entry.colour.startsWith("#") ? entry.colour : undefined;
   return (
-    <section className="stage" aria-label="Project preview">
-      {mode === "3d" ? (
+    <section className="stage" aria-label="Project pictures">
+      {mode === "3d" && turnable ? (
         bytes ? (
-          <ModelStage bytes={bytes} />
+          <div className={tint && lightStage(tint) ? "light-stage" : undefined}>
+            <ModelStage bytes={bytes} tint={tint} />
+          </div>
         ) : (
           <p>{error || "Opening model…"}</p>
         )
       ) : (
-        <Picture
-          id={project.id}
-          path={path}
-          alt={`${project.title} preview`}
-          className="hero-picture"
-        />
+        <Picture id={project.id} path={path} alt={`${entry?.label ?? project.title} picture`} className="hero-picture" />
+      )}
+      {entries.length > 1 && (
+        <div className="gallery-labels" role="tablist" aria-label="Pictures">
+          {entries.map((e) => (
+            <button key={e.id} role="tab" aria-selected={e.id === entry?.id} onClick={() => setChosen(e.id)}>
+              {e.label}
+            </button>
+          ))}
+        </div>
       )}
       <div className="stage-switch">
-        <button
-          aria-pressed={mode === "still"}
-          onClick={() => setMode("still")}
-        >
+        <button aria-pressed={mode === "still"} onClick={() => setMode("still")}>
           Still
         </button>
-        <button
-          aria-pressed={mode === "3d"}
-          disabled={!model?.toLowerCase().endsWith(".stl")}
-          onClick={() => setMode("3d")}
-        >
+        <button aria-pressed={mode === "3d"} disabled={!turnable || !filePath(project, "model.stl").toLowerCase().endsWith(".stl")} onClick={() => setMode("3d")}>
           Explore in 3D
         </button>
+        {entry?.kind === "part" && locate && canLocate(project) && <button onClick={locate}>See it together</button>}
       </div>
-      {mode === "still" && renders.length > 1 && (
+      {mode === "still" && showRenders && (
         <div className="render-picker">
           {renders.map((r, i) => (
-            <button
-              key={r}
-              aria-label={`View ${i + 1}`}
-              aria-pressed={renderIndex === i}
-              onClick={() => setRenderIndex(i)}
-            >
+            <button key={r} aria-label={`View ${i + 1}`} aria-pressed={renderIndex === i} onClick={() => setRenderIndex(i)}>
               {i + 1}
             </button>
           ))}
         </div>
       )}
-      <div className="dimensions">
-        {project.current?.sizeMm
-          ?.map((n) =>
-            n.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-          )
-          .join(" × ")}
-        {project.current?.sizeMm ? " mm" : ""}
-      </div>
+      <div className="dimensions">{entry ? sizeText(entry) : ""}</div>
     </section>
   );
 }

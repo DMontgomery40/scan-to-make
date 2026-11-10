@@ -33,6 +33,9 @@ struct ProjectsRoot: View {
                     nav.open(project.id)
                 }
                 .presentationDetents([.large])
+                // The system's page size on the iPad (and the Mac): room for the question after a scan and its three
+                // answers, not a small card over a dimmed Home (U5). The iPhone keeps its full-height sheet.
+                .presentationSizing(.page)
             case .print(let id): PrintSheet(store: store, projectId: id)
             case .settings: SettingsView(store: store)
             case .printers: NavigationStack { PrintersView(store: store) }
@@ -209,6 +212,10 @@ struct SidebarList: View {
     private func matches(_ project: Project) -> Bool {
         project.matchesSearch(query, additional: [store.printerName(project) ?? ""])
     }
+    /// Why a search found this project, when its title doesn't say (U10): under the row, lined up with its title.
+    private func reason(_ project: Project) -> SearchSnippet? {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : project.searchSnippet(query, additional: [store.printerName(project) ?? ""])
+    }
 
     /// The projects in these phases, in the order the phases are given (printing before working, as on Home).
     /// Archived projects are only in Archived.
@@ -239,8 +246,9 @@ struct SidebarList: View {
                 Section(isExpanded: Binding(get: { showArchived || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }, set: { showArchived = $0 })) {
                     ForEach(archived) { project in
                         SidebarRow(store: store, project: project)
-                            .tag(project.id)
                             .accessibilityIdentifier("sidebar-project-\(project.id)")
+                            .searchReason(reason(project), indent: 56)
+                            .tag(project.id)
                             .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : nil)
                             .contextMenu {
                                 Button("Unarchive", systemImage: "tray.and.arrow.up") {
@@ -261,15 +269,25 @@ struct SidebarList: View {
                 }
             }
         }
-            // New has its own bar under the list, as search has above it. As a bottom-bar toolbar item it was a
-            // floating "+" over whichever row sat behind it (iPad build 202611052142, Nov 5).
-            Button(action: newProject) {
-                Label("New Project", systemImage: "plus").fontWeight(.semibold).frame(maxWidth: .infinity)
+        // New sits in a bottom bar the list scrolls under (first look U11): with the list cut flat at the button, "Done"
+        // hid below it with nothing to say more was there. The hard edge keeps rows from showing through the button
+        // (iPad build 202611052142, Nov 5: a floating "+" over a row), the indicators flash so the scroll is evident,
+        // and the last row still ends above New.
+        .scrollEdgeEffectStyle(.hard, for: .bottom)
+        .scrollIndicatorsFlash(onAppear: true)
+        .safeAreaBar(edge: .bottom) {
+            // While a search is typed, New steps aside: riding above the keyboard it covered the only results' lines on an
+            // iPad Air in landscape (train gate, Nov 10: the match's reason sat under it). ⌘N still works (below).
+            if !searching {
+                Button(action: newProject) {
+                    Label("New Project", systemImage: "plus").fontWeight(.semibold).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent).controlSize(.large)
+                .accessibilityIdentifier("new-project")
+                .padding(.horizontal, 16).padding(.vertical, 10)
             }
-            .buttonStyle(.glassProminent).controlSize(.large)
-            .accessibilityIdentifier("new-project")
-            .keyboardShortcut("n", modifiers: .command)
-            .padding(.horizontal, 16).padding(.vertical, 10)
+        }
+        .background { Button("New Project", action: newProject).keyboardShortcut("n", modifiers: .command).hidden() }
         }
         .sheet(item: $openedStarter) { starter in StarterDetail(project: starter, unavailableMessage: store.starterUnavailableMessage, start: addStarter) }
         .navigationTitle("Projects")
@@ -282,7 +300,9 @@ struct SidebarList: View {
                 if let error = store.error {
                     ConnectionBanner(error: error, pair: store.onPair) { Task { await store.load(); await store.loadPrinters() } }
                 }
-                Text(store.homeSubtitle).font(.caption).foregroundStyle(.secondary)
+                // Readable at arm's length (first look U11): the system's secondary label colour, not a hierarchical
+                // .secondary that went dark grey over the sidebar's glass, at footnote size.
+                Text(store.homeSubtitle).font(.footnote).foregroundStyle(Color(uiColor: .secondaryLabel))
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("projects-status")
             }
@@ -299,8 +319,10 @@ struct SidebarList: View {
             Section(title) {
                 ForEach(projects) { project in
                     SidebarRow(store: store, project: project)
-                        .tag(project.id)
+                        // The row's identifier first: on the whole cell it would replace the reason's own.
                         .accessibilityIdentifier("sidebar-project-\(project.id)")
+                        .searchReason(reason(project), indent: 56)
+                        .tag(project.id)
                         .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : nil)
                         .contextMenu { DeleteProjectButton(store: store, project: project) }
                 }
@@ -313,14 +335,27 @@ struct SidebarRow: View {
     let store: ProjectsStore
     let project: Project
     @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         let words = store.words(project)
-        HStack(spacing: 12) {
+        // At the accessibility text sizes two lines hold a word or two (seen at the largest: "First plate fr…",
+        // "Wall holder…"): the name and its line take as many lines as they need, and the picture goes above them
+        // so they get the row's whole width.
+        let large = typeSize.isAccessibilitySize
+        let layout = large ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6)) : AnyLayout(HStackLayout(spacing: 12))
+        layout {
             ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 160).frame(width: 44, height: 44).clipShape(.rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 2) {
-                Text(words.title).font(.body.weight(.semibold)).lineLimit(1)
+                // A project's name is how a person finds it: it wraps before it is ever cut (David's iPad, Nov 10:
+                // "Scan from Nov 9, 12:24…" and "…12:15…", cut exactly where they differ). Rows may grow taller.
+                Text(words.title).font(.body.weight(.semibold)).lineLimit(large ? nil : 2).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("sidebar-title-\(project.id)")
                 // A scan still on this phone, as on Home's card.
-                Text(store.localScanWords(project) ?? words.line).font(.caption).foregroundStyle(prominence == .increased ? .white.opacity(0.9) : words.phase.color).lineLimit(1)
+                // Under its section's heading the row shows only what differs, on two lines so it isn't cut off
+                // where the meaning is (David's iPad, Nov 10).
+                Text(store.localScanWords(project) ?? ProjectWords.row(project, line: words.line)).font(.caption)
+                    .foregroundStyle(prominence == .increased ? .white.opacity(0.9) : words.phase.color).lineLimit(large ? nil : 2)
+                    .accessibilityIdentifier("sidebar-line-\(project.id)")
             }
         }
         .accessibilityElement(children: .combine)

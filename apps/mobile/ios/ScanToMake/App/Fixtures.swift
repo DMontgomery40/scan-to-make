@@ -61,6 +61,10 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        // `-CounterpartFixtureSet real`: a throwaway copy of real projects, as the companion serves them, for screenshots
+        // with real data (`objects.json` in the folder, each project's files under `objects/<id>/`). Never the Mac's own.
+        if set == "real", let base = folder, let data = try? Data(contentsOf: base.appending(path: "objects.json")),
+           let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] { return rows }
         let now = set == "ask-bottle" ? launched : now
         if set == "limit-stops", let json = ProcessInfo.processInfo.environment["COUNTERPART_LIMIT_FIXTURES"],
            let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
@@ -70,6 +74,15 @@ enum Fixtures {
                 project["title"] = row["name"]
                 return project
             }
+        }
+        // `-CounterpartFixtureSet photo-only`: photos sent, no scan model or result yet. The page shows the subject the
+        // Mac cut out of the first photo (`pictures.photo`), as the project's card does (review of #451, item 7).
+        if set == "photo-only" {
+            let now = now.timeIntervalSince1970 * 1000
+            return [["id": ids.mic, "createdAtMs": now - 120_000, "updatedAtMs": now, "state": "touching-up",
+                "title": "Mic mount", "kind": "fit", "instructions": "Something that holds this mic on top of my monitor arm pole.",
+                "photos": ["photo1.jpg", "photo2.jpg"], "messages": [], "passes": [["startedAtMs": now - 60_000, "trigger": "new"]],
+                "picture": "pictures/photo-1.png", "pictures": ["photo": "pictures/photo-1.png"]]]
         }
         // A copy of a designer's 3MF whose printer MCP says it prints with its own settings, saved at Fine/Strong
         // (Nov 5, caliper card 1f1c5515): the sheet must start at Standard and say it prints the designer's settings.
@@ -155,7 +168,10 @@ enum Fixtures {
                        "monitor": ["phase": "watching", "milestonesSent": [], "firstLayerSent": true]]],
             ["id": ids.plush, "createdAtMs": ago(30), "updatedAtMs": ago(12), "state": "needs-closeup", "title": "Plush, underside",
              "instructions": "Copy this plush, including the bottom.", "scan": "scan.usdz", "photos": [], "capture": ["potato.jpg"],
-             "passes": [["startedAtMs": ago(25), "endedAtMs": ago(12), "status": "needs-closeup"]],
+             "passes": [["startedAtMs": ago(25), "endedAtMs": ago(12), "status": "needs_closeup", "words": "Asked you a question"]],
+             // As the Mac sends it (`objectStatus`): `detail` is the row's line under a Needs you heading.
+             "status": ["phase": "needs-you", "text": "Needs you · Can you send a close-up of the underside? The scan never saw the bottom.",
+                        "detail": "Can you send a close-up of the underside? The scan never saw the bottom.", "symbol": "hand.raised", "tint": "orange"],
              "question": ["closeup": "the underside"],
              "ask": ["id": "1b6f1c1e-2d1e-4c3a-9a51-0e7a0b9e1a03", "question": "Can you send a close-up of the underside? The scan never saw the bottom.",
                      "photo": "asks/1b6f1c1e-2d1e-4c3a-9a51-0e7a0b9e1a03.jpg", "region": ["x": 0.15, "y": 0.55, "width": 0.7, "height": 0.4],
@@ -345,6 +361,9 @@ enum Fixtures {
     ]
 
     static let bottleAsk = "1af638c1-ec63-46fc-aa2f-e74cd29df231"
+    /// The bottle project's picture as the Mac sends it now (#451): its scan alone on the stage, `bottle-picture.png`
+    /// in the assets folder.
+    static let bottlePicture = "pictures/scan-7d141985baea4404.png"
 
     /// Appends `<path> <bytes>` to `served.log` in the assets folder.
     static func logServed(_ path: String, bytes: Int, in folder: URL) {
@@ -361,8 +380,21 @@ enum Fixtures {
             "photo": "asks/\(bottleAsk).jpg", "region": ["x": 0.42, "y": 0.3, "width": 0.28, "height": 0.34],
             "answers": ["camera", "photos", "best-guess", "text"], "status": "open", "askedAtMs": ago(4)]
         if ProcessInfo.processInfo.environment["COUNTERPART_ASK_NO_PHOTO"] != nil { ask["photo"] = nil; ask["region"] = nil }
+        // The same question as its own kind: the sizes to confirm or correct, as the Mac sends them now. The bottle
+        // is waisted, so there are more than three and none is "width".
+        if ProcessInfo.processInfo.environment["COUNTERPART_ASK_SIZES"] != nil {
+            ask["kind"] = "sizes"; ask["answers"] = ["sizes", "text", "camera"]
+            ask["question"] = "Kroger doesn't publish this bottle's size. Can you confirm or correct what the scan reads?"
+            ask["sizes"] = [["id": "size-1", "label": "width at the widest point", "mm": 64, "from": "scan"],
+                            ["id": "size-2", "label": "width at the waist", "mm": 53.5, "from": "scan"],
+                            ["id": "size-3", "label": "thickness", "mm": 32, "from": "scan"],
+                            ["id": "size-4", "label": "height to the cap tip", "mm": 107, "from": "scan"]]
+        }
+        // A kind this build doesn't know (a later Mac's question): the card must offer no answer at all.
+        if let kind = ProcessInfo.processInfo.environment["COUNTERPART_ASK_KIND"] { ask["kind"] = kind }
         return ["id": ids.plush, "createdAtMs": ago(25), "updatedAtMs": ago(4), "state": "needs-closeup", "kind": "fit",
                 "title": "Wall holder for three", "scan": "scan.usdz", "photos": [], "requestPhotos": [], "messages": [],
+                "picture": bottlePicture, "pictures": ["scan": bottlePicture],
                 "instructions": "Make something that holds three of these, on a wall. I don’t care if it’s in front of each other or side to side whatever makes more sense just need three of them in a holder thing that I screwed to drywall\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size.",
                 "capture": (1...130).map { String(format: "%04d.heic", $0) },
                 "passes": [["startedAtMs": ago(20), "endedAtMs": ago(4), "status": "needs_closeup",
@@ -373,6 +405,7 @@ enum Fixtures {
     /// The file a fixture path serves, from the assets folder.
     static func file(_ path: String) -> String? {
         if path.hasSuffix("/asks/\(bottleAsk).jpg") { return "ask-bottle.jpg" }
+        if path.hasSuffix("/" + bottlePicture) { return "bottle-picture.png" }
         if let range = path.range(of: #"/capture/[0-9]{4}\.heic$"#, options: .regularExpression) { return "bottle-capture/" + path[range].dropFirst("/capture/".count) }
         if path.hasSuffix("/model.stl") { return "mic.stl" }
         if path.hasSuffix("/camera.jpg") { return "bed.jpg" }
@@ -541,6 +574,15 @@ struct FixtureTransport: HTTPTransport {
                     ["atMs": Date().timeIntervalSince1970 * 1000 - 30_000, "kind": "tool", "text": "blender  sculpt  draw_sharp  strength 0.25"],
                     ["atMs": Date().timeIntervalSince1970 * 1000 - 20_000, "kind": "tool", "text": "render  front, left  → compare with photo 3"],
                 ]])
+            }
+            if method == "GET", Fixtures.set == "real", parts.count >= 4, let project = object(id) {
+                // The companion's own paths: the model, renders by name, the scan, photos, capture frames, pictures.
+                let rest = parts[3...].joined(separator: "/").removingPercentEncoding ?? ""
+                let current = project["current"] as? [String: Any]
+                let relative = rest == "model.stl" ? (current?["model"] as? String ?? "current/model.stl")
+                    : rest.hasPrefix("renders/") ? ((current?["renders"] as? [String])?.first { $0.hasSuffix("/" + rest.dropFirst(8)) } ?? rest)
+                    : rest
+                if let data = try? Data(contentsOf: folder.appending(path: "objects/\(id)/\(relative)")) { return HTTPReply(status: 200, body: data) }
             }
             if method == "GET", let name = Fixtures.file(path) {
                 let data = try Data(contentsOf: folder.appending(path: name))

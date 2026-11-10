@@ -104,8 +104,10 @@ test('chosen live filament sets slicing profile and AMS slot; a changed spool is
   const bundle = await bundles.read(started.print.bundleId);
   assert.deepEqual(bundle.selection, {material:'PLA', useAms:true, amsSlots:[1], autoMatchAms:false});
   assert.deepEqual(runs[0].options.slicer, {loadFilaments:'/profiles/yellow-pla.json', filamentColours:'#FEC600'});
+  // The spool it prints from stays with the print once it is sent, as the MCP reported it then (PRD §5.4).
+  assert.equal(started.print.spools, undefined, 'nothing is recorded before the print is sent');
   await approve(service, object.id);
-  await service.settled(object.id);
+  assert.deepEqual((await service.settled(object.id)).print.spools, [{colour:'#FEC600', material:'PLA', name:'Sunflower Yellow PLA Basic'}]);
 });
 
 test('Mac local control carries the selected filament through to print preparation', async () => {
@@ -617,4 +619,72 @@ test("the designer's supports choice reaches the slicer as it is, and an MCP tha
   const old = await estimate({supports: {enabled: true, type: 'tree(auto)'}});
   assert.match(old.error?.message ?? '', /^Update bambu-printer-mcp in Settings → Printers so Counterpart can send this design’s supports to the slicer\./);
   assert.deepEqual(old.tools, []);
+});
+
+test('a print keeps the colour of the spool it was sent with, as the MCP reported it; with the MCP choosing, none', async () => {
+  // Lead review, Nov 10: a printed part is drawn in the colour it was printed in, recorded when it is sent; with no
+  // record it is neutral, never the colour of whatever spool is loaded later.
+  const trays = [{slot:2, loaded:true, tray_color:'5B6579FF', tray_type:'PLA', tray_info_idx:'GFA00', spool_name:'Blue Gray PLA Basic', label:'A3', resolved_profile_path:'/profiles/blue-gray.json'}];
+  const {service, object, store} = await setup({inventory:{trays}});
+  await service.print(object.id, {colour:{amsSlot:2}});
+  await approve(service, object.id);
+  const sent = await service.settled(object.id);
+  assert.deepEqual(sent.print.spools, [{colour:'#5B6579', material:'PLA', name:'Blue Gray PLA Basic'}], 'an AMS slot records that tray, as the MCP reported it');
+  await store.update(object.id, o => ({...o, state:'ready'}));
+  const auto = await service.print(object.id, {colour:{auto:true}, checked:true});
+  assert.deepEqual(auto.print.spools, sent.print.spools, 'until this print is sent, the part keeps the colour it was printed in');
+  await approve(service, object.id);
+  const done = await service.settled(object.id);
+  assert.equal(done.print.spools, undefined, 'the MCP choosing the tray records no spool: nothing is guessed');
+  // Swapping the loaded spool afterwards changes nothing about what was printed.
+  trays[0].tray_color = 'FFFFFFFF';
+  assert.equal((await service.get(object.id)).print.spools, undefined);
+  assert.equal(done.print.printId, auto.print.printId);
+});
+
+test("a print that never goes out leaves the part's colour alone; a spool swapped while it waited is the colour recorded", async () => {
+  // Review of #451, blocker 2: refused, timed out at the printer's question, or declined: nothing printed, so the part
+  // keeps the colour of the last print that was sent. And the tray is read again as the print goes out.
+  const trays = [{slot:1, loaded:true, tray_color:'FEC600FF', tray_type:'PLA', tray_info_idx:'GFA00', spool_name:'Sunflower Yellow PLA Basic', label:'A2', resolved_profile_path:'/profiles/yellow.json'},
+    {slot:2, loaded:true, tray_color:'5B6579FF', tray_type:'PLA', tray_info_idx:'GFA00', spool_name:'Blue Gray PLA Basic', label:'A3', resolved_profile_path:'/profiles/blue-gray.json'}];
+  const previous = [{colour:'#FEC600', material:'PLA', name:'Sunflower Yellow PLA Basic'}];
+  const sentBefore = o => ({...o, state:'ready', print:{bundleId:'earlier', printId:'earlier', dispatchedAt:'2026-11-09T00:00:00Z', spools:previous}});
+  // Refused by the printer service before anything was sent.
+  {
+    const {service, object, store} = await setup({inventory:{trays}, runnerFails:'The printer refused the job.'});
+    await store.update(object.id, sentBefore);
+    await service.print(object.id, {colour:{amsSlot:2}, checked:true});
+    const after = await service.settled(object.id);
+    assert.deepEqual(after.print.spools, previous, 'refused: still the colour it was printed in');
+  }
+  // The printer's own question timed out.
+  {
+    const {service, object, store} = await setup({inventory:{trays}, timeoutMs:50});
+    await store.update(object.id, sentBefore);
+    await service.print(object.id, {colour:{amsSlot:2}, checked:true});
+    const after = await service.settled(object.id);
+    assert.match(after.failure ?? '', /timed out|not sent|Not printed|declined/i);
+    assert.deepEqual(after.print.spools, previous, 'timed out: still the colour it was printed in');
+  }
+  // The person answered No to the printer's question.
+  {
+    const {service, object, store} = await setup({inventory:{trays}});
+    await store.update(object.id, sentBefore);
+    await service.print(object.id, {colour:{amsSlot:2}, checked:true});
+    const question = await until(async () => (await service.get(object.id)).printConfirmation);
+    await service.answerPrintConfirmation(object.id, question.id, {action:'decline'});
+    const after = await service.settled(object.id);
+    assert.deepEqual(after.print.spools, previous, 'declined: still the colour it was printed in');
+  }
+  // The blue-grey spool was swapped for a white one of the same material while the question waited: white prints.
+  {
+    const live = trays.map(tray => ({...tray}));
+    const {service, object} = await setup({inventory:{trays:live}});
+    await service.print(object.id, {colour:{amsSlot:2}});
+    const question = await until(async () => (await service.get(object.id)).printConfirmation);
+    live[1].tray_color = 'FFFFFFFF'; live[1].spool_name = 'Jade White PLA Basic';
+    await service.answerPrintConfirmation(object.id, question.id, {action:'accept', content:{confirmed:true}});
+    const after = await service.settled(object.id);
+    assert.deepEqual(after.print.spools, [{colour:'#FFFFFF', material:'PLA', name:'Jade White PLA Basic'}], 'the tray as it was when the print went out');
+  }
 });

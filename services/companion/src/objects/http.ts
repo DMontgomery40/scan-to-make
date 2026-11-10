@@ -10,18 +10,20 @@ import type {RemoteScope} from '../remote-auth.js';
 import {InvalidAnswerError, InvalidCaptureCameraError, InvalidCaptureManifestError, InvalidStateError, passKind, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
 import {CompanionSettingsPatchSchema, FitSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
+import {z} from 'zod';
 import {fitRequest} from './fit.js';
+import {askKind} from './asks.js';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
-import {canRetryPass} from './pass-end.js';
+import {canRetryPass, passWords} from './pass-end.js';
 import {ControlFailure, parameters} from '../local-control-protocol.js';
 import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 /** Settings -> Printers: the printer MCP's connection (`route`) and which MCP a printer uses (`mcp`). */
 const PRINTER_CHOICE = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
@@ -63,7 +65,7 @@ async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-export type PublicObject = Omit<StmObject, 'passes' | 'title' | 'failedPass'> & {plates?: ProjectPlate[]; title: string; canRetryCleanup: boolean; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity' | 'sessionId' | 'resumable' | 'checkpoints' | 'resume' | 'sessionCwd'> & {activityCount: number})[]};
+export type PublicObject = Omit<StmObject, 'passes' | 'title' | 'failedPass'> & {plates?: ProjectPlate[]; title: string; canRetryCleanup: boolean; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity' | 'sessionId' | 'resumable' | 'checkpoints' | 'resume' | 'sessionCwd'> & {activityCount: number; words?: string})[]};
 
 // Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
 // advice for those retained attempts too, leaving their original stored records intact.
@@ -82,7 +84,9 @@ export function publicObject(stored: StmObject): PublicObject {
   // What the person typed, and the fit choice as fields: never the brief a client once appended to the request.
   const {typed, fit} = fitRequest(stored);
   const {instructions: _instructions, fit: _fit, ...rest} = stored;
-  const object: StmObject = {...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {})};
+  // Every question says its kind, also one saved before kinds were written.
+  const kind = askKind(stored);
+  const object: StmObject = {...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {}), ...(rest.ask && kind ? {ask: {...rest.ask, kind}} : {})};
   const failure = currentFailureText(object.failure);
   // Carry this worker stop's retry decision to every client, without exposing its local recovery fields.
   // A later printer failure must not inherit Retry from an older worker stop.
@@ -90,11 +94,13 @@ export function publicObject(stored: StmObject): PublicObject {
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
   // The companion's decision (copy, new design or published), so neither app re-derives it.
   // Local bookkeeping, like the passes' recovery fields below.
-  const {failedPass: _failedPass, ...shown} = object;
+  const {failedPass: _failedPass, checkedSizes: _checkedSizes, ...shown} = object;
   return {...shown, ...(object.kind === 'published' ? {plates: projectPlates(object)} : {}), kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
+    // The sender's own id for a message is how a repeat is recognised here; no client reads it back.
+    ...(object.messages ? {messages: object.messages.map(({clientId: _clientId, ...message}) => message)} : {}),
     passes: object.passes.map(({dir: _dir, activity, sessionId: _session, sessionCwd: _sessionCwd, resumable: _resumable, checkpoints: _checkpoints, resume: _resume, ...pass}) => ({...pass,
-      summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
+      summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0, ...(passWords(pass) ? {words: passWords(pass)} : {})}))};
 }
 
 function sendFrame(response: ServerResponse, frame: CameraFrame, match?: string): void {
@@ -373,6 +379,20 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           response.end(bytes);
           return;
         }
+        if (action.startsWith('pictures/')) {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          const object = await service.get(id);
+          // Only the project's own current pictures (PRD §5.1), never another file under it.
+          if (!Object.values(object.pictures ?? {}).includes(action)) throw new HttpFailure(404, 'not-found');
+          const bytes = await readFile(join(service.dir(id), action)).catch(() => { throw new HttpFailure(404, 'not-found'); });
+          response.statusCode = 200;
+          response.setHeader('content-type', 'image/png');
+          response.setHeader('cache-control', 'private, max-age=86400');
+          response.setHeader('x-content-type-options', 'nosniff');
+          response.end(bytes);
+          return;
+        }
         if (action.startsWith('asks/')) {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
@@ -524,18 +544,25 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             break;
           }
           case 'duplicate': { object = await service.duplicate(id); break; }
+          // Where the scanned object sits in a fit part made before passes said (docs/protocols/seats.md).
+          case 'locate': { await json<unknown>(request); object = await service.locate(id); break; }
           case 'corrections': {
-            const {note, photoNames} = await json<{note?: unknown; photoNames?: unknown}>(request);
+            const {note, photoNames, messageId} = await json<{note?: unknown; photoNames?: unknown; messageId?: unknown}>(request);
             if (typeof note !== 'string' || !note.trim() || note.length > 4000) throw new HttpFailure(400, 'invalid-request');
+            // The client's own id for this note, so the same note sent again is never recorded twice.
+            if (messageId !== undefined && (typeof messageId !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(messageId))) throw new HttpFailure(400, 'invalid-request');
             if (photoNames !== undefined && (!Array.isArray(photoNames) || photoNames.length > 100 || photoNames.some(name => typeof name !== 'string' || name.length > 128))) throw new HttpFailure(400, 'invalid-request');
-            object = await service.correct(id, note, [], photoNames as string[] | undefined);
+            object = await service.correct(id, note, [], photoNames as string[] | undefined, messageId as string | undefined);
             break;
           }
           case 'closeup': {
-            const input = await json<{bestGuess?: unknown; text?: unknown; photoNames?: unknown}>(request);
+            const input = await json<{bestGuess?: unknown; text?: unknown; photoNames?: unknown; sizes?: unknown}>(request);
             if (input.text !== undefined && (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 2000)) throw new HttpFailure(400, 'invalid-request');
+            // A sizes question's numbers: {id, mm} for the sizes it listed.
+            const sizes = input.sizes === undefined ? undefined : z.array(z.strictObject({id: z.string().min(1).max(64), mm: z.number().positive().max(10_000)})).min(1).max(6).safeParse(input.sizes);
+            if (sizes && !sizes.success) throw new HttpFailure(400, 'invalid-request');
             if (input.photoNames !== undefined && (!Array.isArray(input.photoNames) || input.photoNames.length > 100 || input.photoNames.some(name => typeof name !== 'string' || !name || name.length > 128))) throw new HttpFailure(400, 'invalid-request');
-            object = await service.answerCloseup(id, {photoNames: input.photoNames as string[] | undefined, bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {})});
+            object = await service.answerCloseup(id, {photoNames: input.photoNames as string[] | undefined, bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {}), ...(sizes ? {sizes: sizes.data} : {})});
             break;
           }
           case 'print': {

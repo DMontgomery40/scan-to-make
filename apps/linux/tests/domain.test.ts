@@ -1,8 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { canLocate, gallery, lightStage, photoPicture } from "../src/gallery";
 import {
   codeEngineRow,
+  passEnding,
+  stageMark,
+  passHeading,
+  sizeFields,
+  sizesAnswer,
+  sizesUnchanged,
+  sizeSource,
+  KNOWN_ASK_KINDS,
+  rowWords,
+  askAnswerable,
+  sizesCarried,
+  requestedChange,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -16,6 +29,7 @@ import {
   guardPlate,
   parseLayers,
   searchProject,
+  searchSnippet,
   projectThumbnail,
   words,
   startersShown,
@@ -57,11 +71,39 @@ const project = {
   plates: [{ id: "a:1", selected: true }],
   directory: "/private/needle",
 } as unknown as Project;
-test("a project thumbnail is the real object before any render", () => {
-  const rendered = { ...project, current: { model: "m.stl", renders: ["renders/overview.png"] } } as unknown as Project;
-  assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "photos/bottle.jpg");
-  assert.equal(projectThumbnail({ ...rendered, capture: ["0001.heic"] }), "capture/0001.heic");
-  assert.equal(projectThumbnail(rendered), "renders/overview.png");
+// David, Nov 10: "of ALL THE OPTIONS ... the photograph including everything in it is by far the worst".
+test("a project's picture is the object alone on the stage, never a photo of the room", () => {
+  const rendered = { ...project, plates: undefined, current: { model: "current/model.stl", renders: ["current/renders/overview.png"] } } as unknown as Project;
+  assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "current/renders/overview.png", "until the computer draws it: the render");
+  assert.equal(projectThumbnail({ ...rendered, picture: "pictures/part-1.png" }), "pictures/part-1.png");
+  assert.equal(projectThumbnail({ ...project, plates: undefined, photos: ["bottle.jpg"], capture: ["0001.heic"] } as unknown as Project), undefined, "the placeholder, never the room");
+});
+
+// PRD §5.4 Pictures: the same entries as CounterpartKit and Android, from the shared cases.
+test("every client derives the same pictures from the shared gallery cases", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-gallery.json", import.meta.url), "utf8"));
+  assert.ok(doc.cases.length >= 8);
+  for (const item of doc.cases) {
+    const entries = gallery(item.project as Project);
+    assert.deepEqual(entries.map((e) => e.id), item.entries.map((e: { id: string }) => e.id), item.name);
+    if (item.photoPicture) assert.equal(photoPicture(item.project as Project), item.photoPicture, item.name);
+    if (item.canLocate !== undefined) assert.equal(canLocate(item.project as Project), item.canLocate, item.name);
+    entries.forEach((entry, index) => {
+      const want = item.entries[index];
+      assert.equal(entry.kind, want.kind, item.name);
+      assert.equal(entry.label, want.label, item.name);
+      assert.equal(entry.measures, want.measures, item.name);
+      assert.equal(entry.colour, want.colour, item.name);
+      assert.deepEqual(entry.sizeMm, want.sizeMm, item.name);
+      assert.deepEqual(entry.photos ?? [], want.photos ?? [], item.name);
+      const drawing = "assembly" in entry.drawing
+        ? { assembly: { part: entry.drawing.assembly.part, object: entry.drawing.assembly.object, seats: entry.drawing.assembly.seats.length } }
+        : entry.drawing;
+      assert.deepEqual(drawing, want.drawing, item.name);
+    });
+  }
+  const many = doc.cases.find((c: { name: string }) => c.name.includes("six plates"));
+  assert.equal(gallery(many.project).length, 6, "a designer's six plates: six labelled entries");
 });
 
 test("a finished print asks Did it fit? until it's answered, as the other clients do", () => {
@@ -609,6 +651,9 @@ test("all three shared limit reasons survive project words with projects present
   const projects = [project, ...stopped.map((row: {expected: Project}) => row.expected)];
   assert.equal(projects.length, 4);
   for (const row of stopped) {
+    // The pass's own line is the companion's words too, never the wire status ("capped").
+    assert.equal(passHeading(row.expected.passes.at(-1), 0), `Pass 1 · ${reasons[row.name]}`);
+    assert.equal(passHeading({}, 1), "Pass 2 · Working", "a running pass");
     assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
@@ -680,4 +725,126 @@ test("David's Nov 9 bottle: the question's caption is true for any question, and
   assert.deepEqual(scanSample(130), [0, 32, 65, 97, 129], "the same frames as the iPhone, Mac and Android");
   assert.deepEqual(scanSample(3), [0, 1, 2]);
   assert.equal(scanWords(130), "130 photos");
+});
+
+test("a search result whose title lacks the words says where it matched (first look U10)", () => {
+  const hanger = {
+    ...project,
+    title: "AirPods Max desk hanger",
+    messages: [
+      {
+        id: "m",
+        text: "okay the main holder is actually terrible cause the ridge of teh rails holds it too high and it wobbles when I take the headphones off",
+        atMs: 2,
+        photos: [],
+      },
+    ],
+  };
+  assert.equal(searchProject(hanger, "holder"), true);
+  const snippet = searchSnippet(hanger, "holder");
+  assert.ok(snippet);
+  assert.match(snippet.text, /main holder is actually terrible/);
+  assert.ok(snippet.text.length < 120, snippet.text);
+  assert.equal(snippet.text.slice(...snippet.match).toLowerCase(), "holder");
+  assert.equal(searchSnippet(hanger, "desk"), undefined, "the title says it");
+  assert.equal(searchSnippet(hanger, "  "), undefined);
+});
+
+// A part stays readable on its stage: the same rule as CounterpartKit StageContrast.
+test("black and a dark blue grey move to the light stage; white, yellow and the neutral stay dark", () => {
+  assert.equal(lightStage("#000000"), true);
+  assert.equal(lightStage("#5B6579"), true);
+  assert.equal(lightStage("#FFFFFF"), false);
+  assert.equal(lightStage("#FEC600"), false);
+  assert.equal(lightStage("neutral"), false);
+  assert.equal(lightStage("own"), false);
+});
+
+test("a pass that stopped to ask or stopped short never reads as all ticks", () => {
+  const stages = [{ id: "preparing", words: "Getting ready", endedAtMs: 2 }, { id: "working", words: "Designing it", endedAtMs: 3 }];
+  const marks = (status: string | undefined, endedAtMs: number | undefined = 3) => stages.map((_, i) => stageMark({ endedAtMs, status, stages }, i));
+  assert.deepEqual(marks("done"), ["✓", "✓"]);
+  assert.deepEqual(marks("unchanged"), ["✓", "✓"]);
+  assert.deepEqual(marks("needs_closeup"), ["✓", "?"]);
+  assert.deepEqual(marks("needs_file"), ["✓", "?"]);
+  for (const status of ["capped", "failed", "interrupted"]) assert.deepEqual(marks(status), ["✓", "✕"], status);
+  assert.equal(passEnding({ status: "failed" }), undefined, "a running pass has not ended");
+  assert.deepEqual(stages.map((_, i) => stageMark({ stages: [stages[0], { id: "working", words: "Designing it" }] }, i)), ["✓", "◌"]);
+});
+
+test("a size question is number fields with the companion's labels, prefilled, with projects present", () => {
+  const ask = {
+    kind: "sizes",
+    sizes: [
+      { id: "size-1", label: "width at the widest point", mm: 64, from: "scan" },
+      { id: "size-2", label: "width at the waist", mm: 53.5, from: "scan" },
+      { id: "size-3", label: "height to the cap tip", mm: 107, from: "published" },
+    ],
+  };
+  const fields = sizeFields(ask)!;
+  assert.deepEqual(fields.map((f) => [f.label, f.text]), [["width at the widest point", "64"], ["width at the waist", "53.5"], ["height to the cap tip", "107"]]);
+  assert.equal(sizesUnchanged(fields), true);
+  assert.deepEqual(sizesAnswer(fields), [{ id: "size-1", mm: 64 }, { id: "size-2", mm: 53.5 }, { id: "size-3", mm: 107 }]);
+  // A correction with a comma, and a size the person doesn't know left out (never sent as confirmed).
+  const edited = fields.map((f, i) => (i === 0 ? { ...f, text: " 63,2 " } : i === 2 ? { ...f, text: "" } : f));
+  assert.equal(sizesUnchanged(edited), false);
+  assert.deepEqual(sizesAnswer(edited), [{ id: "size-1", mm: 63.2 }, { id: "size-2", mm: 53.5 }]);
+  // Nothing is sent while a field isn't a number, or all are blank.
+  for (const bad of ["about 60", "0", "-4", "10001", "6 3", "1e3"]) assert.equal(sizesAnswer(fields.map((f, i) => (i === 0 ? { ...f, text: bad } : f))), undefined, bad);
+  assert.equal(sizesAnswer(fields.map((f) => ({ ...f, text: " " }))), undefined);
+  // Only a sizes question with sizes is one; every other kind keeps its own card.
+  // The companion's number can be finer than the field shows; untouched, that is still Confirm.
+  const fine = sizeFields({ kind: "sizes", sizes: [{ id: "a", label: "width", mm: 68.412, from: "scan" }, { id: "b", label: "waist", mm: 53.4567, from: "scan" }] })!;
+  assert.deepEqual(fine.map((f) => f.text), ["68.41", "53.46"]);
+  assert.equal(sizesUnchanged(fine), true);
+  assert.deepEqual(sizesAnswer(fine), [{ id: "a", mm: 68.41 }, { id: "b", mm: 53.46 }]);
+  assert.equal(sizesUnchanged(fine.map((f) => (f.id === "a" ? { ...f, text: "68.42" } : f))), false);
+  assert.equal(sizeFields({ kind: "closeup", sizes: ask.sizes }), undefined);
+  assert.equal(sizeFields({ kind: "sizes", sizes: [] }), undefined);
+  assert.equal(sizeFields(undefined), undefined);
+  assert.equal(sizeSource("published"), "from the maker");
+  assert.equal(sizeSource("scan"), "from your scan");
+  assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
+  // The same forms on every client (F8): digits with at most one decimal part.
+  const typed = (text: string) => sizesAnswer([{ ...fields[0], text }])?.[0].mm;
+  for (const good of ["64", "53.5", " 53,25 ", "0.5", "10000"]) assert.notEqual(typed(good), undefined, good);
+  for (const bad of ["1e3", ".5", "5.", "5.5.5", "+5", "-4", "0", "10001", "6 3", "about 60", "٥"]) assert.equal(typed(bad), undefined, bad);
+  // Train #499 review, F3: another answer from the card carries the numbers as they stand, or does not go.
+  assert.deepEqual(sizesCarried(fields), sizesAnswer(fields));
+  assert.deepEqual(sizesCarried(edited), [{ id: "size-1", mm: 63.2 }, { id: "size-2", mm: 53.5 }]);
+  assert.equal(sizesCarried(fields.map((f, i) => (i === 1 ? { ...f, text: "about 53" } : f))), "invalid");
+  assert.equal(sizesCarried(fields.map((f) => ({ ...f, text: " " }))), "none");
+  // F6: a kind this build doesn't know offers no answer; no kind is an older companion's question.
+  for (const kind of KNOWN_ASK_KINDS) assert.equal(askAnswerable({ kind }), true, kind);
+  assert.equal(askAnswerable({}), true);
+  assert.equal(askAnswerable({ kind: "colour" }), false);
+});
+
+test("an ended pass from an older companion is worded from its status, never headed Working", () => {
+  // Train #499 review, F7: with no `words` every ended pass on Linux read "Pass n · Working".
+  assert.equal(passHeading({ endedAtMs: 2, status: "done" }, 0), "Pass 1 · Finished");
+  assert.equal(passHeading({ endedAtMs: 2 }, 0), "Pass 1 · Finished");
+  assert.equal(passHeading({ endedAtMs: 2, status: "needs_closeup" }, 1), "Pass 2 · Asked you a question");
+  assert.equal(passHeading({ endedAtMs: 2, status: "interrupted" }, 0), "Pass 1 · Stopped when Counterpart restarted");
+  assert.equal(passHeading({ endedAtMs: 2, status: "needs_file" }, 0), "Pass 1 · Needs File");
+  assert.equal(passHeading({ endedAtMs: 2, status: "failed", words: "Stopped before it finished" }, 0), "Pass 1 · Stopped before it finished");
+  assert.equal(passHeading({ status: "failed" }, 0), "Pass 1 · Working", "not ended yet");
+});
+
+test("Your change is the person's own note, for every trigger the companion writes", () => {
+  // Train #499 review, F5: Linux showed every pass's note, including the text the companion composes for an answer.
+  const shown: [string | undefined, boolean][] = [["changes", true], ["late-photos", true], [undefined, true], ["ask-answer", false], ["new", false], ["something-later", false]];
+  for (const [trigger, yes] of shown) assert.equal(requestedChange({ note: " see the photos ", trigger }), yes ? "see the photos" : undefined, String(trigger));
+  assert.equal(requestedChange({ trigger: "changes" }), undefined);
+  assert.equal(requestedChange({ note: "  ", trigger: "changes" }), undefined);
+});
+
+test("a row under its phase heading shows the companion's detail, never the heading again, with projects present", () => {
+  const asking = { ...project, id: "a", state: "needs-closeup", status: { phase: "needs-you", tint: "orange", text: "Needs you · Can you confirm these sizes?", detail: "Can you confirm these sizes?" } } as Project;
+  const ready = { ...project, id: "b", state: "ready", status: { phase: "ready", tint: "accent", text: "Ready to print · 68.4 × 34.6 × 149.2 mm", detail: "68.4 × 34.6 × 149.2 mm" } } as Project;
+  const failed = { ...project, id: "c", state: "failed", status: { phase: "failed", tint: "red", text: "The printer stopped." } } as Project;
+  assert.equal(rowWords(asking), "Can you confirm these sizes?");
+  assert.equal(rowWords(ready), "68.4 × 34.6 × 149.2 mm");
+  assert.equal(rowWords(failed), "The printer stopped.", "no detail: the line as it is");
+  for (const p of [asking, ready]) assert.doesNotMatch(rowWords(p), /^(Needs you|Ready to print)/);
 });

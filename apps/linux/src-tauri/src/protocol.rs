@@ -19,6 +19,7 @@ pub fn allowed(method: &str) -> bool {
             | "objects.correct"
             | "objects.delete"
             | "objects.duplicate"
+            | "objects.locate"
             | "objects.settings.get"
             | "objects.settings.set"
             | "objects.passActivity"

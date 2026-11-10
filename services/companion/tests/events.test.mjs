@@ -6,7 +6,7 @@ import {request as httpRequest} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {CounterpartEventSchema, EventsPageSchema} from '@scan-to-make/contracts/counterpart';
 import {EventLog, EVENT_RETENTION_MS} from '../dist/events/log.js';
-import {eventWords, objectStatus, NOTIFY} from '../dist/events/words.js';
+import {eventWords, objectStatus, NOTIFY, DETAIL_MAX, rowDetail} from '../dist/events/words.js';
 import {LiveActivityTokenStore} from '../dist/devices/live-activity-tokens.js';
 import {DevicePresence} from '../dist/devices/presence.js';
 import {RemoteAuthStore, deviceNameFromHeader} from '../dist/remote-auth.js';
@@ -412,4 +412,66 @@ test('local and HTTP device lists keep request presence separate from fresh cred
   assert.ok(again.lastSeenAt > stale, 'an actual request, not credential metadata, advances presence');
   const never = await f.pair('Never requested');
   assert.equal((await f.dispatch('devices.list', {})).devices.find(d => d.deviceId === never.deviceId).lastSeenAt, undefined);
+});
+
+test('a row under its phase heading shows only what differs: the question, the size, the stage; never the heading again', async () => {
+  const {projectTitle} = await import('../dist/events/words.js');
+  const question = "Kroger doesn't publish this bottle's size. Can you confirm these?";
+  const asking = objectStatus({state: 'needs-closeup', ask: {question}});
+  assert.equal(asking.text, `Needs you · ${question}`);
+  assert.equal(asking.detail, question);
+  const ready = objectStatus({state: 'ready', current: {sizeMm: [68.4, 34.6, 149.2]}});
+  assert.equal(ready.detail, '68.4 × 34.6 × 149.2 mm');
+  assert.equal(ready.text, `Ready to print · ${ready.detail}`);
+  assert.equal(objectStatus({state: 'ready'}).detail, undefined, 'nothing to add: the row shows the status');
+  const working = objectStatus({state: 'touching-up', passes: [{startedAtMs: 1, stages: [{id: 'working', words: 'Designing it', startedAtMs: 1, typicalSec: 60}], estimate: {remainingSec: 240, endsAtMs: 2}}]});
+  assert.equal(working.detail, 'Designing it · about 4 min');
+  for (const status of [asking, ready, working]) assert.doesNotMatch(status.detail, /^(Needs you|Ready to print|Your Mac is working)/);
+  // A line that is already only what differs has no separate detail.
+  assert.equal(objectStatus({state: 'failed', failure: 'The printer stopped.'}).detail, undefined);
+  assert.equal(objectStatus({state: 'printing', print: {destination: {name: 'Bambu Lab P1S'}}}).detail, undefined);
+
+  // A scan sent with no words is named from what is known, never "Your scan" twice in one list.
+  const created = Date.UTC(2026, 10, 9, 21, 41);
+  const first = projectTitle({scan: 'scan.usdz', createdAtMs: created, current: {sizeMm: [68.4, 34.6, 149.2]}});
+  const second = projectTitle({capture: ['0001.heic'], createdAtMs: created + 3_600_000, current: {sizeMm: [192.3, 21.3, 10.4]}});
+  assert.match(first, /^Scan, Nov \d+, \d+:\d\d [AP]M$/);
+  assert.notEqual(first, second);
+  // The size is the row's line, so the title never repeats it.
+  assert.equal(first.includes('68.4'), false);
+  assert.equal(objectStatus({state: 'ready', scan: 'scan.usdz', createdAtMs: created, current: {sizeMm: [68.4, 34.6, 149.2]}}).detail, '68.4 × 34.6 × 149.2 mm');
+  assert.match(projectTitle({scan: 'scan.usdz', createdAtMs: created}), /^Scan, Nov \d+, \d+:\d\d [AP]M$/);
+
+  // A row's detail always fits its two lines: no client is left to cut it where the meaning is. A stopped pass's
+  // row is the reason alone ("Try again or …" is the project page's); a long question is its first sentence.
+  const stopped = objectStatus({state: 'failed', failure: 'Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.'});
+  assert.equal(stopped.detail, 'Stopped after 10 minutes without worker activity');
+  assert.match(stopped.text, /Try again or review the saved checkpoint\.$/, 'the whole line is kept for the project page');
+  const kroger = "Kroger doesn't publish this bottle's size. The scan reads about 64 mm wide, 32 mm thick and 107 mm tall. Can you confirm, or send ruler or caliper readings of those three?";
+  assert.equal(objectStatus({state: 'needs-closeup', ask: {question: kroger, status: 'open'}}).detail, "Kroger doesn't publish this bottle's size");
+  assert.equal(objectStatus({state: 'failed', failure: 'Stopped at the step limit. Try again.'}).detail, 'Stopped at the step limit', 'the reason alone, however short the rest');
+  const endless = 'Can you measure the distance between the two mounting holes on the back plate with calipers and tell me the number in millimetres please';
+  assert.equal(rowDetail(endless), 'Can you measure the distance between the two mounting holes on the back plate…');
+  assert.equal(rowDetail('x'.repeat(200)).length, DETAIL_MAX);
+  assert.equal(rowDetail('  '), undefined);
+  const long = 'A very long sentence that keeps going without a full stop anywhere near the front of it so it has to be cut somewhere sensible';
+  const sources = [
+    {state: 'touching-up', passes: [{stages: [{words: long}], estimate: {remainingSec: 240}}]},
+    {state: 'touching-up', progress: long},
+    {state: 'needs-closeup', ask: {question: `${long}?`, status: 'open'}},
+    {state: 'needs-closeup', question: {closeup: long}},
+    {state: 'ready', current: {sizeMm: [1234.5, 1234.5, 1234.5]}},
+    {state: 'failed', failure: `${long}. ${long}.`},
+    {state: 'failed', failure: long},
+    {state: 'printing', print: {destination: {name: long}, dispatchedAt: 'x', monitor: {phase: 'watching'}, live: {state: 'printing', job: {progress: 3, stage: long}}}},
+    {state: 'printed'}, {state: 'confirmed'}, {state: 'sent'}, {state: 'new'},
+  ];
+  for (const source of sources) {
+    const detail = objectStatus(source).detail;
+    assert.ok(detail === undefined || detail.length <= DETAIL_MAX, `${source.state}: ${detail?.length}`);
+  }
+  assert.equal(sources.filter(source => objectStatus(source).detail).length >= 6, true, 'the long ones are cut, not dropped');
+  assert.equal(projectTitle({scan: 'scan.usdz'}), 'Your scan', 'nothing known at all');
+  assert.equal(projectTitle({title: 'Bike oil bottle', scan: 'scan.usdz', current: {sizeMm: [1, 2, 3]}}), 'Bike oil bottle', 'a name the worker gave wins');
+  assert.equal(projectTitle({instructions: 'A hook for my bag', scan: 'scan.usdz'}), 'A hook for my bag');
 });

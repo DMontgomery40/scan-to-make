@@ -50,7 +50,8 @@
           "startedAtMs": 1,
           "endedAtMs": 2,
           "status": "capped",
-          "activityCount": 1
+          "activityCount": 1,
+          "words": "Stopped at a limit"
         }
       ],
       "failure": "Stopped at the step limit. Try again or review the saved checkpoint.",
@@ -58,6 +59,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped at the step limit. Try again or review the saved checkpoint.",
+        "detail": "Stopped at the step limit",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
@@ -122,7 +124,8 @@
           "startedAtMs": 1,
           "endedAtMs": 2,
           "status": "capped",
-          "activityCount": 1
+          "activityCount": 1,
+          "words": "Stopped at a limit"
         }
       ],
       "failure": "Stopped at the step limit. Try again or review the saved checkpoint.",
@@ -133,6 +136,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped at the step limit. Try again or review the saved checkpoint.",
+        "detail": "Stopped at the step limit",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
@@ -198,7 +202,8 @@
           "startedAtMs": 1,
           "endedAtMs": 2,
           "status": "capped",
-          "activityCount": 1
+          "activityCount": 1,
+          "words": "Stopped at a limit"
         }
       ],
       "failure": "The printer stopped.",
@@ -264,7 +269,8 @@
           "startedAtMs": 1,
           "endedAtMs": 2,
           "status": "failed",
-          "activityCount": 0
+          "activityCount": 0,
+          "words": "Stopped before it finished"
         }
       ],
       "failure": "Blender stopped.",
@@ -325,7 +331,8 @@
           "startedAtMs": 1,
           "endedAtMs": 2,
           "status": "done",
-          "activityCount": 0
+          "activityCount": 0,
+          "words": "Finished"
         }
       ],
       "canRetryCleanup": false,
@@ -406,7 +413,8 @@
           "limit": {
             "kind": "inactivity",
             "value": 600000
-          }
+          },
+          "words": "Stopped after 10 minutes without worker activity"
         }
       ],
       "failure": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.",
@@ -414,6 +422,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.",
+        "detail": "Stopped after 10 minutes without worker activity",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
@@ -488,7 +497,8 @@
           "limit": {
             "kind": "absolute",
             "value": 7200000
-          }
+          },
+          "words": "Stopped at the absolute time limit of 2 hours"
         }
       ],
       "failure": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint.",
@@ -496,6 +506,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint.",
+        "detail": "Stopped at the absolute time limit of 2 hours",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
@@ -570,7 +581,8 @@
           "limit": {
             "kind": "tool-calls",
             "value": 120
-          }
+          },
+          "words": "Stopped at the 120 tool-call limit"
         }
       ],
       "failure": "Stopped at the 120 tool-call limit. Try again or review the saved checkpoint.",
@@ -578,6 +590,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped at the 120 tool-call limit. Try again or review the saved checkpoint.",
+        "detail": "Stopped at the 120 tool-call limit",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },

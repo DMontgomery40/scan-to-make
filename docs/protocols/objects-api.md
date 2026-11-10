@@ -46,13 +46,16 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `POST /v1/objects/<id>/photos?name=<file>` | WRITE | JPEG, PNG or HEIC bytes (≤ 25 MiB); optional `forMessage=true` query for a correction or Ask attachment. | `{object}`. Photos are accepted in every state except while the project is being deleted. Message attachments stay pending even if the initial pass fails during upload. Other photos added after an initial failure with no model join the request evidence for Try Again. |
 | `POST /v1/objects/<id>/capture?name=NNNN.heic`, `…/capture-depth?name=NNNN.depth.plist` | WRITE | In-hand capture frames; or, with `capabilities.objectCaptureImages`, every image of an iPhone Object Capture session, byte for byte, named `NNNN.heic` in capture order (Apple names them by seconds since the session started), sent before its scan | `{object}`; refused once a scan is there |
 | `POST /v1/objects/<id>/start` | WRITE | `{captureManifest?}`. A walk-around's manifest is exactly `{version: 1, images: [every name], depthRequired: false, source: "object-capture"}` (no `cameraMetadataRequired` or `scaleQualificationRequired`): the Mac rebuilds that images folder with Apple's PhotogrammetrySession at `.full` (Apple's own masks), and the scan sent with them is the phone's preview until then (`scanSource`) | `{object}` |
-| `POST /v1/objects/<id>/corrections` | WRITE | `{note: string 1–4000}`. Upload any new photos first with `…/photos`. | `{object}` (a new pass) |
+| `POST /v1/objects/<id>/corrections` | WRITE | `{note: string 1–4000, messageId?: string}`. Upload any new photos first with `…/photos`. `messageId` (8–64 letters, digits or hyphens) is the sender's own id for this note; see "A note is recorded once". | `{object}` (a new pass) |
 | `POST /v1/objects/<id>/model?name=<file>` | WRITE | 3MF or STL bytes, ≤64 MiB; preserves the supplied original | `{object}` (ready or plate/file choice) |
 | `POST /v1/objects/<id>/ask` | WRITE | `{askId, choices: [optionId]}` | `{object}` |
 | `POST /v1/objects/<id>/closeup` | WRITE | `{bestGuess?: boolean, text?: string ≤ 2000, photoNames?: string[] ≤ 100}`. Answers the open Ask: upload photos first, then name those exact files in `photoNames`; or use `{bestGuess: true}` or `{text}`. Omitted names select no photos; queued correction evidence remains pending. Empty answers or missing photos are refused before consuming the Ask. | `{object}` (a new pass) |
 | `GET /v1/objects/<id>/passes/<n>/activity` | READ | | `{activity: [{atMs, kind: "message"\|"tool", text}]}` |
 | `GET /v1/objects/<id>/model.stl`, `…/renders/<name>` | READ | | the file |
 | `GET /v1/objects/<id>/photos/<name>`, `…/capture/<name>` | READ | | the image |
+| `GET /v1/objects/<id>/scan/<name>` | READ | | The scan model (`scan.usdz`): the gallery's "What you scanned" and Together (Nov 10) |
+| `GET /v1/objects/<id>/pictures/<name>` | READ | | One of the project's pictures, PNG (`picture`, `pictures`; Nov 10). Only the names the project lists. |
+| `POST /v1/objects/<id>/locate` | WRITE | `{}` | `{object}`: a short pass that finds where the scanned object sits in the existing part and changes nothing ([seats.md](seats.md)) |
 | `GET /v1/objects/<id>/asks/<askId>.jpg` | READ | | The Ask's picture (PR 4). Draw `ask.region` over it. |
 
 ## Printing
@@ -282,7 +285,7 @@ Then the companion restarts every session on that install (each waits for any pr
 | `current.design` | `{f3d, parameters}` paths (relative) when the engine was Fusion; `{script, parameters, inputs?, step?, result?}` (relative, under `current/design/`; `result` is the selected run's cad/1 receipt with its validation) when it was the code engine. A change starts from it | PR 4; code Nov 10 |
 | `passes[].limit` | Optional `{kind, value}` when the worker stopped at a limit: `inactivity` or `absolute` with milliseconds, `tool-calls` with calls. Pass `status` is `capped`; project stays `failed`, with `canRetryCleanup`, and `failure` / `status.text` name the actual limit. A saved checkpoint is reviewable, not a completed model. | Nov 9 |
 | `passes[].toolCalls` | Number of tool calls observed by this attempt. Earlier passes may omit it. | Nov 9 |
-| `passes[].trigger` | `new`, `changes`, `late-photos` or `ask-answer` | PR 4 |
+| `passes[].trigger` | `new`, `changes`, `late-photos`, `ask-answer` or `locate` ([seats.md](seats.md)) | PR 4; `locate` Nov 10 |
 | `passes[].stages` | `[{id, words, startedAtMs, endedAtMs?, typicalSec}]` (`id`: `building`, `preparing`, `working`, `saving`) | PR 4 |
 | `passes[].estimate` | `{remainingSec, endsAtMs}` while the pass runs | PR 4 |
 | `passes[].engine` | `code`, `blender` or `fusion` | PR 4; `code` Nov 10 |
@@ -295,6 +298,10 @@ Then the companion restarts every session on that install (each waits for any pr
 | `print.jobName` | The job name the printer reports for it | PR 2 |
 | `print.taskId` | The printer's task id, when the MCP returns one | PR 2 |
 | `print.settings` | The `PrintSettings` it was printed with | PR 2 |
+| `print.spools` | `[{index?, colour: "#RRGGBB", material?, name?}]`: the spools the print uses, as the printer MCP reported them when it was sent: one for a one-spool print, one per model filament (`index`) for a multi-part model. The result is drawn in them (PRD §5.4). Absent for a print sent with the MCP's own choice (`colour: {auto}`), which then wears `print.live.activeFilament.color` once the printer reports it. | Nov 10 |
+| `current.seats` | Where the scanned object sits in a fit part: `[{name?, rotationDeg, translationMm, check?}]` ([seats.md](seats.md)) | Nov 10 |
+| `picture` | The project's picture, everywhere it appears (PRD §5.1): the gallery's first entry drawn by the Mac as the object alone on the stage (`pictures/<role>-<key>.png`). Absent until drawn, and on a computer that can't draw (Linux): clients then show a design's render or a designer's plate, never a photo. | Nov 10 |
+| `pictures` | `{part?, scan?, together?, photo?}`: each picture the Mac drew. `part` is the result in its spool (or the neutral material), `scan` the scan model in its own colours, `together` the part with the scan at each seat, `photo` a photo's subject cut out of its room, only before any model exists. A name changes whenever what it draws changes (the model, the spool, the seats), so caches refresh. | Nov 10 |
 | `print.live` | `PrintLive`: the latest normalized printer report for this print (state, job progress, layer, time left, `endsAt`, temperatures, active filament, problems). Replaces reading `printerStatus` once present. | PR 2 |
 | `print.monitor` | `PrintMonitor` `{phase: starting\|watching\|ended, startedAt, lastReportAt?, milestonesSent, firstLayerSent, unreachableSince?, endState?, endedAt?}` | PR 2 |
 
@@ -368,6 +375,18 @@ Tokens are stored for the calling device (`X-Scan-Device`) in `<data root>/live-
 ## Events (PR 3)
 
 `GET /v1/events?after=<seq>&wait=<0–25>&limit=<0–500>` (READ). See [events.md](events.md).
+
+### A note is recorded once
+
+A client gives each note a person writes one id and sends it as `messageId` on every try at that note:
+the first send, a second press after a reply that never arrived, and the saved copy that goes when the
+running step ends. The companion keeps the id with the message (never in a reply). A request whose
+`messageId` it has already recorded returns `{object}` as the project is now: no second message, no
+second pass, and no "Wait until the current step finishes." refusal while that note's own pass runs.
+Changed words are a new note with a new id, and so are the same words after a send that worked. A
+request without `messageId` behaves as before. Mac control `objects.correct` takes the same field when
+`capabilities.messageIds` is true. (Nov 10: a project held one note twice, 98 seconds apart, and each
+copy had started a design pass.)
 
 ### Message photo ownership
 

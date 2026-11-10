@@ -2,9 +2,11 @@ import {
   detectCapabilities, readPrinterInfo, readPrintReport, readiness,
   type PrinterCapabilities, type PrinterSession, type PrinterToolCatalog, type PrintReport,
 } from '@scan-to-make/printer-handoff';
-import type {PrinterCatalog, PrinterDestination} from '../objects/printers.js';
+import {defaultName, type PrinterCatalog, type PrinterDestination} from '../objects/printers.js';
 
 export type Readiness = ReturnType<typeof readiness>;
+/** Names older builds generated for a printer nobody named; a saved profile may still carry one (review F6). */
+const LEGACY_GENERATED_NAMES = new Set(['Bambu printer', 'Configured printer']);
 export interface PublicDestination extends PrinterDestination {
   state?: Readiness;
   stateCheckedAt?: string;
@@ -53,6 +55,8 @@ export class PrinterDirectory {
   readonly catalog: PrinterCatalog;
   readonly #session: (destinationId: string) => PrinterSession | undefined;
   readonly #capabilities = new Map<string, PrinterCapabilities>();
+  /** The model each printer's MCP reported in `counterpart_printer_info`. */
+  readonly #models = new Map<string, string>();
   /** The tool list each destination's session connected with, for reading its printer info again. */
   readonly #catalogs = new Map<string, PrinterToolCatalog>();
   readonly #reports = new Map<string, {report?: PrintReport; state: Readiness; checkedAt: number}>();
@@ -103,7 +107,24 @@ export class PrinterDirectory {
    */
   async #readInfo(destinationId: string, session: PrinterSession, catalog: PrinterToolCatalog): Promise<void> {
     const info = await readPrinterInfo(session, {failFast: true}).catch(() => undefined);
-    if (info && this.#catalogs.get(destinationId) === catalog) this.#capabilities.set(destinationId, detectCapabilities(session.config, catalog, info));
+    if (info && this.#catalogs.get(destinationId) === catalog) {
+      this.#capabilities.set(destinationId, detectCapabilities(session.config, catalog, info));
+      if (info.printer.model) this.#models.set(destinationId, info.printer.model);
+    }
+  }
+
+  /**
+   * A printer nobody named is shown by the model its MCP reports, not "Printer at 192.0.2.1" (first look U9). A name the
+   * person gave, or one already made from a known model, stays.
+   */
+  #named(destination: PrinterDestination): Pick<PrinterDestination, 'name'> {
+    const reported = this.#models.get(destination.id);
+    const unnamed = destination.name === defaultName(destination.backend, undefined, destination.address)
+      || LEGACY_GENERATED_NAMES.has(destination.name);
+    if (!reported || destination.model || !unnamed) return {name: destination.name};
+    // The MCP's own display name, exactly as it says it ("A1 Mini", "H2D Pro"): no brand added, nothing reformatted, no
+    // branching on which MCP it is (AGENTS.md, "The app staples onto the MCPs"). A brand in the name is the MCPs' to add.
+    return {name: reported};
   }
 
   /** Any report for the destination (the monitor's, a list refresh) updates its readiness. */
@@ -152,7 +173,7 @@ export class PrinterDirectory {
       void this.refresh(destination.id);
       const known = this.#reports.get(destination.id), capabilities = this.#capabilities.get(destination.id);
       const mcpId = this.#versions?.mcpId(destination.id);
-      return {...destination, state: known?.state ?? 'unknown',
+      return {...destination, ...this.#named(destination), state: known?.state ?? 'unknown',
         ...(known ? {stateCheckedAt: new Date(known.checkedAt).toISOString()} : {}),
         ...(capabilities ? {capabilities: this.#withLatest(structuredClone(capabilities), destination.backend)} : {}),
         ...(mcpId ? {mcpId} : {})};

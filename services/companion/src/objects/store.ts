@@ -27,9 +27,29 @@ export interface ObjectPrintConfirmation {
   supported: boolean;
 }
 
-export interface ObjectMessage { id: string; text: string; atMs: number; photos: string[] }
+export interface CheckedSize { label: string; mm: number; certainty: 'confirmed' | 'measured' }
+export interface ObjectMessage { id: string; text: string; atMs: number; photos: string[];
+  /** The sending client's own id for this message. A second request carrying it is the same message arriving again,
+   *  never a new one (Nov 10: a note whose reply was lost was sent again and started a second design pass). */
+  clientId?: string }
+
+/**
+ * What a locate pass found on the project when it started (docs/protocols/seats.md): it changes nothing, so it gives all
+ * of this back when it ends, however it ends, a restart included.
+ */
+export interface LocateSnapshot {
+  state: StmObject['state'];
+  question?: StmObject['question'];
+  failure?: string;
+  failedPass?: number;
+  pendingFollowup?: string;
+  pendingMessageId?: string;
+  completion?: StmObject['completion'];
+}
 
 export interface ObjectPass {
+  /** A locate pass only: the project as it was before it, restored when it ends. */
+  before?: LocateSnapshot;
   messageId?: string;
   /** Photos explicitly sent with this message, never inferred from old project files. */
   photos?: string[];
@@ -53,7 +73,7 @@ export interface ObjectPass {
   /** The most recent public worker messages and tool names, in stream order. */
   activity?: TouchupActivity[];
   /** What started it: a new project, Ask for changes, a late photo, an answered Ask. */
-  trigger?: 'new' | 'changes' | 'late-photos' | 'ask-answer';
+  trigger?: 'new' | 'changes' | 'late-photos' | 'ask-answer' | 'locate';
   /** Stages with real start and end times and this Mac's typical duration for each (PRD §4). */
   stages?: PassStage[];
   /** While it runs: time left from the stages' typical durations. */
@@ -72,6 +92,9 @@ export interface StmObject {
   instructions?: string;
   /** How a fit's exact size is settled, as New sent it (contracts `FitSchema`). */
   fit?: Fit;
+  /** Sizes the person confirmed or corrected in answer to a size question, by the question's own label. Kept on any
+   *  project, for every later pass (`checkedSizesBrief`). Not `fit.measured`, which is the overall size from New. */
+  checkedSizes?: CheckedSize[];
   preferences?: ProjectPreferences;
   /** A configured destination id; process settings and credentials stay in the companion. */
   printerDestinationId?: string;
@@ -106,6 +129,12 @@ export interface StmObject {
   /** File name under scan/. */
   scan?: string;
   /**
+   * The project's picture (PRD §5.1): the object alone on the stage, drawn by the companion (`pictures/…png`), and
+   * each of its gallery pictures for clients that show pictures (`part`, `scan`, `together`, `photo`).
+   */
+  picture?: string;
+  pictures?: import('./pictures.js').ProjectPictureNames;
+  /**
    * Where `scan` came from when the phone sent an Object Capture session's photos with it: `phone-preview` is the
    * phone's own quick model, kept until this Mac rebuilds from the photos (and kept as the scan, said in words, when
    * it can't); `mac` is that rebuild, with the phone's preview kept as scan/phone-preview.usdz.
@@ -138,6 +167,11 @@ export interface StmObject {
 
     /** What changed, each tagged (PRD §4 Result). */
     changes?: TouchupChange[];
+    /**
+     * A fit's places for the scanned object: each a rigid placement of the scan in this model's frame, as the pass that
+     * made it said (docs/protocols/seats.md). Absent for a model with no scan to fit, or one whose pass didn't say.
+     */
+    seats?: import('./seats.js').Seat[];
     /** The designer's supports choice for this model, sent to the slicer as it is. */
     supports?: import('../touchup/runner.js').TouchupSupports;
     engine?: DesignEngine;
@@ -174,10 +208,23 @@ export interface StmObject {
     /** The print was handed to Bambu Connect: the person finishes it there. */
     sentVia?: 'bambu-connect';
     settings?: PrintSettings;
+    /**
+     * The spools this print uses, as the printer MCP reported them when it was sent (colour `#RRGGBB`, material, name):
+     * one for a one-spool print, one per model filament (`index`) for a multi-part model. The result is drawn in them.
+     */
+    spools?: import('./service.js').PrintSpool[];
     /** The latest report of this print's job (PRD §8.6). */
     live?: PrintLive;
     monitor?: PrintMonitor;
   };
+}
+
+/** The project as a locate pass found it: every field it would otherwise disturb, exactly as it was. */
+export function restoreLocate(o: StmObject, before: LocateSnapshot): StmObject {
+  const {question: _q, failure: _f, failedPass: _p, pendingFollowup: _pf, pendingMessageId: _pm, completion: _c, ...rest} = o;
+  return {...rest, state: before.state, ...(before.question ? {question: before.question} : {}), ...(before.failure !== undefined ? {failure: before.failure} : {}),
+    ...(before.failedPass !== undefined ? {failedPass: before.failedPass} : {}), ...(before.pendingFollowup !== undefined ? {pendingFollowup: before.pendingFollowup} : {}),
+    ...(before.pendingMessageId !== undefined ? {pendingMessageId: before.pendingMessageId} : {}), ...(before.completion ? {completion: before.completion} : {})};
 }
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -228,11 +275,12 @@ export class ObjectStore {
     return objects.sort((a, b) => b.createdAtMs - a.createdAtMs);
   }
 
-  update(id: string, change: (object: StmObject) => StmObject): Promise<StmObject> {
+  /** `keepUpdatedAt`: a change that isn't the project's news (its picture redrawn) keeps its place in recency order. */
+  update(id: string, change: (object: StmObject) => StmObject, options: {keepUpdatedAt?: boolean} = {}): Promise<StmObject> {
     const previous = this.#queues.get(id) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
       const before = await this.get(id);
-      const updated = {...change(before), id, updatedAtMs: Date.now()};
+      const updated = {...change(before), id, updatedAtMs: options.keepUpdatedAt ? before.updatedAtMs : Date.now()};
       // A failure belongs to the pass that set it only until something else sets one: a change that carries
       // `failedPass` over while the project stops being failed, or fails for another reason, loses it.
       if (updated.failedPass !== undefined && updated.failedPass === before.failedPass && (updated.state !== 'failed' || updated.failure !== before.failure)) delete updated.failedPass;
@@ -270,6 +318,10 @@ export class ObjectStore {
         const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
         await this.update(object.id, o => {
           const open = o.state === 'touching-up' ? o.passes.at(-1) : undefined;
+          // A locate pass changes nothing, a restart included: the project is given back as it was.
+          if (open?.trigger === 'locate' && open.endedAtMs === undefined && open.before) return {...restoreLocate(o, open.before), progress: undefined,
+            passes: withPassEnded(o.passes, open.startedAtMs, {status: 'interrupted', resumable: false}, atMs,
+              pass => ({activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200)}))};
           if (!open || open.endedAtMs !== undefined) return {...o, state: 'failed', failure, progress: undefined, printConfirmation: undefined};
           // Only a pass whose worker had a live session when the app stopped may continue it.
           return {...o, state: 'failed', failure, failedPass: open.startedAtMs, progress: undefined, printConfirmation: undefined,

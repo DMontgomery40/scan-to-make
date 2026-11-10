@@ -28,7 +28,12 @@ struct NewObjectView: View {
     @State private var measuredMiddle = ""
     @State private var measuredShortest = ""
     @State private var captureWarning: String?
+    /// One of the finished scan's own frames, shown beside its question.
+    @State private var scanPicture: URL?
     @FocusState private var describing: Bool
+    /// The scroll's own position, so "the top" is the top of the content below the glass header, not the scroll view's
+    /// edge under it (`proxy.scrollTo(_, anchor: .top)` put the question under the header on the iPhone).
+    @State private var scrollPosition = ScrollPosition(edge: .top)
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
@@ -79,19 +84,32 @@ struct NewObjectView: View {
     }
     private var canSend: Bool { missing == nil }
 
-    /// The one bottom action, in the words for what it will do now.
+    /// The one bottom action, in the words for what it will do now. After a scan it is greyed out and says what to
+    /// do until a use is chosen, then names that use's action: an instruction never looks like the action (U5).
     private var sendLabel: String {
         if working == "make" { return scanUse == .later ? "Saving…" : "Sending…" }
         if attached != nil {
             switch scanUse {
-            case .copy: return "Send copy to \(store.macName ?? "your Mac")"
-            case .fit: return "Send to \(store.macName ?? "your Mac")"
-            case .later: return "Save scan for later"
-            case nil: return "Choose what to make"
+            case .copy: return "Copy this object"
+            // A fit needs words first: Continue takes you to them, then Send.
+            case .fit: return described ? "Send to \(store.macName ?? "your Mac")" : "Continue"
+            case .later: return "Save this scan"
+            case nil: return "Choose what this scan becomes"
             }
         }
         return "Send to \(store.macName ?? "your Mac")"
     }
+    private var sendSymbol: String? {
+        guard attached != nil else { return "arrow.up" }
+        switch scanUse {
+        case .copy: return "doc.on.doc"
+        case .fit: return described ? "arrow.up" : nil
+        case .later: return "tray.and.arrow.down"
+        case nil: return nil
+        }
+    }
+    /// Greyed out after a scan until its use is chosen.
+    private var awaitingUse: Bool { attached != nil && scanUse == nil }
 
     /// A job card's choice, kept as the starting answer but still changeable after the scan.
     private func useJobDefault() {
@@ -111,9 +129,15 @@ struct NewObjectView: View {
 
     var body: some View {
         NavigationStack {
+            // The scroll ends where the bottom bar begins (lead, Nov 10): nothing scrolls under the action, so nothing
+            // can be read or reached through it, disabled or not. A bar over the scroll left the covered rows reachable
+            // to VoiceOver and taps even behind an opaque backing.
+            VStack(spacing: 0) {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    // After a scan the sheet opens on its question, first and whole (U5): nothing half-hidden above it.
+                    if attached != nil { scanUseSection }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("What do you need?").font(.headline)
                         TextField(job == .copy ? "Copy this. Close up the bottom." : "A hook for my stroller handle…", text: $instructions, axis: .vertical)
@@ -122,6 +146,7 @@ struct NewObjectView: View {
                             .padding(14)
                             .glassEffect(.regular, in: .rect(cornerRadius: 20))
                             .accessibilityIdentifier("describe")
+                            .id("describe")
                         Text(askedForDescription ? missing ?? Self.hint : Self.hint)
                             .font(.footnote).foregroundStyle(askedForDescription && !canSend ? .red : .secondary)
                     }
@@ -150,21 +175,17 @@ struct NewObjectView: View {
                                    enabled: working == nil && !photosLocked && photos.count < Self.photoLimit) { Task { await addPhotos(camera: false) } }
                     }
 
-                    if attached != nil || !photos.isEmpty {
+                    // The scan itself sits beside its question (above); Added is what else you attach.
+                    if !photos.isEmpty {
                         Text("Added").font(.headline)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
-                                if let attached {
-                                    AttachmentChip(image: nil, symbol: attached == .walkAround ? "cube.transparent" : "hand.raised.fingers.spread",
-                                                   label: attached == .walkAround ? "Scan" : "Scan in hand", remove: nil)
-                                }
                                 ForEach(photos) { photo in
                                     AttachmentChip(url: photo.url, label: "Photo", remove: photosLocked ? nil : { photos.removeAll { $0.id == photo.id } })
                                 }
                             }
                         }
                     }
-                    if attached != nil { scanUseSection }
                     if let captureWarning {
                         Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange)
                     }
@@ -176,26 +197,43 @@ struct NewObjectView: View {
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
             }
-            .onChange(of: attached) { _, now in
-                if now != nil { withAnimation { proxy.scrollTo("scan-use", anchor: .top) } }
+            // A scan arrives after the sheet opens (a saved draft resolves, or a capture returns while the Scan tile is
+            // in view): back to the top, where its question now is.
+            .scrollPosition($scrollPosition)
+            .onChange(of: attached, initial: true) { _, now in
+                guard now != nil else { scanPicture = nil; return }
+                if let created { scanPicture = store.mac.scanPicture(created.id) }
+                withAnimation { scrollPosition.scrollTo(edge: .top) }
+            }
+            // Continue on a fit takes you to the words it still needs.
+            .onChange(of: describing) { _, now in
+                if now, attached != nil { withAnimation { proxy.scrollTo("describe", anchor: .center) } }
             }
             }
             .scrollDismissesKeyboard(.interactively)
+            // The scroll's bottom edge meets the bar with the system's hard edge, so a row cut there reads as cut, not
+            // as floating behind the button.
+            .scrollEdgeEffectStyle(.hard, for: .bottom)
+                Button { Task { await make() } } label: {
+                    Group {
+                        if let sendSymbol { Label(sendLabel, systemImage: sendSymbol) } else { Text(sendLabel) }
+                    }
+                    .fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 40)
+                }
+                .buttonStyle(.glassProminent).controlSize(.large).padding(.horizontal, 20)
+                .disabled(working != nil || awaitingUse)
+                .accessibilityIdentifier("send")
+                .frame(maxWidth: 640)
+                // A full-width bar with the system's bar background, below the scroll.
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(.bar, ignoresSafeAreaEdges: .bottom)
+            }
             .navigationTitle("New Project")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(role: .close) { dismiss() }.disabled(working == "make") }
                 if describing { ToolbarItem(placement: .confirmationAction) { Button("Done") { describing = false } } }
-            }
-            .safeAreaInset(edge: .bottom) {
-                Button { Task { await make() } } label: {
-                    Label(sendLabel, systemImage: scanUse == .later && attached != nil ? "tray.and.arrow.down" : "arrow.up")
-                        .fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 40)
-                }
-                .buttonStyle(.glassProminent).controlSize(.large).padding(.horizontal, 20)
-                .disabled(working != nil)
-                .accessibilityIdentifier("send")
-                .frame(maxWidth: 640)
             }
             .interactiveDismissDisabled(working != nil)
             .dropDestination(for: Data.self) { items, _ in
@@ -222,7 +260,14 @@ struct NewObjectView: View {
     /// as the thing to print, so neither is assumed.
     @ViewBuilder private var scanUseSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("What should this scan become?").font(.headline)
+            // The thing being decided about, next to the question (lead, Nov 10): small, so all three answers still fit.
+            HStack(spacing: 12) {
+                ScanThumb(picture: scanPicture, symbol: attached == .inHand ? "hand.raised.fingers.spread" : "cube.transparent")
+                    .accessibilityLabel(attached == .inHand ? "Your scan in hand" : "Your scan")
+                    .accessibilityIdentifier("scan-use-scan")
+                Text("What should this scan become?").font(.headline)
+                    .accessibilityAddTraits(.isHeader).accessibilityIdentifier("scan-use-question")
+            }
             ScanUseRow(symbol: "doc.on.doc", title: "Copy this object",
                        detail: "Clean up the scan and print the same thing.",
                        selected: scanUse == .copy, identifier: "scan-use-copy") { scanUse = .copy }
@@ -238,8 +283,8 @@ struct NewObjectView: View {
                     .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
+        // No identifier on the whole block: it would replace each answer's own (ux_screens' taps missed them).
         .id("scan-use")
-        .accessibilityIdentifier("scan-use")
     }
 
     /// How the fit's exact size is settled, chosen before the scan is sent.
@@ -448,6 +493,26 @@ struct NewObjectView: View {
                 attached = saved
             }
             if attached != nil { useJobDefault(); store.refreshStoppedScans() }
+        }
+    }
+}
+
+/// The scan beside its question: one of its own frames, or the scan symbol when there's no picture.
+private struct ScanThumb: View {
+    let picture: URL?
+    let symbol: String
+    @State private var loaded: UIImage?
+    var body: some View {
+        ZStack {
+            StageBackground()
+            if let loaded { Image(uiImage: loaded).resizable().scaledToFill() }
+            else { Image(systemName: symbol).font(.title3).foregroundStyle(Color.filament) }
+        }
+        .frame(width: 56, height: 56).clipShape(.rect(cornerRadius: 14))
+        .accessibilityElement()
+        .task(id: picture) {
+            guard let picture else { loaded = nil; return }
+            loaded = await Task.detached { ImageMemory.thumbnail(at: picture, maxPixelSize: 168) }.value
         }
     }
 }

@@ -13,9 +13,10 @@ What it does, in order:
    APFS clone. Never auth, tls, pairing, companion.env, printer handoff or printer profiles. Absolute paths into
    the real state are rewritten to the copy, and the run refuses to start if any remain. Two states the real
    data may lack are added as copies of real projects (an open question, a pass stopped at a limit).
-2. Starts the real companion (services/companion/dist/server-cli.js) on that copy: port 19077, empty
+2. Starts the real companion (services/companion/dist/server-cli.js) on that copy: a free port of its own, empty
    environment, HOME inside the copy, its own auth store, and a printer MCP of /usr/bin/false, so nothing can
-   reach a printer. The simulator reaches it at http://127.0.0.1:9078 (the app's simulator-only test address).
+   reach a printer. The simulator reaches it through a proxy on the first free simulator test address (http://127.0.0.1
+   on 9078 or 9080–9097; CompanionAddress.isFixture), so several prepared runs can wait for the lane at once.
    It pairs once (POST /v1/pair) and hands the record to the app with -CounterpartPairingRecord.
 3. Holding the whole lane (scripts/lane.py --exclusive, re-run by the script itself): builds the Debug app, creates its own simulators (iPhone 17 Pro, iPad Pro 13-inch,
    iPhone Duo), drives them with agent-device (launch arguments, taps, scrolls, screenshots), then deletes them.
@@ -34,6 +35,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import hashlib
 import shutil
 import subprocess
@@ -45,6 +47,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 REAL = Path.home() / 'Library/Application Support/Scan to Make'
 STARTED = time.time()
+# One id per run, in every name it shares with other runs (simulators, agent-device sessions).
+RUN_ID = f'{os.getpid()}-{uuid.uuid4().hex[:6]}'
 sys.path.insert(0, str(REPO / 'scripts'))
 import lane  # noqa: E402  (scripts/lane.py: the Mac's build lane)
 def agent_device() -> list[str]:
@@ -231,6 +235,8 @@ class Companion:
             self.proc.terminate()
             try: self.proc.wait(10)
             except subprocess.TimeoutExpired: self.proc.kill()
+        self.proc.stdout.close()
+        self.log.close()
 
 
 # ---------------------------------------------------------------- screens
@@ -296,6 +302,25 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
     return out
 
 
+def slug(text: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')[:40].strip('-') or 'untitled'
+
+
+def project_names(wanted: list[str], objects: list[dict]) -> dict[str, str]:
+    """File names for --project: the title's slug and the shortest id prefix (8 characters or more) that no other project
+    in the copy shares, so two projects never write the same images, here or in another run on the same copy."""
+    ids = [o['id'] for o in objects]
+    titles = {o['id']: o.get('title') or 'untitled' for o in objects}
+    names = {}
+    for pid in dict.fromkeys(wanted):
+        length = 8
+        while length < len(pid) and any(other != pid and other.startswith(pid[:length]) for other in ids): length += 1
+        names[pid] = f'{slug(titles.get(pid, "untitled"))}-{pid[:length]}'
+    clash = [n for n in names.values() if list(names.values()).count(n) > 1]
+    if clash: raise SystemExit(f'Two projects would share the image names {sorted(set(clash))}; choose them in separate runs.')
+    return names
+
+
 def project_screens(name: str, pid: str, state: str, data: str, record: str) -> list[dict]:
     """A project's three tabs, opened by its link."""
     base = ['-CounterpartPairingRecord', record, '-CounterpartOpen', f'counterpart://project/{pid}']
@@ -308,7 +333,9 @@ def project_screens(name: str, pid: str, state: str, data: str, record: str) -> 
 class Device:
     def __init__(self, key: str, udid: str, out: Path, record):
         self.key, self.udid, self.out, self.record = key, udid, out, record
-        self.session = f'ux-screens-{key}'
+        # One agent-device session per simulator: a fixed name stayed bound to an earlier run's deleted simulator.
+        self.session = f'ux-screens-{key}-{RUN_ID}'
+        self.captured = 0
         self.cli = agent_device()
 
     def ad(self, *args: str, timeout: int = 90) -> dict:
@@ -352,6 +379,7 @@ class Device:
                 break
             previous = path
             self.record('results', {**item, 'args': [], 'device': self.key, 'image': str(path), 'page': page, 'error': error})
+            self.captured += 1
             if page == item['pages']: break
             try: moved = json.dumps(self.ad('scroll', 'down', '0.7'))
             except Exception: break
@@ -401,9 +429,11 @@ def build_app(work: Path) -> Path:
     return app
 
 
-def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record, done: set, deadline: float) -> int:
-    """Captures what isn't done yet, until the deadline; returns how many screens are left."""
+def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record, done: set, deadline: float) -> tuple[int, int, str]:
+    """Captures what isn't done yet, until the deadline; returns the screens left, the images taken and the first failure."""
     created: dict[str, str] = {}
+    devices: list[Device] = []
+    first_failure = ''
     left = sum(1 for key in keys for item in items if (key, item['name']) not in done)
     try:
         for key in keys:
@@ -412,13 +442,14 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
             name, kind, runtime, pose = DEVICES[key]
             base = 'duo' if pose else key
             if base not in created:
-                udid = simctl('create', f'ux-screens-{base}-{os.getpid()}', kind, runtime)
+                udid = simctl('create', f'ux-screens-{base}-{RUN_ID}', kind, runtime)
                 created[base] = udid
                 simctl('boot', udid)
                 simctl('bootstatus', udid, '-b')
                 simctl('install', udid, str(app))
             udid = created[base]
             device = Device(key, udid, out / key, record)
+            devices.append(device)
             device.out.mkdir(parents=True, exist_ok=True)
             started = time.time()
             simctl('ui', udid, 'appearance', 'light', check=False)
@@ -435,17 +466,20 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
                     device.shoot(item)
                     record('done', {'device': key, 'name': item['name']})
                 except Exception as failure:
-                    record('failures', {'device': key, 'name': item['name'], 'why': str(failure)})
-                    record('done', {'device': key, 'name': item['name']})
+                    record('failures', {'device': key, 'name': item['name'], 'why': str(failure)})  # not done: the next run retries it
+                    first_failure = first_failure or f'{item["name"]}: {str(failure)[:300]}'
                     log(key, item['name'], 'FAILED', str(failure)[:200])
             log(key, f'done in {time.time() - started:.0f} s')
             try: device.ad('close')
             except Exception: pass
     finally:
+        for device in devices:
+            try: device.ad('close', timeout=30)
+            except Exception: pass
         for udid in created.values():
             simctl('shutdown', udid, check=False)
             simctl('delete', udid, check=False)
-    return left
+    return left, sum(d.captured for d in devices), first_failure
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -463,7 +497,7 @@ def write_index(out: Path, info: dict, manifest: dict, minutes: float, processes
              f'`{subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()}`'
              f' (this run held the lane {minutes:.0f} min; earlier runs\' images are kept).', '',
              '**Data.** *real*: a copy of this Mac\'s projects (copied ' + manifest['copiedAt'] + '), served by the real companion '
-             '(`server-cli.js`) to the real app client over http://127.0.0.1:9078. The pairing exchange was made by the script, not the pairing UI. '
+             f'(`server-cli.js`) to the real app client over {info.get("url", "a simulator test address")}. The pairing exchange was made by the script, not the pairing UI. '
              'No printer: the printer MCP is `/usr/bin/false`, so printer screens with *real (printer stub)* show what the app says when its '
              'printer MCP can\'t start. *real (state synthesised)*: a copy of a real project changed into a state the data no longer has '
              '(the wall holder\'s open question; a pass stopped at a limit). Home therefore lists both copies too. '
@@ -523,8 +557,9 @@ def main() -> int:
             raise SystemExit(f'The companion does not serve every project the screens need (missing {missing}, status {info.get("objectsStatus")}).')
         time.sleep(6)  # the companion reads its printer MCPs 5 s after start: check what it started
         processes = companion.processes()
-        if any(re.search(r'\bssh\b|bambu|mcp-3d|printer-mcp', p, re.I) for p in processes):
-            raise SystemExit(f'The companion started a printer process, so the run stopped: {processes}')
+        printers = [p for p in processes if re.search(r'\bssh\b|bambu|mcp-3d|printer-mcp', p, re.I) and not re.search(r'\bnpm (view|show)\b', p)]
+        if printers:
+            raise SystemExit(f'The companion started a printer process, so the run stopped: {printers}')
         log(f'companion serves {len(served)} projects; children: {processes}')
         if args.prepare_only:
             for o in info['objects']: print(f"  {o['id'][:8]}  {o['state']:<14} {o['title']}")
@@ -560,7 +595,9 @@ def handoff_context(held: dict, work: Path) -> dict:
 def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set]:
     items = screens(ctx['ids'], ctx['record'], ctx['offline_record'], ctx['fixtures'], ctx['offline'])
     if args.screens: items = [i for i in items if any(s in i['name'] for s in args.screens.split(','))]
-    if args.project: items = [item for pid in args.project for item in project_screens(pid[:8], pid, 'by id', 'real', ctx['record'])]
+    if args.project:
+        names = project_names(args.project, ctx['info']['objects'])
+        items = [item for pid in args.project for item in project_screens(names[pid], pid, 'by id', 'real', ctx['record'])]
     done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
     if args.redo: done -= {(k, i['name']) for k in keys for i in items}
     return items, done
@@ -575,15 +612,22 @@ def capture(args, out: Path, work: Path, keys: list[str], held: dict) -> int:
     # Screens stop starting a minute and a half before --max-minutes, leaving time to delete the simulator.
     log('holding the lane')
     app = build_app(work)
-    left = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90)
+    left, captured, why = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90)
     minutes = (time.time() - STARTED) / 60
     write_index(out, ctx['info'], ctx['manifest'], minutes, ctx['processes'])
     log(f'{len(read_jsonl(out / "results.jsonl"))} images so far; {left} screens left' + (' (run the same command again)' if left else '') + f': {out / "index.md"}')
     log(f'the copy of the projects is in {work / "data"}; move {work} to /Volumes/Spillover when done')
+    if not captured:
+        raise SystemExit(f'This hold captured no screens, so it failed: {why or "no screen started before --max-minutes"}.')
     return 0
 
 
+def stop_on_signal(signum, frame):
+    raise SystemExit(f'Stopped by signal {signum}; the simulators and the companion of this run were cleaned up.')
+
+
 if __name__ == '__main__':
+    for signum in (signal.SIGTERM, signal.SIGHUP): signal.signal(signum, stop_on_signal)
     try:
         sys.exit(main())
     except (SystemExit, KeyboardInterrupt):

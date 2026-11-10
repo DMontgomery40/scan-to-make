@@ -6,7 +6,7 @@ import type {CounterpartEvent, CounterpartEventType, NotifyLevel, ObjectStatus} 
  * the same thing. Kept free of I/O: callers pass what they know.
  */
 
-export interface TitleSource {title?: string; instructions?: string; scan?: string; capture?: string[]}
+export interface TitleSource {title?: string; instructions?: string; scan?: string; capture?: string[]; createdAtMs?: number; current?: {sizeMm?: readonly number[]}}
 
 /** The generated title, else the first words of the request, else a plain name. */
 export function projectTitle(object: TitleSource): string {
@@ -17,8 +17,15 @@ export function projectTitle(object: TitleSource): string {
     const short = words.slice(0, 6).join(' ').replace(/[.,;:!?]+$/, '');
     return (words.length > 6 ? `${short}…` : short).slice(0, 80);
   }
-  return object.scan || object.capture?.length ? 'Your scan' : 'Your project';
+  // A scan sent with no words gets a name of its own, never "Your scan" twice in one list: when it was scanned.
+  // Not its size: every list already shows the size on the line under the title (seen on the iPad with real
+  // projects, Nov 10: "Scan, 68.4 × 34.6 × 14…" over "68.4 × 34.6 × 149.9 mm").
+  if (object.scan || object.capture?.length) {
+    return object.createdAtMs ? `Scan, ${scanDate(object.createdAtMs)}` : 'Your scan';
+  }
+  return 'Your project';
 }
+const scanDate = (atMs: number) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}).format(new Date(atMs));
 
 /** "1 h 5 min", "25 min", "under a minute". */
 export function duration(seconds: number): string {
@@ -197,6 +204,26 @@ export interface StatusSource extends TitleSource {
 
 const formatDate = (iso: string) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric'}).format(new Date(iso));
 
+/**
+ * The most a row's `detail` may be: what fits the two lines a list row gives it on the narrowest sidebar (the
+ * iPad's), so no client ever cuts it mid-word where the meaning is.
+ */
+export const DETAIL_MAX = 80;
+/**
+ * The row's own line: all of it when it fits; else its first sentence; else cut at a word with an ellipsis.
+ * `reason` takes the first sentence whatever the length: a stopped pass's row is why it stopped, and "Try again or
+ * review the saved checkpoint" is the project page's job.
+ */
+export function rowDetail(text: string | undefined, reason = false): string | undefined {
+  const whole = text?.replace(/\s+/g, ' ').trim();
+  if (!whole) return undefined;
+  const first = whole.split(/(?<=[.?!])\s+/)[0]!;
+  const line = whole.length <= DETAIL_MAX && !reason || first.length === whole.length ? whole : first.replace(/\.$/, '');
+  if (line.length <= DETAIL_MAX) return line;
+  const cut = line.slice(0, DETAIL_MAX - 1);
+  return `${cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : cut.length).replace(/[\s,;:·-]+$/, '')}…`;
+}
+
 /** The §4 line for a project, with its symbol and colour. */
 export function objectStatus(object: StatusSource, updatedAtMs?: number): ObjectStatus {
   const printer = object.print?.destination?.name ?? 'your printer';
@@ -207,13 +234,14 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       const pass = object.passes?.at(-1);
       const stage = pass?.stages?.filter(item => item.endedAtMs === undefined).at(-1)?.words ?? object.progress;
       const minutes = pass?.estimate ? Math.max(1, Math.round(pass.estimate.remainingSec / 60)) : undefined;
-      return {phase: 'working', text: joined('Your Mac is working', stage, minutes ? `about ${minutes} min` : undefined).slice(0, 300), symbol: 'wand.and.sparkles', tint: 'blue'};
+      const doing = joined(stage, minutes ? `about ${minutes} min` : undefined);
+      return {phase: 'working', text: joined('Your Mac is working', stage, minutes ? `about ${minutes} min` : undefined).slice(0, 300), ...(rowDetail(doing) ? {detail: rowDetail(doing)} : {}), symbol: 'wand.and.sparkles', tint: 'blue'};
     }
     case 'needs-closeup': {
       const question = object.ask?.question ?? (object.question?.closeup ? `Can you take a close-up of ${object.question.closeup}?` : undefined);
-      return {phase: 'needs-you', text: joined('Needs you', question).slice(0, 300), symbol: 'hand.raised', tint: 'orange'};
+      return {phase: 'needs-you', text: joined('Needs you', question).slice(0, 300), ...(rowDetail(question) ? {detail: rowDetail(question)} : {}), symbol: 'hand.raised', tint: 'orange'};
     }
-    case 'ready': return {phase: 'ready', text: joined('Ready to print', sizeText(object.current?.sizeMm)), symbol: 'checkmark.seal', tint: 'accent'};
+    case 'ready': { const size = sizeText(object.current?.sizeMm); return {phase: 'ready', text: joined('Ready to print', size), ...(size ? {detail: size} : {}), symbol: 'checkmark.seal', tint: 'accent'}; }
     case 'printing': {
       const live = object.print?.live, watching = object.print?.monitor?.phase === 'watching';
       if (!object.print?.dispatchedAt || !watching || !live) return {phase: 'preparing', text: 'Getting the print ready', symbol: 'gearshape', tint: 'accent'};
@@ -231,6 +259,7 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
     // PRD §5.4: marked Works (Done on Home and in the Mac sidebar).
     case 'confirmed': return {phase: 'confirmed', text: 'Done · it works', symbol: 'checkmark.circle.fill', tint: 'green'};
     case 'sent': return {phase: 'sent', text: sentWords(object.print?.destination?.name ?? 'your printer', object.print?.sentVia === 'bambu-connect'), symbol: 'paperplane', tint: 'secondary'};
-    default: return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), symbol: 'exclamationmark.triangle', tint: 'red'};
+    // The row says why it stopped; what to do about it is the project page's.
+    default: return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), ...(rowDetail(object.failure, true) && rowDetail(object.failure, true) !== object.failure!.trim() ? {detail: rowDetail(object.failure, true)} : {}), symbol: 'exclamationmark.triangle', tint: 'red'};
   }
 }

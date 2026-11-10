@@ -203,7 +203,9 @@ private struct Sidebar: View {
 
     private func rows(_ objects: [Project]) -> some View {
         ForEach(objects) { object in
-            ProjectRow(object: object, selected: model.selection == object.id).tag(object.id)
+            ProjectRow(object: object, selected: model.selection == object.id)
+                .searchReason(model.searchReason(object, query: query), indent: 46)
+                .tag(object.id)
                 .contextMenu {
                     if object.words.printRunning && model.capabilities?.printControl == true {
                         let capabilities = model.printer(for: object)?.capabilities
@@ -347,8 +349,9 @@ struct ProjectRow: View {
         HStack(spacing: 10) {
             ProjectThumbnail(object: object).frame(width: 36, height: 36).clipShape(.rect(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 1) {
-                Text(words.title).font(.body.weight(.medium)).lineLimit(1)
-                Text(words.status).font(.caption).lineLimit(1)
+                // The name wraps before it is ever cut; the row grows taller instead.
+                Text(words.title).font(.body.weight(.medium)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                Text(words.row).font(.caption).lineLimit(2)
                     .foregroundStyle(selected ? AnyShapeStyle(.secondary) : AnyShapeStyle(words.done ? Color.okGreen : words.stage.tint))
             }
         }

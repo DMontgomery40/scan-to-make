@@ -43,7 +43,21 @@ export const TOUCHUP_RESULT_SCHEMA = {
         photo: {type: 'string', description: 'The file name of one supplied photo or one of your renders in out/ that shows the region'},
         region: {type: 'object', additionalProperties: false, required: ['x', 'y', 'width', 'height'], description: 'The region on that photo, as fractions of its width and height from the top-left',
           properties: {x: {type: 'number', minimum: 0, maximum: 1}, y: {type: 'number', minimum: 0, maximum: 1}, width: {type: 'number', minimum: 0, maximum: 1}, height: {type: 'number', minimum: 0, maximum: 1}}},
+        sizes: {type: 'array', minItems: 1, maxItems: 6, description: 'Only when the question asks the person to confirm or correct sizes: each size you need, so they can check a number instead of writing a sentence. Name each one so a person holding the object and a caliper knows exactly where to measure ("width at the widest point", "height to the cap tip"); an object that is not a plain box needs more than three',
+          items: {type: 'object', additionalProperties: false, required: ['label', 'mm', 'from'], properties: {
+            label: {type: 'string', maxLength: 120, description: 'What to measure, in plain words'},
+            mm: {type: 'number', exclusiveMinimum: 0, maximum: 10000, description: 'Your number for it, in millimetres'},
+            from: {enum: ['scan', 'published'], description: 'scan: you measured it on the scan; published: the maker published it'},
+          }}},
       }},
+    seats: {type: 'array', minItems: 1, maxItems: 32, description: 'For a part made to fit the scanned object: where that object sits in the finished part, one entry per place it goes (three for a holder of three), as your rules under "Where the scanned object sits" define them',
+      items: {type: 'object', additionalProperties: false, required: ['rotationDeg', 'translationMm'], properties: {
+        name: {type: 'string', maxLength: 40, description: 'A short name for this place, like "left", "middle" or "right"; only when there is more than one'},
+        rotationDeg: {type: 'array', minItems: 3, maxItems: 3, items: {type: 'number'}, description: 'Turn the scan about the fixed X, then Y, then Z axes through the origin, in degrees: cad_check_fit\'s rotation_deg'},
+        translationMm: {type: 'array', minItems: 3, maxItems: 3, items: {type: 'number'}, description: 'Then move it, in millimetres: cad_check_fit\'s translation_mm'},
+        check: {type: 'object', additionalProperties: false, description: 'What cad_check_fit returned for this seat, when you ran it',
+          properties: {minimumGapMm: {type: 'number', minimum: 0}, interferenceMm3: {type: 'number', minimum: 0}, clear: {type: 'boolean'}}},
+      }}},
     supports: {type: 'object', additionalProperties: false, required: ['enabled'], description: 'Whether the slicer generates supports when this model prints. Counterpart sends it to the slicer as it is: supports off is sent too',
       properties: {
         enabled: {type: 'boolean'},
@@ -101,6 +115,7 @@ export const RULE_SECTIONS = {
   colours: 'A request in more than one colour or material:',
   designerCopy: "A copy of a designer's 3MF:",
   namedModel: 'A model the person names:',
+  seats: 'Where the scanned object sits:',
 } as const;
 
 const NEW_DESIGN_RULES = (engineName: string) => `${RULE_SECTIONS.newDesign}
@@ -129,7 +144,7 @@ const CAPTURED_RULES = (tools: string) => `${RULE_SECTIONS.captured}
  */
 const FIT_SIZE_RULES = (scanCheck: string) => `${RULE_SECTIONS.fitSizes}
 Settle the sizes the part must fit in this order, before modelling anything that depends on them:
-1. The interface sizes come from measurements: the measured dimensions in the request, or ones the person has confirmed. When the request asks for a lookup, identify the exact product and variant, open the manufacturer's own published dimensions with WebSearch/WebFetch, then stop with needs_closeup to confirm them before building geometry that depends on them: the ask question names the product, its size in mm and the maker's source, and says the reply can confirm it, correct it in words, or send a caliper photo. If the exact product or size cannot be established, ask for the specific caliper measurements or a photo with calipers instead.
+1. The interface sizes come from measurements: the measured dimensions in the request, or ones the person has confirmed. When the request asks for a lookup, identify the exact product and variant, open the manufacturer's own published dimensions with WebSearch/WebFetch, then stop with needs_closeup to confirm them before building geometry that depends on them: the ask question names the product, its size in mm and the maker's source, and says the reply can confirm it, correct it in words, or send a caliper photo. If the exact product or size cannot be established, ask for the specific caliper measurements or a photo with calipers instead. Whenever you stop to have sizes confirmed or measured, also list each one in ask.sizes with your own number for it, so the person can check or correct a number.
 2. When there is a scan, compare each measured or confirmed size with it, measuring the scan in the object's own upright frame. If any of them differs by more than the stated tolerance (2 mm or 2% when none is stated), stop with needs_closeup before modelling any fit-critical geometry, however little you judge the difference to matter for this part. The question names both sets of numbers, each measurement and what the scan reads, in mm, and asks which to use. Don't ask again when the person has already answered it: their answer is in the request or the change.
 3. Size each place the part meets a real object from the measured or confirmed sizes, with a fit chosen by what that interface has to do. Say its function in plain words: the object rests in, or drops in and lifts out; slides; locates without rattle; grips so it does not slip or turn; clamps closed with a screw; snaps over; or presses in to stay. Infer it first from the object and how the part mounts (a holder open at the top is a drop-in; a mount on a pole must not turn). Keep three things apart: the object's size, with how it was measured (calipers, a published dimension, a scan, a photo estimate) and how sure it is; the correction for how that feature prints; and the fit, which comes only from the function. Choose the fit from the function, the feature's size and shape, how sure the size is and how it prints: a plain clearance where loose is the point; where it must grip, or the size is less sure than the function tolerates, a mechanism that takes up the difference (crush ribs, a split with a pinch screw, a flexure, a snap), or ask for the one caliper measurement that settles it. For example, a wall holder that bottles drop into takes a clearance all round, while a pole clamp sized from a photo takes a split and a screw so it grips across the range that estimate allows. Never reuse one number for every interface, and never choose a fit to make room for the scan. When you can't tell what an interface has to do and the answer would change the design, stop with needs_closeup and ask about behaviour the person can answer (should it stay in upside down, lift out with one hand, ever turn?). In your summary, give each interface its function, the fit chosen (clearance or interference per side, or the mechanism and the range of sizes it holds) and why.${scanCheck}`;
 
@@ -142,9 +157,32 @@ const DESIGNER_COPY_RULES = `${RULE_SECTIONS.designerCopy}
 const NAMED_MODEL_RULES = `${RULE_SECTIONS.namedModel}
 - When the person asks you to copy, change or print an existing model and you can't get its file (a login, a missing download), set status to failed and say which file to add. Never design a substitute for a model the person named.`;
 
+/**
+ * Where the scanned object sits (docs/protocols/seats.md): the pass that built the pocket, hook or cradle says where
+ * the object goes, so every client can show the part with the object in place. One number set for that and the fit check.
+ */
+const SEAT_RULES = (code: boolean) => `${RULE_SECTIONS.seats}
+- In your answer, give "seats": one entry for each place the scanned object goes in or on the finished part (three for a holder of three), each a rigid placement of the scan in the part's frame. Name each one ("left", "middle", "right") when there is more than one.
+- The part's frame is the model as you export it${code ? ' (the run you mark final)' : ' (out/touched.stl)'}: millimetres, Z up, in the orientation it is used in.
+- The scan's frame is the scan file in the files list in its own coordinates, scaled to millimetres and turned so its up axis is +Z by one quarter turn about X (when +Y is up, (x, y, z) becomes (x, -z, y)): not moved, not centred and not dropped to the floor.${code ? ' That is what load_scan(name, source_units="m", up_axis="y", ground=False) returns: load the reference for cad_check_fit that way, so the transform you check is the seat you report, and give that check\'s numbers under the seat\'s "check".' : ''}
+- A seat turns the scan about the fixed X, then Y, then Z axes through the origin (rotationDeg), then moves it (translationMm): the rotation_deg and translation_mm that cad_check_fit takes.
+- Put the object where a person would put it: resting in its pocket, cradle or hook the way it is used, not floating above it and not sunk into the part beyond the scan's own roughness. Measured sizes still decide the part; a seat only says where the object goes.
+- Give the seats in every answer with a model, including a change: where the change moved a pocket, move its seat with it.`;
+
+/** A pass that only says where the object sits in an existing part: no geometry, no export. */
+const LOCATE_RULES = (code: boolean) => `You are working out where a scanned object sits in a part that is already finished, for a person who wants to see the two together.
+- The part is finished and stays exactly as it is. Don't edit, rebuild, repair or export it, and write no STL or 3MF${code ? ': never mark a cad_run final' : ''}. Use the tools only to look at and measure the part and the scan${code ? ' (a cad_run that only loads and measures them, and cad_check_fit)' : ''}.
+- Read the person's original request and the part's summary first: they say what the part holds and how.
+- Answer with status done, a one-sentence summary of where the object goes (for example "One bottle in each of the three pockets, standing upright on the pocket floor"), and seats. If you can't tell where it goes, set status to failed and say why in one sentence.
+
+${SEAT_RULES(code)}`;
+
 /** A code fit with a scan may check itself against it; the scan never wins over measured or confirmed sizes (#427). */
 const CODE_FIT_CHECK = `
 4. When there is a scan, check the finished part against it with cad_check_fit as the printer MCP's cad_design prompt describes, and report the interference and gap, with what you changed in the reference, in your changes.`;
+
+/** The code engine's one line for a locate pass: its tools, and that nothing it runs becomes the model. */
+const CODE_LOCATE_CORE = "- Reach the part and the scan only through the printer MCP's code design engine (its cad_* tools). Give every cad_run the design folder from the files list as its output_dir.";
 
 /** Only what Claude Code needs to find the user's own login. Never printer tokens or provider keys. */
 const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHELL', 'CLAUDE_CONFIG_DIR'] as const;
@@ -222,6 +260,19 @@ function prompt(pass: TouchupPass, instructions?: string, note?: string, summary
   return `${opening}\n\nFiles:\n${files.join('\n')}`;
 }
 
+/** A locate pass's request: the finished part, the scan, and what the person asked the part to do. */
+function locatePrompt(pass: TouchupPass, instructions?: string, summary?: string, frame?: ScanFrame, code = false): string {
+  const [part, ...scans] = pass.scanPaths;
+  return [`Work out where the scanned object sits in this finished part, and give its seats. Change nothing.`,
+    ...(instructions?.trim() ? [`What the person asked the part to do: ${instructions.trim()}`] : []),
+    ...(summary?.trim() ? [`What the pass that made it said: ${summary.trim()}`] : []),
+    `Files:\n${[`- The finished part (millimetres, Z up, as it is used): ${part}`,
+      ...scans.map(scan => `- Scan: ${scan}${frame ? ` (${frameWords(frame)})` : ''}`),
+      ...pass.photoPaths.map((path, index) => `- Photo ${index + 1}: ${path}`),
+      ...(code ? [`- Design folder (output_dir for every cad_run): ${passCadDir(pass)}`] : []),
+      `- Output folder: ${pass.outDir}`].join('\n')}`].join('\n\n');
+}
+
 /** The lean, isolated `claude -p` call for one touch-up pass. Writes the pass's MCP config file. */
 export const BLENDER_RULES = "- Reach Blender only through the printer MCP's blender_mcp_* tools. Start in the empty scene you are given, and work only with objects in the current scene (bpy.context.scene.objects).";
 /**
@@ -239,6 +290,10 @@ export interface PassRules {
   request?: boolean;
   /** The pass edits a designer's 3MF project in place. */
   designerCopy?: boolean;
+  /** The pass has the scanned object to fit (a fit with a scan): it says where the object sits. */
+  scan?: boolean;
+  /** Only says where the scanned object sits in the finished part (docs/protocols/seats.md). */
+  locate?: boolean;
 }
 
 /** The sections a pass gets on top of the core, in the order the worker reads them. */
@@ -251,6 +306,7 @@ export function ruleSections(pass: PassRules): (keyof typeof RULE_SECTIONS)[] {
   if (pass.request && !pass.designerCopy) sections.push('colours');
   if (pass.designerCopy) sections.push('designerCopy');
   if (pass.request) sections.push('namedModel');
+  if (pass.kind === 'fit' && pass.scan) sections.push('seats');
   return sections;
 }
 
@@ -262,7 +318,10 @@ export function systemRules(pass: PassRules, guidance: DesignGuidance = {}): str
     newDesign: () => NEW_DESIGN_RULES(engineName), captured: () => CAPTURED_RULES(code ? '' : " Use Blender's existing sculpt, modelling and modifier tools for that cleanup."),
     fitSizes: () => FIT_SIZE_RULES(code ? CODE_FIT_CHECK : ''),
     colours: () => COLOUR_RULES(code ? 'The run you mark final is still the whole model.' : 'Still export the whole model to out/touched.stl.'), designerCopy: () => DESIGNER_COPY_RULES, namedModel: () => NAMED_MODEL_RULES,
+    seats: () => SEAT_RULES(code),
   };
+  if (pass.locate) return [code ? CODE_LOCATE_CORE : BLENDER_RULES, LOCATE_RULES(code)].join('\n\n')
+    + (code && guidance.cad?.trim() ? `\n\nThe printer MCP's code design engine (its cad_design prompt):\n${guidance.cad.trim()}` : '');
   const core = code ? CORE_RULES(CODE_RULES, EXPORT_RULES.code, 'for example cad_run keeps failing') : CORE_RULES(engine === 'fusion' ? FUSION_RULES : BLENDER_RULES);
   return [core, ...ruleSections(pass).map(section => text[section]())].join('\n\n')
     + (code && guidance.cad?.trim() ? `\n\nThe printer MCP's code design engine (its cad_design prompt):\n${guidance.cad.trim()}` : '')
@@ -271,9 +330,12 @@ export function systemRules(pass: PassRules, guidance: DesignGuidance = {}): str
 }
 
 /** The rules a pass gets, from the same inputs as its prompt. */
-function passRules(input: {pass: TouchupPass; kind?: 'copy' | 'fit'; engine?: DesignEngine; instructions?: string; note?: string; designerCopy?: boolean}): PassRules {
+function passRules(input: {pass: TouchupPass; kind?: 'copy' | 'fit'; engine?: DesignEngine; instructions?: string; note?: string; designerCopy?: boolean; currentModel?: boolean; seats?: unknown[]; locate?: boolean}): PassRules {
   return {kind: input.kind ?? (input.designerCopy || input.pass.scanPaths.length ? 'copy' : 'fit'), ...(input.engine ? {engine: input.engine} : {}),
-    request: Boolean(input.instructions?.trim() || input.note?.trim()), ...(input.designerCopy ? {designerCopy: true} : {})};
+    request: Boolean(input.instructions?.trim() || input.note?.trim()), ...(input.designerCopy ? {designerCopy: true} : {}),
+    // A first fit pass has the scan itself; a change has the current model and the seats it restates.
+    ...((input.pass.scanPaths.length > 0 && !input.currentModel) || input.seats?.length ? {scan: true} : {}),
+    ...(input.locate ? {locate: true} : {})};
 }
 
 export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: TouchupPass; printer: PrinterMcpProcess; claudePath: string; instructions?: string; note?: string; summary?: string; currentModel?: boolean; designerCopy?: boolean; sourceEnv?: NodeJS.ProcessEnv;
@@ -281,7 +343,11 @@ export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: T
   /** A code pass's converted capture: its unit and up axis, from the conversion report. */
   scanFrame?: ScanFrame;
   /** The pass's kind (PRD §8.9). Without it, a pass with a scan is a copy and one without is a new design, as passKind decides. */
-  kind?: 'copy' | 'fit'}): TouchupInvocation {
+  kind?: 'copy' | 'fit';
+  /** The current model's seats, for a change to restate (docs/protocols/seats.md). */
+  seats?: unknown[];
+  /** Only locate the scanned object in the finished part: `pass.scanPaths` is [the part's STL, the scan]. */
+  locate?: boolean}): TouchupInvocation {
   const {pass} = input;
   let printer = printerServer(input.printer);
   if (input.engine === 'fusion') {
@@ -316,8 +382,10 @@ export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: T
     '--json-schema', JSON.stringify(TOUCHUP_RESULT_SCHEMA),
     '--output-format', 'stream-json',
     '--verbose',
-    prompt(pass, input.instructions, input.note, input.summary, input.currentModel, input.designerCopy, input.engine === 'code' ? {...(input.scanFrame ? {frame: input.scanFrame} : {})} : undefined)
-      + (input.engine === 'fusion' && input.design && !isCodeDesign(input.design)
+    (input.locate ? locatePrompt(pass, input.instructions, input.summary, input.engine === 'code' ? input.scanFrame : undefined, input.engine === 'code')
+      : prompt(pass, input.instructions, input.note, input.summary, input.currentModel, input.designerCopy, input.engine === 'code' ? {...(input.scanFrame ? {frame: input.scanFrame} : {})} : undefined)
+      + (input.seats?.length ? `\n\nWhere the scanned object sits in the current model (its seats, as the pass that made it said): ${JSON.stringify(input.seats)}. Give the seats again for the changed model: the same where the object still sits the same, moved where you moved its pocket.` : ''))
+      + (input.locate ? '' : input.engine === 'fusion' && input.design && !isCodeDesign(input.design)
       ? `\n\nThe current design is a parametric Fusion design: ${input.design.f3d}${input.design.parameters ? ` (its parameters: ${input.design.parameters})` : ''}. A separate copy is already imported into this pass's bound document. Change its parameters rather than opening the archive again or editing the mesh.`
       : input.engine === 'code' && isCodeDesign(input.design)
       ? `\n\nThe current design is a code design: ${input.design.script} (its parameters: ${input.design.parameters}). Start from it, as the printer MCP's cad_design prompt says for an edit, rather than rebuilding it or editing the mesh.` : ''),

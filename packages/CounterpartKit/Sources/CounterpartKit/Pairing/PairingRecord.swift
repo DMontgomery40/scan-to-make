@@ -12,11 +12,27 @@ public enum CompanionAddress {
     /// The simulator's local test companions (http 9078, https 9079 on 127.0.0.1). Never on a device.
     public static func isFixture(_ url: URL?) -> Bool {
         #if targetEnvironment(simulator)
-        guard let url, url.host == "127.0.0.1" else { return false }
-        return (url.scheme == "http" && url.port == 9078) || (url.scheme == "https" && url.port == 9079)
+        #if DEBUG
+        return isFixture(url, simulator: true, debug: true)
+        #else
+        return isFixture(url, simulator: true, debug: false)
+        #endif
         #else
         return false
         #endif
+    }
+
+    /// Ports `scripts/ux_screens.py` may give its capture companions in a Debug simulator build, so several prepared runs
+    /// can wait at once (9079 stays the https fixture).
+    public static let debugFixturePorts: ClosedRange<Int> = 9080...9097
+
+    /// The rule behind `isFixture`, for both kinds of build: only the simulator, only 127.0.0.1; a Release build accepts
+    /// exactly http 9078 and https 9079, a Debug build also http on `debugFixturePorts`.
+    public static func isFixture(_ url: URL?, simulator: Bool, debug: Bool) -> Bool {
+        guard simulator, let url, url.host == "127.0.0.1", let port = url.port else { return false }
+        if url.scheme == "https" { return port == 9079 }
+        guard url.scheme == "http" else { return false }
+        return port == 9078 || (debug && debugFixturePorts.contains(port))
     }
 
     private static func components(_ value: String?) -> URLComponents? {

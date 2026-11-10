@@ -187,9 +187,14 @@ async function metadata(config: PrinterHandoffConfig, envPath?: string) {
     printerType: printerType.success ? printerType.data : undefined, keys, bambuKind, ...(serial ? {serial: serial.toUpperCase()} : {})};
 }
 
-function defaultName(backend: PrinterBackend, model?: string): string {
+/**
+ * The name a printer gets when nobody named it: its model, else where it is. Never a bare brand ("Bambu printer"), which
+ * says nothing when it's the only line about the printer (first look U9, Nov 10). Once its MCP reports the model
+ * (`counterpart_printer_info`), the printer list uses that instead (`PrinterDirectory.list`).
+ */
+export function defaultName(backend: PrinterBackend, model?: string, address?: string): string {
   if (model) return `${backend === 'bambu-printer-mcp' ? 'Bambu Lab ' : ''}${model.toUpperCase()}`;
-  return backend === 'bambu-printer-mcp' ? 'Bambu printer' : 'Configured printer';
+  return address ? `Printer at ${address}` : 'Your printer';
 }
 
 function profileEntries(document: RecordValue, scope: string[] = []): {key: string; name: string; value: unknown}[] {
@@ -308,7 +313,7 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
     && currentConfig.process.args[0] === options.placeholderEntryPoint
     && !currentConfig.process.cwd && !currentConfig.process.env && !currentConfig.selection
     && currentMetadata.keys.length === 0 && !currentMetadata.model;
-  const candidates: Candidate[] = [{id: 'current', name: defaultName(currentConfig.backend, currentMetadata.model), backend: currentConfig.backend,
+  const candidates: Candidate[] = [{id: 'current', name: defaultName(currentConfig.backend, currentMetadata.model, currentMetadata.address), backend: currentConfig.backend,
     ...(currentMetadata.model ? {model: currentMetadata.model} : {}), ...(currentMetadata.address ? {address: currentMetadata.address} : {}),
     source: 'current', origin: 'printer-handoff', keys: currentMetadata.keys, bambuKind: currentMetadata.bambuKind,
     ...(currentMetadata.serial ? {serial: currentMetadata.serial} : {}), config: currentConfig}];
@@ -379,7 +384,7 @@ async function buildCatalog(current: PrinterHandoffConfig, options: PrinterCatal
       };
       const id = `mcp-${createHash('sha256').update(`${path}\0${key}`).digest('hex').slice(0, 24)}`;
       const label = name.trim().replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120);
-      candidates.push({id, name: label || defaultName(backend, meta.model), backend, address: meta.address,
+      candidates.push({id, name: label || defaultName(backend, meta.model, meta.address), backend, address: meta.address,
         ...(meta.model ? {model: meta.model} : {}), source: 'mcp-profile', origin, keys: meta.keys, bambuKind: meta.bambuKind,
         ...(meta.serial ? {serial: meta.serial} : {}), config});
     }

@@ -8,6 +8,26 @@ extension Project {
     public var changesWait: Bool { state == .touchingUp || state == .printing || printConfirmation != nil }
 }
 
+/// One id for each note a person writes, kept across every try at sending it. The Mac records a note once per id,
+/// so a send whose reply was lost and is pressed again does not become a second message and a second design pass
+/// (Nov 10, "Guitar pick"). A note is its words and its attachments: changed words are a new note, so are the same
+/// words with other photos (the Mac ignores a repeat's photos, so they would never attach), and so are the same
+/// words after a send that worked.
+public struct NoteAttempts: Equatable, Sendable {
+    private var last: [String: Message] = [:]
+    private struct Message: Equatable, Sendable { var text: String; var photos: [String]; var id: String }
+    public init() {}
+    /// `photos` is whatever names this note's attachments on this client (uploaded names, or local file paths).
+    public mutating func id(for text: String, photos: [String] = [], in project: String) -> String {
+        if let message = last[project], message.text == text, message.photos == photos { return message.id }
+        let id = UUID().uuidString
+        last[project] = Message(text: text, photos: photos, id: id)
+        return id
+    }
+    /// The Mac has it, or the queue now holds it under that id.
+    public mutating func settled(_ project: String) { last[project] = nil }
+}
+
 /// A saved follow-up waits until the current pass or print finishes. The companion keeps any photos.
 /// Adapted from KAN-217's parked queue, with whole messages and no loss of text added during a send.
 public struct CorrectionQueue: Equatable, Sendable {
@@ -17,8 +37,9 @@ public struct CorrectionQueue: Equatable, Sendable {
         /// Nil for a queue migrated from a version that did not save the time.
         public var atMs: Double?
         public var photos: [String]?
-        public init(text: String, photos: [String]? = nil, atMs: Double? = Date().timeIntervalSince1970 * 1000) {
-            self.id = UUID().uuidString; self.text = text; self.photos = photos; self.atMs = atMs
+        /// `id` goes to the Mac with the note, so a note it already has is never recorded twice.
+        public init(text: String, photos: [String]? = nil, atMs: Double? = Date().timeIntervalSince1970 * 1000, id: String = UUID().uuidString) {
+            self.id = id; self.text = text; self.photos = photos; self.atMs = atMs
         }
     }
     public private(set) var messages: [String: [Message]] = [:]
@@ -42,11 +63,14 @@ public struct CorrectionQueue: Equatable, Sendable {
     public mutating func fail(_ id: String, message: String) { failures[id] = message }
     public mutating func retry(_ id: String) { failures[id] = nil }
     public func pending(_ id: String) -> String? { entries[id]?.joined(separator: "\n") }
-    public mutating func add(_ text: String, for id: String, photos: [String]? = nil) {
+    /// `messageId` when this note was already tried once: the saved copy keeps the id that try used.
+    public mutating func add(_ text: String, for id: String, photos: [String]? = nil, messageId: String? = nil) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        messages[id, default: []].append(Message(text: text, photos: photos))
+        messages[id, default: []].append(Message(text: text, photos: photos, id: messageId ?? UUID().uuidString))
     }
+    /// The id to send with the note `due` returns.
+    public func dueId(_ id: String) -> String? { messages[id]?.first?.id }
     /// Newly uploaded photos that have not already been claimed by an earlier local message.
     public func availablePhotos(_ project: Project) -> [String]? {
         guard let pending = project.pendingPhotos else { return nil }
