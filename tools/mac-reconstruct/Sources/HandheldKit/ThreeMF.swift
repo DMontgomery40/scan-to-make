@@ -25,7 +25,7 @@ public struct ThreeMF {
         try reader.load(root)
         var meshes: [Mesh] = []
         for item in reader.parts[root]?.build ?? [] {
-            try reader.place(part: item.path ?? root, object: item.objectId, transform: item.transform, depth: 0, into: &meshes)
+            try reader.place(part: item.path ?? root, object: item.objectId, transform: threeMFMillimetreTransform(item.transform, unit: reader.parts[root]?.scale ?? 1), depth: 0, into: &meshes)
         }
         guard !meshes.isEmpty else { throw HandheldError.io("\(url.lastPathComponent) has no objects to draw") }
         return ThreeMF(meshes: meshes)
@@ -90,6 +90,14 @@ func threeMFTransform(_ text: String?) -> simd_float4x4 {
                                 SIMD4(v[2], v[5], v[8], v[11]), SIMD4(0, 0, 0, 1)])
 }
 
+/// Placements act on millimetre geometry. Their linear coefficients are dimensionless; their translation belongs
+/// to the part containing the build item/component, including at a boundary to a differently-unitized part.
+private func threeMFMillimetreTransform(_ transform: simd_float4x4, unit: Float) -> simd_float4x4 {
+    var result = transform
+    result.columns.3 = SIMD4(transform.columns.3.x * unit, transform.columns.3.y * unit, transform.columns.3.z * unit, 1)
+    return result
+}
+
 /// Hex `#RRGGBB` or `#RRGGBBAA` (materials extension) to sRGB 0...1.
 func threeMFColour(_ text: String?) -> SIMD4<Float>? {
     guard let text, text.hasPrefix("#") else { return nil }
@@ -151,7 +159,7 @@ private struct Reader {
             meshes.append(ThreeMF.Mesh(name: object.name, positions: positions, triangles: object.triangles, colours: colours))
         }
         for component in object.components {
-            try place(part: component.path ?? clean, object: component.objectId, transform: transform * component.transform, depth: depth + 1, into: &meshes)
+            try place(part: component.path ?? clean, object: component.objectId, transform: transform * threeMFMillimetreTransform(component.transform, unit: part.scale), depth: depth + 1, into: &meshes)
         }
     }
 }
