@@ -26,5 +26,10 @@ jobs:
         run: node --test apps/mac/Tests/runtime.test.mjs
       - name: Build shell without signing or runtime downloads
         run: xcodebuild -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake -configuration Debug -destination 'generic/platform=macOS' -derivedDataPath "${{ runner.temp }}/mac-build" CODE_SIGNING_ALLOWED=NO build
+      # The Mac's own layout and model tests (ObjectsModelTests and the rest of AgentKitTests) live in the Xcode
+      # project, not in the Swift package above, so `swift test --package-path apps/mac` never ran them. Until
+      # Nov 10 no gate did: a project-picture test failed on a train and only a hand-run found it.
+      - name: App model and layout tests (AgentKitTests)
+        run: xcodebuild test -project apps/mac/ScanToMake.xcodeproj -scheme ScanToMake -configuration Debug -destination 'platform=macOS' -derivedDataPath "${{ runner.temp }}/mac-build" -only-testing:AgentKitTests CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO
       - name: Compiled model worker boundary tests
         run: STM_MAC_BUILT_APP="${{ runner.temp }}/mac-build/Build/Products/Debug/Counterpart.app" node --test apps/mac/Tests/model-worker.test.mjs
