@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
+import QuickLook
 import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
@@ -229,6 +230,7 @@ struct ProjectDetail: View {
     }
 
     private var needsYou: some View {
+        VStack(alignment: .leading, spacing: 12) {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 4) {
@@ -240,6 +242,11 @@ struct ProjectDetail: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
             if words.actions.contains(.bestGuess) { answer("Best Guess", .bestGuess) }
+        }
+            // The question's picture (David, Nov 9: the phone's was "almost impossible to see"; the Mac showed none).
+            if let ask = object.openAsk, let url = object.askPhotoURL ?? object.thumbnailURL {
+                MacAskPhoto(url: url, region: ask.photo != nil ? ask.region : nil, caption: AskPicture.caption(ask), version: object.updatedAtMs)
+            }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular.tint(.orange.opacity(0.15)), in: .rect(cornerRadius: 14))
@@ -692,5 +699,51 @@ private struct MacProjectSettings: View {
                 }
                 return resolved
             })
+    }
+}
+
+/// The question's picture on the Mac: the card's width at the photo's own aspect ratio, the rest dimmed and the asked-about
+/// part outlined. A click opens it in Quick Look with the region marked, where it zooms.
+struct MacAskPhoto: View {
+    let url: URL
+    let region: Project.Region?
+    let caption: String
+    let version: Double
+    @State private var image: CGImage?
+    @State private var preview: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { open() } label: {
+                ZStack {
+                    if let image { Image(decorative: image, scale: 1).resizable() } else { Color.black.opacity(0.25) }
+                    AskRegionOverlay(region: image == nil ? nil : region)
+                }
+                .aspectRatio(image.map { CGFloat($0.width) / CGFloat(max($0.height, 1)) } ?? 4 / 3, contentMode: .fit)
+                .clipShape(.rect(cornerRadius: 10))
+                .frame(maxWidth: .infinity, maxHeight: 420)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("Open in Quick Look")
+            .accessibilityLabel(caption)
+            .accessibilityHint("Opens the picture in Quick Look")
+            .accessibilityIdentifier("ask-picture")
+            Text(caption).font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
+        }
+        .quickLookPreview($preview)
+        .task(id: "\(url.path)#\(version)") {
+            let url = url
+            image = await Task.detached(priority: .userInitiated) { AskPicture.upright(url, maxPixels: 1600) }.value
+        }
+    }
+
+    private func open() {
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("counterpart-ask-\(abs(url.path.hashValue))-\(Int64(version)).jpg")
+        let url = url, region = region
+        Task {
+            let ok = await Task.detached { FileManager.default.fileExists(atPath: target.path) || AskPicture.markedFile(from: url, region: region, to: target) }.value
+            preview = ok ? target : url
+        }
     }
 }

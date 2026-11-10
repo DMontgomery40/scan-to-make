@@ -245,6 +245,29 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(calls.filter { $0.hasPrefix("plate:") }, ["plate:0:5", "plate:0:4", "plate:0:3", "plate:0:2", "plate:0:1", "plate:0:0"])
     }
 
+    /// David's Nov 9 bottle project (PRD §6.1): with other projects present, its question's picture resolves to the ask's
+    /// own file in the project folder with a caption true for any question, and Request shows the scan as five frames and
+    /// the count, each a file in the project, never all 130.
+    func testTheQuestionsPictureAndTheScanStripAreReachableWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        let ask: [String: Any] = ["id": "1af638c1-ec63-46fc-aa2f-e74cd29df231", "question": "Kroger doesn't publish this bottle's size. Can you confirm?",
+                                  "photo": "asks/1af638c1-ec63-46fc-aa2f-e74cd29df231.jpg", "region": ["x": 0.42, "y": 0.3, "width": 0.28, "height": 0.34],
+                                  "answers": ["camera", "photos", "best-guess", "text"], "status": "open"]
+        await companion.set([item("caliper", "ready"),
+                             item("bottle", "needs-closeup", ["current": NSNull(), "instructions": "Make something that holds three of these",
+                                                              "capture": (1...130).map { String(format: "%04d.heic", $0) }, "ask": ask])])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let bottle = try XCTUnwrap(model.objects.first { $0.id == "bottle" })
+        XCTAssertEqual(bottle.words.stage, .needsYou)
+        XCTAssertEqual(bottle.askPhotoURL?.path, "/tmp/bottle/asks/1af638c1-ec63-46fc-aa2f-e74cd29df231.jpg")
+        XCTAssertEqual(AskPicture.caption(bottle.openAsk), "The outlined part is what this question is about.")
+        let scan = try XCTUnwrap(ProjectConversation(project: bottle).entries.first?.scan)
+        XCTAssertEqual(scan.words, "130 photos")
+        XCTAssertEqual(scan.preview.compactMap(bottle.file).map(\.lastPathComponent), ["0001.heic", "0033.heic", "0066.heic", "0098.heic", "0130.heic"])
+        XCTAssertEqual(ProjectConversation(project: bottle).entries.first?.photos, [], "frames never come back as single photos")
+    }
+
     /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and
     /// paths (mcp-3d-printer-server 1.2.50's `counterpart_setup_fields`), and only a changed slicer is sent (Codex review on #346).
     /// Settings → AI → Design engine (PRD §8.9, §6.1): the code design engine's row reads the companion and Set Up asks

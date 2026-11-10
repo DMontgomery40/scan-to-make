@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// The app opens same-account discovery with an explicit code fallback when no Mac is paired.
 final class LaunchUITests: XCTestCase {
@@ -949,4 +950,94 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertFalse(last.frame.intersects(new.frame), "New \(new.frame) covers the last card \(last.frame)")
         }
     }
+
+    /// David's Nov 9 bottle project (Mac 30a2a33c), with generated pictures in place of his photos. A 4:3 picture, so a
+    /// square crop would show here as a wrong aspect ratio, and 130 scan frames, each logged when the canned Mac serves it.
+    private func launchBottle(noPhoto: Bool = false) throws -> (XCUIApplication, URL) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("bottle-capture"), withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        func picture(_ size: CGSize, _ colour: UIColor) -> Data {
+            UIGraphicsImageRenderer(size: size, format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }()).jpegData(withCompressionQuality: 0.7) { context in
+                colour.setFill(); context.fill(CGRect(origin: .zero, size: size))
+                UIColor.white.setFill(); context.fill(CGRect(x: size.width * 0.45, y: size.height * 0.32, width: size.width * 0.22, height: size.height * 0.3))
+            }
+        }
+        try picture(CGSize(width: 2048, height: 1536), .brown).write(to: folder.appendingPathComponent("ask-bottle.jpg"))
+        let frame = picture(CGSize(width: 240, height: 320), .darkGray)
+        for i in 1...130 { try frame.write(to: folder.appendingPathComponent(String(format: "bottle-capture/%04d.heic", i))) }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ask-bottle", "-CounterpartScreen", "ask"]
+        if noPhoto { app.launchEnvironment["COUNTERPART_ASK_NO_PHOTO"] = "1" }
+        app.launch()
+        return (app, folder)
+    }
+
+    /// Scan frames the canned Mac has served so far, each counted once.
+    private func servedFrames(_ folder: URL) -> Set<String> {
+        let log = (try? String(contentsOf: folder.appendingPathComponent("served.log"), encoding: .utf8)) ?? ""
+        return Set(log.split(separator: "\n").compactMap { $0.split(separator: " ").first.map(String.init) }.filter { $0.contains("/capture/") })
+    }
+
+    /// David, Nov 9, on his iPad: "the area it's highlighting is almost impossible to see, and this is on ipad, can't
+    /// imagine on iphone". The question's picture spans the card at its own aspect ratio with a caption that is true for any
+    /// question, and opens full screen, where it pinches to zoom.
+    func testTheQuestionsPictureIsLargeTrueToEveryQuestionAndZoomsFullScreen() throws {
+        let (app, _) = try launchBottle()
+        let picture = app.descendants(matching: .any)["ask-picture"]
+        XCTAssertTrue(picture.waitForExistence(timeout: 20), app.debugDescription)
+        for _ in 0..<8 where !(picture.isHittable && picture.frame.maxY < app.windows.firstMatch.frame.maxY - 80) { app.swipeUp() }
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: picture)], timeout: 15) == .completed,
+                      "the picture arrives")
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(picture.frame.width, regular ? 400 : window.width * 0.8, "never a thumbnail: \(picture.frame)")
+        XCTAssertEqual(picture.frame.height / picture.frame.width, 0.75, accuracy: 0.05, "the whole 4:3 photo, not a square crop")
+        XCTAssertEqual(picture.label, "The outlined part is what this question is about.")
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] %@", "can't see")).firstMatch.exists, "it never says what the Mac can't see")
+        picture.tap()
+        let full = app.descendants(matching: .any)["ask-picture-full"]
+        XCTAssertTrue(full.waitForExistence(timeout: 10), "full screen")
+        XCTAssertEqual(full.value as? String, "Zoom 100 percent")
+        full.pinch(withScale: 3, velocity: 2)
+        XCTAssertNotEqual(full.value as? String, "Zoom 100 percent", "pinch zooms in")
+        app.buttons["ask-picture-done"].tap()
+        XCTAssertTrue(full.waitForNonExistence(timeout: 5))
+    }
+
+    /// A question that came without a picture shows the project's picture at the same size, and says so.
+    func testAQuestionWithoutAPictureShowsTheProjectsPictureAndSaysSo() throws {
+        let (app, _) = try launchBottle(noPhoto: true)
+        let picture = app.descendants(matching: .any)["ask-picture"]
+        XCTAssertTrue(picture.waitForExistence(timeout: 20))
+        XCTAssertEqual(picture.label, "Your project’s picture. No picture came with this question.")
+        for _ in 0..<8 where !picture.isHittable { app.swipeUp() }
+        XCTAssertGreaterThanOrEqual(picture.frame.width, regular ? 300 : app.windows.firstMatch.frame.width * 0.6)
+    }
+
+    /// David, Nov 9: "highly unnecessary to show every single one of these (and thus load every single one of these)
+    /// images". What you sent shows the scan as one strip with its count and fetches five frames; the full set opens on its
+    /// own and fetches only what scrolls into view.
+    func testWhatYouSentShowsTheScanAsOneStripAndFetchesOnlyWhatIsOnScreen() throws {
+        let (app, folder) = try launchBottle()
+        let tab = app.buttons["What you sent"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 20))
+        for _ in 0..<8 where !tab.isHittable { app.swipeUp() }
+        tab.tap()
+        // The request bubble's identifier covers the strip's, so it is found by what it says.
+        let strip = app.buttons.matching(NSPredicate(format: "label == %@", "Your scan, 130 photos")).firstMatch
+        for _ in 0..<8 where !(strip.exists && strip.isHittable) { app.swipeUp() }
+        XCTAssertTrue(strip.waitForExistence(timeout: 10), app.debugDescription)
+        Thread.sleep(forTimeInterval: 3)
+        let shown = servedFrames(folder)
+        XCTAssertLessThanOrEqual(shown.count, 5, "only the strip's frames: \(shown.sorted())")
+        strip.tap()
+        let gallery = app.descendants(matching: .any)["scan-gallery"]
+        XCTAssertTrue(gallery.waitForExistence(timeout: 10))
+        Thread.sleep(forTimeInterval: 3)
+        let opened = servedFrames(folder).count
+        XCTAssertGreaterThan(opened, shown.count, "the full set shows its frames")
+        XCTAssertLessThan(opened, 90, "but only those on screen, not all 130 (\(opened))")
+        app.buttons["Done"].tap()
+    }
+
 }
