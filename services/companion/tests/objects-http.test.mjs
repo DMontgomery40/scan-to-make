@@ -836,7 +836,7 @@ test('saved project engine reaches the next worker and copies reject Fusion', as
   assert.equal(inputs[0].preferredEngine, 'blender');
   const copy = await service.create('Copy the clip', 'copy');
   await store.update(copy.id, o => ({...o, scan: 'scan.usdz'}));
-  await assert.rejects(service.setProjectSettings(copy.id, {designEngine: 'fusion'}), /cleaned up in Blender/);
+  await assert.rejects(service.setProjectSettings(copy.id, {designEngine: 'fusion'}), /cleaned up by the code design engine, or Blender without it/);
   // Nothing scanned: the request is a new design, which may use Fusion.
   const unscanned = await service.create('A guitar pick that says Vivi', 'copy');
   await service.setProjectSettings(unscanned.id, {designEngine: 'fusion'});

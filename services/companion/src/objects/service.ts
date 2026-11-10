@@ -535,7 +535,7 @@ export class ObjectService {
       if (patch.printerDestinationId !== undefined && (object.state === 'touching-up' || object.state === 'printing'))
         throw new InvalidStateError('Wait until the current step finishes before changing printers.');
       if (patch.designEngine === 'fusion' && passKind(object) === 'copy')
-        throw new InvalidStateError('Scanned copies are cleaned up in Blender.');
+        throw new InvalidStateError('Scanned copies are cleaned up by the code design engine, or Blender without it.');
       // Validate all new fields before applying the existing status/archive actions.
       if (patch.status !== undefined) object = await this.#setStatusNow(id, patch.status);
       if (patch.archived !== undefined) object = await this.#setArchivedNow(id, object, patch.archived);
