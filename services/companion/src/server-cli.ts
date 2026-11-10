@@ -20,13 +20,14 @@ import { remoteDestinationsFor } from './remote-mcp-http.js';
 import { PrinterMcpClient, PrinterSessionPool, readPrinterHandoffConfig, toolResultJson } from '@scan-to-make/printer-handoff';
 import { PrinterDirectory } from './printing/directory.js';
 import { CameraFrames } from './printing/camera.js';
-import { CompanionSettingsStore } from './settings.js';
+import { CompanionSettingsStore, autoUpdatesMcps } from './settings.js';
 import { EventLog } from './events/log.js';
 import { projectTitle, sizeText } from './events/words.js';
 import { LiveActivityTokenStore } from './devices/live-activity-tokens.js';
 import { DevicePresence } from './devices/presence.js';
 import { pruneLegacyDevices } from './devices/legacy.js';
 import { McpOverrides, McpUpdater, inFlight } from './printing/mcp-updates.js';
+import { McpAutoUpdater, companionBusy, contractCheck, settingUp } from './printing/mcp-auto-update.js';
 import { PrintGate } from './printing/print-gate.js';
 import { hostEnvironment } from './printing/mcp-install.js';
 import { IcloudEnrolment } from './icloud-enrolment.js';
@@ -156,6 +157,10 @@ if(remoteAuth)mcpUpdates=new McpUpdater({
   // print has nothing to do with counterpart right now it was printed by studio". A running print lives on the printer.
   busy:inFlight(printGate,id=>printerCatalog?.canonical(id)),
   runningVersion:id=>printerDirectory?.capabilities(id)?.server.version,node:process.execPath,gate:printGate,
+  // Q9: an automatic update keeps a new copy only once it starts on its own and answers counterpart/1, as Add printer… starts one.
+  verify:contractCheck({cwd:join(dataRoot,'printers','profiles')}),
+  // Review F2: an automatic update re-reads the other work it must not start under once it has marked its printers.
+  otherWork:():string|undefined=>settingUp({...(printerSetup?{setup:printerSetup}:{}),...(cadSettings?{cad:cadSettings}:{}),...(runtimeSettings?{fusion:runtimeSettings}:{})}),
   ...(eventLog&&projectlessEvents?{emit:async event=>{await eventLog.append({id:randomUUID(),type:event.type,data:event.data,detail:{package:mcpLabels[event.package]??event.package,...(event.reason?{reason:event.reason}:{})}});}}:{}),
 });
 const printerProfiles=join(dataRoot,'printers','profiles.json');
@@ -178,7 +183,7 @@ const reloadPrinters=async()=>{
   for(const id of before)if(!now.has(id)&&id!=='current'){await services.get(id)?.runner.session?.close().catch(()=>undefined);services.delete(id);}
 };
 const printerSetup=mcpUpdates?new PrinterSetup({env:printerEnv,gate:printGate,configs:()=>printerCatalog?.entries()??[],
-  effective:(id,config)=>mcpUpdates!.effective(id,config),download:pkg=>mcpUpdates!.download(pkg),
+  effective:(id,config)=>mcpUpdates!.effective(id,config),autoReason:id=>mcpUpdates!.autoReason(id),download:pkg=>mcpUpdates!.download(pkg),
   latestVersion:(pkg,options)=>mcpUpdates!.latestVersionSettled(pkg,options),folders:()=>findMcpFolders(homedir()),
   node:process.execPath,profilesPath:printerProfiles,setupCachePath:printerSetupCache,catalog:()=>printerCatalog,reload:reloadPrinters,
   // Complete Settings changed its .env: the MCP reads it again on a fresh start (with any Update's override).
@@ -256,6 +261,24 @@ const {fusionSetup,fusionStatus}=handoffConfig===undefined?{fusionSetup:undefine
 // The objects setup applies saved MCP overrides itself; otherwise apply them here, so every session (the phone's and
 // `/v1/mcp`'s) starts the version an Update chose.
 if(mcpUpdates){if(!objects)await mcpUpdates.applyOverrides();mcpUpdates.start();}
+// Q9, "Keep printer software up to date" (general.autoUpdateMcps, on unless turned off): a newer MCP is installed by
+// itself only while Counterpart is idle, by each of the companion's own answers to "is anything working?".
+const mcpAutoUpdates=mcpUpdates?new McpAutoUpdater({
+  enabled:async()=>autoUpdatesMcps(await companionSettings.load().catch(()=>companionSettings.current())),
+  targets:()=>mcpUpdates!.autoTargets(),
+  latest:pkg=>mcpUpdates!.checkLatest(pkg),
+  update:(mcpId,latest,options)=>mcpUpdates!.autoUpdate(mcpId,latest,options),
+  statePath:join(dataRoot,'printers','auto-update.json'),
+  recovered:()=>mcpUpdates!.recoveredAutoUpdates(),
+  log:line=>console.error(line),
+  // Each of the companion's own answers to "is anything working?": PrintGate (sends, slices, design and cleanup passes,
+  // Moves, the Blender add-on's repair), Update/Download, Add printer…, the code engine's and Fusion's Set Up, and
+  // printing (a project printing there, or the printer's own report).
+  busy:()=>companionBusy({gate:printGate,updates:mcpUpdates,...(printerSetup?{setup:printerSetup}:{}),...(cadSettings?{cad:cadSettings}:{}),
+    ...(runtimeSettings?{fusion:runtimeSettings}:{}),printers:()=>printerCatalog?.destinations??[],
+    printing:async id=>printerBusy?await printerBusy(id):false}),
+}):undefined;
+mcpAutoUpdates?.start();
 if(capture?.scanProcessing&&captureDirectory)capture.modelSize=new ModelSizeStore(capture.storage,capture.scanProcessing,join(captureDirectory,'captures'),
  createModelSizeRunner(async()=>{const running=runningHandoff();return running?.backend==='bambu-printer-mcp'?running.process:installedBambuProcess();}));
 // The port variable keeps its original name so existing operator setups still start.
@@ -348,6 +371,7 @@ process.stdout.write(
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {
     modelAccess?.close();
+    mcpAutoUpdates?.close();
     printerSetup?.closeObtaining();
     // Wake every waiting events.wait and /v1/events first, so shutdown never waits out a long poll.
     eventLog?.close();

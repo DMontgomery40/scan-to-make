@@ -177,7 +177,8 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.sent': title = `Sent ${t} to ${printer}`; body = context.reason === 'bambu-connect' ? 'Finish on your Mac: press Print in Bambu Connect.' : "Counterpart can't follow this print."; break;
     case 'mcp.update.started': title = `Updating ${pkg}`; body = joined(versions, context.printer) || 'Updating'; break;
     case 'mcp.update.waiting': title = `${pkg} updates as soon as Counterpart finishes with this printer`; body = joined(versions, context.printer) || 'Waiting for Counterpart to finish sending, slicing or designing'; break;
-    case 'mcp.update.done': title = data?.toVersion ? `Updated ${pkg} to ${data.toVersion}` : `Updated ${pkg}`; body = context.printer ? `${context.printer} uses it now.` : 'Your printers use it now.'; break;
+    // `reason`: an automatic update says it happened by itself, and from which version (Q9).
+    case 'mcp.update.done': title = data?.toVersion ? `Updated ${pkg} to ${data.toVersion}` : `Updated ${pkg}`; body = context.reason ?? (context.printer ? `${context.printer} uses it now.` : 'Your printers use it now.'); break;
     case 'mcp.update.failed': title = `Couldn't update ${pkg}`;
       // `reason`: the previous version couldn't be put back, so it isn't "still in use".
       body = context.reason ?? `${data?.fromVersion ?? 'The version you had'} is still in use. Try again, or install a fresh copy.`; break;

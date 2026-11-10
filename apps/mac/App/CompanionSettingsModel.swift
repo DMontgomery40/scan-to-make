@@ -58,7 +58,7 @@ import ControlKit
                 settings = CompanionSettings(milestones: "50", notificationsMac: Dictionary(uniqueKeysWithValues: MacNotificationTypes.ordered.map {
                     ($0.type, ["pass.ready", "pass.ask", "pass.failed", "print.confirm", "print.paused", "print.done", "print.failed",
                                "print.not-started", "mcp.update.failed"].contains($0.type)) }),
-                    general: .init(openAtLogin: true, showInDock: true, keepAwake: true))
+                    general: .init(openAtLogin: true, showInDock: true, keepAwake: true, autoUpdateMcps: true))
             }
             return
         }

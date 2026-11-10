@@ -38,6 +38,8 @@ export class RuntimeSettings {
     if(!this.deps.modelAccess)throw new ControlFailure('unavailable','Open AI settings on your Mac to configure model access.');
     this.deps.modelAccess.startCheck(z.uuid().parse(revision));
   }
+  /** Fusion's Set Up is waiting for the Mac or running on it (`fusion.state` reads `setting-up`). */
+  fusionSettingUp():boolean { this.expire(); return !!this.pending; }
   private expire() {
     if(this.pending&&this.now()-this.pending.at>600_000){this.pending=undefined;this.result={ok:false,message:'Fusion setup timed out. Check Counterpart on your Mac, then try again.'};}
   }

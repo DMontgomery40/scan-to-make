@@ -61,6 +61,13 @@ import CounterpartKit
         var transport: HTTPTransport = PinnedTransport()
         #if DEBUG
         if let folder = Fixtures.folder { store = Fixtures.store(); transport = FixtureTransport(folder: folder) }
+        // `-CounterpartPairingRecord <json>`: `scripts/ux_screens.py` paired a real companion serving a copy of real projects
+        // (http://127.0.0.1:9078, simulator only) and passes its record here, so the real client and transport show real data.
+        else if let json = UserDefaults.standard.string(forKey: "CounterpartPairingRecord"), !json.isEmpty {
+            let memory = MemoryStore()
+            try? memory.write("current", Data(json.utf8))
+            store = memory
+        }
         #endif
         let pairing = PairingClient(store: PairingStore(store: store), transport: transport)
         return (pairing, CompanionClient(pairing: pairing, transport: transport, deviceName: pairing.store.userAssignedName()), transport)
@@ -160,6 +167,12 @@ import CounterpartKit
     #if DEBUG
     /// `-CounterpartScreen <name>` opens one screen directly, as the mockup app's `-screen` does.
     private func debugRoute() {
+        // `-CounterpartOpen counterpart://project/<id>` (or print/, printing/, printers, new) and `-CounterpartSection
+        // inputs|activity`: any project's screen, for `scripts/ux_screens.py` with a real companion.
+        if let link = UserDefaults.standard.string(forKey: "CounterpartOpen"), let url = URL(string: link), let opened = AppRoute(url: url) {
+            route = opened
+        }
+        if let section = UserDefaults.standard.string(forKey: "CounterpartSection") { debugSection = section }
         guard let screen = UserDefaults.standard.string(forKey: "CounterpartScreen") else { return }
         let ids = Fixtures.ids
         switch screen {

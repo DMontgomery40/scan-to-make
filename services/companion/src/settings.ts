@@ -6,7 +6,11 @@ import {CompanionSettingsSchema, CompanionSettingsPatchSchema, type CompanionSet
 
 // General values are supplied by the Mac, never guessed by the companion. Empty notification
 // maps mean the documented platform defaults; stored false values always remain explicit.
-export const DEFAULT_SETTINGS: CompanionSettings = {milestones: '50', notifications: {mac: {}, devices: {}}, general: {}};
+// The companion's own General choice, `autoUpdateMcps`, is on until the person turns it off (David, Nov 10: "ours
+// should default to on"): a new install and a settings file from before it was added both read it as on.
+export const DEFAULT_SETTINGS: CompanionSettings = {milestones: '50', notifications: {mac: {}, devices: {}}, general: {autoUpdateMcps: true}};
+/** Whether the companion keeps the printer MCPs up to date by itself (Settings → Printers). */
+export const autoUpdatesMcps = (settings: CompanionSettings): boolean => settings.general?.autoUpdateMcps !== false;
 
 /** Saved choices shared by the Mac and phone. Every partial update merges inside one write queue. */
 export class CompanionSettingsStore {
@@ -22,7 +26,7 @@ export class CompanionSettingsStore {
     try { stored = z.record(z.string(), z.unknown()).parse(JSON.parse(await readFile(this.#path, 'utf8'))); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     // Keep unknown sections on disk for a newer companion, without advertising unsupported APIs.
-    const known = CompanionSettingsSchema.parse({milestones: stored.milestones ?? '50', notifications: stored.notifications ?? {mac: {}, devices: {}}, general: stored.general ?? {}});
+    const known = CompanionSettingsSchema.parse({milestones: stored.milestones ?? '50', notifications: stored.notifications ?? {mac: {}, devices: {}}, general: {autoUpdateMcps: true, ...(stored.general as object ?? {})}});
     this.#document = stored;
     this.#cache = known;
   }

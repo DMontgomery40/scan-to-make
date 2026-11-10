@@ -225,20 +225,13 @@ class CompanionClient(
         one(request("POST", "/v1/objects/$id/plate-selection", jsonOf("fileIndex" to fileIndex, "plateIndex" to plateIndex)))
 
     /** Creates a project. `kind` is `fit`, `copy` or `published` (with a model page `url`). */
-    suspend fun create(instructions: String, kind: String? = null, url: String? = null): Project {
-        val text = instructions.trim()
-        val json = LinkedHashMap<String, JsonElement>()
-        if (text.isNotEmpty()) json["instructions"] = JsonPrimitive(text)
-        if (kind != null && kind in setOf("fit", "copy", "published")) json["kind"] = JsonPrimitive(kind)
-        url?.let { json["url"] = JsonPrimitive(it) }
-        return one(request("POST", "/v1/objects", JsonObject(json)))
-    }
-    suspend fun updateDraft(id: String, instructions: String, kind: String? = null): Project {
-        val json = LinkedHashMap<String, JsonElement>()
-        json["instructions"] = JsonPrimitive(instructions)
-        if (kind != null && kind in setOf("fit", "copy")) json["kind"] = JsonPrimitive(kind)
-        return one(request("PATCH", "/v1/objects/$id", JsonObject(json)))
-    }
+    suspend fun create(instructions: String, kind: String? = null, url: String? = null, fit: ProjectFit? = null): Project =
+        one(request("POST", "/v1/objects", createBody(instructions, kind, url, fit)))
+
+    /** A draft's fit choice is sent every time: the fields, or null when the draft is no longer a fit. */
+    suspend fun updateDraft(id: String, instructions: String, kind: String? = null, fit: ProjectFit? = null): Project =
+        one(request("PATCH", "/v1/objects/$id", draftBody(instructions, kind, fit)))
+
     suspend fun start(id: String, captureManifest: JsonObject? = null): Project =
         one(request("POST", "/v1/objects/$id/start", if (captureManifest != null) jsonOf("captureManifest" to captureManifest) else JsonObject(emptyMap())))
     /** Ask for changes: a new pass with your text. Upload new photos first. */

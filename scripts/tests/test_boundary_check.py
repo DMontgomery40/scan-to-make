@@ -1,4 +1,5 @@
 """PRD §8.0 boundary check: which files it sends, how it decides, and that it fails closed. No network."""
+import lane_isolation  # noqa: F401  (first: no test may reach the real build lane)
 import io
 import json
 import os
