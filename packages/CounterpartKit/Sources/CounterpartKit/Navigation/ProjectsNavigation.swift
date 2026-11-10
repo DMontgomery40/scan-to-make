@@ -86,16 +86,31 @@ public struct ProjectsNavigation: Equatable, Sendable {
 
     public mutating func dismissSheet() { presented = nil }
 
-    /// A notification, widget, Live Activity or link (`AppRoute`).
+    /// New and Print hold what the person is in the middle of: a finished scan with its description and fit choices,
+    /// or spools chosen and a slice computed. Settings and Printers hold nothing.
+    public var sheetHoldsWork: Bool {
+        switch sheet {
+        case .new, .print: true
+        case .settings, .printers, nil: false
+        }
+    }
+
+    /// A notification, widget, Live Activity or link (`AppRoute`). Its navigation always happens. Its sheet, if it
+    /// has one, replaces Settings or Printers but never a New or Print sheet that is up: a tapped notification must
+    /// not throw away an unsent draft or a prepared print. That route's own sheet is dropped, not queued.
     public mutating func apply(_ route: AppRoute) {
         switch route {
         case .project(let id), .camera(let id): open(id)
         case .printing(let id): openPrinting(id)
-        case .print(let id): open(id); present(.print(id))
-        case .newProject: present(.new(job: nil))
-        case .printers: present(.printers)
+        case .print(let id): open(id); routed(.print(id))
+        case .newProject: routed(.new(job: nil))
+        case .printers: routed(.printers)
         case .home, .pair: close()
         }
+    }
+
+    private mutating func routed(_ sheet: Sheet) {
+        if !sheetHoldsWork { present(sheet) }
     }
 
     // MARK: The detail's navigation stack
