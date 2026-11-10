@@ -643,6 +643,19 @@ final class LayoutParityUITests: XCTestCase {
     // The hinge itself is looked at on the iPhone Duo simulator with `agent-device fold open|closed`, and
     // `scantomake://fixture-width/<compact|regular>` (with `-CounterpartLayoutTesting YES`) still resizes a fixture run.
 
+    /// David's iPad, Nov 10: every row under Needs you began "Needs you · " and was cut off before the question. The
+    /// row shows the Mac's own detail for it, whole, and never its section's heading again.
+    func testASidebarRowSaysItsQuestionNotItsHeadingWithProjectsPresent() throws {
+        try XCTSkipUnless(regular, "the phone's Home has cards, not a sidebar grouped by phase")
+        let app = launch()
+        // A selectable list row, not a button.
+        let row = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        XCTAssertTrue(row.label.contains("Plush, underside"), row.label)
+        XCTAssertTrue(row.label.contains("Can you send a close-up of the underside? The scan never saw the bottom."), row.label)
+        XCTAssertFalse(row.label.contains("Needs you"), row.label)
+    }
+
     func testPrinterAttentionAndPrintingSummaryAtBothWidths() {
         let app = launch()
         XCTAssertTrue(app.buttons["Printers, 1 needs attention"].waitForExistence(timeout: 20))
