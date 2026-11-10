@@ -90,6 +90,38 @@ class BlankCheckTests(unittest.TestCase):
         self.assertEqual(self.check(flat, *CHIPS, node('Image', None, (12, 500, 50, 50))), [], 'under 64 pt')
         self.assertEqual(self.check(flat, *CHIPS, node('Image', None, (12, -300, 128, 96))), [], 'scrolled off screen')
 
+    # main's StagePicture (#539): one element, gallery-stage-picture, value shown / loading / not available.
+    def stage_frame(self, spinner=False, line=False, picture=False):
+        from PIL import ImageFont
+        image = frame()
+        pen = ImageDraw.Draw(image)
+        if picture:
+            pen.ellipse([150 * SCALE, 80 * SCALE, 250 * SCALE, 300 * SCALE], fill=(200, 180, 120), outline=(255, 255, 255), width=4)
+        if spinner:
+            pen.ellipse([191 * SCALE, 160 * SCALE, 211 * SCALE, 180 * SCALE], outline=(180, 180, 180), width=3)
+        if line:
+            pen.text((90 * SCALE, 196 * SCALE), 'What you scanned: coming from your Mac', fill=(200, 200, 200),
+                     font=ImageFont.load_default(size=13 * SCALE))
+        return image
+
+    def stage(self, value):
+        return node('Image', 'What you scanned', (0, 0, W, 380), identifier='gallery-stage-picture') | {'value': value}
+
+    def test_stage_states_that_say_what_is_happening_pass(self):
+        self.assertEqual(self.check(self.stage_frame(picture=True), *CHIPS, self.stage('shown')), [])
+        self.assertEqual(self.check(self.stage_frame(spinner=True, line=True), *CHIPS, self.stage('loading')), [])
+        self.assertEqual(self.check(self.stage_frame(line=True), *CHIPS, self.stage('not available')), [])
+
+    def test_stage_states_with_nothing_drawn_fail_whatever_the_label_says(self):
+        shown = self.check(self.stage_frame(), *CHIPS, self.stage('shown'))
+        self.assertTrue(shown and 'nothing is drawn' in shown[0], shown)
+        bare = self.check(self.stage_frame(), *CHIPS, self.stage('loading'))
+        self.assertTrue(bare and 'no line of words' in bare[0], bare)
+        spinner = self.check(self.stage_frame(spinner=True), *CHIPS, self.stage('loading'))
+        self.assertTrue(spinner and 'no line of words' in spinner[0], 'a spinner alone is not a waiting state')
+        unknown = self.check(self.stage_frame(picture=True), *CHIPS, self.stage(''))
+        self.assertTrue(unknown and 'no state' in unknown[0], unknown)
+
     def test_a_folder_flags_frames_without_the_app_and_writes_blank_md(self):
         with tempfile.TemporaryDirectory() as folder:
             out = Path(folder)

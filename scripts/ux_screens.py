@@ -663,7 +663,8 @@ def main() -> int:
     parser.add_argument('--prepare-only', action='store_true', help='copy the data, start the companion, check it, stop')
     parser.add_argument('--max-minutes', type=float, default=10, help='the lane hold\'s length: no new screen starts after it, less 90 s to clean up (default 10); run again to go on')
     parser.add_argument('--project', action='append', default=[], metavar='ID',
-                        help="only this project's Result, What you sent and Activity, by id (any project in the copy; repeatable)")
+                        help="only this project's Result, What you sent and Activity, by id (any project in the copy; repeatable), or all: "
+                             "every project in the copy. With --project, --screens picks tabs (result, sent, activity)")
     parser.add_argument('--condition', choices=CONDITIONS, default='none',
                         help='the Mac on a bad day: ' + '; '.join(f'{k}: {v}' for k, v in CONDITIONS.items()) + '. One condition per output folder')
     parser.add_argument('--fresh-simulator', action='store_true',
@@ -712,7 +713,10 @@ def main() -> int:
         if args.prepare_only:
             for o in info['objects']: print(f"  {o['id'][:8]}  {o['state']:<14} {o['title']}")
             return 0
-        if args.project and (unknown := [p for p in args.project if p not in served]):
+        if args.project == ['all']:
+            args.project = sorted(served)
+            sys.argv[sys.argv.index('all')] = ','.join(args.project)  # the run inside the lane gets the same list
+        if args.project and (unknown := [p for v in args.project for p in v.split(',') if p not in served]):
             raise SystemExit(f'These projects are not in the copy: {unknown}.')
         handoff = work / 'companion-info.json'
         info['source'] = source
@@ -760,8 +764,11 @@ def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set
             valid = ', '.join(i['name'] for i in screens(ctx['ids'], '', '', Path(), Path()))
             raise SystemExit(f'No screen matches --screens {args.screens!r}, so there is nothing to capture. The screens are: {valid}.')
     if args.project:
-        names = project_names(args.project, ctx['info']['objects'])
-        items = [item for pid in args.project for item in project_screens(names[pid], pid, 'by id', 'real', ctx['record'])]
+        wanted = [p for value in args.project for p in value.split(',')]
+        names = project_names(wanted, ctx['info']['objects'])
+        items = [item for pid in wanted for item in project_screens(names[pid], pid, 'by id', 'real', ctx['record'])]
+        if args.screens:  # with --project, --screens picks tabs: result, sent, activity
+            items = [i for i in items if any(i['name'].endswith('-' + w.lstrip('=')) for w in args.screens.split(','))]
     done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
     if args.redo: done -= {(k, i['name']) for k in keys for i in items}
     return items, done

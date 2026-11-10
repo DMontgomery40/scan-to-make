@@ -7,8 +7,12 @@ capture so far talked to a companion that answered instantly. `ux_screens.py --c
 companion behave like a real one; this reads what those runs saved (each frame's PNG and its accessibility tree,
 `<frame>.ax.json`) and flags:
 
-- an empty stage: a picture stage, known by the controls the app draws on it (the size chip "… × … × … mm", "N photos",
-  "AR", "Explore in 3D"), whose area above those controls has no detail, with no progress indicator and no words in it;
+- a stage that fails its state (main's StagePicture, `gallery-stage-picture`, #539): "shown" with nothing drawn, or
+  "loading" / "not available" without its drawn line of words (a bare backdrop, or a spinner alone). The pixels decide,
+  so a stage cannot pass on its label;
+- an empty stage without that element (a model stage): known by the controls the app draws on it (the size chip
+  "… × … × … mm", "N photos", "AR", "Explore in 3D"), whose area above those controls has no detail, with no progress
+  indicator and no words in it;
 - an empty picture: an unlabelled image element (a photo or render; labelled images are symbols) of 64 pt or more, wholly on
   screen, whose pixels are one flat colour.
 
@@ -28,6 +32,8 @@ PROGRESS = re.compile(r'progress|activity|busy|spinner', re.I)
 IMAGE = re.compile(r'image|picture|photo', re.I)
 TEXT = re.compile(r'statictext|text$|label', re.I)
 EDGE_BLANK = 1.2  # mean edge strength (0–255) under which an area has nothing drawn in it
+LINE_MIN_PT = 60  # a drawn line of words is at least this wide; a spinner is about 20 pt
+SHOWN_MIN_PT = 80  # a shown picture draws at least this much edge; a gradient backdrop draws none
 FLAT_BLANK = 3.0  # pixel standard deviation under which a picture is one flat colour
 
 
@@ -76,6 +82,59 @@ def measure(image, area: tuple[float, float, float, float], scale: float, exclud
     return ImageStat.Stat(inner).mean[0] / covered, ImageStat.Stat(gray, mask).stddev[0]
 
 
+def drawn(image, area: tuple[float, float, float, float], scale: float, exclude: list[dict]) -> tuple[float, float]:
+    """What is drawn in an area, from its pixels: the length of strong edges in points (a gradient backdrop has none),
+    and the widest run of them across a few rows (a line of words spans 60 pt or more, a spinner about 20). The controls
+    drawn over the area are masked out. Pixels decide, so a stage cannot pass on its accessibility label alone."""
+    from PIL import ImageDraw, ImageFilter
+    box = tuple(int(v * scale) for v in area)
+    edges = image.convert('L').crop(box).filter(ImageFilter.FIND_EDGES).point(lambda v: 255 if v > 40 else 0)
+    w, h = edges.size
+    if w < 8 or h < 8:
+        return 0.0, 0.0
+    pen = ImageDraw.Draw(edges)
+    for node in exclude:
+        r = node['rect']
+        pen.rectangle([(r['x'] - area[0]) * scale - 6, (r['y'] - area[1]) * scale - 6,
+                       (r['x'] + r['width'] - area[0]) * scale + 6, (r['y'] + r['height'] - area[1]) * scale + 6], fill=0)
+    pixels = edges.load()
+    spans = []
+    for y in range(2, h - 2):
+        xs = [x for x in range(2, w - 2) if pixels[x, y]]
+        spans.append((xs[-1] - xs[0]) if len(xs) >= 6 else 0)
+    spans.sort(reverse=True)
+    length = sum(1 for v in edges.crop((3, 3, w - 3, h - 3)).getdata() if v) / scale  # the crop's own border is no drawing
+    return length, (spans[min(4, len(spans) - 1)] if spans else 0) / scale  # the fifth-widest row, not one stray row
+
+
+def stage_states(image, elements: list[dict], scale: float, width: float, screen_h: float) -> list[str]:
+    """main's stage (#539, StagePicture): one element `gallery-stage-picture`, value "shown", "loading" or "not available".
+    Shown must have something drawn; loading and not available must draw their line of words (a bare backdrop or a
+    spinner without words fails)."""
+    problems = []
+    for node in elements:
+        if node['id'] != 'gallery-stage-picture':
+            continue
+        r = node['rect']
+        area = (max(0.0, r['x']), max(0.0, r['y']), min(width, r['x'] + r['width']), min(screen_h, r['y'] + r['height']))
+        if area[2] - area[0] < 40 or area[3] - area[1] < 40:
+            continue
+        value = node['value'].strip().lower()
+        overlays = [n for n in elements if n is not node and n['rect']['height'] < 60 and inside(n['rect'], area)
+                    and n['id'] != 'gallery-stage-retry']
+        length, span = drawn(image, area, scale, overlays)
+        if value == 'shown':
+            if length < SHOWN_MIN_PT:
+                problems.append(f'stage says "shown" but nothing is drawn on it ({length:.0f} pt of drawn edge)')
+        elif value in ('loading', 'not available'):
+            if span < LINE_MIN_PT:
+                problems.append(f'stage says "{value}" but draws no line of words (widest drawn run {span:.0f} pt): '
+                                f'a bare backdrop or a spinner alone')
+        else:
+            problems.append(f'stage has no state it should have (value "{node["value"]}")')
+    return problems
+
+
 def check_frame(png: Path, tree) -> list[str]:
     """What is blank in one frame, in words; empty when nothing is."""
     from PIL import Image
@@ -89,9 +148,10 @@ def check_frame(png: Path, tree) -> list[str]:
     width = windows[0]['width'] if windows else min(image.width / 2, max(n['rect']['x'] + n['rect']['width'] for n in elements))
     scale = image.width / width if width else 1.0
     screen_h = image.height / scale
-    problems = []
+    problems = stage_states(image, elements, scale, width, screen_h)
+    has_state = any(n['id'] == 'gallery-stage-picture' for n in elements)
     controls = [n for n in elements if STAGE_CONTROL.search(n['label'].strip()) and n['rect']['height'] < 80]
-    if controls:
+    if controls and not has_state:
         bottom = max(n['rect']['y'] + n['rect']['height'] for n in controls)
         top_of_controls = min(n['rect']['y'] for n in controls)
         left = min(n['rect']['x'] for n in controls) - 16
