@@ -1267,7 +1267,7 @@ Screenshots: `screens/mac-settings-ai.jpg` and `screens/mac-settings-ai-nofusion
 - **Never rebuild a published model from its pictures** when the designer's file exists. Pictures on a model page are for picking a variant, never geometry to copy.
 - **Print what the designer published,** with only the user's choices applied: variant, plate, colours, quality.
 - **Edits the user asks for are made to the designer's own file,** through the printer MCP's Blender or Fusion bridge, never by redrawing the model. Examples: "put the Counterpart logo where the maker's logo is", "add my name", "make the hook 5 mm longer". The edit touches only that region; everything else, scales and fit features included, stays exactly as published. The project keeps the original and the edited file side by side, and "Compare" shows both. Counterpart's own mark is in `docs/brand/counterpart-mark.svg`.
-- **Credit the designer.** The project's title is the model's name; the project page shows "by *designer* on *site*" and links back to the page. Printing goes through the user's own download, and Counterpart never re-hosts the files.
+- **Credit the designer.** The project's title is the model's name (from the file or its page). A model file that brings no name is titled from the person's typed words like any other project, once the file is here and by backfill for older ones, never before, so a generated title cannot take the place of the source's own; the companion decides this and no client cuts the request into a title (Nov 10: "First plate from Counterpart's own kernel…"); the project page shows "by *designer* on *site*" and links back to the page. Printing goes through the user's own download, and Counterpart never re-hosts the files.
 
 **Flow:**
 

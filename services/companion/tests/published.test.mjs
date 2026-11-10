@@ -433,3 +433,48 @@ test('an unlisted 3MF that isn’t selected doesn’t block the selected STL’s
  await f.service.selectPlate(object.id,both.files.receipts.findIndex(receipt=>receipt.format==='3mf'),0);
  await assert.rejects(f.service.estimate(object.id),{message:update});
 });
+
+// Nov 10: a model-file project made with typed words and a file that carries no name sat in the list as its request
+// cut off mid-sentence ("First plate from Counterpart's own kernel…"): published projects were never given a
+// generated title. One with a real name from its source keeps it.
+test('a model file with no name of its own is titled from the person\'s words; one with a name keeps it',async t=>{
+ const asked=[];const f=await setup(t,undefined,{titleFor:async request=>{asked.push(request);return 'Kernel wall holder.';}});
+ const until=async check=>{for(let i=0;i<200;i++){if(await check())return;await new Promise(r=>setTimeout(r,10));}assert.fail('timed out');};
+ const words='First plate from our own kernel: a wall holder for the bike-oil bottle, and three more parts on one plate';
+ // Before the file is here nothing is generated: the source's own name may still arrive.
+ const unnamed=await f.service.create(words,'published',LINK);
+ await f.service.list();await new Promise(r=>setTimeout(r,30));
+ assert.deepEqual(asked,[],'not before the file arrives');
+ assert.equal(publicObject(await f.store.get(unnamed.id)).title,'First plate from our own kernel…','until then, the first words');
+ const arrived=await f.service.addModelFile(unnamed.id,'first-plate.3mf',model(''));
+ assert.equal(arrived.state,'ready');
+ await until(async()=>(await f.store.get(unnamed.id)).title==='Kernel wall holder');
+ assert.deepEqual(asked,[words],'asked once, with what the person typed');
+ // A file that names itself keeps that name, and nothing is generated for it.
+ const named=await f.service.create('Print this in black','published',LINK);
+ const done=await f.service.addModelFile(named.id,'caliper.3mf',model('Vernier caliper'));
+ assert.equal(done.title,'Vernier caliper');
+ await f.service.list();await new Promise(r=>setTimeout(r,30));
+ assert.equal(asked.length,1);
+ assert.equal((await f.store.get(named.id)).title,'Vernier caliper');
+ // A name the person gave is never replaced either.
+ const renamed=await f.service.create(words,'published',LINK);await f.service.rename(renamed.id,'My plate');
+ await f.service.addModelFile(renamed.id,'plate.3mf',model(''));
+ await f.service.list();await new Promise(r=>setTimeout(r,30));
+ assert.equal((await f.store.get(renamed.id)).title,'My plate');
+ assert.equal(asked.length,1);
+});
+
+test('an older model-file project with words and no name gets its title when the list is read',async t=>{
+ const asked=[];const f=await setup(t,undefined,{titleFor:async request=>{asked.push(request);return 'Kernel wall holder';}});
+ const until=async check=>{for(let i=0;i<200;i++){if(await check())return;await new Promise(r=>setTimeout(r,10));}assert.fail('timed out');};
+ // As stored before this: published, printed, a file, the person's words, no title.
+ const old=await f.store.update((await f.store.create('First plate from our own kernel: a wall holder','published')).id,o=>({...o,state:'printed',current:{model:'current/model.3mf',renders:[]}}));
+ // Nothing to say and no name: left alone.
+ const wordless=await f.store.update((await f.store.create(undefined,'published')).id,o=>({...o,state:'ready',current:{model:'current/model.3mf',renders:[]}}));
+ await f.service.list();
+ await until(async()=>(await f.store.get(old.id)).title==='Kernel wall holder');
+ await f.service.list();
+ assert.deepEqual(asked,['First plate from our own kernel: a wall holder']);
+ assert.equal((await f.store.get(wordless.id)).title,undefined);
+});
