@@ -1,4 +1,4 @@
-import {copyFile, mkdir, readdir, readFile, stat, writeFile} from 'node:fs/promises';
+import {copyFile, mkdir, readdir, readFile, rm, stat, writeFile} from 'node:fs/promises';
 import {basename, dirname, extname, join, resolve} from 'node:path';
 import {toolResultJson, type PrinterMcpClient} from '@scan-to-make/printer-handoff';
 import type {TouchupPass} from './inputs.js';
@@ -61,11 +61,12 @@ async function isFile(path: string): Promise<boolean> { return stat(path).then(i
  */
 export async function copyDesign(from: CodeDesign, toDir: string): Promise<CodeDesign> {
   await mkdir(toDir, {recursive: true});
-  const script = join(toDir, 'touched.py'), parameters = join(toDir, 'touched.parameters.json');
+  // The saved files keep the extensions the MCP gave them; only their stem is Counterpart's.
+  const script = join(toDir, `touched${extname(from.script)}`), parameters = join(toDir, 'touched.parameters.json');
   await copyFile(from.script, script);
   await copyFile(from.parameters, parameters);
   const copy: CodeDesign = {script, parameters};
-  if (from.step && await isFile(from.step)) { copy.step = join(toDir, 'touched.step'); await copyFile(from.step, copy.step); }
+  if (from.step && await isFile(from.step)) { copy.step = join(toDir, `touched${extname(from.step)}`); await copyFile(from.step, copy.step); }
   if (from.result && await isFile(from.result)) { copy.result = join(toDir, 'touched.result.json'); await copyFile(from.result, copy.result); }
   if (from.inputs && await isFile(from.inputs)) {
     const listed = JSON.parse(await readFile(from.inputs, 'utf8')) as Record<string, unknown>;
@@ -97,7 +98,7 @@ interface CadReceipt {
   status?: unknown; final?: unknown; completed_at?: unknown; valid?: unknown;
   stl?: unknown; step?: unknown; script?: unknown; parameters?: unknown; input_manifest?: unknown; renders?: unknown;
 }
-interface CadRun {dir: string; receipt: CadReceipt; manifest: string; stl: string; completedAt: string}
+interface CadRun {dir: string; receipt: CadReceipt; manifest: string; stl: string; script: string; parameters: string; completedAt: string}
 
 const text = (value: unknown) => typeof value === 'string' && value ? value : undefined;
 /** A receipt's own artifact path, only when it is inside its run folder. */
@@ -123,7 +124,10 @@ async function selectedRuns(cadDir: string, validStl: StlCheck): Promise<CadRun[
     if (receipt.status !== 'completed' || receipt.final !== true || receipt.valid !== true) continue;
     const stl = inside(dir, receipt.stl);
     if (!stl || !await validStl(stl)) continue;
-    runs.push({dir, receipt, manifest, stl, completedAt: text(receipt.completed_at) ?? ''});
+    // The model and its design source come together: a run without its own script and parameters can't be selected.
+    const script = inside(dir, receipt.script), parameters = inside(dir, receipt.parameters);
+    if (!script || !parameters || !await isFile(script) || !await isFile(parameters)) continue;
+    runs.push({dir, receipt, manifest, stl, script, parameters, completedAt: text(receipt.completed_at) ?? ''});
   }
   return runs.sort((a, b) => a.completedAt.localeCompare(b.completedAt) || a.dir.localeCompare(b.dir));
 }
@@ -138,19 +142,27 @@ async function selectedRuns(cadDir: string, validStl: StlCheck): Promise<CadRun[
  */
 export async function collectCodeRuns(pass: Pick<TouchupPass, 'dir' | 'outDir' | 'checkpointsDir'>, validStl: StlCheck): Promise<{design?: CodeDesign}> {
   const runs = await selectedRuns(passCadDir(pass), validStl);
-  await mkdir(pass.checkpointsDir, {recursive: true});
-  for (const [index, run] of runs.entries()) await copyFile(run.stl, join(pass.checkpointsDir, `${String(index + 1).padStart(3, '0')}.stl`));
   const model = runs.at(-1);
   if (!model) return {};
-  await copyFile(model.stl, join(pass.outDir, 'touched.stl'));
-  // The overall sheet first, then the single views: the rules ask for the clearest overall view to sort first.
-  const renders = model.receipt.renders && typeof model.receipt.renders === 'object' ? model.receipt.renders as Record<string, unknown> : {};
-  const views = Object.entries(renders).flatMap(([view, path]) => { const file = inside(model.dir, path); return file ? [{view, file}] : []; })
-    .sort((a, b) => Number(b.view === 'contact') - Number(a.view === 'contact') || a.view.localeCompare(b.view));
-  for (const [index, {view, file}] of views.entries()) await copyFile(file, join(pass.outDir, `${index + 1}-${view}${extname(file) || '.png'}`));
-  const script = inside(model.dir, model.receipt.script), parameters = inside(model.dir, model.receipt.parameters);
-  if (!script || !parameters) return {};
   const inputs = text(model.receipt.input_manifest), step = inside(model.dir, model.receipt.step);
-  return {design: {script, parameters, result: model.manifest,
-    ...(inputs && await isFile(inputs) ? {inputs} : {}), ...(step && await isFile(step) ? {step} : {})}};
+  const design: CodeDesign = {script: model.script, parameters: model.parameters, result: model.manifest,
+    ...(inputs && await isFile(inputs) ? {inputs} : {}), ...(step && await isFile(step) ? {step} : {})};
+  // The overall sheet first, then the single views: the rules ask for the clearest overall view to sort first.
+  // A view the receipt names but that isn't there is left out; it never costs the model or its design.
+  const renders = model.receipt.renders && typeof model.receipt.renders === 'object' ? model.receipt.renders as Record<string, unknown> : {};
+  const views: {view: string; file: string}[] = [];
+  for (const [view, path] of Object.entries(renders)) { const file = inside(model.dir, path); if (file && await isFile(file)) views.push({view, file}); }
+  views.sort((a, b) => Number(b.view === 'contact') - Number(a.view === 'contact') || a.view.localeCompare(b.view));
+  const touched = join(pass.outDir, 'touched.stl');
+  try {
+    await mkdir(pass.checkpointsDir, {recursive: true});
+    for (const [index, run] of runs.entries()) await copyFile(run.stl, join(pass.checkpointsDir, `${String(index + 1).padStart(3, '0')}.stl`));
+    for (const [index, {view, file}] of views.entries()) await copyFile(file, join(pass.outDir, `${index + 1}-${view}${extname(file) || '.png'}`));
+    await copyFile(model.stl, touched);
+  } catch (error) {
+    // Nothing half-kept: without its design source the model is not offered either.
+    await rm(touched, {force: true}).catch(() => undefined);
+    throw error;
+  }
+  return {design};
 }

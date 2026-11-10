@@ -280,7 +280,11 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
 
   // A code pass's worker can't write files: its cad_run folders become the checkpoints, model, renders and design
   // source here, on every ending (a limit or a crash keeps its last run, as any pass keeps its last checkpoint).
-  const code = inv.engine === 'code' ? await collectCodeRuns(pass, isValidStl).catch(() => ({})) as Awaited<ReturnType<typeof collectCodeRuns>> : undefined;
+  let code: Awaited<ReturnType<typeof collectCodeRuns>> | undefined, collectFailed: string | undefined;
+  if (inv.engine === 'code') {
+    try { code = await collectCodeRuns(pass, isValidStl); }
+    catch (error) { code = {}; collectFailed = error instanceof Error ? error.message : String(error); }
+  }
   const touched = join(pass.outDir, 'touched.stl');
   const checkpoints = await list(pass.checkpointsDir, '.stl');
   const renders = await list(pass.outDir, '.png');
@@ -316,6 +320,11 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
     ? {design: {f3d, ...(await stat(parameters).then(info => info.isFile(), () => false) ? {parameters} : {})}} : {};
   Object.assign(base, design);
 
+  // A code pass whose selected run couldn't be kept says so, and offers no model without its design source.
+  if (collectFailed !== undefined) {
+    const {parts: _parts, partColours: _colours, design: _design, ...kept} = base as typeof base & {parts?: string; partColours?: unknown; design?: unknown};
+    return {...kept, status: 'failed', reason: publicText(`Counterpart couldn't keep this pass's design: ${collectFailed}`)};
+  }
   if (ended.error) {
     const reason = ended.error.code === 'ENOENT' ? `Claude Code wasn't found at ${inv.command}. Install it or sign in.` : `Claude Code couldn't start: ${ended.error.message}`;
     return {status: 'failed', reason: publicText(reason), ...withModel, ...base};

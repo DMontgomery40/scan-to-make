@@ -438,3 +438,59 @@ test('after a companion restart, the pass folder alone gives the selected run an
   assert.deepEqual(JSON.parse(await read(found.design.result, 'utf8')).checks, {watertight: true, manifold: true});
   assert.equal(await read(join(pass.outDir, 'touched.stl'), 'utf8'), SOLID);
 });
+
+// Review of #439, F1: the model and its design source arrive together or not at all.
+test('a selected run\'s missing render never costs the design source; a run without an in-folder script and parameters is not selectable', async () => {
+  const {mkdir, rm} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-together-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [], photos: [], requirePhotos: false});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const t0 = Date.now() - 60_000;
+  const earlier = await cadRun(cadDir, 'cad-holder-1', 'holder', {at: t0, final: true});
+  const latest = await cadRun(cadDir, 'cad-holder-2', 'holder', {at: t0 + 1000, final: true});
+  await rm(join(latest, 'holder.renders', 'front.png'));  // a render the receipt names is gone
+  const missing = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Done.'})), pass);
+  assert.equal(missing.model, join(pass.outDir, 'touched.stl'));
+  assert.equal(missing.design?.script, join(latest, 'holder.py'), 'the design source comes with the model');
+  assert.deepEqual(missing.renders.map(path => path.split('/').at(-1)), ['1-contact.png'], 'the render that exists is kept');
+  assert.ok(earlier);
+  // The latest final run lost its script: it is not selectable, so the earlier one is the model and the design.
+  const again = await prepareTouchupPass({root, objectId: 'obj2', scan: [], photos: [], requirePhotos: false});
+  const againCad = join(again.dir, 'cad');
+  await mkdir(againCad, {recursive: true});
+  const first = await cadRun(againCad, 'cad-holder-1', 'holder', {at: t0, final: true});
+  const broken = await cadRun(againCad, 'cad-holder-2', 'holder', {at: t0 + 1000, final: true});
+  await rm(join(broken, 'holder.py'));
+  const fallback = await runTouchupWorker(codeInv(again, codeWorker({status: 'done', summary: 'Done.'})), again);
+  assert.equal(fallback.design?.script, join(first, 'holder.py'));
+  assert.deepEqual(fallback.checkpoints, [join(again.checkpointsDir, '001.stl')], 'the unselectable run is no checkpoint either');
+});
+
+test('a collector that fails promotes nothing and says why on the pass', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-collect-fails-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [], photos: [], requirePhotos: false});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  await cadRun(cadDir, 'cad-holder-1', 'holder', {at: Date.now() - 1000, final: true});
+  await mkdir(join(pass.outDir, 'touched.stl'));  // the model can't be written
+  const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Done.'})), pass);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.model, undefined, 'no model without its design source');
+  assert.equal(result.design, undefined);
+  assert.match(result.reason, /^Counterpart couldn't keep this pass's design/);
+});
+
+// Review of #439, F6: the saved script keeps the extension the MCP gave it.
+test('a saved code design keeps the script\'s own extension from the receipt', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const {copyDesign} = await import('../dist/touchup/code-engine.js');
+  const root = await tempDir('touchup-code-ext-');
+  await mkdir(join(root, 'run'), {recursive: true});
+  await writeFile(join(root, 'run', 'holder.cad'), '# script');
+  await writeFile(join(root, 'run', 'holder.parameters.json'), '{}');
+  const copy = await copyDesign({script: join(root, 'run', 'holder.cad'), parameters: join(root, 'run', 'holder.parameters.json')}, join(root, 'saved'));
+  assert.equal(copy.script, join(root, 'saved', 'touched.cad'));
+  assert.equal(copy.parameters, join(root, 'saved', 'touched.parameters.json'));
+});
