@@ -43,11 +43,12 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Needs you"].exists)
         XCTAssertTrue(app.buttons["Camera"].exists && app.buttons["Best guess"].exists, "the ask card answers in place")
         XCTAssertTrue(app.buttons["new-project"].exists)
-        // Inline in one compact row (§5.1), clear of the floating New button after one scroll (F13).
-        app.scrollViews.firstMatch.swipeUp()
-        let camera = app.buttons["Camera"], photos = app.buttons["Photos"]
-        XCTAssertTrue(camera.isHittable && photos.isHittable && app.buttons["Best guess"].isHittable,
-                      "every answer is tappable, none under New")
+        // Inline in one compact row (§5.1), and never under the floating New button (F13). A blind swipe could
+        // carry the card under the navigation bar instead, so scroll only until the answers can be tapped.
+        let camera = app.buttons["Camera"], photos = app.buttons["Photos"], guess = app.buttons["Best guess"]
+        XCTAssertTrue(reach(app, camera) && photos.isHittable && guess.isHittable, "every answer can be tapped")
+        let new = app.buttons["new-project"].frame
+        for answer in [camera, photos, guess] { XCTAssertFalse(answer.frame.intersects(new), "\(answer.label) is under New") }
         XCTAssertEqual(camera.frame.minY, photos.frame.minY, accuracy: 2, "Camera and Photos share one row")
         // The Mac's real name and what its printer is doing, never "0 printers ready" while one prints.
         XCTAssertTrue(app.staticTexts["Mac mini connected · Bambu Lab P1S printing"].exists)
