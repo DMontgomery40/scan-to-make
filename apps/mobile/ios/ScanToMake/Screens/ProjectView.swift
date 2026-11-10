@@ -531,14 +531,10 @@ struct ProjectView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Your Mac has a question", systemImage: "questionmark.bubble.fill").font(.headline).foregroundStyle(.orange)
             Text(ProjectWords.question(object))
-            if !["file", "choice"].contains(object.openAsk?.type ?? "") { HStack(spacing: 10) {
-                ProjectImage(project: object, path: object.openAsk.flatMap { $0.photo != nil ? "asks/\($0.id).jpg" : nil } ?? object.thumbnailPath, maxPixelSize: 300)
-                    .frame(width: 64, height: 64).clipShape(.rect(cornerRadius: 12))
-                    .overlay { RegionOverlay(region: object.openAsk?.region) }
-                    .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.orange, lineWidth: 2) }
-                Text(object.openAsk?.photo != nil ? "Here's where. The highlighted part is what I can't see." : "This is the closest view I have.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
+            if !["file", "choice"].contains(object.openAsk?.type ?? "") {
+                let ask = object.openAsk
+                AskPhoto(project: object, path: ask.flatMap { $0.photo != nil ? "asks/\($0.id).jpg" : nil } ?? object.thumbnailPath,
+                         region: ask?.photo != nil ? ask?.region : nil, caption: AskPicture.caption(ask))
             }
             AskButtons(store: store, project: object, working: $askWorking, problem: $askProblem)
             // The Mac takes a typed answer when it says so (KAN-214 #204, `answers` includes "text").
@@ -783,22 +779,6 @@ struct ProjectView: View {
     }
 }
 
-/// The highlighted region on an Ask's picture.
-struct RegionOverlay: View {
-    let region: Project.Region?
-    var body: some View {
-        GeometryReader { g in
-            if let r = region {
-                RoundedRectangle(cornerRadius: 6).strokeBorder(.orange, lineWidth: 2)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(.orange.opacity(0.18)))
-                    .frame(width: g.size.width * r.width, height: g.size.height * r.height)
-                    .offset(x: g.size.width * r.x, y: g.size.height * r.y)
-            }
-        }
-        .allowsHitTesting(false)
-    }
-}
-
 // MARK: Sections
 
 /// What changed, and the print's time, filament and printer.
@@ -871,7 +851,7 @@ struct ChangeRow: View {
     }
 }
 
-/// Your request, every photo and scan full size, and your follow-ups.
+/// Your request, the photos you added, your scan as one strip, and your follow-ups.
 struct InputsSection: View {
     let project: Project
     var queued: [CorrectionQueue.Message] = []
@@ -882,10 +862,14 @@ struct InputsSection: View {
         let conversation = ProjectConversation(project: project, queued: queued, queueFailed: queueFailed)
         LazyVStack(alignment: .leading, spacing: 16) {
             ForEach(conversation.entries) { entry in
-                ConversationBubble(entry: entry) { pictures(entry.photos) }
+                ConversationBubble(entry: entry) {
+                    pictures(entry.photos)
+                    if let scan = entry.scan { ScanStrip(project: project, scan: scan) }
+                }
             }
             if conversation.entries.isEmpty { Text("No request was saved with this project.").foregroundStyle(.secondary) }
-            if project.scan != nil {
+            // A scan with its photos is the strip above; this line is for a scan that came as a model file only.
+            if project.scan != nil, project.capture?.isEmpty ?? true {
                 Label("Walk-around scan, saved on your Mac", systemImage: "cube.transparent").font(.subheadline).foregroundStyle(.secondary)
             }
             if !conversation.otherPhotos.isEmpty {

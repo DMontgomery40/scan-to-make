@@ -38,4 +38,32 @@ final class ProjectConversationTests: XCTestCase {
         XCTAssertEqual(queue.messages[project.id]?.map(\.photos), [["one.jpg"], ["two.jpg"]])
         XCTAssertEqual(ProjectConversation(project: project, queued: queue.messages[project.id] ?? []).entries.map(\.photos), [["photos/one.jpg"], ["photos/two.jpg"]])
     }
+
+    /// David, Nov 9: the request showed all of a scan's frames, 130 near-identical bottles. The scan is one thing: five
+    /// frames round the orbit and the count; photos the person added stay one by one.
+    func testAScanIsOneStripOfFiveFramesAndTheCountBesideTheRequestPhotos() {
+        var project = Project(id: "bottle", createdAtMs: 1, updatedAtMs: 2, state: .needsCloseup, photos: ["closeup.jpg"])
+        project.instructions = "Make something that holds three of these"
+        project.requestPhotos = ["closeup.jpg"]
+        project.capture = (1...130).map { String(format: "%04d.heic", $0) }
+        let request = try! XCTUnwrap(ProjectConversation(project: project).entries.first)
+        XCTAssertEqual(request.photos, ["photos/closeup.jpg"], "a photo added on purpose still shows by itself")
+        XCTAssertEqual(request.scan?.count, 130)
+        XCTAssertEqual(request.scan?.words, "130 photos")
+        XCTAssertEqual(request.scan?.preview, ["capture/0001.heic", "capture/0033.heic", "capture/0066.heic", "capture/0098.heic", "capture/0130.heic"])
+        XCTAssertEqual(ScanPhotos.sample(130), [0, 32, 65, 97, 129], "the vector Android and Linux check too")
+        XCTAssertEqual(ScanPhotos.sample(3), [0, 1, 2])
+        XCTAssertEqual(ScanPhotos.sample(6), [0, 1, 3, 4, 5])
+        XCTAssertEqual(ProjectConversation(project: project).otherPhotos, [])
+    }
+
+    func testAScanAloneStillMakesTheRequestEntry() {
+        var project = Project(id: "scan", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        project.capture = ["0001.heic"]
+        let chat = ProjectConversation(project: project)
+        XCTAssertEqual(chat.entries.map(\.id), ["request"])
+        XCTAssertEqual(chat.entries.first?.scan?.words, "1 photo")
+        XCTAssertEqual(chat.entries.first?.photos, [])
+    }
 }
+
