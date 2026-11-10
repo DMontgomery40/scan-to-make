@@ -484,7 +484,8 @@ class HomeLayoutTests {
         compose.setContent { WithApp { SettingsScreen(back = {}, pairAgain = {}, openPrinters = {}) } }
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("code-engine")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Not set up yet.").assertExists()
-        compose.onNodeWithText("Set Up").performClick()
+        // The card is below the fold on a phone: scroll to it as a person would, then press Set Up.
+        compose.onNodeWithText("Set Up").performScrollTo().performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("Setting up… 0 s so far.")).fetchSemanticsNodes().isNotEmpty() }
         org.junit.Assert.assertTrue(paths.contains("POST settings/cad/setup"))
     }
