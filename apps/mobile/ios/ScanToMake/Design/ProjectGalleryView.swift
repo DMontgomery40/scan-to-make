@@ -66,24 +66,16 @@ struct ProjectGalleryView: View {
         return nil
     }
 
-    /// The Mac's picture of an entry, which the stage shows until its model is drawn, and if it can't be.
-    private func still(_ entry: ProjectGallery.Entry) -> AnyView? {
-        guard let path = project.picture(for: entry) else {
-            // Nothing drawn by the Mac (a Mac that can't draw, a picture still being drawn): what it is and that it's
-            // coming, never an empty stage.
-            return AnyView(VStack(spacing: 10) {
-                ProgressView()
-                Text(entry.label).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-            }.accessibilityElement(children: .combine).accessibilityIdentifier("gallery-stage-waiting"))
-        }
-        return AnyView(ProjectImage(project: project, path: path, maxPixelSize: 1200, contentMode: .fit,
-                                    placeholderSymbol: words.phase.symbol, onStage: true)
-            .accessibilityLabel("\(entry.label), as your Mac drew it")
-            .accessibilityAddTraits(.isImage)
-            .accessibilityIdentifier("gallery-stage-picture"))
+    /// The still for an entry (`StagePicture`, the stage's one still picture): its Mac picture until its model is drawn,
+    /// and if it can't be; that one is coming; or that none can be had.
+    private func still(_ entry: ProjectGallery.Entry) -> StagePicture {
+        StagePicture(project: project, still: project.still(for: entry), label: entry.label,
+                     unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.",
+                     symbol: words.phase.symbol)
     }
 
-    /// One plain line under the stage when an entry's model can't be had: its picture stays above it.
+    /// One plain line under the stage when an entry's model can't be had: its picture stays above it. A picture's own
+    /// state is the stage's (`StagePicture`), never a second line here.
     @ViewBuilder private func unavailable(_ entry: ProjectGallery.Entry) -> some View {
         let (path, model): (String?, Project.ScanModel?) = switch entry.drawing {
         case .model(let drawn) where drawn == "model.stl": ("model.stl", nil)
@@ -123,37 +115,32 @@ struct ProjectGalleryView: View {
             switch entry.drawing {
             case .model(let path):
                 ModelStage(url: path == "model.stl" ? modelURL : scanURL, tint: tint(entry.colour),
-                           lightStage: StageContrast.lightStage(for: entry.colour), measured: { measured[entry.id] = $0 },
-                           placeholder: still(entry), undrawable: { undrawable.insert(entry.id) })
+                           lightStage: StageContrast.lightStage(for: entry.colour), measured: { drawn(entry, $0) },
+                           placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) })
                     .id(entry.id)
             case .assembly(_, _, let seats):
                 // Both models or neither: a part with no scan at its seats would not be Together.
                 ModelStage(url: togetherScanURL == nil ? nil : modelURL, tint: tint(entry.colour), lightStage: StageContrast.lightStage(for: entry.colour),
-                           object: togetherScanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 }, placeholder: still(entry), undrawable: { undrawable.insert(entry.id) })
+                           object: togetherScanURL, seats: seats.map(\.matrix), measured: { drawn(entry, $0) }, placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) })
                     .id(entry.id)
-            case .picture(let path):
-                ZStack {
-                    StageBackground()
-                    ProjectImage(project: project, path: path.isEmpty ? nil : path, maxPixelSize: 1200, contentMode: .fit)
-                }
+            case .picture:
+                still(entry)
             }
         } else if let photo = project.photoPicture {
             // Photos sent, no scan model or result yet: the subject the Mac cut out, as the project's card shows it.
-            ZStack {
-                StageBackground()
-                ProjectImage(project: project, path: photo, maxPixelSize: 1200, contentMode: .fit)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Your photo")
-            .accessibilityAddTraits(.isImage)
-            .accessibilityIdentifier("gallery-photo-picture")
+            StagePicture(project: project, still: .picture(photo), label: "Your photo", symbol: words.phase.symbol)
         } else {
-            ZStack {
-                StageBackground()
-                Image(systemName: words.phase.symbol).font(.system(size: 44)).foregroundStyle(words.phase.color.opacity(0.7))
-                    .symbolEffect(.pulse, isActive: words.busy)
-            }
+            // Nothing to show yet: coming while the Mac works, else said plainly.
+            StagePicture(project: project, still: words.busy ? .waiting : .notAvailable, label: project.title ?? "Your project",
+                         unavailableLine: "Nothing to show yet.", symbol: words.phase.symbol)
         }
+    }
+
+    /// The model drew (`ModelStage` measured it): its size for the chip, and any earlier "couldn't be shown" line goes
+    /// (review S5 on #539). ModelStage measures before it draws its poster, so a poster that then fails still says so.
+    private func drawn(_ entry: ProjectGallery.Entry, _ size: [Double]) {
+        measured[entry.id] = size
+        undrawable.remove(entry.id)
     }
 
     private func tint(_ colour: ProjectGallery.Colour) -> UIColor? {

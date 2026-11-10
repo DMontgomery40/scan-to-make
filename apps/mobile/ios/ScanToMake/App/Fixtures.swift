@@ -103,6 +103,19 @@ enum Fixtures {
                      "photos": [], "passes": [["startedAtMs": ms - 8_900_000, "endedAtMs": ms - 8_000_000, "status": "done"]],
                      "current": ["model": "current/model.stl", "renders": ["current/renders/mic.png"], "sizeMm": [48, 50, 54]]]]
         }
+        // `-CounterpartFixtureSet picture-stage` (review B1/B2 on #539): three designer 3MFs, each a `.picture` stage. The
+        // first has the Mac's picture (shown, slow, or refused by an empty folder); the second's is still being drawn; the
+        // Mac couldn't draw the third's. None of them is ever a bare backdrop.
+        if set == "picture-stage" {
+            let ms = now.timeIntervalSince1970 * 1000
+            func model(_ id: String, _ title: String, ago: Double, _ extra: [String: Any]) -> [String: Any] {
+                ["id": id, "createdAtMs": ms - ago - 60_000, "updatedAtMs": ms - ago, "state": "ready", "kind": "published", "title": title,
+                 "photos": [], "messages": [], "passes": [], "current": ["model": "original/abc-gridfinity.3mf", "renders": []]].merging(extra) { $1 }
+            }
+            return [model(ids.mic, "Gridfinity bins", ago: 60_000, ["picture": "pictures/part-0123456789abcdef.png", "pictures": ["part": "pictures/part-0123456789abcdef.png"]]),
+                    model(ids.potato, "Cable clips", ago: 120_000, ["pictureStates": ["part": "drawing"]]),
+                    model(ids.v1, "Lattice vase", ago: 180_000, ["pictureStates": ["part": "failed"]])]
+        }
         // A copy of a designer's 3MF whose printer MCP says it prints with its own settings, saved at Fine/Strong
         // (Nov 5, caliper card 1f1c5515): the sheet must start at Standard and say it prints the designer's settings.
         if set == "designer" {

@@ -862,7 +862,9 @@ final class LayoutParityUITests: XCTestCase {
         photos.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "photo-only",
                                   "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
         photos.launch()
-        XCTAssertTrue(photos.images["gallery-photo-picture"].waitForExistence(timeout: 20), "a photo-only project shows its photo's subject")
+        let subject = photos.images["gallery-stage-picture"]
+        XCTAssertTrue(subject.waitForExistence(timeout: 20), "a photo-only project shows its photo's subject")
+        XCTAssertEqual(subject.label, "Your photo. The picture didn’t come from your Mac.", "this folder has no pictures, and the stage says so")
     }
 
     func testEveryPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() throws {
@@ -1274,9 +1276,9 @@ final class LayoutParityUITests: XCTestCase {
     }
 
     /// Nov 10: every "What you scanned" on David's phone was blank. With projects present: a scan the Mac lists but can't
-    /// send leaves the Mac's picture on the stage and one line with Try Again; a scan too large for a phone keeps its
-    /// picture and says so. Never an empty stage.
-    func testAScanThatCantBeHadKeepsTheMacsPictureAndSaysWhyWithProjectsPresent() {
+    /// send says so in one line with Try Again; a scan too large for a phone says so. The stage itself is never empty: here
+    /// the Mac's picture can't be had either (an empty folder), so it shows the project's symbol and says that too.
+    func testAScanThatCantBeHadSaysWhyAndTheStageIsNeverEmptyWithProjectsPresent() {
         if regular { XCUIDevice.shared.orientation = .landscapeLeft }
         defer { XCUIDevice.shared.orientation = .portrait }
         let app = launch(set: "scan-stage")
@@ -1290,7 +1292,7 @@ final class LayoutParityUITests: XCTestCase {
                                     "-CounterpartOpen", "counterpart://project/\(id)"]
             page.launch()
             let picture = page.images["gallery-stage-picture"]
-            XCTAssertTrue(picture.waitForExistence(timeout: 20), "What you scanned shows the Mac's picture, not an empty stage")
+            XCTAssertTrue(picture.waitForExistence(timeout: 20), "What you scanned has its stage picture, not an empty stage")
             XCTAssertGreaterThan(picture.frame.height, 150, "the picture fills the stage: \(picture.frame)")
             // No pictures in this folder: the picture can't be had, so the stage draws the project's symbol, not a backdrop.
             XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "not available"), object: picture)], timeout: 15) == .completed,
@@ -1327,6 +1329,49 @@ final class LayoutParityUITests: XCTestCase {
             let state = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: picture)
             XCTAssertEqual(XCTWaiter().wait(for: [state], timeout: 15), .completed, "\(value): \(String(describing: picture.value))")
             page.terminate()
+        }
+    }
+
+    /// Review B1/B2 on #539: a 3MF's stage is a picture (`.picture`), and it was a bare backdrop while that picture came.
+    /// With projects present, one page in each state: shown; loading (a slow Mac: a progress mark and what is coming);
+    /// not available after a failed fetch (with Try Again); waiting while the Mac draws it; not available when the Mac
+    /// couldn't draw it (no Try Again: it would not help). The stage is never only the backdrop.
+    func testAPictureStageIsShownLoadingWaitingOrSaysItIsNotAvailable() throws {
+        if regular { XCUIDevice.shared.orientation = .landscapeLeft }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let assets = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: assets) }
+        try UIGraphicsImageRenderer(size: CGSize(width: 600, height: 600), format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }()).pngData { context in
+            UIColor(red: 0.13, green: 0.14, blue: 0.17, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 600))
+            UIColor(red: 0.85, green: 0.65, blue: 0.4, alpha: 1).setFill(); context.fill(CGRect(x: 150, y: 180, width: 300, height: 240))
+        }.write(to: assets.appendingPathComponent("thumb-potato.png"))
+        let none = NSTemporaryDirectory() + "no-assets"
+        let shown = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", drawing = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", failed = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a06"
+        let pages: [(name: String, folder: String, slow: String?, id: String, value: String, label: String, retry: Bool)] = [
+            ("shown", assets.path, nil, shown, "shown", "Model, as your Mac drew it", false),
+            ("loading", assets.path, "60", shown, "loading", "Model: coming from your Mac", false),
+            ("fetch-failed", none, nil, shown, "not available", "Model. The picture didn’t come from your Mac.", true),
+            ("drawing", assets.path, nil, drawing, "loading", "Model: coming from your Mac", false),
+            ("not-drawable", assets.path, nil, failed, "not available", "Model. Your Mac couldn’t draw a picture of this.", false),
+        ]
+        for page in pages {
+            let app = XCUIApplication()
+            app.launchArguments = ["-CounterpartFixtures", page.folder, "-CounterpartFixtureSet", "picture-stage", "-CounterpartOpen", "counterpart://project/\(page.id)"]
+            if let slow = page.slow { app.launchArguments += ["-CounterpartSlowPictures", slow] }
+            app.launch()
+            let picture = app.images["gallery-stage-picture"]
+            XCTAssertTrue(picture.waitForExistence(timeout: 20), "\(page.name): the stage has its picture element")
+            let state = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@ AND label == %@", page.value, page.label), object: picture)
+            XCTAssertEqual(XCTWaiter().wait(for: [state], timeout: 15), .completed, "\(page.name): \(picture.label) / \(String(describing: picture.value))")
+            XCTAssertGreaterThan(picture.frame.height, 20, "\(page.name): something is drawn on the stage: \(picture.frame)")
+            XCTAssertEqual(app.buttons["gallery-stage-retry"].exists, page.retry, "\(page.name): Try Again only where it can help")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "picture-stage-\(page.name)-\(regular ? "ipad" : "iphone")"; shot.lifetime = .keepAlways; add(shot)
+            if let folder = ProcessInfo.processInfo.environment["STAGE_SHOTS"] {
+                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: folder).appendingPathComponent("\(shot.name!).png"))
+            }
+            app.terminate()
         }
     }
 
