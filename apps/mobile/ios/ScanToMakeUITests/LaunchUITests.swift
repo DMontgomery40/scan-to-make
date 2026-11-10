@@ -604,6 +604,12 @@ final class LayoutParityUITests: XCTestCase {
         let close = app.navigationBars["New Project"].buttons.firstMatch.frame
         XCTAssertGreaterThanOrEqual(question.frame.minY, close.maxY, "the question is below the header's Close: \(question.frame) \(close)")
         XCTAssertGreaterThanOrEqual(copy.frame.minY, question.frame.maxY, "the first answer is whole, below its question")
+        // The scan being decided about sits beside the question (lead, Nov 10), with all three answers on screen with it.
+        let scan = app.descendants(matching: .any)["scan-use-scan"]
+        XCTAssertTrue(scan.exists, "the scan is next to its question")
+        XCTAssertGreaterThanOrEqual(scan.frame.minY, close.maxY, "the scan is below the header: \(scan.frame)")
+        XCTAssertLessThanOrEqual(scan.frame.maxY, copy.frame.minY + 1, "the scan is above the answers")
+        XCTAssertLessThanOrEqual(later.frame.maxY, send.frame.minY + 1, "all three answers fit with it, above the button")
         let describe = app.staticTexts["What do you need?"]
         XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
         for row in [copy, fit, later] {

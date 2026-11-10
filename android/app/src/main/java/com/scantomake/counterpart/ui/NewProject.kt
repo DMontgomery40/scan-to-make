@@ -38,6 +38,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
@@ -172,7 +174,18 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             // After a scan the screen opens on its question, first and whole (U5): nothing half-hidden above it.
             if (scanned) {
-                Text("What should this scan become?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.testTag("scan-use"))
+                // The scan being decided about, beside its question (lead, Nov 10): one of its own frames, else the scan symbol.
+                // Small, so all three answers still fit on a phone.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val frames = remember(draftId, scanned) { Media.captureFrames(context, draftId) }
+                    val picture = remember(frames) { frames.getOrNull(frames.size / 3)?.let { ImageCache.decode(it, 168) } }
+                    Box(Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)).background(Palette.card).testTag("scan-use-scan")
+                        .semantics { contentDescription = "Your scan" }, contentAlignment = Alignment.Center) {
+                        if (picture != null) androidx.compose.foundation.Image(picture, null, Modifier.size(56.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                        else Icon(CIcons.Cube, null, tint = Palette.filament)
+                    }
+                    Text("What should this scan become?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.testTag("scan-use"))
+                }
                 ScanUseChoice("Copy this object", "Clean up the scan and print the same thing.", scanUse == "copy", "scan-use-copy") { scanUse = "copy" }
                 ScanUseChoice("Make something that fits this", "A holder, mount, case or adapter. The scan is what it must fit, not the print.", scanUse == "fit", "scan-use-fit") { scanUse = "fit" }
                 ScanUseChoice("Just save this scan", "Keep its shape with this project and decide later.", scanUse == "later", "scan-use-later") { scanUse = "later" }
@@ -228,10 +241,10 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
                 }
                 Spacer(Modifier.weight(1f))
             }
-            if (scanned || photos.isNotEmpty()) {
+            // The scan sits beside its question (above); Added is what else you attach.
+            if (photos.isNotEmpty()) {
                 Text("Added", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (scanned) Chip(CIcons.Cube, "Scan · ${Media.captureFrames(context, draftId).size} frames")
                     photos.toList().forEach { f ->
                         Box {
                             val bmp = remember(f) { ImageCache.decode(f, 300) }

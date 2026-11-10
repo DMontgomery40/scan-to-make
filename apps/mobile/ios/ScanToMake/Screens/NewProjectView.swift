@@ -28,6 +28,8 @@ struct NewObjectView: View {
     @State private var measuredMiddle = ""
     @State private var measuredShortest = ""
     @State private var captureWarning: String?
+    /// One of the finished scan's own frames, shown beside its question.
+    @State private var scanPicture: URL?
     @FocusState private var describing: Bool
     /// The scroll's own position, so "the top" is the top of the content below the glass header, not the scroll view's
     /// edge under it (`proxy.scrollTo(_, anchor: .top)` put the question under the header on the iPhone).
@@ -177,14 +179,11 @@ struct NewObjectView: View {
                                    enabled: working == nil && !photosLocked && photos.count < Self.photoLimit) { Task { await addPhotos(camera: false) } }
                     }
 
-                    if attached != nil || !photos.isEmpty {
+                    // The scan itself sits beside its question (above); Added is what else you attach.
+                    if !photos.isEmpty {
                         Text("Added").font(.headline)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
-                                if let attached {
-                                    AttachmentChip(image: nil, symbol: attached == .walkAround ? "cube.transparent" : "hand.raised.fingers.spread",
-                                                   label: attached == .walkAround ? "Scan" : "Scan in hand", remove: nil)
-                                }
                                 ForEach(photos) { photo in
                                     AttachmentChip(url: photo.url, label: "Photo", remove: photosLocked ? nil : { photos.removeAll { $0.id == photo.id } })
                                 }
@@ -205,8 +204,10 @@ struct NewObjectView: View {
             // A scan arrives after the sheet opens (a saved draft resolves, or a capture returns while the Scan tile is
             // in view): back to the top, where its question now is.
             .scrollPosition($scrollPosition)
-            .onChange(of: attached) { _, now in
-                if now != nil { withAnimation { scrollPosition.scrollTo(edge: .top) } }
+            .onChange(of: attached, initial: true) { _, now in
+                guard now != nil else { scanPicture = nil; return }
+                if let created { scanPicture = store.mac.scanPicture(created.id) }
+                withAnimation { scrollPosition.scrollTo(edge: .top) }
             }
             // Continue on a fit takes you to the words it still needs.
             .onChange(of: describing) { _, now in
@@ -257,8 +258,14 @@ struct NewObjectView: View {
     /// as the thing to print, so neither is assumed.
     @ViewBuilder private var scanUseSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("What should this scan become?").font(.headline)
-                .accessibilityAddTraits(.isHeader).accessibilityIdentifier("scan-use-question")
+            // The thing being decided about, next to the question (lead, Nov 10): small, so all three answers still fit.
+            HStack(spacing: 12) {
+                ScanThumb(picture: scanPicture, symbol: attached == .inHand ? "hand.raised.fingers.spread" : "cube.transparent")
+                    .accessibilityLabel(attached == .inHand ? "Your scan in hand" : "Your scan")
+                    .accessibilityIdentifier("scan-use-scan")
+                Text("What should this scan become?").font(.headline)
+                    .accessibilityAddTraits(.isHeader).accessibilityIdentifier("scan-use-question")
+            }
             ScanUseRow(symbol: "doc.on.doc", title: "Copy this object",
                        detail: "Clean up the scan and print the same thing.",
                        selected: scanUse == .copy, identifier: "scan-use-copy") { scanUse = .copy }
@@ -484,6 +491,26 @@ struct NewObjectView: View {
                 attached = saved
             }
             if attached != nil { useJobDefault(); store.refreshStoppedScans() }
+        }
+    }
+}
+
+/// The scan beside its question: one of its own frames, or the scan symbol when there's no picture.
+private struct ScanThumb: View {
+    let picture: URL?
+    let symbol: String
+    @State private var loaded: UIImage?
+    var body: some View {
+        ZStack {
+            StageBackground()
+            if let loaded { Image(uiImage: loaded).resizable().scaledToFill() }
+            else { Image(systemName: symbol).font(.title3).foregroundStyle(Color.filament) }
+        }
+        .frame(width: 56, height: 56).clipShape(.rect(cornerRadius: 14))
+        .accessibilityElement()
+        .task(id: picture) {
+            guard let picture else { loaded = nil; return }
+            loaded = await Task.detached { ImageMemory.thumbnail(at: picture, maxPixelSize: 168) }.value
         }
     }
 }

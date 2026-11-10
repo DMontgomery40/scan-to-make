@@ -302,6 +302,11 @@ class HomeLayoutTests {
         val describe = compose.onNodeWithTag("describe").fetchSemanticsNode().boundsInRoot
         assertTrue("the question is above the description", question.bottom <= describe.top)
         for (tag in listOf("scan-use-copy", "scan-use-fit", "scan-use-later")) compose.onNodeWithTag(tag).assertIsDisplayed()
+        // The scan sits beside its question, above the answers, on screen with them (lead, Nov 10).
+        compose.onNodeWithTag("scan-use-scan").assertIsDisplayed()
+        val scan = compose.onNodeWithTag("scan-use-scan").fetchSemanticsNode().boundsInRoot
+        assertTrue("the scan is above the answers", scan.bottom <= compose.onNodeWithTag("scan-use-copy").fetchSemanticsNode().boundsInRoot.top)
+        compose.onNodeWithText("Added").assertDoesNotExist()
         // Greyed out, saying what to do, until a use is chosen; then the action for that use.
         compose.onNodeWithTag("send").assertIsNotEnabled().assertTextContains("Choose what this scan becomes")
         compose.onNodeWithTag("scan-use-copy").performClick()
