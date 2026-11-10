@@ -50,12 +50,11 @@ export function spoolColour(p: Project): string | undefined {
 
 export function printableParts(p: Project): PrintablePart[] {
   const plates = p.plates ?? [];
+  // Every plate the file has is an entry; one whose picture the MCP didn't send shows the placeholder ("").
   if (plates.length > 1)
-    return plates.flatMap((plate, index) =>
-      plate.thumbnail
-        ? [{ id: `plate-${plate.id}`, label: plate.name || `Plate ${index + 1}`, drawing: { picture: plate.thumbnail }, colour: "own", plate: true }]
-        : [],
-    );
+    return plates.map((plate, index) => ({
+      id: `plate-${plate.id}`, label: plate.name || `Plate ${index + 1}`, drawing: { picture: plate.thumbnail ?? "" }, colour: "own", plate: true,
+    }));
   const current = p.current;
   if (!current) return [];
   const label = p.kind === "copy" ? "Your copy" : p.kind === "published" ? "Model" : "Your part";
@@ -110,7 +109,7 @@ export function picturePath(p: Project): string | undefined {
 
 /** The computer's picture of one entry, for the still view. */
 export function pictureFor(p: Project, entry: GalleryEntry): string | undefined {
-  if ("picture" in entry.drawing) return entry.drawing.picture;
+  if ("picture" in entry.drawing) return entry.drawing.picture || undefined;
   if (entry.kind === "part") return p.pictures?.part ?? (p.current?.renders[0] ? renderPath(p.current.renders[0]) : undefined);
   if (entry.kind === "together") return p.pictures?.together;
   return p.pictures?.scan ?? p.pictures?.photo;

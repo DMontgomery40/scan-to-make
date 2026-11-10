@@ -55,8 +55,9 @@ data class ProjectGallery(val entries: List<Entry>) {
 
         fun printableParts(project: Project): List<PrintablePart> {
             val plates = project.plates.orEmpty()
-            if (plates.size > 1) return plates.mapIndexedNotNull { index, plate ->
-                plate.thumbnail?.let { PrintablePart("plate-${plate.id}", plate.name.ifEmpty { "Plate ${index + 1}" }, Drawing.Picture(it), Colour.Own, isPlate = true) }
+            // Every plate the file has is an entry; one whose picture the MCP didn't send shows the placeholder ("").
+            if (plates.size > 1) return plates.mapIndexed { index, plate ->
+                PrintablePart("plate-${plate.id}", plate.name.ifEmpty { "Plate ${index + 1}" }, Drawing.Picture(plate.thumbnail ?: ""), Colour.Own, isPlate = true)
             }
             val current = project.current ?: return emptyList()
             val label = when (project.kind) { "copy" -> "Your copy"; "published" -> "Model"; else -> "Your part" }
@@ -115,7 +116,7 @@ fun Project.picturePath(): String? = picture ?: selectedPlate?.thumbnail ?: plat
 /** The computer's picture of one gallery entry. */
 fun Project.pictureFor(entry: ProjectGallery.Entry): String? = when (entry.kind) {
     ProjectGallery.Kind.Part -> (entry.drawing as? ProjectGallery.Drawing.Picture)?.path ?: pictures["part"] ?: current?.renders?.firstOrNull()?.let(ProjectGallery::renderPath)
-    ProjectGallery.Kind.Plate -> (entry.drawing as? ProjectGallery.Drawing.Picture)?.path
+    ProjectGallery.Kind.Plate -> (entry.drawing as? ProjectGallery.Drawing.Picture)?.path?.ifEmpty { null }
     ProjectGallery.Kind.Together -> pictures["together"]
     ProjectGallery.Kind.Scan -> pictures["scan"] ?: pictures["photo"]
 }

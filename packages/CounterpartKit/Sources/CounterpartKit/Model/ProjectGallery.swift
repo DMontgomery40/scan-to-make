@@ -27,7 +27,7 @@ public struct ProjectGallery: Equatable, Sendable {
     public enum Drawing: Equatable, Sendable {
         /// A model to turn, at a project path (`model.stl`, `scan/scan.usdz`).
         case model(String)
-        /// A still: a render, a designer's plate picture.
+        /// A still: a render, a designer's plate picture. Empty when the plate has no picture yet (the placeholder).
         case picture(String)
         /// The part (a project path) with the scanned object (a project path) in each seat.
         case assembly(part: String, object: String, seats: [Project.Seat])
@@ -93,10 +93,11 @@ extension Project {
     /// app has each part's own mesh (the seam in `ProjectGallery.init`).
     public var printableParts: [PrintablePart] {
         if let plates, plates.count > 1 {
+            // Every plate the file has is an entry; one whose picture the MCP didn't send shows the placeholder ("").
             return plates.enumerated().map { index, plate in
                 PrintablePart(id: "plate-\(plate.id)", label: plate.name.isEmpty ? "Plate \(index + 1)" : plate.name,
-                              drawing: plate.thumbnail.map { .picture($0) } ?? .picture(""), colour: .own, isPlate: true)
-            }.filter { if case .picture(let path) = $0.drawing { return !path.isEmpty }; return true }
+                              drawing: .picture(plate.thumbnail ?? ""), colour: .own, isPlate: true)
+            }
         }
         guard let current else { return [] }
         let label = usesCopyWorkflow ? "Your copy" : kind == "published" ? "Model" : "Your part"

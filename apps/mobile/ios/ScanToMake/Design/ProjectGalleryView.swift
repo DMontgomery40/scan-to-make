@@ -58,7 +58,7 @@ struct ProjectGalleryView: View {
             case .picture(let path):
                 ZStack {
                     StageBackground()
-                    ProjectImage(project: project, path: path, maxPixelSize: 1200, contentMode: .fit)
+                    ProjectImage(project: project, path: path.isEmpty ? nil : path, maxPixelSize: 1200, contentMode: .fit)
                 }
             }
         } else {
