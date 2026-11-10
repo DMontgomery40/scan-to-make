@@ -41,9 +41,11 @@ test('the companion draws each picture once, records it on the project, and serv
   await mkdir(join(dir, 'current'), {recursive: true}); await mkdir(join(dir, 'scan'), {recursive: true});
   await writeFile(join(dir, 'current', 'model.stl'), 'solid x\nendsolid x\n'); await writeFile(join(dir, 'scan', 'scan.usdz'), 'usdz');
   await store.update(object.id, o => ({...o, state: 'ready', scan: 'scan.usdz', current: {model: 'current/model.stl', renders: [], seats}}));
+  const stamp = (await store.get(object.id)).updatedAtMs;
   await service.list();
   await service.picturesDrawn();
   const first = await service.get(object.id);
+  assert.equal(first.updatedAtMs, stamp, "a drawn picture isn't news: the project keeps its place on Home");
   assert.deepEqual(Object.keys(first.pictures).sort(), ['part', 'scan', 'together']);
   assert.equal(first.picture, first.pictures.part, "the project's picture is its result");
   assert.equal(publicObject(first).picture, first.picture, 'every client reads the same name');

@@ -236,10 +236,12 @@ export class ObjectStore {
     return objects.sort((a, b) => b.createdAtMs - a.createdAtMs);
   }
 
-  update(id: string, change: (object: StmObject) => StmObject): Promise<StmObject> {
+  /** `keepUpdatedAt`: a change that isn't the project's news (its picture redrawn) keeps its place in recency order. */
+  update(id: string, change: (object: StmObject) => StmObject, options: {keepUpdatedAt?: boolean} = {}): Promise<StmObject> {
     const previous = this.#queues.get(id) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
-      const updated = {...change(await this.get(id)), id, updatedAtMs: Date.now()};
+      const before = await this.get(id);
+      const updated = {...change(before), id, updatedAtMs: options.keepUpdatedAt ? before.updatedAtMs : Date.now()};
       await this.#write(updated);
       return updated;
     });

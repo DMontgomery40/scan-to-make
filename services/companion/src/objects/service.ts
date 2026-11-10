@@ -499,7 +499,8 @@ export class ObjectService {
   constructor(deps: ObjectServiceDeps) {
     this.#deps = deps;
     this.#pictures = new ProjectPictures(deps.drawPicture, async (id, names) => {
-      const updated = await deps.store.update(id, o => ({...o, pictures: names, picture: leadPicture(names, o)})).catch(() => undefined);
+      // A redrawn picture is not news: the project keeps its place on Home and in the sidebar.
+      const updated = await deps.store.update(id, o => ({...o, pictures: names, picture: leadPicture(names, o)}), {keepUpdatedAt: true}).catch(() => undefined);
       if (!updated) return;
       deps.onChange?.(updated);
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['picture']}});
