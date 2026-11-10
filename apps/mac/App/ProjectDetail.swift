@@ -235,14 +235,21 @@ struct ProjectDetail: View {
             Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 4) {
                 Text(words.question ?? words.status).font(.subheadline.weight(.semibold))
-                Text(object.state == .needsCloseup ? "Asked on your iPhone too. Send a close-up from it, or let your Mac make its best guess."
+                Text(object.openAsk.flatMap(AskSizesForm.init) != nil ? "Asked on your iPhone too. Confirm the sizes here, or correct any of them."
+                     : object.state == .needsCloseup ? "Asked on your iPhone too. Send a close-up from it, or let your Mac make its best guess."
                      : "Asked on your iPhone too.")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(4)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
-            if words.actions.contains(.bestGuess) { answer("Best Guess", .bestGuess) }
+            // A size is confirmed or measured, never guessed.
+            if words.actions.contains(.bestGuess), object.openAsk?.kind != "sizes" { answer("Best Guess", .bestGuess) }
         }
+            // A size question: its numbers, prefilled, with Confirm as the one obvious action.
+            if let ask = object.openAsk, let form = AskSizesForm(ask) {
+                MacAskSizes(form: form, working: working) { sizes in Task { await model.answerSizes(sizes, on: object.id) } }
+                    .id(ask.id)
+            }
             // The question's picture (David, Nov 9: the phone's was "almost impossible to see"; the Mac showed none).
             if let ask = object.openAsk, let url = object.askPhotoURL ?? object.thumbnailURL {
                 MacAskPhoto(url: url, region: ask.photo != nil ? ask.region : nil, caption: AskPicture.caption(ask), version: object.updatedAtMs)
@@ -761,6 +768,47 @@ struct MacAskPhoto: View {
         Task {
             let ok = await Task.detached { FileManager.default.fileExists(atPath: target.path) || AskPicture.markedFile(from: url, region: region, to: target) }.value
             preview = ok ? target : url
+        }
+    }
+}
+
+/// A size question's fields on the Mac: one row per size the companion asked about, in its words, prefilled, and one
+/// button. What is sent is `AskSizesForm`'s rule (CounterpartKit), the same as on the phone.
+struct MacAskSizes: View {
+    @State var form: AskSizesForm
+    let working: Bool
+    let send: ([AskSizesForm.Answer]) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach($form.fields) { $field in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(field.label.prefix(1).uppercased() + field.label.dropFirst()).font(.body)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(AskSizesForm.source(field.from)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    TextField("", text: $field.text)
+                        .textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing)
+                        .font(.body.monospacedDigit().weight(.semibold))
+                        .frame(width: 90)
+                        .accessibilityLabel("\(field.label), millimetres")
+                        .accessibilityIdentifier("ask-size-\(field.id)")
+                    Text("mm").foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                if form.answer == nil {
+                    Text("Enter each size in millimetres, or leave one empty if you don't know it.").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(form.unchanged ? "Confirm These Sizes" : "Send These Sizes") { if let answer = form.answer { send(answer) } }
+                    .buttonStyle(.glassProminent).controlSize(.large)
+                    .disabled(working || form.answer == nil)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("ask-sizes-confirm")
+            }
         }
     }
 }

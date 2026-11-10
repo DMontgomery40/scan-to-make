@@ -120,6 +120,9 @@ private actor FakeObjects: ObjectsCompanion {
         return "renamed-evidence.jpg"
     }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try change(id, "closeup:\(bestGuess)", ["state": "touching-up"]) }
+    func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project {
+        try change(id, "sizes:" + sizes.map { "\($0.id)=\(AskSizesForm.text($0.mm))" }.joined(separator: ","), ["state": "touching-up"])
+    }
     func print(_ id: String, checked: Bool) async throws -> Project { try change(id, "print:\(checked)", ["state": "printing"]) }
     func answerPrintConfirmation(_ id: String, confirmationId: String, answer: PrintConfirmationAnswer) async throws -> Project {
         confirmationAnswer = answer
@@ -266,6 +269,31 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(scan.words, "130 photos")
         XCTAssertEqual(scan.preview.compactMap(bottle.file).map(\.lastPathComponent), ["0001.heic", "0033.heic", "0066.heic", "0098.heic", "0130.heic"])
         XCTAssertEqual(ProjectConversation(project: bottle).entries.first?.photos, [], "frames never come back as single photos")
+    }
+
+    /// A size question reaches the Mac as numbers to confirm, with projects present, and its answer goes back as
+    /// numbers: the fields are the companion's own labels, a correction is sent as typed, and Best Guess is not offered.
+    func testASizeQuestionIsAnsweredWithNumbersOnTheMacWithProjectsPresent() async throws {
+        let ask: [String: Any] = ["id": "1af638c1-ec63-46fc-aa2f-e74cd29df231", "question": "Can you confirm or correct what the scan reads?",
+                                  "answers": ["sizes", "text", "camera"], "status": "open", "kind": "sizes",
+                                  "sizes": [["id": "size-1", "label": "width at the widest point", "mm": 64, "from": "scan"],
+                                            ["id": "size-2", "label": "width at the waist", "mm": 53.5, "from": "scan"]]]
+        let companion = FakeObjects()
+        await companion.set([item("other", "ready"), item("bottle", "needs-closeup", ["kind": "fit", "current": NSNull(), "ask": ask])])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let bottle = try XCTUnwrap(model.objects.first { $0.id == "bottle" })
+        XCTAssertEqual(bottle.words.stage, .needsYou)
+        var form = try XCTUnwrap(bottle.openAsk.flatMap(AskSizesForm.init))
+        XCTAssertEqual(form.fields.map(\.label), ["width at the widest point", "width at the waist"])
+        XCTAssertEqual(form.fields.map(\.text), ["64", "53.5"])
+        form.fields[1].text = "53"
+        let answer = try XCTUnwrap(form.answer)
+        let sent = await model.answerSizes(answer, on: "bottle")
+        XCTAssertTrue(sent)
+        XCTAssertEqual(await companion.calls.last, "sizes:size-1=64,size-2=53")
+        XCTAssertEqual(ControlClient.sizesParams("bottle", answer)["sizes"],
+                       .array([.object(["id": .string("size-1"), "mm": .number(64)]), .object(["id": .string("size-2"), "mm": .number(53)])]))
     }
 
     /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and
