@@ -119,6 +119,7 @@ Last reconciled: 2026-11-10 07:40Z, main `bf818db8`, by the lead.
 | Nov 9 11:58 pm | "i dunno how to update ui acceptance" | R2 |
 | Nov 10 | Reprint: "obviously ... not everything needs to be ticked ... or if one part fundamentally changes the other parts, obviously they all need new things. this is one of those things that is very very easy to massively overthink and overengineer" | P1 |
 | Nov 10 | Separate pieces: "that is literally what a slicer does? and we're not a slicer? ... we do what steve jobs would do if he was creating a frontend for an mcp server that can print from like 5 slicers ... don't show the separated objects (which again, the slicer does, so we therefore have them) unless the user separates them" | P1; a standing test for every design here: is this the slicer's job? then it is the MCP's, and the app shows the result |
+| Nov 10 | "counterpart is the glittery friendly frontend ... the backend is the mcps ... half of what this app does if not more, is really an update to the mcps ... DOES THE APP STORE IN IOS TAKE KINDLY TO 4X DAILY UPDATES???" | AGENTS.md "The app staples onto the MCPs" (his words added); every brief states which half is the MCPs'; watch rows Q4 (engine names still in app code), P1 (parts are the MCPs' objects), Q2 (print truth from the MCPs' field) |
 | (seen by the lead in his screenshots) | A "Fit brief:" block he never wrote is shown as his request | Q3 |
 | (seen by the lead) | A size question offers Camera, Photos, Best guess | Q3 |
 
@@ -136,6 +137,8 @@ Last reconciled: 2026-11-10 07:40Z, main `bf818db8`, by the lead.
 | L1 | A small geometry kernel written from scratch on distance fields (watertight by construction, no 640 MB environment, could run in the MCP or on the phone), tried against the same holder and unicorn cases once the code engine has shipped | David, Nov 9 |
 | L2 | The Together view shows the clearance per seat ("0.8 mm clear") from the code engine's fit check | Lead, Nov 10; David: "note that for later" |
 | L4 | Parts: scanning a part into an existing project and the Mac telling two things in one scan apart are in the proposal as later slices | Parts proposal |
+| L5 | The MCPs can update every six hours but the app only takes a new MCP when the person presses Update in Settings → Printers; consider telling them an update is waiting, or taking it automatically while nothing is printing | Lead, Nov 10, from David's remark on update frequency |
+| L6 | The design worker's rules ship inside the companion (so inside the Mac app). The MCPs already serve prompts (`fdm_design`, `fdm_slicing`, `cad_design`); anything in those rules that has to be tuned as printers, slicers or the engine change belongs in an MCP prompt, so it can change without an app release | Lead, Nov 10 |
 | L3 | Jira instead of this file: the lead's Atlassian connector is not authorised in this kind of session; a markdown board in the repo is readable by every agent on every machine | David, Nov 10 |
 
 ## Done since Nov 9 (proof in each PR)
