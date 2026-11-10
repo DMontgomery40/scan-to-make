@@ -40,7 +40,7 @@ import type {TouchupInput} from '../touchup/touchup.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
-import {answeredSizes, askKind, InvalidSizesError, sizesNote} from './asks.js';
+import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesNote, withCheckedSizes} from './asks.js';
 /** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
 export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
 import {AskSchema, type Fit} from '@scan-to-make/contracts/counterpart';
@@ -603,7 +603,7 @@ export class ObjectService {
         // A code design's inputs list names its own snapshots, so the copy gets its own list.
         if (isCodeDesign(current.design)) await copyDesign(absoluteDesign(this.dir(id), current.design), join(this.dir(duplicate.id), 'current', 'design'));
         const credit = (source as StmObject & {credit?: unknown}).credit;
-        const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current,
+        const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current, ...(source.checkedSizes?.length ? {checkedSizes: source.checkedSizes} : {}),
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
           preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {}),
           ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {}), ...(scan ? {scan} : {})}));
@@ -1527,10 +1527,14 @@ export class ObjectService {
     const asked = object.passes.at(-1)?.note;
     const said = answer.text?.trim() ? `Answer to "${object.ask?.question ?? object.question?.closeup ?? 'your question'}": ${answer.text.trim()}` : undefined;
     const parts = [asked, sizes ? sizesNote(sizes) : undefined, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
-    // The person's numbers become the project's measured sizes, so every later pass designs to them too.
-    const measured = sizes?.map(({id: sizeId, label, mm}) => ({id: sizeId, label, mm}));
-    if (object.ask) await this.#deps.store.update(id, o => o.ask ? {...o, ask: {...o.ask, status: 'answered'},
-      ...(measured && passKind(o) === 'fit' ? {fit: {sizeSource: 'measured' as const, measured}} : {})} : o);
+    // The person's numbers stay with the project, a fit or not, so every later pass designs to them too. They are
+    // merged by label into what was checked before; New's own fit choice and overall sizes are kept, and a size New
+    // measured under the same label takes the newer number.
+    if (object.ask) await this.#deps.store.update(id, o => {
+      if (!o.ask) return o;
+      const fit = sizes ? withCheckedSizes(o, sizes) : o.fit;
+      return {...o, ask: {...o.ask, status: 'answered'}, ...(sizes ? {checkedSizes: mergeCheckedSizes(o.checkedSizes, sizes)} : {}), ...(fit ? {fit} : {})};
+    });
     const shown = answer.text?.trim() ?? (sizes ? sizes.map(size => `${size.label}: ${size.mm} mm`).join('\n') : answer.bestGuess ? 'Use your best guess.' : '');
     const updated = await this.#message(await this.get(id), shown, photos, false);
     const message = updated.messages!.find(item => item.id === updated.pendingMessageId)!;

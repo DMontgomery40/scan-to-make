@@ -1,5 +1,5 @@
 import type {Ask, Size} from '@scan-to-make/contracts/counterpart';
-import type {StmObject} from './store.js';
+import type {CheckedSize, StmObject} from './store.js';
 
 /** What a project is waiting on the person for: the one enumeration of waits (contracts `AskSchema.kind`). */
 export type AskKind = NonNullable<Ask['kind']>;
@@ -41,6 +41,42 @@ export function answeredSizes(ask: Ask | undefined, sent: {id: string; mm: numbe
 const shown = (value: number) => Math.round(value * 100) / 100;
 
 const mm = (value: number) => String(Number(value.toPrecision(12)));
+const sameLabel = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * The project's checked sizes after an answer: each answered size replaces the one with its label, or is added. A
+ * size the person left blank isn't in the answer, so its earlier value stays; so does one this question never listed.
+ */
+export function mergeCheckedSizes(earlier: CheckedSize[] | undefined, answered: (Size & {asked: number})[]): CheckedSize[] {
+  const merged = [...(earlier ?? [])];
+  for (const size of answered) {
+    const checked: CheckedSize = {label: size.label, mm: size.mm, certainty: size.mm === size.asked ? 'confirmed' : 'measured'};
+    const at = merged.findIndex(item => sameLabel(item.label, size.label));
+    if (at >= 0) merged[at] = checked; else merged.push(checked);
+  }
+  return merged.slice(-24);
+}
+
+/** A corrected size that New also measured under the same label takes the person's newer number there too. */
+export function withCheckedSizes<T extends Pick<StmObject, 'fit'>>(object: T, answered: (Size & {asked: number})[]): T['fit'] {
+  const fit = object.fit;
+  if (!fit?.measured) return fit;
+  return {...fit, measured: fit.measured.map(item => {
+    const newer = answered.find(size => sameLabel(size.label, item.label));
+    return newer ? {...item, mm: newer.mm} : item;
+  })};
+}
+
+/**
+ * What every later pass is told about them: each size by its own label with how sure it is. These are sizes of the
+ * features the question named ("width at the waist"), so never "the overall size"; and a size the person confirmed
+ * or measured is the most certain kind there is (the fit rules keep a size's source and certainty apart from the fit).
+ */
+export function checkedSizesBrief(sizes: CheckedSize[] | undefined): string | undefined {
+  if (!sizes?.length) return undefined;
+  return ['Sizes the person checked on the real object, each for the feature it names. They are the most certain sizes you have: use them for those features, and do not ask for them again.',
+    ...sizes.map(size => `- ${size.label}: ${mm(size.mm)} mm, ${size.certainty === 'confirmed' ? 'confirmed' : 'measured by the person'}`)].join('\n');
+}
 
 /** What the worker is told: numbers the person confirmed or measured, never a sentence to interpret. */
 export function sizesNote(sizes: (Size & {asked: number})[]): string {

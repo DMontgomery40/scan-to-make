@@ -558,13 +558,18 @@ test('a size question is its own kind: numbers on the wire, numbers back, and th
   await f.service.answerCloseup(object.id, {sizes: [{id: 'size-1', mm: 63}, {id: 'size-2', mm: 53}, {id: 'size-3', mm: 107.5}], text: 'The waist is where it narrows under the label.'});
   const done = await f.service.settled(object.id);
   assert.equal(done.state, 'ready');
-  assert.deepEqual(done.fit, {sizeSource: 'measured', measured: [
-    {id: 'size-1', label: 'width at the pink stripe', mm: 63}, {id: 'size-2', label: 'width at the waist', mm: 53}, {id: 'size-3', label: 'height to the cap tip', mm: 107.5}]});
+  // New's fit choice is kept as it was; the checked sizes are their own list, by the question's labels.
+  assert.deepEqual(done.fit, {sizeSource: 'lookup'});
+  assert.deepEqual(done.checkedSizes, [
+    {label: 'width at the pink stripe', mm: 63, certainty: 'measured'}, {label: 'width at the waist', mm: 53, certainty: 'confirmed'}, {label: 'height to the cap tip', mm: 107.5, certainty: 'measured'}]);
+  assert.equal(publicObject(done).checkedSizes, undefined, 'the companion\'s own record');
   const note = f.inputs[1].note;
   assert.match(note, /Treat these as measured:\n- width at the pink stripe: 63 mm \(corrected; you had 64 mm\)\n- width at the waist: 53 mm \(confirmed\)\n- height to the cap tip: 107\.5 mm \(corrected; you had 107 mm\)/);
   assert.match(note, /The waist is where it narrows under the label\./);
-  // The next pass's brief carries them as the person's measurements, and the request is still only their words.
-  assert.match(f.inputs[1].instructions, /Dimensions I measured on the real object: width at the pink stripe 63 mm, width at the waist 53 mm, height to the cap tip 107\.5 mm\./);
+  // This pass and every later one are told each size by its label and how sure it is, never as "the overall size";
+  // the request is still only the person's words.
+  assert.match(f.inputs[1].instructions, /Sizes the person checked on the real object[^\n]*\n- width at the pink stripe: 63 mm, measured by the person\n- width at the waist: 53 mm, confirmed\n- height to the cap tip: 107\.5 mm, measured by the person$/);
+  assert.doesNotMatch(f.inputs[1].instructions, /exact overall size/);
   assert.equal(publicObject(done).instructions, 'A wall holder for three of these');
 });
 

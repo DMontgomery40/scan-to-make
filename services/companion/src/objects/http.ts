@@ -94,7 +94,7 @@ export function publicObject(stored: StmObject): PublicObject {
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
   // The companion's decision (copy, new design or published), so neither app re-derives it.
   // Local bookkeeping, like the passes' recovery fields below.
-  const {failedPass: _failedPass, ...shown} = object;
+  const {failedPass: _failedPass, checkedSizes: _checkedSizes, ...shown} = object;
   return {...shown, ...(object.kind === 'published' ? {plates: projectPlates(object)} : {}), kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
     passes: object.passes.map(({dir: _dir, activity, sessionId: _session, sessionCwd: _sessionCwd, resumable: _resumable, checkpoints: _checkpoints, resume: _resume, ...pass}) => ({...pass,
