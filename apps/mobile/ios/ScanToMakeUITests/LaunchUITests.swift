@@ -1364,7 +1364,10 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertTrue(picture.waitForExistence(timeout: 20), "\(page.name): the stage has its picture element")
             let state = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@ AND label == %@", page.value, page.label), object: picture)
             XCTAssertEqual(XCTWaiter().wait(for: [state], timeout: 15), .completed, "\(page.name): \(picture.label) / \(String(describing: picture.value))")
-            XCTAssertGreaterThan(picture.frame.height, 20, "\(page.name): something is drawn on the stage: \(picture.frame)")
+            // What is drawn, not only what is said: a bare stage is all dark (its gradient stays near #22-#30); the
+            // picture, the line, the progress mark and the symbol are bright.
+            let bright = Self.brightPixels(picture.screenshot().image)
+            XCTAssertGreaterThan(bright, 300, "\(page.name): something is drawn on the stage, not only its backdrop (\(bright) bright pixels)")
             XCTAssertEqual(app.buttons["gallery-stage-retry"].exists, page.retry, "\(page.name): Try Again only where it can help")
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             shot.name = "picture-stage-\(page.name)-\(regular ? "ipad" : "iphone")"; shot.lifetime = .keepAlways; add(shot)
@@ -1373,6 +1376,17 @@ final class LayoutParityUITests: XCTestCase {
             }
             app.terminate()
         }
+    }
+
+    /// Pixels with any channel above half: what a picture, a line or a symbol puts on the dark stage.
+    static func brightPixels(_ image: UIImage) -> Int {
+        guard let cg = image.cgImage else { return 0 }
+        let width = cg.width, height = cg.height
+        var data = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &data, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 0 }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return stride(from: 0, to: data.count, by: 4).reduce(0) { $0 + (max(data[$1], data[$1 + 1], data[$1 + 2]) > 128 ? 1 : 0) }
     }
 
     /// A question that came without a picture shows the project's picture at the same size, and says so.
