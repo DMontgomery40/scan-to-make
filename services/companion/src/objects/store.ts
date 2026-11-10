@@ -56,7 +56,7 @@ export interface ObjectPass {
   /** While it runs: time left from the stages' typical durations. */
   estimate?: {remainingSec: number; endsAtMs: number};
   engine?: DesignEngine;
-  /** Why a design pass used Blender when Fusion was wanted. */
+  /** Why a design pass used Blender when Fusion or the code engine was wanted. */
   engineNote?: string;
 }
 
@@ -135,8 +135,11 @@ export interface StmObject {
     /** The designer's supports choice for this model, sent to the slicer as it is. */
     supports?: import('../touchup/runner.js').TouchupSupports;
     engine?: DesignEngine;
-    /** A Fusion pass keeps its parametric design for the next "Ask for changes" (PRD §8.9). */
-    design?: {f3d: string; parameters?: string};
+    /**
+     * The design source a pass keeps for the next "Ask for changes" (PRD §8.9), relative paths: Fusion's
+     * `design.f3d` and `parameters.json`, or a code design's script, parameters, input snapshots and STEP.
+     */
+    design?: {f3d: string; parameters?: string} | {script: string; parameters: string; inputs?: string; step?: string; result?: string};
     /**
      * This 3MF prints with the settings it carries (a designer's project), as the project's printer MCP says
      * (get_slice_settings own_process): the print sheet starts at the file's own settings and sends no quality or

@@ -112,12 +112,14 @@ public struct CompanionSettings: Codable, Equatable, Sendable {
     public var general: General?
     public var ai: AI?
     public var fusion: Fusion?
+    /// The printer MCP's code design engine (PRD §8.9), as the companion reads its `cad_status`.
+    public var cad: CodeEngineStatus?
 
-    public init(milestones: String = "50", notifications: Notifications? = nil, general: General? = nil, ai: AI? = nil, fusion: Fusion? = nil) {
-        self.milestones = milestones; self.notifications = notifications; self.general = general; self.ai = ai; self.fusion = fusion
+    public init(milestones: String = "50", notifications: Notifications? = nil, general: General? = nil, ai: AI? = nil, fusion: Fusion? = nil, cad: CodeEngineStatus? = nil) {
+        self.milestones = milestones; self.notifications = notifications; self.general = general; self.ai = ai; self.fusion = fusion; self.cad = cad
     }
 
-    private enum CodingKeys: String, CodingKey { case milestones, notifications, general, ai, fusion }
+    private enum CodingKeys: String, CodingKey { case milestones, notifications, general, ai, fusion, cad }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         milestones = (try? c.decodeIfPresent(String.self, forKey: .milestones)) ?? "50"
@@ -125,6 +127,7 @@ public struct CompanionSettings: Codable, Equatable, Sendable {
         general = (try? c.decodeIfPresent(General.self, forKey: .general)) ?? nil
         ai = (try? c.decodeIfPresent(AI.self, forKey: .ai)) ?? nil
         fusion = (try? c.decodeIfPresent(Fusion.self, forKey: .fusion)) ?? nil
+        cad = (try? c.decodeIfPresent(CodeEngineStatus.self, forKey: .cad)) ?? nil
     }
 
     /// The Mac serves every setting (KAN-214 PR 6b); an older Mac serves only `milestones`.

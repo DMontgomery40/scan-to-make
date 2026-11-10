@@ -309,3 +309,188 @@ for (const [name,changes] of [['model turn',{num_turns:1}],['API work',{duration
  inv.worker=async()=>({resultEvent:{...event,...changes},sessionId:event.session_id,exitCode:1,toolCalls:0,seconds:0,stderrTail:'',publicText:text=>text});
  assert.equal((await runTouchupWorker(inv,pass)).resumeUnavailable,undefined);
 });
+
+// A code pass (PRD §8.9): every cad_run leaves its own `cad-*` folder under the pass's design folder, with the MCP's
+// protected receipt `cad-result.json` (cad/1): completed or not, final (the worker's selection) or not, its checks.
+// The worker can't write files, so Counterpart files the selected runs and keeps the latest as the model.
+const SOLID = 'solid x\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid x\n';
+async function cadRun(cadDir, folder, name, {at, stl = SOLID, step = true, inputs, renders = ['front', 'contact'], final = false, valid = true, status = 'completed', receipt = true} = {}) {
+  const {mkdir} = await import('node:fs/promises');
+  const dir = join(cadDir, folder);
+  await mkdir(join(dir, `${name}.renders`), {recursive: true});
+  await writeFile(join(dir, `${name}.py`), `# ${name}`);
+  await writeFile(join(dir, `${name}.parameters.json`), JSON.stringify({height: 70}));
+  if (stl) await writeFile(join(dir, `${name}.stl`), stl);
+  if (step) await writeFile(join(dir, `${name}.step`), 'STEP');
+  const views = {};
+  for (const view of renders) { await writeFile(join(dir, `${name}.renders`, `${view}.png`), view); views[view] = join(dir, `${name}.renders`, `${view}.png`); }
+  let manifest;
+  if (inputs) {
+    // Input bundles live outside the run folder (cad/1: output_dir/.cad-inputs/<hash>/).
+    const bundle = join(cadDir, '.cad-inputs', 'bundle');
+    await mkdir(bundle, {recursive: true});
+    const listed = {};
+    for (const [alias, file] of Object.entries(inputs)) { await writeFile(join(bundle, file), file); listed[alias] = join(bundle, file); }
+    manifest = join(dir, `${name}.inputs.json`);
+    await writeFile(manifest, JSON.stringify(listed));
+  }
+  if (receipt) await writeFile(join(dir, 'cad-result.json'), JSON.stringify({status, final, valid, completed_at: new Date(at ?? Date.now()).toISOString(), lineage_id: 'sha',
+    script: join(dir, `${name}.py`), parameters: join(dir, `${name}.parameters.json`), stl: join(dir, `${name}.stl`), step: step ? join(dir, `${name}.step`) : null,
+    ...(manifest ? {input_manifest: manifest} : {}), renders: views, checks: {watertight: valid, manifold: valid}}));
+  return dir;
+}
+const codeWorker = (structured_output, extra = {}) => async () => ({toolCalls: 4, stderrTail: '', exitCode: 0, seconds: 9, publicText: text => text,
+  ...(structured_output ? {resultEvent: {type: 'result', structured_output, total_cost_usd: 0.5}} : {}), ...extra});
+const codeInv = (pass, worker) => ({command: '/c', args: [], env: {}, cwd: pass.dir, mcpConfigPath: '', mcpConfig: {mcpServers: {}}, engine: 'code', worker});
+
+test('a code pass files the runs marked final as checkpoints and keeps the latest as its model, renders and design source', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-collect-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const t0 = Date.now() - 60_000;
+  // As the Nov 10 holder pass left them: the scan measured first, then the design; names don't matter, final does.
+  await cadRun(cadDir, 'cad-scan_prep-1', 'scan_prep', {at: t0, step: false});
+  await cadRun(cadDir, 'cad-holder-2', 'holder', {at: t0 + 1000, final: true, stl: 'not an stl'});
+  await cadRun(cadDir, 'cad-holder-3', 'holder', {at: t0 + 2000, final: true, inputs: {scan: 'mesh.obj'}});
+  const last = await cadRun(cadDir, 'cad-holder-4', 'holder', {at: t0 + 3000, final: true, inputs: {scan: 'mesh.obj', texture: 'mesh_basecolor_0.png'}});
+  await cadRun(cadDir, 'cad-letters-5', 'letters', {at: t0 + 4000, step: false});
+  const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Cleaned up.'})), pass);
+  assert.equal(result.status, 'done');
+  assert.equal(result.model, join(pass.outDir, 'touched.stl'));
+  assert.equal(await readFile(result.model, 'utf8'), SOLID);
+  // The measuring run, the broken export and the one-colour part are not checkpoints; the final runs are, in order.
+  assert.deepEqual(result.checkpoints, ['001.stl', '002.stl'].map(name => join(pass.checkpointsDir, name)));
+  // The overall sheet sorts first, as the rules ask of renders.
+  assert.deepEqual(result.renders.map(path => path.split('/').at(-1)), ['1-contact.png', '2-front.png']);
+  assert.equal(await readFile(join(pass.outDir, '1-contact.png'), 'utf8'), 'contact');
+  assert.deepEqual(result.design, {script: join(last, 'holder.py'), parameters: join(last, 'holder.parameters.json'),
+    inputs: join(last, 'holder.inputs.json'), step: join(last, 'holder.step'), result: join(last, 'cad-result.json')});
+});
+
+test('a final run that failed, is invalid or has no receipt is never the model; an unselected run never is', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-receipts-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const t0 = Date.now() - 60_000;
+  const good = await cadRun(cadDir, 'cad-holder-1', 'holder', {at: t0, final: true});
+  await cadRun(cadDir, 'cad-holder-2', 'holder', {at: t0 + 1000, final: true, valid: false});
+  await cadRun(cadDir, 'cad-holder-3', 'holder', {at: t0 + 2000, final: true, status: 'failed'});
+  await cadRun(cadDir, 'cad-holder-4', 'holder', {at: t0 + 3000, final: true, receipt: false});
+  await cadRun(cadDir, 'cad-holder-5', 'holder', {at: t0 + 4000});
+  await cadRun(cadDir, 'notcad-holder-6', 'holder', {at: t0 + 5000, final: true});
+  const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Done.'})), pass);
+  assert.deepEqual(result.checkpoints, [join(pass.checkpointsDir, '001.stl')]);
+  assert.equal(result.design.script, join(good, 'holder.py'), 'the latest completed, valid, selected run');
+});
+
+test('a code pass that only measured the scan, then asked or stopped, leaves no model and no design source', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-measured-');
+  for (const ending of [{answer: {status: 'needs_closeup', summary: 'Which size?', closeup: 'the cap'}, status: 'needs_closeup'},
+    {answer: undefined, extra: {stopReason: 'Stopped at the 120 tool-call limit', limit: {kind: 'tool-calls', value: 120}}, status: 'capped'},
+    {answer: {status: 'failed', summary: 'The engine stopped.'}, status: 'failed'}]) {
+    const pass = await prepareTouchupPass({root, objectId: ending.status, scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
+    const cadDir = join(pass.dir, 'cad');
+    await mkdir(cadDir, {recursive: true});
+    const t0 = Date.now() - 60_000;
+    for (const [index, name] of ['scan_prep', 'scan_aligned_body', 'scan_aligned_full', 'scan_shoulder_slab'].entries())
+      await cadRun(cadDir, `cad-${name}-${index}`, name, {at: t0 + index * 1000, step: false});
+    const result = await runTouchupWorker(codeInv(pass, codeWorker(ending.answer, ending.extra)), pass);
+    assert.equal(result.status, ending.status);
+    assert.equal(result.model, undefined, `${ending.status}: a scan measurement never becomes the model`);
+    assert.equal(result.design, undefined);
+    assert.deepEqual(result.checkpoints, []);
+  }
+});
+
+test('a code pass stopped at a limit keeps its latest final run, as any capped pass keeps its last checkpoint', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-capped-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [join(fixtures, 'scan.obj')], photos: [join(fixtures, 'photo.jpg')]});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const t0 = Date.now() - 60_000;
+  const draft = await cadRun(cadDir, 'cad-holder-1', 'holder', {at: t0, final: true});
+  await cadRun(cadDir, 'cad-holder-2', 'holder', {at: t0 + 1000, stl: false});
+  const capped = await runTouchupWorker(codeInv(pass, codeWorker(undefined, {stopReason: 'Stopped at the 120 tool-call limit', limit: {kind: 'tool-calls', value: 120}})), pass);
+  assert.equal(capped.status, 'capped');
+  assert.equal(capped.model, join(pass.outDir, 'touched.stl'));
+  assert.deepEqual(capped.checkpoints, [join(pass.checkpointsDir, '001.stl')]);
+  assert.deepEqual(capped.design, {script: join(draft, 'holder.py'), parameters: join(draft, 'holder.parameters.json'), step: join(draft, 'holder.step'), result: join(draft, 'cad-result.json')});
+});
+
+test('the pass folder alone gives the selected run and its validation, without building (the receipt read from disk, nothing in memory)', async () => {
+  const {mkdir, readFile: read} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-restart-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [], photos: [], requirePhotos: false});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const run = await cadRun(cadDir, 'cad-holder-1', 'holder', {at: Date.now() - 1000, final: true});
+  // A fresh import of the collector, with nothing in memory: only the disk, and no process started.
+  const {collectCodeRuns} = await import(`../dist/touchup/code-engine.js?restart=${Date.now()}`);
+  const {isValidStl} = await import('../dist/touchup/runner.js');
+  const found = await collectCodeRuns(pass, isValidStl);
+  assert.equal(found.design.result, join(run, 'cad-result.json'));
+  assert.deepEqual(JSON.parse(await read(found.design.result, 'utf8')).checks, {watertight: true, manifold: true});
+  assert.equal(await read(join(pass.outDir, 'touched.stl'), 'utf8'), SOLID);
+});
+
+// Review of #439, F1: the model and its design source arrive together or not at all.
+test('a selected run\'s missing render never costs the design source; a run without an in-folder script and parameters is not selectable', async () => {
+  const {mkdir, rm} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-together-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [], photos: [], requirePhotos: false});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  const t0 = Date.now() - 60_000;
+  const earlier = await cadRun(cadDir, 'cad-holder-1', 'holder', {at: t0, final: true});
+  const latest = await cadRun(cadDir, 'cad-holder-2', 'holder', {at: t0 + 1000, final: true});
+  await rm(join(latest, 'holder.renders', 'front.png'));  // a render the receipt names is gone
+  const missing = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Done.'})), pass);
+  assert.equal(missing.model, join(pass.outDir, 'touched.stl'));
+  assert.equal(missing.design?.script, join(latest, 'holder.py'), 'the design source comes with the model');
+  assert.deepEqual(missing.renders.map(path => path.split('/').at(-1)), ['1-contact.png'], 'the render that exists is kept');
+  assert.ok(earlier);
+  // The latest final run lost its script: it is not selectable, so the earlier one is the model and the design.
+  const again = await prepareTouchupPass({root, objectId: 'obj2', scan: [], photos: [], requirePhotos: false});
+  const againCad = join(again.dir, 'cad');
+  await mkdir(againCad, {recursive: true});
+  const first = await cadRun(againCad, 'cad-holder-1', 'holder', {at: t0, final: true});
+  const broken = await cadRun(againCad, 'cad-holder-2', 'holder', {at: t0 + 1000, final: true});
+  await rm(join(broken, 'holder.py'));
+  const fallback = await runTouchupWorker(codeInv(again, codeWorker({status: 'done', summary: 'Done.'})), again);
+  assert.equal(fallback.design?.script, join(first, 'holder.py'));
+  assert.deepEqual(fallback.checkpoints, [join(again.checkpointsDir, '001.stl')], 'the unselectable run is no checkpoint either');
+});
+
+test('a collector that fails promotes nothing and says why on the pass', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-collect-fails-');
+  const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [], photos: [], requirePhotos: false});
+  const cadDir = join(pass.dir, 'cad');
+  await mkdir(cadDir, {recursive: true});
+  await cadRun(cadDir, 'cad-holder-1', 'holder', {at: Date.now() - 1000, final: true});
+  await mkdir(join(pass.outDir, 'touched.stl'));  // the model can't be written
+  const result = await runTouchupWorker(codeInv(pass, codeWorker({status: 'done', summary: 'Done.'})), pass);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.model, undefined, 'no model without its design source');
+  assert.equal(result.design, undefined);
+  assert.match(result.reason, /^Counterpart couldn't keep this pass's design/);
+});
+
+// Review of #439, F6: the saved script keeps the extension the MCP gave it.
+test('a saved code design keeps the script\'s own extension from the receipt', async () => {
+  const {mkdir} = await import('node:fs/promises');
+  const {copyDesign} = await import('../dist/touchup/code-engine.js');
+  const root = await tempDir('touchup-code-ext-');
+  await mkdir(join(root, 'run'), {recursive: true});
+  await writeFile(join(root, 'run', 'holder.cad'), '# script');
+  await writeFile(join(root, 'run', 'holder.parameters.json'), '{}');
+  const copy = await copyDesign({script: join(root, 'run', 'holder.cad'), parameters: join(root, 'run', 'holder.parameters.json')}, join(root, 'saved'));
+  assert.equal(copy.script, join(root, 'saved', 'touched.cad'));
+  assert.equal(copy.parameters, join(root, 'saved', 'touched.parameters.json'));
+});

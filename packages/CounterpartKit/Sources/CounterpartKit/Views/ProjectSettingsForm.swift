@@ -76,7 +76,8 @@ public struct ProjectSettingsForm: View {
                 } header: { Text("Project") } footer: { Text("Changes are saved on your Mac and shared with your other devices.") }
                 printDefaults
                 Section("Design") {
-                    if copy { LabeledContent("Design engine", value: "Blender") }
+                    // PRD §8.9: the printer MCP's code design engine when it's set up, otherwise Blender.
+                    if copy { LabeledContent("Design engine", value: "Automatic") }
                     else {
                         Picker("Design engine", selection: Binding(get: { project.settings?.designEngine ?? "auto" }, set: { patch(["designEngine": .string($0)]) })) {
                             Text("Automatic").tag("auto")

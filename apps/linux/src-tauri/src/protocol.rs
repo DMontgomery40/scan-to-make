@@ -66,6 +66,8 @@ pub fn allowed(method: &str) -> bool {
             | "blender.status"
             | "blender.check"
             | "blender.update"
+            | "cad.status"
+            | "cad.setup"
     )
 }
 pub fn validate(method: &str, params: &Value) -> Result<(), String> {
@@ -96,6 +98,8 @@ pub fn deadline(method: &str, params: &Value) -> u64 {
             32_000
         }
         "objects.pausePrint" | "objects.resumePrint" | "objects.cancelPrint" => 132_000,
+        // The companion starts the printer MCP to ask cad_status (40 s); Set Up returns while it installs.
+        "cad.status" | "cad.setup" => 42_000,
         "events.wait" => {
             params
                 .get("timeoutMs")

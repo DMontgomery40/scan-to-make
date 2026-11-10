@@ -967,6 +967,22 @@ final class LayoutParityUITests: XCTestCase {
 
     /// iPad build 202611052142 (Nov 5): the round New button sat on top of a sidebar row. The list is longer than
     /// the screen (larger text), so some row always reaches the bottom edge, at rest and scrolled to the end.
+    /// PRD §8.9, §6.1: the code design engine's row is in Settings with projects present, on the iPhone and the iPad,
+    /// and Set Up asks the computer to set it up and shows its progress.
+    func testTheCodeDesignEngineRowIsInSettingsAndSetUpShowsProgress() {
+        let app = launch(screen: "settings")
+        XCTAssertTrue(app.descendants(matching: .any)["mac-status"].waitForExistence(timeout: 20))
+        let message = app.staticTexts["codeEngine.message"]
+        for _ in 0..<12 where !(message.exists && message.isHittable) { app.swipeUp() }
+        XCTAssertTrue(message.isHittable, "the code design engine row is reachable")
+        XCTAssertEqual(message.label, "Not set up yet.")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Set Up downloads about 367 MB and uses about 1.6 GB")).firstMatch.exists, "what Set Up takes")
+        let setUp = app.buttons["codeEngine.setUp"]
+        XCTAssertTrue(setUp.exists)
+        setUp.tap()
+        XCTAssertTrue(app.staticTexts["Setting up… 0 s so far."].waitForExistence(timeout: 10))
+    }
+
     func testNewNeverCoversARow() {
         let app = launch(largeText: true)
         let new = app.buttons["new-project"]

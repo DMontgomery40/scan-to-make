@@ -1,12 +1,14 @@
 import {createHash} from 'node:crypto';
-import {link, lstat, mkdir, readFile, rename, unlink, writeFile} from 'node:fs/promises';
+import {link, lstat, mkdir, readFile, rename, rm, unlink, writeFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {homedir} from 'node:os';
-import {dirname, join} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
 import {PrinterMcpClient, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlender} from './blender.js';
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
-import {buildTouchupInvocation, type DesignEngine, type DesignGuidance, type TouchupInvocation} from './invocation.js';
+import {buildTouchupInvocation, type DesignEngine, type DesignGuidance, type ScanFrame, type TouchupInvocation} from './invocation.js';
+import {codeEngineNotSetUp, codeEngineState, codeEngineUnreadableScan, copyDesign, isCodeDesign, passCadDir, passDesignDir, type CodeEngineState, type DesignSource} from './code-engine.js';
+import {createCaptureConverter} from '../capture-converter.js';
 import {toolErrorText} from './blender.js';
 import {runTouchupWorker, publicTouchupText, type TouchupProgress, type TouchupResult} from './runner.js';
 import {DESIGNER_FILE_REBUILT, designerEditProblem} from './designer-file.js';
@@ -36,17 +38,23 @@ export interface TouchupInput {
   designerCopy?: boolean;
   onProgress?: (progress: TouchupProgress) => void;
   signal?: AbortSignal;
-  /** "fit" (make something that fits) may design in Fusion; "copy" always uses Blender (PRD §8.9). */
+  /**
+   * "fit" (make something that fits) or "copy" (clean up a captured or supplied object). Both use the printer MCP's
+   * code engine when it is set up; otherwise a fit may design in Fusion and a copy uses Blender (PRD §8.9).
+   */
   kind?: 'fit' | 'copy';
+  /** The project's own engine choice (Blender or Fusion), which wins over the automatic one. */
   preferredEngine?: DesignEngine;
-  /** The previous Fusion design, so a change starts from its parameters. */
-  design?: {f3d: string; parameters?: string};
+  /** The current design source, so a change starts from it: Fusion's archive and parameters, or a code design's script and parameters. */
+  design?: DesignSource;
   /** Stage changes: getting the engine ready, then the worker. */
   onStage?: (stage: 'preparing' | 'working', engine: DesignEngine) => void;
 }
 
-/** Which engine ran, and why it isn't Fusion when Fusion was wanted. */
-export interface EngineChoice {engine: DesignEngine; note?: string; documentId?: string}
+/** Which engine ran, and why it isn't Fusion (or the code engine) when that was wanted. */
+export interface EngineChoice {engine: DesignEngine; note?: string; documentId?: string;
+  /** A note the person sees in the pass's activity: why the code engine didn't run. */
+  activity?: string}
 export interface TouchupDeps {
   ensureBlender?: () => Promise<unknown>;
   resetScene?: (client: ReturnType<NonNullable<TouchupDeps['client']>>, signal?: AbortSignal) => Promise<void>;
@@ -58,6 +66,10 @@ export interface TouchupDeps {
   run?: (inv: TouchupInvocation, pass: TouchupPass, opts: Parameters<typeof runTouchupWorker>[2]) => Promise<TouchupResult>;
   lockPath?: string;
   fusionLockPath?: string;
+  /** Code passes take turns across companion processes: the printer MCP's engine runs one job at a time. */
+  codeLockPath?: string;
+  /** Turns a capture (USDZ) into a mesh the code engine reads, with its unit and up axis from the conversion report. */
+  convertCapture?: (source: string, outDir: string, signal?: AbortSignal) => Promise<{files: string[]; frame: ScanFrame}>;
 }
 
 /** One Blender, one scene: touch-ups run strictly one at a time, within this process (queue) and across processes (lock file). */
@@ -67,6 +79,8 @@ let idleBlender: {input: TouchupInput; deps: TouchupDeps} | undefined;
 export const BLENDER_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'blender.lock');
 /** One open Fusion document: design passes take turns across companion processes too. */
 export const FUSION_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'fusion.lock');
+/** The printer MCP's code engine refuses a second job while one runs: code passes and its setup take turns. */
+export const CODE_LOCK_PATH = join(homedir(), 'Library', 'Caches', 'scan-to-make', 'code-engine.lock');
 
 function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
@@ -113,6 +127,11 @@ export function slicingGuidanceUnavailable(backend: string): string {
   return `Update ${mcpPackageName(backend)} in Settings → Printers so Counterpart can plan how this prints. Nothing was changed.`;
 }
 
+/** The pass's refusal when the printer MCP's code engine is ready but it serves no cad_design prompt to design with. */
+export function codeGuidanceUnavailable(backend: string): string {
+  return `Update ${mcpPackageName(backend)} in Settings → Printers so Counterpart can design with its code engine. Nothing was changed.`;
+}
+
 /** The pass's refusal when the printer MCP couldn't be reached for its guidance: a connection problem, not an old MCP. */
 export function slicingGuidanceUnreachable(backend: string): string {
   return `Counterpart couldn't reach ${mcpPackageName(backend)} to plan how this prints. Check it in Settings → Printers, then try again. Nothing was changed.`;
@@ -129,7 +148,9 @@ export async function printerDesignGuidance(handoff: PrinterHandoffConfig, signa
     const options = signal ? {signal} : {};
     const design = await client.prompt('fdm_design', options);
     const slicing = await client.prompt('fdm_slicing', options);
-    return {...(design ? {design} : {}), ...(slicing ? {slicing} : {})};
+    // The code engine's own rules (PRD §8.9): how its scripts look, run and are checked are the MCP's to say.
+    const cad = client.hasTool('cad_run') ? await client.prompt('cad_design', options) : undefined;
+    return {...(design ? {design} : {}), ...(slicing ? {slicing} : {}), ...(cad ? {cad} : {})};
   } catch (error) {
     if (signal?.aborted) throw error;
     return undefined;
@@ -143,12 +164,47 @@ async function stlSha256(scan: string[]): Promise<string | undefined> {
   return createHash('sha256').update(await readFile(scan[0]!)).digest('hex');
 }
 
+type ChoiceInput = Pick<TouchupInput, 'handoff' | 'kind' | 'signal' | 'preferredEngine' | 'design' | 'designerCopy'>;
+
 /**
- * PRD §8.9: a copy is cleaned up in Blender. A new design uses Fusion when the
- * printer MCP's bridge reports it connected (after `launch: true`) and a new
- * design opens; otherwise Blender, with the reason recorded.
+ * Whether this pass uses the printer MCP's code engine (PRD §8.9), from the MCP's own answers: `absent` when the
+ * pass can't use it or the MCP doesn't offer it. A project's own engine choice wins, a Fusion design's change
+ * goes back to Fusion, and a designer's 3MF is edited in place, which the engine (cad/1) can't write.
  */
-export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' | 'signal' | 'preferredEngine' | 'design'>, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
+export async function codeEngineFor(input: ChoiceInput, deps: Pick<TouchupDeps, 'client'> = {}): Promise<CodeEngineState> {
+  if (input.preferredEngine || input.designerCopy || (input.design && !isCodeDesign(input.design))) return 'absent';
+  const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
+  try {
+    await client.connect(input.signal);
+    return await codeEngineState(client, input.signal);
+  } catch (error) {
+    if (input.signal?.aborted) throw error;
+    return 'absent';
+  } finally {
+    await Promise.resolve().then(() => client.close()).catch(() => undefined);
+  }
+}
+
+/** A choice with one more note for the person, after any it already has. */
+function withNote(choice: EngineChoice, note: string): EngineChoice {
+  return {...choice, note: choice.note ? `${choice.note} ${note}` : note};
+}
+
+/**
+ * PRD §8.9: the printer MCP's code engine designs and cleans up whenever it is there and set up. Otherwise, as
+ * before: a copy is cleaned up in Blender, and a new design uses Fusion when the printer MCP's bridge reports it
+ * connected (after `launch: true`) and a new design opens, else Blender, with the reason recorded. When the code
+ * engine is there but not set up, the choice says so.
+ */
+export async function chooseEngine(input: ChoiceInput, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
+  const code = await codeEngineFor(input, deps);
+  if (code === 'ready') return {engine: 'code'};
+  const choice = await appEngine(input, deps);
+  return code === 'not-set-up' ? withNote(choice, codeEngineNotSetUp(choice.engine === 'fusion' ? 'fusion' : 'blender')) : choice;
+}
+
+/** Blender, or Fusion for a new design when it's connected and a new design opens (the engines before cad/1). */
+async function appEngine(input: ChoiceInput, deps: Pick<TouchupDeps, 'client'> = {}): Promise<EngineChoice> {
   if (input.kind !== 'fit' || input.preferredEngine === 'blender') return {engine: 'blender'};
   const client = (deps.client ?? (handoff => new PrinterMcpClient(handoff)))(input.handoff);
   try {
@@ -162,7 +218,7 @@ export async function chooseEngine(input: Pick<TouchupInput, 'handoff' | 'kind' 
     if (!client.hasTool('fusion_mcp_new_design')) return {engine: 'blender', note: "This printer MCP can't open a new Fusion design."};
     if (!client.getTool('fusion_mcp_new_design').inputSchema.properties?.bind_document)
       return {engine: 'blender', note: "The Fusion bridge needs an update for document binding."};
-    const opened = await client.callTool('fusion_mcp_new_design', {bind_document: true, ...(input.design ? {source_f3d: input.design.f3d} : {})}, {signal: input.signal, timeoutMs: 120_000});
+    const opened = await client.callTool('fusion_mcp_new_design', {bind_document: true, ...(input.design && !isCodeDesign(input.design) ? {source_f3d: input.design.f3d} : {})}, {signal: input.signal, timeoutMs: 120_000});
     if (opened.isError) return {engine: 'blender', note: `Fusion couldn't open a new design: ${toolErrorText(opened).slice(0, 200)}`};
     const created = JSON.parse((opened.content ?? []).flatMap(item => item.type === 'text' ? [item.text] : []).join('') || '{}') as {document_id?: unknown; document_binding?: unknown};
     if (created.document_binding !== 1 || typeof created.document_id !== 'string' || !created.document_id.trim())
@@ -214,18 +270,68 @@ async function closeCompletedFusionDocument(input: TouchupInput, deps: TouchupDe
   }
 }
 
+const isCapture = (path: string) => /\.(usdz|usdc|usda)$/i.test(path);
+
+/** The capture converter the companion already uses for imports, writing the mesh and its material files to `outDir`. */
+async function defaultConvertCapture(source: string, outDir: string, signal?: AbortSignal): Promise<{files: string[]; frame: ScanFrame}> {
+  const converter = createCaptureConverter({executable: process.env.SCAN_TO_MAKE_CAPTURE_PYTHON ?? 'python3', temporaryRoot: outDir, timeoutMs: 120_000});
+  const converted = await converter.convert(await readFile(source), signal);
+  const report = JSON.parse(converted.report.toString('utf8')) as {metersPerUnit?: unknown; upAxis?: unknown};
+  if (typeof report.metersPerUnit !== 'number' || !(report.metersPerUnit > 0) || typeof report.upAxis !== 'string') throw new Error('The capture has no unit or up axis.');
+  // The mesh keeps the name its material file refers to.
+  const files = [join(outDir, 'mesh.obj')];
+  await writeFile(files[0]!, converted.derived);
+  for (const [name, bytes] of Object.entries(converted.assets ?? {})) { await writeFile(join(outDir, name), bytes); files.push(join(outDir, name)); }
+  return {files, frame: {unitMetres: report.metersPerUnit, upAxis: report.upAxis}};
+}
+
 async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupResult & {passDir: string} & EngineChoice> {
+  let code: CodeEngineState | 'unreadable' = await codeEngineFor(input, deps);
+  let scan = input.scan, frame: ScanFrame | undefined, converted: string | undefined;
+  // The engine reads meshes, not captures: a scan comes to it as the capture converter's mesh, unchanged.
+  if (code === 'ready' && input.scan.some(isCapture)) {
+    converted = join(resolve(input.root), `.capture-${randomUUID()}`);
+    try {
+      await mkdir(converted, {recursive: true});
+      const meshes: string[] = [];
+      for (const path of input.scan) {
+        if (!isCapture(path)) { meshes.push(path); continue; }
+        const result = await (deps.convertCapture ?? defaultConvertCapture)(path, converted, input.signal);
+        meshes.push(...result.files); frame = result.frame;
+      }
+      scan = meshes;
+    } catch (error) {
+      await rm(converted, {recursive: true, force: true}).catch(() => undefined);
+      if (input.signal?.aborted) throw error;
+      code = 'unreadable'; converted = undefined;
+    }
+  }
+  if (code === 'ready') {
+    input.onStage?.('preparing', 'code');
+    const release = await acquireBlenderLock(deps.codeLockPath ?? CODE_LOCK_PATH, input.signal ? {signal: input.signal} : {});
+    try { return {...await touchUpLocked({...input, scan}, deps, {engine: 'code'}, frame), engine: 'code'}; }
+    finally {
+      await release();
+      if (converted) await rm(converted, {recursive: true, force: true}).catch(() => undefined);
+    }
+  }
   input.onStage?.('preparing', 'blender');
   // A design may open a new Fusion document: hold Fusion from that call to the end of the worker.
   const releaseFusion = input.kind === 'fit' && input.preferredEngine !== 'blender' ? await acquireBlenderLock(deps.fusionLockPath ?? FUSION_LOCK_PATH) : undefined;
   let choice: EngineChoice;
-  try { choice = await chooseEngine(input, deps); }
+  try {
+    choice = await appEngine(input, deps);
+    const engine = choice.engine === 'fusion' ? 'fusion' : 'blender';
+    // The person sees why the faster engine didn't run, in the pass's activity on every layout.
+    if (code === 'not-set-up') choice = {...withNote(choice, codeEngineNotSetUp(engine)), activity: codeEngineNotSetUp(engine)};
+    else if (code === 'unreadable') choice = {...withNote(choice, codeEngineUnreadableScan(engine)), activity: codeEngineUnreadableScan(engine)};
+  }
   catch (error) { await releaseFusion?.(); throw error; }
   // Fusion passes don't touch Blender: no Blender lock, no launch, no scene reset.
   if (choice.engine === 'fusion') {
     try {
       const result = await touchUpLocked(input, deps, choice);
-      if ((result.status === 'done' || result.status === 'unchanged') && result.model && result.design?.f3d && choice.documentId) {
+      if ((result.status === 'done' || result.status === 'unchanged') && result.model && result.design && !isCodeDesign(result.design) && choice.documentId) {
         const checked = await closeCompletedFusionDocument(input, deps, choice.documentId, result.design.f3d);
         if (!checked.valid) {
           const {design: _invalidArchive, ...savedMesh} = result;
@@ -239,11 +345,11 @@ async function touchUp(input: TouchupInput, deps: TouchupDeps): Promise<TouchupR
   }
   await releaseFusion?.();
   const release = await acquireBlenderLock(deps.lockPath);
-  try { return {...await touchUpLocked(input, deps, choice), ...choice}; }
+  try { const {activity: _shown, ...made} = choice; return {...await touchUpLocked(input, deps, choice), ...made}; }
   finally { await release(); }
 }
 
-async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: EngineChoice): Promise<TouchupResult & {passDir: string}> {
+async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: EngineChoice, frame?: ScanFrame): Promise<TouchupResult & {passDir: string}> {
   if (choice.engine === 'blender') {
     idleBlender = {input, deps};
     await (deps.ensureBlender ?? (() => ensureBlenderMcp({launch: defaultBlenderLaunch()})))();
@@ -271,11 +377,25 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   if (!guidance.slicing?.trim()) {
     return {status: 'failed', reason: slicingGuidanceUnavailable(input.handoff.backend), renders: [], checkpoints: [], stats: {seconds: 0, toolCalls: 0}, passDir: pass.dir};
   }
+  const code = choice.engine === 'code';
+  // The code engine's rules are its MCP's: without its cad_design prompt the pass doesn't start.
+  if (code && !guidance.cad?.trim()) {
+    return {status: 'failed', reason: codeGuidanceUnavailable(input.handoff.backend), renders: [], checkpoints: [], stats: {seconds: 0, toolCalls: 0}, passDir: pass.dir};
+  }
+  // A code pass keeps its runs in its own design folder; a change to a code design starts from a copy of it, so
+  // the project's saved design is never written to and the engine reads it inside this project's passes.
+  let design = input.design;
+  if (code) {
+    await mkdir(passCadDir(pass), {recursive: true});
+    design = isCodeDesign(input.design) ? await copyDesign(input.design, passDesignDir(pass)) : undefined;
+  }
   input.onStage?.('working', choice.engine);
+  if (choice.activity) input.onProgress?.({seconds: 0, toolCalls: 0, activity: [{atMs: Date.now(), kind: 'message', text: choice.activity}]});
   const inv = buildTouchupInvocation({...(input.resume ? {resumeSessionId: input.resume.sessionId} : {}), pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
     ...(input.kind ? {kind: input.kind} : {}),
     ...(input.designerCopy ? {designerCopy: true} : {}),
-    ...(choice.engine === 'fusion' && input.design ? {design: input.design} : {}), ...(guidance ? {guidance} : {}),
+    ...((choice.engine === 'fusion' && input.design && !isCodeDesign(input.design)) || (code && design) ? {design: design!} : {}), ...(guidance ? {guidance} : {}),
+    ...(code && frame ? {scanFrame: frame} : {}),
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
     ...(input.note !== undefined ? {note: input.note} : {}), ...(input.summary !== undefined ? {summary: input.summary} : {})});
   inv.worker = input.worker;
@@ -286,8 +406,13 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
     inv.cwd = input.resume.sessionCwd ?? input.resume.passDir;
     // Session lookup keeps its original cwd; relative output names must still belong to this new attempt.
     const rules = inv.args.indexOf('--append-system-prompt') + 1;
-    inv.args[rules] += `\nFor this resumed attempt, resolve every out/... output name in these rules and the result schema against ${pass.dir}, not the session working directory. Write final files only to ${pass.outDir} and checkpoints only to ${pass.checkpointsDir}, using absolute paths. The previous pass folder is a recovery source: do not overwrite its files.`;
-    inv.args[inv.args.length - 1] = `Continue from where you stopped. The previous checkpoints folder is ${join(input.resume.passDir, 'out', 'checkpoints')}. Restore the latest valid checkpoint if needed. Save this pass's checkpoints in ${pass.checkpointsDir} and final files in ${pass.outDir}. The modeling engine is prepared for this pass; use its current MCP binding. You already have the original request and photos in this session.${input.note ? ` New request: ${input.note}` : ''}${input.resume.photos?.length ? ` New photos for this request: ${input.resume.photos.map(path => pass.photoPaths[input.photos.indexOf(path)]).filter(Boolean).join(', ')}.` : ''}`;
+    inv.args[rules] += code
+      ? `\nFor this resumed attempt, give every cad_run ${passCadDir(pass)} as its output_dir, and write any other output only to ${pass.outDir}, using absolute paths. The previous pass folder is a recovery source: do not overwrite its files.`
+      : `\nFor this resumed attempt, resolve every out/... output name in these rules and the result schema against ${pass.dir}, not the session working directory. Write final files only to ${pass.outDir} and checkpoints only to ${pass.checkpointsDir}, using absolute paths. The previous pass folder is a recovery source: do not overwrite its files.`;
+    inv.args[inv.args.length - 1] = code
+      ? `Continue from where you stopped. The previous attempt's cad_run folders are in ${passCadDir({dir: input.resume.passDir})}: start from the latest one's script and parameters if needed. Give this pass's cad_run calls ${passCadDir(pass)} as output_dir, and mark the finished model's run final.`
+      : `Continue from where you stopped. The previous checkpoints folder is ${join(input.resume.passDir, 'out', 'checkpoints')}. Restore the latest valid checkpoint if needed. Save this pass's checkpoints in ${pass.checkpointsDir} and final files in ${pass.outDir}.`;
+    inv.args[inv.args.length - 1] += ` The modeling engine is prepared for this pass; use its current MCP binding. You already have the original request and photos in this session.${input.note ? ` New request: ${input.note}` : ''}${input.resume.photos?.length ? ` New photos for this request: ${input.resume.photos.map(path => pass.photoPaths[input.photos.indexOf(path)]).filter(Boolean).join(', ')}.` : ''}`;
   }
   const runOptions = {
     ...(inputStlSha256 ? {inputStlSha256} : {}),

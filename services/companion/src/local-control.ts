@@ -62,6 +62,8 @@ export function methodDeadlineMs(method: ControlMethod, params: unknown): number
   if (method === 'fusion.setup') return (params as {install?: unknown})?.install === true ? 330_000 : 100_000;
   // fusion.status may start Fusion and waits up to 90 s for its add-in, then lists the Fusion MCP's tools.
   if (method === 'fusion.status') return 160_000;
+  // cad.status starts the printer MCP to ask cad_status; cad.setup may ask it first, then returns while it installs.
+  if (method === 'cad.status' || method === 'cad.setup') return 40_000;
   // The printer MCP may ask its own confirmation: the control waits the question's window (10 min) plus 2 min,
   // so the app's request must outlive it, or an answer after the app gave up would still run the control.
   if (method === 'objects.pausePrint' || method === 'objects.resumePrint' || method === 'objects.cancelPrint') return DEFAULT_TIMEOUTS.elicitationMs + 130_000;

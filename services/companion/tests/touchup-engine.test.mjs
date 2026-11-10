@@ -284,3 +284,196 @@ test('bound Fusion workers redact configured credentials without receiving them 
   const failed = await runTouchupWorker(inv, pass, {spawn: fakeWorker({status: 'failed', summary: `Failure ${secret}`})});
   assert.equal(failed.reason, 'Failure [redacted]');
 });
+
+// One engine (PRD §8.9, David Nov 9): the printer MCP's code design engine (cad/1) is chosen whenever it is there
+// and set up. Blender and Fusion run exactly as before when it isn't.
+const CAD_TOOLS = ['cad_status', 'cad_setup', 'cad_run', 'cad_check_fit'];
+const LEGACY_TOOLS = ['blender_mcp_status', 'blender_mcp_call', 'fusion_mcp_status', 'fusion_mcp_new_design', 'fusion_mcp_call', 'fusion_mcp_export'];
+const cadStatus = (ready, configured = ready) => ({structuredContent: {configured, ready, python: configured ? '/cad/python' : null, build123d: '0.13.0', platform: 'darwin'}, content: []});
+
+test('the code design engine: ready → it designs and cleans up; installed but not set up → today\'s engine with a note; absent → today\'s engine; a project\'s own choice wins', async () => {
+  const {codeEngineNotSetUp} = await import('../dist/touchup/code-engine.js');
+  // Ready: fits and copies both use it, and Fusion is never opened.
+  for (const kind of ['fit', 'copy']) {
+    const ready = bridge({cad_status: cadStatus(true), fusion_mcp_status: text({configured: true, connected: true})}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+    assert.deepEqual(await chooseEngine({handoff, kind}, ready), {engine: 'code'}, kind);
+    assert.deepEqual(ready.calls.map(call => call.name), ['cad_status'], `${kind}: only cad_status is asked`);
+    assert.deepEqual(ready.calls[0].args, {});
+  }
+  // A later change to a code design starts from its script, on the code engine.
+  const revision = bridge({cad_status: cadStatus(true)}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit', design: {script: '/p/current/design/touched.py', parameters: '/p/current/design/touched.parameters.json'}}, revision), {engine: 'code'});
+  // The tools are there but the engine isn't set up: today's engine runs, and the pass says the faster one can be set up.
+  const copyNotSetUp = bridge({cad_status: cadStatus(false)}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'copy'}, copyNotSetUp), {engine: 'blender', note: codeEngineNotSetUp('blender')});
+  const installedNotVerified = bridge({cad_status: cadStatus(false, true)}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.equal((await chooseEngine({handoff, kind: 'copy'}, installedNotVerified)).engine, 'blender');
+  const fitNotSetUp = bridge({cad_status: cadStatus(false), fusion_mcp_status: text({configured: true, connected: true})}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit'}, fitNotSetUp), {engine: 'fusion', documentId: 'owned-token', note: codeEngineNotSetUp('fusion')});
+  const fitNeither = bridge({cad_status: cadStatus(false), fusion_mcp_status: text({configured: true, connected: false, error: 'Fusion is not running'})}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit'}, fitNeither), {engine: 'blender', note: `Fusion isn't connected: Fusion is not running. ${codeEngineNotSetUp('blender')}`});
+  assert.match(codeEngineNotSetUp('blender'), /Settings/);
+  assert.doesNotMatch(codeEngineNotSetUp('blender'), /cad_|build123d|install/);
+  // cad_status answering with an error is not "ready".
+  const statusError = bridge({cad_status: error('cad_status failed')}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'copy'}, statusError), {engine: 'blender', note: codeEngineNotSetUp('blender')});
+  // An MCP without the tools: exactly today's choice, with no note.
+  const absentCopy = bridge({}, LEGACY_TOOLS);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'copy'}, absentCopy), {engine: 'blender'});
+  assert.deepEqual(absentCopy.calls, []);
+  const absentFit = bridge({fusion_mcp_status: text({configured: true, connected: true})}, LEGACY_TOOLS);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit'}, absentFit), {engine: 'fusion', documentId: 'owned-token'});
+  // The project's own choice wins over the code engine, exactly as it did over Fusion.
+  const preferBlender = bridge({cad_status: cadStatus(true)}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit', preferredEngine: 'blender'}, preferBlender), {engine: 'blender'});
+  assert.deepEqual(preferBlender.calls, []);
+  const preferFusion = bridge({cad_status: cadStatus(true), fusion_mcp_status: text({configured: true, connected: false})}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'fit', preferredEngine: 'fusion'}, preferFusion), {engine: 'blender', note: "Fusion isn't connected."});
+  assert.equal(preferFusion.calls.some(call => call.name === 'cad_status'), false, 'a Fusion project never asks for the code engine');
+  // A Fusion design's next change goes to Fusion; a designer's 3MF is edited in place, which cad/1 can't write.
+  const fusionDesign = bridge({cad_status: cadStatus(true), fusion_mcp_status: text({configured: true, connected: true})}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.equal((await chooseEngine({handoff, kind: 'fit', design: {f3d: '/p/current/design.f3d'}}, fusionDesign)).engine, 'fusion');
+  const designer = bridge({cad_status: cadStatus(true)}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  assert.deepEqual(await chooseEngine({handoff, kind: 'copy', designerCopy: true}, designer), {engine: 'blender'});
+  assert.deepEqual(designer.calls, []);
+});
+
+test('the composed rules for a code pass: the MCP\'s cad_design prompt plus only Counterpart\'s own sections, with no Blender, Fusion or script-format words', () => {
+  const guidance = {design: 'MCP DESIGN GUIDANCE', slicing: 'MCP SLICING GUIDANCE', cad: 'MCP CAD PROMPT'};
+  const fit = systemRules({kind: 'fit', engine: 'code', request: true}, guidance);
+  const copy = systemRules({kind: 'copy', engine: 'code'}, guidance);
+  for (const [name, rules] of [['fit', fit], ['copy', copy]]) {
+    assert.match(rules, /cad_design/, name);
+    assert.ok(rules.includes('MCP CAD PROMPT'), `${name}: the MCP's own engine prompt is included as served`);
+    assert.ok(rules.indexOf('MCP CAD PROMPT') < rules.indexOf('MCP DESIGN GUIDANCE'), `${name}: the engine prompt comes before the manufacturing guidance`);
+    assert.doesNotMatch(rules, /Blender|blender_mcp|fusion_mcp|Fusion/, `${name}: no other engine is named`);
+    // What the script looks like and which libraries it uses is the MCP's to say (AGENTS.md: the app staples onto the MCPs).
+    assert.doesNotMatch(rules.replace('MCP CAD PROMPT', ''), /build123d|trimesh|manifold|load_scan|def build|\bP = \{|numpy|scipy|\.py\b/, `${name}: no script-format knowledge`);
+    assert.doesNotMatch(rules, /\(01\.stl, 02\.stl/, `${name}: Counterpart keeps every run as a checkpoint itself`);
+    assert.match(rules, /mark the run of the whole model you select as the result so far final/, `${name}: the worker marks the selected run final`);
+    assert.match(rules, /Never mark final a run that measures or prepares the scan/, `${name}: measuring runs never become the model`);
+    assert.match(rules, /orientation the object is used in/, `${name}: exported as it is used`);
+  }
+  assert.ok(fit.includes(RULE_SECTIONS.newDesign) && fit.includes(RULE_SECTIONS.fitSizes));
+  assert.equal(fit.includes(RULE_SECTIONS.captured), false);
+  assert.match(fit, /cad_check_fit/, 'a fit can check itself against the scan');
+  assert.doesNotMatch(fit, /out\/touched\.stl/, 'a code worker writes no files itself: the touched run is the whole model');
+  assert.match(fit, /counterpart_make_3mf into out\/touched\.3mf/, 'several colours still combine into the 3MF');
+  assert.match(systemRules({kind: 'fit', request: true}), /Still export the whole model to out\/touched\.stl\./);
+  // How to prepare the reference and that a fit check never resizes a measured interface are the MCP's (cad_design).
+  assert.doesNotMatch(fit.replace('MCP CAD PROMPT', ''), /never rescale|as information|never to choose a size/i, 'no sentence duplicates the MCP\'s cad_design prompt');
+  // The captured-object rules stay Counterpart's, and apply to a code cleanup pass.
+  assert.ok(copy.includes(RULE_SECTIONS.captured));
+  assert.match(copy, /First say what the object is/);
+  assert.match(copy, /tagged assumed, or estimated with toleranceMm/);
+  assert.match(copy, /Organic and handmade surfaces/);
+  // Without the code engine the rules are what they were.
+  assert.match(systemRules({kind: 'copy'}), /Use Blender's existing sculpt, modelling and modifier tools/);
+  assert.match(systemRules({kind: 'copy'}), /\(01\.stl, 02\.stl, …\)/);
+});
+
+test('a code cleanup pass names the converted scan with its units and up axis, and the MCP may write only inside the project\'s passes', async () => {
+  const root = await tempDir('touchup-code-inv-');
+  const source = join(root, 'source');
+  await mkdir(source, {recursive: true});
+  for (const name of ['mesh.obj', 'mesh.mtl', 'mesh_basecolor_0.png']) await writeFile(join(source, name), name);
+  const pass = await prepareTouchupPass({root: join(root, 'passes'), objectId: 'pass', scan: ['mesh.obj', 'mesh.mtl', 'mesh_basecolor_0.png'].map(name => join(source, name)), photos: [], requirePhotos: false});
+  const printer = {command: '/usr/bin/node', args: ['/mcp/index.js'], env: {CAD_OUTPUT_DIRS: '/users/own/designs', BAMBU_TOKEN: 'secret'}};
+  const inv = buildTouchupInvocation({pass, printer, claudePath: '/c', kind: 'copy', engine: 'code', scanFrame: {unitMetres: 1, upAxis: 'Y'},
+    guidance: {design: 'D', slicing: 'S', cad: 'MCP CAD PROMPT'}});
+  const prompt = inv.args.at(-1);
+  assert.match(prompt, /- Scan: .*mesh\.obj, .*mesh\.mtl, .*mesh_basecolor_0\.png/);
+  assert.match(prompt, /1 unit is 1 metre and \+Y is up/);
+  assert.match(prompt, new RegExp(`- Design folder \\(output_dir for every cad_run\\): ${join(pass.dir, 'cad').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.doesNotMatch(prompt, /Checkpoints folder/, 'every cad_run is a checkpoint; Counterpart files them');
+  assert.doesNotMatch(prompt, /get_stl_info/);
+  const env = inv.mcpConfig.mcpServers.printer.env;
+  assert.equal(env.CAD_OUTPUT_DIRS, ['/users/own/designs', join(root, 'passes', 'pass')].join(':'), 'the person\'s own roots stay, and this project\'s passes are added');
+  assert.equal(env.BAMBU_TOKEN, 'secret', 'the printer MCP is otherwise unchanged');
+  // A pass on today's engines writes no CAD roots.
+  const blender = buildTouchupInvocation({pass, printer, claudePath: '/c', kind: 'copy'});
+  assert.equal(blender.mcpConfig.mcpServers.printer.env.CAD_OUTPUT_DIRS, '/users/own/designs');
+  // A change to a code design starts from its saved script and parameters.
+  const change = buildTouchupInvocation({pass, printer, claudePath: '/c', kind: 'fit', engine: 'code', instructions: 'A holder', note: 'Make it 1 mm taller', currentModel: true,
+    design: {script: join(pass.dir, 'design', 'touched.py'), parameters: join(pass.dir, 'design', 'touched.parameters.json')}});
+  assert.match(change.args.at(-1), new RegExp(`The current design is a code design: ${join(pass.dir, 'design', 'touched.py').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(its parameters: .*touched\\.parameters\\.json\\)`));
+  assert.match(change.args.at(-1), /cad_design prompt says for an edit/);
+});
+
+test('a code pass never touches Blender or Fusion: it converts the capture, reads cad_design, and a change starts from the saved design', async () => {
+  const {readFile} = await import('node:fs/promises');
+  const root = await tempDir('touchup-code-pass-');
+  const usdz = join(root, 'scan.usdz');
+  await writeFile(usdz, 'usdz');
+  const ready = bridge({cad_status: cadStatus(true)}, [...CAD_TOOLS, ...LEGACY_TOOLS]);
+  const log = [], stages = [];
+  const deps = {
+    lockPath: join(root, 'blender.lock'), fusionLockPath: join(root, 'fusion.lock'), codeLockPath: join(root, 'code.lock'),
+    ensureBlender: async () => { log.push('ensureBlender'); }, resetScene: async () => { log.push('resetScene'); },
+    client: ready.client,
+    convertCapture: async (source, out) => {
+      log.push(`convert ${source.split('/').at(-1)}`);
+      const files = [];
+      for (const name of ['mesh.obj', 'mesh.mtl', 'mesh_basecolor_0.png']) { await writeFile(join(out, name), name); files.push(join(out, name)); }
+      return {files, frame: {unitMetres: 1, upAxis: 'Y'}};
+    },
+    guidance: async () => { log.push('guidance'); return {design: 'D', slicing: 'S', cad: 'MCP CAD PROMPT'}; },
+    run: async (inv, pass) => {
+      log.push('run');
+      const rules = inv.args[inv.args.indexOf('--append-system-prompt') + 1];
+      assert.ok(rules.includes('MCP CAD PROMPT'));
+      assert.doesNotMatch(rules, /Blender/);
+      assert.match(inv.args.at(-1), /mesh\.obj.*1 unit is 1 metre and \+Y is up/);
+      assert.doesNotMatch(inv.args.at(-1), /scan\.usdz/, 'the worker gets the converted mesh, which the engine can read');
+      assert.equal(inv.engine, 'code');
+      return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}};
+    },
+  };
+  const result = await runTouchup({root, objectId: 'obj', scan: [usdz], photos: [], handoff, claudePath: '/c', instructions: 'Clean it up', kind: 'copy',
+    onStage: (stage, engine) => stages.push([stage, engine])}, deps);
+  assert.equal(result.engine, 'code');
+  assert.deepEqual(log, ['convert scan.usdz', 'guidance', 'run'], 'no Blender launch or scene reset');
+  assert.deepEqual(stages, [['preparing', 'code'], ['working', 'code']]);
+  assert.equal(ready.calls.some(call => call.name.startsWith('fusion_') || call.name.startsWith('blender_')), false);
+
+  // An MCP that has the engine but serves no cad_design prompt is one to update: nothing runs.
+  log.length = 0;
+  const noPrompt = await runTouchup({root, objectId: 'obj', scan: [usdz], photos: [], handoff, claudePath: '/c', instructions: 'Clean it up', kind: 'copy'},
+    {...deps, guidance: async () => ({design: 'D', slicing: 'S'})});
+  assert.equal(noPrompt.status, 'failed');
+  assert.match(noPrompt.reason, /^Update bambu-printer-mcp in Settings → Printers/);
+  assert.equal(log.includes('run'), false);
+
+  // A scan the converter can't read: today's engine cleans it up, and the pass says why.
+  log.length = 0;
+  const unreadable = await runTouchup({root, objectId: 'obj', scan: [usdz], photos: [], handoff, claudePath: '/c', instructions: 'Clean it up', kind: 'copy'},
+    {...deps, convertCapture: async () => { throw new Error('Capture conversion failed or was unqualified'); },
+      run: async (inv, pass) => { log.push('run'); assert.equal(inv.engine, 'blender'); return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}}; }});
+  assert.equal(unreadable.engine, 'blender');
+  assert.match(unreadable.note, /couldn't read this scan/);
+  assert.deepEqual(log, ['ensureBlender', 'resetScene', 'guidance', 'run']);
+
+  // A change to a code design: its script, parameters and input snapshots are copied into the pass, and the
+  // copy's inputs list points at the copies (the saved design itself is never written to).
+  const saved = join(root, 'project', 'current', 'design');
+  await mkdir(join(saved, 'inputs'), {recursive: true});
+  await writeFile(join(saved, 'touched.py'), 'script');
+  await writeFile(join(saved, 'touched.parameters.json'), '{"cup_h":70}');
+  await writeFile(join(saved, 'inputs', 'mesh.obj'), 'mesh');
+  await writeFile(join(saved, 'touched.inputs.json'), JSON.stringify({scan: join(saved, 'inputs', 'mesh.obj')}));
+  const model = join(root, 'model.stl');
+  await writeFile(model, 'solid x\nendsolid x\n');
+  let copied;
+  await runTouchup({root, objectId: 'obj', scan: [model], photos: [], handoff, claudePath: '/c', instructions: 'A holder', note: 'Make it 1 mm taller', currentModel: true, kind: 'fit',
+    design: {script: join(saved, 'touched.py'), parameters: join(saved, 'touched.parameters.json'), inputs: join(saved, 'touched.inputs.json')}},
+  {...deps, run: async (inv, pass) => {
+    const design = join(pass.dir, 'design');
+    copied = {script: await readFile(join(design, 'touched.py'), 'utf8'), parameters: await readFile(join(design, 'touched.parameters.json'), 'utf8'),
+      inputs: JSON.parse(await readFile(join(design, 'touched.inputs.json'), 'utf8')), mesh: await readFile(join(design, 'inputs', 'mesh.obj'), 'utf8')};
+    assert.deepEqual(copied.inputs, {scan: join(design, 'inputs', 'mesh.obj')});
+    assert.match(inv.args.at(-1), new RegExp(`code design: ${join(design, 'touched.py').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    return {status: 'done', model: join(pass.outDir, 'touched.stl'), renders: [], checkpoints: [], stats: {seconds: 1, toolCalls: 1}};
+  }});
+  assert.deepEqual({...copied, inputs: undefined}, {script: 'script', parameters: '{"cup_h":70}', inputs: undefined, mesh: 'mesh'});
+  assert.equal(await readFile(join(saved, 'touched.inputs.json'), 'utf8'), JSON.stringify({scan: join(saved, 'inputs', 'mesh.obj')}));
+});

@@ -251,6 +251,30 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(fake.calls.map { $0.request.url?.path }, ["/v1/blender", "/v1/blender/check", "/v1/blender/update"])
     }
 
+    /// The code design engine's row (PRD §8.9): read with the settings, and Set Up, which the computer starts.
+    func testTheCodeDesignEngineRowReadsTheSettingsAndSetsUpOnTheComputer() async throws {
+        let ready = ["state": "not-set-up", "message": "Not set up yet.", "server": "bambu-printer-mcp", "canSetUp": true,
+                     "size": "Set Up downloads about 367 MB and uses about 1.6 GB on this computer."] as [String: Any]
+        let fake = FakeTransport { request, _ in
+            request.httpMethod == "POST"
+                ? json(200, ["settings": ["milestones": "50", "cad": ["state": "setting-up", "message": "Setting up… 0 s so far.", "seconds": 0, "canSetUp": false]]])
+                : json(200, ["cad": ready])
+        }
+        let mac = try client(fake)
+        let status = try await mac.codeEngine()
+        XCTAssertEqual(status, CodeEngineStatus(state: "not-set-up", message: "Not set up yet.", server: "bambu-printer-mcp",
+                                                size: "Set Up downloads about 367 MB and uses about 1.6 GB on this computer.", canSetUp: true))
+        let setUp = try await mac.codeEngine(.setup)
+        XCTAssertEqual(setUp?.state, "setting-up")
+        XCTAssertEqual(setUp?.isWorking, true)
+        XCTAssertEqual(fake.calls.map { $0.request.httpMethod }, ["GET", "POST"])
+        XCTAssertEqual(fake.calls.map { $0.request.url?.path }, ["/v1/settings/cad", "/v1/settings/cad/setup"])
+        // A computer whose companion predates the engine: no row.
+        let older = FakeTransport { _, _ in json(404, ["error": ["code": "not-found", "message": "Not found"]]) }
+        let none = try await client(older).codeEngine()
+        XCTAssertNil(none)
+    }
+
     private func client(_ fake: FakeTransport, record: PairingRecord = v2Record()) throws -> CompanionClient {
         let store = PairingStore(store: MemoryStore(), defaults: UserDefaults(suiteName: "cc-\(UUID().uuidString)")!)
         try store.save(record, notify: false)

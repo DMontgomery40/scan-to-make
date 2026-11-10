@@ -186,7 +186,60 @@ test('a fit lookup is confirmed before fit-critical geometry', () => {
   assert.match(FIT_RULES, /manufacturer's own published dimensions/);
   assert.match(FIT_RULES, /stop with needs_closeup to confirm/);
   assert.match(FIT_RULES, /caliper photo/);
-  assert.match(FIT_RULES, /Measured dimensions in the request are authoritative/);
+  assert.match(FIT_RULES, /come from measurements/);
+});
+
+// #427, Nov 10: a code fit pass measured the scan 29.8 deep and 150 tall against calipers of 28 and 145, judged the
+// difference unimportant, designed without asking, and chose 1.5 mm a side so the cavity swallowed the inflated scan.
+// The order is fixed for every engine: measurements define the interface, a disagreement stops the pass with the ask
+// before any fit-critical geometry, the stated clearance is applied to the measurements, and a fit check is information.
+test('a fit settles a scan disagreement with the person before any fit-critical geometry, then sizes from the measurements plus a stated clearance', () => {
+  for (const engine of ['blender', 'fusion', 'code']) {
+    const rules = systemRules({kind: 'fit', engine, request: true});
+    const fit = rules.slice(rules.indexOf(RULE_SECTIONS.fitSizes), rules.indexOf('\n\n', rules.indexOf(RULE_SECTIONS.fitSizes)) >>> 0);
+    const step = text => { const at = fit.indexOf(text); assert.ok(at >= 0, `${engine}: ${text}`); return at; };
+    // In this order: measurements define the interface; compare with the scan; ask on a disagreement; size; check.
+    const measured = step('come from measurements');
+    const compare = step('When there is a scan, compare each measured or confirmed size with it');
+    const ask = step('stop with needs_closeup before modelling any fit-critical geometry');
+    const size = step('Size the interface from the measured or confirmed sizes plus a clearance you state');
+    assert.ok(measured < compare && compare < ask && ask < size, `${engine}: the steps are in order`);
+    assert.match(fit, /2 mm or 2%/);
+    assert.match(fit, /however little you judge the difference to matter/, `${engine}: the worker's own judgement is no reason to skip the ask`);
+    assert.match(fit, /names both sets of numbers/, `${engine}: the question gives the measurement and the scan reading`);
+    assert.match(fit, /already answered/, `${engine}: an answered question isn't asked again`);
+    assert.match(fit, /never choose the clearance to make room for the scan/i, `${engine}: the clearance isn't sized to swallow the scan`);
+    assert.match(fit, /clearance per side in your summary/, `${engine}: the clearance is said`);
+    assert.match(fit, /manufacturer's own published dimensions/, `${engine}: the lookup stays`);
+    assert.doesNotMatch(fit, /still win over the scan/, `${engine}: no line reads as permission to skip the ask`);
+    if (engine === 'code') {
+      const check = step('cad_check_fit');
+      assert.ok(size < check, 'the fit check comes after the size is settled');
+      assert.match(fit, /as the printer MCP's cad_design prompt describes/, 'the reference and the never-resize rule are the MCP\'s');
+      assert.match(fit, /report the interference and gap, with what you changed in the reference, in your changes/);
+      assert.doesNotMatch(fit, /never rescale|as information/, 'no sentence duplicates cad_design');
+    } else assert.doesNotMatch(fit, /cad_check_fit/);
+  }
+});
+
+// F2 (review of #439): a fit from photos, a lookup or calipers alone has no scan; the comparison must not be demanded.
+test('a fit with measurements and no scan is asked for no scan comparison, and a lookup is still confirmed first', async () => {
+  const root = await tempDir('touchup-fit-noscan-');
+  const pass = await prepareTouchupPass({root, objectId: 'fit', scan: [], photos: [], requirePhotos: false});
+  for (const engine of ['blender', 'fusion', 'code']) {
+    const inv = buildTouchupInvocation({pass, printer: {command: '/x'}, claudePath: '/c', kind: 'fit', engine: engine === 'blender' ? undefined : engine, documentId: 'd', handoff: {backend: 'bambu-printer-mcp', process: {command: '/x'}},
+      instructions: 'A wall holder for a bottle. My calipers say 65 × 28 × 145 mm.'});
+    assert.doesNotMatch(inv.args.at(-1), /- Scan:/, `${engine}: this pass has no scan`);
+    const rules = inv.args[inv.args.indexOf('--append-system-prompt') + 1];
+    const fit = rules.slice(rules.indexOf(RULE_SECTIONS.fitSizes), rules.indexOf('\n\n', rules.indexOf(RULE_SECTIONS.fitSizes)) >>> 0);
+    // Every step that compares with or checks against a scan is conditional on there being one.
+    const scanSteps = fit.split('\n').filter(line => /^\d\./.test(line) && /\b(compare|check the finished part)\b/i.test(line));
+    assert.ok(scanSteps.length >= (engine === 'code' ? 2 : 1), `${engine}: the comparison (and the code engine's check) are found`);
+    for (const line of scanSteps)
+      assert.match(line, /^\d\. When there is a scan,/, `${engine}: ${line.slice(0, 60)}`);
+    // The lookup-and-confirm ask does not depend on a scan.
+    assert.match(fit, /^1\. The interface sizes come from measurements[^\n]*stop with needs_closeup to confirm them/m, `${engine}: the lookup is still confirmed`);
+  }
 });
 
 test('photo evidence lists overview pages first and every real filename, including PNG inputs', async () => {

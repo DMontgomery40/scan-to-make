@@ -10,6 +10,7 @@ final class SettingsTests: XCTestCase {
       "general":{"openAtLogin":true,"showInDock":false,"keepAwake":true},
       "ai":{"revision":"r1","choice":{"kind":"claude-code"},"check":{"id":"c","revision":"r1","state":"failed","outcome":"needs-gui-session"}},
       "fusion":{"state":"not-set-up","message":"Not set up. Set Up installs the Fusion add-in."},
+      "cad":{"state":"ready","message":"Ready. New designs and scan cleanups use it.","server":"bambu-printer-mcp","canSetUp":true,"size":"Uses 1.4 GB on this computer.","result":{"ok":false,"message":"The MCP's sentence.","suggestion":"The MCP's suggestion.","refusal":{"status":"error","code":"cad-uv-missing","message":"The MCP's sentence."}}},
       "somethingNew":{"x":1}}}
     """#
 
@@ -25,6 +26,10 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(s.general?["showInDock"], false)
         XCTAssertEqual(s.ai?.check?.outcome, "needs-gui-session")
         XCTAssertEqual(s.fusion?.state, "not-set-up")
+        XCTAssertEqual(s.cad?.state, "ready")
+        XCTAssertEqual(s.cad?.result, CodeEngineStatus.Result(ok: false, message: "The MCP's sentence.", suggestion: "The MCP's suggestion."), "the refusal's structured result travels without being read")
+        XCTAssertEqual(s.cad?.size, "Uses 1.4 GB on this computer.")
+        XCTAssertEqual(s.cad?.server, "bambu-printer-mcp")
         let older = try JSONDecoder().decode(Reply.self, from: Data(#"{"settings":{"milestones":"50"}}"#.utf8)).settings
         XCTAssertFalse(older.isFull, "an older Mac serves only milestones")
         XCTAssertTrue(SettingsSchema.defaultValue("print.new-thing", mac: false), "an unknown type is on for the phone")
@@ -66,6 +71,8 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(CompanionClient.scope("DELETE", "/v1/devices/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"), "projects:write")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/settings/ai/test"), "projects:write")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/settings/fusion/setup"), "projects:write")
+        XCTAssertEqual(CompanionClient.scope("POST", "/v1/settings/cad/setup"), "projects:write")
+        XCTAssertEqual(CompanionClient.scope("GET", "/v1/settings/cad"), "projects:read")
         XCTAssertEqual(CompanionClient.scope("POST", "/v1/printers/mcp/m1/update"), "projects:write")
         XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/printers/current/route"), "printer-handoff:use")
         XCTAssertEqual(CompanionClient.scope("PUT", "/v1/objects/printers/current/route"), "projects:write")

@@ -143,6 +143,8 @@ struct MacSettingsSections: View {
     var body: some View {
         printers
         Section("Printer software") { MCPCopiesView(store: model.store) }
+        // PRD §8.9: the printer MCP's code design engine; hidden when the computer's companion predates it.
+        CodeEngineSettingsSection { action in try await model.store.mac.client.codeEngine(action) }
         if model.store.macCapabilities.contains("blenderAddon") {
             BlenderAddonSettingsSection { action in try await model.store.mac.client.blenderAddon(action) }
         }

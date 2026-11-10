@@ -18,7 +18,7 @@ const SAMPLES = 20;
 export function stageWords(id: StageId, engine: DesignEngine, kind: PassKind): string {
   switch (id) {
     case 'building': return 'Building the model from your photos';
-    case 'preparing': return kind === 'published' ? 'Reading the model page' : engine === 'fusion' ? 'Getting Fusion ready' : 'Getting Blender ready';
+    case 'preparing': return kind === 'published' ? 'Reading the model page' : engine === 'fusion' ? 'Getting Fusion ready' : engine === 'code' ? 'Getting the design engine ready' : 'Getting Blender ready';
     case 'working': return kind === 'published' ? "Getting the designer's file" : kind === 'fit' ? 'Designing it' : 'Fixing the scan';
     case 'saving': return 'Saving the result';
   }

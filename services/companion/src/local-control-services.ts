@@ -1,3 +1,4 @@
+import {CadSetupRefused} from './cad-settings.js';
 import {lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile} from 'node:fs/promises';
 import {dirname, join, sep} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -53,6 +54,8 @@ export interface ControlServices {
   fusionSetup?: (install: boolean) => Promise<{setup: Record<string, unknown> | null; server: string; error?: string}>;
   /** fusion_mcp_status {launch: true} on the same printer MCP, its structured result as the MCP gives it (null without the tool). */
   fusionStatus?: () => Promise<{status: Record<string, unknown> | null; server: string; error?: string}>;
+  /** Settings → the code design engine: the printer MCP's cad_status, and Set Up (cad_setup in the background). */
+  cadSettings?: import('./cad-settings.js').CadSettings;
   mcpUpdates?: import('./printing/mcp-updates.js').McpUpdater;
   /** Settings → Printers: both MCPs (Download), finding and adding printers. Present without a printer. */
   printerSetup?: import('./printing/setup.js').PrinterSetup;
@@ -261,6 +264,16 @@ export function createControlDispatcher(services: ControlServices) {
           if (!services.fusionStatus) throw new ControlFailure('unavailable');
           parameters[method].parse(raw);
           return await services.fusionStatus();
+        }
+        case 'cad.status': case 'cad.setup': {
+          if (!services.cadSettings) throw new ControlFailure('unavailable');
+          parameters[method].parse(raw);
+          if (method === 'cad.status') return {cad: await services.cadSettings.view()};
+          try { return {cad: await services.cadSettings.setUp()}; }
+          catch (error) {
+            if (error instanceof CadSetupRefused) throw new ControlFailure('conflict', error.message);
+            throw error;
+          }
         }
         case 'fusion.report': case 'fusion.claimSetup': case 'fusion.setupDone': {
           if (!services.runtimeSettings) throw new ControlFailure('unavailable');

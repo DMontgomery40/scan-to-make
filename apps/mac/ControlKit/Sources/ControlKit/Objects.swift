@@ -644,6 +644,13 @@ public extension ControlClient {
         let reply: Reply = try await call("blender." + action.rawValue)
         return reply.blender
     }
+    /// The code design engine's row (PRD §8.9): `cad.status` reads the printer MCP's cad_status; `cad.setup` starts its
+    /// cad_setup and returns at once, and the row follows its progress with `cad.status`.
+    func codeEngine(_ action: CodeEngineStatus.Action = .status) async throws -> CodeEngineStatus? {
+        struct Reply: Decodable { let cad: CodeEngineStatus }
+        let reply: Reply = try await call("cad." + action.rawValue)
+        return reply.cad
+    }
 }
 
 /// `printers.mcps`: one of the two printer MCPs, and whether this Mac has a copy of it (a printer's, the app's own,

@@ -39,6 +39,15 @@ private actor FakeObjects: ObjectsCompanion {
     private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
     private var capabilities: ControlStatus.Capabilities?
     func setCapabilities(_ capabilities: ControlStatus.Capabilities) { self.capabilities = capabilities }
+    private(set) var codeEngineCalls: [String] = []
+    func codeEngine(_ action: CodeEngineStatus.Action) async throws -> CodeEngineStatus? {
+        codeEngineCalls.append("cad." + action.rawValue)
+        return action == .setup
+            ? CodeEngineStatus(state: "setting-up", message: "Setting up… 0 s so far.", server: "bambu-printer-mcp", seconds: 0,
+                               size: "Set Up downloads about 367 MB and uses about 1.6 GB on this computer.", canSetUp: false)
+            : CodeEngineStatus(state: "not-set-up", message: "Not set up yet.", server: "bambu-printer-mcp",
+                               size: "Set Up downloads about 367 MB and uses about 1.6 GB on this computer.", canSetUp: true)
+    }
     func status() async throws -> ControlStatus {
         guard let capabilities else { throw ControlClientError.unavailable }
         return ControlStatus(companionVersion: "test", pairedDeviceCount: 1, capabilities: capabilities)
@@ -238,6 +247,35 @@ private func project(_ item: [String: Any]) throws -> Project {
 
     /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and
     /// paths (mcp-3d-printer-server 1.2.50's `counterpart_setup_fields`), and only a changed slicer is sent (Codex review on #346).
+    /// Settings → AI → Design engine (PRD §8.9, §6.1): the code design engine's row reads the companion and Set Up asks
+    /// it to set the engine up, with projects present.
+    func testTheDesignEngineRowReadsTheCodeEngineAndSetsItUpWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("caliper", "ready"), item("holder", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertFalse(model.objects.isEmpty, "projects are present")
+        let row = try await model.codeEngine(.status)
+        XCTAssertEqual(row?.state, "not-set-up")
+        XCTAssertEqual(row?.message, "Not set up yet.")
+        XCTAssertEqual(row?.canSetUp, true, "Set Up is offered")
+        XCTAssertEqual(row?.size, "Set Up downloads about 367 MB and uses about 1.6 GB on this computer.", "what Set Up takes, before it runs")
+        let setUp = try await model.codeEngine(.setup)
+        XCTAssertEqual(setUp?.isWorking, true)
+        XCTAssertEqual(setUp?.canSetUp, false, "no second Set Up while it runs")
+        let calls = await companion.codeEngineCalls
+        XCTAssertEqual(calls, ["cad.status", "cad.setup"])
+        // The row is on screen: the AI tab's settings render the code engine's section through this model (review F4).
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("App/SettingsViews.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains(#"Tab("AI", systemImage:"sparkles", value:.ai) { AISettings(model:cleanup, objects:objects) }"#), "the AI tab shows AISettings with the projects model")
+        let ai = try XCTUnwrap(source.range(of: "struct AISettings: View {"), "AISettings exists")
+        let body = source[ai.upperBound...]
+        let end = body.range(of: "\n}\n")?.lowerBound ?? body.endIndex
+        XCTAssertTrue(body[..<end].contains("CodeEngineSettingsSection { [objects] action in try await objects.codeEngine(action) }"),
+                      "AISettings renders the code design engine's section, wired to ObjectsModel")
+    }
+
     func testAddPrinterSlicerControlsComeFromTheChosenMCPWithProjectsPresent() async throws {
         let companion = FakeObjects()
         await companion.set([item("caliper", "ready")])

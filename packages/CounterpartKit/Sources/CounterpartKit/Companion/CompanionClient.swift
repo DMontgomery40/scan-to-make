@@ -74,7 +74,7 @@ public final class CompanionClient: @unchecked Sendable {
             if path == "/v1/blender" { return "projects:read" }
             if is_("/v1/objects(?:/printers)?") || is_(one) || is_(one + "/passes/(0|[1-9][0-9]{0,15})/activity") { return "projects:read" }
             if is_("/healthz") { return "generation:health" }
-            if is_("/v1/events") || is_("/v1/settings") || is_("/v1/devices") { return "projects:read" }
+            if is_("/v1/events") || is_("/v1/settings") || is_("/v1/settings/cad") || is_("/v1/devices") { return "projects:read" }
             if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
             if is_(one + "/(filaments|colour-mapping|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route") { return "printer-handoff:use" }
@@ -94,7 +94,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-manifest|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
-            if is_("/v1/settings/(ai/test|fusion/setup)") { return "projects:write" }
+            if is_("/v1/settings/(ai/test|fusion/setup|cad/setup)") { return "projects:write" }
             if is_("/v1/printers/mcp/[^/]+/update") { return "projects:write" }
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route") { return "printer-handoff:use" }
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/mcp") { return "projects:write" }
@@ -498,6 +498,17 @@ public final class CompanionClient: @unchecked Sendable {
     public func testAI(revision: String) async throws { _ = try await send("POST", "/v1/settings/ai/test", body: try JSONSerialization.data(withJSONObject: ["revision": revision])).checked(path: "/v1/settings/ai/test") }
     /// Asks the Mac to set up Fusion (it installs an add-in there).
     public func setUpFusion() async throws { _ = try await send("POST", "/v1/settings/fusion/setup", body: Data("{}".utf8)).checked(path: "/v1/settings/fusion/setup") }
+    /// The code design engine's row (PRD §8.9): its own fresh read (the plain settings read never starts the printer
+    /// MCP), or Set Up, which the computer starts and returns from at once. Nil when the companion predates the engine.
+    public func codeEngine(_ action: CodeEngineStatus.Action = .status) async throws -> CodeEngineStatus? {
+        if action == .status {
+            struct Reply: Decodable { let cad: CodeEngineStatus? }
+            let response = try await send("GET", "/v1/settings/cad")
+            if response.status == 404 { return nil }
+            return try JSONDecoder().decode(Reply.self, from: response.checked(path: "/v1/settings/cad").body).cad
+        }
+        return try await request("POST", "/v1/settings/cad/setup", json: [:], as: SettingsReply.self).settings.cad
+    }
 
     private struct DevicesReply: Decodable { var devices: [CompanionDevice] }
     public func devices() async throws -> [CompanionDevice] { try await request("GET", "/v1/devices", as: DevicesReply.self).devices }

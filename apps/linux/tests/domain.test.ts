@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  codeEngineRow,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -30,6 +31,7 @@ import {
   printNeedsCheck,
 } from "../src/domain.ts";
 import type { Project, ReconstructionReview } from "../src/types.ts";
+import type { CodeEngineView } from "../src/domain.ts";
 import {
   buildRegionAnswer,
   buildScaleAnswer,
@@ -606,4 +608,31 @@ test("all three shared limit reasons survive project words with projects present
     assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
+});
+
+// PRD §8.9, §6.1: the code design engine's row is in Settings → Model access → Design engine, from the companion's
+// cad.status (the printer MCP's cad_status), with Set Up (cad.setup) when the companion offers it.
+test("the code design engine row is reachable in Settings and shows the companion's words and Set Up", () => {
+  const settings = readFileSync(new URL("../src/Settings.tsx", import.meta.url), "utf8");
+  const models = settings.slice(settings.indexOf("<h3>Design engine</h3>"));
+  assert.ok(models.indexOf("<CodeEngine />") > 0 && models.indexOf("<CodeEngine />") < models.indexOf("<Blender />"), "listed first under Design engine");
+  assert.match(settings, /call<\{ cad: CodeEngineView \}>\("cad\.status"\)/);
+  assert.match(settings, /call<\{ cad: CodeEngineView \}>\("cad\.setup"\)/);
+  const tauri = readFileSync(new URL("../src-tauri/src/protocol.rs", import.meta.url), "utf8");
+  assert.match(tauri, /"cad\.status"/); assert.match(tauri, /"cad\.setup"/);
+  assert.deepEqual(codeEngineRow({ state: "not-set-up", message: "Not set up yet.", canSetUp: true }), { message: "Not set up yet.", action: "Set Up", working: false });
+  // Sizes from the MCP's storage fields, before and after Set Up; a refusal in the MCP's words, its code never read.
+  assert.equal(codeEngineRow({ state: "not-set-up", message: "Not set up yet.", canSetUp: true, size: "Set Up downloads about 367 MB and uses about 1.6 GB on this computer." }).size,
+    "Set Up downloads about 367 MB and uses about 1.6 GB on this computer.");
+  assert.equal(codeEngineRow({ state: "ready", message: "Ready.", canSetUp: true, size: "Uses 1.4 GB on this computer." }).size, "Uses 1.4 GB on this computer.");
+  assert.deepEqual(codeEngineRow({ state: "not-set-up", message: "Not set up yet.", canSetUp: true,
+    result: { ok: false, message: "The MCP's sentence.", suggestion: "The MCP's suggestion.", refusal: { code: "cad-uv-missing" } } as CodeEngineView["result"] }).result,
+    { ok: false, message: "The MCP's sentence.", suggestion: "The MCP's suggestion." });
+  assert.match(settings, /\{row\.size && <p>\{row\.size\}<\/p>\}/, "the size line is shown");
+  assert.deepEqual(codeEngineRow({ state: "ready", message: "Ready. New designs and scan cleanups use it.", canSetUp: true, result: { ok: true, message: "CAD is ready." } }),
+    { message: "Ready. New designs and scan cleanups use it.", action: "Set Up Again", working: false, result: { ok: true, message: "CAD is ready." } });
+  assert.deepEqual(codeEngineRow({ state: "setting-up", message: "Setting up… 12 s so far.", seconds: 12, canSetUp: false }), { message: "Setting up… 12 s so far.", working: true });
+  assert.deepEqual(codeEngineRow({ state: "unavailable", message: "Update mcp-3D-printer-server in Settings → Printers to use its code design engine.", canSetUp: false }),
+    { message: "Update mcp-3D-printer-server in Settings → Printers to use its code design engine.", working: false });
+  assert.deepEqual(codeEngineRow(undefined), { message: "Checking…", working: true });
 });

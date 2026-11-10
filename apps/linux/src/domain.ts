@@ -669,3 +669,33 @@ export function addressField(options: SetupOptions | undefined, printerType: str
     placeholder: address?.url ? "192.168.1.20, printer.local or https://…" : "192.168.1.20 or printer.local",
   };
 }
+
+/** The code design engine's row (PRD §8.9), as the companion's `cad.status` reports the printer MCP's cad_status. */
+export interface CodeEngineView {
+  state: "checking" | "unavailable" | "not-set-up" | "setting-up" | "ready";
+  message: string;
+  server?: string;
+  seconds?: number;
+  /** What it takes on disk, in the companion's words from the MCP's figures: before Set Up, then after. */
+  size?: string;
+  /** A refusal's sentence and suggestion are the MCP's; its structured result (with its code) is never read here. */
+  result?: { ok: boolean; message: string; suggestion?: string };
+  canSetUp: boolean;
+}
+/** What the row shows: the companion's words, Set Up when offered, and whether to keep reading while it works. */
+export function codeEngineRow(view: CodeEngineView | undefined): {
+  message: string;
+  size?: string;
+  action?: "Set Up" | "Set Up Again";
+  working: boolean;
+  result?: { ok: boolean; message: string; suggestion?: string };
+} {
+  if (!view) return { message: "Checking…", working: true };
+  return {
+    message: view.message,
+    ...(view.size ? { size: view.size } : {}),
+    ...(view.canSetUp ? { action: view.state === "ready" ? "Set Up Again" as const : "Set Up" as const } : {}),
+    working: view.state === "checking" || view.state === "setting-up",
+    ...(view.result ? { result: { ok: view.result.ok, message: view.result.message, ...(view.result.suggestion ? { suggestion: view.result.suggestion } : {}) } } : {}),
+  };
+}

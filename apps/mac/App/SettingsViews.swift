@@ -39,7 +39,7 @@ struct SettingsView: View {
             Tab("General", systemImage:"gearshape", value:.general) { GeneralSettings() }
             Tab("Phones and iPads", systemImage:"iphone", value:.devices) { DevicesSettings(mac:mac) }
             Tab("Printers", systemImage:"printer", value:.printers) { PrintersSettings(objects:objects) }
-            Tab("AI", systemImage:"sparkles", value:.ai) { AISettings(model:cleanup) }
+            Tab("AI", systemImage:"sparkles", value:.ai) { AISettings(model:cleanup, objects:objects) }
             Tab("Advanced", systemImage:"wrench.and.screwdriver", value:.advanced) { AdvancedSettings(mac:mac) }
         }
         .frame(width:620)
@@ -602,6 +602,8 @@ private struct MCPRow: View {
 
 struct AISettings: View {
     @ObservedObject var model: ModelAccessModel
+    /// The companion's projects model, which also reads and sets up the code design engine.
+    let objects: ObjectsModel
     @State private var other = false
     @State private var fusion = FusionState.checking
     @State private var fusionProblem: String?
@@ -638,6 +640,8 @@ struct AISettings: View {
                 if let problem = model.problem { Text(problem).font(.caption).foregroundStyle(.red) }
                 Text("Choose the AI for your model jobs. New scan cleanup, designs and corrections use this choice. Jobs already running keep their provider.").font(.caption).foregroundStyle(.secondary)
             }
+            // PRD §8.9: the printer MCP's code design engine, first, because it designs and cleans up when it's set up.
+            CodeEngineSettingsSection { [objects] action in try await objects.codeEngine(action) }
             BlenderAddonSettingsSection { action in
                 let socket = ModelAccessModel.socketPath(for: Installation(bundle: .main))
                 return try await ControlClient(socketPath: socket).blenderAddon(action)
@@ -678,9 +682,10 @@ struct AISettings: View {
                         .font(.caption).foregroundStyle(fusionStatus.ok ? Color.okGreen : Color.orange)
                 }
                 LabeledContent("Make something that fits") {
-                    Text(fusion == .notInstalled ? "Blender" : "Fusion, or Blender if Fusion can't start").foregroundStyle(.secondary)
+                    Text(fusion == .notInstalled ? "The code design engine when it's set up, otherwise Blender" : "The code design engine when it's set up, otherwise Fusion, or Blender if Fusion can't start")
+                        .foregroundStyle(.secondary).multilineTextAlignment(.trailing)
                 }
-                LabeledContent("Clean up a scan") { Text("Blender").foregroundStyle(.secondary) }
+                LabeledContent("Clean up a scan") { Text("The code design engine when it's set up, otherwise Blender").foregroundStyle(.secondary).multilineTextAlignment(.trailing) }
             } header: { Text("Design engine") } footer: {
                 Text("Blender and Fusion are optional. Printing existing models and reprinting needs neither. Fusion and its licence are yours; its bridge is fusion360-mcp-server by Faust Machines (MIT).")
                     .font(.caption).foregroundStyle(.secondary)

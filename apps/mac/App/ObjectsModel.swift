@@ -31,6 +31,8 @@ protocol ObjectsCompanion: Sendable {
     func devices() async throws -> [ControlDevice]
     /// The selected provider for subsequent model jobs.
     func aiProvider() async -> String?
+    /// Settings → AI → Design engine: the printer MCP's code design engine (PRD §8.9), read or set up by the companion.
+    func codeEngine(_ action: CodeEngineStatus.Action) async throws -> CodeEngineStatus?
     func create(instructions: String?, kind: String?) async throws -> Project
     func addFile(_ id: String, kind: String, path: String) async throws -> Project
     func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String
@@ -69,6 +71,7 @@ extension ObjectsCompanion {
     func status() async throws -> ControlStatus { throw ControlClientError.unavailable }
     func devices() async throws -> [ControlDevice] { throw ControlClientError.unavailable }
     func aiProvider() async -> String? { nil }
+    func codeEngine(_ action: CodeEngineStatus.Action) async throws -> CodeEngineStatus? { throw ControlClientError.unavailable }
     func create(instructions: String?, kind: String?) async throws -> Project { throw ControlClientError.unavailable }
     func addFile(_ id: String, kind: String, path: String) async throws -> Project { throw ControlClientError.unavailable }
     func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String { throw ControlClientError.unavailable }
@@ -92,6 +95,8 @@ extension ObjectsCompanion {
 /// The control socket. A fresh client per call, so a missing socket fails that call, not the model.
 struct SocketObjects: ObjectsCompanion {
     let path: String
+    /// `cad.status` starts the printer MCP to ask it, within the companion's 40 s.
+    func codeEngine(_ action: CodeEngineStatus.Action) async throws -> CodeEngineStatus? { try await ControlClient(socketPath: path, timeout: 45).codeEngine(action) }
     func addStarter(_ starterId: String) async throws -> Project { try await ControlClient(socketPath: path).addStarter(starterId) }
     func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
         try await ControlClient(socketPath: path).selectPlate(id, fileIndex: fileIndex, plateIndex: plateIndex)
@@ -421,6 +426,9 @@ struct SocketObjects: ObjectsCompanion {
         if self.extras != extras { self.extras = extras }
         return true
     }
+
+    /// The Design engine row's code design engine (PRD §8.9): its state, or Set Up, through the companion.
+    func codeEngine(_ action: CodeEngineStatus.Action) async throws -> CodeEngineStatus? { try await companion.codeEngine(action) }
 
     @discardableResult func refresh() async -> Double {
         do {

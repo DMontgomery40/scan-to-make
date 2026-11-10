@@ -309,6 +309,8 @@ enum Fixtures {
         "general": ["openAtLogin": true, "showInDock": true, "keepAwake": true],
         "ai": ["revision": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1aa1", "choice": ["kind": "claude-code"], "check": ["state": "connected"]],
         "fusion": ["state": "not-set-up", "message": "Not set up. Set Up installs the Fusion add-in."],
+        "cad": ["state": "not-set-up", "message": "Not set up yet.", "server": "bambu-printer-mcp", "canSetUp": true,
+                "size": "Set Up downloads about 367 MB and uses about 1.6 GB on this computer."],
     ]
     static let devices: [[String: Any]] = [
         ["deviceId": "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a99", "deviceName": "David's iPhone", "current": true, "model": "iPhone18,2"],
@@ -418,6 +420,13 @@ struct FixtureTransport: HTTPTransport {
         if path == "/v1/settings" { return json(["settings": Fixtures.settings]) }
         if path == "/v1/devices" && method == "GET" { return json(["devices": Fixtures.devices]) }
         if path.hasPrefix("/v1/devices/") && method == "DELETE" { return json(["removed": true]) }
+        if path == "/v1/settings/cad" { return json(["cad": Fixtures.settings["cad"]!]) }
+        // The code design engine's Set Up: the computer starts it and the row follows its progress (PRD §8.9).
+        if path == "/v1/settings/cad/setup" && method == "POST" {
+            var settings = Fixtures.settings
+            settings["cad"] = ["state": "setting-up", "message": "Setting up… 0 s so far.", "seconds": 0, "server": "bambu-printer-mcp", "canSetUp": false]
+            return json(["settings": settings])
+        }
         if path.hasPrefix("/v1/settings/") && method == "POST" { return json(["check": ["state": "checking"]]) }
         if completingMove, path.hasPrefix("/v1/printers/mcp/"), method == "POST" { await Fixtures.mcpCopyState.accept() }
         if path.hasPrefix("/v1/printers/mcp/"), method == "POST", FileManager.default.fileExists(atPath: folder.appending(path: "mcp-update-waiting.json").path) { return HTTPReply(status: 200, body: try Data(contentsOf: folder.appending(path: "mcp-update-waiting.json"))) }

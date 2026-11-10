@@ -16,6 +16,8 @@ export class PrinterMcpError extends Error {
    * the server's handler may still be running and may still ask a question.
    */
   incomplete?: boolean;
+  /** A tool's own error result (`isError`), its structuredContent as the MCP gave it: passed on, never interpreted here. */
+  structured?: unknown;
   constructor(code: string, cause?: unknown, detail?: string) {
     super(`Printer MCP failed: ${code}`);
     this.code = code;
@@ -23,7 +25,11 @@ export class PrinterMcpError extends Error {
     if (cause !== undefined) this.cause = cause;
   }
 }
-function fail(code: string, cause?: unknown, detail?: string): never { throw new PrinterMcpError(code, cause, detail); }
+function fail(code: string, cause?: unknown, detail?: string, structured?: unknown): never {
+  const error = new PrinterMcpError(code, cause, detail);
+  if (structured !== undefined) error.structured = structuredClone(structured);
+  throw error;
+}
 
 /** The server's user-facing failure, bounded and stripped of configured credentials. */
 function failureDetail(result: CallToolResult, config: PrinterHandoffConfig): string | undefined {
@@ -343,7 +349,7 @@ export class PrinterMcpClient {
     // The slicer's own refusal, word for word, from the MCP's verdict on it (slicer_report).
     const refused = result.isError && name === 'slice_stl' ? slicerReport(result.structuredContent) : undefined;
     if (refused?.failed) { logSlicerRefusal(refused); fail('slicer-error', undefined, refused.message); }
-    if (result.isError) fail('tool-failed', undefined, failureDetail(result, this.#config));
+    if (result.isError) fail('tool-failed', undefined, failureDetail(result, this.#config), result.structuredContent);
     if (Buffer.byteLength(JSON.stringify(result)) > (options.largeResult ? MAX_FORWARDED_BYTES : MAX_RESULT_BYTES)) fail('result-limit');
     return structuredClone(result);
   }
