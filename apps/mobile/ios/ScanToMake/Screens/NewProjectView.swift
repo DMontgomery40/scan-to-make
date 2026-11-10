@@ -208,6 +208,10 @@ struct NewObjectView: View {
             useJobDefault()
             _ = try? await savedDraft()
             if let created, attached == nil { attached = await savedCapture(created.id) }
+            #if DEBUG
+            // `-CounterpartNewScan walk-around` (scripts/ux_screens.py): New as it looks after a scan, which a simulator can't take.
+            if attached == nil, UserDefaults.standard.string(forKey: "CounterpartNewScan") == "walk-around" { attached = .walkAround }
+            #endif
             store.refreshStoppedScans()
         }
     }
