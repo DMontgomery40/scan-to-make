@@ -738,6 +738,9 @@ final class LayoutParityUITests: XCTestCase {
         func nothingReachesTheBar(_ state: String) {
             // The bar is what's shown of the ask field and Print (Print gives way while typing).
             let bar = [print, ask].filter(\.exists).map(\.frame).reduce(CGRect.null) { $0.union($1) }
+            // The bar must be there: with neither part on screen the check below would pass on nothing (review).
+            XCTAssertTrue(ask.exists, "\(state): the bar's ask field is on screen")
+            XCTAssertFalse(bar.isNull, "\(state): the bar is on screen")
             // The page's scroll ends where the bar begins, so nothing it draws (it clips) can sit under or around the bar.
             // Accessibility frames are unclipped, so the scroll view's own frame is what proves it; an overlay bar fails here.
             let page = app.scrollViews.containing(NSPredicate(format: "label == %@", "Activity")).firstMatch
@@ -808,6 +811,26 @@ final class LayoutParityUITests: XCTestCase {
             : app.descendants(matching: .any)["fit-size-longest"].textFields.firstMatch
         XCTAssertTrue(longest.waitForExistence(timeout: 5))
         XCTAssertEqual(longest.value(forKey: "hasKeyboardFocus") as? Bool, true, "the first measurement is focused")
+    }
+
+    /// Review F3 (train 2026-11-10e): the Result's printer row is never empty. While the printer list is on its way it says so;
+    /// if the Mac won't give it, it says that with Try Again; with no printers at all, "No printer set up yet." (test above).
+    func testAResultPrinterRowSaysItIsWaitingOrThatTheMacWontSay() {
+        let waiting = launch(set: "printers-slow", screen: "ready")
+        let loading = waiting.staticTexts["result-printers-loading"]
+        for _ in 0..<6 where !(loading.exists && loading.isHittable) { waiting.swipeUp() }
+        XCTAssertTrue(loading.waitForExistence(timeout: 20), waiting.debugDescription)
+        XCTAssertEqual(loading.label, "Asking your Mac about its printers…")
+
+        let refused = launch(set: "printers-refused", screen: "ready")
+        let problem = refused.staticTexts["result-printers-problem"]
+        for _ in 0..<6 where !(problem.exists && problem.isHittable) { refused.swipeUp() }
+        XCTAssertTrue(problem.waitForExistence(timeout: 20), refused.debugDescription)
+        XCTAssertEqual(problem.label, "Couldn't read the printers configured on your Mac.")
+        let retry = refused.buttons["result-printers-retry"]
+        XCTAssertTrue(retry.isHittable, "the way to try again")
+        retry.tap()
+        XCTAssertTrue(problem.waitForExistence(timeout: 10), "still says so after another refusal")
     }
 
     /// Review F3: a project whose chosen printer is no longer on the Mac says so (not "No printer chosen yet."), and Choose

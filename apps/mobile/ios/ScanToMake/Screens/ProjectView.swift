@@ -905,6 +905,28 @@ struct ResultSection: View {
             }
             .padding(14)
             .background(Color.card, in: .rect(cornerRadius: 20))
+        } else if let problem = store.printerProblem {
+            // Review F3: the printer list can't be had: say so, with the way to try again; never an empty row.
+            HStack(spacing: 12) {
+                Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
+                Text(problem).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("result-printers-problem")
+                Spacer(minLength: 8)
+                Button("Try Again") { Task { await store.loadPrinters() } }.buttonStyle(.glass)
+                    .accessibilityIdentifier("result-printers-retry")
+            }
+            .padding(14)
+            .background(Color.card, in: .rect(cornerRadius: 20))
+        } else {
+            // While the printer list is on its way: one plain line that says so.
+            HStack(spacing: 12) {
+                ProgressView().frame(width: 28)
+                Text("Asking your Mac about its printers…").font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("result-printers-loading")
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .background(Color.card, in: .rect(cornerRadius: 20))
         }
     }
 }
