@@ -1153,7 +1153,7 @@ final class LayoutParityUITests: XCTestCase {
 
     /// David's Nov 9 bottle project (Mac 30a2a33c), with generated pictures in place of his photos. A 4:3 picture, so a
     /// square crop would show here as a wrong aspect ratio, and 130 scan frames, each logged when the canned Mac serves it.
-    private func launchBottle(noPhoto: Bool = false, askFileMissing: Bool = false, sizes: Bool = false) throws -> (XCUIApplication, URL) {
+    private func launchBottle(noPhoto: Bool = false, askFileMissing: Bool = false, sizes: Bool = false, kind: String? = nil) throws -> (XCUIApplication, URL) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("bottle-capture"), withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
@@ -1170,6 +1170,7 @@ final class LayoutParityUITests: XCTestCase {
         app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ask-bottle", "-CounterpartScreen", "ask"]
         if noPhoto { app.launchEnvironment["COUNTERPART_ASK_NO_PHOTO"] = "1" }
         if sizes { app.launchEnvironment["COUNTERPART_ASK_SIZES"] = "1" }
+        if let kind { app.launchEnvironment["COUNTERPART_ASK_KIND"] = kind }
         app.launch()
         return (app, folder)
     }
@@ -1183,6 +1184,18 @@ final class LayoutParityUITests: XCTestCase {
     /// A size question is number fields, not a camera (David answered one in a paragraph of caliper readings, Nov 10):
     /// one field per size the Mac asked about, in its words and prefilled, with Confirm as the obvious action; words
     /// and a caliper photo stay for what the numbers don't say.
+    /// Train #499 review, F6: a question of a kind this build doesn't know said "update" above live answer buttons,
+    /// so it could be consumed with a guess or a photo. It shows the question and the sentence, and nothing to press.
+    func testAQuestionOfAnUnknownKindOffersNoAnswerWithProjectsPresent() throws {
+        let (app, _) = try launchBottle(kind: "colour")
+        let update = app.staticTexts["ask-update"]
+        XCTAssertTrue(update.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Your Mac has a question"].exists)
+        for label in ["Camera", "Photos", "Best guess", "Caliper photo", "Send answer"] { XCTAssertFalse(app.buttons[label].exists, label) }
+        XCTAssertFalse(app.descendants(matching: .any)["ask-text"].exists)
+        XCTAssertFalse(app.buttons["ask-sizes-confirm"].exists)
+    }
+
     func testASizeQuestionShowsItsNumbersPrefilledWithConfirmWithProjectsPresent() throws {
         let (app, _) = try launchBottle(sizes: true)
         let confirm = app.buttons["ask-sizes-confirm"]
