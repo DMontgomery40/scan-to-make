@@ -361,6 +361,9 @@ enum Fixtures {
     ]
 
     static let bottleAsk = "1af638c1-ec63-46fc-aa2f-e74cd29df231"
+    /// The bottle project's picture as the Mac sends it now (#451): its scan alone on the stage, `bottle-picture.png`
+    /// in the assets folder.
+    static let bottlePicture = "pictures/scan-7d141985baea4404.png"
 
     /// Appends `<path> <bytes>` to `served.log` in the assets folder.
     static func logServed(_ path: String, bytes: Int, in folder: URL) {
@@ -391,6 +394,7 @@ enum Fixtures {
         if let kind = ProcessInfo.processInfo.environment["COUNTERPART_ASK_KIND"] { ask["kind"] = kind }
         return ["id": ids.plush, "createdAtMs": ago(25), "updatedAtMs": ago(4), "state": "needs-closeup", "kind": "fit",
                 "title": "Wall holder for three", "scan": "scan.usdz", "photos": [], "requestPhotos": [], "messages": [],
+                "picture": bottlePicture, "pictures": ["scan": bottlePicture],
                 "instructions": "Make something that holds three of these, on a wall. I don’t care if it’s in front of each other or side to side whatever makes more sense just need three of them in a holder thing that I screwed to drywall\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size.",
                 "capture": (1...130).map { String(format: "%04d.heic", $0) },
                 "passes": [["startedAtMs": ago(20), "endedAtMs": ago(4), "status": "needs_closeup",
@@ -401,6 +405,7 @@ enum Fixtures {
     /// The file a fixture path serves, from the assets folder.
     static func file(_ path: String) -> String? {
         if path.hasSuffix("/asks/\(bottleAsk).jpg") { return "ask-bottle.jpg" }
+        if path.hasSuffix("/" + bottlePicture) { return "bottle-picture.png" }
         if let range = path.range(of: #"/capture/[0-9]{4}\.heic$"#, options: .regularExpression) { return "bottle-capture/" + path[range].dropFirst("/capture/".count) }
         if path.hasSuffix("/model.stl") { return "mic.stl" }
         if path.hasSuffix("/camera.jpg") { return "bed.jpg" }
