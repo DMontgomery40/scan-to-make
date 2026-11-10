@@ -33,15 +33,10 @@ import CounterpartKit
 }
 
 extension Project {
-    /// The picture that stands for a project: the real thing you showed Counterpart, so a project is
-    /// recognisable the same way on every card. A model render is the fallback when there is no real
-    /// photo or scan frame (a described or published project); the model itself is on its page.
-    var thumbnailPath: String? {
-        if let photo = photos.first { return "photos/\(photo)" }
-        if let frame = capture?.first { return "capture/\(frame)" }
-        if let render = current?.renders.first, let name = render.split(separator: "/").last { return "renders/\(name)" }
-        return nil
-    }
+    /// The picture that stands for a project everywhere (Projects, sidebar, Home cards, Printers, the Live Activity):
+    /// the object alone on the stage, the project page's first picture (CounterpartKit `picturePath`, PRD §5.1).
+    /// Never a photo with its room in it (David, Nov 10). Nil shows the neutral placeholder.
+    var thumbnailPath: String? { picturePath }
 }
 
 /// One of a project's images, downloaded once per project version and decoded at the size shown.

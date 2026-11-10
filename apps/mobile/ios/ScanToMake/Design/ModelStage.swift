@@ -18,6 +18,12 @@ struct ModelStage: View {
     var backdrop: Color? = nil
     /// Two-tone like a two-colour AMS print: the upper part in a warm tone (the mic-mount mockup).
     var twoTone = false
+    /// Together (docs/protocols/seats.md): a scan drawn in its own colours at each seat (row-major 4×4, the part's
+    /// millimetre frame), turned and framed with the part as one.
+    var object: URL? = nil
+    var seats: [[Double]] = []
+    /// The size of what is drawn, in millimetres (width, depth, height), once it is loaded: the size chip's numbers.
+    var measured: (([Double]) -> Void)? = nil
 
     @State private var holder = PivotHolder()
     @State private var turn: CGSize = .zero
@@ -31,7 +37,7 @@ struct ModelStage: View {
     @State private var lastTouch = Date.distantPast
     @State private var failed = false
 
-    private var identity: String { "\(url?.absoluteString ?? "empty")#\(tint?.description ?? "default")#\(twoTone)#\(yaw)#\(pitch)#\(fit)" }
+    private var identity: String { "\(url?.absoluteString ?? "empty")#\(tint?.description ?? "default")#\(twoTone)#\(yaw)#\(pitch)#\(fit)#\(object?.absoluteString ?? "")#\(seats.count)" }
 
     var body: some View {
         ZStack {
@@ -66,9 +72,11 @@ struct ModelStage: View {
             live = false; poster = nil; failed = false
             turn = .zero; settled = .zero; zoom = 1; settledZoom = 1
             guard let url, scenePhase == .active else { return }
-            let loaded = await Self.load(url, tint: tint, twoTone: twoTone)
+            let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
             guard !Task.isCancelled else { return }
             guard let entity = loaded else { failed = true; return }
+            let e = entity.visualBounds(relativeTo: nil).extents
+            measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
             let image = await ModelPoster.image(key: identity, model: entity, yaw: yaw, pitch: pitch, fit: fit)
             guard !Task.isCancelled else { return }
             poster = image; failed = image == nil
@@ -93,7 +101,7 @@ struct ModelStage: View {
         RealityView { content in
             content.camera = .virtual
             if let url {
-                let loaded = await Self.load(url, tint: tint, twoTone: twoTone)
+                let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
                 guard !Task.isCancelled, live, scenePhase == .active else { return }
                 guard let model = loaded else { failed = true; return }
                 let scene = ModelPoster.scene(model: model, yaw: yaw, pitch: pitch, fit: fit)
@@ -116,17 +124,36 @@ struct ModelStage: View {
         return simd_quatf(angle: p, axis: [1, 0, 0]) * simd_quatf(angle: y, axis: [0, 1, 0])
     }
 
-    @MainActor private static let cache = ModelEntityCache(limit: 1)
-    @MainActor static func load(_ url: URL, tint: UIColor?, twoTone: Bool) async -> Entity? {
-        let key = "\(url.absoluteString)#\(tint?.description ?? "default")#\(twoTone)"
+    /// The gallery turns between a part, its scan and the two together: keep those three loaded, not one.
+    @MainActor private static let cache = ModelEntityCache(limit: 3)
+    @MainActor static func load(_ url: URL, tint: UIColor?, twoTone: Bool, object: URL? = nil, seats: [[Double]] = []) async -> Entity? {
+        let key = "\(url.absoluteString)#\(tint?.description ?? "default")#\(twoTone)#\(object?.absoluteString ?? "")#\(seats.map { $0.map { String($0) }.joined(separator: ",") }.joined(separator: ";"))"
         return await cache.load(key: key) {
+            let model: Entity?
             switch url.pathExtension.lowercased() {
-            case "usdz", "usd", "usdc", "reality": return try? await Entity(contentsOf: url)
-            case "stl": return await stl(url, tint: tint, twoTone: twoTone)
-            default: return nil
+            case "usdz", "usd", "usdc", "reality": model = try? await Entity(contentsOf: url)
+            case "stl": model = await stl(url, tint: tint, twoTone: twoTone)
+            default: model = nil
             }
+            guard let model, let object, !seats.isEmpty, let scan = try? await Entity(contentsOf: object) else { return model }
+            // Together: the scan (metres, Y up) into the seat frame (millimetres, Z up), placed by each seat in the part's
+            // frame, then back to the stage (metres, Y up), where the part already is (docs/protocols/seats.md).
+            let toSeat = simd_float4x4(rows: [SIMD4(1000, 0, 0, 0), SIMD4(0, 0, -1000, 0), SIMD4(0, 1000, 0, 0), SIMD4(0, 0, 0, 1)])
+            let toStage = simd_float4x4(rows: [SIMD4(0.001, 0, 0, 0), SIMD4(0, 0, 0.001, 0), SIMD4(0, -0.001, 0, 0), SIMD4(0, 0, 0, 1)])
+            let together = Entity()
+            together.addChild(model)
+            for seat in seats where seat.count == 16 {
+                let m = simd_float4x4(rows: (0..<4).map { r in SIMD4<Float>((0..<4).map { Float(seat[r * 4 + $0]) }) })
+                let placed = scan.clone(recursive: true)
+                placed.transform = Transform(matrix: toStage * m * toSeat)
+                together.addChild(placed)
+            }
+            return together
         }
     }
+
+    /// The material every layout draws a model in before a spool is chosen (the Mac's and the companion's pictures').
+    static let neutral = UIColor(red: 0.58, green: 0.58, blue: 0.60, alpha: 1)
 
     /// STL (binary or ASCII) to a RealityKit mesh. STL is Z-up millimetres; RealityKit is Y-up metres.
     @MainActor static func stl(_ url: URL, tint: UIColor?, twoTone: Bool) async -> Entity? {
@@ -165,7 +192,7 @@ struct ModelStage: View {
             }
             if let lo = await part(lowI, UIColor(white: 0.16, alpha: 1)) { entity.addChild(lo) }
             if let hi = await part(highI, UIColor(red: 0.80, green: 0.62, blue: 0.36, alpha: 1)) { entity.addChild(hi) }
-        } else if let one = await part(Array(0..<UInt32(positions.count)), tint ?? UIColor(red: 0.80, green: 0.62, blue: 0.36, alpha: 1)) {
+        } else if let one = await part(Array(0..<UInt32(positions.count)), tint ?? neutral) {
             entity.addChild(one)
         }
         return entity

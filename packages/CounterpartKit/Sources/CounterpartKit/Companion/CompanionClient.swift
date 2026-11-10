@@ -302,6 +302,11 @@ public final class CompanionClient: @unchecked Sendable {
     public func duplicate(_ id: String) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/duplicate", json: [:], as: One.self).object
     }
+    /// Asks the Mac where the scanned object sits in a fit part made before passes said (docs/protocols/seats.md):
+    /// a short pass that changes no geometry. `POST /v1/objects/<id>/locate`.
+    public func locate(_ id: String) async throws -> Project {
+        try await request("POST", "/v1/objects/\(id)/locate", json: [:], as: One.self).object
+    }
     public func delete(_ id: String) async throws { _ = try await request("DELETE", "/v1/objects/\(id)", as: Deleted.self) }
     public func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] {
         try await request("GET", "/v1/objects/\(id)/passes/\(index)/activity", as: ActivityReply.self).activity
@@ -540,7 +545,7 @@ public final class CompanionClient: @unchecked Sendable {
 
     /// Downloads one project file into the cache, once per project version, and returns where it is.
     public func download(_ project: Project, _ name: String) async throws -> URL {
-        let allowed = Pattern(#"original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}"#)
+        let allowed = Pattern(#"original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png"#)
         guard Pattern(Self.uuid).matches(project.id), allowed.matches(name), !name.contains("..") else { throw CompanionError.transport("invalid-request") }
         let version = String(Int64(project.mediaVersion))
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)

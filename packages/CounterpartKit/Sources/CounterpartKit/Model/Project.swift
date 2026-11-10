@@ -110,6 +110,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var outcome: String?
     /// Hidden from Home (Archive). Kept beside `settings.status`.
     public var archived: Bool?
+    /// The project's picture (PRD §5.1): the object alone on the stage, drawn once by the Mac (`pictures/…png`).
+    public var picture: String?
+    /// Each gallery picture the Mac drew, for layouts that show pictures: `part`, `scan`, `together`, `photo`.
+    public var pictures: [String: String]?
     /// Published model attribution and files from the companion, retained for shared search.
     public var credit: JSONValue?
     public var files: JSONValue?
@@ -139,7 +143,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -184,6 +188,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         settings = optional(Settings.self, .settings)
         outcome = optional(String.self, .outcome)
         archived = optional(Bool.self, .archived)
+        picture = optional(String.self, .picture)
+        pictures = optional([String: String].self, .pictures)
     }
 
     public var createdAt: Date { Date(timeIntervalSince1970: createdAtMs / 1000) }
@@ -370,10 +376,16 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. Nil until asked,
         /// or when the MCP doesn't say.
         public var ownSettings: Bool?
-        public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil, ownSettings: Bool? = nil) {
+        /// A multi-colour design's parts in filament order, with the colour each was asked for (`#RRGGBB`), as the pass declared them.
+        public var filaments: [DeclaredFilament]?
+        /// A fit's places for the scanned object, as the pass that made it said (docs/protocols/seats.md).
+        public var seats: [Seat]?
+        public init(model: String, renders: [String], sizeMm: [Double]? = nil, summary: String? = nil, changes: [Change]? = nil, ownSettings: Bool? = nil,
+                    filaments: [DeclaredFilament]? = nil, seats: [Seat]? = nil) {
             self.model = model; self.renders = renders; self.sizeMm = sizeMm; self.summary = summary; self.changes = changes; self.ownSettings = ownSettings
+            self.filaments = filaments; self.seats = seats
         }
-        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings }
+        private enum CodingKeys: String, CodingKey { case model, renders, sizeMm, summary, changes, engine, ownSettings, filaments, seats }
         /// A malformed optional (say, `changes`) is left out; the model and renders still show.
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -384,7 +396,50 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             changes = (try? c.decodeIfPresent([Change].self, forKey: .changes)) ?? nil
             engine = (try? c.decodeIfPresent(String.self, forKey: .engine)) ?? nil
             ownSettings = (try? c.decodeIfPresent(Bool.self, forKey: .ownSettings)) ?? nil
+            filaments = (try? c.decodeIfPresent([DeclaredFilament].self, forKey: .filaments)) ?? nil
+            seats = (try? c.decodeIfPresent([Seat].self, forKey: .seats)) ?? nil
         }
+    }
+
+    /// One part of a multi-colour design, as its pass declared it.
+    public struct DeclaredFilament: Codable, Equatable, Sendable {
+        public var name: String?
+        public var colour: String?
+        public var material: String?
+        public init(name: String? = nil, colour: String? = nil, material: String? = nil) { self.name = name; self.colour = colour; self.material = material }
+    }
+
+    /// Where the scanned object sits in the part (docs/protocols/seats.md): the scan, in millimetres and Z up, turned
+    /// about the fixed X, then Y, then Z axes (`rotationDeg`), then moved (`translationMm`), into the part's frame.
+    public struct Seat: Codable, Equatable, Sendable {
+        public var name: String?
+        public var translationMm: [Double]
+        public var rotationDeg: [Double]
+        public var check: Check?
+        public struct Check: Codable, Equatable, Sendable { public var minimumGapMm: Double?; public var interferenceMm3: Double?; public var clear: Bool? }
+        public init(name: String? = nil, translationMm: [Double], rotationDeg: [Double]) { self.name = name; self.translationMm = translationMm; self.rotationDeg = rotationDeg }
+        /// Row-major 4×4: Rz·Ry·Rx, then the translation (the printer MCP's `cad_check_fit`).
+        public var matrix: [Double] {
+            guard translationMm.count == 3, rotationDeg.count == 3 else { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }
+            let a = rotationDeg.map { $0 * .pi / 180 }
+            let (cx, sx, cy, sy, cz, sz) = (cos(a[0]), sin(a[0]), cos(a[1]), sin(a[1]), cos(a[2]), sin(a[2]))
+            let t = translationMm
+            return [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx, t[0],
+                    sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx, t[1],
+                    -sy, cy * sx, cy * cx, t[2],
+                    0, 0, 0, 1]
+        }
+    }
+
+    /// A spool a print used, as the printer MCP reported it when the print was sent.
+    public struct Spool: Codable, Equatable, Sendable {
+        /// The model's 1-based filament, for a multi-part model; nil for a one-spool print.
+        public var index: Int?
+        /// `#RRGGBB`.
+        public var colour: String
+        public var material: String?
+        public var name: String?
+        public init(index: Int? = nil, colour: String, material: String? = nil, name: String? = nil) { self.index = index; self.colour = colour; self.material = material; self.name = name }
     }
 
     public struct Question: Codable, Equatable, Sendable {
@@ -474,6 +529,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var fileBase: String?
         /// "bambu-connect" when the print was handed to Bambu Connect on the Mac.
         public var sentVia: String?
+        /// The spools this print uses (PRD §5.4): the result is drawn in them.
+        public var spools: [Spool]?
 
         public init(bundleId: String, uncertain: Bool? = nil, destination: PrintDestination? = nil, sliced: Bool? = nil,
                     estimate: PrintEstimate? = nil, printId: String? = nil, live: PrintLive? = nil, monitor: PrintMonitor? = nil) {

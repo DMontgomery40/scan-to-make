@@ -28,15 +28,17 @@ import CounterpartKit
         XCTAssertEqual(app.route, .print("p"))
     }
 
-    func testAProjectThumbnailIsTheRealObjectBeforeAnyRender() {
+    /// David, Nov 10: "of ALL THE OPTIONS ... the photograph including everything in it is by far the worst". A project's
+    /// picture is the object alone on the stage, as the Mac drew it, else a render; never a photo or a scan frame.
+    func testAProjectPictureIsTheObjectAloneNeverAPhotoOfTheRoom() {
         var project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready,
                               photos: ["bottle.jpg"], capture: ["0001.heic"],
                               current: Project.Result(model: "current/model.stl", renders: ["renders/overview.png"]))
-        XCTAssertEqual(project.thumbnailPath, "photos/bottle.jpg")
-        project.photos = []
-        XCTAssertEqual(project.thumbnailPath, "capture/0001.heic")
-        project.capture = nil
-        XCTAssertEqual(project.thumbnailPath, "renders/overview.png")
+        XCTAssertEqual(project.thumbnailPath, "renders/overview.png", "until the Mac draws it: the render, not the photo")
+        project.picture = "pictures/part-0123456789abcdef.png"
+        XCTAssertEqual(project.thumbnailPath, "pictures/part-0123456789abcdef.png")
+        project.picture = nil; project.current = nil
+        XCTAssertNil(project.thumbnailPath, "nothing drawn yet: the placeholder, never the room")
     }
 
     func testActivityPictureRefreshReturnsWhileTheMacIsStillUnreachable() async throws {

@@ -224,8 +224,9 @@ public extension Project {
     var renderURLs: [URL] { current?.renders.compactMap(file) ?? [] }
     var photoURLs: [URL] { photos.compactMap { file("photos/\($0)") } }
     var captureURLs: [URL] { (capture ?? []).compactMap { file("capture/\($0)") } }
-    /// The project's picture: the real thing first (a photo or scan frame), else its model render.
-    var thumbnailURL: URL? { photoURLs.first ?? captureURLs.first ?? renderURLs.first }
+    /// The project's picture everywhere on the Mac and in CloudKit (the phone's notifications and Live Activity): the
+    /// object alone on the stage (CounterpartKit `picturePath`, PRD §5.1), never a photo with its room (David, Nov 10).
+    var thumbnailURL: URL? { picturePath.flatMap(file) }
     /// The Ask's picture, with `ask.region` to highlight on it.
     var askPhotoURL: URL? { ask?.photo.flatMap(file) }
     /// A file the companion names relative to this project's folder (an event's `frame`).
@@ -372,6 +373,11 @@ public extension ControlClient {
     /// Copies the current model and project preferences, leaving the source and its print history alone.
     func duplicateObject(_ id: String) async throws -> Project {
         let result: ObjectReply = try await call("objects.duplicate", ["id": .string(id)])
+        return result.object
+    }
+    /// A short pass that reports where the scanned object sits in the finished part, changing nothing (docs/protocols/seats.md).
+    func locateObject(_ id: String) async throws -> Project {
+        let result: ObjectReply = try await call("objects.locate", ["id": .string(id)])
         return result.object
     }
     /// Removes the object and its folder from this Mac. Refused (`conflict`) while it is printing.

@@ -34,7 +34,6 @@ struct ProjectView: View {
     @State private var modelURL: URL?
     @State private var arURL: URL?
     @State private var scanURL: URL?
-    @State private var scanSize: String?
     @State private var captureWarning: String?
     @State private var askWorking = false
     @State private var askProblem: String?
@@ -364,67 +363,26 @@ struct ProjectView: View {
                 }
             }
         } message: { Text("Its model, photos and activity are removed from your Mac.") }
-        .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")") {
+        .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(object.spoolColour ?? "")") {
             modelURL = nil; arURL = nil
             guard object.current != nil, let url = try? await store.mac.download(object, "model.stl") else { return }
             modelURL = url
-            if !object.preservesPublishedFilaments { arURL = await ARModel.usdz(fromSTL: url) }
+            if !object.preservesPublishedFilaments { arURL = await ARModel.usdz(fromSTL: url, tint: object.spoolColour) }
         }
     }
 
     // MARK: Hero
 
+    /// The project's pictures (PRD §5.4): what will print, the two together, what was scanned (`ProjectGalleryView`).
     @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords) -> some View {
-        Group {
-            if object.preservesPublishedFilaments {
-                ProjectImage(project: object, path: object.thumbnailPath, maxPixelSize: 1200, contentMode: .fit)
-            } else if object.current != nil {
-                ModelStage(url: modelURL, twoTone: false)
-            } else if let scanURL {
-                ModelStage(url: scanURL, twoTone: false)
-            } else if let path = object.thumbnailPath {
-                ProjectImage(project: object, path: path, maxPixelSize: 1200)
-            } else {
-                ZStack {
-                    StageBackground()
-                    Image(systemName: words.phase.symbol).font(.system(size: 44)).foregroundStyle(words.phase.color.opacity(0.7))
-                        .symbolEffect(.pulse, isActive: words.busy)
-                }
-            }
-        }
         // Shorter when a card has to be answered, so its buttons sit above the bottom bar.
-        .frame(height: words.phase == .failed || words.actions.contains(.itWorks) ? 300 : 380)
-        .clipped()
-        .overlay(alignment: .bottom) {
-            GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
-                    // The Mac's model, else your own scan (Object Capture writes it at true size).
-                    if let arURL = arURL ?? (object.current == nil ? scanURL : nil) {
-                        Button { ARModel.show(arURL) } label: { Label("AR", systemImage: "arkit") }.buttonStyle(.glass)
-                            .accessibilityHint("Places the model at true size in your room")
-                    }
-                    if object.preservesPublishedFilaments {
-                        Text("Plate preview · 3D and AR unavailable").font(.caption).padding(8).glassEffect(.regular, in: .capsule)
-                    }
-                    Spacer()
-                    if let size = words.size ?? (object.current == nil ? scanSize : nil) {
-                        Text(size).font(.caption.monospacedDigit().weight(.semibold))
-                            .padding(.horizontal, 12).padding(.vertical, 8).glassEffect(.regular, in: .capsule)
-                            .accessibilityLabel("Size \(size)")
-                    }
-                }
-                .labelStyle(.titleAndIcon).font(.caption.weight(.semibold))
-            }
-            .padding(14)
-        }
+        ProjectGalleryView(store: store, project: object, words: words,
+                           height: words.phase == .failed || words.actions.contains(.itWorks) ? 300 : 380,
+                           modelURL: modelURL, arURL: arURL, localScan: scanURL, working: working,
+                           locate: { act { try await store.mac.client.locate(object.id) } })
         .task(id: "\(object.id)#\(object.scan ?? "")") {
-            scanURL = object.current == nil && object.scan != nil ? store.mac.localScan(object.id) : nil
-            // Object Capture writes the scan at true size, so its bounds are the object's size until the Mac measures it.
-            scanSize = nil
-            if let scanURL, let entity = try? await Entity(contentsOf: scanURL) {
-                let e = entity.visualBounds(relativeTo: nil).extents
-                scanSize = Format.size([Double(e.x), Double(e.z), Double(e.y)].map { $0 * 1000 })
-            }
+            // The scan while it's only on this phone, for Share until the Mac has it.
+            scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
         }
         .ignoresSafeArea(edges: .top)
     }
@@ -1019,10 +977,14 @@ enum StepState: Equatable {
 /// Quick Look AR for the model at true size: the STL (millimetres, Z up) converted to USDZ (metres, Y up).
 enum ARModel {
     /// The STL as USDZ for AR Quick Look, written once beside it. RealityKit writes the same mesh the stage shows.
-    @MainActor static func usdz(fromSTL url: URL) async -> URL? {
-        let target = url.deletingPathExtension().appendingPathExtension("usdz")
+    /// AR wears what the stage wears: the spool it prints in, or the neutral material before one is chosen.
+    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil) async -> URL? {
+        let target = url.deletingPathExtension().appendingPathExtension("\(hex.map { $0.dropFirst() + "." } ?? "")usdz")
         if FileManager.default.fileExists(atPath: target.path) { return target }
-        guard let entity = await ModelStage.load(url, tint: UIColor(Color.filament), twoTone: false) else { return nil }
+        let tint = hex.flatMap { Int($0.dropFirst().prefix(6), radix: 16) }.map {
+            UIColor(red: CGFloat(($0 >> 16) & 255) / 255, green: CGFloat(($0 >> 8) & 255) / 255, blue: CGFloat($0 & 255) / 255, alpha: 1)
+        }
+        guard let entity = await ModelStage.load(url, tint: tint, twoTone: false) else { return nil }
         do { try await entity.write(to: target); return target } catch { return nil }
     }
 
