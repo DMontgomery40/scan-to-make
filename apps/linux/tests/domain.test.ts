@@ -764,6 +764,12 @@ test("a size question is number fields with the companion's labels, prefilled, w
   for (const bad of ["about 60", "0", "-4", "10001", "6 3", "1e3"]) assert.equal(sizesAnswer(fields.map((f, i) => (i === 0 ? { ...f, text: bad } : f))), undefined, bad);
   assert.equal(sizesAnswer(fields.map((f) => ({ ...f, text: " " }))), undefined);
   // Only a sizes question with sizes is one; every other kind keeps its own card.
+  // The companion's number can be finer than the field shows; untouched, that is still Confirm.
+  const fine = sizeFields({ kind: "sizes", sizes: [{ id: "a", label: "width", mm: 68.412, from: "scan" }, { id: "b", label: "waist", mm: 53.4567, from: "scan" }] })!;
+  assert.deepEqual(fine.map((f) => f.text), ["68.41", "53.46"]);
+  assert.equal(sizesUnchanged(fine), true);
+  assert.deepEqual(sizesAnswer(fine), [{ id: "a", mm: 68.41 }, { id: "b", mm: 53.46 }]);
+  assert.equal(sizesUnchanged(fine.map((f) => (f.id === "a" ? { ...f, text: "68.42" } : f))), false);
   assert.equal(sizeFields({ kind: "closeup", sizes: ask.sizes }), undefined);
   assert.equal(sizeFields({ kind: "sizes", sizes: [] }), undefined);
   assert.equal(sizeFields(undefined), undefined);

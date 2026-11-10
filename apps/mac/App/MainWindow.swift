@@ -348,7 +348,7 @@ struct ProjectRow: View {
             ProjectThumbnail(object: object).frame(width: 36, height: 36).clipShape(.rect(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 1) {
                 Text(words.title).font(.body.weight(.medium)).lineLimit(1)
-                Text(words.status).font(.caption).lineLimit(1)
+                Text(words.row).font(.caption).lineLimit(2)
                     .foregroundStyle(selected ? AnyShapeStyle(.secondary) : AnyShapeStyle(words.done ? Color.okGreen : words.stage.tint))
             }
         }

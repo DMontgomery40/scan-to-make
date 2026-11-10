@@ -24,6 +24,28 @@ private func status(_ phase: String, _ text: String) -> [String: Any] { ["status
 final class ObjectWordsTests: XCTestCase {
     /// A print's words are the companion's, as they are: getting ready shows no percent (the printer's raw progress
     /// is 3% before it prints anything), and a stopped print says only what the printer said.
+    /// The sidebar groups rows by phase. With a current companion (a status carrying both `text` and `detail`) the
+    /// row is the detail; the project's header keeps the whole line. Train #499 review, F2: the row showed the whole
+    /// line whenever the companion sent one, so "Needs you · …" still sat under Needs you.
+    func testTheSidebarRowIsTheCompanionsDetailNotItsHeading() {
+        func said(_ phase: String, _ text: String, _ detail: String?) -> [String: Any] {
+            ["status": ["phase": phase, "text": text, "symbol": "", "tint": "secondary"].merging(detail.map { ["detail": $0] } ?? [:]) { $1 }]
+        }
+        let asking = ready(["state": "needs-closeup"].merging(said("needs-you", "Needs you · Can you confirm these sizes?", "Can you confirm these sizes?")) { $1 })
+        XCTAssertEqual(asking.words.row, "Can you confirm these sizes?")
+        XCTAssertEqual(asking.words.status, "Needs you · Can you confirm these sizes?", "the header keeps the whole line")
+        let sized = ready(said("ready", "Ready to print · 48 × 50 × 54 mm", "48 × 50 × 54 mm"))
+        XCTAssertEqual(sized.words.row, "48 × 50 × 54 mm")
+        // An older companion, or a line with nothing more to say: the line as it is.
+        let old = ready(said("ready", "Ready to print · 48 × 50 × 54 mm", nil))
+        XCTAssertEqual(old.words.row, "Ready to print · 48 × 50 × 54 mm")
+        let stopped = ready(["state": "failed"].merging(said("failed", "The printer stopped.", nil)) { $1 })
+        XCTAssertEqual(stopped.words.row, "The printer stopped.")
+        // Done is the app's own word; a detail from the companion never replaces it.
+        let done = ready(["state": "confirmed"].merging(said("confirmed", "", "48 × 50 × 54 mm")) { $1 })
+        XCTAssertEqual(done.words.row, done.words.status)
+    }
+
     func testAPrintsWordsAreTheCompanionsAsTheyAre() {
         let live: [String: Any] = ["print": ["bundleId": "b", "live": ["source": "counterpart", "state": "printing", "job": ["progress": 3]]]]
         let preparing = ready(["state": "printing"].merging(live) { $1 }.merging(status("preparing", "Getting ready · Heating")) { $1 })
