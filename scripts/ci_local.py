@@ -198,35 +198,44 @@ def setup_action(step, context, env, temporary):
     raise ValueError('Unsupported action: ' + action)
 
 
+# Jobs that take both build-lane slots (docs/operations.md, "Printing beats gating"): UI tests go flaky under
+# contention, and a false failure of the iPhone/iPad UI job costs 22 minutes.
+EXCLUSIVE_JOBS = {('mobile', 'app')}
+
+
+def load_lane(workspace=None):
+    """scripts/lane.py, beside this file or (for a job sent from Linux) in the job's source snapshot."""
+    import importlib.util
+    for folder in (Path(__file__).resolve().parent, Path(workspace or '.') / 'scripts'):
+        if (folder / 'lane.py').exists():
+            spec = importlib.util.spec_from_file_location('stm_lane', folder / 'lane.py')
+            module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+            return module
+    raise FileNotFoundError('scripts/lane.py not found beside ci_local.py or in ' + str(workspace))
+
+
 @contextlib.contextmanager
-def ios_lock(label):
-    """One iOS/Mac build or test at a time on this Mac (David, 2026-11-01: load average 672 with three
-    simulator runs at once). Uses flock(2), so any other holder of ~/.stm-ios.lock is respected."""
-    import fcntl
-    path = Path(os.environ.get('STM_IOS_LOCK', str(Path.home() / '.stm-ios.lock')))
-    with path.open('a+') as handle:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            handle.seek(0); holder = handle.read().strip() or 'unknown'
-            print('Waiting for the Mac iOS lock ' + str(path) + ', held by: ' + holder, flush=True)
-            fcntl.flock(handle, fcntl.LOCK_EX)
-        handle.seek(0); handle.truncate(); handle.write(str(os.getpid()) + ' ' + label + ' since ' + time.strftime('%H:%M:%S') + '\n'); handle.flush()
-        try:
-            yield
-        finally:
-            handle.seek(0); handle.truncate(); handle.flush()
+def ios_lock(label, exclusive=False, max_minutes=10, workspace=None):
+    """Hold the Mac's build lane (scripts/lane.py): one of two slots, or both when exclusive. Waiters queue in
+    arrival order and are told who holds the lane (David, 2026-11-01: load average 672 with three simulator runs
+    at once; Nov 10: two slots, so an install need not wait behind a 22-minute UI job)."""
+    lane = load_lane(workspace)
+    with lane.hold(label, exclusive=exclusive, max_minutes=max_minutes,
+                   log=lambda text: print(text, flush=True)) as held:
+        yield {lane.HELD_ENV: str(held['pid'])}
 
 
 def execute_job(spec, workspace, directory):
     runner = spec['job'].get('runs-on', '')
     if isinstance(runner, str) and runner.startswith(('macos', 'xcode-')) and platform.system() == 'Darwin':
-        with ios_lock(spec['workflow'] + '/' + spec['key']):
-            return run_job_steps(spec, workspace, directory)
+        name = spec['workflow'] + '/' + spec['key']
+        with ios_lock('ci_local ' + name, exclusive=(spec['workflow'], spec['key']) in EXCLUSIVE_JOBS,
+                      max_minutes=spec['job'].get('timeout-minutes', 30), workspace=workspace) as lane_env:
+            return run_job_steps(spec, workspace, directory, lane_env)
     return run_job_steps(spec, workspace, directory)
 
 
-def run_job_steps(spec, workspace, directory):
+def run_job_steps(spec, workspace, directory, extra_env=None):
     directory.mkdir(parents=True, exist_ok=True)
     temporary = directory / 'temp'; temporary.mkdir()
     environment_file = temporary / 'github-env'; environment_file.touch()
@@ -234,7 +243,7 @@ def run_job_steps(spec, workspace, directory):
     context = {'runner.temp': str(temporary), 'github.workspace': str(workspace),
                **{'matrix.' + k: v for k, v in spec['matrix'].items()}}
     env = dict(os.environ, CI='true', GITHUB_WORKSPACE=str(workspace), RUNNER_TEMP=str(temporary),
-               GITHUB_ENV=str(environment_file), GITHUB_PATH=str(path_file))
+               GITHUB_ENV=str(environment_file), GITHUB_PATH=str(path_file), **(extra_env or {}))
     env['PATH'] = env.get('PATH', '') + ':/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
     for values in (spec['env'], spec['job'].get('env', {})):
         env.update({key: expand(value, context) for key, value in values.items()})
@@ -313,7 +322,7 @@ def run_mac(spec, workspace, directory, host):
     subprocess.run(['git', '-C', str(workspace), 'archive', '--format=tar', '-o', str(archive), 'HEAD'], check=True)
     manifest = local / 'manifest.json'
     manifest.write_text(json.dumps({'spec': spec, 'workspace': remote+'/source', 'directory': remote+'/result'}))
-    subprocess.run(['scp', str(archive), str(manifest), str(Path(__file__).resolve()), host+':'+remote+'/'], check=True)
+    subprocess.run(['scp', str(archive), str(manifest), str(Path(__file__).resolve()), str(Path(__file__).resolve().parent/'lane.py'), host+':'+remote+'/'], check=True)
     command = 'mkdir '+shlex.quote(remote+'/source')+' && tar -xf '+shlex.quote(remote+'/source.tar')+' -C '+shlex.quote(remote+'/source')+' && python3 '+shlex.quote(remote+'/ci_local.py')+' --launch-macos '+shlex.quote(remote+'/manifest.json')
     completed = subprocess.run(['ssh', host, command])
     collect_mac_evidence(host, remote, directory/'mac')
@@ -429,11 +438,11 @@ def main():
     parser.add_argument('--author', default=os.environ.get('CI_LOCAL_AUTHOR'))
     parser.add_argument('--prompt-dir', default=os.environ.get('CI_LOCAL_REVIEW_PROMPTS', str(Path.home()/'.config/scan-to-make/review-prompts')))
     parser.add_argument('--worker', type=Path); parser.add_argument('--launch-macos', type=Path)
-    parser.add_argument('--ios-lock', nargs=argparse.REMAINDER, metavar='COMMAND', help='run COMMAND holding the Mac iOS lock (~/.stm-ios.lock)')
+    parser.add_argument('--ios-lock', nargs=argparse.REMAINDER, metavar='COMMAND', help='run COMMAND in one build-lane slot (same as scripts/lane.py -- COMMAND)')
     args = parser.parse_args()
     if args.ios_lock is not None:
         if not args.ios_lock: raise ValueError('--ios-lock needs a command')
-        with ios_lock(' '.join(args.ios_lock)[:120]): return subprocess.run(args.ios_lock).returncode
+        lane = load_lane(); return lane.run(args.ios_lock, ' '.join(args.ios_lock)[:120], False, lane.DEFAULT_MAX_MINUTES)
     if args.worker:
         config = json.loads(args.worker.read_text()); result = execute_job(config['spec'], Path(config['workspace']), Path(config['directory'])); return result['status']=='FAIL'
     if args.launch_macos: mac_launch(args.launch_macos); return 0
