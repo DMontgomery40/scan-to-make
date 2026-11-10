@@ -937,8 +937,11 @@ struct PassTimeline: View {
 
     private var steps: [(title: String, detail: String?, state: StepState)] {
         if let stages = pass.stages, !stages.isEmpty {
-            return stages.map { stage in
-                let state: StepState = stage.endedAtMs != nil ? .done : (pass.failed ? .failed : running ? .current : .done)
+            // The last stage carries how the pass ended: one that stopped to ask or stopped short is never a green tick.
+            let ended: StepState? = pass.ending.map { $0 == .finished ? .done : $0 == .asked ? .asked : .failed }
+            return stages.enumerated().map { offset, stage in
+                let last = offset == stages.count - 1
+                let state: StepState = last && ended != nil ? ended! : stage.endedAtMs != nil ? .done : (pass.failed ? .failed : running ? .current : .done)
                 return (stage.words, nil, state)
             }
         }
@@ -948,9 +951,15 @@ struct PassTimeline: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(index == 0 ? "First pass · \(Format.clock(Date(timeIntervalSince1970: pass.startedAtMs / 1000)))"
-                 : "Pass \(index + 1) · \(Format.clock(Date(timeIntervalSince1970: pass.startedAtMs / 1000)))")
-                .font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 8)
+            // Each pass says when it ran and how it ended, in the Mac's words, and what it was asked to change.
+            Text([index == 0 ? "First pass" : "Pass \(index + 1)", Format.clock(Date(timeIntervalSince1970: pass.startedAtMs / 1000)), pass.endingWords]
+                    .compactMap { $0 }.joined(separator: " · "))
+                .font(.caption.weight(.semibold)).foregroundStyle(pass.ending == .stopped ? Color.red : pass.ending == .asked ? .orange : .secondary)
+                .padding(.bottom, pass.requestedChange == nil ? 8 : 2)
+                .accessibilityIdentifier("pass-\(index + 1)-header")
+            if let change = pass.requestedChange {
+                Text("Your change: “\(change)”").font(.footnote).foregroundStyle(.secondary).lineLimit(3).padding(.bottom, 8)
+            }
             ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
                 HStack(alignment: .top, spacing: 12) {
                     VStack(spacing: 0) {
@@ -992,11 +1001,13 @@ struct PassTimeline: View {
 
 enum StepState: Equatable {
     case done, current, failed, pending
+    /// The pass stopped here to ask the person something.
+    case asked
     var symbol: String {
-        switch self { case .done: "checkmark.circle.fill"; case .current: "circle.dotted.circle"; case .failed: "xmark.circle.fill"; case .pending: "circle" }
+        switch self { case .done: "checkmark.circle.fill"; case .current: "circle.dotted.circle"; case .failed: "xmark.circle.fill"; case .pending: "circle"; case .asked: "questionmark.circle.fill" }
     }
     var color: Color {
-        switch self { case .done: .green; case .current: .blue; case .failed: .red; case .pending: .secondary }
+        switch self { case .done: .green; case .current: .blue; case .failed: .red; case .pending: .secondary; case .asked: .orange }
     }
 }
 

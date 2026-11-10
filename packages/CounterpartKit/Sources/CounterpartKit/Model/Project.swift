@@ -364,6 +364,22 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             case let other?: return other.replacingOccurrences(of: "_", with: " ").capitalized
             }
         }
+        /// How an ended pass left things, for the mark beside it: it finished, it stopped to ask the person, or it
+        /// stopped short. Nil while it runs. A pass that asked or stopped must never read as all green ticks.
+        public enum Ending: Equatable, Sendable { case finished, asked, stopped }
+        public var ending: Ending? {
+            guard endedAtMs != nil else { return nil }
+            switch status {
+            case "needs_closeup", "needs_file": return .asked
+            case "capped", "failed", "interrupted": return .stopped
+            default: return .finished
+            }
+        }
+        /// The words that started this pass, when it was a change the person asked for ("Your change: …").
+        public var requestedChange: String? {
+            guard let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty, trigger == nil || trigger == "changes" else { return nil }
+            return note
+        }
         public var failed: Bool { ["failed", "interrupted"].contains(status ?? "") }
         /// The stage running now: the last one started and not ended.
         public var currentStage: Stage? { stages?.last { $0.endedAtMs == nil } }

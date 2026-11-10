@@ -12,6 +12,7 @@ import {
   didItFitQuestion,
   duration,
   passHeading,
+  stageMark,
   words,
 } from "./domain";
 import { Picture, Stage } from "./Stage";
@@ -752,9 +753,10 @@ export function ProjectView({
                   <h3>
                     {passHeading(pass, i)}
                   </h3>
-                  {pass.stages?.map((s) => (
+                  {pass.note && <p className="hint">Your change: “{pass.note}”</p>}
+                  {pass.stages?.map((s, stage) => (
                     <p key={s.id}>
-                      {s.endedAtMs ? "✓" : "◌"} {s.words}
+                      {stageMark(pass, stage)} {s.words}
                     </p>
                   ))}
                   <p>{pass.summary}</p>

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   codeEngineRow,
+  passEnding,
+  stageMark,
   passHeading,
   AFTER_PRINTING,
   didItFitQuestion,
@@ -652,4 +654,16 @@ test("David's Nov 9 bottle: the question's caption is true for any question, and
   assert.deepEqual(scanSample(130), [0, 32, 65, 97, 129], "the same frames as the iPhone, Mac and Android");
   assert.deepEqual(scanSample(3), [0, 1, 2]);
   assert.equal(scanWords(130), "130 photos");
+});
+
+test("a pass that stopped to ask or stopped short never reads as all ticks", () => {
+  const stages = [{ id: "preparing", words: "Getting ready", endedAtMs: 2 }, { id: "working", words: "Designing it", endedAtMs: 3 }];
+  const marks = (status: string | undefined, endedAtMs: number | undefined = 3) => stages.map((_, i) => stageMark({ endedAtMs, status, stages }, i));
+  assert.deepEqual(marks("done"), ["✓", "✓"]);
+  assert.deepEqual(marks("unchanged"), ["✓", "✓"]);
+  assert.deepEqual(marks("needs_closeup"), ["✓", "?"]);
+  assert.deepEqual(marks("needs_file"), ["✓", "?"]);
+  for (const status of ["capped", "failed", "interrupted"]) assert.deepEqual(marks(status), ["✓", "✕"], status);
+  assert.equal(passEnding({ status: "failed" }), undefined, "a running pass has not ended");
+  assert.deepEqual(stages.map((_, i) => stageMark({ stages: [stages[0], { id: "working", words: "Designing it" }] }, i)), ["✓", "◌"]);
 });
