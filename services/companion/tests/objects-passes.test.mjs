@@ -48,7 +48,8 @@ async function setup(t, outcomes) {
       await writeFile(join(run, 'touched.py'), `# pass ${inputs.length}`); await writeFile(join(run, 'touched.parameters.json'), '{"cup_h":70}');
       await writeFile(join(run, 'touched.step'), 'STEP'); await writeFile(join(run, 'inputs', 'mesh.obj'), 'mesh');
       await writeFile(join(run, 'touched.inputs.json'), JSON.stringify({scan: join(run, 'inputs', 'mesh.obj')}));
-      design = {script: join(run, 'touched.py'), parameters: join(run, 'touched.parameters.json'), inputs: join(run, 'touched.inputs.json'), step: join(run, 'touched.step')};
+      await writeFile(join(run, 'cad-result.json'), JSON.stringify({status: 'completed', final: true, valid: true, checks: {watertight: true}}));
+      design = {script: join(run, 'touched.py'), parameters: join(run, 'touched.parameters.json'), inputs: join(run, 'touched.inputs.json'), step: join(run, 'touched.step'), result: join(run, 'cad-result.json')};
     }
     if (outcome.answered) input.onProgress?.({seconds: 1, toolCalls: 1, resumable: false});
     if (outcome.throw) throw new Error(outcome.throw);
@@ -507,7 +508,9 @@ test('a code design is kept as the project\'s design source, a change starts fro
   assert.deepEqual(ready.passes[0].stages.map(stage => stage.words), ['Getting the design engine ready', 'Designing it', 'Saving the result'],
     'the pass says which engine it is getting ready once it has chosen');
   assert.deepEqual(ready.current.design, {script: 'current/design/touched.py', parameters: 'current/design/touched.parameters.json',
-    inputs: 'current/design/touched.inputs.json', step: 'current/design/touched.step'});
+    inputs: 'current/design/touched.inputs.json', step: 'current/design/touched.step', result: 'current/design/touched.result.json'});
+  assert.deepEqual(JSON.parse(await readFile(join(f.service.dir(object.id), 'current', 'design', 'touched.result.json'), 'utf8')).checks, {watertight: true},
+    'the selected run\'s validation is kept with the design');
   const dir = f.service.dir(object.id);
   assert.equal(await readFile(join(dir, 'current', 'design', 'touched.py'), 'utf8'), '# pass 1');
   assert.equal(await readFile(join(dir, 'current', 'design', 'inputs', 'mesh.obj'), 'utf8'), 'mesh');
@@ -517,7 +520,7 @@ test('a code design is kept as the project\'s design source, a change starts fro
   await f.service.correct(object.id, 'Make it 1 mm taller');
   await f.service.settled(object.id);
   assert.deepEqual(f.inputs[1].design, {script: join(dir, 'current', 'design', 'touched.py'), parameters: join(dir, 'current', 'design', 'touched.parameters.json'),
-    inputs: join(dir, 'current', 'design', 'touched.inputs.json'), step: join(dir, 'current', 'design', 'touched.step')});
+    inputs: join(dir, 'current', 'design', 'touched.inputs.json'), step: join(dir, 'current', 'design', 'touched.step'), result: join(dir, 'current', 'design', 'touched.result.json')});
   assert.equal(await readFile(join(dir, 'current', 'design', 'touched.py'), 'utf8'), '# pass 2');
   // A duplicate keeps the design source too.
   const copy = await f.service.duplicate(object.id);

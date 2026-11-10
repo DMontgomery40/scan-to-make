@@ -350,7 +350,8 @@ test('the composed rules for a code pass: the MCP\'s cad_design prompt plus only
     // What the script looks like and which libraries it uses is the MCP's to say (AGENTS.md: the app staples onto the MCPs).
     assert.doesNotMatch(rules.replace('MCP CAD PROMPT', ''), /build123d|trimesh|manifold|load_scan|def build|\bP = \{|numpy|scipy|\.py\b/, `${name}: no script-format knowledge`);
     assert.doesNotMatch(rules, /\(01\.stl, 02\.stl/, `${name}: Counterpart keeps every run as a checkpoint itself`);
-    assert.match(rules, /"touched"/, `${name}: the final run is named touched`);
+    assert.match(rules, /mark the run of the whole model you select as the result so far final/, `${name}: the worker marks the selected run final`);
+    assert.match(rules, /Never mark final a run that measures or prepares the scan/, `${name}: measuring runs never become the model`);
     assert.match(rules, /orientation the object is used in/, `${name}: exported as it is used`);
   }
   assert.ok(fit.includes(RULE_SECTIONS.newDesign) && fit.includes(RULE_SECTIONS.fitSizes));
@@ -359,7 +360,8 @@ test('the composed rules for a code pass: the MCP\'s cad_design prompt plus only
   assert.doesNotMatch(fit, /out\/touched\.stl/, 'a code worker writes no files itself: the touched run is the whole model');
   assert.match(fit, /counterpart_make_3mf into out\/touched\.3mf/, 'several colours still combine into the 3MF');
   assert.match(systemRules({kind: 'fit', request: true}), /Still export the whole model to out\/touched\.stl\./);
-  assert.match(fit, /never rescale/i, 'interference with an oversized scan is reported, not fixed by rescaling it');
+  // How to prepare the reference and that a fit check never resizes a measured interface are the MCP's (cad_design).
+  assert.doesNotMatch(fit.replace('MCP CAD PROMPT', ''), /never rescale|as information|never to choose a size/i, 'no sentence duplicates the MCP\'s cad_design prompt');
   // The captured-object rules stay Counterpart's, and apply to a code cleanup pass.
   assert.ok(copy.includes(RULE_SECTIONS.captured));
   assert.match(copy, /First say what the object is/);

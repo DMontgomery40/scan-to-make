@@ -139,7 +139,7 @@ export interface StmObject {
      * The design source a pass keeps for the next "Ask for changes" (PRD §8.9), relative paths: Fusion's
      * `design.f3d` and `parameters.json`, or a code design's script, parameters, input snapshots and STEP.
      */
-    design?: {f3d: string; parameters?: string} | {script: string; parameters: string; inputs?: string; step?: string};
+    design?: {f3d: string; parameters?: string} | {script: string; parameters: string; inputs?: string; step?: string; result?: string};
     /**
      * This 3MF prints with the settings it carries (a designer's project), as the project's printer MCP says
      * (get_slice_settings own_process): the print sheet starts at the file's own settings and sends no quality or

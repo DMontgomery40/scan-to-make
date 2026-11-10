@@ -17,18 +17,57 @@ export interface CadView {
   server?: string;
   /** While setting up: seconds since Set Up started, from the MCP's progress. */
   seconds?: number;
-  /** The last Set Up's outcome in the MCP's own words: its `message` when it finished, its error when it failed. */
-  result?: {ok: boolean; message: string};
+  /**
+   * What the engine takes on disk, from the MCP's `storage` fields: before Set Up the download and installed size it
+   * expects, after it the size it measured. Absent when the MCP doesn't report them.
+   */
+  size?: string;
+  /**
+   * The last Set Up's outcome in the MCP's own words: its `message` when it finished; when it was refused, its
+   * `message` and `suggestion`, with the structured refusal (`code` included) passed through as the MCP gave it.
+   * Counterpart never chooses words or actions by the code.
+   */
+  result?: {ok: boolean; message: string; suggestion?: string; refusal?: Record<string, unknown>};
   /** Set Up is offered: the MCP has the engine and isn't setting it up now. */
   canSetUp: boolean;
+}
+
+/** Bytes as people see them in Finder (decimal units), for the sizes the MCP reports. */
+export function diskSize(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+}
+
+const whole = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+/** The row's size line from the MCP's `storage`: what Set Up takes while it isn't set up, what it uses once it is. */
+export function storageWords(storage: unknown, installed: boolean): string | undefined {
+  if (!storage || typeof storage !== 'object') return undefined;
+  const {expected_download_bytes: download, expected_installed_bytes: expected, installed_bytes: measured} = storage as Record<string, unknown>;
+  // Installed: only what the MCP measured counts (null is "not measured yet": say nothing rather than guess).
+  if (installed) { const used = whole(measured); return used ? `Uses ${diskSize(used)} on this computer.` : undefined; }
+  const fetch = whole(download), size = whole(expected);
+  if (fetch && size) return `Set Up downloads about ${diskSize(fetch)} and uses about ${diskSize(size)} on this computer.`;
+  if (size) return `Set Up uses about ${diskSize(size)} on this computer.`;
+  return undefined;
+}
+
+/** A refused tool's structured result, as the MCP gave it (`status: "error"`), or undefined. */
+function refusalOf(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && (value as {status?: unknown}).status === 'error' && typeof (value as {message?: unknown}).message === 'string'
+    ? value as Record<string, unknown> : undefined;
 }
 
 type Client = Pick<PrinterMcpClient, 'connect' | 'hasTool' | 'callTool' | 'close'>;
 export interface CadCalls {
   /** `cad_status` on the printer MCP as the companion runs it: its structured answer, or null when it has no such tool. */
   status(signal?: AbortSignal): Promise<{status: Record<string, unknown> | null; server: string; error?: string}>;
-  /** `cad_setup {install: true}`: its structured answer, or the MCP's error. `onProgress` gets each progress notification. */
-  setup(onProgress: () => void, signal?: AbortSignal): Promise<{setup: Record<string, unknown> | null; server: string; error?: string}>;
+  /**
+   * `cad_setup {install: true}`: its structured answer, or the MCP's error. A refusal's structured result is `refusal`,
+   * as the MCP gave it. `onProgress` gets each progress notification.
+   */
+  setup(onProgress: () => void, signal?: AbortSignal): Promise<{setup: Record<string, unknown> | null; server: string; error?: string; refusal?: Record<string, unknown>}>;
 }
 
 /** The two calls, on the printer MCP as the companion runs it (`running()`, with any Update or Move override). */
@@ -43,10 +82,16 @@ export function cadCalls(running: () => PrinterHandoffConfig, client: (config: P
       try { reply = await mcp.callTool(tool, args, {signal, timeoutMs: options.timeoutMs, ...(options.onProgress ? {onProgress: options.onProgress} : {})}); }
       catch (error) {
         // A tool's own error result is its answer; a call that didn't complete is not, and still throws.
-        if (error instanceof PrinterMcpError && error.code === 'tool-failed' && !error.incomplete) return {result: null, server, error: error.detail ?? `${tool} failed.`};
+        if (error instanceof PrinterMcpError && error.code === 'tool-failed' && !error.incomplete) {
+          const refusal = refusalOf(error.structured);
+          return {result: null, server, error: (refusal?.message as string | undefined) ?? error.detail ?? `${tool} failed.`, ...(refusal ? {refusal} : {})};
+        }
         throw error;
       }
-      if (reply.isError) return {result: null, server, error: toolErrorText(reply)};
+      if (reply.isError) {
+        const refusal = refusalOf(reply.structuredContent);
+        return {result: null, server, error: (refusal?.message as string | undefined) ?? toolErrorText(reply), ...(refusal ? {refusal} : {})};
+      }
       return {result: toolResultJson<Record<string, unknown>>(reply), server};
     } finally { await mcp.close().catch(() => undefined); }
   };
@@ -88,7 +133,10 @@ export class CadSettings {
     const server = this.#status?.server;
     const named = server ? {server} : {};
     const result = this.#result ? {result: this.#result} : {};
-    if (this.#setup) return {state: 'setting-up', message: `Setting up… ${this.#setup.seconds} s so far.`, seconds: this.#setup.seconds, canSetUp: false, ...named};
+    const engine = this.#status?.status;
+    const sized = storageWords(engine?.storage, engine?.configured === true);
+    const size = sized ? {size: sized} : {};
+    if (this.#setup) return {state: 'setting-up', message: `Setting up… ${this.#setup.seconds} s so far.`, seconds: this.#setup.seconds, canSetUp: false, ...named, ...size};
     if (!this.#status) return {state: 'checking', message: 'Checking…', canSetUp: false, ...result};
     const status = this.#status.status;
     if (!status) {
@@ -97,8 +145,8 @@ export class CadSettings {
         ? {state: 'unavailable', message: `Counterpart couldn't check ${server}. Check it in Settings → Printers.`, canSetUp: false, ...named}
         : {state: 'unavailable', message: `Update ${server} in Settings → Printers to use its code design engine.`, canSetUp: false, ...named};
     }
-    if (status.ready === true) return {state: 'ready', message: 'Ready. New designs and scan cleanups use it.', canSetUp: true, ...named, ...result};
-    return {state: 'not-set-up', message: status.configured === true ? 'Installed, but not checked since the last update. Set it up again.' : 'Not set up yet.', canSetUp: true, ...named, ...result};
+    if (status.ready === true) return {state: 'ready', message: 'Ready. New designs and scan cleanups use it.', canSetUp: true, ...named, ...size, ...result};
+    return {state: 'not-set-up', message: status.configured === true ? 'Installed, but not checked since the last update. Set it up again.' : 'Not set up yet.', canSetUp: true, ...named, ...size, ...result};
   }
 
   /** Asks the printer MCP's `cad_status` now, and tells every client when the row changed. */
@@ -140,8 +188,11 @@ export class CadSettings {
         });
         const message = typeof answer.setup?.message === 'string' ? answer.setup.message : undefined;
         const error = answer.error ?? (typeof answer.setup?.error === 'string' && answer.setup.ready !== true ? answer.setup.error : undefined);
+        // A refusal is shown in the MCP's own sentence and suggestion; its code travels with it, unread here.
+        const suggestion = typeof answer.refusal?.suggestion === 'string' ? {suggestion: answer.refusal.suggestion} : {};
         this.#result = answer.setup?.ready === true ? {ok: true, message: message ?? 'Set up.'}
-          : {ok: false, message: error ?? (answer.setup ? 'Set up did not finish.' : `Update ${answer.server} in Settings → Printers to use its code design engine.`)};
+          : {ok: false, message: error ?? (answer.setup ? 'Set up did not finish.' : `Update ${answer.server} in Settings → Printers to use its code design engine.`),
+            ...suggestion, ...(answer.refusal ? {refusal: answer.refusal} : {})};
       } catch (error) {
         this.#result = {ok: false, message: error instanceof Error ? error.message : String(error)};
       } finally {

@@ -68,7 +68,7 @@ const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's f
  * printer MCP's (its cad_design prompt, added below); these lines are only where Counterpart keeps each run.
  */
 const CODE_RULES = `- Build it with the printer MCP's code design engine (its cad_* tools), following its cad_design prompt below. Give every cad_run the design folder from the files list as its output_dir.
-- Name every run of the whole model "touched", and save one after each fix: Counterpart files each as a checkpoint, the last one's model, views, script and parameters become this pass's result, and a later change starts from that script and those parameters. Give runs that measure or prepare the scan, or make one colour's part, any other name: they never become the model.`;
+- After each fix, mark the run of the whole model you select as the result so far final: Counterpart files each final run as a checkpoint, the latest one's model, views, script and parameters become this pass's result, and a later change starts from that script and those parameters. Never mark final a run that measures or prepares the scan, or makes one colour's part: it never becomes the model.`;
 
 /** How the core's checkpoint and final-export lines read for each engine. The code engine's runs are filed by Counterpart. */
 const EXPORT_RULES = {
@@ -76,7 +76,7 @@ const EXPORT_RULES = {
 - Render and inspect the candidate from all six sides against the request and reference photos. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the dimensions; revise defects you can see. Successful export alone does not establish that the result works.
 - Export the final model to out/touched.stl and clear PNG renders to out/, named so the clearest overall view sorts first (for example 1_overview.png).`,
   code: `- Inspect all six views of each run against the request and reference photos. Revise visible discrepancies, or ask for the specific missing evidence when it is actually absent. Check the dimensions; revise defects you can see. Successful export alone does not establish that the result works.
-- The last cad_run named "touched" is the final model; Counterpart copies its model and views to the output folder.`,
+- The latest run marked final is this pass's model; Counterpart copies its model and views to the output folder.`,
 };
 
 /**
@@ -144,7 +144,7 @@ const NAMED_MODEL_RULES = `${RULE_SECTIONS.namedModel}
 
 /** A code fit with a scan may check itself against it; the scan never wins over measured or confirmed sizes (#427). */
 const CODE_FIT_CHECK = `
-4. When there is a scan, check the finished part against the raw scan with cad_check_fit and report the interference and gap in your changes as information, with any crop or alignment you applied to the scan. It is never to choose a size: never rescale the scan or the part to make that check pass.`;
+4. When there is a scan, check the finished part against it with cad_check_fit as the printer MCP's cad_design prompt describes, and report the interference and gap, with what you changed in the reference, in your changes.`;
 
 /** Only what Claude Code needs to find the user's own login. Never printer tokens or provider keys. */
 const ENV_ALLOWLIST = ['HOME', 'USER', 'LOGNAME', 'PATH', 'TMPDIR', 'LANG', 'SHELL', 'CLAUDE_CONFIG_DIR'] as const;
@@ -261,7 +261,7 @@ export function systemRules(pass: PassRules, guidance: DesignGuidance = {}): str
   const text: Record<keyof typeof RULE_SECTIONS, () => string> = {
     newDesign: () => NEW_DESIGN_RULES(engineName), captured: () => CAPTURED_RULES(code ? '' : " Use Blender's existing sculpt, modelling and modifier tools for that cleanup."),
     fitSizes: () => FIT_SIZE_RULES(code ? CODE_FIT_CHECK : ''),
-    colours: () => COLOUR_RULES(code ? 'The run named "touched" is still the whole model.' : 'Still export the whole model to out/touched.stl.'), designerCopy: () => DESIGNER_COPY_RULES, namedModel: () => NAMED_MODEL_RULES,
+    colours: () => COLOUR_RULES(code ? 'The run you mark final is still the whole model.' : 'Still export the whole model to out/touched.stl.'), designerCopy: () => DESIGNER_COPY_RULES, namedModel: () => NAMED_MODEL_RULES,
   };
   const core = code ? CORE_RULES(CODE_RULES, EXPORT_RULES.code, 'for example cad_run keeps failing') : CORE_RULES(engine === 'fusion' ? FUSION_RULES : BLENDER_RULES);
   return [core, ...ruleSections(pass).map(section => text[section]())].join('\n\n')

@@ -215,10 +215,9 @@ test('a fit settles a scan disagreement with the person before any fit-critical 
     if (engine === 'code') {
       const check = step('cad_check_fit');
       assert.ok(size < check, 'the fit check comes after the size is settled');
-      assert.match(fit, /as information/);
-      assert.match(fit, /with any crop/);
-      assert.match(fit, /never to choose a size/);
-      assert.match(fit, /never rescale the scan or the part/);
+      assert.match(fit, /as the printer MCP's cad_design prompt describes/, 'the reference and the never-resize rule are the MCP\'s');
+      assert.match(fit, /report the interference and gap, with what you changed in the reference, in your changes/);
+      assert.doesNotMatch(fit, /never rescale|as information/, 'no sentence duplicates cad_design');
     } else assert.doesNotMatch(fit, /cad_check_fit/);
   }
 });

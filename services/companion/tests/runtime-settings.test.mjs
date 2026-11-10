@@ -318,3 +318,48 @@ test('cad.status and cad.setup reach the code design engine row over the control
   assert.equal(scopes.at(-1), 'projects:write', 'Set Up needs the same scope as Fusion\'s Set Up');
   assert.equal((await fetch(`${base}/cad/setup`, {method: 'GET'})).status, 405);
 });
+
+// cad/1 (bambu-printer-mcp #136 d2f04c75): storage sizes and structured refusals.
+test('the code design engine row shows what Set Up takes, then what it uses, from the MCP\'s storage fields', async () => {
+  const {CadSettings, storageWords} = await import('../dist/cad-settings.js');
+  const storage = installed => ({expected_download_bytes: 367001600, expected_installed_bytes: 1610612736, installed_bytes: installed, measurement: 'allocated-last-setup'});
+  let status = {configured: false, ready: false, python: null, build123d: '0.13.0', platform: 'darwin', storage: storage(0)};
+  let finish;
+  const settings = new CadSettings({calls: {status: async () => ({status, server: 'bambu-printer-mcp'}), setup: () => new Promise(resolve => { finish = resolve; })}, emit: async () => {}});
+  assert.equal((await settings.view()).size, 'Set Up downloads about 367 MB and uses about 1.6 GB on this computer.');
+  const started = await settings.setUp();
+  assert.equal(started.size, 'Set Up downloads about 367 MB and uses about 1.6 GB on this computer.', 'shown while it sets up');
+  status = {...status, configured: true, ready: true, python: '/cad/python', storage: {...storage(1395412992), measured_at: '2026-11-10T04:00:00Z'}};
+  finish({setup: {supported: true, ...status, installed: true, message: 'CAD is ready.'}, server: 'bambu-printer-mcp'});
+  for (let i = 0; i < 100 && settings.current().state !== 'ready'; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settings.current().size, 'Uses 1.4 GB on this computer.');
+  // An environment present but not yet measured (null), or a status without storage: no size line, never a guess.
+  assert.equal(storageWords({expected_download_bytes: 1, expected_installed_bytes: 1, installed_bytes: null}, true), undefined);
+  assert.equal(storageWords(undefined, false), undefined);
+});
+
+test('a refused Set Up shows the MCP\'s own sentence and suggestion, and passes its structured result through unread', async () => {
+  const {CadSettings, cadCalls} = await import('../dist/cad-settings.js');
+  const {PrinterMcpError} = await import('@scan-to-make/printer-handoff');
+  const refusal = {status: 'error', code: 'cad-data-volume-refused', message: 'Code-CAD on macOS requires an internal disk with file ownership enabled.', tool: 'cad_setup',
+    retryable: false, suggestion: 'Set CAD_DATA_DIR to an internal folder and set it up again.', storage: {expected_download_bytes: 1, expected_installed_bytes: 2, installed_bytes: 0, measurement: 'allocated-last-setup'}};
+  // The printer MCP client turns the tool's error result into an error carrying its structured content.
+  const error = new PrinterMcpError('tool-failed', undefined, 'text');
+  error.structured = refusal;
+  const client = () => ({async connect() {}, async close() {}, hasTool: () => true, async callTool(name) { if (name === 'cad_setup') throw error; return {structuredContent: {configured: false, ready: false, storage: refusal.storage}, content: []}; }});
+  const calls = cadCalls(() => ({backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}), client);
+  assert.deepEqual(await calls.setup(() => {}), {setup: null, server: 'bambu-printer-mcp', error: refusal.message, refusal});
+  const settings = new CadSettings({calls, emit: async () => {}});
+  await settings.setUp();
+  for (let i = 0; i < 100 && !settings.current().result; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(settings.current().result, {ok: false, message: refusal.message, suggestion: refusal.suggestion, refusal});
+  // Every code gets the same treatment: the words are the MCP's, whatever the code.
+  for (const code of ['cad-uv-missing', 'cad-setup-busy', 'cad-something-new']) {
+    error.structured = {...refusal, code, message: `The MCP's sentence for ${code}.`};
+    const other = new CadSettings({calls, emit: async () => {}});
+    await other.setUp();
+    for (let i = 0; i < 100 && !other.current().result; i++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(other.current().result.message, `The MCP's sentence for ${code}.`);
+    assert.equal(other.current().result.refusal.code, code);
+  }
+});

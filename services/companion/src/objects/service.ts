@@ -24,9 +24,9 @@ import {copyDesign, isCodeDesign, type CodeDesign, type DesignSource} from '../t
 
 type SavedDesign = NonNullable<NonNullable<StmObject['current']>['design']>;
 const absoluteDesign = (dir: string, design: CodeDesign): CodeDesign => ({script: join(dir, design.script), parameters: join(dir, design.parameters),
-  ...(design.inputs ? {inputs: join(dir, design.inputs)} : {}), ...(design.step ? {step: join(dir, design.step)} : {})});
+  ...(design.inputs ? {inputs: join(dir, design.inputs)} : {}), ...(design.step ? {step: join(dir, design.step)} : {}), ...(design.result ? {result: join(dir, design.result)} : {})});
 const relativeDesign = (dir: string, design: CodeDesign): CodeDesign => ({script: relative(dir, design.script), parameters: relative(dir, design.parameters),
-  ...(design.inputs ? {inputs: relative(dir, design.inputs)} : {}), ...(design.step ? {step: relative(dir, design.step)} : {})});
+  ...(design.inputs ? {inputs: relative(dir, design.inputs)} : {}), ...(design.step ? {step: relative(dir, design.step)} : {}), ...(design.result ? {result: relative(dir, design.result)} : {})});
 /** The saved design a change starts from (PRD §8.9), as absolute paths: a Fusion design's archive, or a code design's script. */
 function designInput(dir: string, engine: DesignEngine | undefined, design: SavedDesign): {design?: DesignSource} {
   if (engine === 'fusion' && !isCodeDesign(design)) return {design: {f3d: join(dir, design.f3d), ...(design.parameters ? {parameters: join(dir, design.parameters)} : {})}};

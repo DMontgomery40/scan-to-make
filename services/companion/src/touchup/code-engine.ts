@@ -1,5 +1,5 @@
 import {copyFile, mkdir, readdir, readFile, stat, writeFile} from 'node:fs/promises';
-import {basename, dirname, join, resolve} from 'node:path';
+import {basename, dirname, extname, join, resolve} from 'node:path';
 import {toolResultJson, type PrinterMcpClient} from '@scan-to-make/printer-handoff';
 import type {TouchupPass} from './inputs.js';
 
@@ -10,7 +10,9 @@ import type {TouchupPass} from './inputs.js';
  */
 
 /** A code design, as a project keeps it: the script and its parameters, plus the input snapshots it reads. */
-export interface CodeDesign {script: string; parameters: string; inputs?: string; step?: string}
+export interface CodeDesign {script: string; parameters: string; inputs?: string; step?: string;
+  /** The selected run's receipt (cad/1 `cad-result.json`): its validation, kept with the design so it is never rebuilt to know it. */
+  result?: string}
 /** A Fusion design, as a project keeps it. */
 export interface FusionDesign {f3d: string; parameters?: string}
 export type DesignSource = FusionDesign | CodeDesign;
@@ -64,6 +66,7 @@ export async function copyDesign(from: CodeDesign, toDir: string): Promise<CodeD
   await copyFile(from.parameters, parameters);
   const copy: CodeDesign = {script, parameters};
   if (from.step && await isFile(from.step)) { copy.step = join(toDir, 'touched.step'); await copyFile(from.step, copy.step); }
+  if (from.result && await isFile(from.result)) { copy.result = join(toDir, 'touched.result.json'); await copyFile(from.result, copy.result); }
   if (from.inputs && await isFile(from.inputs)) {
     const listed = JSON.parse(await readFile(from.inputs, 'utf8')) as Record<string, unknown>;
     const manifest: Record<string, string> = {};
@@ -85,61 +88,69 @@ export async function copyDesign(from: CodeDesign, toDir: string): Promise<CodeD
 /** A valid STL: every triangle complete and finite. Shared with the runner's own check. */
 type StlCheck = (path: string) => Promise<boolean>;
 
-interface CadRun {dir: string; name: string; at: number; stl?: string}
+/**
+ * One run's receipt, as the MCP writes it to `cad-result.json` in each immediate `cad-*` run folder (cad/1): protected
+ * from the script, it records whether the run completed, whether the worker selected it (`final`), when, and the full
+ * validation and artifact paths, so it is read from disk after any ending or restart, without building again.
+ */
+interface CadReceipt {
+  status?: unknown; final?: unknown; completed_at?: unknown; valid?: unknown;
+  stl?: unknown; step?: unknown; script?: unknown; parameters?: unknown; input_manifest?: unknown; renders?: unknown;
+}
+interface CadRun {dir: string; receipt: CadReceipt; manifest: string; stl: string; completedAt: string}
 
-/** Every cad_run folder under the pass's design folder that holds a script, oldest first. */
-async function cadRuns(cadDir: string, validStl: StlCheck): Promise<CadRun[]> {
+const text = (value: unknown) => typeof value === 'string' && value ? value : undefined;
+/** A receipt's own artifact path, only when it is inside its run folder. */
+const inside = (dir: string, value: unknown) => {
+  const path = text(value);
+  return path && (resolve(path) === resolve(dir) || resolve(path).startsWith(resolve(dir) + '/')) ? path : undefined;
+};
+
+/**
+ * The runs the worker selected (`final: true`) that completed with valid geometry and a complete STL, oldest first:
+ * every immediate `cad-*` folder of the pass's design folder whose `cad-result.json` says so.
+ */
+async function selectedRuns(cadDir: string, validStl: StlCheck): Promise<CadRun[]> {
   let folders: string[];
-  try { folders = (await readdir(cadDir, {withFileTypes: true})).filter(entry => entry.isDirectory()).map(entry => entry.name); }
+  try { folders = (await readdir(cadDir, {withFileTypes: true})).filter(entry => entry.isDirectory() && entry.name.startsWith('cad-')).map(entry => entry.name); }
   catch { return []; }
   const runs: CadRun[] = [];
   for (const folder of folders) {
-    const dir = join(cadDir, folder);
-    // The MCP saves <name>.py and <name>.parameters.json before running, and its STL after.
-    const scripts = (await readdir(dir)).filter(name => name.endsWith('.py'));
-    if (scripts.length !== 1) continue;
-    const name = scripts[0]!.slice(0, -3);
-    if (!await isFile(join(dir, `${name}.parameters.json`))) continue;
-    const at = (await stat(join(dir, scripts[0]!))).mtimeMs;
-    const stl = join(dir, `${name}.stl`);
-    runs.push({dir, name, at, ...(await validStl(stl) ? {stl} : {})});
+    const dir = join(cadDir, folder), manifest = join(dir, 'cad-result.json');
+    let receipt: CadReceipt;
+    try { receipt = JSON.parse(await readFile(manifest, 'utf8')) as CadReceipt; } catch { continue; }
+    // Final is the worker's selection, not proof: the run must also have completed, passed its checks and kept its STL.
+    if (receipt.status !== 'completed' || receipt.final !== true || receipt.valid !== true) continue;
+    const stl = inside(dir, receipt.stl);
+    if (!stl || !await validStl(stl)) continue;
+    runs.push({dir, receipt, manifest, stl, completedAt: text(receipt.completed_at) ?? ''});
   }
-  return runs.sort((a, b) => a.at - b.at || a.dir.localeCompare(b.dir));
-}
-
-async function pngs(dir: string): Promise<string[]> {
-  const found: string[] = [];
-  for (const entry of await readdir(dir, {withFileTypes: true}).catch(() => [])) {
-    if (entry.name === 'inputs') continue;
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...await pngs(path));
-    else if (entry.name.toLowerCase().endsWith('.png')) found.push(path);
-  }
-  return found;
+  return runs.sort((a, b) => a.completedAt.localeCompare(b.completedAt) || a.dir.localeCompare(b.dir));
 }
 
 /**
- * Files a code pass's runs the way every pass's results are kept. Only runs named "touched" are the model: each
- * one with a model becomes a checkpoint (`out/checkpoints/001.stl`, …), the last becomes `out/touched.stl` with its
- * views as the pass's renders, and its script and parameters are the pass's design source. Runs under other names
- * (measuring the scan, one colour's part) never become the model, so a pass that measures and then asks, or stops
- * at a limit before a touched run, leaves the project's model alone. Runs on any ending. Nothing is changed.
+ * Files a code pass's runs the way every pass's results are kept, from the runs the worker marked final (cad/1's
+ * `cad-result.json`): each becomes a checkpoint (`out/checkpoints/001.stl`, …), the latest becomes `out/touched.stl`
+ * with its views as the pass's renders, and its script, parameters and receipt are the pass's design source. Runs
+ * not marked final (measuring the scan, one colour's part) never become the model, so a pass that measures and then
+ * asks, or stops before selecting a run, leaves the project's model alone. Reads only what is on disk, on any ending
+ * and after a restart. Nothing is changed.
  */
 export async function collectCodeRuns(pass: Pick<TouchupPass, 'dir' | 'outDir' | 'checkpointsDir'>, validStl: StlCheck): Promise<{design?: CodeDesign}> {
-  const runs = await cadRuns(passCadDir(pass), validStl);
-  const built = runs.filter(run => run.stl && run.name === 'touched');
+  const runs = await selectedRuns(passCadDir(pass), validStl);
   await mkdir(pass.checkpointsDir, {recursive: true});
-  for (const [index, run] of built.entries()) await copyFile(run.stl!, join(pass.checkpointsDir, `${String(index + 1).padStart(3, '0')}.stl`));
-  const final = built.at(-1);
-  if (final) {
-    await copyFile(final.stl!, join(pass.outDir, 'touched.stl'));
-    // The overall sheet first, then the single views: the rules ask for the clearest overall view to sort first.
-    const views = (await pngs(final.dir)).sort((a, b) => Number(basename(b) === 'contact.png') - Number(basename(a) === 'contact.png') || basename(a).localeCompare(basename(b)));
-    for (const [index, view] of views.entries()) await copyFile(view, join(pass.outDir, `${index + 1}-${basename(view)}`));
-  }
-  const source = final;
-  if (!source) return {};
-  const at = (suffix: string) => join(source.dir, `${source.name}${suffix}`);
-  return {design: {script: at('.py'), parameters: at('.parameters.json'),
-    ...(await isFile(at('.inputs.json')) ? {inputs: at('.inputs.json')} : {}), ...(await isFile(at('.step')) ? {step: at('.step')} : {})}};
+  for (const [index, run] of runs.entries()) await copyFile(run.stl, join(pass.checkpointsDir, `${String(index + 1).padStart(3, '0')}.stl`));
+  const model = runs.at(-1);
+  if (!model) return {};
+  await copyFile(model.stl, join(pass.outDir, 'touched.stl'));
+  // The overall sheet first, then the single views: the rules ask for the clearest overall view to sort first.
+  const renders = model.receipt.renders && typeof model.receipt.renders === 'object' ? model.receipt.renders as Record<string, unknown> : {};
+  const views = Object.entries(renders).flatMap(([view, path]) => { const file = inside(model.dir, path); return file ? [{view, file}] : []; })
+    .sort((a, b) => Number(b.view === 'contact') - Number(a.view === 'contact') || a.view.localeCompare(b.view));
+  for (const [index, {view, file}] of views.entries()) await copyFile(file, join(pass.outDir, `${index + 1}-${view}${extname(file) || '.png'}`));
+  const script = inside(model.dir, model.receipt.script), parameters = inside(model.dir, model.receipt.parameters);
+  if (!script || !parameters) return {};
+  const inputs = text(model.receipt.input_manifest), step = inside(model.dir, model.receipt.step);
+  return {design: {script, parameters, result: model.manifest,
+    ...(inputs && await isFile(inputs) ? {inputs} : {}), ...(step && await isFile(step) ? {step} : {})}};
 }
