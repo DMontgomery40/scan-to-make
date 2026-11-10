@@ -81,7 +81,7 @@ import ControlKit
              "directory": folder("c2", ["photos/potato.png": "thumb-potato.png", "scan/scan.usdz": "scanB.usdz"])],
             ["id": "0b6f0f43-7c35-4b8a-9a3c-000000000004", "createdAtMs": now - 3_000, "updatedAtMs": now - 720_000, "title": "Plush, underside",
              "instructions": "Copy this plush, including the bottom.", "state": "needs-closeup", "scan": "scan.usdz",
-             "question": ["closeup": "the underside"], "passes": [["startedAtMs": now - 900_000, "endedAtMs": now - 720_000, "status": "needs-closeup"]],
+             "question": ["closeup": "the underside"], "passes": [["startedAtMs": now - 900_000, "endedAtMs": now - 720_000, "status": "needs_closeup", "words": "Asked for a close-up"]],
              "photos": ["plush.png"],
              "directory": folder("c4", ["photos/plush.png": "thumb-potato.png", "scan/scan.usdz": "scanB.usdz"])],
             ["id": micID, "createdAtMs": now - 4_000, "updatedAtMs": now - 120_000, "title": "Mic mount",

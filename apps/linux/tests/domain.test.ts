@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   codeEngineRow,
+  passHeading,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -605,6 +606,9 @@ test("all three shared limit reasons survive project words with projects present
   const projects = [project, ...stopped.map((row: {expected: Project}) => row.expected)];
   assert.equal(projects.length, 4);
   for (const row of stopped) {
+    // The pass's own line is the companion's words too, never the wire status ("capped").
+    assert.equal(passHeading(row.expected.passes.at(-1), 0), `Pass 1 · ${reasons[row.name]}`);
+    assert.equal(passHeading({}, 1), "Pass 2 · Working");
     assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }

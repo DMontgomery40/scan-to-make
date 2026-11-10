@@ -332,6 +332,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// Your follow-up that started it, if any.
         public var note: String?
         public var status: String?
+        /// How it ended, in the Mac's words ("Asked for a close-up"); nil while it runs or from an older Mac.
+        public var words: String?
         public var summary: String?
         public var activity: [Activity]?
         public var activityCount: Int?
@@ -350,6 +352,18 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         }
 
         public var count: Int { activityCount ?? activity?.count ?? 0 }
+        /// How an ended pass reads in the project's history: the Mac's own words. An older Mac sends only the status,
+        /// which is worded here as that Mac's window worded it. Nil while the pass runs.
+        public var endingWords: String? {
+            guard endedAtMs != nil else { return nil }
+            if let words, !words.isEmpty { return words }
+            switch status {
+            case "needs_closeup": return "Asked for a close-up"
+            case "interrupted": return "Stopped when Counterpart restarted"
+            case "done", nil: return "Finished"
+            case let other?: return other.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+        }
         public var failed: Bool { ["failed", "interrupted"].contains(status ?? "") }
         /// The stage running now: the last one started and not ended.
         public var currentStage: Stage? { stages?.last { $0.endedAtMs == nil } }

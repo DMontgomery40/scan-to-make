@@ -6,6 +6,7 @@ import {
   canSelectPlate,
   didItFitQuestion,
   duration,
+  passHeading,
   words,
 } from "./domain";
 import { Picture, Stage } from "./Stage";
@@ -513,7 +514,7 @@ export function ProjectView({
                             {item.pass.summary ??
                               item.pass.stages?.find((s) => !s.endedAtMs)
                                 ?.words ??
-                              item.pass.status ??
+                              item.pass.words ??
                               "Working…"}
                           </p>
                         </div>
@@ -665,7 +666,7 @@ export function ProjectView({
               {p.passes.map((pass, i) => (
                 <section key={i}>
                   <h3>
-                    Pass {i + 1} · {pass.status ?? "Working"}
+                    {passHeading(pass, i)}
                   </h3>
                   {pass.stages?.map((s) => (
                     <p key={s.id}>

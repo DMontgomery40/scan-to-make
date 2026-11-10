@@ -604,7 +604,7 @@ struct ProjectView: View {
             }
             if let pass = object.passes.last {
                 DisclosureGroup("Details") {
-                    Text([pass.status, pass.summary, Format.clock(Date(timeIntervalSince1970: (pass.endedAtMs ?? pass.startedAtMs) / 1000))]
+                    Text([pass.endingWords, pass.summary, Format.clock(Date(timeIntervalSince1970: (pass.endedAtMs ?? pass.startedAtMs) / 1000))]
                         .compactMap { $0 }.joined(separator: " · "))
                         .font(.caption2.monospaced()).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
                         .textSelection(.enabled)

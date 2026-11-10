@@ -194,15 +194,8 @@ private struct ActivityTab: View {
         let minutes = max(1, Int(((ended - pass.startedAtMs) / 60_000).rounded()))
         return "\(clock(ended)) · \(minutes) min"
     }
-    static func outcome(_ pass: Project.Pass) -> String {
-        switch pass.status {
-        case "done"?, "ready"?: return "Finished"
-        case "needs-closeup"?: return "Asked for a close-up"
-        case "interrupted"?: return "Stopped when your Mac restarted"
-        case let status?: return status.replacingOccurrences(of: "_", with: " ").capitalized
-        case nil: return "Finished"
-        }
-    }
+    /// The companion's words for how the pass ended (`passes[].words`), the same on every client.
+    static func outcome(_ pass: Project.Pass) -> String { pass.endingWords ?? "Finished" }
     static func firstSentence(_ text: String) -> String {
         let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
         return line.count > 140 ? String(line.prefix(139)) + "…" : line

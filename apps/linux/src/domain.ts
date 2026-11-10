@@ -13,6 +13,7 @@ import type {
   ReconstructionReview,
   ReconstructionSelection,
   Vec3,
+  Pass,
 } from "./types";
 /** Issue tickets before reads AND mutations. Late reads cannot roll the UI back. */
 export class ReadOrder {
@@ -698,4 +699,9 @@ export function codeEngineRow(view: CodeEngineView | undefined): {
     working: view.state === "checking" || view.state === "setting-up",
     ...(view.result ? { result: { ok: view.result.ok, message: view.result.message, ...(view.result.suggestion ? { suggestion: view.result.suggestion } : {}) } } : {}),
   };
+}
+
+/** A pass in the project's history: how it ended in the companion's words (`passes[].words`), or that it is running. */
+export function passHeading(pass: Pick<Pass, "words">, index: number): string {
+  return `Pass ${index + 1} · ${pass.words ?? "Working"}`;
 }
