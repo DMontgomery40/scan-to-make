@@ -28,6 +28,8 @@ struct ModelStage: View {
     var measured: (([Double]) -> Void)? = nil
     /// What the stage shows until the model is drawn, and if it can't be: the Mac's picture of it, never an empty stage.
     var placeholder: AnyView? = nil
+    /// Told when the file is here but can't be drawn (review F7 on #525), so the page can say so under its picture.
+    var undrawable: (() -> Void)? = nil
 
     @State private var holder = PivotHolder()
     @State private var turn: CGSize = .zero
@@ -55,7 +57,7 @@ struct ModelStage: View {
             } else if failed {
                 Text("This model couldn't be shown.").font(.footnote).foregroundStyle(.secondary)
             } else if url != nil { ProgressView() }
-            if interactive && url != nil && !live {
+            if interactive && url != nil && !live && !failed {
                 VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }.stageButton(light: lightStage) }; Spacer() }.padding(16)
             }
         }
@@ -80,12 +82,13 @@ struct ModelStage: View {
             guard let url, scenePhase == .active else { return }
             let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
             guard !Task.isCancelled else { return }
-            guard let entity = loaded else { failed = true; return }
+            guard let entity = loaded else { failed = true; undrawable?(); return }
             let e = entity.visualBounds(relativeTo: nil).extents
             measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
             let image = await ModelPoster.image(key: identity, model: entity, yaw: yaw, pitch: pitch, fit: fit)
             guard !Task.isCancelled else { return }
             poster = image; failed = image == nil
+            if image == nil { undrawable?() }
         }
         .task(id: lastTouch) {
             guard live else { return }

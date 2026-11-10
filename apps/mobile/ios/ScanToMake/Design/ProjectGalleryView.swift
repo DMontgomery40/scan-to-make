@@ -19,6 +19,8 @@ struct ProjectGalleryView: View {
     /// "See it together": asks the Mac where the scanned object sits in a part made before passes said.
     var locate: (() -> Void)? = nil
     @State private var selected: String?
+    /// Entries whose model is here but can't be drawn (review F7 on #525): their picture stays, and the line says so.
+    @State private var undrawable: Set<String> = []
     @Environment(\.scenePhase) private var scenePhase
     @State private var measured: [String: [Double]] = [:]
     @State private var showingPhotos = false
@@ -74,8 +76,8 @@ struct ProjectGalleryView: View {
                 Text(entry.label).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
             }.accessibilityElement(children: .combine).accessibilityIdentifier("gallery-stage-waiting"))
         }
-        return AnyView(ProjectImage(project: project, path: path, maxPixelSize: 1200, contentMode: .fit)
-            .accessibilityElement(children: .ignore)
+        return AnyView(ProjectImage(project: project, path: path, maxPixelSize: 1200, contentMode: .fit,
+                                    placeholderSymbol: words.phase.symbol, onStage: true)
             .accessibilityLabel("\(entry.label), as your Mac drew it")
             .accessibilityAddTraits(.isImage)
             .accessibilityIdentifier("gallery-stage-picture"))
@@ -106,7 +108,11 @@ struct ProjectGalleryView: View {
         case .tooLarge?:
             Text("This scan is too detailed to show in 3D on a phone. Open it on your Mac to see it from every side.").font(.footnote).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 16).accessibilityIdentifier("gallery-model-unavailable")
-        default: EmptyView()
+        default:
+            if undrawable.contains(entry.id) {
+                Text("This model couldn’t be shown in 3D on this phone. Open it on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal, 16).accessibilityIdentifier("gallery-model-unavailable")
+            }
         }
     }
 
@@ -118,12 +124,12 @@ struct ProjectGalleryView: View {
             case .model(let path):
                 ModelStage(url: path == "model.stl" ? modelURL : scanURL, tint: tint(entry.colour),
                            lightStage: StageContrast.lightStage(for: entry.colour), measured: { measured[entry.id] = $0 },
-                           placeholder: still(entry))
+                           placeholder: still(entry), undrawable: { undrawable.insert(entry.id) })
                     .id(entry.id)
             case .assembly(_, _, let seats):
                 // Both models or neither: a part with no scan at its seats would not be Together.
                 ModelStage(url: togetherScanURL == nil ? nil : modelURL, tint: tint(entry.colour), lightStage: StageContrast.lightStage(for: entry.colour),
-                           object: togetherScanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 }, placeholder: still(entry))
+                           object: togetherScanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 }, placeholder: still(entry), undrawable: { undrawable.insert(entry.id) })
                     .id(entry.id)
             case .picture(let path):
                 ZStack {

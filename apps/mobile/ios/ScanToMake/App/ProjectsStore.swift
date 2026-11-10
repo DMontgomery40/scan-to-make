@@ -485,7 +485,8 @@ struct MCPUpdateProgress: Equatable {
                 if attempt > 0 { try? await Task.sleep(for: pauses[attempt - 1]) }
                 do { outcome = .ready(try await download(project, path)); break }
                 catch let error as CompanionError where Self.final.contains(error.code) {
-                    outcome = error.code == "file-too-large" ? .tooLarge : .failed
+                    // The Mac's refusal for size, or this phone's own limit met mid-transfer (review F5 on #525).
+                    outcome = ["file-too-large", "too-large"].contains(error.code) ? .tooLarge : .failed
                     break
                 } catch { outcome = .failed }
             }
@@ -503,6 +504,6 @@ struct MCPUpdateProgress: Equatable {
     }
 
     /// Answers that another try won't change: the Mac refused the file, or this phone may not ask for it.
-    private static let final: Set<String> = ["file-too-large", "not-found", "invalid-request", "scope-denied", "pairing-required", "pairing-changed"]
+    private static let final: Set<String> = ["file-too-large", "too-large", "not-found", "invalid-request", "scope-denied", "pairing-required", "pairing-changed"]
 }
 
