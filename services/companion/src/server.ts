@@ -250,6 +250,24 @@ export async function startCompanionServer(
   const discoveredFolders=new Set<string>();
   let authority = '';
   const handler: RequestListener = async (request, response) => {
+    // Exactly one bounded, non-secret line, including early authentication refusals and disconnected clients.
+    const started = performance.now(), socket = request.socket, before = socket.bytesWritten;
+    const path = (request.url ?? '').split('?')[0] ?? '';
+    const route = path.endsWith('/model.stl') ? 'objects.model'
+      : /^\/v1\/objects\/[^/]+\/(renders|pictures|scan|original)\//.test(path) ? 'objects.media'
+      : path.startsWith('/v1/objects') ? 'objects' : path.startsWith('/v1/events') ? 'events'
+      : path.startsWith('/v1/pair') ? 'pairing' : path === '/healthz' ? 'health' : 'other';
+    const header = request.headers['x-scan-device'];
+    const device = typeof header === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(header) ? header.slice(-6) : 'unknown';
+    let logged = false, refusal: string | undefined;
+    const logRequest = () => {
+      if (logged) return;
+      logged = true;
+      console.info(JSON.stringify({event: 'phone.http', route, status: response.statusCode,
+        ms: Math.round(performance.now() - started), bytes: Math.max(0, socket.bytesWritten - before),
+        device, ended: response.writableFinished ? 'finished' : 'closed', ...(refusal ? {refusal} : {})}));
+    };
+    response.once('finish', logRequest); response.once('close', logRequest);
     response.setHeader('Content-Type', 'application/json');
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('Connection', 'close');
@@ -521,6 +539,7 @@ export async function startCompanionServer(
         error instanceof ServerFailure || error instanceof RemoteAuthFailure
           ? error
           : new ServerFailure('companion-failed');
+      refusal = failure.code;
       if (!response.destroyed) {
         response.statusCode = failure.status;
         response.end(

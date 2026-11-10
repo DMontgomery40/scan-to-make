@@ -71,3 +71,25 @@ is within ±2 mm of the reference on every axis with a mean surface distance und
 masks have a mean IoU of at least 0.9 while keeping at most 5% of the hand.
 
 Build: `swift build -c release --package-path tools/mac-reconstruct`. Unit tests: `swift test --package-path tools/mac-reconstruct`.
+
+## 3MF picture safety
+
+The 3MF reader uses the open core mesh/build format, standard colours and referenced model parts. It never opens
+private `Metadata/` entries. Unsupported geometry (including a build with no mesh triangles), unknown units and
+malformed transforms return a reason rather than a successful empty or misplaced picture. A missing or malformed
+referenced part is skipped so the other components can still be drawn; resource-limit refusals always stop the read.
+The caller must record a failed attempt and present that state to clients (the companion and client UI own that).
+
+`Sources/HandheldKit/ThreeMFLimits.swift` is the single budget policy. ZIP directory sizes are checked before any
+entry is inflated, and the output pipe is capped at the declared size as well. The full directory is bounded, as are
+parsed geometry across model parts, component visits/depth and all placed geometry. SceneKit checks the same placed
+budget before expanding triangles into positions, normals and indices. DTD entity declarations are refused.
+
+The Nov 10 read-only baseline from the four real original 3MFs: largest model XML 62.2 MB total, 8.1 MB per part,
+395,982 stored vertices and 792,360 triangles; expanded build 54 meshes, 568,964 vertices and 1,138,264 triangles.
+The byte allowances leave room for larger files; the geometry allowances account for both repeated components and
+flat-shading's three corners per triangle, without retaining the previous 20-million-vertex allowance.
+
+API references checked for this change: Apple's [XMLParser](https://developer.apple.com/documentation/foundation/xmlparser)
+(delegate callbacks and aborting parsing) and [SCNGeometrySource](https://developer.apple.com/documentation/scenekit/scngeometrysource)
+(geometry buffer ownership). SceneKit is the existing drawer; replacing that renderer is outside this fix.

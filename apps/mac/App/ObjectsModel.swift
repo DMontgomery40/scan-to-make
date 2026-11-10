@@ -922,3 +922,25 @@ enum ProjectStageOffer {
         entry?.kind == .part && object.canLocate
     }
 }
+
+
+/// What the Mac's stage still shows (`StageStill` in ProjectDetail; review S7 on #539): never a bare backdrop.
+enum StageStillState: Equatable {
+    case shown, loading(String), notAvailable(String, retry: Bool)
+
+    /// `file`: the picture's file in the project's folder. `decoded`: nil while it is read, else whether it opened.
+    static func shows(_ still: Project.Still, file: URL?, decoded: Bool?, label: String, unavailableLine: String) -> StageStillState {
+        let coming = "\(label): coming from this Mac"
+        switch still {
+        case .waiting: return .loading(coming)
+        case .notAvailable: return .notAvailable(unavailableLine, retry: false)
+        case .picture:
+            guard file != nil else { return .notAvailable("This picture isn’t in the project’s folder.", retry: false) }
+            switch decoded {
+            case nil: return .loading(coming)
+            case true?: return .shown
+            case false?: return .notAvailable("This picture couldn’t be opened.", retry: true)
+            }
+        }
+    }
+}

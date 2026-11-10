@@ -1216,4 +1216,19 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.availability, .ready)
         XCTAssertEqual(model.selection, "s", "the first read still picks the top project")
     }
+
+    /// Review S7 on #539: the Mac's stage was a bare backdrop while a picture loaded or when it couldn't be opened, and
+    /// said nothing when none was coming. Every still state shows something and, where it can't, says so.
+    func testTheStageStillIsShownLoadingOrSaysItIsNotAvailable() {
+        let file = URL(fileURLWithPath: "/tmp/part.png")
+        func shows(_ still: Project.Still, _ file: URL?, _ decoded: Bool?) -> StageStillState {
+            StageStillState.shows(still, file: file, decoded: decoded, label: "Model", unavailableLine: "This Mac couldn’t draw a picture of this.")
+        }
+        XCTAssertEqual(shows(.picture("pictures/part.png"), file, true), .shown)
+        XCTAssertEqual(shows(.picture("pictures/part.png"), file, nil), .loading("Model: coming from this Mac"), "while it is read: what is coming")
+        XCTAssertEqual(shows(.picture("pictures/part.png"), file, false), .notAvailable("This picture couldn’t be opened.", retry: true))
+        XCTAssertEqual(shows(.picture("pictures/part.png"), nil, nil), .notAvailable("This picture isn’t in the project’s folder.", retry: false))
+        XCTAssertEqual(shows(.waiting, nil, nil), .loading("Model: coming from this Mac"), "a 3MF the Mac is drawing")
+        XCTAssertEqual(shows(.notAvailable, nil, nil), .notAvailable("This Mac couldn’t draw a picture of this.", retry: false), "one it couldn't draw")
+    }
 }

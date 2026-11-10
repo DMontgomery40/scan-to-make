@@ -181,7 +181,7 @@ struct ProjectDetail: View {
                                poster: entry.kind == .part ? (object.pictures?["part"].flatMap(object.projectFile) ?? Self.poster(object)) : object.pictures?["scan"].flatMap(object.projectFile), tint: Self.colour(entry.colour),
                                measured: { measured[entry.id] = $0 })
                     .id(entry.id)
-                } else { still(nil) }
+                } else { still(entry) }
             case .assembly(_, let scan, let seats):
                 if let url = object.blenderModelURL, let scanURL = object.projectFile(scan) {
                     ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
@@ -189,28 +189,27 @@ struct ProjectDetail: View {
                                accessibilityText: "\(words.title) with what you scanned in place. Drag to turn it, scroll to zoom.",
                                tint: Self.colour(entry.colour), object: scanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 })
                     .id(entry.id)
-                } else { still(nil) }
-            case .picture(let path):
-                still(object.projectFile(path))
+                } else { still(entry) }
+            case .picture:
+                still(entry)
             }
-        } else {
+        } else if let photo = object.photoPicture {
             // Photos sent, no scan model or result yet: the subject this Mac cut out, as the sidebar shows it.
-            still(object.photoPicture.flatMap(object.projectFile))
+            StageStill(still: .picture(photo), file: object.projectFile(photo), version: object.updatedAtMs, label: "Your photo",
+                       unavailableLine: "This Mac couldn’t draw a picture of this.")
+        } else {
+            StageStill(still: words.busy ? .waiting : .notAvailable, file: nil, version: object.updatedAtMs, label: words.title,
+                       unavailableLine: "Nothing to show yet.")
         }
     }
 
-    private func still(_ url: URL?) -> some View {
-        ZStack {
-            StageBackground()
-            if let url {
-                FileImage(url: url, version: object.updatedAtMs, contentMode: .fit).padding(80)
-            } else if words.busy {
-                ProgressView().controlSize(.large)
-            } else {
-                Image(systemName: "cube").font(.system(size: 54, weight: .ultraLight)).foregroundStyle(.white.opacity(0.35))
-            }
-        }
-        .environment(\.colorScheme, .dark)
+    /// An entry's still (`StageStill`, the stage's one still picture): its picture, or that one is coming, or that none
+    /// can be had (review S7 on #539).
+    private func still(_ entry: ProjectGallery.Entry) -> some View {
+        let still = object.still(for: entry)
+        let file: URL? = if case .picture(let path) = still { object.projectFile(path) } else { nil }
+        return StageStill(still: still, file: file, version: object.updatedAtMs, label: entry.label,
+                          unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "This Mac couldn’t draw a picture of this.")
     }
 
     static func colour(_ colour: ProjectGallery.Colour) -> NSColor? {
@@ -890,6 +889,65 @@ struct MacAskSizes: View {
                     .keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier("ask-sizes-confirm")
             }
+        }
+    }
+}
+
+
+/// The one still picture on a project's stage on the Mac (review S7 on #539; iOS `StagePicture`, CounterpartKit
+/// `Project.still(for:)`). Never a bare backdrop: shown, the picture; waiting, a progress mark and what is coming; not
+/// available, a symbol and one line, with Try Again when the file couldn't be opened. Never a picture of something else.
+struct StageStill: View {
+    let still: Project.Still
+    /// The picture's file in the project's folder, when `still` is a picture and the file is there.
+    let file: URL?
+    let version: Double
+    let label: String
+    let unavailableLine: String
+    @Environment(\.displayScale) private var scale
+    /// The decoded picture, or nil when it couldn't be opened, for one key.
+    @State private var loaded: (key: String, image: NSImage?)?
+    @State private var attempt = 0
+
+    private var key: String { file.map { "\($0.path)#\(FileVersion.of($0, else: version))@stage" } ?? "" }
+    private var image: NSImage? { loaded?.key == key ? loaded?.image : nil }
+    private var decoded: Bool? { loaded?.key == key ? loaded?.image != nil : nil }
+
+    var body: some View {
+        let shows = StageStillState.shows(still, file: file, decoded: decoded, label: label, unavailableLine: unavailableLine)
+        ZStack {
+            StageBackground()
+            switch shows {
+            case .shown:
+                if let image { Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit).padding(80) }
+            case .loading(let line):
+                VStack(spacing: 12) {
+                    ProgressView().controlSize(.large)
+                    Text(line).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                }
+            case .notAvailable(let line, let retry):
+                VStack(spacing: 12) {
+                    Image(systemName: "cube").font(.system(size: 54, weight: .ultraLight)).foregroundStyle(.white.opacity(0.35))
+                    Text(line).font(.callout).foregroundStyle(.secondary)
+                    if retry { Button("Try Again") { attempt += 1 } }
+                }
+                .multilineTextAlignment(.center).padding(.horizontal, 40)
+            }
+        }
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(shows == .shown ? "\(label), as this Mac drew it" : label)
+        .accessibilityValue(shows == .shown ? "shown" : { if case .loading = shows { "loading" } else { "not available" } }())
+        .accessibilityIdentifier("project-stage-picture")
+        .task(id: "\(key)#\(attempt)") {
+            guard let file else { return }
+            let key = key, pixels = 2400, scale = scale
+            if let cached = FileImages.cached(key) { loaded = (key, cached); return }
+            loaded = nil
+            let read = await Task.detached(priority: .userInitiated) { FileImages.decode(file, maxPixels: pixels, scale: scale) }.value
+            guard !Task.isCancelled else { return }
+            if let read { FileImages.store(read.image, key, bytes: read.bytes) }
+            loaded = (key, read?.image)
         }
     }
 }

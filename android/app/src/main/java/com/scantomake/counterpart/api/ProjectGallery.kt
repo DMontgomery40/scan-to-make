@@ -63,7 +63,9 @@ data class ProjectGallery(val entries: List<Entry>) {
             val current = project.current ?: return emptyList()
             val label = when (project.kind) { "copy" -> "Your copy"; "published" -> "Model"; else -> "Your part" }
             if (current.model.lowercase(Locale.ROOT).endsWith(".3mf")) {
-                val render = current.renders.firstOrNull()?.let(::renderPath) ?: plates.firstOrNull()?.thumbnail ?: return emptyList()
+                // The Mac's drawing of all the file's objects first, as on the other clients (Nov 10).
+                // Always an entry (review B2 on #539): with no picture yet ("") the stage says it is coming or that it can't be had.
+                val render = project.pictures["part"] ?: current.renders.firstOrNull()?.let(::renderPath) ?: plates.firstOrNull()?.thumbnail ?: ""
                 return listOf(PrintablePart("result", label, Drawing.Picture(render), Colour.Own, current.sizeMm))
             }
             return listOf(PrintablePart("result", label, Drawing.Model("model.stl"), spoolColour(project)?.let { Colour.Spool(it) } ?: Colour.Neutral, current.sizeMm))
@@ -117,12 +119,35 @@ fun Project.picturePath(): String? = picture ?: selectedPlate?.thumbnail ?: plat
 /** The page's picture while the gallery is empty (photos sent, no model yet): the subject the computer cut out of the photo. */
 fun Project.photoPicture(): String? = pictures["photo"]
 
-/** The computer's picture of one gallery entry. */
+/** The computer's picture of one gallery entry. Null when there is none yet ([still] says whether one is coming). */
 fun Project.pictureFor(entry: ProjectGallery.Entry): String? = when (entry.kind) {
     ProjectGallery.Kind.Part -> (entry.drawing as? ProjectGallery.Drawing.Picture)?.path ?: pictures["part"] ?: current?.renders?.firstOrNull()?.let(ProjectGallery::renderPath)
-    ProjectGallery.Kind.Plate -> (entry.drawing as? ProjectGallery.Drawing.Picture)?.path?.ifEmpty { null }
+    ProjectGallery.Kind.Plate -> (entry.drawing as? ProjectGallery.Drawing.Picture)?.path
     ProjectGallery.Kind.Together -> pictures["together"]
     ProjectGallery.Kind.Scan -> pictures["scan"] ?: pictures["photo"]
+}?.ifEmpty { null }
+
+/**
+ * What the stage shows for an entry while no model is drawn (CounterpartKit `Project.still(for:)`): its own picture, or
+ * that one is coming, or that none can be had. A picture of something else never stands in for it.
+ */
+sealed interface Still {
+    data class Picture(val path: String) : Still
+    /** None yet, and one is coming: the computer hasn't drawn it. */
+    data object Waiting : Still
+    /** None is coming: the computer's drawing failed, or a designer's plate came without its picture. */
+    data object NotAvailable : Still
+}
+
+fun Project.still(entry: ProjectGallery.Entry): Still {
+    pictureFor(entry)?.let { return Still.Picture(it) }
+    val role = when (entry.kind) {
+        ProjectGallery.Kind.Part -> "part"
+        ProjectGallery.Kind.Together -> "together"
+        ProjectGallery.Kind.Scan -> "scan"
+        ProjectGallery.Kind.Plate -> return Still.NotAvailable
+    }
+    return if (pictureStates[role] == "failed") Still.NotAvailable else Still.Waiting
 }
 
 /**

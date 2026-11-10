@@ -6,6 +6,155 @@ import Metal
 
 @available(macOS 15, iOS 18, *)
 final class ModelPosterTests: XCTestCase {
+    @MainActor private static func box() -> Entity {
+        ModelEntity(mesh: .generateBox(size: 0.1), materials: [SimpleMaterial(color: .orange, isMetallic: false)])
+    }
+
+    @MainActor private static func waitUntil(_ condition: () -> Bool) async {
+        let end = ContinuousClock.now.advanced(by: .seconds(2))
+        while !condition(), ContinuousClock.now < end { try? await Task.sleep(for: .milliseconds(1)) }
+        XCTAssertTrue(condition(), "The operation must start within two seconds")
+    }
+
+    @MainActor func testEmptyEntityAndTransparentPixelsAreFailures() async {
+        let cache = ModelEntityCache(limit: 1)
+        let empty = await cache.load(key: "empty") { Entity() }
+        XCTAssertNil(empty)
+        let fixed = await cache.load(key: "empty") { Self.box() }
+        XCTAssertNotNil(fixed, "Empty geometry must never poison the successful cache")
+        XCTAssertEqual(ModelPoster.visiblePixels([0, 0, 0, 0, 0, 0, 0, 0]), 0)
+        XCTAssertEqual(ModelPoster.visiblePixels([0, 0, 0, 0, 4, 5, 6, 255]), 1)
+        let poster = await ModelPoster.image(key: "empty", model: Entity(), yaw: 0, pitch: 0, fit: 0.2)
+        XCTAssertNil(poster)
+    }
+
+    @MainActor func testHungMeshExpiresAndLateCompletionCannotReplaceReopenedGeneration() async {
+        let cache = ModelEntityCache(limit: 2, timeout: .milliseconds(30))
+        var late: CheckedContinuation<Entity?, Never>?
+        let hung = Task { await cache.load(key: "same") { await withCheckedContinuation { late = $0 } } }
+        await Self.waitUntil { late != nil }
+        let other = await cache.load(key: "other") { Self.box() }
+        XCTAssertNotNil(other, "One stuck mesh must not monopolize the owner")
+        let expired = await hung.value
+        XCTAssertNil(expired)
+        let reopened = await cache.load(key: "same") { let e = Self.box(); e.name = "current"; return e }
+        XCTAssertEqual(reopened?.name, "current")
+        late?.resume(returning: Self.box())
+        await Task.yield()
+        let current = await cache.load(key: "same") { XCTFail("Late generation removed new cache"); return nil }
+        XCTAssertEqual(current?.name, "current")
+    }
+
+    @MainActor func testCancelledPageSettlesBeforeMeshReturnsAndReopenStartsAgain() async {
+        let cache = ModelEntityCache(limit: 2)
+        var late: CheckedContinuation<Entity?, Never>?
+        let page = Task { await cache.load(key: "same") { await withCheckedContinuation { late = $0 } } }
+        await Self.waitUntil { late != nil }
+        page.cancel()
+        let cancelled = await page.value
+        XCTAssertNil(cancelled, "Cancellation settles without waiting for the framework")
+        let reopened = await cache.load(key: "same") { Self.box() }
+        XCTAssertNotNil(reopened)
+        late?.resume(returning: Self.box())
+    }
+
+    @MainActor func testDeactivationSettlesEachStepAndReactivationStartsFresh() async {
+        for label in ["mesh", "poster"] {
+            let work = MediaWork<Int>(label: label)
+            var late: CheckedContinuation<Int?, Never>?
+            let pending = Task { await work.run(key: "same") { await withCheckedContinuation { late = $0 } } }
+            await Self.waitUntil { late != nil }
+            work.cancelAll()
+            let deferred = await pending.value
+            XCTAssertNil(deferred)
+            let active = await work.run(key: "same") { 42 }
+            XCTAssertEqual(active, 42)
+            late?.resume(returning: 9)
+        }
+    }
+
+    func testMissingRendererCallbackAndLateDuplicateCallbackSettleOnce() async {
+        let callback = MediaCallback()
+        let result = await callback.wait(timeout: .milliseconds(20))
+        XCTAssertFalse(result)
+        callback.finish(true); callback.finish(true)
+        let late = await callback.wait(timeout: .milliseconds(20))
+        XCTAssertFalse(late)
+        let cancelled = MediaCallback()
+        let page = Task { await cancelled.wait(timeout: .seconds(5)) }
+        page.cancel()
+        let settled = await page.value
+        XCTAssertFalse(settled)
+        cancelled.finish(true)
+    }
+
+    @MainActor func testAllTransparentRendererOutputIsNotCachedAsSuccess() async throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal is unavailable on this host") }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let trace = MediaTrace(url: folder.appendingPathComponent("media-trace.ndjson"))
+        let context = MediaTrace.Context(project: "transparent", version: "1", generation: "render", scene: "active")
+        var material = PhysicallyBasedMaterial()
+        material.blending = .transparent(opacity: .init(floatLiteral: 0))
+        let invisible = ModelEntity(mesh: .generateBox(size: 0.1), materials: [material])
+        let results = await MediaTrace.$destination.withValue(trace) {
+            await MediaTrace.$context.withValue(context) {
+                let empty = await ModelPoster.image(key: "transparent-retry", model: invisible, yaw: 0, pitch: 0, fit: 0.2)
+                let repaired = await ModelPoster.image(key: "transparent-retry", model: Self.box(), yaw: 0, pitch: 0, fit: 0.2)
+                return (empty, repaired)
+            }
+        }
+        XCTAssertNil(results.0)
+        XCTAssertNotNil(results.1, "A transparent output must remain retryable with visible geometry")
+        let rows = try String(contentsOf: trace.url, encoding: .utf8).split(separator: "\n").map {
+            try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: String]
+        }
+        for event in ["poster.renderer-made", "poster.submitted", "poster.whenScheduled", "poster.onComplete", "poster.readback"] {
+            XCTAssertTrue(rows.contains { $0["event"] == event && $0["project"] == "transparent" && $0["generation"] == "render" })
+        }
+        XCTAssertTrue(rows.contains { $0["event"] == "poster.readback" && $0["visiblePixels"] == "0" })
+        XCTAssertTrue(rows.contains { $0["event"] == "poster.failed" })
+        XCTAssertTrue(rows.contains { $0["event"] == "poster.ready" })
+    }
+
+    @MainActor func testSceneDeferralOutsideTaskContextRetainsOperationCorrelation() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let trace = MediaTrace(url: folder.appendingPathComponent("media-trace.ndjson"))
+        let work = MediaWork<Int>(label: "mesh")
+        let context = MediaTrace.Context(project: "p", version: "9", generation: "cancel-me")
+        var finish: CheckedContinuation<Int?, Never>?
+        let pending = Task {
+            await MediaTrace.$destination.withValue(trace) {
+                await MediaTrace.$context.withValue(context) {
+                    await work.run(key: "same") { await withCheckedContinuation { finish = $0 } }
+                }
+            }
+        }
+        await Self.waitUntil { finish != nil }
+        work.cancelAll() // SwiftUI scene callbacks have no task-local media context.
+        let result = await pending.value
+        XCTAssertNil(result)
+        finish?.resume(returning: 1)
+        let text = try String(contentsOf: trace.url, encoding: .utf8)
+        XCTAssertTrue(text.contains("mesh.deferred"))
+        let last = try XCTUnwrap(text.split(separator: "\n").last)
+        let row = try JSONSerialization.jsonObject(with: Data(last.utf8)) as! [String: String]
+        XCTAssertEqual(row["generation"], "cancel-me")
+        XCTAssertEqual(row["project"], "p")
+    }
+
+    @MainActor func testARExportProducesANonemptyFileOnDemand() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let result = await ModelEntityCache.export(Self.box(), to: folder.appendingPathComponent("part.usdz"))
+        let url = try XCTUnwrap(result)
+        XCTAssertGreaterThan(try Data(contentsOf: url).count, 0)
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        XCTAssertEqual(leftovers, ["part.usdz"])
+    }
+
     @MainActor func testActualRenderHasVisibleOpaqueModelAndTransparentUnclippedBorder() async throws {
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal is unavailable on this host") }
         let model = ModelEntity(mesh: .generateBox(size: 0.1), materials: [SimpleMaterial(color: .orange, isMetallic: false)])
@@ -33,17 +182,17 @@ final class ModelPosterTests: XCTestCase {
     @MainActor func testEntityCacheBoundsStorageAndReturnsIndependentHierarchies() async {
         let cache = ModelEntityCache(limit: 1)
         var reads = 0
-        let original = await cache.load(key: "one") { reads += 1; return Entity() }
+        let original = await cache.load(key: "one") { reads += 1; return Self.box() }
         original?.position = [1, 2, 3]
-        let copy = await cache.load(key: "one") { reads += 1; return Entity() }
+        let copy = await cache.load(key: "one") { reads += 1; return Self.box() }
         XCTAssertEqual(copy?.position, .zero)
         XCTAssertEqual(reads, 1)
-        _ = await cache.load(key: "two") { Entity() }
-        _ = await cache.load(key: "one") { reads += 1; return Entity() }
+        _ = await cache.load(key: "two") { Self.box() }
+        _ = await cache.load(key: "one") { reads += 1; return Self.box() }
         XCTAssertEqual(reads, 2, "Old model resources must be evicted")
         let missing = await cache.load(key: "missing") { nil }
         XCTAssertNil(missing)
-        let repaired = await cache.load(key: "missing") { Entity() }
+        let repaired = await cache.load(key: "missing") { Self.box() }
         XCTAssertNotNil(repaired, "A failed load must remain retryable")
     }
 
@@ -55,13 +204,13 @@ final class ModelPosterTests: XCTestCase {
             starts += 1
             return await withCheckedContinuation { finishOld = $0 }
         } }
-        while finishOld == nil { await Task.yield() }
+        await Self.waitUntil { finishOld != nil }
         let peer = Task { @MainActor in await cache.load(key: "old") { starts += 1; return nil } }
         await Task.yield()
         old.cancel()
-        let newer = await cache.load(key: "new") { Entity() }
+        let newer = await cache.load(key: "new") { Self.box() }
         XCTAssertNotNil(newer)
-        finishOld?.resume(returning: Entity())
+        finishOld?.resume(returning: Self.box())
         let oldResult = await old.value
         let peerResult = await peer.value
         XCTAssertNil(oldResult)
@@ -75,7 +224,7 @@ final class ModelPosterTests: XCTestCase {
         let cache = ModelEntityCache(limit: 1)
         weak var prototype: Entity?
         let displayed = await cache.load(key: "model") {
-            let entity = Entity(); entity.name = "model"
+            let entity = Self.box(); entity.name = "model"
             prototype = entity
             return entity
         }
@@ -91,14 +240,14 @@ final class ModelPosterTests: XCTestCase {
         let old = Task { @MainActor in await cache.load(key: "model") {
             await withCheckedContinuation { finishOld = $0 }
         } }
-        while finishOld == nil { await Task.yield() }
+        await Self.waitUntil { finishOld != nil }
         old.cancel()
         cache.removeAll()
         let started = expectation(description: "Reopened window starts its own load")
         var newStarted = false
         let reopened = Task { @MainActor in await cache.load(key: "model") {
             newStarted = true; started.fulfill()
-            let entity = Entity(); entity.name = "reopened"
+            let entity = Self.box(); entity.name = "reopened"
             return entity
         } }
         await fulfillment(of: [started], timeout: 2)

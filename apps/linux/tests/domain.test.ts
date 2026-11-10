@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, lightStage, photoPicture } from "../src/gallery";
+import { canLocate, gallery, lightStage, photoPicture, still } from "../src/gallery";
 import {
   pageActions,
   codeEngineRow,
@@ -98,6 +98,10 @@ test("every client derives the same pictures from the shared gallery cases", () 
       assert.equal(entry.colour, want.colour, item.name);
       assert.deepEqual(entry.sizeMm, want.sizeMm, item.name);
       assert.deepEqual(entry.photos ?? [], want.photos ?? [], item.name);
+      if (want.still !== undefined) {
+        const got = still(item.project as Project, entry);
+        assert.equal(typeof got === "string" ? got : got.picture, want.still, `${item.name}: ${entry.id}'s stage`);
+      }
       const drawing = "assembly" in entry.drawing
         ? { assembly: { part: entry.drawing.assembly.part, object: entry.drawing.assembly.object, seats: entry.drawing.assembly.seats.length } }
         : entry.drawing;

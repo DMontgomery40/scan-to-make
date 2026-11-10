@@ -18,7 +18,9 @@ import CounterpartKit
 
     /// The Mac replied, so nothing is wrong with the connection any more.
     private func answered() {
+        let recovered = link.reachable != true
         link.answered()
+        if recovered { models.recover() }
         if let shown = error, shown.isUnreachable || shown.needsPairing { error = nil }
     }
 
@@ -156,7 +158,7 @@ import CounterpartKit
         do {
             let latest = try await mac.list()
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return }
-            projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; link.answered()
+            projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; answered()
             refreshStoppedScans()
             for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
         } catch let failure as CompanionError {
@@ -319,6 +321,7 @@ import CounterpartKit
     /// Clears everything read from the previous Mac.
     func reset() {
         reads.reset()
+        models.reset()
         projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
         stoppedScans = [:]; readyScans = []; sendFailures = [:]
     }
@@ -454,13 +457,20 @@ struct MCPUpdateProgress: Equatable {
     enum Fetch: Equatable { case loading, ready(URL), failed, tooLarge }
     private(set) var fetches: [String: Fetch] = [:]
     @ObservationIgnored private var running: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var generations: [String: UUID] = [:]
+    @ObservationIgnored private var contexts: [String: MediaTrace.Context] = [:]
+    @ObservationIgnored private var demands: [String: (Project, String)] = [:]
+    @ObservationIgnored private var active = true
     @ObservationIgnored private let download: (Project, String) async throws -> URL
     /// The waits before each new try after a dropped link or a timeout.
     @ObservationIgnored var pauses: [Duration] = [.seconds(2), .seconds(8)]
 
     init(download: @escaping (Project, String) async throws -> URL) { self.download = download }
 
-    static func key(_ project: Project, _ path: String) -> String { "\(project.id)#\(Int64(project.mediaVersion))#\(path)" }
+    static func key(_ project: Project, _ path: String) -> String {
+        "\(project.id)#\(Int64(project.mediaVersion))#\(path)#\(path == "model.stl" ? project.current?.model ?? "" : "")"
+    }
+    func traceContext(_ project: Project, _ path: String) -> MediaTrace.Context? { contexts[Self.key(project, path)] }
     func fetch(_ project: Project, _ path: String) -> Fetch? { fetches[Self.key(project, path)] }
     func file(_ project: Project, _ path: String) -> URL? {
         if case .ready(let url) = fetch(project, path) { return url }
@@ -471,27 +481,74 @@ struct MCPUpdateProgress: Equatable {
     /// reads `fetch`. Nothing the page does cancels it.
     func want(_ project: Project, _ path: String) {
         let key = Self.key(project, path)
-        guard running[key] == nil else { return }
+        demands = demands.filter { $0.key == key || $0.value.0.id != project.id || $0.value.1 != path }
+        demands[key] = (project, path)
+        guard active, running[key] == nil else { return }
         switch fetches[key] {
         case .ready(let url) where FileManager.default.fileExists(atPath: url.path): return
         case .tooLarge: return
         default: break
         }
         fetches[key] = .loading
-        let download = download, pauses = pauses
+        let download = download, pauses = pauses, generation = UUID()
+        generations[key] = generation
+        let context = MediaTrace.Context(project: project.id, version: String(Int64(project.mediaVersion)), generation: generation.uuidString, scene: "active")
+        contexts[key] = context
         running[key] = Task {
-            var outcome = Fetch.failed
-            for attempt in 0...pauses.count {
-                if attempt > 0 { try? await Task.sleep(for: pauses[attempt - 1]) }
-                do { outcome = .ready(try await download(project, path)); break }
-                catch let error as CompanionError where Self.final.contains(error.code) {
-                    outcome = error.code == "file-too-large" ? .tooLarge : .failed
-                    break
-                } catch { outcome = .failed }
+            await MediaTrace.$context.withValue(context) {
+                MediaTrace.record("model.begin", ["key": path])
+                var outcome = Fetch.failed
+                for attempt in 0...pauses.count {
+                    if attempt > 0 { do { try await Task.sleep(for: pauses[attempt - 1]) } catch { break } }
+                    guard !Task.isCancelled else { break }
+                    do { outcome = .ready(try await download(project, path)); break }
+                    catch let error as CompanionError where error.isLocked {
+                        MediaTrace.record("model.deferred", ["reason": "device-locked"])
+                        break
+                    }
+                    catch let error as CompanionError where Self.final.contains(error.code) {
+                        // The Mac's refusal for size, or this phone's own limit met mid-transfer (review F5 on #525).
+                        outcome = ["file-too-large", "too-large"].contains(error.code) ? .tooLarge : .failed
+                        break
+                    } catch { outcome = .failed }
+                }
+                guard !Task.isCancelled, self.generations[key] == generation else {
+                    MediaTrace.record("model.cancelled"); return
+                }
+                self.fetches[key] = outcome
+                self.running[key] = nil
+                self.generations[key] = nil
+                MediaTrace.record("model.published", ["ready": String(self.file(project, path) != nil)])
             }
-            self.fetches[key] = outcome
-            self.running[key] = nil
         }
+    }
+
+    /// A scene reset abandons pending generations without disturbing completed files.
+    func setActive(_ value: Bool) {
+        active = value
+        if value { recover() }
+        else {
+            for (key, task) in running {
+                task.cancel(); generations[key] = nil
+                MediaTrace.record("model.deferred", ["scene": "inactive"], context: contexts[key])
+                if fetches[key] == .loading { fetches[key] = .failed }
+            }
+            running = [:]
+        }
+    }
+
+    /// A transfer may finish after its page closes; only visible demand is retried on recovery.
+    func releaseDemand(_ project: String) { demands = demands.filter { $0.value.0.id != project } }
+
+    func reset() {
+        for task in running.values { task.cancel() }
+        running = [:]; generations = [:]; contexts = [:]; demands = [:]; fetches = [:]
+    }
+
+    /// Foreground/unlock and a recovered Mac link retry known failed demand.
+    func recover() {
+        guard active else { return }
+        for (project, path) in Array(demands.values) where fetch(project, path) == .failed { want(project, path) }
     }
 
     /// Try Again: a download that failed starts over.
@@ -503,6 +560,6 @@ struct MCPUpdateProgress: Equatable {
     }
 
     /// Answers that another try won't change: the Mac refused the file, or this phone may not ask for it.
-    private static let final: Set<String> = ["file-too-large", "not-found", "invalid-request", "scope-denied", "pairing-required", "pairing-changed"]
+    private static let final: Set<String> = ["file-too-large", "too-large", "not-found", "invalid-request", "scope-denied", "pairing-required", "pairing-changed"]
 }
 
