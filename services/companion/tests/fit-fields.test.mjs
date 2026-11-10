@@ -54,6 +54,17 @@ test('only the exact block a client wrote is split off; anything else stays the 
   assert.equal(publicObject(own).instructions, 'Fit brief: snug');
 });
 
+test('a fit choice set on a draft that still carries the old block: the block is read once, and the field wins', () => {
+  for (const row of fixture.cases) {
+    const fit = {sizeSource: 'measured', measured: [{id: 'a', label: 'width at the waist', mm: 53}]};
+    const both = project({instructions: row.legacy, fit});
+    assert.deepEqual(fitRequest(both), {typed: fixture.typed, fit}, row.name);
+    assert.equal(publicObject(both).instructions, fixture.typed, row.name);
+    assert.equal(workerRequest(both), `${fixture.typed}\n\n${fitBrief(fit)}`, row.name);
+    assert.equal(workerRequest(both).match(/Fit brief:/g).length, 1, row.name);
+  }
+});
+
 test('sizes are opaque ids with labels a person can act on; a measured fit needs at least one', () => {
   const waisted = {sizeSource: 'measured', measured: [{id: 'a', label: 'width at the pink stripe', mm: 63}, {id: 'b', label: 'width at the waist', mm: 53}, {id: 'c', label: 'height to the cap tip', mm: 107}]};
   assert.equal(FitSchema.safeParse(waisted).success, true);
