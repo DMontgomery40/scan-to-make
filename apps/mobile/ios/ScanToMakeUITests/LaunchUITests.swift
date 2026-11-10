@@ -1284,7 +1284,7 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 20), "projects are present")
         app.terminate()
         for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "The 3D view isn’t here yet."),
-                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "This scan is too large to turn on a phone. The picture is your Mac’s.")] {
+                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "This scan is too detailed to show in 3D on a phone. Open it on your Mac to see it from every side.")] {
             let page = XCUIApplication()
             page.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
                                     "-CounterpartOpen", "counterpart://project/\(id)"]
