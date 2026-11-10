@@ -93,7 +93,7 @@ test('a project failed before the owner was recorded still offers Retry, told th
 test('every ending has words, sent to every client with the pass, and a running pass has none', () => {
   assert.equal(passWords(running()), undefined);
   const words = Object.fromEntries(PASS_STATUSES.map(status => [status, passWords({endedAtMs: 50, status})]));
-  assert.deepEqual(words, {done: 'Finished', unchanged: 'Nothing needed changing', needs_closeup: 'Asked for a close-up', needs_file: "Asked for the designer's file",
+  assert.deepEqual(words, {done: 'Finished', unchanged: 'Nothing needed changing', needs_closeup: 'Asked you a question', needs_file: "Asked for the designer's file",
     capped: 'Stopped at a limit', failed: 'Stopped before it finished', interrupted: 'Stopped when Counterpart restarted'});
   // A limit says which one, in the words the failure uses.
   assert.equal(passWords({endedAtMs: 50, status: 'capped', limit: {kind: 'tool-calls', value: 120}}), 'Stopped at the 120 tool-call limit');
@@ -101,5 +101,5 @@ test('every ending has words, sent to every client with the pass, and a running 
   for (const said of Object.values(words)) assert.doesNotMatch(said, /_|needs-|capped/, 'never the wire spelling');
   const shown = publicObject({id: 'p', createdAtMs: 1, updatedAtMs: 2, state: 'ready', photos: [], requestPhotos: [], pendingPhotos: [], messages: [],
     passes: [endPass(running(), {status: 'needs_closeup'}, 50), running()]});
-  assert.deepEqual(shown.passes.map(pass => pass.words), ['Asked for a close-up', undefined]);
+  assert.deepEqual(shown.passes.map(pass => pass.words), ['Asked you a question', undefined]);
 });

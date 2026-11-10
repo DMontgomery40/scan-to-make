@@ -332,7 +332,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// Your follow-up that started it, if any.
         public var note: String?
         public var status: String?
-        /// How it ended, in the Mac's words ("Asked for a close-up"); nil while it runs or from an older Mac.
+        /// How it ended, in the Mac's words ("Asked you a question"); nil while it runs or from an older Mac.
         public var words: String?
         public var summary: String?
         public var activity: [Activity]?
@@ -358,7 +358,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             guard endedAtMs != nil else { return nil }
             if let words, !words.isEmpty { return words }
             switch status {
-            case "needs_closeup": return "Asked for a close-up"
+            case "needs_closeup": return "Asked you a question"
             case "interrupted": return "Stopped when Counterpart restarted"
             case "done", nil: return "Finished"
             case let other?: return other.replacingOccurrences(of: "_", with: " ").capitalized

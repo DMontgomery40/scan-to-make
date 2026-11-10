@@ -72,7 +72,9 @@ export function passWords(pass: Pick<ObjectPass, 'endedAtMs' | 'status' | 'limit
   if (pass.endedAtMs === undefined) return undefined;
   switch (pass.status) {
     case 'unchanged': return 'Nothing needed changing';
-    case 'needs_closeup': return 'Asked for a close-up';
+    // Any question, not only a close-up: this status also ends a pass that asked to confirm sizes or pick a part
+    // (Nov 10: a size question read "Asked for a close-up" on real data).
+    case 'needs_closeup': return 'Asked you a question';
     case 'needs_file': return "Asked for the designer's file";
     case 'capped': return pass.limit ? limitWords(pass.limit) : 'Stopped at a limit';
     case 'failed': return 'Stopped before it finished';

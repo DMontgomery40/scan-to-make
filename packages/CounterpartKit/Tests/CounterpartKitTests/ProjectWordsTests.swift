@@ -381,7 +381,7 @@ final class ProjectWordsTests: XCTestCase {
         func pass(_ json: String) throws -> Project.Pass { try JSONDecoder().decode(Project.Pass.self, from: Data(json.utf8)) }
         XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"capped","words":"Stopped at the 120 tool-call limit"}"#).endingWords, "Stopped at the 120 tool-call limit")
         XCTAssertNil(try pass(#"{"startedAtMs":1,"status":"done","words":"Finished"}"#).endingWords, "a running pass has not ended")
-        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"needs_closeup"}"#).endingWords, "Asked for a close-up")
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"needs_closeup"}"#).endingWords, "Asked you a question")
         XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"done"}"#).endingWords, "Finished")
         XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2}"#).endingWords, "Finished")
         XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"status":"needs_file"}"#).endingWords, "Needs File")
