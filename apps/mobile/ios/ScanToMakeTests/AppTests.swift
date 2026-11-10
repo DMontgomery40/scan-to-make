@@ -118,10 +118,10 @@ import CounterpartKit
         let files = ModelFiles { _, path in
             let n = await counter.next()
             if path == "scan/scan.usdz" { throw CompanionError(code: "file-too-large", message: "This file is too large for this phone.") }
-            if n <= 3 { throw CompanionError.transport("network") }
+            if n <= 3 { throw CompanionError(code: "network", message: "Your Mac stopped answering.") }
             return file
         }
-        files.pauses = [.zero, .zero]
+        files.pauses = [Duration.zero, Duration.zero]
         files.want(project, "model.stl")
         let failed = await until(patience) { await MainActor.run { files.fetch(project, "model.stl") == .failed } }
         XCTAssertTrue(failed, "three tries, then it says so")
@@ -567,7 +567,7 @@ private actor DownloadGate {
         calls += 1
         let end = ContinuousClock.now.advanced(by: .seconds(patience))
         while opened == nil, ContinuousClock.now < end { try await Task.sleep(for: .milliseconds(10)) }
-        guard let opened else { throw CompanionError.transport("timeout") }
+        guard let opened else { throw CompanionError(code: "timeout", message: "Timed out.") }
         return opened
     }
     func open(_ url: URL) { opened = url }
