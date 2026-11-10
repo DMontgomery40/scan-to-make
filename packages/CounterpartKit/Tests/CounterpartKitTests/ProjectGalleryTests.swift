@@ -72,6 +72,18 @@ final class ProjectGalleryTests: XCTestCase {
         XCTAssertEqual(entry.sizeText([66.2, 30.6, 150]), "Part · 66.2 × 30.6 × 150 mm")
     }
 
+    /// A part stays readable on the stage (lead review, Nov 10: a black holder was a silhouette): black and a dark slate
+    /// blue move to the light stage; white, yellow and the neutral material stay on the dark one.
+    func testEveryFilamentColourStaysReadableOnItsStage() {
+        XCTAssertTrue(StageContrast.lightStage(hex: "#000000"))
+        XCTAssertTrue(StageContrast.lightStage(hex: "#5B6579"), "a blue grey close to the dark stage")
+        XCTAssertTrue(StageContrast.lightStage(hex: "#1F2A44"))
+        XCTAssertFalse(StageContrast.lightStage(hex: "#FFFFFF"))
+        XCTAssertFalse(StageContrast.lightStage(hex: "#FEC600"))
+        XCTAssertFalse(StageContrast.lightStage(for: .neutral))
+        XCTAssertFalse(StageContrast.lightStage(for: .own), "a scan's own colours stay on the dark stage")
+    }
+
     func testASeatIsTheTransformTheFitCheckTakes() {
         let seat = Project.Seat(translationMm: [10, 20, 30], rotationDeg: [90, 0, 90])
         let m = seat.matrix

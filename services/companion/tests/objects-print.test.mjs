@@ -620,3 +620,23 @@ test("the designer's supports choice reaches the slicer as it is, and an MCP tha
   assert.match(old.error?.message ?? '', /^Update bambu-printer-mcp in Settings → Printers so Counterpart can send this design’s supports to the slicer\./);
   assert.deepEqual(old.tools, []);
 });
+
+test('a print keeps the colour of the spool it was sent with, as the MCP reported it; with the MCP choosing, none', async () => {
+  // Lead review, Nov 10: a printed part is drawn in the colour it was printed in, recorded when it is sent; with no
+  // record it is neutral, never the colour of whatever spool is loaded later.
+  const trays = [{slot:2, loaded:true, tray_color:'5B6579FF', tray_type:'PLA', tray_info_idx:'GFA00', spool_name:'Blue Gray PLA Basic', label:'A3', resolved_profile_path:'/profiles/blue-gray.json'}];
+  const {service, object, store} = await setup({inventory:{trays}});
+  const bySlot = await service.print(object.id, {colour:{amsSlot:2}});
+  assert.deepEqual(bySlot.print.spools, [{colour:'#5B6579', material:'PLA', name:'Blue Gray PLA Basic'}], 'an AMS slot records that tray, as the MCP reported it');
+  await approve(service, object.id);
+  await service.settled(object.id);
+  await store.update(object.id, o => ({...o, state:'ready'}));
+  const auto = await service.print(object.id, {colour:{auto:true}, checked:true});
+  assert.equal(auto.print.spools, undefined, 'the MCP choosing the tray records no spool: nothing is guessed');
+  await approve(service, object.id);
+  const done = await service.settled(object.id);
+  // Swapping the loaded spool afterwards changes nothing about what was printed.
+  trays[0].tray_color = 'FFFFFFFF';
+  assert.equal((await service.get(object.id)).print.spools, undefined);
+  assert.equal(done.print.printId, auto.print.printId);
+});

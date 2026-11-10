@@ -257,6 +257,10 @@ main > .model-view {
   font-size: 12px;
   color: #6e7a6d;
 }
+/* The light stage (gallery.ts lightStage): a black or dark blue-grey part is never a silhouette on the dark stage. */
+.light-stage .model-view .canvas {
+  background: linear-gradient(#dbdee3, #b3b5bd);
+}
 /* The gallery's labels (PRD §5.4 Pictures): under the stage's top controls, a row that scrolls for a dozen plates. */
 .gallery-labels {
   position: absolute;

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { gallery } from "../src/gallery";
+import { gallery, lightStage } from "../src/gallery";
 import {
   codeEngineRow,
   AFTER_PRINTING,
@@ -675,4 +675,14 @@ test("David's Nov 9 bottle: the question's caption is true for any question, and
   assert.deepEqual(scanSample(130), [0, 32, 65, 97, 129], "the same frames as the iPhone, Mac and Android");
   assert.deepEqual(scanSample(3), [0, 1, 2]);
   assert.equal(scanWords(130), "130 photos");
+});
+
+// A part stays readable on its stage: the same rule as CounterpartKit StageContrast.
+test("black and a dark blue grey move to the light stage; white, yellow and the neutral stay dark", () => {
+  assert.equal(lightStage("#000000"), true);
+  assert.equal(lightStage("#5B6579"), true);
+  assert.equal(lightStage("#FFFFFF"), false);
+  assert.equal(lightStage("#FEC600"), false);
+  assert.equal(lightStage("neutral"), false);
+  assert.equal(lightStage("own"), false);
 });

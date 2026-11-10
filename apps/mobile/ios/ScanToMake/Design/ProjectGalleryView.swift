@@ -50,10 +50,12 @@ struct ProjectGalleryView: View {
         if let entry {
             switch entry.drawing {
             case .model(let path):
-                ModelStage(url: path == "model.stl" ? modelURL : scanURL, tint: tint(entry.colour), measured: { measured[entry.id] = $0 })
+                ModelStage(url: path == "model.stl" ? modelURL : scanURL, tint: tint(entry.colour),
+                           lightStage: StageContrast.lightStage(for: entry.colour), measured: { measured[entry.id] = $0 })
                     .id(entry.id)
             case .assembly(_, _, let seats):
-                ModelStage(url: modelURL, tint: tint(entry.colour), object: scanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 })
+                ModelStage(url: modelURL, tint: tint(entry.colour), lightStage: StageContrast.lightStage(for: entry.colour),
+                           object: scanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 })
                     .id(entry.id)
             case .picture(let path):
                 ZStack {

@@ -4,6 +4,16 @@ import RealityKit
 import CounterpartKit
 
 /// The dark "stage" behind every model (PRD §2.1, §10): the object is the hero, glass floats over it.
+/// The light stage (CounterpartKit `StageContrast`), for a part that would be a silhouette on the dark one.
+struct LightStageBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red: 0.86, green: 0.87, blue: 0.89), Color(red: 0.70, green: 0.71, blue: 0.74)], startPoint: .top, endPoint: .bottom)
+            RadialGradient(colors: [Color.white.opacity(0.35), .clear], center: .init(x: 0.5, y: 0.62), startRadius: 4, endRadius: 220)
+        }
+    }
+}
+
 struct StageBackground: View {
     var body: some View {
         ZStack {
@@ -27,6 +37,8 @@ struct ModelStage: View {
     /// The model's largest side, in metres, as framed by the camera.
     var fit: Float = 0.15
     var backdrop: Color? = nil
+    /// The light stage, for a part that would be a silhouette on the dark one (CounterpartKit `StageContrast`).
+    var lightStage = false
     var accessibilityText = "The model. Drag to turn it, scroll or pinch to zoom."
     /// Optional companion still while the local model poster loads.
     var poster: URL? = nil
@@ -52,7 +64,7 @@ struct ModelStage: View {
 
     var body: some View {
         ZStack {
-            if let backdrop { backdrop } else { StageBackground() }
+            if let backdrop { backdrop } else if lightStage { LightStageBackground() } else { StageBackground() }
             if showsLive {
                 realityView
                     .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in touch() })

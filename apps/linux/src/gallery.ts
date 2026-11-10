@@ -127,3 +127,19 @@ export function canLocate(p: Project): boolean {
   return p.kind === "fit" && !!p.scan && !!p.current && p.current.model.toLowerCase().endsWith(".stl") && !p.current.seats?.length
     && p.state !== "printing" && p.state !== "touching-up";
 }
+
+/**
+ * The part reads better on the light stage than the dark one (WCAG contrast; CounterpartKit `StageContrast`, stage
+ * colours #22242B and #C8CACF): black and a dark blue grey move to the light stage, white and yellow stay dark.
+ */
+export function lightStage(colour: Colour): boolean {
+  const luminance = (hex: string) => {
+    const value = parseInt(hex.slice(1, 7), 16);
+    const channel = (shift: number) => { const c = ((value >> shift) & 255) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0);
+  };
+  if (!/^#[0-9A-Fa-f]{6}$/.test(colour)) return false;
+  const part = luminance(colour), dark = luminance("#22242B"), light = luminance("#C8CACF");
+  const ratio = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  return ratio(part, light) > ratio(part, dark);
+}

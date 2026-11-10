@@ -173,6 +173,7 @@ struct ProjectDetail: View {
             case .model(let path):
                 if let url = path == "model.stl" ? (object.modelURL.flatMap { $0.pathExtension.lowercased() == "stl" ? $0 : nil } ?? object.blenderModelURL) : object.projectFile(path) {
                     ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
+                               lightStage: StageContrast.lightStage(for: entry.colour),
                                accessibilityText: "\(entry.label). Drag to turn it, scroll to zoom.",
                                poster: entry.kind == .part ? (object.pictures?["part"].flatMap(object.projectFile) ?? Self.poster(object)) : object.pictures?["scan"].flatMap(object.projectFile), tint: Self.colour(entry.colour),
                                measured: { measured[entry.id] = $0 })
@@ -181,6 +182,7 @@ struct ProjectDetail: View {
             case .assembly(_, let scan, let seats):
                 if let url = object.blenderModelURL, let scanURL = object.projectFile(scan) {
                     ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
+                               lightStage: StageContrast.lightStage(for: entry.colour),
                                accessibilityText: "\(words.title) with what you scanned in place. Drag to turn it, scroll to zoom.",
                                tint: Self.colour(entry.colour), object: scanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 })
                     .id(entry.id)

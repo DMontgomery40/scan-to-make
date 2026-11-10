@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { artifact } from "./bridge";
 import type { Project } from "./types";
-import { canLocate, filePath, gallery, pictureFor, sizeText } from "./gallery";
+import { canLocate, filePath, gallery, lightStage, pictureFor, sizeText } from "./gallery";
 export function Picture({
   id,
   path,
@@ -301,7 +301,9 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
     <section className="stage" aria-label="Project pictures">
       {mode === "3d" && turnable ? (
         bytes ? (
-          <ModelStage bytes={bytes} tint={tint} />
+          <div className={tint && lightStage(tint) ? "light-stage" : undefined}>
+            <ModelStage bytes={bytes} tint={tint} />
+          </div>
         ) : (
           <p>{error || "Opening model…"}</p>
         )

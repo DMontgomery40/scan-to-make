@@ -16,6 +16,8 @@ struct ModelStage: View {
     /// One filament colour for the whole model; nil for the default printed look.
     var tint: UIColor? = nil
     var backdrop: Color? = nil
+    /// The light stage, for a part that would be a silhouette on the dark one (CounterpartKit `StageContrast`).
+    var lightStage = false
     /// Two-tone like a two-colour AMS print: the upper part in a warm tone (the mic-mount mockup).
     var twoTone = false
     /// Together (docs/protocols/seats.md): a scan drawn in its own colours at each seat (row-major 4×4, the part's
@@ -41,7 +43,7 @@ struct ModelStage: View {
 
     var body: some View {
         ZStack {
-            if let backdrop { backdrop } else { StageBackground() }
+            if let backdrop { backdrop } else if lightStage { LightStageBackground() } else { StageBackground() }
             if live && scenePhase == .active && interactive {
                 realityView
             } else if let poster {

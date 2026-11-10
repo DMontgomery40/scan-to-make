@@ -173,3 +173,36 @@ extension ProjectGallery.Entry {
         return "\(measures) · \(size)"
     }
 }
+
+/// Which stage keeps a part readable (PRD §5.4): the dark stage, or a light one when the part's colour would be a
+/// silhouette on it (black, a dark slate blue). The one with more contrast for the part's colour (WCAG relative
+/// luminance), so white and yellow stay on the dark stage and black moves to the light one. Every layout and the
+/// Mac's pictures use the same rule (`mac-reconstruct picture`, Linux `gallery.ts`).
+public enum StageContrast {
+    /// The stages' own colours, `#RRGGBB`: the dark stage's middle and the light stage's middle.
+    public static let dark = "#22242B"
+    public static let light = "#C8CACF"
+
+    /// True when the part reads better on the light stage. Neutral and own colours stay on the dark stage.
+    public static func lightStage(for colour: ProjectGallery.Colour) -> Bool {
+        guard case .spool(let hex) = colour else { return false }
+        return lightStage(hex: hex)
+    }
+
+    public static func lightStage(hex: String) -> Bool {
+        guard let part = luminance(hex), let onDark = luminance(dark), let onLight = luminance(light) else { return false }
+        return ratio(part, onLight) > ratio(part, onDark)
+    }
+
+    static func ratio(_ a: Double, _ b: Double) -> Double { (max(a, b) + 0.05) / (min(a, b) + 0.05) }
+
+    static func luminance(_ hex: String) -> Double? {
+        let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        guard digits.count >= 6, let value = Int(digits.prefix(6), radix: 16) else { return nil }
+        func channel(_ shift: Int) -> Double {
+            let c = Double((value >> shift) & 255) / 255
+            return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+    }
+}

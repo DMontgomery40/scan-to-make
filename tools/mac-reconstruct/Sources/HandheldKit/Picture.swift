@@ -25,14 +25,17 @@ public struct PictureSpec {
     public init() {}
 }
 
-/// The stage the apps draw: a vertical gradient (top 0.13/0.14/0.17 to 0.05/0.05/0.07) with a soft light below centre.
-private func stage(_ size: Int) -> CGContext? {
+/// The stage the apps draw: a vertical gradient (top 0.13/0.14/0.17 to 0.05/0.05/0.07) with a soft light below centre;
+/// or the light stage (0.86/0.87/0.89 to 0.70/0.71/0.74) for a part that would be a silhouette on the dark one.
+private func stage(_ size: Int, light: Bool = false) -> CGContext? {
     guard let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
     let space = CGColorSpace(name: CGColorSpace.sRGB)!
-    let linear = CGGradient(colorsSpace: space, colors: [CGColor(red: 0.13, green: 0.14, blue: 0.17, alpha: 1), CGColor(red: 0.05, green: 0.05, blue: 0.07, alpha: 1)] as CFArray, locations: [0, 1])!
+    let top = light ? CGColor(red: 0.86, green: 0.87, blue: 0.89, alpha: 1) : CGColor(red: 0.13, green: 0.14, blue: 0.17, alpha: 1)
+    let bottom = light ? CGColor(red: 0.70, green: 0.71, blue: 0.74, alpha: 1) : CGColor(red: 0.05, green: 0.05, blue: 0.07, alpha: 1)
+    let linear = CGGradient(colorsSpace: space, colors: [top, bottom] as CFArray, locations: [0, 1])!
     context.drawLinearGradient(linear, start: CGPoint(x: 0, y: size), end: CGPoint(x: 0, y: 0), options: [])
-    let glow = CGGradient(colorsSpace: space, colors: [CGColor(gray: 1, alpha: 0.10), CGColor(gray: 1, alpha: 0)] as CFArray, locations: [0, 1])!
+    let glow = CGGradient(colorsSpace: space, colors: [CGColor(gray: 1, alpha: light ? 0.35 : 0.10), CGColor(gray: 1, alpha: 0)] as CFArray, locations: [0, 1])!
     let centre = CGPoint(x: Double(size) * 0.5, y: Double(size) * 0.38)
     context.drawRadialGradient(glow, startCenter: centre, startRadius: 4, endCenter: centre, endRadius: Double(size) * 0.55, options: [])
     return context
@@ -83,9 +86,20 @@ private func luminance(_ colour: NSColor?) -> CGFloat {
     return 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
 }
 
+/// The part reads better on the light stage than the dark one (WCAG contrast of relative luminance; the same rule as
+/// CounterpartKit `StageContrast`, whose stage colours are #22242B and #C8CACF).
+public func wantsLightStage(_ colour: NSColor?) -> Bool {
+    guard let rgb = colour?.usingColorSpace(.sRGB) else { return false }
+    func linear(_ c: CGFloat) -> Double { let c = Double(c); return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+    let part = 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722 * linear(rgb.blueComponent)
+    let dark = 0.01776, light = 0.59025
+    func ratio(_ a: Double, _ b: Double) -> Double { (max(a, b) + 0.05) / (min(a, b) + 0.05) }
+    return ratio(part, light) > ratio(part, dark)
+}
+
 public func renderPicture(_ spec: PictureSpec, to output: URL) throws {
     let size = spec.pixels
-    guard let context = stage(size) else { throw HandheldError.io("no drawing context") }
+    guard let context = stage(size, light: spec.model != nil && wantsLightStage(spec.tint)) else { throw HandheldError.io("no drawing context") }
     if let model = spec.model {
         let scene = SCNScene()
         scene.background.contents = NSColor.clear
