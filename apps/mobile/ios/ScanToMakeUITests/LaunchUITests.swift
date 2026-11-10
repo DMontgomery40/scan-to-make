@@ -999,6 +999,12 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(print.exists)
         XCTAssertEqual(print.label, "Print Another")
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
+        // On a phone's width a plain Print Another was as large as It Works and the card started under the bar
+        // (captures, Nov 10). Not the main action: the symbol alone, still named for VoiceOver. And the page opens
+        // with the card that holds the main action in view, its button ready to press.
+        XCTAssertLessThan(print.frame.width, 80, "the bar's Print is the symbol alone when it does not lead")
+        XCTAssertTrue(app.buttons["it-works"].isHittable, "the page opens with the main action in view")
+        XCTAssertGreaterThan(app.buttons["it-works"].frame.width, print.frame.width * 2, "the main action is the larger control")
     }
 
     /// Needs Changes on the finished Printing screen starts the change on the project page, as the project's own card does.

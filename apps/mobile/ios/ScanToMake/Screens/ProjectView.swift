@@ -189,6 +189,7 @@ struct ProjectView: View {
         // The page's content ends where the bottom bar begins (lead, Nov 10, as New and first run): Activity's lines never
         // read through or around "Ask for changes…" and Print, on any tab, with the keyboard up too.
         VStack(spacing: 0) {
+        ScrollViewReader { reader in
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 hero(object, words)
@@ -283,7 +284,7 @@ struct ProjectView: View {
                             .disabled(working)
                     }.font(.subheadline).padding(.horizontal, 20)
                 }
-                stateCard(object, words).padding(.horizontal, 16)
+                stateCard(object, words).padding(.horizontal, 16).id(Self.mainCard)
 
                 Picker("Section", selection: $section) {
                     ForEach(ProjectSection.allCases, id: \.self) { Text($0.rawValue) }
@@ -308,6 +309,15 @@ struct ProjectView: View {
         .background(Color.black)
         .scrollEdgeEffectStyle(.soft, for: .all)
         .scrollDismissesKeyboard(.interactively)
+        // On a phone the picture, the name and the request fill the first screen, and the card that holds the page's
+        // main action started below it (captures, Nov 10: "Did it fit?" cut by the bar until scrolled). The page
+        // opens with that card whole and at the bottom of the screen; when it already fits, nothing moves.
+        .task(id: "\(object.id) \(words.phase.rawValue)") {
+            guard widthClass == .compact, words.page.mainIsInCard else { return }
+            try? await Task.sleep(for: .milliseconds(150))
+            reader.scrollTo(Self.mainCard, anchor: .bottom)
+        }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if writing { ToolbarItem(placement: .confirmationAction) { Button("Done") { writing = false } } }
@@ -405,6 +415,9 @@ struct ProjectView: View {
     }
 
     // MARK: State cards
+
+    /// The state card's place in the scroll, so the page can open with it in view.
+    static let mainCard = "main-card"
 
     @ViewBuilder private func stateCard(_ object: Project, _ words: ProjectWords) -> some View {
         switch words.phase {
@@ -765,15 +778,26 @@ struct ProjectView: View {
                     if canPrint && !writing {
                         // The page's main action never truncates ("Print Ano…", lead review Nov 10): it keeps its whole
                         // label and the ask field gives way.
+                        // On a phone's width a plain Print Another was as large as the card's own answer and read as
+                        // the first thing to press (captures, Nov 10). There, when Print is not the page's main
+                        // action, it is the printer symbol alone, named for VoiceOver by what it would print.
+                        let quiet = widthClass == .compact && !words.page.printIsMain
+                        let name = words.page.printWords ?? "Print"
                         Button { openPrint(object.id) } label: {
-                            Label(words.page.printWords ?? "Print", systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
-                                .fixedSize().padding(.horizontal, 8).frame(height: 36)
+                            if quiet {
+                                Image(systemName: "printer.fill").frame(width: 36, height: 36)
+                            } else {
+                                Label(name, systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
+                                    .fixedSize().padding(.horizontal, 8).frame(height: 36)
+                            }
                         }
                         .mainAction(words.page.printIsMain)
+                        .buttonBorderShape(quiet ? .circle : .capsule)
                         .controlSize(.large)
                         .fixedSize()
                         .layoutPriority(1)
                         .keyboardShortcut("p", modifiers: .command)
+                        .accessibilityLabel(name)
                         .accessibilityIdentifier("print")
                     }
                 }

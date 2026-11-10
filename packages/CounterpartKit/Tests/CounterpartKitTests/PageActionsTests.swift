@@ -44,6 +44,14 @@ final class PageActionsTests: XCTestCase {
             XCTAssertEqual(page.printPlace != nil, page.printWords != nil, row.name)
             if let main = page.main { XCTAssertFalse(page.others.map { "\($0)" }.contains(main.rawValue), "\(row.name): the lead is listed again") }
         }
+        // Where the main action's control is: in the bar only when it is a Print the bar holds (ready, sent, done).
+        let inCard = Dictionary(uniqueKeysWithValues: try rows().map { ($0.name, ProjectWords($0.project, sending: $0.sending).page.mainIsInCard) })
+        for name in ["ready", "sent-cannot-follow", "accepted-not-seen-to-finish", "done", "sending", "working-first-pass", "question-choice", "pass-failed-for-good-earlier-result", "unknown-state"] {
+            XCTAssertEqual(inCard[name], false, name)
+        }
+        for name in ["printed-did-it-fit", "pass-stopped-earlier-result", "pass-stopped-no-result", "print-failed", "refused-before-send", "question-sizes", "question-closeup", "printer-needs-a-yes", "printing", "draft-with-files"] {
+            XCTAssertEqual(inCard[name], true, name)
+        }
         // The pair the capture showed (row 14): Try Again leads; the earlier result prints from the card, once, under
         // its true name; the bar keeps Ask for changes and no Print.
         let stopped = try XCTUnwrap(try rows().first { $0.name == "pass-stopped-earlier-result" })
