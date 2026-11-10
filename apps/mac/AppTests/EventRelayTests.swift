@@ -288,11 +288,35 @@ final class EventRelayTests: XCTestCase {
         let first = event("print.first-layer", printId: "print-1", title: "First layer")
         let second = event("print.milestone", printId: "print-1", title: "Halfway")
         let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
-        XCTAssertTrue(relay.alertMilestone(first, title: "Mic mount", local: local, cloudTokens: .init()))
+        XCTAssertTrue(relay.alertMilestone(first, title: "Mic mount", local: local, cloudTokens: .init(), phoneChoices: [:]))
         await eventually { relay.lastResult.hasPrefix("Waiting:") }
-        XCTAssertTrue(relay.alertMilestone(second, title: "Mic mount", local: local, cloudTokens: .init()))
+        XCTAssertTrue(relay.alertMilestone(second, title: "Mic mount", local: local, cloudTokens: .init(), phoneChoices: [:]))
         await eventually(timeout: 4) { harness.acceptedTitles.count == 2 }
         XCTAssertEqual(Set(harness.acceptedTitles), ["First layer", "Halfway"], "neither milestone may disappear during coalescing")
+    }
+
+    @MainActor func testRestartedDeliveryCannotResumeAMilestoneWithoutCurrentPhoneChoices() async throws {
+        let harness = try MilestoneHarness { _, index in (index == 0 ? 429 : 200, ["Retry-After": "30"]) }
+        defer { harness.close() }
+        let milestone = event("print.milestone", id: "unknown-after-restart", printId: "print-1", title: "Halfway")
+        let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
+        var relay: LiveActivityRelay? = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init(),
+                                           phoneChoices: ["phone": ["print.milestone": true]]))
+        await eventually { relay!.lastResult.hasPrefix("Waiting:") }
+        relay = nil
+        let restarted = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
+        restarted.deliver(event("print.status", id: "new-progress", data: .init(progress: 60), printId: "print-1"),
+                          title: "Mic mount", local: local, cloudTokens: .init())
+        await eventually { harness.requestCount >= 2 }
+        XCTAssertTrue(harness.acceptedTitles.isEmpty, "unknown current settings cannot authorize an activity alert")
+        XCTAssertNotNil(MilestoneDeliveries(defaults: harness.defaults).entries[milestone.id], "keep the decision pending until settings are known")
+        var fallbacks = 0
+        restarted.undelivered = { _ in fallbacks += 1; return true }
+        restarted.recover(local: local, cloud: .init(), phoneChoices: ["phone": ["print.milestone": false]])
+        await eventually { fallbacks == 1 }
+        XCTAssertEqual(fallbacks, 1, "a current opt-out must take the existing CloudKit path")
+        XCTAssertTrue(harness.acceptedTitles.isEmpty, "the choice changed while the Mac was down")
     }
 
     @MainActor func testRestartMidRetryRecoversTheUnconfirmedMilestone() async throws {
@@ -301,12 +325,12 @@ final class EventRelayTests: XCTestCase {
         var relay: LiveActivityRelay? = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
         let first = event("print.first-layer", id: "first", printId: "print-1", title: "First layer")
         let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
-        XCTAssertTrue(relay!.alertMilestone(first, title: "Mic mount", local: local, cloudTokens: .init()))
+        XCTAssertTrue(relay!.alertMilestone(first, title: "Mic mount", local: local, cloudTokens: .init(), phoneChoices: [:]))
         await eventually { relay!.lastResult.hasPrefix("Waiting:") }
         XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(first.id), "enqueueing is not delivery")
         relay = nil
         let restarted = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
-        restarted.recover(local: local, cloud: .init())
+        restarted.recover(local: local, cloud: .init(), phoneChoices: [:])
         await eventually { harness.acceptedTitles == ["First layer"] }
         XCTAssertEqual(harness.acceptedTitles, ["First layer"], "the persisted outbox must outlive the waiting task and event cursor")
         XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(first.id), "mark alerted only after a confirmed 200")
@@ -324,7 +348,7 @@ final class EventRelayTests: XCTestCase {
         relay.undelivered = { _ in cloudFallbacks += 1; return true }
         let event = event("print.milestone", id: "halfway", printId: "print-1", title: "Halfway")
         let local = tokens([("phone", "print-1", "aa"), ("ipad", "print-1", "bb")], starters: ["phone", "ipad"])
-        XCTAssertTrue(relay.alertMilestone(event, title: "Mic mount", local: local, cloudTokens: .init(), pairedDeviceIds: ["phone", "ipad"]))
+        XCTAssertTrue(relay.alertMilestone(event, title: "Mic mount", local: local, cloudTokens: .init(), pairedDeviceIds: ["phone", "ipad"], phoneChoices: [:]))
         await eventually { harness.requestCount >= 2 }
         XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(event.id), "wait for every recipient's final decision")
         await eventually(timeout: 3) { harness.requestCount >= 3 && AlertedMilestones(defaults: harness.defaults).contains(event.id) }
@@ -345,7 +369,7 @@ final class EventRelayTests: XCTestCase {
         relay.deliver(event("print.status", id: "moving", printId: "print-1"), title: "Mic mount", local: local, cloudTokens: .init())
         await eventually { harness.requestCount == 1 }
         XCTAssertTrue(relay.alertMilestone(event("print.milestone", id: "halfway-pause", printId: "print-1"),
-                                          title: "Mic mount", local: local, cloudTokens: .init()))
+                                          title: "Mic mount", local: local, cloudTokens: .init(), phoneChoices: [:]))
         relay.deliver(event("print.paused", id: "paused", printId: "print-1"), title: "Mic mount", local: local, cloudTokens: .init())
         await eventually(timeout: 5) { harness.acceptedPriorities.count == 2 }
         XCTAssertEqual(harness.acceptedPriorities, [5, 10], "removing the optional milestone must keep the paused update immediate")
@@ -359,7 +383,7 @@ final class EventRelayTests: XCTestCase {
         relay.undelivered = { _ in cloudFallbacks += 1; return true }
         let milestone = event("print.milestone", id: "busy-halfway", printId: "print-1", title: "Halfway")
         let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
-        XCTAssertTrue(relay.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init()))
+        XCTAssertTrue(relay.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init(), phoneChoices: [:]))
         await eventually { harness.requestCount >= 1 }
         XCTAssertEqual(cloudFallbacks, 0, "a busy relay has not exhausted its retry attempts")
         XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
@@ -377,7 +401,7 @@ final class EventRelayTests: XCTestCase {
         relay.undelivered = { _ in cloudFallbacks += 1; return true }
         let event = event("print.milestone", id: "halfway", printId: "print-1", title: "Halfway")
         let local = tokens([("phone", "print-1", "aa"), ("ipad", "print-1", "bb")], starters: ["phone", "ipad"])
-        XCTAssertTrue(relay.alertMilestone(event, title: "Mic mount", local: local, cloudTokens: .init(), pairedDeviceIds: ["phone", "ipad"]))
+        XCTAssertTrue(relay.alertMilestone(event, title: "Mic mount", local: local, cloudTokens: .init(), pairedDeviceIds: ["phone", "ipad"], phoneChoices: [:]))
         await eventually { harness.requestCount >= 2 }
         XCTAssertEqual(cloudFallbacks, 0, "one token still has its supported short retry")
         XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(event.id))
@@ -410,12 +434,12 @@ final class EventRelayTests: XCTestCase {
         relay!.undelivered = { _ in fallbacks += 1; return true }
         let milestone = event("print.milestone", id: "m1", printId: "print-1", title: "Halfway")
         let local = tokens([("phone", "print-1", "aa"), ("ipad", "print-1", "bb")], starters: ["phone", "ipad"])
-        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init(), pairedDeviceIds: ["phone", "ipad"]))
+        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init(), pairedDeviceIds: ["phone", "ipad"], phoneChoices: [:]))
         await eventually { harness.requestCount == 2 && !harness.acceptedTitles.isEmpty && relay!.lastResult.hasPrefix("Waiting:") }
         relay = nil
         let restarted = LiveActivityRelay(defaults: harness.defaults, session: harness.session)
         restarted.undelivered = { _ in fallbacks += 1; return true }
-        restarted.recover(local: local, cloud: .init())
+        restarted.recover(local: local, cloud: .init(), phoneChoices: [:])
         await eventually { AlertedMilestones(defaults: harness.defaults).contains(milestone.id) }
         XCTAssertEqual(harness.acceptedTitles, ["Halfway"], "the confirmed recipient never alerts again after restart")
         XCTAssertEqual(fallbacks, 0, "a remembered success forbids account-wide fallback")
@@ -430,7 +454,7 @@ final class EventRelayTests: XCTestCase {
         relay!.undelivered = { _ in fallbacks += 1; return false }
         let milestone = event("print.milestone", id: "m1", printId: "print-1", title: "Halfway")
         let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
-        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init()))
+        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init(), phoneChoices: [:]))
         await eventually { fallbacks == 1 }
         XCTAssertFalse(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
         relay = nil
@@ -441,7 +465,7 @@ final class EventRelayTests: XCTestCase {
             XCTAssertEqual(event.printId, milestone.printId)
             fallbacks += 1; return true
         }
-        restarted.recover(local: local, cloud: .init())
+        restarted.recover(local: local, cloud: .init(), phoneChoices: [:])
         await eventually { AlertedMilestones(defaults: harness.defaults).contains(milestone.id) }
         XCTAssertEqual(fallbacks, 2)
         XCTAssertTrue(AlertedMilestones(defaults: harness.defaults).contains(milestone.id))
@@ -468,7 +492,7 @@ final class EventRelayTests: XCTestCase {
         var relay: LiveActivityRelay? = LiveActivityRelay(defaults: harness.defaults, session: harness.session, now: { clock })
         let milestone = event("print.milestone", id: "dismissed", printId: "print-1", title: "Halfway")
         let local = tokens([("phone", "print-1", "aa")], starters: ["phone"])
-        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init()))
+        XCTAssertTrue(relay!.alertMilestone(milestone, title: "Mic mount", local: local, cloudTokens: .init(), phoneChoices: [:]))
         await eventually { relay!.lastResult.hasPrefix("Waiting:") }
         relay = nil
         var fallbacks = 0

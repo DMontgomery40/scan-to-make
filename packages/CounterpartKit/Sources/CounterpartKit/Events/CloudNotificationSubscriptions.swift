@@ -27,7 +27,7 @@ public enum CloudNotificationSubscriptions {
     public static func make() -> [CKSubscription] {
         let groups = CloudKitRecords.subscriptions + [
             (id: "ev-started", types: ["print.started"], category: "PROGRESS"),
-            (id: "ev-stopped", types: ["print.cancelled", "print.sent"], category: "DONE"),
+            (id: "ev-stopped", types: ["print.cancelled", "print.sent"], category: "ENDED"),
             (id: "ev-software", types: ["mcp.update.done", "mcp.update.failed"], category: "SOFTWARE"),
         ]
         var subscriptions: [CKSubscription] = groups.map { group in

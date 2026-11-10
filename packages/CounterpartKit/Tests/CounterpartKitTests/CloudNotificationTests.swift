@@ -3,6 +3,11 @@ import CloudKit
 @testable import CounterpartKit
 
 final class CloudNotificationTests: XCTestCase {
+    func testStoppedPrintSubscriptionHasNoFitFeedbackActionsWithoutTheExtension() throws {
+        let stopped = try XCTUnwrap(CloudNotificationSubscriptions.make().first { $0.subscriptionID == "ev-stopped" })
+        XCTAssertEqual(stopped.notificationInfo?.category, "ENDED", "cancelled/sent prints must not show the successful-print DONE actions")
+    }
+
     func testPrintStartedSubscriptionIsSilentBecauseTheActivityStartAlreadyAlerts() throws {
         // Keep the stable ID so an existing account's visible subscription is replaced in place.
         let subscriptions = CloudNotificationSubscriptions.changes(settings: .init(notifications: .init()), localChoices: [true]).saving
