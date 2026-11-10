@@ -31,9 +31,14 @@ public struct CodeEngineSettingsSection: View {
                             .modifier(GlassProminent()).accessibilityIdentifier("codeEngine.setUp")
                     }
                 }
+                if let size = status?.size {
+                    Label(size, systemImage: "internaldrive").font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("codeEngine.size")
+                }
                 if let result = status?.result {
                     Label(result.message, systemImage: result.ok ? "checkmark.circle.fill" : "exclamationmark.circle")
                         .font(.caption).foregroundStyle(result.ok ? Color.green : Color.orange)
+                    if let suggestion = result.suggestion { Text(suggestion).font(.caption).foregroundStyle(.secondary) }
                 }
                 if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
             } header: { Text("Code design engine") } footer: {

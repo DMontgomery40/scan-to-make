@@ -31,6 +31,7 @@ import {
   printNeedsCheck,
 } from "../src/domain.ts";
 import type { Project, ReconstructionReview } from "../src/types.ts";
+import type { CodeEngineView } from "../src/domain.ts";
 import {
   buildRegionAnswer,
   buildScaleAnswer,
@@ -620,6 +621,14 @@ test("the code design engine row is reachable in Settings and shows the companio
   const tauri = readFileSync(new URL("../src-tauri/src/protocol.rs", import.meta.url), "utf8");
   assert.match(tauri, /"cad\.status"/); assert.match(tauri, /"cad\.setup"/);
   assert.deepEqual(codeEngineRow({ state: "not-set-up", message: "Not set up yet.", canSetUp: true }), { message: "Not set up yet.", action: "Set Up", working: false });
+  // Sizes from the MCP's storage fields, before and after Set Up; a refusal in the MCP's words, its code never read.
+  assert.equal(codeEngineRow({ state: "not-set-up", message: "Not set up yet.", canSetUp: true, size: "Set Up downloads about 367 MB and uses about 1.6 GB on this computer." }).size,
+    "Set Up downloads about 367 MB and uses about 1.6 GB on this computer.");
+  assert.equal(codeEngineRow({ state: "ready", message: "Ready.", canSetUp: true, size: "Uses 1.4 GB on this computer." }).size, "Uses 1.4 GB on this computer.");
+  assert.deepEqual(codeEngineRow({ state: "not-set-up", message: "Not set up yet.", canSetUp: true,
+    result: { ok: false, message: "The MCP's sentence.", suggestion: "The MCP's suggestion.", refusal: { code: "cad-uv-missing" } } as CodeEngineView["result"] }).result,
+    { ok: false, message: "The MCP's sentence.", suggestion: "The MCP's suggestion." });
+  assert.match(settings, /\{row\.size && <p>\{row\.size\}<\/p>\}/, "the size line is shown");
   assert.deepEqual(codeEngineRow({ state: "ready", message: "Ready. New designs and scan cleanups use it.", canSetUp: true, result: { ok: true, message: "CAD is ready." } }),
     { message: "Ready. New designs and scan cleanups use it.", action: "Set Up Again", working: false, result: { ok: true, message: "CAD is ready." } });
   assert.deepEqual(codeEngineRow({ state: "setting-up", message: "Setting up… 12 s so far.", seconds: 12, canSetUp: false }), { message: "Setting up… 12 s so far.", working: true });

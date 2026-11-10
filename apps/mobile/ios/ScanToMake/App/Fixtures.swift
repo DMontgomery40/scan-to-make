@@ -309,7 +309,8 @@ enum Fixtures {
         "general": ["openAtLogin": true, "showInDock": true, "keepAwake": true],
         "ai": ["revision": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1aa1", "choice": ["kind": "claude-code"], "check": ["state": "connected"]],
         "fusion": ["state": "not-set-up", "message": "Not set up. Set Up installs the Fusion add-in."],
-        "cad": ["state": "not-set-up", "message": "Not set up yet.", "server": "bambu-printer-mcp", "canSetUp": true],
+        "cad": ["state": "not-set-up", "message": "Not set up yet.", "server": "bambu-printer-mcp", "canSetUp": true,
+                "size": "Set Up downloads about 367 MB and uses about 1.6 GB on this computer."],
     ]
     static let devices: [[String: Any]] = [
         ["deviceId": "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a99", "deviceName": "David's iPhone", "current": true, "model": "iPhone18,2"],

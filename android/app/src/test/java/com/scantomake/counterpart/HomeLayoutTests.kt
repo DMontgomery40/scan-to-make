@@ -472,7 +472,8 @@ class HomeLayoutTests {
             when {
                 request.url.endsWith("/v1/settings/cad/setup") -> { started = true; json(200, mapOf("settings" to mapOf("milestones" to "50", "cad" to settingUp))) }
                 request.url.endsWith("/v1/settings/cad") -> json(200, mapOf("cad" to if (started) settingUp
-                    else mapOf("state" to "not-set-up", "message" to "Not set up yet.", "server" to "bambu-printer-mcp", "canSetUp" to true)))
+                    else mapOf("state" to "not-set-up", "message" to "Not set up yet.", "server" to "bambu-printer-mcp", "canSetUp" to true,
+                        "size" to "Set Up downloads about 367 MB and uses about 1.6 GB on this computer.")))
                 request.url.endsWith("/v1/settings") -> json(200, mapOf("settings" to mapOf("milestones" to "50")))
                 else -> json(404, mapOf("error" to "not-found"))
             }
@@ -484,6 +485,7 @@ class HomeLayoutTests {
         compose.setContent { WithApp { SettingsScreen(back = {}, pairAgain = {}, openPrinters = {}) } }
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("code-engine")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Not set up yet.").assertExists()
+        compose.onNodeWithText("Set Up downloads about 367 MB and uses about 1.6 GB on this computer.").assertExists()
         // The card is below the fold on a phone: scroll to it as a person would, then press Set Up.
         compose.onNodeWithText("Set Up").performScrollTo().performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("Setting up… 0 s so far.")).fetchSemanticsNodes().isNotEmpty() }

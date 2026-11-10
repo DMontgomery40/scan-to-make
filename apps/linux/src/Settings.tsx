@@ -466,6 +466,7 @@ function CodeEngine() {
     <>
       <h4>Code design engine</h4>
       <p role="status">{row.message}</p>
+      {row.size && <p>{row.size}</p>}
       {row.action && (
         <Action
           run={async () =>
@@ -480,6 +481,7 @@ function CodeEngine() {
           {row.result.message}
         </p>
       )}
+      {row.result?.suggestion && <p>{row.result.suggestion}</p>}
       <p>
         Designs new parts and cleans up scans as a script, without opening
         Blender, and a later change starts from that script. It runs inside{" "}

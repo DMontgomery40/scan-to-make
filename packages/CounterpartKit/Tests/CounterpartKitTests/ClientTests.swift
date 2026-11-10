@@ -253,7 +253,8 @@ final class CompanionClientTests: XCTestCase {
 
     /// The code design engine's row (PRD §8.9): read with the settings, and Set Up, which the computer starts.
     func testTheCodeDesignEngineRowReadsTheSettingsAndSetsUpOnTheComputer() async throws {
-        let ready = ["state": "not-set-up", "message": "Not set up yet.", "server": "bambu-printer-mcp", "canSetUp": true] as [String: Any]
+        let ready = ["state": "not-set-up", "message": "Not set up yet.", "server": "bambu-printer-mcp", "canSetUp": true,
+                     "size": "Set Up downloads about 367 MB and uses about 1.6 GB on this computer."] as [String: Any]
         let fake = FakeTransport { request, _ in
             request.httpMethod == "POST"
                 ? json(200, ["settings": ["milestones": "50", "cad": ["state": "setting-up", "message": "Setting up… 0 s so far.", "seconds": 0, "canSetUp": false]]])
@@ -261,7 +262,8 @@ final class CompanionClientTests: XCTestCase {
         }
         let mac = try client(fake)
         let status = try await mac.codeEngine()
-        XCTAssertEqual(status, CodeEngineStatus(state: "not-set-up", message: "Not set up yet.", server: "bambu-printer-mcp", canSetUp: true))
+        XCTAssertEqual(status, CodeEngineStatus(state: "not-set-up", message: "Not set up yet.", server: "bambu-printer-mcp",
+                                                size: "Set Up downloads about 367 MB and uses about 1.6 GB on this computer.", canSetUp: true))
         let setUp = try await mac.codeEngine(.setup)
         XCTAssertEqual(setUp?.state, "setting-up")
         XCTAssertEqual(setUp?.isWorking, true)

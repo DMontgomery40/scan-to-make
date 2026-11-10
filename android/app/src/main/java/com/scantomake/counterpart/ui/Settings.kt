@@ -157,7 +157,13 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> 
                 SectionTitle("Code design engine")
                 GlassCard(Modifier.fillMaxWidth().testTag("code-engine")) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(cad["message"].str ?: "Checking…", fontWeight = FontWeight.Medium)
-                    cad["result"].obj?.let { result -> Text(result["message"].str ?: "", color = if (result["ok"].bool == true) Palette.filament else Palette.failed, fontSize = 13.sp) }
+                    // What it takes on disk, in the companion's words from the MCP's own figures.
+                    cad["size"].str?.let { Text(it, color = Palette.secondary, fontSize = 13.sp) }
+                    // A refusal shows the MCP's sentence and suggestion; its code travels with it, unread.
+                    cad["result"].obj?.let { result ->
+                        Text(result["message"].str ?: "", color = if (result["ok"].bool == true) Palette.filament else Palette.failed, fontSize = 13.sp)
+                        result["suggestion"].str?.let { Text(it, color = Palette.secondary, fontSize = 12.sp) }
+                    }
                     codeEngineProblem?.let { Text(it, color = Palette.failed, fontSize = 13.sp) }
                     if (cad["canSetUp"].bool == true) SecondaryButton(if (cad["state"].str == "ready") "Set Up Again" else "Set Up", Modifier.fillMaxWidth()) {
                         scope.launch {
