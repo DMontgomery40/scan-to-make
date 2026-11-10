@@ -87,8 +87,9 @@ PROJECTS = [
     ('mic-mount', '7f157a66', 'done: the oldest project format'),
 ]
 DEVICES = {
-    'iphone': ('iPhone 17 Pro', 'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro', 'com.apple.CoreSimulator.SimRuntime.iOS-27-2', None),
-    'ipad': ('iPad Pro 13-inch (M5)', 'com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB', 'com.apple.CoreSimulator.SimRuntime.iOS-27-2', None),
+    # The gate's devices (.github/workflows/mobile.yml): an iPhone 18 Pro, and an iPad Air 11-inch, here in landscape.
+    'iphone': ('iPhone 18 Pro', 'com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro', 'com.apple.CoreSimulator.SimRuntime.iOS-27-2', None),
+    'ipad': ('iPad Air 11-inch (M2), landscape', 'com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M2', 'com.apple.CoreSimulator.SimRuntime.iOS-27-2', 'landscape-left'),
     'duo-folded': ('iPhone Duo, folded', 'com.apple.CoreSimulator.SimDeviceType.iPhone-Duo', 'com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4', 'closed'),
     'duo-open': ('iPhone Duo, unfolded', 'com.apple.CoreSimulator.SimDeviceType.iPhone-Duo', 'com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4', 'open'),
 }
@@ -480,7 +481,7 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
             todo = [item for item in items if (key, item['name']) not in done]
             if not todo or time.time() > deadline: continue
             name, kind, runtime, pose = DEVICES[key]
-            base = 'duo' if pose else key
+            base = 'duo' if key.startswith('duo') else key
             if base not in created:
                 udid = simctl('create', f'ux-screens-{base}-{RUN_ID}', kind, runtime)
                 created[base] = udid
@@ -496,8 +497,8 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
             for setting in (['settings', 'permission', 'grant', 'notifications', '--app', BUNDLE],):
                 try: device.ad(*setting)
                 except Exception as failure: record('failures', {'device': key, 'name': ' '.join(setting), 'why': str(failure)})
-            if pose:
-                try: device.ad('open', BUNDLE, '--relaunch', timeout=120); device.ad('fold', pose, timeout=120)
+            if pose:  # a Duo's fold, or an iPad's orientation, set once with the app open
+                try: device.ad('open', BUNDLE, '--relaunch', timeout=120); device.ad('orientation' if pose.startswith('landscape') else 'fold', pose, timeout=120)
                 except Exception as failure: record('failures', {'device': key, 'name': f'fold {pose}', 'why': str(failure)})
             for item in todo:
                 if time.time() > deadline: break
