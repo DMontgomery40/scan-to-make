@@ -3,6 +3,7 @@ import Foundation
 import struct CounterpartKit.Project
 import struct CounterpartKit.PrintConfirmationResponse
 @testable import ControlKit
+import struct CounterpartKit.CodeEngineStatus
 
 private let id = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
 private let folder = "/Users/someone/Library/Application Support/Scan to Make/capture/objects/\(id)"
@@ -34,6 +35,21 @@ final class ObjectsClientTests: XCTestCase {
         XCTAssertTrue(status.isWorking)
         XCTAssertFalse(status.canUpdate)
         withExtendedLifetime(server) {}
+    }
+
+    func testTheCodeDesignEngineRowReadsAndSetsUpThroughTheCompanion() async throws {
+        for (action, expected) in [(CodeEngineStatus.Action.status, "not-set-up"), (.setup, "setting-up")] {
+            let server = try UnixFixture { request in
+                XCTAssertEqual(request["method"] as? String, "cad." + action.rawValue)
+                return [try reply(request, result: ["cad": action == .setup
+                    ? ["state": "setting-up", "message": "Setting up… 0 s so far.", "seconds": 0, "canSetUp": false]
+                    : ["state": "not-set-up", "message": "Not set up yet.", "server": "bambu-printer-mcp", "canSetUp": true]])]
+            }
+            let status = try await ControlClient(socketPath: server.path).codeEngine(action)
+            XCTAssertEqual(status?.state, expected)
+            XCTAssertEqual(status?.canSetUp, Optional(action == .status))
+            withExtendedLifetime(server) {}
+        }
     }
 
     func testInitialFileUploadDoesNotClaimMessageOwnership() async throws {

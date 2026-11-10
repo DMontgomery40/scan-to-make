@@ -229,6 +229,8 @@ export interface ObjectServiceDeps {
   /** Companion settings: which milestones the print monitor announces. */
   settings?: CompanionSettingsStore;
   runtimeSettings?: RuntimeSettings;
+  /** Settings → the code design engine (PRD §8.9): the printer MCP's cad_status and Set Up. */
+  cadSettings?: import('../cad-settings.js').CadSettings;
   /** Where print and pass events go (the event log, PRD §8.7). */
   events?: {emit(draft: EventDraft): Promise<void>};
   /** PRD §8.10: prints and MCP updates on a printer exclude each other. */
@@ -485,7 +487,13 @@ export class ObjectService {
 
   /** Print settings, controls and the monitor need the printers' sessions. */
   get printSettingsAvailable(): boolean { return !!this.#deps.printers; }
-  async settings() { return {...(this.#deps.settings ? await this.#deps.settings.load() : {milestones: '50' as const}), ...this.#deps.runtimeSettings?.snapshot()}; }
+  async settings() { return {...(this.#deps.settings ? await this.#deps.settings.load() : {milestones: '50' as const}), ...this.#deps.runtimeSettings?.snapshot(),
+    ...(this.#deps.cadSettings ? {cad: this.#deps.cadSettings.snapshot()} : {})}; }
+  /** Settings → Set Up for the code design engine: starts the printer MCP's cad_setup and returns at once. */
+  setupCad() {
+    if (!this.#deps.cadSettings) throw new InvalidStateError('Open an updated Counterpart on your Mac.');
+    return this.#deps.cadSettings.setUp();
+  }
   testAI(revision: string) { return this.runtimeSettings().testAI(revision); }
   setupFusion() { return this.runtimeSettings().requestFusion(); }
   private runtimeSettings() {
@@ -2422,7 +2430,16 @@ export class ObjectService {
         if (nextEngine !== engine) { engine = nextEngine; typical = await this.#typical(kind, engine); }
         const latest = (await store.get(object.id)).passes.find(p => p.startedAtMs === startedAtMs);
         const previous = latest?.stages?.at(-1);
-        if (previous?.id === id) return;
+        if (previous?.id === id) {
+          // The pass chose its engine after this stage began (the code engine is ready, say): say what it is doing.
+          const words = stageWords(id, engine, kind);
+          if (previous.words !== words) {
+            this.#changed(await store.update(object.id, o => ({...o, passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, engine,
+              stages: (p.stages ?? []).map((item, index, all) => index === all.length - 1 ? {...item, words, typicalSec: typical[id]} : item)})})));
+            await this.#emit({id: randomUUID(), type: 'pass.stage', projectId: object.id, data: {stage: words, estimateSec: passEstimate(latest!.stages!, plan, typical, now).remainingSec}});
+          }
+          return;
+        }
         if (previous && previous.endedAtMs === undefined) void this.#deps.passTimings?.record(kind, engine, previous.id, (now - previous.startedAtMs) / 1000).catch(() => undefined);
         const next: PassStage = {id, words: stageWords(id, engine, kind), startedAtMs: now, typicalSec: typical[id]};
         const stages = [...(latest?.stages ?? []).map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), next];

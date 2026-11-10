@@ -103,7 +103,7 @@ class CompanionClient(
                     if (m("/v1/objects") || m("$one/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
                     if (m("$one/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)")) return "printer-handoff:use"
                     if (m("/v1/devices/live-activity-tokens")) return "projects:write"
-                    if (m("/v1/settings/(ai/test|fusion/setup)")) return "projects:write"
+                    if (m("/v1/settings/(ai/test|fusion/setup|cad/setup)")) return "projects:write"
                     if (m("/v1/printers/mcp/mcp-[0-9a-f]{16}/update")) return "projects:write"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/mcp")) return "projects:write"
@@ -357,6 +357,8 @@ class CompanionClient(
 
     suspend fun settings(): JsonObject = request("GET", "/v1/settings")["settings"].obj ?: throw invalid()
     suspend fun changeSettings(patch: JsonObject): JsonObject = request("PATCH", "/v1/settings", patch)["settings"].obj ?: throw invalid()
+    /** Settings → the code design engine's Set Up (PRD §8.9): the computer starts the printer MCP's cad_setup and returns at once. */
+    suspend fun setUpCodeEngine(): JsonObject = request("POST", "/v1/settings/cad/setup", jsonOf())["settings"].obj ?: throw invalid()
     suspend fun devices(): List<JsonObject> = request("GET", "/v1/devices")["devices"].arr?.mapNotNull { it.obj } ?: emptyList()
 
     suspend fun events(after: Int, wait: Int, limit: Int): EventsPage {

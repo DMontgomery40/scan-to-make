@@ -24,7 +24,7 @@ async function setup(t, outcomes) {
   const runTouchup = async input => {
     inputs.push(input);
     const outcome = outcomes[inputs.length - 1];
-    input.onStage?.('preparing', 'blender');
+    input.onStage?.('preparing', outcome.engine === 'code' ? 'code' : 'blender');
     if (outcome.liveSession) input.onProgress?.({seconds: 0, toolCalls: 0, sessionId: outcome.liveSession, passDir: join(root, `pass-${inputs.length}`), resumable: true});
     if (outcome.wait) await new Promise(resolve => { gate = resolve; });
     input.onStage?.('working', outcome.engine ?? 'blender');
@@ -504,6 +504,8 @@ test('a code design is kept as the project\'s design source, a change starts fro
   await f.service.start(object.id);
   const ready = await f.service.settled(object.id);
   assert.equal(ready.current.engine, 'code');
+  assert.deepEqual(ready.passes[0].stages.map(stage => stage.words), ['Getting the design engine ready', 'Designing it', 'Saving the result'],
+    'the pass says which engine it is getting ready once it has chosen');
   assert.deepEqual(ready.current.design, {script: 'current/design/touched.py', parameters: 'current/design/touched.parameters.json',
     inputs: 'current/design/touched.inputs.json', step: 'current/design/touched.step'});
   const dir = f.service.dir(object.id);

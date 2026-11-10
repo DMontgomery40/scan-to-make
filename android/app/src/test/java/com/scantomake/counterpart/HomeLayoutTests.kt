@@ -460,6 +460,32 @@ class HomeLayoutTests {
         compose.runOnIdle { org.junit.Assert.assertEquals(1, printers) }
     }
 
+    /** PRD §8.9, §6.1: Settings shows the code design engine from the computer's settings, and Set Up asks the computer to set it up. */
+    @Test fun settingsShowsTheCodeDesignEngineAndSetsItUpOnTheComputer() {
+        app.pairingStore.save(v2Record(), false)
+        val paths = mutableListOf<String>()
+        val transport = FakeTransport { request, _ ->
+            paths += "${request.method} ${request.url.substringAfter("/v1/")}"
+            when {
+                request.url.endsWith("/v1/settings/cad/setup") -> json(200, mapOf("settings" to mapOf("milestones" to "50",
+                    "cad" to mapOf("state" to "setting-up", "message" to "Setting up… 0 s so far.", "seconds" to 0, "canSetUp" to false))))
+                request.url.endsWith("/v1/settings") -> json(200, mapOf("settings" to mapOf("milestones" to "50",
+                    "cad" to mapOf("state" to "not-set-up", "message" to "Not set up yet.", "server" to "bambu-printer-mcp", "canSetUp" to true))))
+                else -> json(404, mapOf("error" to "not-found"))
+            }
+        }
+        app.pairing = PairingClient(app.pairingStore, transport)
+        app.companion = CompanionClient(app.pairing, transport, null, null, app.cacheDir)
+        state.projects.value = listOf(project("a", "Existing project", "ready"))
+        state.loaded.value = true
+        compose.setContent { WithApp { SettingsScreen(back = {}, pairAgain = {}, openPrinters = {}) } }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("code-engine")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Not set up yet.").assertExists()
+        compose.onNodeWithText("Set Up").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Setting up… 0 s so far.")).fetchSemanticsNodes().isNotEmpty() }
+        org.junit.Assert.assertTrue(paths.contains("POST settings/cad/setup"))
+    }
+
     /** Nov 5, caliper card 1f1c5515: the print sheet says a designer's file prints with its own settings (PRD §6.1). */
     @Test fun aDesignersFileSaysItPrintsWithItsOwnSettings() {
         // The companion's project for a designer's copy, as packages/contracts/fixtures/designer-own-settings.json has it.

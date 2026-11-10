@@ -1,3 +1,4 @@
+import {CadSetupRefused} from '../cad-settings.js';
 import {projectPlates, type ProjectPlate} from './plates.js';
 import {once} from 'node:events';
 import {createHash} from 'node:crypto';
@@ -205,6 +206,16 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             const status = error.code === 'not-found' ? 404 : error.code === 'invalid' ? 400 : error.code === 'conflict' ? 409 : 503;
             throw new HttpFailure(status, error.code === 'invalid' ? 'invalid-request' : error.code, error.message);
           }
+        }
+        if (url.pathname === '/v1/settings/cad/setup') {
+          // Settings → the code design engine's Set Up (PRD §8.9): the companion runs the printer MCP's cad_setup.
+          if (request.method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(SETTINGS);
+          const parsed = parameters['cad.setup'].safeParse(await json<unknown>(request));
+          if (!parsed.success) throw new HttpFailure(400, 'invalid-request');
+          try { await service.setupCad(); }
+          catch (error) { if (error instanceof CadSetupRefused) throw new HttpFailure(409, 'conflict', error.message); throw error; }
+          return send(response, 200, {settings: await service.settings()});
         }
         if (url.pathname === '/v1/settings/ai/test' || url.pathname === '/v1/settings/fusion/setup') {
           if (request.method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');

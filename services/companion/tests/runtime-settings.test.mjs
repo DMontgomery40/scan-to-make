@@ -221,3 +221,95 @@ test('a lost Fusion claim reply can be replayed only by the same claimant until 
   await assert.rejects(service.completeFusion({...lost,ok:true}),e=>e.code==='conflict');
   await service.requestFusion();assert.ok(service.claimFusion(other).requestId,'explicit retry after expiry can use a new app instance');
 });
+
+// Settings → the code design engine (PRD §8.9): the printer MCP's cad_status and cad_setup, as every layout shows them.
+test('the code design engine row: from cad_status, Set Up runs cad_setup in the background with progress, and its failure is the MCP\'s own words', async () => {
+  const {CadSettings, CadSetupRefused} = await import('../dist/cad-settings.js');
+  const events = [];
+  let status = {configured: false, ready: false, python: null, build123d: '0.13.0', platform: 'darwin', error: 'Run cad_setup with install: true to install and verify the confined CAD runtime.'};
+  let finish, progress;
+  let statusCalls = 0;
+  const calls = {
+    status: async () => { statusCalls++; return {status, server: 'bambu-printer-mcp'}; },
+    setup: onProgress => { progress = onProgress; return new Promise(resolve => { finish = resolve; }); },
+  };
+  let now = 1_000_000;
+  const locks = [];
+  const settings = new CadSettings({calls, emit: async event => { events.push(event); }, now: () => now, lock: async () => { locks.push('held'); return async () => { locks.push('released'); }; }});
+  const notSetUp = await settings.view();
+  assert.deepEqual(notSetUp, {state: 'not-set-up', message: 'Not set up yet.', server: 'bambu-printer-mcp', canSetUp: true});
+  assert.doesNotMatch(JSON.stringify(notSetUp), /cad_setup|install: true/, 'the MCP\'s developer text is not the row\'s words');
+  // Fresh for 30 s; then asked again.
+  await settings.view(); assert.equal(statusCalls, 1);
+  now += 31_000; await settings.view(); assert.equal(statusCalls, 2);
+  // Set Up returns at once and shows its progress.
+  const started = await settings.setUp();
+  assert.equal(started.state, 'setting-up');
+  assert.equal(started.canSetUp, false);
+  assert.deepEqual(locks, ['held'], 'it takes the code engine\'s turn, so no pass runs during the install');
+  now += 25_000; progress();
+  assert.equal(settings.current().message, 'Setting up… 25 s so far.');
+  assert.ok(events.every(event => event.type === 'settings.changed' && event.data.keys[0] === 'cad'));
+  // It finishes: the MCP's own message, and the row reads cad_status again.
+  status = {...status, configured: true, ready: true, python: '/cad/python'};
+  finish({setup: {supported: true, configured: true, ready: true, installed: true, message: 'CAD is ready; confined import, build, STL and STEP round trip passed.'}, server: 'bambu-printer-mcp'});
+  for (let i = 0; i < 50 && settings.current().state === 'setting-up'; i++) await new Promise(resolve => setImmediate(resolve));
+  for (let i = 0; i < 50 && settings.current().state !== 'ready'; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(settings.current(), {state: 'ready', message: 'Ready. New designs and scan cleanups use it.', server: 'bambu-printer-mcp', canSetUp: true,
+    result: {ok: true, message: 'CAD is ready; confined import, build, STL and STEP round trip passed.'}});
+  assert.deepEqual(locks, ['held', 'released']);
+  // A failed setup keeps the MCP's own reason on the row.
+  status = {...status, ready: false};
+  await settings.refresh();
+  const again = await settings.setUp();
+  assert.equal(again.state, 'setting-up');
+  finish({setup: null, server: 'bambu-printer-mcp', error: 'Code-CAD on macOS requires an internal disk with file ownership enabled.'});
+  for (let i = 0; i < 100 && settings.current().state === 'setting-up'; i++) await new Promise(resolve => setImmediate(resolve));
+  for (let i = 0; i < 100 && !settings.current().result; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(settings.current().result, {ok: false, message: 'Code-CAD on macOS requires an internal disk with file ownership enabled.'});
+  assert.equal(settings.current().state, 'not-set-up');
+  // An MCP without the engine: update it; Set Up isn't offered and is refused.
+  const older = new CadSettings({calls: {status: async () => ({status: null, server: 'mcp-3D-printer-server'}), setup: async () => assert.fail('no setup')}, emit: async () => {}});
+  assert.deepEqual(await older.view(), {state: 'unavailable', message: 'Update mcp-3D-printer-server in Settings → Printers to use its code design engine.', server: 'mcp-3D-printer-server', canSetUp: false});
+  await assert.rejects(older.setUp(), CadSetupRefused);
+  // A code pass is running: Set Up waits its turn briefly, then says why it can't start.
+  const busy = new CadSettings({calls, emit: async () => {}, lock: async () => { throw new Error('timed out'); }});
+  await assert.rejects(busy.setUp(), {name: 'CadSetupRefused', message: 'Wait until the design that is running finishes, then set it up.'});
+});
+
+test('cad.status and cad.setup reach the code design engine row over the control socket; a phone reads it in settings and sets it up over HTTP', async t => {
+  const {createControlDispatcher} = await import('../dist/local-control-services.js');
+  const {CadSettings} = await import('../dist/cad-settings.js');
+  const {ObjectStore} = await import('../dist/objects/store.js');
+  const {ObjectService} = await import('../dist/objects/service.js');
+  const {createObjectRoutes} = await import('../dist/objects/http.js');
+  const {createServer} = await import('node:http');
+  const {join} = await import('node:path');
+  const setups = [];
+  const make = () => new CadSettings({calls: {status: async () => ({status: {configured: false, ready: false}, server: 'bambu-printer-mcp'}), setup: () => { setups.push('setup'); return new Promise(() => {}); }}, emit: async () => {}});
+  const dispatch = createControlDispatcher({cadSettings: make()});
+  assert.equal((await dispatch('cad.status', {})).cad.state, 'not-set-up');
+  assert.equal((await dispatch('cad.setup', {})).cad.state, 'setting-up');
+  assert.deepEqual(setups, ['setup']);
+  await assert.rejects(dispatch('cad.setup', {extra: true}), {code: 'invalid-request'});
+  // A phone (or Android) reads the row in GET /v1/settings and presses Set Up with POST /v1/settings/cad/setup.
+  const root = await tempDir('stm-cad-http-');
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const cadSettings = make();
+  const service = new ObjectService({store: new ObjectStore(join(root, 'objects')), runTouchup: async () => assert.fail('no pass'), stlInfo: async () => [1, 1, 1], claudePath: '/c',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}}, events: {emit: async () => {}}, cadSettings});
+  t.after(() => service.close());
+  await cadSettings.refresh();
+  const scopes = [];
+  const routes = createObjectRoutes(service);
+  const server = createServer((request, response) => void routes.handle(request, response, async scope => { scopes.push(scope); }, () => undefined));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}/v1/settings`;
+  assert.equal((await (await fetch(base)).json()).settings.cad.state, 'not-set-up');
+  const pressed = await fetch(`${base}/cad/setup`, {method: 'POST', headers: {'content-type': 'application/json'}, body: '{}'});
+  assert.equal(pressed.status, 200);
+  assert.equal((await pressed.json()).settings.cad.state, 'setting-up');
+  assert.equal(scopes.at(-1), 'projects:write', 'Set Up needs the same scope as Fusion\'s Set Up');
+  assert.equal((await fetch(`${base}/cad/setup`, {method: 'GET'})).status, 405);
+});

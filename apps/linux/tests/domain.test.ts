@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  codeEngineRow,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -606,4 +607,23 @@ test("all three shared limit reasons survive project words with projects present
     assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
+});
+
+// PRD §8.9, §6.1: the code design engine's row is in Settings → Model access → Design engine, from the companion's
+// cad.status (the printer MCP's cad_status), with Set Up (cad.setup) when the companion offers it.
+test("the code design engine row is reachable in Settings and shows the companion's words and Set Up", () => {
+  const settings = readFileSync(new URL("../src/Settings.tsx", import.meta.url), "utf8");
+  const models = settings.slice(settings.indexOf("<h3>Design engine</h3>"));
+  assert.ok(models.indexOf("<CodeEngine />") > 0 && models.indexOf("<CodeEngine />") < models.indexOf("<Blender />"), "listed first under Design engine");
+  assert.match(settings, /call<\{ cad: CodeEngineView \}>\("cad\.status"\)/);
+  assert.match(settings, /call<\{ cad: CodeEngineView \}>\("cad\.setup"\)/);
+  const tauri = readFileSync(new URL("../src-tauri/src/protocol.rs", import.meta.url), "utf8");
+  assert.match(tauri, /"cad\.status"/); assert.match(tauri, /"cad\.setup"/);
+  assert.deepEqual(codeEngineRow({ state: "not-set-up", message: "Not set up yet.", canSetUp: true }), { message: "Not set up yet.", action: "Set Up", working: false });
+  assert.deepEqual(codeEngineRow({ state: "ready", message: "Ready. New designs and scan cleanups use it.", canSetUp: true, result: { ok: true, message: "CAD is ready." } }),
+    { message: "Ready. New designs and scan cleanups use it.", action: "Set Up Again", working: false, result: { ok: true, message: "CAD is ready." } });
+  assert.deepEqual(codeEngineRow({ state: "setting-up", message: "Setting up… 12 s so far.", seconds: 12, canSetUp: false }), { message: "Setting up… 12 s so far.", working: true });
+  assert.deepEqual(codeEngineRow({ state: "unavailable", message: "Update mcp-3D-printer-server in Settings → Printers to use its code design engine.", canSetUp: false }),
+    { message: "Update mcp-3D-printer-server in Settings → Printers to use its code design engine.", working: false });
+  assert.deepEqual(codeEngineRow(undefined), { message: "Checking…", working: true });
 });

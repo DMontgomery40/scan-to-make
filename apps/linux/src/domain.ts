@@ -669,3 +669,28 @@ export function addressField(options: SetupOptions | undefined, printerType: str
     placeholder: address?.url ? "192.168.1.20, printer.local or https://…" : "192.168.1.20 or printer.local",
   };
 }
+
+/** The code design engine's row (PRD §8.9), as the companion's `cad.status` reports the printer MCP's cad_status. */
+export interface CodeEngineView {
+  state: "checking" | "unavailable" | "not-set-up" | "setting-up" | "ready";
+  message: string;
+  server?: string;
+  seconds?: number;
+  result?: { ok: boolean; message: string };
+  canSetUp: boolean;
+}
+/** What the row shows: the companion's words, Set Up when offered, and whether to keep reading while it works. */
+export function codeEngineRow(view: CodeEngineView | undefined): {
+  message: string;
+  action?: "Set Up" | "Set Up Again";
+  working: boolean;
+  result?: { ok: boolean; message: string };
+} {
+  if (!view) return { message: "Checking…", working: true };
+  return {
+    message: view.message,
+    ...(view.canSetUp ? { action: view.state === "ready" ? "Set Up Again" as const : "Set Up" as const } : {}),
+    working: view.state === "checking" || view.state === "setting-up",
+    ...(view.result ? { result: view.result } : {}),
+  };
+}

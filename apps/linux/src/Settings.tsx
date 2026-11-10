@@ -1,4 +1,4 @@
-import { addressField, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls } from "./domain";
+import { addressField, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls, codeEngineRow, type CodeEngineView } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -435,11 +435,58 @@ function Models() {
       )}
       <hr />
       <h3>Design engine</h3>
+      <CodeEngine />
       <p>
-        Blender is launched by your printer MCP when a pass needs it. Autodesk
-        Fusion is unavailable on Linux.
+        Without the code design engine, Blender is launched by your printer MCP
+        when a pass needs it. Autodesk Fusion is unavailable on Linux.
       </p>
       <Blender />
+    </>
+  );
+}
+/** The printer MCP's code design engine (PRD §8.9): its cad_status, and Set Up (cad_setup), run by the companion. */
+function CodeEngine() {
+  const [view, setView] = useState<CodeEngineView>();
+  const [error, setError] = useState("");
+  const read = async () =>
+    setView((await call<{ cad: CodeEngineView }>("cad.status")).cad);
+  useEffect(() => {
+    void read().catch((e) => setError(String(e)));
+  }, []);
+  const row = codeEngineRow(view);
+  useEffect(() => {
+    if (!row.working || !view) return;
+    const timer = setInterval(
+      () => void read().catch((e) => setError(String(e))),
+      2000,
+    );
+    return () => clearInterval(timer);
+  }, [row.working, view?.state]);
+  return (
+    <>
+      <h4>Code design engine</h4>
+      <p role="status">{row.message}</p>
+      {row.action && (
+        <Action
+          run={async () =>
+            setView((await call<{ cad: CodeEngineView }>("cad.setup")).cad)
+          }
+        >
+          {row.action}
+        </Action>
+      )}
+      {row.result && (
+        <p className={row.result.ok ? undefined : "notice"}>
+          {row.result.message}
+        </p>
+      )}
+      <p>
+        Designs new parts and cleans up scans as a script, without opening
+        Blender, and a later change starts from that script. It runs inside{" "}
+        {view?.server ?? "your printer MCP"} on this computer; Set Up downloads
+        it there. Printing an existing model never needs it.
+      </p>
+      {error && <p className="notice">{error}</p>}
     </>
   );
 }

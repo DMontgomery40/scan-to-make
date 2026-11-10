@@ -119,6 +119,9 @@ export const parameters = {
   'fusion.setupDone': z.strictObject({requestId:z.uuid(), ok:z.boolean(), message:z.string().max(500).optional()}),
   'fusion.setup': z.strictObject({install:z.boolean()}),
   'fusion.status': empty,
+  // The printer MCP's code design engine (PRD §8.9): its cad_status, and Set Up (cad_setup), on every layout.
+  'cad.status': empty,
+  'cad.setup': empty,
   'settings.get': empty,
   'settings.set': CompanionSettingsPatchSchema,
   'objects.answerPrintConfirmation': z.strictObject({id: z.uuid(), confirmationId: z.uuid(), answer: z.union([

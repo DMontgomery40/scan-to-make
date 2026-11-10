@@ -42,7 +42,8 @@ import {generateTitle} from './objects/title.js';
 import {PassTimings} from './touchup/stages.js';
 import {printerStlSize} from './objects/stl-size.js';
 import {findMacReconstruct,macScanToStl} from './objects/reconstruct.js';
-import {runTouchup, acquireBlenderLock} from './touchup/touchup.js';
+import {runTouchup, acquireBlenderLock, CODE_LOCK_PATH} from './touchup/touchup.js';
+import {CadSettings, cadCalls} from './cad-settings.js';
 import {toolErrorText} from './touchup/blender.js';
 import {BlenderAddonRepair, BlenderSetupUnavailableError, type BlenderSetupReport} from './touchup/addon-repair.js';
 import {mcpPackageName} from './printing/print-settings.js';
@@ -117,6 +118,10 @@ const eventLog=remoteAuth?await new EventLog(join(dataRoot,'events.ndjson'),{con
     ...(object.failure?{reason:object.failure}:{})};
 }}).open():undefined;
 const runtimeSettings=remoteAuth&&eventLog?new RuntimeSettings({modelAccess,emit:async draft=>{await eventLog.append(draft);}}):undefined;
+// Settings → the code design engine (PRD §8.9): cad_status and cad_setup on the printer MCP as it runs. Set Up takes
+// the same turn as a code pass, so it never starts while one runs.
+const cadSettings=handoffConfig&&eventLog?new CadSettings({calls:cadCalls(()=>runningHandoff()!),emit:async draft=>{await eventLog.append(draft);},
+  lock:waitMs=>acquireBlenderLock(CODE_LOCK_PATH,{signal:AbortSignal.timeout(waitMs)})}):undefined;
 const liveActivityTokens=remoteAuth?new LiveActivityTokenStore(join(dataRoot,'live-activity-tokens.json')):undefined;
 const presence=remoteAuth?new DevicePresence(join(remoteAuth.directory,'device-presence.json')):undefined;
 // Audit M4: legacy device rows (paired before stable identity) unused for 14 days are removed; checked at start and every 6 h.
@@ -220,7 +225,7 @@ if(handoffConfig&&printHandoff&&captureDirectory){
     // A Mac rebuilds a phone's Object Capture photos with Apple's PhotogrammetrySession and keeps a scan as a model without a touch-up.
     ...(process.platform==='darwin'?{scanToStl:macScanToStl(),objectCaptureRebuild:!!findMacReconstruct()}:{}),
     print:{services:printHandoff,destinations},
-    settings:companionSettings,runtimeSettings,camera:new CameraFrames(),printGate,
+    settings:companionSettings,runtimeSettings,...(cadSettings?{cadSettings}:{}),camera:new CameraFrames(),printGate,
     passTimings:new PassTimings(join(dataRoot,'pass-timings.json')),
     titleFor:async request=>modelAccess?generateTitle(request,'',{worker:modelAccess.projectWorker()}):undefined,
     reportsCompletion:async note=>{if(!modelAccess)throw Error('AI settings are unavailable on this Mac');return reportsCompletion(note,'',modelAccess.projectWorker());},
@@ -319,6 +324,7 @@ try {
       ...(printerSetup ? {printerSetup} : {}),
   ...(blenderAddon ? {blenderAddon} : {}),
       ...(fusionSetup ? {fusionSetup} : {}),
+      ...(cadSettings ? {cadSettings} : {}),
       ...(fusionStatus ? {fusionStatus} : {}),
       // With every address answering, the Mac's QR is a v2 link from the live list.
       ...(allAddresses === '1' && server.publicKeySha256 ? {pairingLink:() => ({addresses:server.addresses(),publicKeySha256:server.publicKeySha256!,

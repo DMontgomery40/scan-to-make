@@ -50,7 +50,10 @@ import com.scantomake.counterpart.app.Counterpart
 import com.scantomake.counterpart.app.Notifications
 import com.scantomake.counterpart.core.isPlainText
 import com.scantomake.counterpart.core.jsonOf
+import com.scantomake.counterpart.core.bool
+import com.scantomake.counterpart.core.obj
 import com.scantomake.counterpart.core.str
+import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.launch
 
 /** Printers (PRD §5.6): the printers configured in the MCPs on the Mac, what they're doing, and what they can do. */
@@ -112,10 +115,23 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> 
     val macName by state.macName.collectAsState()
     var name by remember { mutableStateOf(app.prefs.getString(Counterpart.DEVICE_NAME_KEY, null) ?: app.pairingStore.deviceName()) }
     var milestones by remember { mutableStateOf<String?>(null) }
+    // The printer MCP's code design engine (PRD §8.9), as the companion reads its cad_status. Null on an older computer.
+    var codeEngine by remember { mutableStateOf<JsonObject?>(null) }
+    var codeEngineProblem by remember { mutableStateOf<String?>(null) }
     var forget by remember { mutableStateOf(false) }
     var notifications by remember { mutableStateOf(Notifications.allowed(context)) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifications = it }
-    LaunchedEffect(Unit) { milestones = try { app.companion.settings()["milestones"].str } catch (_: Exception) { null } }
+    LaunchedEffect(Unit) {
+        try { val settings = app.companion.settings(); milestones = settings["milestones"].str; codeEngine = settings["cad"].obj } catch (_: Exception) {}
+    }
+    // Checking or setting up: read again until it settles (an install can take minutes).
+    LaunchedEffect(codeEngine?.get("state").str) {
+        var reads = 0
+        while (codeEngine?.get("state").str.let { it == "checking" || it == "setting-up" } && reads++ < 600) {
+            kotlinx.coroutines.delay(2_000)
+            try { codeEngine = app.companion.settings()["cad"].obj } catch (_: Exception) {}
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -136,6 +152,22 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> 
             // The print sheet sends people to "Settings → Printers" for an MCP update; on Android it was only the Home icon.
             SectionTitle("Printers")
             SecondaryButton("Printers and Their MCPs", Modifier.fillMaxWidth(), onClick = openPrinters)
+            codeEngine?.let { cad ->
+                SectionTitle("Code design engine")
+                GlassCard(Modifier.fillMaxWidth().testTag("code-engine")) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(cad["message"].str ?: "Checking…", fontWeight = FontWeight.Medium)
+                    cad["result"].obj?.let { result -> Text(result["message"].str ?: "", color = if (result["ok"].bool == true) Palette.filament else Palette.failed, fontSize = 13.sp) }
+                    codeEngineProblem?.let { Text(it, color = Palette.failed, fontSize = 13.sp) }
+                    if (cad["canSetUp"].bool == true) SecondaryButton(if (cad["state"].str == "ready") "Set Up Again" else "Set Up", Modifier.fillMaxWidth()) {
+                        scope.launch {
+                            codeEngineProblem = null
+                            try { codeEngine = app.companion.setUpCodeEngine()["cad"].obj } catch (e: Exception) { codeEngineProblem = e.message }
+                        }
+                    }
+                    Text("Designs new parts and cleans up scans as a script, without opening Blender or Fusion, and a later change starts from that script. It runs inside ${cad["server"].str ?: "your printer MCP"} on your computer; Set Up downloads it there. Printing an existing model never needs it.",
+                        color = Palette.secondary, fontSize = 12.sp)
+                } }
+            }
             SectionTitle("This phone")
             OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name your computer shows") }, singleLine = true)
             SecondaryButton("Save Name", Modifier.fillMaxWidth(), enabled = isPlainText(name, 80)) { app.prefs.edit().putString(Counterpart.DEVICE_NAME_KEY, name.trim()).apply() }
