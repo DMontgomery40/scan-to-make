@@ -240,6 +240,19 @@ main > .model-view {
 .stage > .picture-placeholder {
   height: 100%;
 }
+.stage-still {
+  flex-direction: column;
+  gap: 10px;
+  text-align: center;
+}
+.stage-still > span {
+  font-size: 32px;
+}
+.stage-still > p {
+  margin: 0;
+  font-size: 14px;
+  color: #5f6b5f;
+}
 .stage-switch {
   position: absolute;
   top: 18px;
