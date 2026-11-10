@@ -352,6 +352,7 @@ The phone offers pasted-link creation, file and plate Asks, source credit and no
 |---|---|---|---|
 | `GET /v1/settings` | READ | | `{settings: {milestones}}` |
 | `PATCH /v1/settings` | SETTINGS | `{milestones: "off"\|"50"\|"25-50-75"\|"every-10"}` | `{settings}` |
+| `GET /v1/settings/cad` | READ | | `{cad}`: the code design engine's row, read fresh from the printer MCP's `cad_status` (at most 30 s old). `GET /v1/settings` carries only the last answer |
 | `POST /v1/settings/cad/setup` | WRITE (`projects:write`) | `{}` | `{settings}`. Starts the printer MCP's `cad_setup {install: true}` on the computer and returns at once; `settings.cad` is `{state: "checking"\|"unavailable"\|"not-set-up"\|"setting-up"\|"ready", message, server?, seconds?, result?: {ok, message}, canSetUp}`, re-read while it is `setting-up` (and announced with `settings.changed`, `keys: ["cad"]`). 409 `conflict` with the reason while a code pass runs, or when the printer MCP has no code engine (PRD §8.9) |
 
 `milestones` (default `"50"`) chooses which `print.milestone` events the companion emits; it is read at each report, so a change applies to prints already running. The per-event notification switches stay on each device.

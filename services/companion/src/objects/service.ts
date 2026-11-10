@@ -489,6 +489,11 @@ export class ObjectService {
   get printSettingsAvailable(): boolean { return !!this.#deps.printers; }
   async settings() { return {...(this.#deps.settings ? await this.#deps.settings.load() : {milestones: '50' as const}), ...this.#deps.runtimeSettings?.snapshot(),
     ...(this.#deps.cadSettings ? {cad: this.#deps.cadSettings.snapshot()} : {})}; }
+  /** Settings → the code design engine's row, read fresh (the printer MCP's cad_status, at most 30 s old). */
+  codeEngine() {
+    if (!this.#deps.cadSettings) throw new InvalidStateError('Open an updated Counterpart on your Mac.');
+    return this.#deps.cadSettings.view();
+  }
   /** Settings → Set Up for the code design engine: starts the printer MCP's cad_setup and returns at once. */
   setupCad() {
     if (!this.#deps.cadSettings) throw new InvalidStateError('Open an updated Counterpart on your Mac.');

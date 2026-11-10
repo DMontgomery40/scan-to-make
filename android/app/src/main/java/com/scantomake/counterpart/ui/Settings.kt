@@ -122,14 +122,15 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> 
     var notifications by remember { mutableStateOf(Notifications.allowed(context)) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifications = it }
     LaunchedEffect(Unit) {
-        try { val settings = app.companion.settings(); milestones = settings["milestones"].str; codeEngine = settings["cad"].obj } catch (_: Exception) {}
+        try { milestones = app.companion.settings()["milestones"].str } catch (_: Exception) {}
+        try { codeEngine = app.companion.codeEngine() } catch (_: Exception) {}
     }
     // Checking or setting up: read again until it settles (an install can take minutes).
     LaunchedEffect(codeEngine?.get("state").str) {
         var reads = 0
         while (codeEngine?.get("state").str.let { it == "checking" || it == "setting-up" } && reads++ < 600) {
             kotlinx.coroutines.delay(2_000)
-            try { codeEngine = app.companion.settings()["cad"].obj } catch (_: Exception) {}
+            try { codeEngine = app.companion.codeEngine() } catch (_: Exception) {}
         }
     }
 

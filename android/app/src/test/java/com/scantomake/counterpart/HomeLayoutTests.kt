@@ -469,8 +469,8 @@ class HomeLayoutTests {
             when {
                 request.url.endsWith("/v1/settings/cad/setup") -> json(200, mapOf("settings" to mapOf("milestones" to "50",
                     "cad" to mapOf("state" to "setting-up", "message" to "Setting up… 0 s so far.", "seconds" to 0, "canSetUp" to false))))
-                request.url.endsWith("/v1/settings") -> json(200, mapOf("settings" to mapOf("milestones" to "50",
-                    "cad" to mapOf("state" to "not-set-up", "message" to "Not set up yet.", "server" to "bambu-printer-mcp", "canSetUp" to true))))
+                request.url.endsWith("/v1/settings/cad") -> json(200, mapOf("cad" to mapOf("state" to "not-set-up", "message" to "Not set up yet.", "server" to "bambu-printer-mcp", "canSetUp" to true)))
+                request.url.endsWith("/v1/settings") -> json(200, mapOf("settings" to mapOf("milestones" to "50")))
                 else -> json(404, mapOf("error" to "not-found"))
             }
         }

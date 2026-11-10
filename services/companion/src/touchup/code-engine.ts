@@ -119,24 +119,25 @@ async function pngs(dir: string): Promise<string[]> {
 }
 
 /**
- * Files a code pass's runs the way every pass's results are kept: each run with a model becomes a checkpoint
- * (`out/checkpoints/001.stl`, …), the last run named "touched" (or, if the pass stopped before one, the last run
- * with a model) becomes `out/touched.stl` and its views the pass's renders, and its script and parameters are
- * the pass's design source. Runs on any ending, a limit or a crash included. Nothing the worker made is changed.
+ * Files a code pass's runs the way every pass's results are kept. Only runs named "touched" are the model: each
+ * one with a model becomes a checkpoint (`out/checkpoints/001.stl`, …), the last becomes `out/touched.stl` with its
+ * views as the pass's renders, and its script and parameters are the pass's design source. Runs under other names
+ * (measuring the scan, one colour's part) never become the model, so a pass that measures and then asks, or stops
+ * at a limit before a touched run, leaves the project's model alone. Runs on any ending. Nothing is changed.
  */
 export async function collectCodeRuns(pass: Pick<TouchupPass, 'dir' | 'outDir' | 'checkpointsDir'>, validStl: StlCheck): Promise<{design?: CodeDesign}> {
   const runs = await cadRuns(passCadDir(pass), validStl);
-  const built = runs.filter(run => run.stl);
+  const built = runs.filter(run => run.stl && run.name === 'touched');
   await mkdir(pass.checkpointsDir, {recursive: true});
   for (const [index, run] of built.entries()) await copyFile(run.stl!, join(pass.checkpointsDir, `${String(index + 1).padStart(3, '0')}.stl`));
-  const final = built.filter(run => run.name === 'touched').at(-1);
+  const final = built.at(-1);
   if (final) {
     await copyFile(final.stl!, join(pass.outDir, 'touched.stl'));
     // The overall sheet first, then the single views: the rules ask for the clearest overall view to sort first.
     const views = (await pngs(final.dir)).sort((a, b) => Number(basename(b) === 'contact.png') - Number(basename(a) === 'contact.png') || basename(a).localeCompare(basename(b)));
     for (const [index, view] of views.entries()) await copyFile(view, join(pass.outDir, `${index + 1}-${basename(view)}`));
   }
-  const source = final ?? built.at(-1);
+  const source = final;
   if (!source) return {};
   const at = (suffix: string) => join(source.dir, `${source.name}${suffix}`);
   return {design: {script: at('.py'), parameters: at('.parameters.json'),

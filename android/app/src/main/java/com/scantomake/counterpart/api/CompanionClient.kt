@@ -83,7 +83,7 @@ class CompanionClient(
                     if (path == "/v1/blender") return "projects:read"
                     if (m("/v1/objects(?:/printers)?") || m(one) || m("$one/passes/(0|[1-9][0-9]{0,15})/activity")) return "projects:read"
                     if (m("/healthz")) return "generation:health"
-                    if (m("/v1/events") || m("/v1/settings") || m("/v1/devices")) return "projects:read"
+                    if (m("/v1/events") || m("/v1/settings") || m("/v1/settings/cad") || m("/v1/devices")) return "projects:read"
                     if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
                     if (m("$one/(filaments|colour-mapping|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
@@ -357,6 +357,8 @@ class CompanionClient(
 
     suspend fun settings(): JsonObject = request("GET", "/v1/settings")["settings"].obj ?: throw invalid()
     suspend fun changeSettings(patch: JsonObject): JsonObject = request("PATCH", "/v1/settings", patch)["settings"].obj ?: throw invalid()
+    /** Settings → the code design engine's row, read fresh (the plain settings read never starts the printer MCP). */
+    suspend fun codeEngine(): JsonObject? = request("GET", "/v1/settings/cad")["cad"].obj
     /** Settings → the code design engine's Set Up (PRD §8.9): the computer starts the printer MCP's cad_setup and returns at once. */
     suspend fun setUpCodeEngine(): JsonObject = request("POST", "/v1/settings/cad/setup", jsonOf())["settings"].obj ?: throw invalid()
     suspend fun devices(): List<JsonObject> = request("GET", "/v1/devices")["devices"].arr?.mapNotNull { it.obj } ?: emptyList()

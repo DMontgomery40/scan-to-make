@@ -78,11 +78,11 @@ export class CadSettings {
     return this.current();
   }
 
-  /** The row as it stands, without waiting: a stale answer is read again in the background, and settings.changed follows. */
-  snapshot(): CadView {
-    if (!this.#setup && (!this.#status || this.#now() - this.#status.at > STALE_MS)) void this.refresh().catch(() => undefined);
-    return this.current();
-  }
+  /**
+   * The row as last read, for passive settings reads: it never starts the printer MCP (settings.md: a passive refresh
+   * launches no MCP). The row itself reads fresh with `view()` (`cad.status`, `GET /v1/settings/cad`).
+   */
+  snapshot(): CadView { return this.current(); }
 
   current(): CadView {
     const server = this.#status?.server;

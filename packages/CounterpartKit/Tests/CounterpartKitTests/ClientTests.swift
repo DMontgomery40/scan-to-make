@@ -257,7 +257,7 @@ final class CompanionClientTests: XCTestCase {
         let fake = FakeTransport { request, _ in
             request.httpMethod == "POST"
                 ? json(200, ["settings": ["milestones": "50", "cad": ["state": "setting-up", "message": "Setting up… 0 s so far.", "seconds": 0, "canSetUp": false]]])
-                : json(200, ["settings": ["milestones": "50", "cad": ready]])
+                : json(200, ["cad": ready])
         }
         let mac = try client(fake)
         let status = try await mac.codeEngine()
@@ -266,9 +266,9 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(setUp?.state, "setting-up")
         XCTAssertEqual(setUp?.isWorking, true)
         XCTAssertEqual(fake.calls.map { $0.request.httpMethod }, ["GET", "POST"])
-        XCTAssertEqual(fake.calls.map { $0.request.url?.path }, ["/v1/settings", "/v1/settings/cad/setup"])
+        XCTAssertEqual(fake.calls.map { $0.request.url?.path }, ["/v1/settings/cad", "/v1/settings/cad/setup"])
         // A computer whose companion predates the engine: no row.
-        let older = FakeTransport { _, _ in json(200, ["settings": ["milestones": "50"]]) }
+        let older = FakeTransport { _, _ in json(404, ["error": ["code": "not-found", "message": "Not found"]]) }
         let none = try await client(older).codeEngine()
         XCTAssertNil(none)
     }

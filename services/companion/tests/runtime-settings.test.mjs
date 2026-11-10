@@ -239,9 +239,10 @@ test('the code design engine row: from cad_status, Set Up runs cad_setup in the 
   const notSetUp = await settings.view();
   assert.deepEqual(notSetUp, {state: 'not-set-up', message: 'Not set up yet.', server: 'bambu-printer-mcp', canSetUp: true});
   assert.doesNotMatch(JSON.stringify(notSetUp), /cad_setup|install: true/, 'the MCP\'s developer text is not the row\'s words');
-  // Fresh for 30 s; then asked again.
+  // Fresh for 30 s; then asked again. A passive settings read (snapshot) never asks.
   await settings.view(); assert.equal(statusCalls, 1);
-  now += 31_000; await settings.view(); assert.equal(statusCalls, 2);
+  now += 31_000; settings.snapshot(); assert.equal(statusCalls, 1, 'a passive read starts no MCP');
+  await settings.view(); assert.equal(statusCalls, 2);
   // Set Up returns at once and shows its progress.
   const started = await settings.setUp();
   assert.equal(started.state, 'setting-up');
@@ -307,6 +308,10 @@ test('cad.status and cad.setup reach the code design engine row over the control
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}/v1/settings`;
   assert.equal((await (await fetch(base)).json()).settings.cad.state, 'not-set-up');
+  // A passive settings read never starts the printer MCP; the row's own read does.
+  const before = cadSettings.current();
+  assert.equal((await (await fetch(`${base}/cad`)).json()).cad.state, before.state);
+  assert.equal(scopes.at(-1), 'projects:read');
   const pressed = await fetch(`${base}/cad/setup`, {method: 'POST', headers: {'content-type': 'application/json'}, body: '{}'});
   assert.equal(pressed.status, 200);
   assert.equal((await pressed.json()).settings.cad.state, 'setting-up');

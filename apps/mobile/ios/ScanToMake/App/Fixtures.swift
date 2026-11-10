@@ -419,6 +419,7 @@ struct FixtureTransport: HTTPTransport {
         if path == "/v1/settings" { return json(["settings": Fixtures.settings]) }
         if path == "/v1/devices" && method == "GET" { return json(["devices": Fixtures.devices]) }
         if path.hasPrefix("/v1/devices/") && method == "DELETE" { return json(["removed": true]) }
+        if path == "/v1/settings/cad" { return json(["cad": Fixtures.settings["cad"]!]) }
         // The code design engine's Set Up: the computer starts it and the row follows its progress (PRD §8.9).
         if path == "/v1/settings/cad/setup" && method == "POST" {
             var settings = Fixtures.settings

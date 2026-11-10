@@ -68,7 +68,7 @@ const FUSION_RULES = `- Design it in Autodesk Fusion through the printer MCP's f
  * printer MCP's (its cad_design prompt, added below); these lines are only where Counterpart keeps each run.
  */
 const CODE_RULES = `- Build it with the printer MCP's code design engine (its cad_* tools), following its cad_design prompt below. Give every cad_run the design folder from the files list as its output_dir.
-- Every cad_run is kept: Counterpart files each one with a model as a checkpoint, so save a run after each fix. Name the run that makes the finished model "touched" (for several colours, the whole model): its model, views, script and parameters become this pass's result, and a later change starts from that script and those parameters.`;
+- Name every run of the whole model "touched", and save one after each fix: Counterpart files each as a checkpoint, the last one's model, views, script and parameters become this pass's result, and a later change starts from that script and those parameters. Give runs that measure or prepare the scan, or make one colour's part, any other name: they never become the model.`;
 
 /** How the core's checkpoint and final-export lines read for each engine. The code engine's runs are filed by Counterpart. */
 const EXPORT_RULES = {

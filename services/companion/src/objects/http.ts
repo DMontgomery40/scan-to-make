@@ -207,6 +207,12 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             throw new HttpFailure(status, error.code === 'invalid' ? 'invalid-request' : error.code, error.message);
           }
         }
+        if (url.pathname === '/v1/settings/cad') {
+          // The code design engine's row, read fresh: GET /v1/settings only carries the last answer.
+          if (request.method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          return send(response, 200, {cad: await service.codeEngine()});
+        }
         if (url.pathname === '/v1/settings/cad/setup') {
           // Settings → the code design engine's Set Up (PRD §8.9): the companion runs the printer MCP's cad_setup.
           if (request.method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
