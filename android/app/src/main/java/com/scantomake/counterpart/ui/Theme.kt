@@ -197,13 +197,15 @@ object ImageCache {
 
 /** A file of a project (a render, a photo, an Ask's picture), fetched over the pinned connection. */
 @Composable
-fun ProjectImage(project: Project, name: String?, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Crop) {
-    val key = name?.let { "${project.id}/${project.mediaVersion}/$it" }
+fun ProjectImage(project: Project, name: String?, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Crop,
+                 /** The longest side to decode: about 300 for a grid cell, so a scan's 130 frames never decode near full size. */
+                 maxSide: Int = 1600) {
+    val key = name?.let { "${project.id}/${project.mediaVersion}/$it" + if (maxSide == 1600) "" else "@$maxSide" }
     var bitmap by remember(key) { mutableStateOf(key?.let(ImageCache::get)) }
     LaunchedEffect(key) {
         if (key == null || bitmap != null) return@LaunchedEffect
         bitmap = withContext(Dispatchers.IO) {
-            try { Counterpart.instance.companion.download(project, name).let(ImageCache::decode)?.also { ImageCache.put(key, it) } } catch (_: Exception) { null }
+            try { ImageCache.decode(Counterpart.instance.companion.download(project, name), maxSide)?.also { ImageCache.put(key, it) } } catch (_: Exception) { null }
         }
     }
     Box(modifier.stage(), contentAlignment = Alignment.Center) {

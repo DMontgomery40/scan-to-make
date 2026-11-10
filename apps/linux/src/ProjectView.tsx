@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { artifact, call, importFiles, openLink, openProject } from "./bridge";
 import {
   AFTER_PRINTING,
   activePrint,
+  askCaption,
   canSelectPlate,
+  clampRegion,
+  projectThumbnail,
+  scanSample,
+  scanWords,
   didItFitQuestion,
   duration,
   passHeading,
@@ -20,6 +25,101 @@ type Mutate = (
   method: string,
   params?: object,
 ) => Promise<{ object?: Project }>;
+/** The question's picture (David, Nov 9: "the area it's highlighting is almost impossible to see"): the panel's width at
+ * the photo's own aspect ratio, the rest dimmed and the region outlined, sized to the image itself so the region sits on
+ * the part it names. Click opens it in a dialog where the wheel or a pinch zooms it. */
+function AskPhoto({ project, ask }: { project: Project; ask: Ask }) {
+  const [open, setOpen] = useState(false);
+  const path = ask.photo ?? projectThumbnail(project);
+  const region = ask.photo ? clampRegion(ask.region) : undefined;
+  const caption = askCaption(ask);
+  // A picture that fails to load hides the whole figure; a new question starts over (review F2, F3 on #456).
+  const [failedPath, setFailedPath] = useState<string>();
+  if (!path || failedPath === `${project.id}/${path}`) return null;
+  const marked = (zoom = 1) => (
+    <span className="ask-photo-frame" style={zoom === 1 ? undefined : { transform: `scale(${zoom})` }}>
+      <Picture id={project.id} path={path} alt={caption} onFailed={() => setFailedPath(`${project.id}/${path}`)} />
+      {region && (
+        <span
+          className="region"
+          style={{
+            left: `${region.x * 100}%`,
+            top: `${region.y * 100}%`,
+            width: `${region.width * 100}%`,
+            height: `${region.height * 100}%`,
+          }}
+        />
+      )}
+    </span>
+  );
+  return (
+    <figure className="ask-photo">
+      <button className="ask-photo-open" aria-label={`${caption} Open it larger.`} onClick={() => setOpen(true)}>
+        {marked()}
+      </button>
+      <figcaption>{caption}</figcaption>
+      {open && <ZoomDialog caption={caption} onClose={() => setOpen(false)} render={marked} />}
+    </figure>
+  );
+}
+function ZoomDialog({ caption, onClose, render }: { caption: string; onClose: () => void; render: (zoom: number) => ReactNode }) {
+  const [zoom, setZoom] = useState(1);
+  return (
+    <Modal title="The question's picture" onClose={onClose} wide>
+      <div
+        className="zoom-view"
+        onWheel={(e) => setZoom((z) => Math.min(6, Math.max(1, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15))))}
+        onDoubleClick={() => setZoom((z) => (z > 1 ? 1 : 3))}
+      >
+        {render(zoom)}
+      </div>
+      <p className="ask-caption">{caption} Scroll or pinch to zoom; double-click to zoom in or out.</p>
+    </Modal>
+  );
+}
+/** A picture fetched only once it scrolls into view. */
+function LazyPicture({ id, path, alt }: { id: string; path: string; alt: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || seen) return;
+    const observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setSeen(true), { rootMargin: "200px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [seen]);
+  return <div ref={ref} className="lazy-picture">{seen ? <Picture id={id} path={path} alt={alt} /> : null}</div>;
+}
+/** A scan as one thing (David, Nov 9: "highly unnecessary to show every single one of these"): five frames round the
+ * orbit and the count; Show all opens every frame, each fetched as it scrolls into view. */
+function ScanStrip({ project }: { project: Project }) {
+  const [all, setAll] = useState(false);
+  const frames = (project.capture ?? []).map((name) => `capture/${name}`);
+  if (!frames.length) return null;
+  const words = scanWords(frames.length);
+  return (
+    <div className="scan-strip">
+      <button className="scan-strip-frames" aria-label={`Your scan, ${words}. Show all.`} onClick={() => setAll(true)}>
+        {scanSample(frames.length).map((i) => (
+          <Picture key={frames[i]} id={project.id} path={frames[i]} alt="" />
+        ))}
+      </button>
+      <div className="scan-strip-words">
+        <span>Your scan · {words}</span>
+        <button className="link" onClick={() => setAll(true)}>Show all</button>
+      </div>
+      {all && (
+        <Modal title={`Your scan · ${words}`} onClose={() => setAll(false)} wide>
+          <div className="scan-gallery">
+            {frames.map((path, i) => (
+              <LazyPicture key={path} id={project.id} path={path} alt={`Photo ${i + 1} of ${frames.length}`} />
+            ))}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
 function AskCard({
   project,
   ask,
@@ -38,25 +138,8 @@ function AskCard({
     <section className="question">
       <div className="eyebrow">Needs you</div>
       <h3>{ask.question}</h3>
-      {ask.photo && (
-        <div className="ask-photo">
-          <Picture
-            id={project.id}
-            path={ask.photo}
-            alt="The region this question is about"
-          />
-          {ask.region && (
-            <div
-              className="region"
-              style={{
-                left: `${ask.region.x * 100}%`,
-                top: `${ask.region.y * 100}%`,
-                width: `${ask.region.width * 100}%`,
-                height: `${ask.region.height * 100}%`,
-              }}
-            />
-          )}
-        </div>
+      {ask.type !== "file" && ask.type !== "choice" && (
+        <AskPhoto project={project} ask={ask} />
       )}
       {ask.url && (
         <Action run={() => openLink(ask.url!)}>Open designer’s page</Action>
@@ -473,6 +556,7 @@ export function ProjectView({
                       alt="Photo with original request"
                     />
                   ))}
+                  <ScanStrip project={p} />
                 </div>
                 {[
                   ...p.passes.map((pass, index) => ({

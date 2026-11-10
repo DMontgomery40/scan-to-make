@@ -1,0 +1,68 @@
+import XCTest
+import CoreGraphics
+@testable import CounterpartKit
+
+/// David, Nov 9: the question's picture was a 64-point square with an unreadable box, captioned "The highlighted part is
+/// what I can't see." under a size question that boxed the whole bottle.
+final class AskPictureTests: XCTestCase {
+    func testTheCaptionNeverClaimsWhatTheMacCannotSee() {
+        let bottle = Project.Ask(id: "a", question: "Can you confirm the size?", photo: "asks/a.jpg",
+                                 region: .init(x: 0.42, y: 0.3, width: 0.28, height: 0.34), answers: ["text"])
+        XCTAssertEqual(AskPicture.caption(bottle), "The outlined part is what this question is about.")
+        XCTAssertEqual(AskPicture.caption(Project.Ask(id: "a", question: "q", photo: "asks/a.jpg", answers: [])), "The picture that goes with this question.")
+        XCTAssertEqual(AskPicture.caption(Project.Ask(id: "a", question: "q", answers: [])), "Your project’s picture. No picture came with this question.")
+        for caption in [AskPicture.caption(bottle), AskPicture.caption(nil)] {
+            XCTAssertFalse(caption.localizedCaseInsensitiveContains("can't see") || caption.localizedCaseInsensitiveContains("can’t see"))
+        }
+    }
+
+    func testARegionOutsideThePictureIsClampedOrDropped() {
+        let edge = try! XCTUnwrap(Project.Region(x: -0.1, y: 0.5, width: 0.3, height: 0.8).clamped)
+        XCTAssertEqual([edge.x, edge.y, edge.width, edge.height].map { ($0 * 1000).rounded() }, [0, 500, 200, 500])
+        XCTAssertNil(Project.Region(x: 1.2, y: 0, width: 0.3, height: 0.3).clamped)
+        XCTAssertNil(Project.Region(x: .nan, y: 0, width: 0.3, height: 0.3).clamped)
+    }
+
+    /// The full-screen picture keeps its size, dims outside the region and leaves the region's middle untouched.
+    func testTheMarkedPictureDimsOutsideTheRegionOnly() throws {
+        let width = 400, height = 300
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let photo = try XCTUnwrap(context.makeImage())
+        let marked = try XCTUnwrap(AskPicture.marked(photo, region: .init(x: 0.42, y: 0.3, width: 0.28, height: 0.34)))
+        XCTAssertEqual([marked.width, marked.height], [width, height])
+        func red(_ x: Int, _ yFromTop: Int) throws -> UInt8 {
+            let data = try XCTUnwrap(marked.dataProvider?.data as Data?)
+            return data[yFromTop * marked.bytesPerRow + x * 4]
+        }
+        XCTAssertGreaterThan(try red(Int(0.56 * Double(width)), Int(0.47 * Double(height))), 250, "the region's middle is untouched")
+        XCTAssertLessThan(try red(20, 20), 140, "outside the region is dimmed")
+        XCTAssertLessThan(try red(200, 280), 140, "below the region too (top-left origin)")
+        // The region runs 0.30–0.64 from the top. Without the flip to Core Graphics' bottom-left origin it would land at
+        // 0.36–0.70, so these two rows tell the two apart (review F8a on #456).
+        XCTAssertGreaterThan(try red(Int(0.56 * Double(width)), Int(0.33 * Double(height))), 250, "0.33 from the top is inside")
+        XCTAssertLessThan(try red(Int(0.56 * Double(width)), Int(0.67 * Double(height))), 140, "0.67 from the top is outside")
+    }
+}
+
+extension AskPictureTests {
+    /// David's photo is stored on its side (EXIF orientation 6) and its region is measured upright, so the marked file is
+    /// upright too.
+    func testTheMarkedFileIsUprightForAPhotoStoredOnItsSide() throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let sideways = folder.appendingPathComponent("ask.jpg"), marked = folder.appendingPathComponent("marked.jpg")
+        let out = try XCTUnwrap(CGImageDestinationCreateWithURL(sideways as CFURL, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(out, try XCTUnwrap(context.makeImage()), [kCGImagePropertyOrientation: 6] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(out))
+        XCTAssertTrue(AskPicture.markedFile(from: sideways, region: .init(x: 0.42, y: 0.3, width: 0.28, height: 0.34), to: marked))
+        let image = try XCTUnwrap(AskPicture.upright(marked))
+        XCTAssertEqual([image.width, image.height], [300, 400], "portrait, as the photo is meant to be seen")
+    }
+}

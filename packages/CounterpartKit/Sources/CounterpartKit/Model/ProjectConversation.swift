@@ -8,8 +8,10 @@ public struct ProjectConversation: Equatable, Sendable {
         public var role: Role
         public var text: String
         public var atMs: Double?
-        /// Project-relative paths, ready for the existing image readers.
+        /// Project-relative paths, ready for the existing image readers: the photos the person added on purpose.
         public var photos: [String]
+        /// The scan's frames, shown as one thing (a few of them and the count), never as a wall of pictures.
+        public var scan: ScanPhotos?
         public var status: String?
         public var showsTime = false
         public var firstParagraph: String {
@@ -22,9 +24,10 @@ public struct ProjectConversation: Equatable, Sendable {
 
     public init(project: Project, queued: [CorrectionQueue.Message] = [], queueFailed: Bool = false) {
         var rows: [Entry] = []
-        let initialPhotos = (project.requestPhotos ?? []).map { "photos/\($0)" } + (project.capture ?? []).map { "capture/\($0)" }
-        if project.instructions?.isEmpty == false || !initialPhotos.isEmpty {
-            rows.append(Entry(id: "request", role: .person, text: project.instructions ?? "", atMs: project.createdAtMs, photos: initialPhotos))
+        let initialPhotos = (project.requestPhotos ?? []).map { "photos/\($0)" }
+        let scan = ScanPhotos(project)
+        if project.instructions?.isEmpty == false || !initialPhotos.isEmpty || scan != nil {
+            rows.append(Entry(id: "request", role: .person, text: project.instructions ?? "", atMs: project.createdAtMs, photos: initialPhotos, scan: scan))
         }
         for message in project.messages ?? [] {
             let status = message.id == project.pendingMessageId ? "Message saved" :
@@ -71,5 +74,36 @@ public struct ProjectConversation: Equatable, Sendable {
         entries = rows
         let associated = Set(rows.flatMap(\.photos))
         otherPhotos = project.photos.map { "photos/\($0)" }.filter { !associated.contains($0) }
+    }
+}
+
+/// A scan's frames (David, Nov 9: "it also seems highly unnecessary to show every single one of these (and thus load every
+/// single one of these) images"): a few spread round the orbit and the count; the whole set opens in its own lazy view.
+public struct ScanPhotos: Equatable, Sendable {
+    /// Every frame, project-relative (`capture/0001.heic`), for the full view.
+    public var frames: [String]
+    /// The frames the strip shows: the first, the last, and evenly between.
+    public var preview: [String]
+    public var count: Int { frames.count }
+    /// "130 photos".
+    public var words: String { count == 1 ? "1 photo" : "\(count) photos" }
+
+    /// How many the strip shows.
+    public static let shown = 5
+
+    public init?(_ project: Project) {
+        let names = project.capture ?? []
+        guard !names.isEmpty else { return nil }
+        let all = names.map { "capture/\($0)" }
+        frames = all
+        preview = Self.sample(all.count).map { all[$0] }
+    }
+
+    /// Indexes of `count` frames to show, the same on every client (Kotlin `ScanPhotos.sample`, Linux `scanSample`):
+    /// 130 frames give 0, 32, 65, 97, 129.
+    public static func sample(_ count: Int, shown: Int = ScanPhotos.shown) -> [Int] {
+        guard count > shown else { return Array(0..<count) }
+        guard shown > 1 else { return [0] }
+        return (0..<shown).map { (($0 * (count - 1)) + (shown - 1) / 2) / (shown - 1) }
     }
 }
