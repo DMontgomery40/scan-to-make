@@ -1003,8 +1003,9 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["ask-text"].exists, "words for what the numbers don't say")
         // Changing a number changes what the button says it will do; a field that isn't a number sends nothing.
         let waist = app.textFields["ask-size-size-2"]
-        waist.tap()
-        waist.typeText(XCUIKeyboardKey.delete.rawValue + XCUIKeyboardKey.delete.rawValue + XCUIKeyboardKey.delete.rawValue + XCUIKeyboardKey.delete.rawValue + "53")
+        // The number is right-aligned: tap its trailing edge so the cursor is after the last digit.
+        waist.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        waist.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "53")
         XCTAssertEqual(waist.value as? String, "53")
         XCTAssertEqual(confirm.label, "Send These Sizes")
         XCTAssertTrue(confirm.isEnabled)
