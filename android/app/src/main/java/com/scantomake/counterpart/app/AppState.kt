@@ -109,9 +109,12 @@ class AppState(private val app: Counterpart) {
         loaded.value = true
     }
 
+    /** A project refresh tells the link what happened, as the list load does: an answer, a refusal (still an answer),
+     *  pairing lost, or no answer at all. */
     suspend fun reload(id: String): CompanionException? = try {
-        show(app.companion.get(id)); null
+        show(app.companion.get(id)); answered(); null
     } catch (e: CompanionException) {
+        if (e.code != "cancelled") requestFailed(e)
         if (e.code == "not-found") remove(id)
         e
     }

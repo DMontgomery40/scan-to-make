@@ -95,4 +95,29 @@ class AppStateTests {
         assertTrue(state.needsMac)
         assertFalse(state.loaded.value)
     }
+
+    /** A project refresh reports every failure to the link, not only "didn't answer": pairing lost on a refresh must
+     *  not leave Home saying "connected", and a refusal ends a stale "isn't answering". */
+    @Test fun aProjectRefreshThatFailsForAnyReasonUpdatesTheLink() = kotlinx.coroutines.test.runTest(dispatcher) {
+        pair()
+        dispatcher.scheduler.runCurrent()
+        val id = "d79d4c15-d786-461c-b76e-ec687c8e2dad"
+        state.link.value = com.scantomake.counterpart.api.MacLink.Connected
+        transport.answer = { _, _ -> json(401, mapOf("error" to mapOf("code" to "pairing-changed", "message" to "Refused."))) }
+        val lost = state.reload(id)
+        assertTrue(lost!!.needsPairing)
+        assertTrue(state.link.value is com.scantomake.counterpart.api.MacLink.NeedsPairing)
+        assertTrue(state.error.value!!.needsPairing)
+        state.link.value = com.scantomake.counterpart.api.MacLink.NotAnswering
+        state.error.value = com.scantomake.counterpart.api.CompanionException.unreachable
+        transport.answer = { _, _ -> json(409, mapOf("error" to mapOf("code" to "invalid-state", "message" to "Refused."))) }
+        state.reload(id)
+        assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
+        assertNull(state.error.value)
+        // And a refresh that works is an answer.
+        state.link.value = com.scantomake.counterpart.api.MacLink.NotAnswering
+        transport.answer = { _, _ -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "Gone."))) }
+        state.reload(id)
+        assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
+    }
 }
