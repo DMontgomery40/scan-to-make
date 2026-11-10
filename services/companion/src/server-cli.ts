@@ -135,7 +135,7 @@ const mcpLabels:Record<string,string>={'bambu-printer-mcp':'bambu-printer-mcp','
 if(remoteAuth)mcpUpdates=new McpUpdater({
   catalog:()=>printerCatalog,
   destinations:()=>printerCatalog?printerCatalog.destinations.map(destination=>({id:destination.id,config:printerCatalog!.resolve(destination.id)!})):[],
-  env:printerEnv,overrides:new McpOverrides(join(dataRoot,'printers','overrides.json')),
+  env:printerEnv,overrides:new McpOverrides(join(dataRoot,'printers','overrides.json')),journal:join(dataRoot,'printers','mcp-updates'),
   session:id=>{
     const services=printerDestinations;
     if(!services)return undefined;
