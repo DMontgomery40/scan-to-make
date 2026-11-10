@@ -325,7 +325,7 @@ for (const unavailable of [false, true]) test(`a recovery uses --resume and a sh
   const deps=recorder([]);
   deps.run=async (inv,pass,opts)=>{
     seen.push({args:[...inv.args],cwd:inv.cwd});
-    if (unavailable && seen.length===1) return {status:'failed',reason:'No conversation found with session ID: old-session',sessionId:'old-session',renders:[],checkpoints:[],stats:{seconds:1,toolCalls:0}};
+    if (unavailable && seen.length===1) return {status:'failed',reason:'No conversation found with session ID: old-session',sessionId:'old-session',resumeUnavailable:true,worker:{tools:[],plugins:[],mcpServers:[]},renders:[],checkpoints:[],stats:{seconds:1,toolCalls:0}};
     return {...done(pass), sessionId:unavailable?'new-session':'old-session',resumable:false};
   };
   const result=await runTouchup(i,deps);
@@ -353,4 +353,17 @@ test('an initialized worker failure is never retried cold even if its answer men
  const i=await input({instructions:'A unicorn',resume:{sessionId:'old',passDir:'/old/pass'}}),deps=recorder([]);let calls=0;
  deps.run=async()=>{calls++;return {status:'failed',reason:'Session unavailable in a modeling tool.',sessionId:'old',worker:{tools:[],plugins:[],mcpServers:[]},renders:[],checkpoints:[],stats:{seconds:1,toolCalls:0}};};
  const result=await runTouchup(i,deps);assert.equal(calls,1);assert.equal(result.status,'failed');
+});
+
+for (const throws of [false,true]) test(`an unavailable session whose cold start ${throws ? 'throws' : 'returns failed'} explains both failures`, async () => {
+ const i=await input({instructions:'A unicorn',resume:{sessionId:'old',passDir:'/old/pass'}}),deps=recorder([]);let calls=0;
+ deps.run=async()=>{
+  if(++calls===1)return {status:'failed',reason:'No conversation found with session ID: old',sessionId:'old',resumeUnavailable:true,worker:{tools:[],plugins:[],mcpServers:[]},renders:[],checkpoints:[],stats:{seconds:0,toolCalls:0}};
+  if(throws)throw new Error('Claude login unavailable');
+  return {status:'failed',reason:'Claude login unavailable',resumable:false,renders:[],checkpoints:[],stats:{seconds:0,toolCalls:0}};
+ };
+ const result=await runTouchup(i,deps);
+ assert.equal(calls,2);assert.equal(result.status,'failed');assert.equal(result.resumable,false);
+ assert.match(result.reason,/previous Claude Code session.*unavailable/i);assert.match(result.reason,/starting again failed/i);assert.match(result.reason,/Claude login unavailable/);
+ assert.equal(result.resume.outcome,'cold-start');
 });

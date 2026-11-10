@@ -8,7 +8,7 @@ import {defaultBlenderLaunch, ensureBlenderMcp, resetBlenderScene, stopOwnedBlen
 import {prepareTouchupPass, type TouchupPass} from './inputs.js';
 import {buildTouchupInvocation, type DesignEngine, type DesignGuidance, type TouchupInvocation} from './invocation.js';
 import {toolErrorText} from './blender.js';
-import {runTouchupWorker, type TouchupProgress, type TouchupResult} from './runner.js';
+import {runTouchupWorker, publicTouchupText, type TouchupProgress, type TouchupResult} from './runner.js';
 import {DESIGNER_FILE_REBUILT, designerEditProblem} from './designer-file.js';
 import {mcpPackageName} from '../printing/print-settings.js';
 
@@ -298,17 +298,25 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   input.onProgress?.({seconds: 0, toolCalls: 0, passDir: pass.dir, sessionCwd: inv.cwd, ...(input.resume ? {sessionId: input.resume.sessionId} : {})});
   let result = await (deps.run ?? runTouchupWorker)(inv, pass, runOptions);
   if (input.resume) {
-    const unavailable = result.status === 'failed' && !result.worker && result.stats.toolCalls === 0
-      && /no conversation found with session ID|session[^\n]*(?:not found|does not exist|unavailable)|invalid session (?:id|identifier)/i.test(result.reason ?? '');
+    const unavailable = result.status === 'failed' && result.resumeUnavailable === true && result.stats.toolCalls === 0;
     if (unavailable && !input.signal?.aborted) {
-      const reason = 'The previous Claude Code session is unavailable. Started again from the saved project inputs.';
+      const reason = 'The previous Claude Code session is unavailable. Trying again from the saved project inputs.';
       input.onProgress?.({seconds: 0, toolCalls: 0, activity: [{atMs: Date.now(), kind: 'message', text: reason}]});
       inv.cwd = pass.dir;
       const coldArgs = [...inv.args], index = coldArgs.indexOf('--resume');
       coldArgs.splice(index, 2); coldArgs[coldArgs.length - 1] = coldPrompt;
       const prior = result;
-      result = await (deps.run ?? runTouchupWorker)({...inv, args: coldArgs, cwd: pass.dir}, pass, runOptions);
-      result = {...result, stats: {...result.stats, seconds: prior.stats.seconds + result.stats.seconds}, resume: {sessionId: input.resume.sessionId, outcome: 'cold-start', reason}};
+      const coldStarted = Date.now();
+      try { result = await (deps.run ?? runTouchupWorker)({...inv, args: coldArgs, cwd: pass.dir}, pass, runOptions); }
+      catch (error) {
+        if (input.signal?.aborted) throw error;
+        result = {status: 'failed', reason: publicTouchupText(error instanceof Error ? error.message : String(error), {...inv.env, ...input.handoff.process.env, ...inv.redactionEnv}),
+          resumable: false, renders: prior.renders, checkpoints: prior.checkpoints, stats: {seconds: Math.round((Date.now() - coldStarted) / 1000), toolCalls: 0}};
+      }
+      if (result.status === 'failed' && result.reason !== 'cancelled') result = {...result, resumable: result.resumable === true,
+        reason: `The previous Claude Code session is unavailable, and starting again failed. ${result.reason ?? 'The worker could not start.'}`};
+      result = {...result, stats: {...result.stats, seconds: prior.stats.seconds + result.stats.seconds},
+        resume: {sessionId: input.resume.sessionId, outcome: 'cold-start', reason: result.status === 'failed' ? result.reason : reason}};
     } else result = {...result, resume: {sessionId: input.resume.sessionId, outcome: result.sessionId === input.resume.sessionId ? 'resumed' : 'attempted'}};
   }
   result = {...result, sessionCwd: inv.cwd};

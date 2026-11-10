@@ -35,6 +35,8 @@ export interface TouchupResult {
   /** Fusion passes: the parametric design and its parameters, from fusion_mcp_export. */
   design?: {f3d: string; parameters?: string};
   reason?: string;
+  /** CLI loader rejection, recognized from its terminal event before any model turn. */
+  resumeUnavailable?: boolean;
   limit?: WorkerLimit;
   sessionId?: string;
   sessionCwd?: string;
@@ -81,6 +83,10 @@ export function publicTouchupText(text: string, env: NodeJS.ProcessEnv = {}): st
 }
 
 export interface ResultEvent {
+  subtype?: string;
+  num_turns?: number;
+  duration_api_ms?: number;
+  errors?: string[];
   is_error?: boolean;
   result?: string;
   total_cost_usd?: number;
@@ -287,7 +293,13 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const parts = model === touched ? await readFile(partsPath).then(bytes => {
     try { inspectModelFile(bytes, '3mf'); return partsPath; } catch { return undefined; }
   }, () => undefined) : undefined;
-  const base = {renders, checkpoints: validCheckpoints, ...(run.sessionId ? {sessionId: run.sessionId} : {}),
+  const resumeIndex = inv.args.indexOf('--resume'), resumeId = resumeIndex < 0 ? undefined : inv.args[resumeIndex + 1];
+  // Claude Code 2.1.321: exact loader error, exit 1, zero API time/turns. Init is not evidence either way.
+  const resumeUnavailable = !!resumeId && run.exitCode === 1 && toolCalls === 0
+    && resultEvent?.is_error === true && resultEvent.subtype === 'error_during_execution'
+    && resultEvent.num_turns === 0 && resultEvent.duration_api_ms === 0 && !resultEvent.structured_output
+    && Array.isArray(resultEvent.errors) && resultEvent.errors.includes(`No conversation found with session ID: ${resumeId}`);
+  const base = {renders, ...(resumeUnavailable ? {resumeUnavailable: true} : {}), checkpoints: validCheckpoints, ...(run.sessionId ? {sessionId: run.sessionId} : {}),
     resumable: !!run.sessionId && !resultEvent && stopReason !== 'cancelled',
     ...(run.limit ? {limit: run.limit} : {}), ...(parts ? {parts} : {}), ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
