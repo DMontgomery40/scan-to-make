@@ -20,6 +20,23 @@ final class PrinterSetupTests: XCTestCase {
         XCTAssertNil(catalog.destination(for: "Printer"), "A matching display name is not identity evidence")
     }
 
+    /// Review F2 (Nov 10): a project's printer saved under its other MCP's id is the same printer. The Mac app's
+    /// `ObjectsModel.printer(for:)` calls this; only the Xcode scheme compiles that file, so the member is tested here.
+    func testCatalogResolvesAPrinterSavedUnderItsOtherMCPsId() throws {
+        let catalog = try JSONDecoder().decode(PrinterCatalog.self, from: Data("""
+        {"defaultDestinationId":"other","destinations":[
+          {"id":"through-bambu","name":"Printer","backend":"bambu-printer-mcp","aliases":["old"],
+           "mcps":[{"backend":"bambu-printer-mcp","destinationId":"through-bambu"},{"backend":"mcp-3d-printer-server","destinationId":"through-generic"}]},
+          {"id":"other","name":"Printer","backend":"test"}
+        ]}
+        """.utf8))
+        XCTAssertEqual(catalog.resolved("through-generic")?.id, "through-bambu", "its id through the other MCP")
+        XCTAssertEqual(catalog.resolved("through-bambu")?.id, "through-bambu")
+        XCTAssertEqual(catalog.resolved("old")?.id, "through-bambu", "a recorded alias")
+        XCTAssertNil(catalog.resolved("gone"), "an id nothing lists is not the default printer: the caller decides")
+        XCTAssertNil(catalog.resolved(nil))
+    }
+
     func testFormSendsOnlyTheFieldsItsBrandUses() throws {
         var bambu = PrinterForm()
         bambu.host = " 192.168.1.40 "; bambu.serial = "01P00A123456789"; bambu.model = "p1s"; bambu.secret = "12345678"
