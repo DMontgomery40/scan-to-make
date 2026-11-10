@@ -12,11 +12,32 @@ async function fixture(t, value) {
   if(value!==undefined)await writeFile(path,JSON.stringify(value));
   return {path,store:new CompanionSettingsStore(path)};
 }
-test('absent and legacy settings expose supported notification and General sections without inventing choices',async t=>{
+test('absent and legacy settings expose supported notification and General sections without inventing the Mac\'s choices',async t=>{
   for(const value of [undefined,{milestones:'25-50-75'}]) {
     const {store}=await fixture(t,value);
-    assert.deepEqual(await store.load(),{milestones:value?.milestones??'50',notifications:{mac:{},devices:{}},general:{}});
+    // Only the companion's own choice has a default: Keep printer software up to date is on (Q9).
+    assert.deepEqual(await store.load(),{milestones:value?.milestones??'50',notifications:{mac:{},devices:{}},general:{autoUpdateMcps:true}});
   }
+});
+test('Q9: Keep printer software up to date is on for a new install and for a settings file from before it, and off stays off',async t=>{
+  const {autoUpdatesMcps}=await import('../dist/settings.js');
+  // A new install: no settings file at all.
+  const fresh=await fixture(t);
+  assert.equal(autoUpdatesMcps(await fresh.store.load()),true,'a new install is on');
+  // An existing file written before the key existed, with the Mac's own General choices in it.
+  const old=await fixture(t,{milestones:'50',general:{showInDock:false,keepAwake:true}});
+  const loaded=await old.store.load();
+  assert.equal(autoUpdatesMcps(loaded),true,'an existing file without the key is on');
+  assert.deepEqual(loaded.general,{autoUpdateMcps:true,showInDock:false,keepAwake:true},'and keeps the Mac\'s choices');
+  // Turned off, it stays off, through another change and a restart.
+  await old.store.update({general:{autoUpdateMcps:false}});
+  await old.store.update({milestones:'every-10'});
+  const again=new CompanionSettingsStore(old.path);
+  assert.equal(autoUpdatesMcps(await again.load()),false,'off is saved and read back as off');
+  assert.equal(JSON.parse(await readFile(old.path,'utf8')).general.autoUpdateMcps,false);
+  // The default isn't stuck on: it is the store's reading of a missing key, not a value forced over a saved one.
+  assert.equal(autoUpdatesMcps({milestones:'50',general:{}}),true);
+  assert.equal(autoUpdatesMcps({milestones:'50'}),true);
 });
 test('nested patches and concurrent changes preserve every explicit opt-out and unrelated stored section',async t=>{
   const {store,path}=await fixture(t,{milestones:'50',notifications:{mac:{'pass.ready':false,'future.event':false},devices:{phoneA:{'print.done':false}}},general:{showInDock:false},futureSection:{kept:true}});
@@ -25,7 +46,7 @@ test('nested patches and concurrent changes preserve every explicit opt-out and 
     store.update({notifications:{devices:{phoneB:{'pass.ask':false}}},general:{keepAwake:false}}),
     store.update({milestones:'every-10'})
   ]);
-  const expected={milestones:'every-10',notifications:{mac:{'pass.ready':false,'future.event':false,'print.milestone':true},devices:{phoneA:{'print.done':false},phoneB:{'pass.ask':false}}},general:{showInDock:false,keepAwake:false}};
+  const expected={milestones:'every-10',notifications:{mac:{'pass.ready':false,'future.event':false,'print.milestone':true},devices:{phoneA:{'print.done':false},phoneB:{'pass.ask':false}}},general:{autoUpdateMcps:true,showInDock:false,keepAwake:false}};
   assert.deepEqual(await store.load(),expected);
   assert.deepEqual(await new CompanionSettingsStore(path).load(),expected);
   assert.deepEqual(JSON.parse(await readFile(path,'utf8')).futureSection,{kept:true});

@@ -222,17 +222,27 @@ public final class CompanionClient: @unchecked Sendable {
     public func addStarter(_ starter: StarterProject) async throws -> Project {
         try await request("POST", "/v1/objects", json: ["starterId": starter.id], as: One.self).object
     }
-    public func create(_ instructions: String, kind: String? = nil, url: URL? = nil) async throws -> Project {
+    public func create(_ instructions: String, kind: String? = nil, url: URL? = nil, fit: ProjectFit? = nil) async throws -> Project {
+        try await request("POST", "/v1/objects", json: Self.createBody(instructions, kind: kind, url: url, fit: fit), as: One.self).object
+    }
+    /// `instructions` is what the person typed; how a fit's size is settled goes beside it as `fit`, never inside it.
+    static func createBody(_ instructions: String, kind: String?, url: URL?, fit: ProjectFit?) -> [String: Any] {
         let text = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         var json: [String: Any] = text.isEmpty ? [:] : ["instructions": text]
         if let kind, ["fit", "copy", "published"].contains(kind) { json["kind"] = kind }
         if let url { json["url"] = url.absoluteString }
-        return try await request("POST", "/v1/objects", json: json, as: One.self).object
+        if let fit, kind == "fit", !text.isEmpty { json["fit"] = fit.json }
+        return json
     }
-    public func updateDraft(_ id: String, instructions: String, kind: String? = nil) async throws -> Project {
+    /// A draft's fit choice is sent every time: the fields, or null when the draft is no longer a fit.
+    public func updateDraft(_ id: String, instructions: String, kind: String? = nil, fit: ProjectFit? = nil) async throws -> Project {
+        try await request("PATCH", "/v1/objects/\(id)", json: Self.draftBody(instructions, kind: kind, fit: fit), as: One.self).object
+    }
+    static func draftBody(_ instructions: String, kind: String?, fit: ProjectFit?) -> [String: Any] {
         var json: [String: Any] = ["instructions": instructions]
         if let kind, ["fit", "copy"].contains(kind) { json["kind"] = kind }
-        return try await request("PATCH", "/v1/objects/\(id)", json: json, as: One.self).object
+        json["fit"] = kind == "fit" ? fit?.json ?? NSNull() : NSNull()
+        return json
     }
     public func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/start", json: captureManifest.map { ["captureManifest": $0] } ?? [:], as: One.self).object

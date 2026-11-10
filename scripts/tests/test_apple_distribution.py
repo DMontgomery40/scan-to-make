@@ -1,4 +1,5 @@
 """Reject release artifacts that would strand external testers on development services."""
+import lane_isolation  # noqa: F401  (first: no test may reach the real build lane)
 import copy
 import importlib.util
 import pathlib
@@ -76,8 +77,9 @@ class TestFlightPreparationTests(unittest.TestCase):
     @staticmethod
     def past_trunk_guard(root):
         # These tests run on PR branches; the guard itself is covered by test_trunk_guard.py.
+        # Its own build lane under root, never the Mac's real one (lane_isolation.py), so a test can see its use.
         return {'STM_TRUNK_OVERRIDE': 'test_apple_distribution', 'STM_TRUNK_OVERRIDE_LOG': str(root / 'trunk-overrides.log'),
-                'STM_TRUNK_NO_FETCH': '1'}
+                'STM_TRUNK_NO_FETCH': '1', **lane_isolation.lane_env(root / 'lane-test')}
 
     def test_export_options_allow_external_testing_and_pin_production(self):
         # Xcode is the external, signing/account-changing boundary. Stop there, then
@@ -92,6 +94,9 @@ class TestFlightPreparationTests(unittest.TestCase):
                 env={**os.environ, 'BUILD_NUMBER': '42', 'RELEASE_DIR': str(output),
                      'PATH': str(root) + os.pathsep + os.environ['PATH'], **self.past_trunk_guard(root)})
             self.assertEqual(result.returncode, 77, result.stderr)
+            # The archive step ran inside a lane slot: this test's temporary lane, which it took and released.
+            self.assertTrue((root / 'lane-test/lane/sequence').exists())
+            self.assertEqual(list((root / 'lane-test/lane/holders').iterdir()), [])
             options = plistlib.loads((output / 'ExportOptions.plist').read_bytes())
             self.assertEqual(options['destination'], 'export')
             self.assertEqual(options['method'], 'app-store-connect')
@@ -109,6 +114,7 @@ class TestFlightPreparationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(archive.read_text(), 'preserved')
             self.assertFalse((pathlib.Path(directory) / 'ExportOptions.plist').exists())
+            self.assertFalse((pathlib.Path(directory) / 'lane-test').exists(), 'a refused run queued in the build lane')
 
 
 if __name__ == '__main__':

@@ -1,4 +1,5 @@
 """One trunk: build and install scripts refuse a dirty tree or a SHA that isn't on origin/main."""
+import lane_isolation  # noqa: F401  (first: no test may reach the real build lane)
 import os
 from pathlib import Path
 import shutil
@@ -8,6 +9,7 @@ import unittest
 
 REPO = Path(__file__).resolve().parents[2]
 GUARD = 'scripts/trunk_guard.sh'
+LANE = 'scripts/lane.py'
 # Every script that builds something installable or publishable. Each must refuse before doing work.
 ENTRY_POINTS = [
     'apps/mac/scripts/prepare-payload.sh',
@@ -30,9 +32,11 @@ class TrunkGuardTests(unittest.TestCase):
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('STM_TRUNK')}
         self.env.update(GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t', GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
                         STM_TRUNK_OVERRIDE_LOG=str(self.log), HOME=str(root))
+        # This test's own build lane, so a test can see whether a script queued in it.
+        self.lane = root / 'lane-test'; self.env.update(lane_isolation.lane_env(self.lane))
         subprocess.run(['git', 'init', '-q', '--bare', '-b', 'main', str(self.origin)], check=True)
         subprocess.run(['git', 'clone', '-q', str(self.origin), str(self.work)], check=True, stderr=subprocess.DEVNULL)
-        for path in [GUARD, *ENTRY_POINTS]:
+        for path in [GUARD, LANE, *ENTRY_POINTS]:
             (self.work / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / path, self.work / path)
         (self.work / 'apps/mobile/ios').mkdir(parents=True)  # the iPhone project's SRCROOT (empty: git ignores it)
@@ -107,6 +111,46 @@ class TrunkGuardTests(unittest.TestCase):
                                        STM_IPHONE_DEVICE='x')
                 self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
                 self.assertIn('trunk_guard: refusing', done.stderr)
+                self.assert_lane_untouched(path)
+
+    def assert_lane_untouched(self, what):
+        self.assertFalse(self.lane.exists(), what + ' queued in the build lane before refusing')
+
+    def test_scripts_that_take_the_lane_refuse_bad_arguments_before_queueing(self):
+        # Past the trunk guard (override), each refusal below is the script's own check. It must come before the
+        # script takes the lane: a refused run never waits in the queue or holds a slot.
+        node = self.work / 'apps/mac/Payload/node/bin/node'
+        release = dict(DEVELOPER_ID_APPLICATION='x', NOTARY_PROFILE='x', SPARKLE_PUBLIC_KEY='x', SPARKLE_FEED_URL='https://x',
+                       SPARKLE_BIN='x', RELEASE_DOWNLOAD_URL='https://x', BUILD_NUMBER='1', MAC_PROVISIONING_PROFILE='x')
+        existing = Path(self.folder.name) / 'existing'
+        (existing / 'Counterpart.xcarchive').mkdir(parents=True); (existing / 'DerivedData').mkdir()
+        testflight, iphone, mac = ('apps/mobile/scripts/prepare-testflight.sh', 'apps/mobile/scripts/install-iphone.sh',
+                                   'apps/mac/scripts/release.sh')
+        cases = [  # (script, environment, whether the Mac Payload is prepared)
+            (testflight, {'RELEASE_DIR': str(existing)}, False),  # no BUILD_NUMBER
+            (testflight, {'BUILD_NUMBER': '1'}, False),  # no RELEASE_DIR
+            (testflight, {'BUILD_NUMBER': '1', 'RELEASE_DIR': 'relative'}, False),
+            (testflight, {'BUILD_NUMBER': 'x', 'RELEASE_DIR': str(existing)}, False),
+            (testflight, {'BUILD_NUMBER': '1', 'RELEASE_DIR': str(self.work / 'out')}, False),
+            (testflight, {'BUILD_NUMBER': '1', 'RELEASE_DIR': str(existing)}, False),  # archive already there
+            (iphone, {'RELEASE_DIR': 'relative'}, False),
+            (iphone, {'RELEASE_DIR': str(self.work / 'out')}, False),
+            (iphone, {'RELEASE_DIR': str(existing)}, False),  # a build already there
+            (mac, dict(release, DEVELOPER_ID_APPLICATION=''), True),  # missing signing identity
+            (mac, release, False),  # Payload not prepared
+            (mac, dict(release, SPARKLE_FEED_URL='http://x'), True),
+            (mac, dict(release, RELEASE_DIR=str(existing)), True),  # archive already there
+        ]
+        for path, env, payload in cases:
+            with self.subTest(path=path, env=env):
+                if payload:
+                    node.parent.mkdir(parents=True, exist_ok=True); node.write_text('#!/bin/sh\n'); node.chmod(0o755)
+                elif node.exists():
+                    node.unlink()
+                done = self.run_script(path, STM_TRUNK_OVERRIDE='lane test', STM_TRUNK_NO_FETCH='1', **env)
+                self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
+                self.assertNotIn('trunk_guard: refusing', done.stderr)  # Past the guard: the script refused on its own.
+                self.assert_lane_untouched(path)
 
     @staticmethod
     def srcroot(path):

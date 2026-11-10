@@ -353,6 +353,8 @@ struct PrintersSettings: View {
     @ObservedObject var objects: ObjectsModel
     @ObservedObject private var updates = PrinterUpdates.shared
     @ObservedObject private var setup = PrinterSetupModel.shared
+    /// Q9, `general.autoUpdateMcps`: kept in the companion, so the phone and Linux show and change the same value.
+    @ObservedObject private var companion = CompanionSettingsModel.shared
     @State private var adding = false
 
     private var printers: [PrinterDestination] { objects.printerCatalog?.destinations ?? [] }
@@ -392,6 +394,15 @@ struct PrintersSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                // Only from a companion that sends it: an older one has no automatic updates.
+                if let on = companion.settings?.general?.autoUpdateMcps {
+                    Toggle(isOn:Binding(get:{ on }, set:{ value in Task { await companion.setGeneral(CounterpartKit.SettingsSchema.autoUpdateMcps.key, value) } })) {
+                        Text(CounterpartKit.SettingsSchema.autoUpdateMcps.label)
+                        Text(CounterpartKit.SettingsSchema.autoUpdateMcps.footer)
+                    }
+                    .disabled(companion.saving)
+                    .accessibilityIdentifier("auto-update-mcps")
+                }
                 ForEach(setup.packages.contains(where: { $0.uses != nil }) ? [] : PrinterMCP.list(printers)) { mcp in
                     MCPRow(mcp:mcp, companionUpdates:objects.capabilities?.mcpUpdates == true,
                            status:mcp.mcpId.flatMap { updates.status[$0] },
