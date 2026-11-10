@@ -1321,7 +1321,7 @@ test('paired update and move require settings scope and retain the desktop print
  * never returns, and `kill()` then stops that companion touching anything (its own timers may still fire in the test
  * process): together, what a companion killed at that step looks like to the next one.
  */
-async function restartable(t, {profile, npx = false, latest = '1.1.50', busy = () => false, inFlightWaitMs} = {}) {
+async function restartable(t, {profile, npx = false, latest = '1.1.50', busy = () => false, inFlightWaitMs, startedDelayMs = 0} = {}) {
   const root = await tempDir('mcp-update-journal-');
   // A killed companion that was waiting for an MCP to restart still has its start timer in this process; when it
   // fires, that companion records its failed update. The folder goes only after that, so nothing is written into it later.
@@ -1342,7 +1342,10 @@ async function restartable(t, {profile, npx = false, latest = '1.1.50', busy = (
   const config = profile ?? (npx ? bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']) : bambu(node, [`${live}/dist/index.js`]));
   const boot = ({hang = {}, failRename, verify} = {}) => {
     const moves = [];
-    let dead = false;
+    // `parked`: this companion has reached the step `hang` stops it at. Kill it only then: a killed companion here is
+    // still running in this process, and its journal writes (unlike its file moves, overrides and events) aren't stopped,
+    // so killing it earlier lets it write a journal after the next start has recovered (the Nov 10 flake).
+    let dead = false, parked = false;
     if (hang.restart) lingersUntil = Date.now() + 5000; // two start waits: the new copy, then the one put back
     const saved = new McpOverrides(join(root, 'overrides.json'));
     const overrides = new Proxy(saved, {get: (target, key) => key === 'set' ? (...args) => dead ? Promise.resolve() : target.set(...args)
@@ -1364,16 +1367,17 @@ async function restartable(t, {profile, npx = false, latest = '1.1.50', busy = (
         mkdir: async () => undefined,
       },
       destinations: () => [{id: 'p1s', config}],
-      session: () => ({restart: async () => { if (hang.restart) await never; }, connect: async () => ({server: {name: 'bambu-printer-mcp', version: latest}, tools: []})}),
+      session: () => ({restart: async () => { if (hang.restart) { parked = true; await never; } }, connect: async () => ({server: {name: 'bambu-printer-mcp', version: latest}, tools: []})}),
       busy: async id => busy(id), runningVersion: () => '1.1.46',
-      emit: async event => { if (!dead) events.push(event); },
+      // `startedDelayMs`: a companion slow between admitting an update and starting it (its `started` event is the first step).
+      emit: async event => { if (event.type === 'mcp.update.started' && startedDelayMs) await new Promise(resolve => setTimeout(resolve, startedDelayMs)); if (!dead) events.push(event); },
       run: async (command, args) => {
         if (args.includes('view')) return {code: 0, output: `${latest}\n`};
-        if (args.includes('install') && hang.install) await never;
+        if (args.includes('install') && hang.install) { parked = true; await never; }
         return {code: 0, output: ''};
       },
     });
-    return {updates, overrides, moves, kill: () => { dead = true; }};
+    return {updates, overrides, moves, parked: () => parked, kill: () => { dead = true; }};
   };
   const journals = async () => (await readdir(join(root, 'journal')).catch(() => [])).filter(name => name.endsWith('.json'));
   const version = () => files[`${live}/package.json`] && JSON.parse(files[`${live}/package.json`]).version;
@@ -1407,17 +1411,21 @@ test('a companion restarted between the two moves of an update puts the previous
 });
 
 test('a restart at any other point of an update leaves the previous version in use and ends the update with a sentence', async t => {
-  for (const [point, hang, sentence] of [
-    ['during npm install', {install: true}, /before anything changed\. The previous version is still in use/],
+  for (const [point, hang, sentence, startedDelayMs] of [
+    ['during npm install', {install: true}, /before anything changed\. The previous version is still in use/, 0],
+    // The Nov 10 flake, every time: a companion slow to start the install it admitted is still killed only once it is there.
+    ['during npm install, started slowly', {install: true}, /before anything changed\. The previous version is still in use/, 30],
     // The new copy is live but never proved it starts: the previous one comes back, as a failed start does.
-    ['while the MCP restarts on the new copy', {restart: true}, /so it put the previous version back/],
+    ['while the MCP restarts on the new copy', {restart: true}, /so it put the previous version back/, 0],
   ]) {
-    const f = await restartable(t);
+    const f = await restartable(t, {startedDelayMs});
     const first = f.boot({hang});
     await first.updates.update(first.updates.mcpId('p1s'));
-    await until(async () => (await f.journals()).length === 1 && (hang.install || f.version() === '1.1.50'));
+    await until(async () => first.parked() && (await f.journals()).length === 1);
     first.kill();
     await f.boot().updates.applyOverrides();
+    // Longer than the slow start above: what is checked is what stays, not a moment before a late write.
+    await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal(f.version(), '1.1.46', point);
     assert.deepEqual(f.staging(), [], point);
     assert.deepEqual(await f.journals(), [], point);
