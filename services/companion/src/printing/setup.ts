@@ -5,7 +5,7 @@ import {parseEnv} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {PrinterMcpClient, toolResultJson, type PrinterBackend, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
-import {appInstall, appMcpId, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
+import {appInstall, appMcpId, autoUpdateReason, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
 import type {McpUpdate} from './mcp-updates.js';
 import type {PrinterCatalog} from '../objects/printers.js';
 import {envOf, field, kindFor, modelForSerial, names, readMcpSetup, readSetupCache, setupOptions, writeSetupCache, type McpSetup, type SetupKind, type SetupOptions} from './mcp-setup.js';
@@ -372,10 +372,13 @@ export class PrinterSetup {
         const version = install.type === 'npx' ? undefined : installedVersion(install, env);
         const printer = catalog?.destinations.find(destination => destination.id === catalog.canonical(id))?.name ?? id;
         const managed = install.type === 'app' && install.prefix === own.prefix;
+        const reason = autoUpdateReason(install);
         return {destinationId: id, printerId: catalog?.canonical(id) ?? id, printer, mcpId: mcpIdFor(resolveMcpInstall(config, env), config), kind: install.type,
           ...(path ? {path} : {}), ...(version ? {version} : {}), canMove: !managed, managed,
           words: `${printer} uses ${copyWords(install, path, managed, home)} (${version ?? 'version unknown'})`
-            + (!managed && version && appVersion && newerVersion(appVersion, version) ? `, older than Counterpart’s copy (${appVersion}).` : '.')};
+            + (!managed && version && appVersion && newerVersion(appVersion, version) ? `, older than Counterpart’s copy (${appVersion}).` : '.')
+            // Q9: a copy that "Keep printer software up to date" never touches says so here, on every layout.
+            + (reason ? ` ${reason}` : '')};
       });
       // In the order the uses are listed: two Moves for one printer (one per MCP profile) read differently and in screen order.
       const moves = [...new Set(uses.filter(use => use.canMove).map(use => use.mcpId))].map(mcpId => {

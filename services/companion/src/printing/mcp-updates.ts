@@ -7,7 +7,7 @@ import {printerBackendSchema, type PrinterBackend, type PrinterHandoffConfig, ty
 import {newerVersion} from './directory.js';
 import type {PrintGate} from './print-gate.js';
 import type {PrinterCatalog} from '../objects/printers.js';
-import {appInstall, appMcpId, findNpm, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type McpInstall, type ResolvedMcpInstall} from './mcp-install.js';
+import {appInstall, appMcpId, autoUpdateKind, findNpm, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type McpInstall, type ResolvedMcpInstall} from './mcp-install.js';
 
 export const MCP_UPDATE_TIMEOUT_MS = 10 * 60_000;
 /** PRD §8.10: the latest version is checked once a day, and when Settings opens (a list read after an hour). */
@@ -52,8 +52,11 @@ export type AutoUpdateOutcome =
   | {state: 'done'; fromVersion?: string; toVersion: string}
   | {state: 'reverted' | 'stuck' | 'failed'; fromVersion?: string; toVersion: string; why: string}
   | {state: 'busy' | 'current' | 'skipped' | 'gone'};
-/** A copy an automatic update may change, and the version it has. */
-export interface AutoUpdateTarget {mcpId: string; pkg: PrinterBackend; fromVersion?: string}
+/**
+ * A copy an automatic update may change, and the version it has. `move`: the printers run the person's global npm
+ * install, which is never changed; keeping them current puts them on Counterpart's own copy, as Move does.
+ */
+export interface AutoUpdateTarget {mcpId: string; pkg: PrinterBackend; fromVersion?: string; move?: true}
 /** Starts a copy as nothing but itself (no printer settings) and says why it doesn't answer `counterpart/1`, if it doesn't. */
 export type ContractCheck = (config: PrinterHandoffConfig, version: string) => Promise<string | undefined>;
 export type CommandRunner = (command: string, args: string[], options: {cwd?: string; env: NodeJS.ProcessEnv; timeoutMs: number}) => Promise<{code: number; output: string}>;
@@ -188,6 +191,13 @@ const AUTO_DONE = (from: string | undefined, to: string) => `Updated automatical
 /** The new copy was in place and failed; the previous one is back. `why` is the update's own sentence. */
 const AUTO_BACK = (from: string | undefined, to: string, why: string) =>
   `Counterpart tried ${to} by itself and put ${from ?? 'the previous version'} back: ${why} It won't try ${to} again by itself. Update in Settings → Printers tries it now.`;
+/** A printer on the person's global install, moved to Counterpart's own copy so it can be kept current (Q9, Nov 10). */
+const AUTO_MOVED = (name: string, to: string) =>
+  `Counterpart now runs its own copy of ${name} (${to}) so it can keep it up to date. Your other install was not changed.`;
+const AUTO_MOVE_BACK = (pkg: string, to: string, why: string) =>
+  `Counterpart tried to move these printers to its own copy of ${pkg} ${to} by itself, and they stay on your install, unchanged: ${why} It won't try ${to} again by itself. Move in Settings → Printers tries it now.`;
+const AUTO_MOVE_NOT_INSTALLED = (pkg: string, to: string) =>
+  `Counterpart couldn't install its own copy of ${pkg} ${to} by itself after several tries, so these printers stay on your install, unchanged. Move in Settings → Printers tries again.`;
 const AUTO_NOT_INSTALLED = (from: string | undefined, to: string) =>
   `Counterpart couldn't install ${to} by itself after several tries, so ${from ?? 'the version you had'} is still in use. Update in Settings → Printers tries again.`;
 const NOT_CONTRACT = (pkg: string, why: string) => `The updated ${pkg} ${why}`;
@@ -608,10 +618,14 @@ export class McpUpdater {
   busy(): boolean { return this.#active.size > 0 || this.#starting.size > 0 || this.#changing.size > 0; }
 
   /**
-   * The copies an automatic update may change, one per set of files, with the version each has: Counterpart's own
-   * copies (`<appPrinters>/…`, with or without a printer on them) and the npx pins it saves. Never a global npm
-   * install or a git checkout: those are the person's, and another MCP client may be running them; Update and Move
-   * still work on them. Never a copy reached through a command Counterpart can't change (npx inside ssh).
+   * The copies an automatic update keeps current, one per set of files, with the version each has (Q9; the lead's
+   * decision, Nov 10: "every printer is kept current except one the person runs from their own git checkout or on
+   * another machine"):
+   * - Counterpart's own copies (`<appPrinters>/…`, with or without a printer on them) and the npx pins it saves: updated.
+   * - A global npm install (`move`): never changed, since another MCP client may run it. Its printers are moved to
+   *   Counterpart's own copy at the newest version, as Move does, and are kept current there afterwards.
+   * - Never a git checkout (a working tree the person manages) or anything reached through a wrapper (`via`: ssh,
+   *   possibly another machine). The copies listing says so on their rows (`autoUpdateReason`).
    */
   autoTargets(): AutoUpdateTarget[] {
     const out: AutoUpdateTarget[] = [], seen = new Set<string>();
@@ -619,10 +633,11 @@ export class McpUpdater {
       const found = this.install(entry.id);
       if (!found || seen.has(found.runs)) continue;
       seen.add(found.runs);
-      if (!McpUpdater.#owned(found.install)) continue;
+      const kind = autoUpdateKind(found.install);
+      if (!kind) continue;
       const members = this.#members(found.mcpId);
       const fromVersion = this.#fromVersion(found.mcpId, members);
-      out.push({mcpId: found.mcpId, pkg: entry.config.backend, ...(fromVersion ? {fromVersion} : {})});
+      out.push({mcpId: found.mcpId, pkg: entry.config.backend, ...(fromVersion ? {fromVersion} : {}), ...(kind === 'move' ? {move: true as const} : {})});
     }
     for (const pkg of printerBackendSchema.options) {
       const id = appMcpId(pkg, this.#deps.env), install = this.#freshInstall({backend: pkg, process: {command: this.#deps.node}} as PrinterHandoffConfig);
@@ -632,7 +647,6 @@ export class McpUpdater {
     }
     return out;
   }
-  static #owned(install: ResolvedMcpInstall): boolean { return install.type === 'app' || (install.type === 'npx' && !install.via); }
 
   /** The oldest version any printer on this install runs; undefined when one of them isn't known yet. */
   #fromVersion(mcpId: string, members: {id: string; mcpId: string; runs: string; install: ResolvedMcpInstall}[]): string | undefined {
@@ -665,7 +679,10 @@ export class McpUpdater {
     }
     const first = members[0];
     if (!first) return {state: 'gone'};
-    if (!McpUpdater.#owned(first.install)) return {state: 'skipped'};
+    const kind = autoUpdateKind(first.install);
+    if (!kind) return {state: 'skipped'};
+    // A global install is never changed: its printers move to Counterpart's own copy, through Move's own path (fresh).
+    const fresh = kind === 'move';
     const pkg = first.config.backend;
     const fromVersion = this.#fromVersion(mcpId, members);
     if (!fromVersion || !newer(latest, fromVersion)) return {state: 'current'};
@@ -673,14 +690,14 @@ export class McpUpdater {
     this.#active.set(mcpId, update);
     this.#packages.set(mcpId, pkg);
     await this.#note(update, pkg, {phase: 'admitted'});
-    const claimed = await this.#claim(mcpId).catch(() => false);
+    const claimed = await this.#claim(mcpId, fresh ? {fresh} : {}).catch(() => false);
     if (!claimed) {
       // Nothing was touched and nothing is held: the next try is the scheduler's, soon.
       this.#active.delete(mcpId);
       await this.#forget(mcpId);
       return {state: 'busy'};
     }
-    return this.#perform(mcpId, {auto: true, report: !!options.report}, latest, pkg);
+    return this.#perform(mcpId, {auto: true, report: !!options.report, ...(fresh ? {fresh} : {})}, latest, pkg);
   }
 
   /** The new copy's own answer to `counterpart/1`; throws the update's sentence when it doesn't answer. */
@@ -963,7 +980,8 @@ export class McpUpdater {
       await this.#forget(mcpId);
       this.#active.delete(mcpId);
       const toVersion = catalog?.server.version ?? latest;
-      await this.#emit('mcp.update.done', pkg, {...update, toVersion}, undefined, options.auto ? AUTO_DONE(update.fromVersion, toVersion) : undefined);
+      await this.#emit('mcp.update.done', pkg, {...update, toVersion}, undefined,
+        !options.auto ? undefined : options.fresh ? AUTO_MOVED(catalog?.server.name || pkg, toVersion) : AUTO_DONE(update.fromVersion, toVersion));
       return {state: 'done', ...(update.fromVersion ? {fromVersion: update.fromVersion} : {}), toVersion};
     } catch (error) {
       // The previous version stays in use: the swap or checkout is undone, and an override is put back.
@@ -990,11 +1008,12 @@ export class McpUpdater {
       const why = shortWhy(sentence ?? (error as Error).message);
       const from = update.fromVersion ? {fromVersion: update.fromVersion} : {};
       if (options.auto && !changed && !restoreFailed) {
-        if (options.report) await this.#emit('mcp.update.failed', pkg, update, tail(log || String((error as Error).message)), AUTO_NOT_INSTALLED(update.fromVersion, latest));
+        if (options.report) await this.#emit('mcp.update.failed', pkg, update, tail(log || String((error as Error).message)),
+          options.fresh ? AUTO_MOVE_NOT_INSTALLED(pkg, latest) : AUTO_NOT_INSTALLED(update.fromVersion, latest));
         return {state: 'failed', ...from, toVersion: latest, why};
       }
       await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)),
-        restoreFailed ? RESTORE_FAILED : options.auto ? AUTO_BACK(update.fromVersion, latest, why) : undefined);
+        restoreFailed ? RESTORE_FAILED : !options.auto ? undefined : options.fresh ? AUTO_MOVE_BACK(pkg, latest, why) : AUTO_BACK(update.fromVersion, latest, why));
       return {state: restoreFailed ? 'stuck' : options.auto ? 'reverted' : 'failed', ...from, toVersion: latest, why};
     } finally { release(); }
   }

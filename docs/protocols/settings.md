@@ -13,7 +13,9 @@ Implemented sections:
 - `general.autoUpdateMcps`: "Keep printer software up to date" (Settings → Printers; PRD §8.10). The companion's own
   choice, not the Mac's: it is `true` in every response unless the person turned it off (a new install and a settings
   file from before the key both read `true`), and `false` stays `false`. Off means the printer MCPs change only when
-  the person presses Update.
+  the person presses Update or Move. On: Counterpart's own copies and its npx pins are updated in place, and a printer
+  on a global npm install is moved to Counterpart's own copy (the global install is never changed); a git checkout or
+  anything run through ssh is never changed by itself (PRD §8.10).
 
 The companion serializes load/merge/validate/write, deep-merges nested partial patches,
 retains explicit false values and unknown top-level stored sections, and emits

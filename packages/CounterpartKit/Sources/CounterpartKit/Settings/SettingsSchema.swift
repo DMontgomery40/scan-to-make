@@ -55,7 +55,7 @@ public enum SettingsSchema {
     public static let autoUpdateMcps = (
         key: "autoUpdateMcps",
         label: "Keep printer software up to date",
-        footer: "Counterpart installs a newer version of Counterpart’s own copies by itself while nothing is printing or working, checks that it starts, and tells you afterwards. If it doesn’t start, the previous version is put back. Your own copies are updated only with Update."
+        footer: "Counterpart installs a newer version of Counterpart’s own copies by itself while nothing is printing or working, checks that it starts, and tells you afterwards. If it doesn’t start, the previous version is put back. A printer on another install of yours is moved to Counterpart’s copy, and that install isn’t changed. One run from a folder you manage, or through ssh, changes only with Update."
     )
 
     /// `ai.choice.kind`, and which of them a phone can choose (the others need a key in the Mac's Keychain).

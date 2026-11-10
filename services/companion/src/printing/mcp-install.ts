@@ -44,6 +44,23 @@ export function hostEnvironment(dataRoot: string): InstallEnvironment {
   };
 }
 
+/**
+ * What an automatic update does with an install: `update` it in place (Counterpart's own copy, an npx pin it saves),
+ * `move` its printers to Counterpart's own copy (a global npm install, never changed), or nothing (a checkout, a
+ * wrapped command, an install it can't tell). Decided by install type, never by which MCP it is.
+ */
+export function autoUpdateKind(install: ResolvedMcpInstall): 'update' | 'move' | undefined {
+  if (install.via) return undefined;
+  if (install.type === 'app' || install.type === 'npx') return 'update';
+  if (install.type === 'global') return 'move';
+  return undefined;
+}
+/** Why a printer's MCP is never updated by itself, in the person's words; shown on its row in Settings → Printers. */
+export function autoUpdateReason(install: ResolvedMcpInstall): string | undefined {
+  if (install.via) return `Runs through an ${install.via.kind} command you manage, so Counterpart doesn't update it by itself.`;
+  if (install.type === 'checkout') return "Runs from a folder you manage, so Counterpart doesn't update it by itself.";
+  return undefined;
+}
 /** The npm package for a backend. */
 export function packageName(backend: PrinterHandoffConfig['backend']): string { return backend; }
 
