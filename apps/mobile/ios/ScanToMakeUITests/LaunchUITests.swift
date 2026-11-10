@@ -841,12 +841,18 @@ final class LayoutParityUITests: XCTestCase {
         let missing = app.staticTexts["fit-size-missing"]
         XCTAssertTrue(missing.waitForExistence(timeout: 5), "it says what's missing")
         XCTAssertEqual(missing.label, "Enter at least one measurement in millimetres.")
-        XCTAssertTrue(missing.isHittable, "on screen, by the fields")
         // The field's identifier is on its column, which SwiftUI gives to the field itself; look in both places.
         let longest = app.textFields["fit-size-longest"].exists ? app.textFields["fit-size-longest"]
             : app.descendants(matching: .any)["fit-size-longest"].textFields.firstMatch
         XCTAssertTrue(longest.waitForExistence(timeout: 5))
-        XCTAssertEqual(longest.value(forKey: "hasKeyboardFocus") as? Bool, true, "the first measurement is focused")
+        // Send's work ends with Longest focused and the keyboard up; the sheet shrinks and scrolls the fields into the room
+        // left. The line is judged once that has happened, not while the sheet is still moving (the gate's slow iPad).
+        let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: longest)
+        XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed, "the first measurement is focused")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the number keyboard is up")
+        let onScreen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: missing)
+        XCTAssertEqual(XCTWaiter().wait(for: [onScreen], timeout: 5), .completed,
+                       "on screen, by the fields: line \(missing.frame), field \(longest.frame), keyboard \(app.keyboards.firstMatch.frame), sheet \(sheet.frame)")
     }
 
     /// Review F3 (train 2026-11-10e): the Result's printer row is never empty. While the printer list is on its way it says so;
