@@ -129,6 +129,10 @@ struct NewObjectView: View {
 
     var body: some View {
         NavigationStack {
+            // The scroll ends where the bottom bar begins (lead, Nov 10): nothing scrolls under the action, so nothing
+            // can be read or reached through it, disabled or not. A bar over the scroll left the covered rows reachable
+            // to VoiceOver and taps even behind an opaque backing.
+            VStack(spacing: 0) {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -207,17 +211,9 @@ struct NewObjectView: View {
             }
             }
             .scrollDismissesKeyboard(.interactively)
-            // The content scrolls under the bottom action behind the system's nearly opaque edge, so nothing reads through
-            // the button, disabled or not (lead, Nov 10: "Scan it" and its link showed through "Choose what this scan
-            // becomes"). The same treatment as Welcome's Continue and the sidebar's New Project.
+            // The scroll's bottom edge meets the bar with the system's hard edge, so a row cut there reads as cut, not
+            // as floating behind the button.
             .scrollEdgeEffectStyle(.hard, for: .bottom)
-            .navigationTitle("New Project")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(role: .close) { dismiss() }.disabled(working == "make") }
-                if describing { ToolbarItem(placement: .confirmationAction) { Button("Done") { describing = false } } }
-            }
-            .safeAreaBar(edge: .bottom) {
                 Button { Task { await make() } } label: {
                     Group {
                         if let sendSymbol { Label(sendLabel, systemImage: sendSymbol) } else { Text(sendLabel) }
@@ -228,12 +224,16 @@ struct NewObjectView: View {
                 .disabled(working != nil || awaitingUse)
                 .accessibilityIdentifier("send")
                 .frame(maxWidth: 640)
-                // A full-width bar with the system's bar background: what scrolls under it can't be read or reached
-                // through it, disabled or not (a disabled button lets touches and VoiceOver through to what's beneath).
+                // A full-width bar with the system's bar background, below the scroll.
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity)
                 .background(.bar, ignoresSafeAreaEdges: .bottom)
-                .accessibilityElement(children: .contain)
+            }
+            .navigationTitle("New Project")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(role: .close) { dismiss() }.disabled(working == "make") }
+                if describing { ToolbarItem(placement: .confirmationAction) { Button("Done") { describing = false } } }
             }
             .interactiveDismissDisabled(working != nil)
             .dropDestination(for: Data.self) { items, _ in
