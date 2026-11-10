@@ -13,9 +13,10 @@ What it does, in order:
    APFS clone. Never auth, tls, pairing, companion.env, printer handoff or printer profiles. Absolute paths into
    the real state are rewritten to the copy, and the run refuses to start if any remain. Two states the real
    data may lack are added as copies of real projects (an open question, a pass stopped at a limit).
-2. Starts the real companion (services/companion/dist/server-cli.js) on that copy: port 19077, empty
+2. Starts the real companion (services/companion/dist/server-cli.js) on that copy: a free port of its own, empty
    environment, HOME inside the copy, its own auth store, and a printer MCP of /usr/bin/false, so nothing can
-   reach a printer. The simulator reaches it at http://127.0.0.1:9078 (the app's simulator-only test address).
+   reach a printer. The simulator reaches it through a proxy on the first free simulator test address (http://127.0.0.1
+   on 9078 or 9080–9097; CompanionAddress.isFixture), so several prepared runs can wait for the lane at once.
    It pairs once (POST /v1/pair) and hands the record to the app with -CounterpartPairingRecord.
 3. Holding the whole lane (scripts/lane.py --exclusive, re-run by the script itself): builds the Debug app, creates its own simulators (iPhone 17 Pro, iPad Pro 13-inch,
    iPhone Duo), drives them with agent-device (launch arguments, taps, scrolls, screenshots), then deletes them.
@@ -231,6 +232,8 @@ class Companion:
             self.proc.terminate()
             try: self.proc.wait(10)
             except subprocess.TimeoutExpired: self.proc.kill()
+        self.proc.stdout.close()
+        self.log.close()
 
 
 # ---------------------------------------------------------------- screens
@@ -294,6 +297,25 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
     add('fx-live-activity', 'Live Activity (Home screen)', 'print halfway', 'fixture', fixture('-CounterpartScreen', 'live-activity'), [['home']],
         note='after Home; the Lock Screen cannot be shown in a simulator by agent-device')
     return out
+
+
+def slug(text: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')[:40].strip('-') or 'untitled'
+
+
+def project_names(wanted: list[str], objects: list[dict]) -> dict[str, str]:
+    """File names for --project: the title's slug and the shortest id prefix (8 characters or more) that no other project
+    in the copy shares, so two projects never write the same images, here or in another run on the same copy."""
+    ids = [o['id'] for o in objects]
+    titles = {o['id']: o.get('title') or 'untitled' for o in objects}
+    names = {}
+    for pid in dict.fromkeys(wanted):
+        length = 8
+        while length < len(pid) and any(other != pid and other.startswith(pid[:length]) for other in ids): length += 1
+        names[pid] = f'{slug(titles.get(pid, "untitled"))}-{pid[:length]}'
+    clash = [n for n in names.values() if list(names.values()).count(n) > 1]
+    if clash: raise SystemExit(f'Two projects would share the image names {sorted(set(clash))}; choose them in separate runs.')
+    return names
 
 
 def project_screens(name: str, pid: str, state: str, data: str, record: str) -> list[dict]:
@@ -463,7 +485,7 @@ def write_index(out: Path, info: dict, manifest: dict, minutes: float, processes
              f'`{subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()}`'
              f' (this run held the lane {minutes:.0f} min; earlier runs\' images are kept).', '',
              '**Data.** *real*: a copy of this Mac\'s projects (copied ' + manifest['copiedAt'] + '), served by the real companion '
-             '(`server-cli.js`) to the real app client over http://127.0.0.1:9078. The pairing exchange was made by the script, not the pairing UI. '
+             f'(`server-cli.js`) to the real app client over {info.get("url", "a simulator test address")}. The pairing exchange was made by the script, not the pairing UI. '
              'No printer: the printer MCP is `/usr/bin/false`, so printer screens with *real (printer stub)* show what the app says when its '
              'printer MCP can\'t start. *real (state synthesised)*: a copy of a real project changed into a state the data no longer has '
              '(the wall holder\'s open question; a pass stopped at a limit). Home therefore lists both copies too. '
@@ -560,7 +582,9 @@ def handoff_context(held: dict, work: Path) -> dict:
 def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set]:
     items = screens(ctx['ids'], ctx['record'], ctx['offline_record'], ctx['fixtures'], ctx['offline'])
     if args.screens: items = [i for i in items if any(s in i['name'] for s in args.screens.split(','))]
-    if args.project: items = [item for pid in args.project for item in project_screens(pid[:8], pid, 'by id', 'real', ctx['record'])]
+    if args.project:
+        names = project_names(args.project, ctx['info']['objects'])
+        items = [item for pid in args.project for item in project_screens(names[pid], pid, 'by id', 'real', ctx['record'])]
     done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
     if args.redo: done -= {(k, i['name']) for k in keys for i in items}
     return items, done

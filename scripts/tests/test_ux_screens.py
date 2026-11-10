@@ -5,6 +5,7 @@ and point the lane at a temporary folder, so they never queue in the real lane."
 import lane_isolation  # noqa: F401  (first: no test may reach the real build lane)
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -74,10 +75,6 @@ class UxScreensTests(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('node') and (REPO / 'services/companion/dist/server-cli.js').exists(),
                          'needs macOS, node and the built companion')
     def test_a_long_work_path_still_starts_the_companion(self):
-        import socket
-        for port in (9078, 19077):
-            with socket.socket() as probe:
-                if probe.connect_ex(('127.0.0.1', port)) == 0: self.skipTest(f'port {port} is in use (another capture is running)')
         source = synthetic_state(self.tmp / 'state')
         work = self.tmp / ('a-work-folder-name-long-enough-to-push-a-socket-under-it-past-the-unix-limit-' * 2) / 'work'
         self.assertGreater(len(str(work / 'data/state/auth/control.sock')), 110)
@@ -86,6 +83,37 @@ class UxScreensTests(unittest.TestCase):
         expected = len([1 for _, prefix, _ in ux_screens.PROJECTS if not prefix.startswith('synth:')]) + 1 + 2
         self.assertIn(f'companion serves {expected} projects', run.stdout + run.stderr)
         self.assertFalse((work / 'data/state/auth/control.sock').exists(), 'the control socket lives outside --work')
+
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('node') and (REPO / 'services/companion/dist/server-cli.js').exists(),
+                         'needs macOS, node and the built companion')
+    def test_two_prepared_runs_have_companions_of_their_own_at_once(self):
+        source = synthetic_state(self.tmp / 'state')
+        companions = []
+        try:
+            for name in ('first', 'second'):
+                data = self.tmp / name / 'data'
+                ux_screens.prepare(source, data)
+                companions.append(ux_screens.Companion(data / 'state', self.tmp / f'{name}.log'))
+            urls = [c.info['url'] for c in companions]
+            self.assertEqual(len(set(urls)), 2, urls)
+            for companion in companions:
+                self.assertEqual(companion.info['objectsStatus'], 200)
+                self.assertTrue(re.fullmatch(r'http://127\.0\.0\.1:(9078|90[89]\d)', companion.info['url']), companion.info['url'])
+                self.assertEqual(companion.info['record']['baseUrl'], companion.info['url'], 'the pairing record carries the chosen address')
+        finally:
+            for companion in companions: companion.stop()
+
+    def test_project_images_are_named_by_title_and_an_id_prefix_no_other_project_shares(self):
+        objects = [{'id': '5ea94301-84d9-5acd-b3b2-36f33d063099', 'title': 'Wall holder for three'},
+                   {'id': '5ea94301-0000-4000-8000-000000000001', 'title': 'Wall holder for three'},
+                   {'id': '30a2a33c-75f9-4519-aaeb-f53affeffb61', 'title': None}]
+        names = ux_screens.project_names([o['id'] for o in objects], objects)
+        self.assertEqual(names['5ea94301-84d9-5acd-b3b2-36f33d063099'], 'wall-holder-for-three-5ea94301-8')
+        self.assertEqual(names['5ea94301-0000-4000-8000-000000000001'], 'wall-holder-for-three-5ea94301-0')
+        self.assertEqual(names['30a2a33c-75f9-4519-aaeb-f53affeffb61'], 'untitled-30a2a33c')
+        self.assertEqual(len(set(names.values())), 3)
+        screens = [item['name'] for pid, name in names.items() for item in ux_screens.project_screens(name, pid, '', 'real', '{}')]
+        self.assertEqual(len(screens), len(set(screens)), 'no two projects write the same image files')
 
 
 if __name__ == '__main__':

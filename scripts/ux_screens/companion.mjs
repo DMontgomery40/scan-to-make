@@ -1,8 +1,11 @@
 // The companion `scripts/ux_screens.py` shows the simulator: the real `server-cli.js` serving a throwaway copy of
 // a Mac's projects, with no printer and no model access, behind the simulator-only fixture address
-// http://127.0.0.1:9078 (CompanionAddress.isFixture). Started by ux_screens.py, which made the copy.
+// http://127.0.0.1:<9078 or 9080–9097> (CompanionAddress.isFixture). Started by ux_screens.py, which made the copy.
 //
-//   node companion.mjs --state <copied state root> --dist <services/companion/dist> [--port 19077]
+//   node companion.mjs --state <copied state root> --dist <services/companion/dist>
+//
+// Every run takes free ports of its own (the server any free port, the proxy the first free simulator test port), so
+// any number of prepared runs can wait for the lane at once.
 //
 // It never reads or writes the installed app's state: the server runs with an empty environment, HOME inside the
 // copy (so it finds none of this Mac's printer MCPs), its own auth store, and a printer handoff whose MCP command is
@@ -18,8 +21,8 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, inde
   value.startsWith('--') ? [...pairs, [value.slice(2), all[index + 1]]] : pairs, []));
 if (!args.state || !args.dist) throw new Error('usage: companion.mjs --state <copied state root> --dist <companion dist>');
 const state = resolve(args.state), dist = resolve(args.dist);
-const port = Number(args.port ?? 19077), proxyPort = 9078;
-if (port === 9077) throw new Error('9077 is the installed companion');
+// The simulator-only test addresses the app accepts: 9078 in every build, 9080–9097 in Debug (9079 is the https one).
+const PROXY_PORTS = [9078, ...Array.from({length: 18}, (_, i) => 9080 + i)];
 
 const host = 'ux-screens.example.ts.net', login = 'ux-screens@example.test';
 const {RemoteAuthStore} = await import(pathToFileURL(join(dist, 'remote-auth.js')).href);
@@ -42,7 +45,7 @@ const env = {
   SCAN_TO_MAKE_CAPTURE_DIR: join(state, 'capture'),
   SCAN_TO_MAKE_PRINTER_HANDOFF_CONFIG: handoffConfig,
   SCAN_TO_MAKE_PRINTER_HANDOFF_DIR: handoffDir,
-  SCAN_TO_MAKE_GENERATION_PORT: String(port),
+  SCAN_TO_MAKE_GENERATION_PORT: '0',
   SCAN_TO_MAKE_CONTROL_SOCKET: join(socketDir, 'control.sock'),
 };
 await mkdir(env.TMPDIR, {recursive: true});
@@ -67,7 +70,19 @@ const proxy = createServer((req, res) => {
   upstream.on('error', () => { res.writeHead(503); res.end(); });
   req.pipe(upstream);
 });
-await new Promise((done, fail) => { proxy.once('error', fail); proxy.listen(proxyPort, '127.0.0.1', done); });
+const listen = candidate => new Promise(done => {
+  const failed = () => done(false);
+  proxy.once('error', failed);
+  proxy.listen(candidate, '127.0.0.1', () => { proxy.off('error', failed); done(true); });
+});
+let proxyPort;
+for (const candidate of PROXY_PORTS) if (await listen(candidate)) { proxyPort = candidate; break; }
+if (proxyPort === undefined) {
+  server.kill('SIGTERM');
+  await rm(socketDir, {recursive: true, force: true}).catch(() => {});
+  process.stderr.write(`Every simulator test port (9078, 9080–9097) is in use by other capture runs.\n`);
+  process.exit(1);
+}
 const base = `http://127.0.0.1:${proxyPort}`;
 
 // The phone's pairing: the exchange the app's PairingClient makes (POST /v1/pair), done here once.
@@ -82,7 +97,7 @@ const record = {...await paired.json(), baseUrl: base};
 for (const key of ['certificateSha256', 'publicKeySha256', 'addresses', 'activeUrl']) delete record[key];
 const listed = await fetch(`${base}/v1/objects`, {headers: {authorization: `Bearer ${record.token}`, 'x-scan-device': record.deviceId}});
 const objects = listed.ok ? (await listed.json()).objects.map(object => ({id: object.id, state: object.state, title: object.title ?? null})) : [];
-process.stdout.write(JSON.stringify({ready: true, url: base, server: started, pid: server.pid, record, objects, objectsStatus: listed.status}) + '\n');
+process.stdout.write(JSON.stringify({ready: true, url: base, proxyPort, server: started, pid: server.pid, record, objects, objectsStatus: listed.status}) + '\n');
 
 const cleanUp = () => rm(socketDir, {recursive: true, force: true}).catch(() => {});
 const stop = () => { proxy.close(); server.kill('SIGTERM'); setTimeout(() => cleanUp().then(() => process.exit(0)), 3000).unref(); };
