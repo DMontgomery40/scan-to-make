@@ -15,6 +15,10 @@ struct CounterpartApp: App {
                 .environment(app)
                 .tint(.filament)
                 .onOpenURL { app.open($0) }
+                // A link goes to the window that is already open. The app allows several windows on iPad, and
+                // without this a link from a widget, a Live Activity or another app opened a second one beside
+                // the project the person was in.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .task(id: app.pairingKey) {
                     notifications.attach(app)
                     app.activities.attach(app)

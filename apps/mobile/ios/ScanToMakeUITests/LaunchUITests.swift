@@ -638,9 +638,37 @@ final class LayoutParityUITests: XCTestCase {
     }
 
     // A fold, an unfold and an iPad resize with a project or the print sheet open are unit tests of the navigation
-    // value now (CounterpartKit `ProjectsNavigationTests`): XCTest has no hinge API and could not drive them here.
-    // The hinge itself is looked at on the iPhone Duo simulator with `agent-device fold open|closed`, and
-    // `scantomake://fixture-width/<compact|regular>` (with `-CounterpartLayoutTesting YES`) still resizes a fixture run.
+    // value (CounterpartKit `ProjectsNavigationTests`). XCTest has no hinge API; the hinge itself is looked at on the
+    // iPhone Duo simulator with `agent-device fold open|closed`.
+
+    /// One run of the real view through a resize, so the wiring the unit tests can't see is covered by the gate: the
+    /// sheet's binding, the split's column, the detail stack and its key. The fixture link sets the window's
+    /// horizontal size class, as an iPad resize does. iPad only: an iPhone simulator can't widen into a split.
+    func testAProjectAndItsPrintSheetSurviveAResizeOnTheRealView() throws {
+        try XCTSkipUnless(regular, "an iPhone simulator can't widen into a side-by-side split")
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartLayoutTesting", "YES"]
+        app.launch()
+        let resize = { (width: String) in app.open(URL(string: "scantomake://fixture-width/\(width)")!) }
+        let project = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        XCTAssertTrue(project.waitForExistence(timeout: 20), app.debugDescription)
+        project.tap()
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10))
+        resize("compact")
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "collapsing keeps the project\n\(app.debugDescription)")
+        XCTAssertFalse(app.buttons["new-project"].isHittable, "collapsed, the project covers the list")
+        app.buttons["print"].tap()
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
+        resize("regular")
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10), "the print sheet survives widening")
+        resize("compact")
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10), "and collapsing again")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "Cancel returns to the same project, not the list")
+        resize("regular")
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "widened, the project is still open")
+        XCTAssertTrue(app.buttons["new-project"].isHittable, "beside the list")
+    }
 
     func testPrinterAttentionAndPrintingSummaryAtBothWidths() {
         let app = launch()
