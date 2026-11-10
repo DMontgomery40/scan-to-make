@@ -289,6 +289,8 @@ class HomeLayoutTests {
         compose.onNodeWithText("Make something that fits").assertDoesNotExist()
     }
 
+    // A phone-sized screen (Pixel 8, 411 × 891 dp): Robolectric's default 320 × 470 dp window is smaller than any phone this ships to.
+    @Config(qualifiers = "w411dp-h891dp")
     @Test fun aFinishedScanAsksCopyFitOrSaveBeforeItCanSend() {
         state.projects.value = listOf(project("a", "Existing project", "ready"))
         app.prefs.edit().putString("CounterpartNewDraftId", "scan-draft").commit()
@@ -298,14 +300,16 @@ class HomeLayoutTests {
         compose.setContent { WithApp { NewProjectScreen(job = null, close = {}, started = {}, scan = {}) } }
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("scan-use")).fetchSemanticsNodes().isNotEmpty() }
         // U5: the question is first, above "What do you need?", and its three choices are on screen without scrolling.
-        val question = compose.onNodeWithTag("scan-use").fetchSemanticsNode().boundsInRoot
-        val describe = compose.onNodeWithTag("describe").fetchSemanticsNode().boundsInRoot
-        assertTrue("the question is above the description", question.bottom <= describe.top)
-        for (tag in listOf("scan-use-copy", "scan-use-fit", "scan-use-later")) compose.onNodeWithTag(tag).assertIsDisplayed()
-        // The scan sits beside its question, above the answers, on screen with them (lead, Nov 10).
-        compose.onNodeWithTag("scan-use-scan").assertIsDisplayed()
-        val scan = compose.onNodeWithTag("scan-use-scan").fetchSemanticsNode().boundsInRoot
-        assertTrue("the scan is above the answers", scan.bottom <= compose.onNodeWithTag("scan-use-copy").fetchSemanticsNode().boundsInRoot.top)
+        // Positions are unclipped (positionInRoot + size): boundsInRoot is clipped to the viewport and is Rect.Zero for a node
+        // scrolled out of view, which is where "What do you need?" now starts once the scan sits beside the question.
+        fun top(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().positionInRoot.y
+        fun bottom(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().let { it.positionInRoot.y + it.size.height }
+        assertTrue("the question is above the description", bottom("scan-use") <= top("describe"))
+        // The scan sits beside its question, above the answers (lead, Nov 10)...
+        assertTrue("the scan is above the answers", bottom("scan-use-scan") <= top("scan-use-copy"))
+        // ...and the scan and all three answers are whole on screen together, between the header and the button.
+        for (tag in listOf("scan-use-scan", "scan-use-copy", "scan-use-fit", "scan-use-later")) compose.onNodeWithTag(tag).assertIsDisplayed()
+        assertTrue("the last answer clears the button", bottom("scan-use-later") <= top("send"))
         compose.onNodeWithText("Added").assertDoesNotExist()
         // Greyed out, saying what to do, until a use is chosen; then the action for that use.
         compose.onNodeWithTag("send").assertIsNotEnabled().assertTextContains("Choose what this scan becomes")
