@@ -56,6 +56,18 @@ class BranchCheckTests(unittest.TestCase):
         code, out = self.check('--merge', 'left')
         self.assertEqual(code, 1); self.assertIn('conflicts with right in a.txt', out)
 
+    def test_a_stated_order_lets_the_first_branch_land_and_says_so(self):
+        self.branch('left', {'a.txt': 'one\nLEFT\nthree\n'})
+        self.branch('right', {'a.txt': 'one\nRIGHT\nthree\n'})
+        code, out = self.check('--merge', 'left', '--lands-first', 'right rebases, its owner knows')
+        self.assertEqual(code, 0, out)
+        self.assertIn('conflicts with right in a.txt: this branch lands first (right rebases, its owner knows); right rebases on it', out)
+        # The order excuses nothing else: a branch behind main still has to rebase.
+        self.git('checkout', '-q', '-B', 'main', 'origin/main'); self.write('z.txt', 'z\n'); self.commit('main moves')
+        self.git('push', '-q', 'origin', 'HEAD:main')
+        code, out = self.check('--merge', 'left', '--lands-first', 'right rebases, its owner knows')
+        self.assertEqual(code, 1); self.assertIn('behind main', out)
+
     def test_shared_file_without_conflict_is_only_a_warning(self):
         self.branch('top', {'a.txt': 'ONE\ntwo\nthree\n'})
         self.branch('bottom', {'a.txt': 'one\ntwo\nTHREE\n'})
