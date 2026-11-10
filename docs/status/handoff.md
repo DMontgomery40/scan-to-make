@@ -4,77 +4,45 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **How the owner works (David, Nov 6–10).** An item ends only as *done and verified on David's real install* (with evidence: SHA, log line, AX read, camera frame) or *blocked on one small thing only David can do*, named exactly. Green CI is not verification. Find facts yourself (code, logs, `object.json`, MQTT, camera); never ask David what you can read. Never end a turn "waiting"; re-drive agents that do. Scanning by hand is physically hard for him. He cannot leave his iPhone unlocked. Never take his screen and never press controls in his installed app: read and drive through the companion's control socket. Rules and notes in this repo can be stale: when one contradicts what David said later or what the code does, fix the note in the same PR.
 
-## Now (2026-11-10, 20:00Z): a new lead takes over
+## Now (2026-11-10, 22:05Z)
 
-David, 19:55Z, replacing the lead: "It's the earbuds the phone holder and literally everything you've made including what's printing now nothing shows up I have no earthly idea what you're printing this is such a shit show. Write a handoff prompt to a new lead with fresh context window. Please be very detailed and have it actually clean up after its agents and settle threads in t3 code when they're done."
-
-### Since the handoff (20:30Z, the new lead, thread "Take Over Project Recovery Lead")
-
-- The previous lead's process is stopped and its thread settled.
-- **A small train goes first: PR #539** (`train/2026-11-10f`, board I19): #520, #525 with its review fixes, #524 and the model-file pictures. Its gate and one review are running. The fifth train (#527) follows with X86's fix.
-- The cause of the empty part stage is with a second lab (board X87); a watcher lists the phone's cache when it wakes.
-- David, 20:25Z: the two parts fail differently on his phone (one looks like it is loading, one does not), and the lead is fixing instances, not the root. The root is the chain the phone must finish before it draws anything (board X92).
-- "A model file with several objects gets no picture" (below, and in X72) was wrong: a model file shows a picture only when its maker put one inside (board X93).
-- Housekeeping runs on the Mac and all three Linux machines (board X88).
-- Delegates are Opus 5.5 (medium by default), GPT-6.1 Sol at xhigh and Muse Wonder Full, not Sonnet (X89). No AI attribution on commits or PRs (X90).
-
-### The one thing that matters first
-
-**On David's iPhone, projects open to an empty stage.** He has reported it three times today (16:45Z the scans; 19:40Z "Forester phone mount"; 19:55Z "literally everything"). What is established:
-
-- Installed everywhere: build **202611101556** from main `9896c8f3` (the fourth Nov 10 train). It introduced the gallery (#451) that draws a project's stage only as a 3D model the phone must first download; a failed or slow download is swallowed (`try?`) and nothing is drawn.
-- Scans: explained and fixed in #525 (on the fifth train, **not installed**): one scan is 192 MB against a 64 MB limit; downloads belonged to the page; nothing was shown while waiting.
-- **Parts made by the code engine: not explained.** "Earbud case replacement" (`52f0b309`) and "Forester phone mount" (`53a48b5e`) are the first designs the code engine (build123d, `engine: "code"`) made that he opened on the phone. On the Mac each is whole: a sound binary STL (the Forester's is 167 KB, 3,344 triangles, outward winding, not centred on the origin, header "STL Exported by Open CASCADE Technology"), seven renders, and a correct picture drawn by the Mac. The phone was on the local network and the companion logged no refusal. His screenshot shows a dark stage with a faint oval, the size chip, and no "Explore in 3D" or AR button. **Reproduced at 20:05Z:** the model is fine and draws from the installed build's code over a working link; his exact screen appears when the request for `model.stl` never finishes (`~/scan-to-make-work/part-stage-2026-11-10/`). So on his phone the download does not complete, and the installed build shows nothing. **Why it does not complete, for every project he opens, is the open question**: check whether any `model.stl` has reached his phone since the 15:58Z install, and whether the installed companion answers that route promptly on his real data (board X85). #525 on the fifth train shows the Mac's picture at once and retries, which covers what he sees but not the cause.
-- The two test plates the old lead printed (`e4d404f2`, `a7564dd2`) are 3MF files with several objects and have **no picture at all**, cut-off titles, and nothing on their pages saying what each piece is. That is why he does not know what is printing. `a7564dd2` ("Second test plate…") is printing now: 13 small coupons for the geometry kernel, sent 18:29Z, about 1 h 41 min; what each coupon is for is in `prints/2026-11-10-second-plate/KEY.md` of the private repo `DMontgomery40/counterpart-kernel`.
-
-Until his phone shows his projects, nothing else is progress. Verify on his real phone, not a simulator: the app's cache can be listed read-only with `xcrun devicectl device info files --device <udid> --domain-type appDataContainer --domain-identifier com.scantomake --subdirectory Library/Caches --recurse` when the phone is awake, and the companion's log is `~/Library/Application Support/Scan to Make/logs/companion-error.log`.
+The lead is the session in thread "Take Over Project Recovery Lead" (Claude Fable 5.2) since 20:07Z Nov 10. The lead before it was removed by David (19:55Z: "nothing shows up I have no earthly idea what you're printing this is such a shit show"); its process is stopped and its thread settled.
 
 ### Installed
 
 | Where | Installed |
 |---|---|
-| Mac, iPhone Davica3, iPad Air | **202611101556** from main `9896c8f3` (#443, #456, #487, #499). Receipts `~/scan-to-make-work/{mac,iphone,ipad}-202611101556/`. Mac rollback: `Counterpart-202611101110.app` in the Mac receipt folder. |
-| Mac MCP copies | bambu-printer-mcp 1.1.85, mcp-3d-printer-server 1.2.65 (1.2.66 is published; automatic updates are on). The code design engine is set up and is what new designs use. |
+| Mac | **202611102149** from main `d922973f` (#539), since 21:53Z Nov 10. Receipts `~/scan-to-make-work/mac-202611102149/` (`NOTES.txt`); rollback `Counterpart-202611101556.app` in that folder. MCP copies: bambu-printer-mcp 1.1.85, mcp-3d-printer-server 1.2.66. |
+| iPhone Davica3, iPad Air | Still **202611101556** from `9896c8f3`. The new build is compiled and waiting: `bash ~/scan-to-make-work/iphone-202611102149/install-when-reachable.sh` and the same under `ipad-202611102149/`. The lead's session runs a watcher that installs when a device becomes reachable; if that session is gone, run them by hand. |
 | Android, Linux (agents-136) | Nov 5 builds. Stale. |
 | Public | Mac beta 6 and TestFlight 2.0 (4), both from `30e3afdd` (Nov 6). |
 
-Printer: P1S, LAN Only + Developer Mode. Nobody watches a print once it has started. The lead may start one print per bed clearing after David says the bed is clear (AGENTS.md); **do not start another until his phone shows him what it is.**
+**David's phone is always on his LAN and often not on his Wi-Fi** (his words, board X100): it reaches the Mac through WireGuard on his router from any connection, cellular included, so the app's link can be slow at any time. Apple's device tools (`devicectl`, installs, reading the app's files) need the phone on the house Wi-Fi itself or on a cable; when they say `unavailable`, say that. Never write that the phone is asleep or locked.
 
-### The fifth train: built, reviewed, not merged
+### What is true about the empty stage (board X85, X92, X96, X97)
 
-PR #527, `train/2026-11-10e`, head `c54fc3bc` (checkout `~/fleet/stm-lane-b`). It carries: #520 the camera-cancel crash (the phone app dies when a camera view goes away as its stream starts; it hits ordinary project pages), #525 the scan stage is never blank, #509, #510, #513 one main action per page, #519, #523, #524 generated titles for model files, #531 no address in a printer's name, and small fixes by the old lead. Two review parts (`~/scan-to-make-work/train-2026-11-10/review-527-part1.md`, `-part2.md`); blockers fixed.
+- The Mac and its companion are not the cause: at load average 430 the installed companion served both parts' models to a pinned client in 6 to 34 ms (`~/scan-to-make-work/x85-cause-2026-11-10/REPORT.md`).
+- In David's own screenshots the phone was on 5G through his tunnel; the phone mount's model arrived in the end and draws; the old build shows nothing while a file travels and never retries.
+- The proven defect was the design: a one-shot, unsupervised chain (download → mesh → poster) with several ways to end in nothing. #539 replaces it: the Mac's picture at once on every layout, one stage picture with three states, deadlines and recovery on the model chain, and a trace.
+- **Not yet verified on his phone.** After the phone has the build: copy `Library/Caches/media-trace.ndjson` from the app's container (`xcrun devicectl device copy from …`), read the phone's requests in `~/Library/Application Support/Scan to Make/logs/companion.log` (one `phone.http` line each, with milliseconds), and say which step each project reaches. Until then nothing here is "done".
 
-Gate at the head before the last two test-only commits (`a626bea2`): companion 1,169 of 1,170 on Node 22 and 24, Android, Linux, scripts and the Mac job green; iPhone 79 of 79. **The iPad job has failed three times** on `LayoutParityUITests.testSendOnAFitMissingItsMeasurementGoesToTheFields` (40 of 41 at `13f083ea`): it passes alone and fails as about the thirtieth test; the best explanation is that an earlier test's ⌘N leaves the simulator in hardware-keyboard mode and something then covers the "Enter at least one measurement" line, which would be a real defect for iPad keyboard users. **Confirmed at 19:58Z by the rerun at `c54fc3bc`** (iPhone 79 of 79, iPad 40 of 41): the failure screenshot shows iPadOS's floating number pad, anchored to the focused field, covering the line (`~/scan-to-make-work/train-2026-11-10/gate-e-ipad-failure-screenshot.jpeg`; board X86). It is a small view fix: say what is missing under the fields, where the pad cannot cover it.
+### In motion and owed, in order
 
-The train has been held for five hours while the fixes David needs sat uninstalled. **Decide first whether to cut a small train** from main with only what his phone needs (#520, #525 and its two review fixes, the cause of X85 once known, model-file pictures and titles) and land the rest after.
+1. **The phone and iPad install**, then the verification above (board I19).
+2. **The fifth train, #527**, rebuilt on the new main: #509, #510, #513, #519, #523, #531, with the iPad number-pad defect fixed (X86, owner: the "First look fixes…" delegate, told to wait for the lead) and the conflicts each owner must take (the state-machines session for #513, #532, #533: it has acknowledged and is waiting to be told which). `feat/model-file-pictures` landed inside #539; its tag is `archive/2026-11-10/model-file-pictures`.
+3. **For that train or the one after**: #539's leftovers (X101); the size card that records guesses as measured (X103, the reason the phone mount cannot fit his cased phone, X102); the second test plate's project (X98); the picture framing rule (X105); the kind of link in the trace and what the phone fetches by itself on a metered link (X97, X100); #530, the screenshot tool's slow, refusing and away conditions, into the gate (X76).
+4. **The kernel and physics labs** (K1, K4): no round is running. Three Gemini 4 Carbon reviews are in (`~/scan-to-make-work/gemini-carbon-2026-11-10/`, rows X104, X106): the third plate is held until coupons K and L are checked; the physics engine's "it holds" answers are not to be trusted yet. Start the next rounds only after item 1.
+5. The 13 coupons of the second plate are on David's bed (sent 18:29Z); his readings are owed to the kernel lab (key: `prints/2026-11-10-second-plate/KEY.md` in the private kernel repo). Start no print until his phone shows him what it is.
 
-### What went wrong under the old lead (so it is not repeated)
+### How this lead works (David, Nov 10 20:07Z; operations.md has the detail)
 
-- A screen that shows nothing while it waits or after a refusal passed every gate, because every test and capture talks to a companion on loopback. The rule is now in operations.md ("Waiting, failed and empty are screens too") and a tool for it is draft PR #530; neither has yet stopped anything.
-- Too much ran at once: up to five delegates on the Mac, two labs on Linux, a second Fable session, three trains' worth of branches. Simulator runs drove the Mac's load to 150–600 while David used his app on it. Keep to about three, one simulator at a time.
-- Test prints went into David's own app with no name, picture or explanation.
-- Agents were not cleaned up after: about 60 finished threads are still unsettled, 17 worktrees exist, the Mac has **42 GiB free** (it had 200 this morning), `~/scan-to-make-work` is 44 GB, CoreSimulator 41 GB, and leftover simulators exist (`xcrun simctl list devices`).
-- Side work (a geometry kernel and a physics engine, on Linux machines) took the lead's attention while the app David uses every day was broken.
+- Delegates are Opus 5.5 (medium by default, high or xhigh for harder work), GPT-6.1 Sol at xhigh, Muse Wonder Full for reviews, Gemini 4 Carbon for spatial reviews. Not Sonnet. Every brief names its files, its budget and its cleanup.
+- No AI attribution on commits or PR bodies.
+- Every delegate thread is settled when its result has been read; worktrees and branches go when their PR merges; disk is checked on all four machines after each train (Nov 10 22:00Z: the Mac 138 GiB free, agents-136 104 GB, agents-173 148 GB, agents-171 154 GB).
+- A Bash hook (`dcg`) on the Mac refuses recursive deletes and any `git push` whose text contains ` -f` (a branch name ending in `-f` trips it): delete remote branches with `gh api -X DELETE repos/<owner>/<repo>/git/refs/heads/<branch>`, and move folders to the Trash or to `/Volumes/Spillover/stm-cleanup-<date>/`.
+- Threads still open on purpose: "Find Implicit State Machines" (a second Fable session with #513, #519, #523, #532, #533), "First look fixes…" (#509, #531, `fix/train-e-ipad`), "Look at the real app…" (#530).
 
-### Clean up (owed; do it as work finishes, not at the end)
-
-- **Threads:** settle each delegate's thread when its result is read (`t3_thread_organize`, `action: "settle"`). `t3_thread_list` with `settled: false` shows what is left: finished reviews and installs from this session are settled; subagent threads of delegates, the research readers, and older sessions' threads are not.
-- **Worktrees and branches:** `git -C ~/fleet/scan-to-make worktree list`; remove every worktree whose PR has merged or closed and delete its branch; `scripts/branch_check.py` lists branches behind main. `~/fleet/stm-lane-a` (docs PRs) and `~/fleet/stm-lane-b` (train assembly) are separate clones the lead uses: keep or remove them deliberately.
-- **Disk:** a hook blocks recursive deletes on the Mac, so build output is moved to `/Volumes/Spillover/stm-scratch/` (data only; never built or run from) and David deletes the staging folders (board W3). DerivedData, gate temp folders under `/private/var/folders/…/T/stm-ci-local-*`, and simulators a run created are the agent's to remove.
-- **Simulators:** `xcrun simctl delete <udid>` for every `mobile-ci-*`, `stm-ux-*` and capture simulator not in use.
-
-### Still running at handoff (read each, then finish, cancel or settle it)
-
-| What | Where | State |
-|---|---|---|
-| Reproducing the empty part stage (X85); owner of #525 and `feat/model-file-pictures` | Mac, thread "The project's picture…" | Running; a compile hold queued in the lane |
-| #509/#531's owner; next job `fix/printer-name-snapshots` | Mac, thread "First look fixes…" | Idle, waiting for the train to merge |
-| Screenshot tool: #530 conditions and blank check | Mac, thread "Look at the real app…" | Proof runs pending |
-| State-machines session (a second Fable session, not a delegate): #513, #519, #523, #524, #532 the stop hint, #533 the phone's bar | Mac, thread "Find Implicit State Machines" | Standing by for the train |
-| Kernel lab, round 4 | agents-136 | Finishing its report |
-| Physics lab, round 3 continued, 3 GB memory limit | agents-173 | Running until about 21:45Z |
-
-Open PRs here: #527 (the train) and its pieces #509, #510, #513, #519, #520, #523, #524, #525, #531; for the next train #530, #532, #533 and branch `feat/model-file-pictures`; old and unreviewed against today's main #404, #410, #413. In the MCP repos: bambu-printer-mcp #138 and mcp-3D-printer-server #94 (fit-by-function guidance, drafts), bambu-printer-mcp #128 (not this project's).
+Open PRs here: #527 (the fifth train, to be rebuilt) and its pieces #509, #510, #513, #519, #523, #531; #530, #532, #533; old and unreviewed against today's main #404, #410, #413. In the MCP repos: bambu-printer-mcp #138 and mcp-3D-printer-server #94 (fit-by-function guidance, drafts), bambu-printer-mcp #128 (not this project's).
 
 **How work lands** (operations.md): finished branches go on a train, with one review, one gate (`scripts/ci_local.py` and `scripts/branch_check.py --merge` printing SAFE), a merge commit, and an install the same day from a clone pinned at the merged SHA. The Mac has two build slots and one simulator session at a time (`scripts/lane.py`; every hold that boots a simulator is `--exclusive`).
 
