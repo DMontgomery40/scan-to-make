@@ -275,6 +275,60 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertNil(none)
     }
 
+    func testLockedKeychainAfterResponseKeepsPairingAndRetriesAfterUnlock() async throws {
+        let secure = LockTransitionStore()
+        let store = PairingStore(store: secure, defaults: UserDefaults(suiteName: "locked-\(UUID().uuidString)")!)
+        try store.save(v2Record(), notify: false)
+        let fake = FakeTransport { _, _ in
+            secure.locked = true
+            return HTTPReply(status: 200, body: Data("mesh".utf8))
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let c = CompanionClient(pairing: PairingClient(store: store, transport: fake), transport: fake, cache: root)
+        let p = project([:])
+        do { _ = try await c.download(p, "model.stl"); XCTFail("Lock transition must defer publication") }
+        catch let error as CompanionError {
+            XCTAssertEqual(error.code, "device-locked")
+            XCTAssertFalse(error.needsPairing)
+        }
+        secure.locked = false
+        XCTAssertNotNil(try store.read(), "The stored credential survives locking")
+        fake.answer = { _, _ in HTTPReply(status: 200, body: Data("mesh".utf8)) }
+        let downloaded = try await c.download(p, "model.stl")
+        XCTAssertEqual(try Data(contentsOf: downloaded), Data("mesh".utf8))
+    }
+
+    func testActualSuccessfulAndFailedVisitsWriteTheirBoundariesWithoutSecrets() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let trace = MediaTrace(url: folder.appendingPathComponent("media-trace.ndjson"))
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: Data("mesh".utf8)) }
+        let c = try client(fake)
+        defer { try? FileManager.default.removeItem(at: c.cache) }
+        try await MediaTrace.$destination.withValue(trace) {
+            _ = try await c.download(project([:]), "model.stl")
+            fake.answer = { _, _ in throw TransportError("timeout") }
+            do { _ = try await c.download(project([:]), "renders/one.png"); XCTFail() } catch {}
+        }
+        let text = try String(contentsOf: trace.url, encoding: .utf8)
+        let rows = try text.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: String] }
+        for boundary in ["file.miss", "pairing.read", "request.start", "request.response", "pairing.reread", "file.committed", "request.error"] {
+            XCTAssertTrue(rows.contains { $0["event"] == boundary }, "Missing \(boundary)")
+        }
+        XCTAssertTrue(rows.contains { $0["event"] == "request.response" && $0["status"] == "200" && $0["bytes"] == "4" })
+        XCTAssertTrue(rows.allSatisfy { $0["project"] == project([:]).id && $0["generation"] != nil && $0["version"] != nil })
+        XCTAssertFalse(text.contains(token)); XCTAssertFalse(text.contains(keyPin)); XCTAssertFalse(text.contains("192.168"))
+    }
+
+    func testHTTPDownloadRefusalKeepsStatus() async throws {
+        let fake = FakeTransport { _, _ in HTTPReply(status: 503, body: Data()) }
+        let c = try client(fake)
+        defer { try? FileManager.default.removeItem(at: c.cache) }
+        do { _ = try await c.download(project([:]), "model.stl"); XCTFail("Refused") }
+        catch let error as CompanionError { XCTAssertEqual(error.code, "http-503") }
+    }
+
     private func client(_ fake: FakeTransport, record: PairingRecord = v2Record()) throws -> CompanionClient {
         let store = PairingStore(store: MemoryStore(), defaults: UserDefaults(suiteName: "cc-\(UUID().uuidString)")!)
         try store.save(record, notify: false)
@@ -1206,4 +1260,16 @@ final class NotificationActionsTests: XCTestCase {
         XCTAssertTrue(CompanionClient.draftBody("A clip.", kind: "fit", fit: nil)["fit"] is NSNull)
         XCTAssertEqual((CompanionClient.draftBody("A clip.", kind: "fit", fit: ProjectFit(sizeSource: .scan))["fit"] as? [String: Any])?["sizeSource"] as? String, "scan")
     }
+}
+
+private final class LockTransitionStore: SecureStore, @unchecked Sendable {
+    private let memory = MemoryStore()
+    var locked = false
+    func read(_ account: String) throws -> Data? {
+        if locked { throw PairingError(.secureStorage, status: -25308) }
+        return try memory.read(account)
+    }
+    func write(_ account: String, _ data: Data) throws { try memory.write(account, data) }
+    func add(_ account: String, _ data: Data) throws -> Bool { try memory.add(account, data) }
+    func delete(_ account: String) throws { try memory.delete(account) }
 }
