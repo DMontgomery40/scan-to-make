@@ -120,33 +120,43 @@ class LocalWorkflowTests(unittest.TestCase):
             self.assertFalse((root/'sub/must-not-exist').exists()); self.assertTrue((root/'sub/failure-ran').exists())
             self.assertEqual(json.loads((root/'logs/result.json').read_text())['status'],'FAIL')
 
-    def test_mac_jobs_hold_the_ios_lock_and_linux_jobs_do_not(self):
-        probe = 'python3 -c "import fcntl,os,sys\nf=open(os.environ[\'STM_IOS_LOCK\'],\'a\')\ntry: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept BlockingIOError: sys.exit(7)"'
+    def test_mac_jobs_hold_a_lane_slot_the_ui_job_holds_both_and_linux_jobs_hold_none(self):
+        # Exit 7 when slot 1 is held, 8 when slot 2 is, 15 when both are; 0 when neither.
+        probe = ('python3 -c "import fcntl,os,sys\ncode=0\nfor bit,name in ((7,\'STM_LANE_SLOT1\'),(8,\'STM_LANE_SLOT2\')):\n'
+                 ' f=open(os.environ[name],\'a\')\n try: fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\n except BlockingIOError: code+=bit\nsys.exit(code)"')
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder).resolve()
-            with patch.dict(os.environ,{'STM_IOS_LOCK':str(root/'ios.lock')}), patch.object(ci.platform,'system',return_value='Darwin'):
-                for label, expected in (('macos-27','PASS'),('xcode-27.2','PASS'),('ubuntu-latest','FAIL')):
-                    job={'workflow':'fixture','key':label,'matrix':{},'env':{},'defaults':{},'job':{'runs-on':label,'steps':[{'run':'set +e; '+probe+'; test $? -eq 7'}]}}
+            lanes={'STM_LANE_SLOT1':str(root/'ios.lock'),'STM_LANE_SLOT2':str(root/'ios-2.lock'),'STM_LANE_DIR':str(root/'lane')}
+            with patch.dict(os.environ,lanes), patch.object(ci.platform,'system',return_value='Darwin'):
+                cases=(('fixture','macos-27','test $? -eq 7 -o $? -eq 8'),('fixture','xcode-27.2','test $? -eq 7 -o $? -eq 8'),
+                       ('mobile','app','test $? -eq 15'),('fixture','ubuntu-latest','test $? -eq 0'))
+                for workflow, label, check in cases:
+                    runner = 'xcode-27' if workflow == 'mobile' else label
+                    job={'workflow':workflow,'key':label,'matrix':{},'env':{},'defaults':{},'job':{'runs-on':runner,'steps':[
+                        {'run':'set +e; '+probe+'; '+check},
+                        {'run':'test "${STM_LANE_HELD:-}" '+('= ""' if label.startswith('ubuntu') else '!= ""')}]}}
                     result=ci.execute_job(job,root,root/('logs-'+label))
-                    self.assertEqual(result['status'],expected,label)
+                    self.assertEqual(result['status'],'PASS',label)
                 self.assertEqual((root/'ios.lock').read_text(),'')
 
-    def test_ios_lock_command_waits_for_the_holder_then_runs(self):
+    def test_ios_lock_command_waits_and_says_who_holds_the_lane(self):
         import fcntl
         with tempfile.TemporaryDirectory() as folder:
-            lock=Path(folder)/'ios.lock'; marker=Path(folder)/'ran'
-            env=dict(os.environ,STM_IOS_LOCK=str(lock))
-            with lock.open('a+') as held:
-                fcntl.flock(held,fcntl.LOCK_EX); held.write('123 other-seat since 00:00:00\n'); held.flush()
-                child=subprocess.Popen([sys.executable,str(MODULE),'--ios-lock','touch',str(marker)],env=env,stdout=subprocess.PIPE,text=True)
+            slot1=Path(folder)/'ios.lock'; slot2=Path(folder)/'ios-2.lock'; marker=Path(folder)/'ran'
+            env=dict(os.environ,STM_LANE_SLOT1=str(slot1),STM_LANE_SLOT2=str(slot2),STM_LANE_DIR=str(Path(folder)/'lane'),STM_LANE_POLL='0.05')
+            with slot1.open('a+') as one, slot2.open('a+') as two:
+                # Slot 1 held by ci_local from before the lane (it wrote its description into the file).
+                fcntl.flock(one,fcntl.LOCK_EX); one.write('123 other-seat since 00:00:00\n'); one.flush()
+                fcntl.flock(two,fcntl.LOCK_EX)
+                child=subprocess.Popen([sys.executable,str(MODULE),'--ios-lock','touch',str(marker)],env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
                 try:
-                    child.wait(timeout=1.5); self.fail('ran without the lock')
+                    child.wait(timeout=1.5); self.fail('ran without a slot')
                 except subprocess.TimeoutExpired: pass
                 self.assertFalse(marker.exists())
-                fcntl.flock(held,fcntl.LOCK_UN)
-            out,_=child.communicate(timeout=20)
+                fcntl.flock(two,fcntl.LOCK_UN)
+                out,_=child.communicate(timeout=20)
             self.assertEqual(child.returncode,0); self.assertTrue(marker.exists())
-            self.assertIn('held by: 123 other-seat',out)
+            self.assertIn('held by 123 other-seat',out)
 
     def route(self, kinds, alive):
         """Run main() on a pretend Mac with Linux hosts a, b, c; `alive` is the set that answers SSH."""

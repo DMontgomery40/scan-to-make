@@ -18,7 +18,9 @@ derived="${DERIVED_DATA_PATH:-$out/derived}"
 archive="$out/Counterpart.xcarchive"
 [ ! -e "$archive" ] || { echo "Archive already exists: $archive" >&2; exit 1; }
 mkdir -p "$out"
-xcodebuild -project "$mac/ScanToMake.xcodeproj" -scheme ScanToMake -configuration Release -derivedDataPath "$derived" -archivePath "$archive" CODE_SIGN_STYLE=Manual CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS=--timestamp CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" STM_MAC_PROVISIONING_PROFILE="$MAC_PROVISIONING_PROFILE" STM_ENTITLEMENTS_SUFFIX=+CloudKitProduction STM_APS_ENVIRONMENT=production CURRENT_PROJECT_VERSION="$BUILD_NUMBER" SPARKLE_FEED_URL="$SPARKLE_FEED_URL" SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" archive
+# Each xcodebuild holds one build-lane slot on the Mac (scripts/README.md, "The Mac's build lane").
+lane=("python3" "$mac/../../scripts/lane.py")
+"${lane[@]}" --label "mac release: archive build $BUILD_NUMBER" -- xcodebuild -project "$mac/ScanToMake.xcodeproj" -scheme ScanToMake -configuration Release -derivedDataPath "$derived" -archivePath "$archive" CODE_SIGN_STYLE=Manual CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS=--timestamp CODE_SIGN_IDENTITY="$DEVELOPER_ID_APPLICATION" STM_MAC_PROVISIONING_PROFILE="$MAC_PROVISIONING_PROFILE" STM_ENTITLEMENTS_SUFFIX=+CloudKitProduction STM_APS_ENVIRONMENT=production CURRENT_PROJECT_VERSION="$BUILD_NUMBER" SPARKLE_FEED_URL="$SPARKLE_FEED_URL" SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY" archive
 # Export signs Sparkle's nested updater/XPC helpers as well as the containing app.
 # Use Apple's rsync peer during export, even when Homebrew is earlier on PATH.
 python3 - "$out/ExportOptions.plist" "$MAC_PROVISIONING_PROFILE" "$DEVELOPER_ID_APPLICATION" <<'PYEXPORT'
@@ -32,7 +34,7 @@ with open(path, 'wb') as handle:
         'iCloudContainerEnvironment': 'Production',
     }, handle)
 PYEXPORT
-PATH=/usr/bin:/bin:/usr/sbin:/sbin xcodebuild -exportArchive -archivePath "$archive" -exportPath "$out/export" -exportOptionsPlist "$out/ExportOptions.plist"
+"${lane[@]}" --label "mac release: export build $BUILD_NUMBER" -- /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin xcodebuild -exportArchive -archivePath "$archive" -exportPath "$out/export" -exportOptionsPlist "$out/ExportOptions.plist"
 app="$out/export/Counterpart.app"
 codesign --verify --deep --strict "$app"
 python3 "$mac/../../scripts/verify_apple_distribution.py" "$app" --platform mac --build "$BUILD_NUMBER"
