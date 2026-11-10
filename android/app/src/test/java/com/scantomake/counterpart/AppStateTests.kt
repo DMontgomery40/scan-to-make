@@ -11,6 +11,10 @@ import com.scantomake.counterpart.app.Counterpart
 import com.scantomake.counterpart.pairing.MemoryStore
 import com.scantomake.counterpart.pairing.PairingClient
 import com.scantomake.counterpart.pairing.PairingStore
+import com.scantomake.counterpart.net.HttpReply
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -114,10 +118,23 @@ class AppStateTests {
         state.reload(id)
         assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
         assertNull(state.error.value)
-        // And a refresh that works is an answer.
+        // "Not found" is an answer too, and the project goes.
         state.link.value = com.scantomake.counterpart.api.MacLink.NotAnswering
         transport.answer = { _, _ -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "Gone."))) }
         state.reload(id)
         assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
+        // No answer at all: the link stops saying connected and the banner says why.
+        transport.answer = { _, _ -> throw com.scantomake.counterpart.net.TransportException("network") }
+        assertTrue(state.reload(id)!!.isUnreachable)
+        assertEquals(com.scantomake.counterpart.api.MacLink.NotAnswering, state.link.value)
+        assertTrue(state.error.value!!.isUnreachable)
+        // A refresh that works is an answer, and clears the "not answering" banner.
+        val objects = com.scantomake.counterpart.core.WireJson.parseToJsonElement(kitFixture("objects.json").readText())
+            .jsonObject["objects"]!!.jsonArray
+        val project = objects[0].jsonObject
+        transport.answer = { _, _ -> HttpReply(200, """{"object":$project}""".toByteArray()) }
+        assertNull(state.reload(project["id"]!!.jsonPrimitive.content))
+        assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
+        assertNull(state.error.value)
     }
 }
