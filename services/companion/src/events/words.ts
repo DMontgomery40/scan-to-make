@@ -21,7 +21,7 @@ export function projectTitle(object: TitleSource): string {
   // Not its size: every list already shows the size on the line under the title (seen on the iPad with real
   // projects, Nov 10: "Scan, 68.4 × 34.6 × 14…" over "68.4 × 34.6 × 149.9 mm").
   if (object.scan || object.capture?.length) {
-    return object.createdAtMs ? `Scan from ${scanDate(object.createdAtMs)}` : 'Your scan';
+    return object.createdAtMs ? `Scan, ${scanDate(object.createdAtMs)}` : 'Your scan';
   }
   return 'Your project';
 }
@@ -204,6 +204,26 @@ export interface StatusSource extends TitleSource {
 
 const formatDate = (iso: string) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric'}).format(new Date(iso));
 
+/**
+ * The most a row's `detail` may be: what fits the two lines a list row gives it on the narrowest sidebar (the
+ * iPad's), so no client ever cuts it mid-word where the meaning is.
+ */
+export const DETAIL_MAX = 80;
+/**
+ * The row's own line: all of it when it fits; else its first sentence; else cut at a word with an ellipsis.
+ * `reason` takes the first sentence whatever the length: a stopped pass's row is why it stopped, and "Try again or
+ * review the saved checkpoint" is the project page's job.
+ */
+export function rowDetail(text: string | undefined, reason = false): string | undefined {
+  const whole = text?.replace(/\s+/g, ' ').trim();
+  if (!whole) return undefined;
+  const first = whole.split(/(?<=[.?!])\s+/)[0]!;
+  const line = whole.length <= DETAIL_MAX && !reason || first.length === whole.length ? whole : first.replace(/\.$/, '');
+  if (line.length <= DETAIL_MAX) return line;
+  const cut = line.slice(0, DETAIL_MAX - 1);
+  return `${cut.slice(0, cut.lastIndexOf(' ') > 40 ? cut.lastIndexOf(' ') : cut.length).replace(/[\s,;:·-]+$/, '')}…`;
+}
+
 /** The §4 line for a project, with its symbol and colour. */
 export function objectStatus(object: StatusSource, updatedAtMs?: number): ObjectStatus {
   const printer = object.print?.destination?.name ?? 'your printer';
@@ -215,11 +235,11 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       const stage = pass?.stages?.filter(item => item.endedAtMs === undefined).at(-1)?.words ?? object.progress;
       const minutes = pass?.estimate ? Math.max(1, Math.round(pass.estimate.remainingSec / 60)) : undefined;
       const doing = joined(stage, minutes ? `about ${minutes} min` : undefined);
-      return {phase: 'working', text: joined('Your Mac is working', stage, minutes ? `about ${minutes} min` : undefined).slice(0, 300), ...(doing ? {detail: doing.slice(0, 300)} : {}), symbol: 'wand.and.sparkles', tint: 'blue'};
+      return {phase: 'working', text: joined('Your Mac is working', stage, minutes ? `about ${minutes} min` : undefined).slice(0, 300), ...(rowDetail(doing) ? {detail: rowDetail(doing)} : {}), symbol: 'wand.and.sparkles', tint: 'blue'};
     }
     case 'needs-closeup': {
       const question = object.ask?.question ?? (object.question?.closeup ? `Can you take a close-up of ${object.question.closeup}?` : undefined);
-      return {phase: 'needs-you', text: joined('Needs you', question).slice(0, 300), ...(question ? {detail: question.slice(0, 300)} : {}), symbol: 'hand.raised', tint: 'orange'};
+      return {phase: 'needs-you', text: joined('Needs you', question).slice(0, 300), ...(rowDetail(question) ? {detail: rowDetail(question)} : {}), symbol: 'hand.raised', tint: 'orange'};
     }
     case 'ready': { const size = sizeText(object.current?.sizeMm); return {phase: 'ready', text: joined('Ready to print', size), ...(size ? {detail: size} : {}), symbol: 'checkmark.seal', tint: 'accent'}; }
     case 'printing': {
@@ -239,6 +259,7 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
     // PRD §5.4: marked Works (Done on Home and in the Mac sidebar).
     case 'confirmed': return {phase: 'confirmed', text: 'Done · it works', symbol: 'checkmark.circle.fill', tint: 'green'};
     case 'sent': return {phase: 'sent', text: sentWords(object.print?.destination?.name ?? 'your printer', object.print?.sentVia === 'bambu-connect'), symbol: 'paperplane', tint: 'secondary'};
-    default: return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), symbol: 'exclamationmark.triangle', tint: 'red'};
+    // The row says why it stopped; what to do about it is the project page's.
+    default: return {phase: 'failed', text: (object.failure ?? 'Something went wrong. Try again.').slice(0, 300), ...(rowDetail(object.failure, true) && rowDetail(object.failure, true) !== object.failure!.trim() ? {detail: rowDetail(object.failure, true)} : {}), symbol: 'exclamationmark.triangle', tint: 'red'};
   }
 }

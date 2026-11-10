@@ -216,7 +216,7 @@ private fun NowCard(p: Project, w: ProjectWords, onClick: () -> Unit) {
             ProjectImage(p, p.posterName(), Modifier.size(76.dp).clip(RoundedCornerShape(16.dp)))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(w.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(w.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 StatusCapsule(w.phase)
                 // The capsule already names the phase: the line shows only what differs.
                 Text(rowLine(p, w.line), Modifier.testTag("row-line-${p.id}"), color = Palette.secondary, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -235,7 +235,7 @@ private fun ProjectCard(p: Project, w: ProjectWords, onClick: () -> Unit) {
             StatusCapsule(w.phase, modifier = Modifier.padding(8.dp))
         }
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(w.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(w.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(w.size ?: Format.`when`(p.updatedAtMs.toLong()), color = Palette.secondary, fontSize = 12.sp, maxLines = 1)
         }
     }

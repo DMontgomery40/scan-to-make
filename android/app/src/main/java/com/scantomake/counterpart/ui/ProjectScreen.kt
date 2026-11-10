@@ -113,6 +113,11 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
     var confirmDelete by remember { mutableStateOf(false) }
     var pendingCamera by remember { mutableStateOf<File?>(null) }
     var forAsk by remember { mutableStateOf(true) }
+    // The size fields as they stand, with the question they belong to: read by every answer the card sends.
+    var askSizes by remember { mutableStateOf<Pair<String, AskSizesForm>?>(null) }
+    // The numbers that go with the caliper photo, taken when its button is pressed (the fields can't change meanwhile).
+    var photoSizes by remember { mutableStateOf(listOf<AskSizesForm.Answer>()) }
+    var askProblem by remember { mutableStateOf<String?>(null) }
     val messagePhotos = remember { mutableStateOf(listOf<File>()) }
     var noteAttempt by remember { mutableStateOf<NoteAttempt?>(null) }
 
@@ -132,7 +137,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
         if (files.isEmpty()) return
         if (forAsk) run("ask") {
             val names = Media.sendPhotos(app.uploader, id, files, forMessage = true)
-            state.show(app.companion.answerAsk(id, photoNames = names))
+            state.show(app.companion.answerAsk(id, photoNames = names, sizes = photoSizes))
         } else messagePhotos.value = messagePhotos.value + files
     }
     val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
@@ -249,13 +254,23 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     if (ask.type != "choice" && ask.type != "file") AskPhoto(project, ask)
                     // A size question: its numbers, prefilled, with Confirm as the one obvious action. Words and a
                     // caliper photo stay below for whatever the numbers don't say.
-                    val sizes = AskSizesForm.of(ask)
-                    if (sizes != null) AskSizesCard(sizes, ask.id, enabled = working == null) { answer ->
+                    val sizes = AskSizesForm.of(ask)?.let { asked -> askSizes?.takeIf { it.first == ask.id }?.second ?: asked }
+                    if (sizes != null) AskSizesCard(sizes, enabled = working == null, changed = { askSizes = ask.id to it; askProblem = null }) { answer ->
                         run("ask") { state.show(app.companion.answerAsk(id, text = askText.trim().ifBlank { null }, sizes = answer)); askText = "" }
                     }
-                    if (ask.kind != null && ask.kind !in AskSizesForm.knownKinds)
+                    // One answer carries everything the card holds: the numbers as they stand go with words or a photo.
+                    // Null when a filled field isn't a number, and then nothing is sent.
+                    fun carried(): List<AskSizesForm.Answer>? = when (val c = sizes?.carried) {
+                        is AskSizesForm.Carried.Sizes -> c.sizes
+                        AskSizesForm.Carried.Invalid -> { askProblem = AskSizesForm.invalidWords; null }
+                        AskSizesForm.Carried.None, null -> emptyList()
+                    }
+                    askProblem?.let { Text(it, color = Palette.failed, fontSize = 13.sp) }
+                    // A kind this build doesn't know: the question and this sentence, and no answer at all, because any
+                    // answer offered here could consume the question wrongly.
+                    if (!AskSizesForm.answerable(ask.kind))
                         Text("Update Counterpart on this phone to answer this kind of question here.", color = Palette.secondary, fontSize = 13.sp, modifier = Modifier.testTag("ask-update"))
-                    when (ask.type) {
+                    else when (ask.type) {
                         "choice" -> ask.options?.forEach { o ->
                             SecondaryButton(o.label + (o.detail?.let { " · $it" } ?: ""), Modifier.fillMaxWidth(), enabled = working == null) {
                                 run("ask") { state.show(app.companion.choosePublishedPlate(id, ask.id, o.id)) }
@@ -268,16 +283,18 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                         else -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 SecondaryButton(if (sizes != null) "Caliper Photo" else "Take a Photo", Modifier.weight(1f), enabled = working == null, icon = CIcons.Camera) {
+                                    photoSizes = carried() ?: return@SecondaryButton
                                     forAsk = true; val (f, uri) = Media.newPhotoTarget(context); pendingCamera = f; takePhoto.launch(uri)
                                 }
                                 if (sizes == null) SecondaryButton("Choose", Modifier.weight(1f), enabled = working == null, icon = CIcons.Photo) {
-                                    forAsk = true; pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                    photoSizes = emptyList(); forAsk = true; pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                                 }
                             }
                             if ("text" in ask.answers || ask.answers.isEmpty()) {
                                 OutlinedTextField(askText, { askText = it }, Modifier.fillMaxWidth().testTag("ask-text"), placeholder = { Text(if (sizes != null) "Anything the numbers don't say" else "Or tell it in words") })
                                 if (askText.isNotBlank()) SecondaryButton("Send Answer", Modifier.fillMaxWidth(), enabled = working == null) {
-                                    run("ask") { state.show(app.companion.answerAsk(id, text = askText.trim())); askText = "" }
+                                    val numbers = carried() ?: return@SecondaryButton
+                                    run("ask") { state.show(app.companion.answerAsk(id, text = askText.trim(), sizes = numbers)); askText = "" }
                                 }
                             }
                             // A size is confirmed or measured, never guessed.
@@ -403,8 +420,7 @@ fun DidItFitCard(project: Project, enabled: Boolean, itWorks: () -> Unit, needsC
 /** A size question's fields: one row per size the computer asked about, in its words, prefilled, and one button.
  *  What is sent is `AskSizesForm`'s rule, the same as on every other client. */
 @Composable
-fun AskSizesCard(initial: AskSizesForm, askId: String, enabled: Boolean, send: (List<AskSizesForm.Answer>) -> Unit) {
-    var form by remember(askId) { mutableStateOf(initial) }
+fun AskSizesCard(form: AskSizesForm, enabled: Boolean, changed: (AskSizesForm) -> Unit, send: (List<AskSizesForm.Answer>) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         form.fields.forEach { field ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -412,13 +428,13 @@ fun AskSizesCard(initial: AskSizesForm, askId: String, enabled: Boolean, send: (
                     Text(field.label.replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Medium)
                     Text(AskSizesForm.source(field.from), color = Palette.secondary, fontSize = 12.sp)
                 }
-                OutlinedTextField(field.text, { form = form.with(field.id, it) }, Modifier.width(120.dp).testTag("ask-size-${field.id}"),
+                OutlinedTextField(field.text, { changed(form.with(field.id, it)) }, Modifier.width(120.dp).testTag("ask-size-${field.id}"),
                     singleLine = true, suffix = { Text("mm") },
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal))
             }
         }
         val answer = form.answer
-        if (answer == null) Text("Enter each size in millimetres, or leave one empty if you don't know it.", color = Palette.secondary, fontSize = 13.sp)
+        if (answer == null) Text(AskSizesForm.invalidWords, color = Palette.secondary, fontSize = 13.sp)
         PrimaryButton(if (form.unchanged) "Confirm These Sizes" else "Send These Sizes", Modifier.fillMaxWidth().testTag("ask-sizes-confirm"), enabled = enabled && answer != null) {
             answer?.let(send)
         }

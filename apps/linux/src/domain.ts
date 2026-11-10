@@ -768,27 +768,6 @@ export function scanSample(count: number, shown = 5): number[] {
 
 export const scanWords = (count: number) => (count === 1 ? "1 photo" : `${count} photos`);
 
-/** A pass in the project's history: how it ended in the companion's words (`passes[].words`), or that it is running. */
-export function passHeading(pass: Pick<Pass, "words">, index: number): string {
-  return `Pass ${index + 1} · ${pass.words ?? "Working"}`;
-}
-
-/** How an ended pass left things (CounterpartKit `Pass.ending`): finished, stopped to ask, or stopped short. */
-export function passEnding(pass: Pick<Pass, "endedAtMs" | "status">): "finished" | "asked" | "stopped" | undefined {
-  if (!pass.endedAtMs) return undefined;
-  if (pass.status === "needs_closeup" || pass.status === "needs_file") return "asked";
-  if (pass.status === "capped" || pass.status === "failed" || pass.status === "interrupted") return "stopped";
-  return "finished";
-}
-
-/** The mark beside a stage. The last stage carries how the pass ended: asked or stopped is never a tick. */
-export function stageMark(pass: Pick<Pass, "endedAtMs" | "status" | "stages">, index: number): string {
-  const stage = pass.stages?.[index];
-  const ending = index === (pass.stages?.length ?? 0) - 1 ? passEnding(pass) : undefined;
-  if (ending === "asked") return "?";
-  if (ending === "stopped") return "✕";
-  return stage?.endedAtMs ? "✓" : "◌";
-}
 /** The kinds of question this build knows how to answer (contracts `AskSchema.kind`). */
 export const KNOWN_ASK_KINDS = ["closeup", "file", "choice", "region", "scale", "sizes"];
 
@@ -832,6 +811,16 @@ export function sizesAnswer(fields: SizeField[]): { id: string; mm: number }[] |
   return sizes.length ? sizes : undefined;
 }
 
+/** What goes with any other answer sent from the same card (CounterpartKit `AskSizesForm.carried`): the numbers as
+ *  they stand; "none" when every field is blank; "invalid" while a filled field isn't a number. */
+export function sizesCarried(fields: SizeField[]): { id: string; mm: number }[] | "none" | "invalid" {
+  return sizesAnswer(fields) ?? (fields.every((field) => !field.text.trim()) ? "none" : "invalid");
+}
+
+/** False for a kind this build doesn't know: the card shows the question and says to update, and offers no answer
+ *  at all (CounterpartKit `Ask.answerable`). A question with no kind is from a companion older than kinds. */
+export const askAnswerable = (ask: Pick<Ask, "kind">) => !ask.kind || KNOWN_ASK_KINDS.includes(ask.kind);
+
 /** Nothing was changed: the button says Confirm. */
 export const sizesUnchanged = (fields: SizeField[]) => fields.every((field) => millimetres(field.text) === millimetres(sizeText(field.asked)));
 
@@ -839,4 +828,46 @@ export const sizeSource = (from: string) => (from === "published" ? "from the ma
 /** The line under a project's title in the list grouped by phase (CounterpartKit `ProjectWords.row`). */
 export function rowWords(p: Project): string {
   return p.status?.detail?.trim() || words(p);
+}
+
+/** A pass in the project's history: how it ended in the companion's words (`passes[].words`), or that it is running. */
+export function passHeading(pass: Pick<Pass, "words" | "endedAtMs" | "status">, index: number): string {
+  return `Pass ${index + 1} · ${passWords(pass) ?? "Working"}`;
+}
+
+/** How an ended pass is worded: the companion's `words`, or for an older companion its status worded here
+ *  (CounterpartKit `Pass.endingWords`). Undefined while it runs. */
+export function passWords(pass: Pick<Pass, "words" | "endedAtMs" | "status">): string | undefined {
+  if (!pass.endedAtMs) return undefined;
+  if (pass.words) return pass.words;
+  if (pass.status === "needs_closeup") return "Asked you a question";
+  if (pass.status === "interrupted") return "Stopped when Counterpart restarted";
+  if (!pass.status || pass.status === "done") return "Finished";
+  return pass.status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** The words that started a pass, when it was a change the person asked for (CounterpartKit `requestedChange`):
+ *  a note with or without photos, or from a companion older than triggers. Never the first request or an answer
+ *  to a question, whose note the companion composes. */
+export function requestedChange(pass: Pick<Pass, "note" | "trigger">): string | undefined {
+  const note = pass.note?.trim();
+  if (!note || !(pass.trigger === undefined || pass.trigger === "changes" || pass.trigger === "late-photos")) return undefined;
+  return note;
+}
+
+/** How an ended pass left things (CounterpartKit `Pass.ending`): finished, stopped to ask, or stopped short. */
+export function passEnding(pass: Pick<Pass, "endedAtMs" | "status">): "finished" | "asked" | "stopped" | undefined {
+  if (!pass.endedAtMs) return undefined;
+  if (pass.status === "needs_closeup" || pass.status === "needs_file") return "asked";
+  if (pass.status === "capped" || pass.status === "failed" || pass.status === "interrupted") return "stopped";
+  return "finished";
+}
+
+/** The mark beside a stage. The last stage carries how the pass ended: asked or stopped is never a tick. */
+export function stageMark(pass: Pick<Pass, "endedAtMs" | "status" | "stages">, index: number): string {
+  const stage = pass.stages?.[index];
+  const ending = index === (pass.stages?.length ?? 0) - 1 ? passEnding(pass) : undefined;
+  if (ending === "asked") return "?";
+  if (ending === "stopped") return "✕";
+  return stage?.endedAtMs ? "✓" : "◌";
 }

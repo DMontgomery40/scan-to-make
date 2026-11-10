@@ -345,6 +345,8 @@ struct NeedsYouCard: View {
 struct AskButtons: View {
     let store: ProjectsStore
     let project: Project
+    /// The size card's numbers as they stand, when these buttons sit on one: a caliper photo goes with them.
+    var sizes: AskSizesForm? = nil
     @Binding var working: Bool
     @Binding var problem: String?
 
@@ -354,6 +356,10 @@ struct AskButtons: View {
     private var answers: Set<String> { Set(project.openAsk?.answers ?? ["camera", "photos", "best-guess"]) }
 
     var body: some View {
+        // A kind this build doesn't know gets no answer control at all (`Project.Ask.answerable`).
+        if project.openAsk?.answerable ?? true { buttons }
+    }
+    private var buttons: some View {
         GlassEffectContainer(spacing: 8) {
             VStack(alignment: .leading, spacing: 8) {
                 if project.openAsk?.type == "file" {
@@ -407,10 +413,17 @@ struct AskButtons: View {
     }
 
     private func answer(camera: Bool) {
+        // One answer carries everything the card holds: the photo goes with the numbers as they stand.
+        var numbers: [AskSizesForm.Answer] = []
+        switch sizes?.carried {
+        case .sizes(let carried): numbers = carried
+        case .invalid: problem = AskSizesForm.invalidWords; return
+        case .some(.none), nil: break
+        }
         act {
             let sent = try await store.mac.addCloseups(project.id, camera: camera, forMessage: true)
             guard !sent.isEmpty else { return nil }
-            return try await store.mac.closeup(project.id, bestGuess: false, photoNames: sent)
+            return try await store.mac.client.answerAsk(project.id, photoNames: sent, sizes: numbers)
         }
     }
     private func bestGuess() { act { try await store.mac.closeup(project.id, bestGuess: true) } }

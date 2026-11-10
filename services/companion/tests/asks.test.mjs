@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {AskSchema} from '@scan-to-make/contracts/counterpart';
-import {askKind, answeredSizes, sizesNote} from '../dist/objects/asks.js';
+import {askKind, answeredSizes, sizesNote, mergeCheckedSizes, withCheckedSizes, checkedSizesBrief} from '../dist/objects/asks.js';
+import {workerRequest, fitBrief} from '../dist/objects/fit.js';
 import {publicObject} from '../dist/objects/http.js';
 
 const ask = extra => ({id: '6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01', question: 'Q?', answers: ['text'], status: 'open', askedAtMs: 1, ...extra});
@@ -55,4 +56,42 @@ test('answered sizes keep the question\'s labels and order, and say which were c
   assert.equal(sizesNote(echoed), 'The person checked the sizes you asked about on the real object. Treat these as measured:\n- width: 68.412 mm (confirmed)\n- waist: 53.4567 mm (confirmed)\n- height: 149.3 mm (corrected; you had 149.2049 mm)');
   // One hundredth away is a correction.
   assert.equal(answeredSizes(fine, [{id: 'a', mm: 68.42}])[0].mm, 68.42);
+});
+
+// Train #499 review, F4: answered sizes replaced the whole fit, were dropped on a project that isn't a fit, and were
+// later called "the exact overall size".
+test('checked sizes merge by label, stay on any project, and are worded by label with how sure each is', () => {
+  const answered = (label, mm, asked = mm) => ({id: 'x', label, mm, asked});
+  const first = mergeCheckedSizes(undefined, [answered('width at the waist', 53.5), answered('height to the cap tip', 107.3, 107)]);
+  assert.deepEqual(first, [{label: 'width at the waist', mm: 53.5, certainty: 'confirmed'}, {label: 'height to the cap tip', mm: 107.3, certainty: 'measured'}]);
+  // A later question lists the waist again and a new size; the height it left blank or never listed stays.
+  const second = mergeCheckedSizes(first, [answered('Width at the waist ', 53, 53.5), answered('cap diameter', 28)]);
+  assert.deepEqual(second, [{label: 'Width at the waist ', mm: 53, certainty: 'measured'}, {label: 'height to the cap tip', mm: 107.3, certainty: 'measured'}, {label: 'cap diameter', mm: 28, certainty: 'confirmed'}]);
+  assert.equal(checkedSizesBrief(undefined), undefined);
+  assert.equal(checkedSizesBrief([]), undefined);
+  const brief = checkedSizesBrief(first);
+  assert.match(brief, /^Sizes the person checked on the real object[^\n]*do not ask for them again\.\n- width at the waist: 53\.5 mm, confirmed\n- height to the cap tip: 107\.3 mm, measured by the person$/);
+  assert.doesNotMatch(brief, /exact overall size/);
+  // New measured "width" 64; the question then had "width at the widest point" corrected to 63. Not the same label,
+  // so both numbers reach the worker, and the brief says which one wins rather than leaving two to choose between.
+  const near = {instructions: 'A wall holder', fit: {sizeSource: 'measured', measured: [{id: 'a', label: 'width', mm: 64}]},
+    checkedSizes: mergeCheckedSizes(undefined, [answered('width at the widest point', 63, 64)])};
+  const request = workerRequest(near);
+  assert.ok(request.indexOf('width 64 mm') < request.indexOf('width at the widest point: 63 mm, measured by the person'), 'New\'s size first, the checked one after it');
+  assert.match(request, /They are newer than any size earlier in this request: where one is about the same feature as an earlier size[^\n]*use this one\./);
+
+  // A fit: New's choice and its overall sizes are kept; the brief is the fit brief, then the checked sizes.
+  const measured = {sizeSource: 'measured', measured: [{id: 'a', label: 'longest', mm: 107}, {id: 'b', label: 'width', mm: 64}]};
+  const fit = {instructions: 'A wall holder', fit: measured, checkedSizes: first};
+  assert.equal(workerRequest(fit), `A wall holder\n\n${fitBrief(measured)}\n\n${brief}`);
+  // A size New measured under the same label takes the newer number; the others are untouched.
+  assert.deepEqual(withCheckedSizes({fit: measured}, [answered('Longest', 108, 107), answered('width at the waist', 53)]),
+    {sizeSource: 'measured', measured: [{id: 'a', label: 'longest', mm: 108}, {id: 'b', label: 'width', mm: 64}]});
+  assert.deepEqual(withCheckedSizes({fit: {sizeSource: 'lookup'}}, [answered('width', 60)]), {sizeSource: 'lookup'});
+  assert.equal(withCheckedSizes({}, [answered('width', 60)]), undefined);
+  // Not a fit: no fit brief (it would say "do not print a copy"), and the checked sizes still reach the worker.
+  assert.equal(workerRequest({instructions: 'Copy this', checkedSizes: first}), `Copy this\n\n${brief}`);
+  assert.equal(workerRequest({checkedSizes: first}), brief, 'a scan with no words');
+  assert.equal(workerRequest({instructions: 'Copy this'}), 'Copy this');
+  assert.equal(workerRequest({}), undefined);
 });

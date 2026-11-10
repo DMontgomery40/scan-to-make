@@ -349,7 +349,8 @@ struct ProjectRow: View {
         HStack(spacing: 10) {
             ProjectThumbnail(object: object).frame(width: 36, height: 36).clipShape(.rect(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 1) {
-                Text(words.title).font(.body.weight(.medium)).lineLimit(1)
+                // The name wraps before it is ever cut; the row grows taller instead.
+                Text(words.title).font(.body.weight(.medium)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 Text(words.row).font(.caption).lineLimit(2)
                     .foregroundStyle(selected ? AnyShapeStyle(.secondary) : AnyShapeStyle(words.done ? Color.okGreen : words.stage.tint))
             }

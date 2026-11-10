@@ -19,6 +19,18 @@ data class AskSizesForm(val fields: List<Field>) {
         return sizes.ifEmpty { null }
     }
 
+    /** What goes with any other answer sent from the same card (words, a caliper photo): one answer carries everything the
+     *  card holds, so a number typed into a field is never dropped by pressing another button. */
+    sealed interface Carried {
+        /** The numbers as they stand, edited or prefilled. */
+        data class Sizes(val sizes: List<Answer>) : Carried
+        /** Every field is blank: the person knows none of them, and the other answer goes alone. */
+        data object None : Carried
+        /** A filled field isn't a number: nothing is sent until it is fixed or cleared. */
+        data object Invalid : Carried
+    }
+    val carried: Carried get() = answer?.let { Carried.Sizes(it) } ?: if (fields.all { it.text.isBlank() }) Carried.None else Carried.Invalid
+
     /** Nothing was changed: the button says Confirm. */
     val unchanged: Boolean get() = fields.all { millimetres(it.text) == millimetres(text(it.asked)) }
 
@@ -40,7 +52,8 @@ data class AskSizesForm(val fields: List<Field>) {
         /** The number a field holds, when it is one (a comma or a point for the decimal; over zero, at most 10 m). */
         fun millimetres(text: String): Double? {
             val typed = text.trim().replace(',', '.')
-            if (!Regex("^\\d+(\\.\\d+)?$").matches(typed)) return null
+            // Digits with at most one decimal part, ASCII only, as every client takes it: never "1e3", ".5", "5." or "٥".
+            if (!Regex("^[0-9]+(\\.[0-9]+)?$").matches(typed)) return null
             return typed.toDoubleOrNull()?.takeIf { it > 0 && it <= 10_000 }
         }
 
@@ -48,5 +61,13 @@ data class AskSizesForm(val fields: List<Field>) {
 
         /** The kinds of question this build knows how to answer (contracts `AskSchema.kind`). */
         val knownKinds = setOf("closeup", "file", "choice", "region", "scale", "sizes")
+
+        /** False for a kind this build doesn't know: the card shows the question and says to update, and offers no answer
+         *  at all, because any answer it offered could consume the question wrongly. No kind is a computer older than
+         *  kinds, answered the old way. */
+        fun answerable(kind: String?) = kind == null || kind in knownKinds
+
+        /** Said under the fields while nothing can be sent, and when another answer is pressed with a field that isn't a number. */
+        const val invalidWords = "Enter each size in millimetres, or leave one empty if you don't know it."
     }
 }

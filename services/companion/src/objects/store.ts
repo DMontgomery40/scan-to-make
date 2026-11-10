@@ -27,6 +27,7 @@ export interface ObjectPrintConfirmation {
   supported: boolean;
 }
 
+export interface CheckedSize { label: string; mm: number; certainty: 'confirmed' | 'measured' }
 export interface ObjectMessage { id: string; text: string; atMs: number; photos: string[];
   /** The sending client's own id for this message. A second request carrying it is the same message arriving again,
    *  never a new one (Nov 10: a note whose reply was lost was sent again and started a second design pass). */
@@ -75,6 +76,9 @@ export interface StmObject {
   instructions?: string;
   /** How a fit's exact size is settled, as New sent it (contracts `FitSchema`). */
   fit?: Fit;
+  /** Sizes the person confirmed or corrected in answer to a size question, by the question's own label. Kept on any
+   *  project, for every later pass (`checkedSizesBrief`). Not `fit.measured`, which is the overall size from New. */
+  checkedSizes?: CheckedSize[];
   preferences?: ProjectPreferences;
   /** A configured destination id; process settings and credentials stay in the companion. */
   printerDestinationId?: string;

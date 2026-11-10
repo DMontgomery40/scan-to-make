@@ -386,11 +386,14 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             default: return .finished
             }
         }
-        /// The words that started this pass, when it was a change the person asked for ("Your change: …").
+        /// The words that started this pass, when it was a change the person asked for ("Your change: …"): a note,
+        /// with photos (`late-photos`) or without (`changes`), or from a Mac older than triggers. Never the first
+        /// request, and never an answer to a question, whose note the Mac composes.
         public var requestedChange: String? {
-            guard let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty, trigger == nil || trigger == "changes" else { return nil }
+            guard let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty, Self.changeTriggers.contains(trigger) else { return nil }
             return note
         }
+        static let changeTriggers: Set<String?> = [nil, "changes", "late-photos"]
         public var failed: Bool { ["failed", "interrupted"].contains(status ?? "") }
         /// The stage running now: the last one started and not ended.
         public var currentStage: Stage? { stages?.last { $0.endedAtMs == nil } }
@@ -490,6 +493,12 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// A structured question from the Mac (PRD §4 Ask).
     public struct Ask: Codable, Equatable, Sendable {
+        /// The kinds of question this build knows how to answer (contracts `AskSchema.kind`).
+        public static let knownKinds: Set<String> = ["closeup", "file", "choice", "region", "scale", "sizes"]
+        /// False for a kind this build doesn't know: the card shows the question and says to update, and offers no
+        /// answer at all, because any answer it offered could consume the question wrongly. A question with no
+        /// kind is from a Mac older than kinds and is answered the old way.
+        public var answerable: Bool { kind.map(Self.knownKinds.contains) ?? true }
         public var id: String
         public var question: String
         public var type: String?
