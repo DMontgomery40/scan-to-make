@@ -87,7 +87,7 @@ test('shell command lines: quotes, escapes, cd and variables', () => {
 });
 
 /** A scripted updater: commands are recorded, sessions are fakes, versions come from a fake registry. */
-async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest: published = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog, session: sessionFor, busyTimeoutMs, startTimeoutMs, inFlightWaitMs, journal = false, verify} = {}) {
+async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest: published = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog, session: sessionFor, busyTimeoutMs, startTimeoutMs, inFlightWaitMs, journal = false, verify, otherWork} = {}) {
   // The registry: a version, or a function when a test publishes a newer one partway through.
   const registry = () => typeof published === 'function' ? published() : published;
   const root = await tempDir('mcp-updates-');
@@ -107,7 +107,7 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
   const overrides = new McpOverrides(join(root, 'overrides.json'));
   await overrides.load();
   const updates = new McpUpdater({
-    ...(journal ? {journal: join(root, 'journal')} : {}), ...(verify ? {verify} : {}),
+    ...(journal ? {journal: join(root, 'journal')} : {}), ...(verify ? {verify} : {}), ...(otherWork ? {otherWork} : {}),
     catalog, gate, fs: {rename: async (from, to) => { moves.push(['rename', from, to]); if (failRename && failRename(from, to)) throw new Error('EXDEV'); }, rm: async path => { moves.push(['rm', path]); }, mkdir: async () => undefined},
     destinations: () => profiles ?? [{id: 'p1s', config: profile}, {id: 'a1', config: profile}],
     env, overrides, session, busy: async id => busy(id), runningVersion: id => id in installed ? installed[id] : '1.1.46',
@@ -1997,4 +1997,102 @@ test('Q9: an Update in progress makes the updater busy, so an automatic one wait
   assert.equal((await second.updates.update(mcpId)).state, 'started');
   await until(() => f.events.some(event => event.type === 'mcp.update.done'));
   assert.equal(second.updates.busy(), false);
+});
+
+test('review F2: an automatic update refuses work that starts between the idle check and the claim (a design pass anywhere, Add printer…), touching nothing', async t => {
+  const {McpAutoUpdater, companionBusy, settingUp} = await import('../dist/printing/mcp-auto-update.js');
+  const copy = appCopy(), gate = new PrintGate();
+  let setupWorking = false, startInGap;
+  const setup = {working: () => setupWorking};
+  const f = await updater(t, {profile: copy.profile, files: copy.files, gate, journal: true, verify: async () => undefined, otherWork: () => settingUp({setup})});
+  const auto = new McpAutoUpdater({enabled: () => true, targets: () => f.updates.autoTargets(), latest: pkg => f.updates.checkLatest(pkg),
+    // The idle check has said idle; the work starts before the install claims its printers.
+    update: (id, latest, options) => { startInGap?.(); return f.updates.autoUpdate(id, latest, options); },
+    busy: () => companionBusy({gate, updates: f.updates, setup, printers: () => [], printing: async () => false})});
+  const untouched = async () => {
+    assert.ok(!f.commands.some(line => line.includes(' install ')), 'nothing installed');
+    assert.deepEqual(f.moves, [], 'no file moved');
+    assert.deepEqual(f.restarts, [], 'no printer restarted');
+    assert.deepEqual(f.events, [], 'nothing said');
+    assert.deepEqual(await readdir(f.journalDir).catch(() => []), [], 'no journal left');
+    assert.equal(gate.updating('p1s') || gate.updating('a1'), false, 'no printer left marked');
+    assert.equal(f.updates.busy(), false, 'nothing held');
+  };
+  // A design pass holds `current`, which is not one of this install's printers (p1s, a1): Update alone would go ahead.
+  let release;
+  startInGap = () => { release = gate.hold('current'); };
+  assert.deepEqual(await auto.runOnce(), {state: 'deferred', why: 'Counterpart started working on it'});
+  await untouched();
+  release();
+  startInGap = () => { setupWorking = true; };
+  assert.equal((await auto.runOnce()).state, 'deferred', 'Add printer… starting in the gap is refused too');
+  await untouched();
+  setupWorking = false; startInGap = undefined;
+  assert.equal((await auto.runOnce()).results[0].outcome.state, 'done', 'once the work ends, the update runs');
+  // Settings → Printers reading each MCP, and Remove, count as setting up a printer.
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const real = new PrinterSetup({env: mac({}), configs: () => [], list: () => [], catalog: () => ({canonical: id => id, destinations: []})});
+  const reading = real.mcps();
+  assert.equal(real.working(), true, 'reading the MCPs for Settings');
+  await reading;
+  const removing = real.remove('not-added-here').catch(() => undefined);
+  assert.equal(real.working(), true, 'Remove');
+  await removing;
+  await until(() => !real.working());
+});
+
+test('review F4: a restart in the middle of an automatic update records that version for the schedule; a manual Update cut short is not recorded', async t => {
+  const f = await restartable(t);
+  const first = f.boot({hang: {rename: (from, to) => to === f.live}, verify: async () => undefined});
+  const mcpId = first.updates.mcpId('p1s');
+  void first.updates.autoUpdate(mcpId, '1.1.50');
+  await until(() => first.moves.some(move => move[0] === 'rename' && move[1] === f.live));
+  first.kill();
+  const second = f.boot();
+  await second.updates.applyOverrides();
+  assert.equal(f.version(), '1.1.46', 'the previous copy is back');
+  assert.deepEqual(second.updates.recoveredAutoUpdates(), [{mcpId, toVersion: '1.1.50'}]);
+  assert.deepEqual(second.updates.recoveredAutoUpdates(), [], 'given once');
+  const g = await restartable(t);
+  const manual = g.boot({hang: {rename: (from, to) => to === g.live}});
+  await manual.updates.update(manual.updates.mcpId('p1s'));
+  await until(() => manual.moves.some(move => move[0] === 'rename' && move[1] === g.live));
+  manual.kill();
+  const after = g.boot();
+  await after.updates.applyOverrides();
+  assert.equal(g.version(), '1.1.46');
+  assert.deepEqual(after.updates.recoveredAutoUpdates(), [], 'Update is the person asking: nothing recorded');
+});
+
+test('review F6: an automatic npx update checks the pinned version before it saves the pin; a pin that fails is never saved', async t => {
+  let f;
+  const seen = [];
+  f = await updater(t, {profile: bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']),
+    verify: async config => { seen.push({args: config.process.args, saved: f.overrides.saved('p1s')}); }});
+  assert.equal((await f.updates.autoUpdate(f.mcpId, '1.1.50')).state, 'done');
+  assert.deepEqual(seen, [{args: ['-y', 'bambu-printer-mcp@1.1.50'], saved: undefined}], 'checked while no pin was saved');
+  assert.deepEqual(f.overrides.saved('p1s').args, ['-y', 'bambu-printer-mcp@1.1.50'], 'then pinned');
+  const g = await updater(t, {profile: bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']), verify: async () => "didn't answer Counterpart's contract (counterpart/1)."});
+  const written = [], set = g.overrides.set.bind(g.overrides);
+  g.overrides.set = (id, value, config) => { written.push(value); return set(id, value, config); };
+  assert.equal((await g.updates.autoUpdate(g.mcpId, '1.1.50')).state, 'reverted', 'said and not tried again, as before');
+  assert.ok(written.every(value => !value?.args?.includes('bambu-printer-mcp@1.1.50')), 'the failed version was never saved as a pin');
+  assert.deepEqual(g.events.map(event => event.type), ['mcp.update.failed']);
+});
+
+test('review F7: a copy whose version can\'t be read isn\'t updated by itself, and its row says so', async t => {
+  const node = '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node';
+  const live = `${APP}/printers/bambu/lib/node_modules/bambu-printer-mcp`, profile = bambu(node, [`${live}/dist/index.js`]);
+  // No package.json, and the running MCP hasn't said its version.
+  const f = await updater(t, {profile, files: {[`${live}/dist/index.js`]: ''}, installed: {p1s: undefined, a1: undefined}});
+  assert.deepEqual(f.updates.autoTargets(), [{mcpId: f.mcpId, pkg: 'bambu-printer-mcp'}], 'no version to compare');
+  assert.equal(f.updates.autoReason('p1s'), "Counterpart can't read which version this is, so it doesn't update it by itself.");
+  const {PrinterSetup} = await import('../dist/printing/setup.js');
+  const setup = new PrinterSetup({env: mac({[`${live}/dist/index.js`]: ''}), configs: () => [{id: 'p1s', config: profile}], list: () => [],
+    autoReason: id => f.updates.autoReason(id), catalog: () => ({canonical: () => 'p1s', destinations: [{id: 'p1s', name: 'Bambu Lab P1S'}]})});
+  const words = (await setup.mcps()).packages.find(item => item.package === 'bambu-printer-mcp').uses[0].words;
+  assert.match(words, /\(version unknown\)\. Counterpart can't read which version this is, so it doesn't update it by itself\.$/);
+  // Once the version is known, nothing is said.
+  const known = await updater(t, {profile, files: {[`${live}/dist/index.js`]: '', [`${live}/package.json`]: pkgJson('1.1.46')}});
+  assert.equal(known.updates.autoReason('p1s'), undefined);
 });
