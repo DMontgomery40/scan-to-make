@@ -670,7 +670,7 @@ final class LayoutParityUITests: XCTestCase {
     /// that said only "Bambu printer". Before slicing, one row names the printer and says when the numbers come.
     /// Review F7: what this proves is the app's half: the row shows the name the printer list gives (the fixture Mac's
     /// "P1S"), and no time or filament tile exists before slicing. How that name is made is the companion's, tested in
-    /// `printer-directory.test.mjs` (the MCP's display name, exactly; "Printer at <address>" when it can't be asked).
+    /// `printer-directory.test.mjs` (the MCP's display name, exactly; "Your printer" when it can't be asked, never an address).
     func testAResultBeforeSlicingShowsTheListedPrinterNameAndNoTimeOrFilamentTiles() {
         let app = launch(screen: "printed")
         let row = app.descendants(matching: .any)["result-printer"]

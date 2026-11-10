@@ -205,27 +205,27 @@ async function listedName(catalog, info = INFO) {
 
 test('a printer nobody named is listed by the display name its MCP reports, exactly as reported (first look U9, review F1)', async () => {
   // bambu-printer-mcp's own display name, as its counterpart_printer_info gives it: no brand added, nothing uppercased.
-  assert.deepEqual(await listedName(named('Printer at 192.0.2.1')), {before: 'Printer at 192.0.2.1', after: 'A1 Mini'});
+  assert.deepEqual(await listedName(named('Your printer')), {before: 'Your printer', after: 'A1 Mini'});
   // mcp-3D-printer-server's shape: another kind and a mixed-case model, passed through the same way.
   const prusa = {...INFO, server: {name: 'mcp-3D-printer-server', version: '1.2.40'}, printer: {kind: 'prusa', host: '192.0.2.1', model: 'Original Prusa MK4S'}};
-  assert.equal((await listedName(named('Printer at 192.0.2.1', 'mcp-3d-printer-server'), prusa)).after, 'Original Prusa MK4S');
+  assert.equal((await listedName(named('Your printer', 'mcp-3d-printer-server'), prusa)).after, 'Original Prusa MK4S');
 });
 
 test('names older builds generated count as unnamed; a name someone gave stays (review F6)', async () => {
-  for (const legacy of ['Bambu printer', 'Configured printer']) assert.equal((await listedName(named(legacy))).after, 'A1 Mini', legacy);
+  for (const legacy of ['Bambu printer', 'Configured printer', 'Printer at 192.0.2.1', 'Printer 2']) assert.equal((await listedName(named(legacy))).after, 'A1 Mini', legacy);
   assert.equal((await listedName(named('Garage printer'))).after, 'Garage printer');
 });
 
 test('a config that names a model still shows what the MCP reports; an MCP that cannot be asked leaves where it is (F1 follow-up)', async () => {
   // The config says "p1s": the companion composes nothing from it; the MCP's own display name is shown.
-  const withModel = named('Printer at 192.0.2.1');
+  const withModel = named('Your printer');
   withModel.destinations[0].model = 'p1s';
   assert.equal((await listedName(withModel)).after, 'A1 Mini');
-  // No counterpart_printer_info (an MCP without the contract, or one that never answers): "Printer at <address>".
+  // No counterpart_printer_info (an MCP without the contract, or one that never answers): "Your printer", never its address.
   const d = destination({tools: [tool('get_printer_status')], status: () => ({connected: true, status: 'idle'})});
-  const directory = new PrinterDirectory(named('Printer at 192.0.2.1'), id => id === 'current' ? d.session : undefined, {now: () => 1_000_000});
+  const directory = new PrinterDirectory(named('Your printer'), id => id === 'current' ? d.session : undefined, {now: () => 1_000_000});
   d.set(directory);
   await directory.refresh('current');
   await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(directory.list().destinations[0].name, 'Printer at 192.0.2.1');
+  assert.equal(directory.list().destinations[0].name, 'Your printer');
 });
