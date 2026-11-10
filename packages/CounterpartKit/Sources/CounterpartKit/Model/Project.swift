@@ -375,11 +375,14 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
             default: return .finished
             }
         }
-        /// The words that started this pass, when it was a change the person asked for ("Your change: …").
+        /// The words that started this pass, when it was a change the person asked for ("Your change: …"): a note,
+        /// with photos (`late-photos`) or without (`changes`), or from a Mac older than triggers. Never the first
+        /// request, and never an answer to a question, whose note the Mac composes.
         public var requestedChange: String? {
-            guard let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty, trigger == nil || trigger == "changes" else { return nil }
+            guard let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty, Self.changeTriggers.contains(trigger) else { return nil }
             return note
         }
+        static let changeTriggers: Set<String?> = [nil, "changes", "late-photos"]
         public var failed: Bool { ["failed", "interrupted"].contains(status ?? "") }
         /// The stage running now: the last one started and not ended.
         public var currentStage: Stage? { stages?.last { $0.endedAtMs == nil } }

@@ -6,6 +6,7 @@ import {
   passEnding,
   stageMark,
   passHeading,
+  requestedChange,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -614,7 +615,7 @@ test("all three shared limit reasons survive project words with projects present
   for (const row of stopped) {
     // The pass's own line is the companion's words too, never the wire status ("capped").
     assert.equal(passHeading(row.expected.passes.at(-1), 0), `Pass 1 · ${reasons[row.name]}`);
-    assert.equal(passHeading({}, 1), "Pass 2 · Working");
+    assert.equal(passHeading({}, 1), "Pass 2 · Working", "a running pass");
     assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
@@ -686,6 +687,25 @@ test("David's Nov 9 bottle: the question's caption is true for any question, and
   assert.deepEqual(scanSample(130), [0, 32, 65, 97, 129], "the same frames as the iPhone, Mac and Android");
   assert.deepEqual(scanSample(3), [0, 1, 2]);
   assert.equal(scanWords(130), "130 photos");
+});
+
+test("an ended pass from an older companion is worded from its status, never headed Working", () => {
+  // Train #499 review, F7: with no `words` every ended pass on Linux read "Pass n · Working".
+  assert.equal(passHeading({ endedAtMs: 2, status: "done" }, 0), "Pass 1 · Finished");
+  assert.equal(passHeading({ endedAtMs: 2 }, 0), "Pass 1 · Finished");
+  assert.equal(passHeading({ endedAtMs: 2, status: "needs_closeup" }, 1), "Pass 2 · Asked you a question");
+  assert.equal(passHeading({ endedAtMs: 2, status: "interrupted" }, 0), "Pass 1 · Stopped when Counterpart restarted");
+  assert.equal(passHeading({ endedAtMs: 2, status: "needs_file" }, 0), "Pass 1 · Needs File");
+  assert.equal(passHeading({ endedAtMs: 2, status: "failed", words: "Stopped before it finished" }, 0), "Pass 1 · Stopped before it finished");
+  assert.equal(passHeading({ status: "failed" }, 0), "Pass 1 · Working", "not ended yet");
+});
+
+test("Your change is the person's own note, for every trigger the companion writes", () => {
+  // Train #499 review, F5: Linux showed every pass's note, including the text the companion composes for an answer.
+  const shown: [string | undefined, boolean][] = [["changes", true], ["late-photos", true], [undefined, true], ["ask-answer", false], ["new", false], ["something-later", false]];
+  for (const [trigger, yes] of shown) assert.equal(requestedChange({ note: " see the photos ", trigger }), yes ? "see the photos" : undefined, String(trigger));
+  assert.equal(requestedChange({ trigger: "changes" }), undefined);
+  assert.equal(requestedChange({ note: "  ", trigger: "changes" }), undefined);
 });
 
 test("a pass that stopped to ask or stopped short never reads as all ticks", () => {

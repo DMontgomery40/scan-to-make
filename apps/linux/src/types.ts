@@ -114,6 +114,8 @@ export interface Pass {
   startedAtMs: number;
   endedAtMs?: number;
   note?: string;
+  /** Why the pass started; a note is the person's own words only for `changes` and `late-photos`. */
+  trigger?: string;
   photos?: string[];
   summary?: string;
   status?: string;

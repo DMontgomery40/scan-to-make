@@ -740,8 +740,28 @@ export function scanSample(count: number, shown = 5): number[] {
 export const scanWords = (count: number) => (count === 1 ? "1 photo" : `${count} photos`);
 
 /** A pass in the project's history: how it ended in the companion's words (`passes[].words`), or that it is running. */
-export function passHeading(pass: Pick<Pass, "words">, index: number): string {
-  return `Pass ${index + 1} · ${pass.words ?? "Working"}`;
+export function passHeading(pass: Pick<Pass, "words" | "endedAtMs" | "status">, index: number): string {
+  return `Pass ${index + 1} · ${passWords(pass) ?? "Working"}`;
+}
+
+/** How an ended pass is worded: the companion's `words`, or for an older companion its status worded here
+ *  (CounterpartKit `Pass.endingWords`). Undefined while it runs. */
+export function passWords(pass: Pick<Pass, "words" | "endedAtMs" | "status">): string | undefined {
+  if (!pass.endedAtMs) return undefined;
+  if (pass.words) return pass.words;
+  if (pass.status === "needs_closeup") return "Asked you a question";
+  if (pass.status === "interrupted") return "Stopped when Counterpart restarted";
+  if (!pass.status || pass.status === "done") return "Finished";
+  return pass.status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** The words that started a pass, when it was a change the person asked for (CounterpartKit `requestedChange`):
+ *  a note with or without photos, or from a companion older than triggers. Never the first request or an answer
+ *  to a question, whose note the companion composes. */
+export function requestedChange(pass: Pick<Pass, "note" | "trigger">): string | undefined {
+  const note = pass.note?.trim();
+  if (!note || !(pass.trigger === undefined || pass.trigger === "changes" || pass.trigger === "late-photos")) return undefined;
+  return note;
 }
 
 /** How an ended pass left things (CounterpartKit `Pass.ending`): finished, stopped to ask, or stopped short. */

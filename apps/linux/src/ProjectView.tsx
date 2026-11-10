@@ -12,6 +12,7 @@ import {
   didItFitQuestion,
   duration,
   passHeading,
+  requestedChange,
   stageMark,
   words,
 } from "./domain";
@@ -753,7 +754,7 @@ export function ProjectView({
                   <h3>
                     {passHeading(pass, i)}
                   </h3>
-                  {pass.note && <p className="hint">Your change: “{pass.note}”</p>}
+                  {requestedChange(pass) && <p className="hint">Your change: “{requestedChange(pass)}”</p>}
                   {pass.stages?.map((s, stage) => (
                     <p key={s.id}>
                       {stageMark(pass, stage)} {s.words}
