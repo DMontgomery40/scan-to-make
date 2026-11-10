@@ -38,4 +38,27 @@ final class ProjectSearchTests: XCTestCase {
         XCTAssertFalse(Project.validName("bad\u{0}name"))
         XCTAssertFalse(Project.validName(String(repeating: "🖨", count: 61)))
     }
+
+    /// First look U10 (Nov 10): "holder" listed "3D scan platform" and "AirPods Max desk hanger" with no reason. A result
+    /// whose title lacks a searched word says where it matched, with the words marked; one whose title has them says nothing.
+    func testAResultShowsWhereItMatchedWhenTheTitleDoesnt() throws {
+        let long = "okay the main holder is actually terrible cause the ridge of teh rails holds it too high and it wobbles when I take the headphones off"
+        let data = Data(#"{"id":"a","createdAtMs":1,"updatedAtMs":2,"state":"ready","title":"AirPods Max desk hanger","passes":[],"messages":[{"id":"m","text":"\#(long)","atMs":1,"photos":[]}]}"#.utf8)
+        let project = try JSONDecoder().decode(Project.self, from: data)
+        XCTAssertTrue(project.matchesSearch("holder"))
+        let snippet = try XCTUnwrap(project.searchSnippet("holder"))
+        XCTAssertTrue(snippet.text.contains("main holder is actually terrible"), snippet.text)
+        XCTAssertLessThan(snippet.text.count, 120, "a short line, not the whole message")
+        XCTAssertTrue(snippet.text.hasSuffix("…"))
+        let marked = snippet.marks.map { mark in
+            String(snippet.text[snippet.text.index(snippet.text.startIndex, offsetBy: mark.lowerBound)..<snippet.text.index(snippet.text.startIndex, offsetBy: mark.upperBound)])
+        }
+        XCTAssertEqual(marked.first?.lowercased(), "holder")
+        XCTAssertNotNil(snippet.attributed.runs.first { $0.inlinePresentationIntent == .stronglyEmphasized })
+        // The title has it: no line.
+        XCTAssertNil(project.searchSnippet("desk"))
+        XCTAssertNil(project.searchSnippet(""))
+        // Two words, one in the title: the line is about the other.
+        XCTAssertTrue(try XCTUnwrap(project.searchSnippet("airpods ridge")).text.contains("ridge"))
+    }
 }

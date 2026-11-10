@@ -19,6 +19,18 @@ final class AskSizesFormTests: XCTestCase {
         XCTAssertEqual(form.answer, [.init(id: "size-1", mm: 64), .init(id: "size-2", mm: 53.5), .init(id: "size-3", mm: 107)])
     }
 
+    /// The Mac's number can be finer than the field shows (68.412 shown as 68.41). Untouched, that is still Confirm,
+    /// and the Mac keeps its own number for it (`answeredSizes`), never the rounded echo sent here.
+    func testANumberFinerThanTheFieldShowsIsStillUnchanged() throws {
+        var form = try XCTUnwrap(AskSizesForm(ask([.init(id: "a", label: "width", mm: 68.412, from: "scan"),
+                                                   .init(id: "b", label: "waist", mm: 53.4567, from: "scan")])))
+        XCTAssertEqual(form.fields.map(\.text), ["68.41", "53.46"])
+        XCTAssertTrue(form.unchanged)
+        XCTAssertEqual(form.answer, [.init(id: "a", mm: 68.41), .init(id: "b", mm: 53.46)])
+        form.fields[0].text = "68.42"
+        XCTAssertFalse(form.unchanged)
+    }
+
     func testACorrectionAComma_AndABlankField() throws {
         var form = try XCTUnwrap(AskSizesForm(ask(waisted)))
         form.fields[0].text = " 63 "
@@ -38,6 +50,25 @@ final class AskSizesFormTests: XCTestCase {
         }
         for index in form.fields.indices { form.fields[index].text = " " }
         XCTAssertNil(form.answer)
+    }
+
+    /// Train #499 review, F3: words or a caliper photo sent from the size card dropped the numbers. One answer
+    /// carries everything the card holds.
+    func testAnotherAnswerFromTheCardCarriesTheNumbersAsTheyStand() throws {
+        var form = try XCTUnwrap(AskSizesForm(ask(waisted)))
+        XCTAssertEqual(form.carried, .sizes([.init(id: "size-1", mm: 64), .init(id: "size-2", mm: 53.5), .init(id: "size-3", mm: 107)]), "prefilled")
+        form.fields[0].text = "63"; form.fields[2].text = ""
+        XCTAssertEqual(form.carried, .sizes([.init(id: "size-1", mm: 63), .init(id: "size-2", mm: 53.5)]), "edited, one unknown")
+        form.fields[1].text = "about 53"
+        XCTAssertEqual(form.carried, .invalid, "nothing goes until the field is a number or empty")
+        for index in form.fields.indices { form.fields[index].text = " " }
+        XCTAssertEqual(form.carried, AskSizesForm.Carried.none, "every size unknown: the other answer goes alone")
+    }
+
+    /// The same forms on every client (train #499 review, F8): Swift's `Double` alone took "1e3", ".5" and "5.".
+    func testANumberIsDigitsWithAtMostOneDecimalPart() {
+        for good in ["64", "53.5", " 53,25 ", "0.5", "10000"] { XCTAssertNotNil(AskSizesForm.millimetres(good), good) }
+        for bad in ["1e3", ".5", "5.", "5.5.5", "+5", "-4", "0", "10001", "6 3", "about 60", "", "٥"] { XCTAssertNil(AskSizesForm.millimetres(bad), bad) }
     }
 
     func testOnlyASizesQuestionWithSizesIsOne() {

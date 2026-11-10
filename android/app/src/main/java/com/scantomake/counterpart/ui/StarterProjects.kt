@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.scantomake.counterpart.api.CompanionException
@@ -55,9 +56,11 @@ fun StarterProjects(open: (String) -> Unit) {
     if (starters.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionTitle("Start with something useful")
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val cardWidth = starterCardWidth(maxWidth, starters.size)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             starters.forEach { starter ->
-                GlassCard(Modifier.width(256.dp)) {
+                GlassCard(Modifier.width(cardWidth)) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         StarterImage(starter, Modifier.fillMaxWidth().height(130.dp).clip(RoundedCornerShape(14.dp)))
                         Text(starter.title, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
@@ -68,6 +71,7 @@ fun StarterProjects(open: (String) -> Unit) {
                     }
                 }
             }
+        }
         }
     }
     val reachable = state.link.collectAsState().value.reachable
@@ -123,4 +127,16 @@ private fun StarterImage(starter: StarterProject, modifier: Modifier) {
         bitmap?.let { Image(it, starter.title, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
             ?: Icon(if (starter.id == "scan-platform") CIcons.Camera else CIcons.Ruler, starter.title, Modifier.size(56.dp), tint = Palette.filament)
     }
+}
+
+/**
+ * A starter card's width (first look U14, Nov 10: the second starter was cut off at the margin): its natural 256 dp when
+ * every card fits; narrower so they fit whole when there are only two; otherwise two whole cards and about a third of the
+ * next, a deliberate peek. The same rule as `StarterProjectsView.cardWidth` on iOS and the Mac.
+ */
+internal fun starterCardWidth(available: Dp, count: Int, spacing: Dp = 12.dp, natural: Dp = 256.dp): Dp {
+    if (count <= 0 || available <= 0.dp) return natural
+    if (natural * count + spacing * (count - 1) <= available) return natural
+    if (count <= 2) return maxOf(150.dp, (available - spacing * (count - 1)) / count)
+    return minOf(natural, maxOf(150.dp, (available - spacing * 2) / 2.35f))
 }

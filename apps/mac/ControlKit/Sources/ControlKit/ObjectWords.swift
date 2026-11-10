@@ -58,8 +58,12 @@ public struct ObjectWords: Sendable, Equatable {
     /// The capsule's words: the stage alone.
     public let capsule: String
     public let group: ProjectGroup
-    /// The status line, for the sidebar row and the menu bar: "Ready to print · 48 × 50 × 54 mm".
+    /// The whole status line, for the project's own header and the menu bar: "Ready to print · 48 × 50 × 54 mm".
     public let status: String
+    /// The line under the title in the sidebar, which groups rows by phase: the Mac's own detail for the row
+    /// ("48 × 50 × 54 mm" under Ready, the question under Needs you), never the section's heading again. The whole
+    /// status line when the companion sends no detail.
+    public let row: String
     /// The question, when the Mac needs something ("Can you send me a close-up of the underside? …").
     public let question: String?
     /// Working or printing: keep reading while it changes.
@@ -122,14 +126,18 @@ public struct ObjectWords: Sendable, Equatable {
         // The companion's own words when it sends them ("Getting ready · Heating", "The printer stopped: …"): never a
         // percent built here from the printer's raw progress, which can read 3% before printing has begun.
         let said = object.status?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        status = draft ? Self.draftLine : said?.isEmpty == false ? said! : done ? "It works" : words.line
         // The sidebar groups rows by phase, so a row never repeats its section's heading.
-        status = draft ? Self.draftLine : said?.isEmpty == false ? said! : done ? "It works" : ProjectWords.row(object, line: words.line)
+        row = draft || done ? status : ProjectWords.row(object, line: status)
         // A new project waits on the phone; the Mac can't tell an upload from an abandoned draft, so it isn't busy
         // (it would keep the Mac awake and polling for good).
         busy = object.state == .new ? false : words.busy || words.phase.isRunning
         size = words.size
         // Done stays printable ("Print Another…") and changeable, as a printed project is.
+        // A question of a kind this build doesn't know is shown with the update sentence and no answer at all:
+        // any answer offered (a guess, a photo) could consume it wrongly.
         actions = done && object.current != nil ? [object.print?.uncertain == true ? .printChecked : .print, .correct]
+            : object.openAsk?.answerable == false ? []
             : words.actions.compactMap(ObjectAction.init)
         capsule = done ? "Done" : stage.label
         group = done ? .done : Self.group(stage)

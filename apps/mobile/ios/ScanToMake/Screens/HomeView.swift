@@ -15,6 +15,10 @@ struct HomeView: View {
     @FocusState private var searching: Bool
     @State private var showArchived = false
 
+    /// Why a search found this project, when its title doesn't say (U10).
+    private func reason(_ project: Project) -> SearchSnippet? {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : project.searchSnippet(query, additional: [store.printerName(project) ?? ""])
+    }
     private var searched: [Project] {
         store.projects.filter { $0.matchesSearch(query, additional: [store.printerName($0) ?? ""]) }
     }
@@ -62,13 +66,14 @@ struct HomeView: View {
                                     else { NowWorkingCard(store: store, project: project) }
                                 }
                                 .buttonStyle(.plain)
+                                .searchReason(reason(project))
                             }
                         }
                         }
                     }
                     if !needsYou.isEmpty {
                         HomeSection("Needs you") {
-                            ForEach(needsYou) { project in NeedsYouCard(store: store, project: project) { openProject(project.id) } }
+                            ForEach(needsYou) { project in NeedsYouCard(store: store, project: project) { openProject(project.id) }.searchReason(reason(project)) }
                         }
                     }
                     if !grid.isEmpty { HomeSection("All projects") { projectGrid(grid) } }
@@ -80,7 +85,7 @@ struct HomeView: View {
                         }
                         .accessibilityIdentifier("show-archived")
                         if showArchived || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            VStack(spacing: 8) { ForEach(archived) { ArchivedRow(store: store, project: $0) { openProject($0.id) } } }
+                            VStack(spacing: 8) { ForEach(archived) { project in ArchivedRow(store: store, project: project) { openProject($0.id) }.searchReason(reason(project)) } }
                         }
                     }
                     if query.isEmpty { starters }
@@ -140,6 +145,7 @@ struct HomeView: View {
                 Button { openProject(project.id) } label: { ProjectCard(store: store, project: project) }
                     .buttonStyle(.plain)
                     .contextMenu { DeleteProjectButton(store: store, project: project) }
+                    .searchReason(reason(project))
             }
         }
     }
@@ -339,6 +345,8 @@ struct NeedsYouCard: View {
 struct AskButtons: View {
     let store: ProjectsStore
     let project: Project
+    /// The size card's numbers as they stand, when these buttons sit on one: a caliper photo goes with them.
+    var sizes: AskSizesForm? = nil
     @Binding var working: Bool
     @Binding var problem: String?
 
@@ -348,6 +356,10 @@ struct AskButtons: View {
     private var answers: Set<String> { Set(project.openAsk?.answers ?? ["camera", "photos", "best-guess"]) }
 
     var body: some View {
+        // A kind this build doesn't know gets no answer control at all (`Project.Ask.answerable`).
+        if project.openAsk?.answerable ?? true { buttons }
+    }
+    private var buttons: some View {
         GlassEffectContainer(spacing: 8) {
             VStack(alignment: .leading, spacing: 8) {
                 if project.openAsk?.type == "file" {
@@ -401,10 +413,17 @@ struct AskButtons: View {
     }
 
     private func answer(camera: Bool) {
+        // One answer carries everything the card holds: the photo goes with the numbers as they stand.
+        var numbers: [AskSizesForm.Answer] = []
+        switch sizes?.carried {
+        case .sizes(let carried): numbers = carried
+        case .invalid: problem = AskSizesForm.invalidWords; return
+        case .some(.none), nil: break
+        }
         act {
             let sent = try await store.mac.addCloseups(project.id, camera: camera, forMessage: true)
             guard !sent.isEmpty else { return nil }
-            return try await store.mac.closeup(project.id, bestGuess: false, photoNames: sent)
+            return try await store.mac.client.answerAsk(project.id, photoNames: sent, sizes: numbers)
         }
     }
     private func bestGuess() { act { try await store.mac.closeup(project.id, bestGuess: true) } }

@@ -27,14 +27,17 @@ public struct StarterProjectsView: View {
                     ForEach(StarterProject.all) { project in
                         Button { opened = project } label: {
                             VStack(alignment: .leading, spacing: 8) {
-                                StarterArtwork(project: project).frame(width: 164, height: 118).clipped()
+                                StarterArtwork(project: project).frame(maxWidth: .infinity).frame(height: 118).clipped()
                                     .background(Color.secondary.opacity(0.08), in: .rect(cornerRadius: 18))
                                 Text(project.title).font(.headline).lineLimit(2, reservesSpace: true)
                                 Text(project.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                                 Text("by \(project.designer)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                            }.frame(width: 164, alignment: .leading).padding(12)
+                            }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
                                 .background(Color.secondary.opacity(0.06), in: .rect(cornerRadius: 24))
                                 .contentShape(.rect(cornerRadius: 24))
+                                .containerRelativeFrame(.horizontal) { width, _ in
+                                    Self.cardWidth(available: width, count: StarterProject.all.count)
+                                }
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("starter-\(project.id)")
@@ -45,6 +48,18 @@ public struct StarterProjectsView: View {
         .sheet(item: $opened) { project in
             StarterDetail(project: project, actionTitle: actionTitle, unavailableMessage: unavailableMessage, start: start)
         }
+    }
+
+    /// A card's width: its natural 188 pt when every card fits; narrower so they all fit whole when there are only
+    /// two; otherwise sized so the next card shows by about a third, a deliberate peek rather than a card cut off at the
+    /// margin (first look U14, Nov 10: the iPhone cut the second starter at the screen edge).
+    static func cardWidth(available: CGFloat, count: Int, spacing: CGFloat = 12, natural: CGFloat = 188) -> CGFloat {
+        guard count > 0, available > 0 else { return natural }
+        let n = CGFloat(count)
+        if n * natural + (n - 1) * spacing <= available { return natural }
+        if count <= 2 { return max(120, (available - (n - 1) * spacing) / n) }
+        // Two whole cards and a third of the next, never wider than natural.
+        return min(natural, max(120, (available - 2 * spacing) / 2.35))
     }
 }
 

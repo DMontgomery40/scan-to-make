@@ -387,6 +387,8 @@ enum Fixtures {
                             ["id": "size-3", "label": "thickness", "mm": 32, "from": "scan"],
                             ["id": "size-4", "label": "height to the cap tip", "mm": 107, "from": "scan"]]
         }
+        // A kind this build doesn't know (a later Mac's question): the card must offer no answer at all.
+        if let kind = ProcessInfo.processInfo.environment["COUNTERPART_ASK_KIND"] { ask["kind"] = kind }
         return ["id": ids.plush, "createdAtMs": ago(25), "updatedAtMs": ago(4), "state": "needs-closeup", "kind": "fit",
                 "title": "Wall holder for three", "scan": "scan.usdz", "photos": [], "requestPhotos": [], "messages": [],
                 "instructions": "Make something that holds three of these, on a wall. I don’t care if it’s in front of each other or side to side whatever makes more sense just need three of them in a holder thing that I screwed to drywall\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size.",

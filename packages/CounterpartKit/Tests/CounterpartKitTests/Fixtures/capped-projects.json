@@ -59,6 +59,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped at the step limit. Try again or review the saved checkpoint.",
+        "detail": "Stopped at the step limit",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
@@ -135,6 +136,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped at the step limit. Try again or review the saved checkpoint.",
+        "detail": "Stopped at the step limit",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
@@ -420,6 +422,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.",
+        "detail": "Stopped after 10 minutes without worker activity",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
@@ -503,6 +506,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint.",
+        "detail": "Stopped at the absolute time limit of 2 hours",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },
@@ -586,6 +590,7 @@
       "status": {
         "phase": "failed",
         "text": "Stopped at the 120 tool-call limit. Try again or review the saved checkpoint.",
+        "detail": "Stopped at the 120 tool-call limit",
         "symbol": "exclamationmark.triangle",
         "tint": "red"
       },

@@ -39,6 +39,8 @@ struct ProjectView: View {
     @State private var askWorking = false
     @State private var askProblem: String?
     @State private var askText = ""
+    /// The size card's fields as they stand (`AskSizesFields` reports them), for the card's other answers.
+    @State private var askSizes: AskSizesForm?
     @State private var notice: String?
     /// The ask field's width, so its placeholder fits whole.
     @State private var fieldWidth: CGFloat = 0
@@ -501,16 +503,18 @@ struct ProjectView: View {
             }
             // A size question: its numbers, prefilled, with Confirm as the one obvious action. Words and a caliper
             // photo stay below for whatever the numbers don't say.
+            let answerable = object.openAsk?.answerable ?? true
             if let ask = object.openAsk, let form = AskSizesForm(ask) {
-                AskSizesFields(form: form, working: askWorking) { sizes in answerWithSizes(object, sizes) }
+                AskSizesFields(form: form, working: askWorking, changed: { askSizes = $0 }) { sizes in answerWithSizes(object, sizes) }
                     .id(ask.id)
-            } else if let kind = object.openAsk?.kind, !ProjectView.knownAskKinds.contains(kind) {
+            } else if !answerable {
+                // A kind this build doesn't know: the question and this sentence, and no answer control at all.
                 Text("Update Counterpart on this \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone") to answer this kind of question here.")
                     .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("ask-update")
             }
-            AskButtons(store: store, project: object, working: $askWorking, problem: $askProblem)
+            if answerable { AskButtons(store: store, project: object, sizes: sizesForm(object), working: $askWorking, problem: $askProblem) }
             // The Mac takes a typed answer when it says so (KAN-214 #204, `answers` includes "text").
-            if object.openAsk?.answers.contains("text") == true {
+            if answerable, object.openAsk?.answers.contains("text") == true {
                 HStack(spacing: 8) {
                     TextField(object.openAsk?.kind == "sizes" ? "Anything the numbers don't say…" : "Or answer in words…", text: $askText, axis: .vertical)
                         .lineLimit(1...4).padding(10).glassEffect(.regular, in: .rect(cornerRadius: 16))
@@ -527,8 +531,13 @@ struct ProjectView: View {
         .glassEffect(.regular.tint(.orange.opacity(0.15)), in: .rect(cornerRadius: 24))
     }
 
-    /// The kinds of question this build knows how to answer (contracts `AskSchema.kind`).
-    static let knownAskKinds: Set<String> = ["closeup", "file", "choice", "region", "scale", "sizes"]
+    /// The size card's numbers as they stand now, for whichever button is pressed; nil when the open question isn't
+    /// a size question. Before the fields report their first state, the Mac's own numbers.
+    private func sizesForm(_ object: Project) -> AskSizesForm? {
+        guard let ask = object.openAsk, let asked = AskSizesForm(ask) else { return nil }
+        if let askSizes, askSizes.fields.map(\.id) == asked.fields.map(\.id) { return askSizes }
+        return asked
+    }
 
     /// A size question's numbers, with whatever is typed in the words box beside them.
     private func answerWithSizes(_ object: Project, _ sizes: [AskSizesForm.Answer]) {
@@ -550,10 +559,17 @@ struct ProjectView: View {
     private func answerInWords(_ object: Project) {
         let text = askText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !askWorking else { return }
+        // One answer carries everything the card holds: the words go with the numbers as they stand.
+        var sizes: [AskSizesForm.Answer] = []
+        switch sizesForm(object)?.carried {
+        case .sizes(let carried): sizes = carried
+        case .invalid: askProblem = AskSizesForm.invalidWords; return
+        case .some(.none), nil: break
+        }
         askWorking = true; askProblem = nil
         Task {
             defer { askWorking = false }
-            do { let ticket = store.startRequest(); store.replace(try await store.mac.client.answerAsk(object.id, text: String(text.prefix(2000))), ticket: ticket); askText = "" }
+            do { let ticket = store.startRequest(); store.replace(try await store.mac.client.answerAsk(object.id, text: String(text.prefix(2000)), sizes: sizes), ticket: ticket); askText = "" }
             catch let failure as CompanionError { askProblem = failure.message }
             catch { askProblem = CompanionError.unreachable.message }
         }
@@ -768,7 +784,8 @@ struct ProjectView: View {
         guard !text.isEmpty else { return }
         writing = false
         // One id for this note across every try, so the Mac never records it twice.
-        let messageId = attempts.id(for: text, in: object.id)
+        let photoNames = store.corrections.availablePhotos(object)
+        let messageId = attempts.id(for: text, photos: photoNames ?? [], in: object.id)
         if object.changesWait {
             // The Mac takes changes between passes; this one is sent the moment the pass ends.
             store.queue(note: text, for: object.id, messageId: messageId)
@@ -778,7 +795,7 @@ struct ProjectView: View {
         }
         act {
             do {
-                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object), messageId: messageId)
+                let next = try await store.mac.correct(object.id, text, photoNames: photoNames, messageId: messageId)
                 store.corrections.sent(text, for: object.id)
                 attempts.settled(object.id)
                 note = ""; section = .activity
@@ -795,10 +812,12 @@ struct ProjectView: View {
 
 // MARK: Sections
 
-/// What changed, and the print's time, filament and printer.
+/// What changed, and the print's time, filament and printer. No card says nothing (first look U9): before slicing
+/// there are no numbers, so the printer's row says when they come; with no printer, it says so and offers one.
 struct ResultSection: View {
     let store: ProjectsStore
     let project: Project
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -822,15 +841,53 @@ struct ResultSection: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             if project.current != nil {
-                HStack(spacing: 12) {
-                    InfoTile(title: "Print time", value: Format.duration(project.print?.estimate?.seconds) ?? "—", symbol: "clock")
-                    InfoTile(title: "Filament", value: Format.grams(project.print?.estimate?.grams) ?? "—", symbol: "scalemass")
-                    InfoTile(title: "Printer", value: store.printerName(project) ?? "—", symbol: "printer")
-                }
-                if project.print?.estimate == nil {
-                    Text("Time and filament come from slicing on your Mac when you print.").font(.caption).foregroundStyle(.secondary)
+                let time = Format.duration(project.print?.estimate?.seconds), grams = Format.grams(project.print?.estimate?.grams)
+                let printer = store.printerName(project)
+                if time != nil || grams != nil {
+                    HStack(spacing: 12) {
+                        if let time { InfoTile(title: "Print time", value: time, symbol: "clock") }
+                        if let grams { InfoTile(title: "Filament", value: grams, symbol: "scalemass") }
+                        if let printer { InfoTile(title: "Printer", value: printer, symbol: "printer") }
+                    }
+                    if printer == nil { noPrinter }
+                } else if let printer {
+                    printerRow(printer)
+                } else {
+                    noPrinter
                 }
             }
+        }
+    }
+
+    /// Before it's sliced: the printer it goes to, and when the numbers come. One row, nothing empty.
+    private func printerRow(_ name: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.headline)
+                Text("Print time and filament show here once it’s sliced for printing.")
+                    .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color.card, in: .rect(cornerRadius: 20))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("result-printer")
+    }
+
+    /// No printer to print on: say so, with the way to choose one. Nothing while the Mac's printers are still loading.
+    @ViewBuilder private var noPrinter: some View {
+        if store.catalog != nil {
+            HStack(spacing: 12) {
+                Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
+                Text("No printer chosen yet.").font(.headline)
+                Spacer(minLength: 8)
+                Button("Choose a Printer") { app.route = .printers }.buttonStyle(.glass)
+                    .accessibilityIdentifier("result-choose-printer")
+            }
+            .padding(14)
+            .background(Color.card, in: .rect(cornerRadius: 20))
         }
     }
 }
@@ -1148,6 +1205,8 @@ struct DidItFitCard: View {
 struct AskSizesFields: View {
     @State var form: AskSizesForm
     let working: Bool
+    /// The fields as they stand, so the card's other answers (words, a caliper photo) carry the same numbers.
+    var changed: (AskSizesForm) -> Void = { _ in }
     let send: ([AskSizesForm.Answer]) -> Void
 
     var body: some View {
@@ -1176,9 +1235,11 @@ struct AskSizesFields: View {
             .disabled(working || form.answer == nil)
             .accessibilityIdentifier("ask-sizes-confirm")
             if form.answer == nil {
-                Text("Enter each size in millimetres, or leave one empty if you don't know it.").font(.footnote).foregroundStyle(.secondary)
+                Text(AskSizesForm.invalidWords).font(.footnote).foregroundStyle(.secondary)
             }
         }
+        .onAppear { changed(form) }
+        .onChange(of: form) { _, now in changed(now) }
     }
 }
 

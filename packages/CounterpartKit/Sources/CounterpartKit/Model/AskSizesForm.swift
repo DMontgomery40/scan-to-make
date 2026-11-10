@@ -39,7 +39,10 @@ public struct AskSizesForm: Equatable, Sendable {
     /// The number a field holds, when it is one (a comma or a point for the decimal; over zero, at most 10 m).
     public static func millimetres(_ text: String) -> Double? {
         let typed = text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
-        guard !typed.isEmpty, let mm = Double(typed), mm.isFinite, mm > 0, mm <= 10_000 else { return nil }
+        // Digits with at most one decimal part, as the Kotlin and Linux forms take it: never "1e3", ".5" or "5.",
+        // which `Double` alone would accept here and nowhere else.
+        guard typed.range(of: #"^[0-9]+(\.[0-9]+)?$"#, options: .regularExpression) != nil,
+              let mm = Double(typed), mm.isFinite, mm > 0, mm <= 10_000 else { return nil }
         return mm
     }
 
@@ -53,6 +56,24 @@ public struct AskSizesForm: Equatable, Sendable {
             sizes.append(Answer(id: field.id, mm: mm))
         }
         return sizes.isEmpty ? nil : sizes
+    }
+
+    /// Said under the fields while nothing can be sent, and when another answer is pressed with a field that isn't a number.
+    public static let invalidWords = "Enter each size in millimetres, or leave one empty if you don't know it."
+
+    /// What goes with any other answer sent from the same card (words, a caliper photo): one answer carries
+    /// everything the card holds, so a number typed into a field is never dropped by pressing another button.
+    public enum Carried: Equatable, Sendable {
+        /// The numbers as they stand, edited or prefilled.
+        case sizes([Answer])
+        /// Every field is blank: the person knows none of them, and the other answer goes alone.
+        case none
+        /// A filled field isn't a number: nothing is sent until it is fixed or cleared.
+        case invalid
+    }
+    public var carried: Carried {
+        if let answer { return .sizes(answer) }
+        return fields.allSatisfy { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ? .none : .invalid
     }
 
     /// Nothing was changed: the button says Confirm. Otherwise it sends corrections.

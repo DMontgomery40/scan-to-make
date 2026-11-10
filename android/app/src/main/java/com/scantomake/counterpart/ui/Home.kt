@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -77,6 +78,8 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
     var showArchived by remember { mutableStateOf(false) }
 
     val searched = searchProjects(projects, query, state::printerName)
+    // Why a search found a project whose title doesn't say (U10).
+    fun reason(p: Project) = searchSnippet(p, query, state::printerName)
     val visible = searched.filter { !it.isArchived }
     val archived = searched.filter { it.isArchived }.sortedByDescending { it.updatedAtMs }
     fun phase(p: Project) = state.words(p).phase
@@ -104,7 +107,7 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
 
     Scaffold(containerColor = Color.Black, topBar = {
         TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black), title = {
-            Column { Text("Projects", fontWeight = FontWeight.Bold); Text(subtitle, fontSize = 12.sp, color = Palette.secondary) }
+            Column { Text("Projects", fontWeight = FontWeight.Bold); Text(subtitle, fontSize = 13.sp, color = Palette.secondary, modifier = Modifier.testTag("projects-status")) }
         }, actions = {
             IconButton(onClick = { searching = !searching; if (!searching) query = "" }) { Icon(CIcons.Search, "Search") }
             IconButton(onClick = printers) {
@@ -138,15 +141,15 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
                     item { SectionTitle("Now") }
                     items(running, key = { "now-" + it.id }) { p ->
                         val w = state.words(p)
-                        NowCard(p, w) { open(p.id, ProjectWords.watchable(p, w.phase)) }
+                        Column { NowCard(p, w) { open(p.id, ProjectWords.watchable(p, w.phase)) }; SearchReason(reason(p)) }
                     }
                 }
                 if (needsYou.isNotEmpty()) {
                     item { SectionTitle("Needs you") }
-                    items(needsYou, key = { "needs-" + it.id }) { p -> NowCard(p, state.words(p)) { open(p.id, false) } }
+                    items(needsYou, key = { "needs-" + it.id }) { p -> Column { NowCard(p, state.words(p)) { open(p.id, false) }; SearchReason(reason(p)) } }
                 }
-                if (grid.isNotEmpty()) { item { SectionTitle("All projects") }; gridItems(grid, "all") { p -> ProjectCard(p, state.words(p)) { open(p.id, false) } } }
-                if (done.isNotEmpty()) { item { SectionTitle("Done") }; gridItems(done, "done") { p -> ProjectCard(p, state.words(p)) { open(p.id, false) } } }
+                if (grid.isNotEmpty()) { item { SectionTitle("All projects") }; gridItems(grid, "all") { p -> Column { ProjectCard(p, state.words(p)) { open(p.id, false) }; SearchReason(reason(p)) } } }
+                if (done.isNotEmpty()) { item { SectionTitle("Done") }; gridItems(done, "done") { p -> Column { ProjectCard(p, state.words(p)) { open(p.id, false) }; SearchReason(reason(p)) } } }
                 if (archived.isNotEmpty()) {
                     item { Text((if (showArchived) "▾ " else "▸ ") + "Archived · ${archived.size}", color = Palette.secondary, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.clickable { showArchived = !showArchived }.padding(vertical = 6.dp)) }
@@ -213,7 +216,7 @@ private fun NowCard(p: Project, w: ProjectWords, onClick: () -> Unit) {
             ProjectImage(p, p.posterName(), Modifier.size(76.dp).clip(RoundedCornerShape(16.dp)))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(w.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(w.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 StatusCapsule(w.phase)
                 // The capsule already names the phase: the line shows only what differs.
                 Text(rowLine(p, w.line), Modifier.testTag("row-line-${p.id}"), color = Palette.secondary, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -232,7 +235,7 @@ private fun ProjectCard(p: Project, w: ProjectWords, onClick: () -> Unit) {
             StatusCapsule(w.phase, modifier = Modifier.padding(8.dp))
         }
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(w.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(w.title, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(w.size ?: Format.`when`(p.updatedAtMs.toLong()), color = Palette.secondary, fontSize = 12.sp, maxLines = 1)
         }
     }

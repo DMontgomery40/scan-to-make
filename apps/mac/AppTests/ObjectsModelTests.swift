@@ -612,6 +612,28 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertNotEqual(later[3], ids[0])
     }
 
+    /// Train #499 review, F8: the id was made from the words alone, before "See the photos I added." stood in for
+    /// none, so two photo-only notes shared an id and the second one's photos would never attach.
+    func testTwoPhotoOnlyNotesAreTwoNotes() async throws {
+        let suite = "counterpart-note-photos-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let companion = FakeObjects()
+        await companion.set([item("hook", "ready")])
+        await companion.setCapabilities(.init(messagePhotos: true, messageIds: true))
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        // Neither reply arrives, so neither attempt is settled.
+        await companion.failNextCorrections([ControlClientError.unavailable, ControlClientError.unavailable, ControlClientError.unavailable])
+        _ = await model.perform(.correct, on: "hook", photos: [URL(fileURLWithPath: "/tmp/side.jpg")])
+        _ = await model.perform(.correct, on: "hook", photos: [URL(fileURLWithPath: "/tmp/side.jpg")])
+        _ = await model.perform(.correct, on: "hook", photos: [URL(fileURLWithPath: "/tmp/underside.jpg")])
+        let ids = await companion.messageIds
+        XCTAssertEqual(ids.count, 3)
+        XCTAssertEqual(ids[0], ids[1], "the same photo again is the same note")
+        XCTAssertNotEqual(ids[1], ids[2], "another photo is another note")
+    }
+
     func testACompanionFromBeforeNoteIdsIsSentWhatItAlwaysWas() async throws {
         let suite = "counterpart-note-old-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -997,6 +1019,23 @@ private func project(_ item: [String: Any]) throws -> Project {
             XCTAssertEqual(all.hidden, 0, "no search hides nothing")
             XCTAssertEqual(all.groups.map(\.group), model.groups.map(\.group))
         }
+    }
+
+    /// First look U10 (Nov 10): "holder" listed projects with nothing to show why. Every result whose title lacks the word
+    /// carries the line it matched in, with projects present; one whose title has it carries none.
+    func testEverySearchResultWhoseTitleLacksTheWordSaysWhereItMatched() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("h", "ready", ["title": "AirPods Max desk hanger", "instructions": "The main holder hooks over the desk edge."]),
+                             item("w", "ready", ["title": "Wall holder for three"]), item("s", "ready", ["title": "Stove gap filler"])])
+        await companion.setCapabilities(.init(objectsCreate: true, projectSettings: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let found = model.groups(matching: "holder").groups.flatMap(\.objects)
+        XCTAssertEqual(Set(found.map(\.id)), ["h", "w"])
+        let hanger = try XCTUnwrap(found.first { $0.id == "h" })
+        XCTAssertEqual(model.searchReason(hanger, query: "holder")?.text, "The main holder hooks over the desk edge.")
+        XCTAssertNil(model.searchReason(try XCTUnwrap(found.first { $0.id == "w" }), query: "holder"), "the title says it")
+        XCTAssertNil(model.searchReason(hanger, query: " "))
     }
 
     /// David, Nov 5: "where did the 'start with these things' thing go, to print the 3d scan rig and the calipers?"
