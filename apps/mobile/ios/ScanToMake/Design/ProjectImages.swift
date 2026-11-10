@@ -44,20 +44,6 @@ extension Project {
     }
 }
 
-/// At most three pictures decode at once, off the main thread; the rest wait their turn.
-actor DecodeLane {
-    static let shared = DecodeLane()
-    private var running = 0
-    private var waiting: [CheckedContinuation<Void, Never>] = []
-
-    func run<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
-        if running < 3 { running += 1 } else { await withCheckedContinuation { waiting.append($0) } }
-        let result = await Task.detached(priority: .userInitiated) { work() }.value
-        if waiting.isEmpty { running -= 1 } else { waiting.removeFirst().resume() }
-        return result
-    }
-}
-
 /// One of a project's images, downloaded once per project version and decoded at the size shown.
 struct ProjectImage: View {
     @Environment(AppModel.self) private var app
@@ -88,7 +74,8 @@ struct ProjectImage: View {
             // A few at a time: a grid of scan frames decoding two dozen HEICs at once got nothing back (Nov 10).
             var decoded: UIImage?
             for _ in 0..<2 where decoded == nil && !Task.isCancelled {
-                decoded = await DecodeLane.shared.run { ImageMemory.thumbnail(at: url, maxPixelSize: size) }
+                // CounterpartKit's lane: three at a time, and a cell that scrolled away leaves the queue (review F4).
+                decoded = await DecodeLane.shared.run { ImageMemory.thumbnail(at: url, maxPixelSize: size) } ?? nil
             }
             guard !Task.isCancelled, let decoded else { return }
             ImageMemory.shared.store(decoded, key)
@@ -160,15 +147,22 @@ struct AskPhoto: View {
     /// The tallest it gets, so the answers stay near it (a portrait photo on an iPhone, any photo on an iPad); it keeps its
     /// aspect ratio, so it narrows instead of cropping.
     private var maxHeight: CGFloat { sizeClass == .compact ? 380 : 460 }
-    @State private var image: UIImage?
-    @State private var file: URL?
+    /// The picture, its file and whether it failed, for the current key (review F2, F3).
+    @State private var load = PictureLoad<UIImage>()
     @State private var full = false
     @Namespace private var zoom
 
+    private var image: UIImage? { load.key == key ? load.picture : ImageMemory.shared.image(key) }
+    private var file: URL? { load.key == key ? load.file : nil }
     private var aspect: CGFloat { image.map { $0.size.width / max($0.size.height, 1) } ?? 4 / 3 }
     private var key: String { "\(project.id)#\(Int64(project.mediaVersion))#\(path ?? "")#ask" }
 
     var body: some View {
+        Group { if !(load.key == key && load.hidden) { figure } }
+            .task(id: key) { await fetch(key) }
+    }
+
+    private var figure: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button { full = true } label: {
                 ZStack {
@@ -197,17 +191,21 @@ struct AskPhoto: View {
         .fullScreenCover(isPresented: $full) {
             if let file { AskPhotoFullScreen(file: file, region: region, caption: caption).navigationTransition(.zoom(sourceID: "ask-photo", in: zoom)) }
         }
-        .task(id: key) {
-            if let cached = ImageMemory.shared.image(key) { image = cached }
-            guard let path, let url = try? await app.projects.mac.download(project, path) else { return }
-            file = url
-            guard image == nil else { return }
-            // Sharp at the card's width on a 3x iPhone and a 2x iPad, never the camera's full size (PRD §9.6).
-            let decoded = await Task.detached { ImageMemory.thumbnail(at: url, maxPixelSize: 1600) }.value
-            guard !Task.isCancelled, let decoded else { return }
-            ImageMemory.shared.store(decoded, key)
-            image = decoded
-        }
+    }
+
+    /// A new key starts from its own cached picture or none; a failed download or decode hides the figure.
+    private func fetch(_ key: String) async {
+        load.start(key, cached: ImageMemory.shared.image(key))
+        guard let path else { load.downloaded(nil, for: key); return }
+        let url = try? await app.projects.mac.download(project, path)
+        guard !Task.isCancelled else { return }
+        load.downloaded(url, for: key)
+        guard let url, load.picture == nil else { return }
+        // Sharp at the card's width on a 3x iPhone and a 2x iPad, never the camera's full size (PRD §9.6).
+        let decoded = await Task.detached { ImageMemory.thumbnail(at: url, maxPixelSize: 1600) }.value
+        guard !Task.isCancelled else { return }
+        if let decoded { ImageMemory.shared.store(decoded, key) }
+        load.decoded(decoded, for: key)
     }
 }
 
