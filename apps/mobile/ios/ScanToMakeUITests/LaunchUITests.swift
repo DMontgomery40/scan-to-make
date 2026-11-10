@@ -697,6 +697,58 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(reason.isHittable, "the reason is on screen")
     }
 
+    /// Review F4: a fit with words and "I measured" but no measurement: Send takes you to the measurement fields, focuses the
+    /// first, and says there what's missing, instead of seeming to do nothing.
+    func testSendOnAFitMissingItsMeasurementGoesToTheFields() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
+                               "-CounterpartScreen", "new", "-CounterpartNewScan", "walk-around"]
+        app.launch()
+        let fit = app.buttons["scan-use-fit"]
+        XCTAssertTrue(fit.waitForExistence(timeout: 20))
+        fit.tap()
+        let describe = app.descendants(matching: .any).matching(identifier: "describe").firstMatch
+        for _ in 0..<4 where !describe.isHittable { app.swipeUp() }
+        describe.tap()
+        describe.typeText("A wall holder for it")
+        let measured = app.segmentedControls.buttons["I measured"]
+        for _ in 0..<4 where !measured.isHittable { app.swipeDown() }
+        measured.tap()
+        // Scroll back down so Send is pressed from where a person would be, below the fields.
+        for _ in 0..<3 { app.swipeUp() }
+        let send = app.buttons["send"]
+        XCTAssertTrue(send.label.hasPrefix("Send to"), send.label)
+        send.tap()
+        let missing = app.staticTexts["fit-size-missing"]
+        XCTAssertTrue(missing.waitForExistence(timeout: 5), "it says what's missing")
+        XCTAssertEqual(missing.label, "Enter at least one measurement in millimetres.")
+        XCTAssertTrue(missing.isHittable, "on screen, by the fields")
+        let longest = app.descendants(matching: .any)["fit-size-longest"].textFields.firstMatch
+        XCTAssertTrue(longest.waitForExistence(timeout: 5))
+        XCTAssertEqual(longest.value(forKey: "hasKeyboardFocus") as? Bool, true, "the first measurement is focused")
+    }
+
+    /// Review F3: a project whose chosen printer is no longer on the Mac says so (not "No printer chosen yet."), and Choose
+    /// a Printer opens this project's print sheet, where its printer is chosen. With no printers at all, Add a Printer.
+    func testAResultWhosePrinterIsGoneSaysSoAndChoosesOneForThisProject() {
+        let app = launch(set: "stale-printer", screen: "ready")
+        let words = app.staticTexts["result-no-printer"]
+        for _ in 0..<6 where !(words.exists && words.isHittable) { app.swipeUp() }
+        XCTAssertTrue(words.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(words.label, "The printer chosen for this project isn’t on your Mac anymore.")
+        let choose = app.buttons["result-choose-printer"]
+        XCTAssertEqual(choose.label, "Choose a Printer")
+        choose.tap()
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10), "this project's print sheet, with its printer picker")
+
+        let empty = launch(set: "no-printers", screen: "ready")
+        let none = empty.staticTexts["result-no-printer"]
+        for _ in 0..<6 where !(none.exists && none.isHittable) { empty.swipeUp() }
+        XCTAssertTrue(none.waitForExistence(timeout: 20))
+        XCTAssertEqual(none.label, "No printer set up yet.")
+        XCTAssertEqual(empty.buttons["result-choose-printer"].label, "Add a Printer")
+    }
+
     /// David, Nov 9: "I SCANNED A PINK UNICORN TOO BUT THE APP IS TOO GLITCHY I DON'T EVEN KNOW WHERE IT IS". A scan
     /// stopped after it kept photos says so on Home and on its project, with Send to your Mac and Scan again.
     func testAStoppedScanThatKeptPhotosShowsOnHomeAndItsProject() throws {

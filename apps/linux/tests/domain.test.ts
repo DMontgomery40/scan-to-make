@@ -848,3 +848,17 @@ test("a row under its phase heading shows the companion's detail, never the head
   assert.equal(rowWords(failed), "The printer stopped.", "no detail: the line as it is");
   for (const p of [asking, ready]) assert.doesNotMatch(rowWords(p), /^(Needs you|Ready to print)/);
 });
+
+test("search reasons survive a project without a title, and never cut an emoji in half (review F5)", () => {
+  const untitled = { ...project, title: undefined, instructions: "A hook for the stroller handle", messages: [] } as unknown as Project;
+  const reason = searchSnippet(untitled, "stroller");
+  assert.ok(reason, "the instructions are still searched for the reason");
+  assert.match(reason.text, /stroller handle/);
+  // A long note with emoji right where the cut lands, and no spaces near it.
+  const emoji = "🙂".repeat(40);
+  const noisy = { ...project, title: "Clip", messages: [{ id: "m", text: `${emoji}holder${emoji}`, atMs: 1, photos: [] }] } as Project;
+  const cut = searchSnippet(noisy, "holder");
+  assert.ok(cut);
+  assert.equal(cut.text.slice(...cut.match), "holder");
+  assert.doesNotMatch(cut.text, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/, "no half of a surrogate pair");
+});

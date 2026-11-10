@@ -877,13 +877,19 @@ struct ResultSection: View {
     }
 
     /// No printer to print on: say so, with the way to choose one. Nothing while the Mac's printers are still loading.
+    /// Review F3: a printer chosen for this project that's no longer on the Mac says so, and Choose a Printer opens this
+    /// project's print sheet, whose picker sets its printer. With no printers at all, Add a Printer opens Printers.
     @ViewBuilder private var noPrinter: some View {
-        if store.catalog != nil {
+        if let catalog = store.catalog {
+            let none = catalog.destinations.isEmpty
             HStack(spacing: 12) {
                 Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
-                Text("No printer chosen yet.").font(.headline)
+                Text(none ? "No printer set up yet." : "The printer chosen for this project isn’t on your Mac anymore.")
+                    .font(.headline).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("result-no-printer")
                 Spacer(minLength: 8)
-                Button("Choose a Printer") { app.route = .printers }.buttonStyle(.glass)
+                Button(none ? "Add a Printer" : "Choose a Printer") { app.route = none ? .printers : .print(project.id) }
+                    .buttonStyle(.glass)
                     .accessibilityIdentifier("result-choose-printer")
             }
             .padding(14)
