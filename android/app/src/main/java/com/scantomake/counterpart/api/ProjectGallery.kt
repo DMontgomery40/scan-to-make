@@ -63,7 +63,8 @@ data class ProjectGallery(val entries: List<Entry>) {
             val current = project.current ?: return emptyList()
             val label = when (project.kind) { "copy" -> "Your copy"; "published" -> "Model"; else -> "Your part" }
             if (current.model.lowercase(Locale.ROOT).endsWith(".3mf")) {
-                val render = current.renders.firstOrNull()?.let(::renderPath) ?: plates.firstOrNull()?.thumbnail ?: return emptyList()
+                // The Mac's drawing of all the file's objects first, as on the other clients (Nov 10).
+                val render = project.pictures["part"] ?: current.renders.firstOrNull()?.let(::renderPath) ?: plates.firstOrNull()?.thumbnail ?: return emptyList()
                 return listOf(PrintablePart("result", label, Drawing.Picture(render), Colour.Own, current.sizeMm))
             }
             return listOf(PrintablePart("result", label, Drawing.Model("model.stl"), spoolColour(project)?.let { Colour.Spool(it) } ?: Colour.Neutral, current.sizeMm))
