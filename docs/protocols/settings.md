@@ -9,7 +9,11 @@ Implemented sections:
 - `milestones`: `off`, `50`, `25-50-75`, or `every-10`.
 - `notifications.mac`: event-type → boolean overrides for Mac notifications.
 - `notifications.devices`: device ID → event-type → boolean saved phone preferences.
-- `general`: optional `openAtLogin`, `showInDock`, and `keepAwake` booleans.
+- `general`: optional `openAtLogin`, `showInDock`, and `keepAwake` booleans, and `autoUpdateMcps`.
+- `general.autoUpdateMcps`: "Keep printer software up to date" (Settings → Printers; PRD §8.10). The companion's own
+  choice, not the Mac's: it is `true` in every response unless the person turned it off (a new install and a settings
+  file from before the key both read `true`), and `false` stays `false`. Off means the printer MCPs change only when
+  the person presses Update.
 
 The companion serializes load/merge/validate/write, deep-merges nested partial patches,
 retains explicit false values and unknown top-level stored sections, and emits
@@ -17,7 +21,7 @@ retains explicit false values and unknown top-level stored sections, and emits
 with defaults. An old milestones-only client can continue reading and writing milestones.
 
 Empty notification maps mean the documented defaults in `SettingsSchema`, not all off.
-General starts empty: the Mac supplies its actual current login, Dock and awake choices
+General starts with only `autoUpdateMcps: true`: the Mac supplies its actual current login, Dock and awake choices
 before the phone offers those controls. The Mac then applies changes made on either
 client. Existing Mac overrides migrate on the first supported read. Older phone keys
 `CounterpartNotify.*` migrate into its device map without turning an already saved false

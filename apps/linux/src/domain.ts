@@ -513,6 +513,16 @@ export function mcpUpdateNotice(reply: {update?: {state: string; toVersion?: str
   }
 }
 
+/**
+ * Q9, "Keep printer software up to date" (`general.autoUpdateMcps`): on unless the person turned it off, as the
+ * companion reads it. An older companion that doesn't send the key has no automatic updates: the switch isn't shown.
+ */
+export function autoUpdateSwitch(settings: import("./types").CompanionSettings | undefined): { shown: boolean; on: boolean } {
+  const value = settings?.general?.autoUpdateMcps;
+  return { shown: value !== undefined, on: value !== false };
+}
+export const autoUpdatePatch = (on: boolean) => ({ general: { autoUpdateMcps: on } });
+
 export function mcpMoveNotice(reply: {update: {state: string; found?: string}}): string {
   const update = reply.update;
   if (update.found) return update.found;

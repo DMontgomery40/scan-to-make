@@ -29,6 +29,8 @@ import {
   addressField,
   canSelectPlate,
   printNeedsCheck,
+  autoUpdatePatch,
+  autoUpdateSwitch,
 } from "../src/domain.ts";
 import type { Project, ReconstructionReview } from "../src/types.ts";
 import type { CodeEngineView } from "../src/domain.ts";
@@ -635,4 +637,24 @@ test("the code design engine row is reachable in Settings and shows the companio
   assert.deepEqual(codeEngineRow({ state: "unavailable", message: "Update mcp-3D-printer-server in Settings → Printers to use its code design engine.", canSetUp: false }),
     { message: "Update mcp-3D-printer-server in Settings → Printers to use its code design engine.", working: false });
   assert.deepEqual(codeEngineRow(undefined), { message: "Checking…", working: true });
+});
+
+// Q9, PRD §6.1: "Keep printer software up to date" is in Settings → Printers → Printer tools, on unless turned off,
+// and writes the companion's own setting (general.autoUpdateMcps) through settings.set.
+test("Keep printer software up to date is reachable in Settings → Printers and reads and writes the companion's setting", () => {
+  const settings = readFileSync(new URL("../src/Settings.tsx", import.meta.url), "utf8");
+  const printers = settings.slice(settings.indexOf("function Printers("));
+  const tools = printers.slice(printers.indexOf("<h3>Printer tools</h3>"));
+  assert.ok(tools.indexOf("Keep printer software up to date") > 0, "under Printer tools");
+  assert.ok(tools.indexOf("Keep printer software up to date") < tools.indexOf("{packages.map("), "above the MCPs and their Update buttons");
+  assert.match(printers, /call<\{ settings: CompanionSettings \}>\("settings\.get"\)/);
+  assert.match(printers, /call<\{ settings: CompanionSettings \}>\("settings\.set", autoUpdatePatch\(e\.target\.checked\)\)/);
+  // On for a companion that says nothing else; off only when turned off; hidden for a companion without the setting.
+  assert.deepEqual(autoUpdateSwitch({ milestones: "50", general: { autoUpdateMcps: true } }), { shown: true, on: true });
+  assert.deepEqual(autoUpdateSwitch({ milestones: "50", general: { autoUpdateMcps: false } }), { shown: true, on: false });
+  assert.deepEqual(autoUpdateSwitch({ milestones: "50", general: {} }), { shown: false, on: true });
+  assert.deepEqual(autoUpdateSwitch(undefined), { shown: false, on: true });
+  assert.deepEqual(autoUpdatePatch(false), { general: { autoUpdateMcps: false } });
+  const tauri = readFileSync(new URL("../src-tauri/src/protocol.rs", import.meta.url), "utf8");
+  assert.match(tauri, /"settings\.get"/); assert.match(tauri, /"settings\.set"/);
 });

@@ -292,6 +292,18 @@ export class PrinterSetup {
   readonly deps: PrinterSetupDeps;
   constructor(deps: PrinterSetupDeps) { this.deps = deps; }
 
+  /** Add printer…'s steps running now (Find Printers, Check, Add, Complete Settings, a Printer MCP choice). */
+  #working = 0;
+  async #tracked<T>(work: () => Promise<T>): Promise<T> {
+    this.#working++;
+    try { return await work(); } finally { this.#working--; }
+  }
+  /**
+   * A printer is being set up: one of Add printer…'s steps is running, or an approval it started (OctoPrint's key) is
+   * still open. Each starts or talks to an MCP, so an automatic MCP update waits for it (McpAutoUpdater).
+   */
+  working(): boolean { return this.#working > 0 || this.#obtaining.size > 0; }
+
   #list(path: string): string[] {
     if (this.deps.list) return this.deps.list(path);
     try { return readdirSync(path); } catch { return []; }
@@ -522,7 +534,8 @@ export class PrinterSetup {
    * (`counterpart_discover_printers`), asked one MCP at a time so two never listen on the same port. A printer both
    * MCPs find is listed once, with the MCP listed first for its kind (PRD §8.2). About 4 s per MCP.
    */
-  async discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: SetupOptions}> {
+  discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: SetupOptions}> { return this.#tracked(() => this.#discover()); }
+  async #discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: SetupOptions}> {
     // All of it inside the request's 15 s: what doesn't fit is left out, never the whole answer.
     const until = Date.now() + (this.deps.discoverBudgetMs ?? 13_000), remainingMs = () => Math.max(0, until - Date.now());
     const [folders, saved, setups] = await Promise.all([
@@ -641,7 +654,8 @@ export class PrinterSetup {
    * when the MCP has it) camera_snapshot. Never a print, heating, motion or settings tool. Only this projection is
    * returned: no telemetry, MCP error text or credentials (KAN-163's check).
    */
-  async check(input: PrinterForm): Promise<CheckResult> {
+  check(input: PrinterForm): Promise<CheckResult> { return this.#tracked(() => this.#check(input)); }
+  async #check(input: PrinterForm): Promise<CheckResult> {
     // One budget for the whole check, inside local-control's 60 s: reading the MCP's fields comes out of it too.
     const total = this.deps.checkBudgetMs ?? 55_000;
     const until = Date.now() + total, remainingMs = () => Math.max(0, Math.floor(until - Date.now()));
@@ -684,7 +698,8 @@ export class PrinterSetup {
   readonly #obtaining = new Map<string, {client: ProbeClient; tool: string; requestId: string; key: string; field: string; env: string; timer: NodeJS.Timeout; seen: number; asking: boolean}>();
 
   /** `printers.obtain` (ObtainRequestSchema). */
-  async obtain(input: ObtainRequest): Promise<ObtainResult> {
+  obtain(input: ObtainRequest): Promise<ObtainResult> { return this.#tracked(() => this.#obtain(input)); }
+  async #obtain(input: ObtainRequest): Promise<ObtainResult> {
     const key = JSON.stringify([input.backend, input.printerType, input.host, input.port ?? '', input.field]);
     if (input.session) {
       const open = this.#obtaining.get(input.session);
@@ -768,7 +783,8 @@ export class PrinterSetup {
    * `<appPrinters>/profiles/<id>/.env` (0600) with exactly the MCP's variables. Either way it joins Counterpart's list
    * and the catalog reads it as a destination.
    */
-  async add(input: PrinterForm): Promise<{id: string; destinationId?: string; sameAs?: string}> {
+  add(input: PrinterForm): Promise<{id: string; destinationId?: string; sameAs?: string}> { return this.#tracked(() => this.#add(input)); }
+  async #add(input: PrinterForm): Promise<{id: string; destinationId?: string; sameAs?: string}> {
     const id = newProfileId();
     let profile: SavedProfile;
     let created: string | undefined;
@@ -893,7 +909,8 @@ export class PrinterSetup {
    * `printers.completeSettings`: a printer added in Counterpart whose `.env` lacks the model its MCP needs gets it
    * (as on Add), the profile records it, and its MCP restarts so it reads the file again.
    */
-  async completeSettings(destinationId: string, model?: string): Promise<{destinationId: string; model?: string}> {
+  completeSettings(destinationId: string, model?: string): Promise<{destinationId: string; model?: string}> { return this.#tracked(() => this.#completeSettings(destinationId, model)); }
+  async #completeSettings(destinationId: string, model?: string): Promise<{destinationId: string; model?: string}> {
     const saved = await readProfiles(this.#profilesPath);
     const profile = saved.profiles.find(item => item.id === destinationId)
       ?? saved.profiles.find(item => this.deps.catalog?.()?.canonical(item.id) === destinationId);
@@ -931,7 +948,8 @@ export class PrinterSetup {
   }
 
   /** `printers.chooseMcp`: which MCP a printer reachable through both uses. Counterpart's own preference, kept with its list. */
-  async chooseMcp(destinationId: string, backend: PrinterBackend): Promise<{destinationId: string}> {
+  chooseMcp(destinationId: string, backend: PrinterBackend): Promise<{destinationId: string}> { return this.#tracked(() => this.#chooseMcp(destinationId, backend)); }
+  async #chooseMcp(destinationId: string, backend: PrinterBackend): Promise<{destinationId: string}> {
     const catalog = this.deps.catalog?.();
     const listed = catalog?.canonical(destinationId);
     const destination = catalog?.destinations.find(item => item.id === listed);

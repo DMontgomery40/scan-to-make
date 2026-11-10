@@ -3,7 +3,7 @@ import {StringDecoder} from 'node:string_decoder';
 import {mkdir, readdir, readFile, rename, rm as fsRm, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {dirname, join} from 'node:path';
-import {printerBackendSchema, type PrinterHandoffConfig, type PrinterSession} from '@scan-to-make/printer-handoff';
+import {printerBackendSchema, type PrinterBackend, type PrinterHandoffConfig, type PrinterSession} from '@scan-to-make/printer-handoff';
 import {newerVersion} from './directory.js';
 import type {PrintGate} from './print-gate.js';
 import type {PrinterCatalog} from '../objects/printers.js';
@@ -37,8 +37,25 @@ export type McpUpdateStateName = 'started' | 'waiting' | 'current' | 'unresolved
 export interface McpUpdate {mcpId: string; state: McpUpdateStateName; fromVersion?: string; toVersion?: string; found?: string}
 export type McpUpdateEventType = 'mcp.update.started' | 'mcp.update.waiting' | 'mcp.update.done' | 'mcp.update.failed';
 export interface McpUpdateEvent {type: McpUpdateEventType; data: {mcpId: string; fromVersion?: string; toVersion?: string; log?: string}; package: string;
-  /** mcp.update.failed when the previous version couldn't be put back: what to do, in place of "still in use". */
+  /**
+   * The event's sentence, in place of the usual one: mcp.update.failed when the previous version couldn't be put back
+   * (what to do, in place of "still in use"); an automatic update's done or failed (what happened by itself).
+   */
   reason?: string}
+/**
+ * How an automatic update ended (McpAutoUpdater). `done`: installed, started and answered; `reverted`: the new copy was
+ * put in place, failed, and the previous one was put back by itself; `stuck`: it couldn't be put back (said, with what
+ * to do); `failed`: nothing had changed yet (npm couldn't install it), said only when `report` asked; `busy`: Counterpart
+ * was working, nothing was touched; `current`, `skipped` (a copy Counterpart doesn't own) and `gone`: nothing to do.
+ */
+export type AutoUpdateOutcome =
+  | {state: 'done'; fromVersion?: string; toVersion: string}
+  | {state: 'reverted' | 'stuck' | 'failed'; fromVersion?: string; toVersion: string; why: string}
+  | {state: 'busy' | 'current' | 'skipped' | 'gone'};
+/** A copy an automatic update may change, and the version it has. */
+export interface AutoUpdateTarget {mcpId: string; pkg: PrinterBackend; fromVersion?: string}
+/** Starts a copy as nothing but itself (no printer settings) and says why it doesn't answer `counterpart/1`, if it doesn't. */
+export type ContractCheck = (config: PrinterHandoffConfig, version: string) => Promise<string | undefined>;
 export type CommandRunner = (command: string, args: string[], options: {cwd?: string; env: NodeJS.ProcessEnv; timeoutMs: number}) => Promise<{code: number; output: string}>;
 
 export class McpUpdateError extends Error {
@@ -167,6 +184,20 @@ const RESTARTED_CHECKOUT = (pkg: string, dir: string, head?: string) =>
 const JOURNAL_UNREADABLE = (pkg: string) => `Counterpart found a record of an unfinished ${pkg} update that it couldn't read, so it changed nothing. If this printer's MCP doesn't start, press Update again.`;
 const RESTARTED_KEPT = (pkg: string, kept: string, live: string) =>
   `${RESTARTED(pkg)} and couldn't put the previous version back. It is kept in ${kept}: move it to ${live}, or install a fresh copy.`;
+const AUTO_DONE = (from: string | undefined, to: string) => `Updated automatically${from ? ` from ${from}` : ''}. Your printers use ${to} now.`;
+/** The new copy was in place and failed; the previous one is back. `why` is the update's own sentence. */
+const AUTO_BACK = (from: string | undefined, to: string, why: string) =>
+  `Counterpart tried ${to} by itself and put ${from ?? 'the previous version'} back: ${why} It won't try ${to} again by itself. Update in Settings → Printers tries it now.`;
+const AUTO_NOT_INSTALLED = (from: string | undefined, to: string) =>
+  `Counterpart couldn't install ${to} by itself after several tries, so ${from ?? 'the version you had'} is still in use. Update in Settings → Printers tries again.`;
+const NOT_CONTRACT = (pkg: string, why: string) => `The updated ${pkg} ${why}`;
+/** A short why for the event's sentence; the whole log is in its `log`. */
+const shortWhy = (sentence: string | undefined) => {
+  const first = sentence?.split('\n').map(line => line.trim()).filter(Boolean).at(-1);
+  if (!first || first.length > 240) return "the new version didn't start or answer.";
+  const why = first.replace(NOT_STARTED_BACK, '.');
+  return /[.!?]$/.test(why) ? why : `${why}.`;
+};
 const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.length <= LOG_TAIL_BYTES ? text : bytes.subarray(bytes.length - LOG_TAIL_BYTES).toString('utf8').replace(/^�+/, ''); };
 const newer = newerVersion;
 
@@ -202,6 +233,8 @@ export interface McpUpdaterDeps {
   fs?: UpdateFs;
   /** Where each update in progress is written down (UpdateJournals), so a restart can undo it. Without it, nothing is. */
   journal?: string;
+  /** An automatic update's proof that the new copy starts and answers `counterpart/1` before it is kept. */
+  verify?: ContractCheck;
 }
 
 /** The file moves an npm update makes (a staged install swapped in). */
@@ -571,6 +604,92 @@ export class McpUpdater {
     return work.then(update => ({...update}));
   }
 
+  /** An update, Download or Move is admitted, waiting or running. */
+  busy(): boolean { return this.#active.size > 0 || this.#starting.size > 0 || this.#changing.size > 0; }
+
+  /**
+   * The copies an automatic update may change, one per set of files, with the version each has: Counterpart's own
+   * copies (`<appPrinters>/…`, with or without a printer on them) and the npx pins it saves. Never a global npm
+   * install or a git checkout: those are the person's, and another MCP client may be running them; Update and Move
+   * still work on them. Never a copy reached through a command Counterpart can't change (npx inside ssh).
+   */
+  autoTargets(): AutoUpdateTarget[] {
+    const out: AutoUpdateTarget[] = [], seen = new Set<string>();
+    for (const entry of this.#destinations()) {
+      const found = this.install(entry.id);
+      if (!found || seen.has(found.runs)) continue;
+      seen.add(found.runs);
+      if (!McpUpdater.#owned(found.install)) continue;
+      const members = this.#members(found.mcpId);
+      const fromVersion = this.#fromVersion(found.mcpId, members);
+      out.push({mcpId: found.mcpId, pkg: entry.config.backend, ...(fromVersion ? {fromVersion} : {})});
+    }
+    for (const pkg of printerBackendSchema.options) {
+      const id = appMcpId(pkg, this.#deps.env), install = this.#freshInstall({backend: pkg, process: {command: this.#deps.node}} as PrinterHandoffConfig);
+      if (seen.has(id) || !this.#deps.env.exists(install.entry!) || this.#members(id).length) continue;
+      const fromVersion = installedVersion(install, this.#deps.env);
+      out.push({mcpId: id, pkg, ...(fromVersion ? {fromVersion} : {})});
+    }
+    return out;
+  }
+  static #owned(install: ResolvedMcpInstall): boolean { return install.type === 'app' || (install.type === 'npx' && !install.via); }
+
+  /** The oldest version any printer on this install runs; undefined when one of them isn't known yet. */
+  #fromVersion(mcpId: string, members: {id: string; mcpId: string; runs: string; install: ResolvedMcpInstall}[]): string | undefined {
+    const known = members.filter(member => (member.mcpId === mcpId || member.runs === mcpId))
+      .map(member => installedVersion(member.install, this.#deps.env) ?? this.#deps.runningVersion(member.id));
+    const versions = known.filter((version): version is string => !!version);
+    return versions.length === known.length ? versions.sort((a, b) => newer(a, b) ? 1 : newer(b, a) ? -1 : 0)[0] : undefined;
+  }
+
+  /**
+   * One automatic update (McpAutoUpdater), to `latest`, run to its end: the same journaled install as Update, but it
+   * never waits (busy is the caller's to retry), says nothing before it ends, proves the new copy answers
+   * `counterpart/1` before keeping it, and puts the previous copy back by itself when it doesn't. A failure before
+   * anything changed (npm couldn't install it) is said only when `report` is set.
+   */
+  async autoUpdate(mcpId: string, latest: string, options: {report?: boolean} = {}): Promise<AutoUpdateOutcome> {
+    if (this.busy()) return {state: 'busy'};
+    const members = this.#members(mcpId);
+    const unused = printerBackendSchema.options.find(pkg => appMcpId(pkg, this.#deps.env) === mcpId);
+    if (unused && !members.length) {
+      const install = this.#freshInstall({backend: unused, process: {command: this.#deps.node}} as PrinterHandoffConfig);
+      const fromVersion = installedVersion(install, this.#deps.env);
+      if (!this.#deps.env.exists(install.entry!)) return {state: 'gone'};
+      if (!fromVersion || !newer(latest, fromVersion)) return {state: 'current'};
+      const update: McpUpdate = {mcpId, state: 'started', fromVersion, toVersion: latest};
+      this.#active.set(mcpId, update);
+      this.#changing.set(mcpId, mcpId);
+      await this.#note(update, unused, {phase: 'admitted'});
+      return this.#performDownload(install, update, latest, {auto: true, report: !!options.report});
+    }
+    const first = members[0];
+    if (!first) return {state: 'gone'};
+    if (!McpUpdater.#owned(first.install)) return {state: 'skipped'};
+    const pkg = first.config.backend;
+    const fromVersion = this.#fromVersion(mcpId, members);
+    if (!fromVersion || !newer(latest, fromVersion)) return {state: 'current'};
+    const update: McpUpdate = {mcpId, state: 'started', fromVersion, toVersion: latest};
+    this.#active.set(mcpId, update);
+    this.#packages.set(mcpId, pkg);
+    await this.#note(update, pkg, {phase: 'admitted'});
+    const claimed = await this.#claim(mcpId).catch(() => false);
+    if (!claimed) {
+      // Nothing was touched and nothing is held: the next try is the scheduler's, soon.
+      this.#active.delete(mcpId);
+      await this.#forget(mcpId);
+      return {state: 'busy'};
+    }
+    return this.#perform(mcpId, {auto: true, report: !!options.report}, latest, pkg);
+  }
+
+  /** The new copy's own answer to `counterpart/1`; throws the update's sentence when it doesn't answer. */
+  async #verify(pkg: string, config: PrinterHandoffConfig, version: string): Promise<void> {
+    if (!this.#deps.verify) return;
+    const why = await this.#deps.verify(config, version).catch((error: Error) => `didn't start (${String(error?.message ?? error)}).`);
+    if (why) throw Object.assign(new Error('contract check failed'), {sentence: NOT_CONTRACT(pkg, why)});
+  }
+
   /** A waiting update's version, raised to npm's newest answer when that is newer. In the background. */
   #raiseTarget(mcpId: string, update: McpUpdate): void {
     const pkg = this.#packages.get(mcpId);
@@ -719,7 +838,7 @@ export class McpUpdater {
     }
   }
 
-  async #perform(mcpId: string, options: {fresh?: boolean}, latest: string, pkg: string): Promise<void> {
+  async #perform(mcpId: string, options: {fresh?: boolean; auto?: boolean; report?: boolean}, latest: string, pkg: string): Promise<AutoUpdateOutcome> {
     const update = this.#active.get(mcpId)!;
     const members = this.#members(mcpId, options), first = members[0];
     const release = () => {
@@ -732,8 +851,8 @@ export class McpUpdater {
       this.#active.delete(mcpId);
       release();
       await this.#forget(mcpId);
-      if (update) await this.#emit('mcp.update.failed', pkg, update, NO_PRINTERS(pkg)).catch(() => undefined);
-      return;
+      if (update && !options.auto) await this.#emit('mcp.update.failed', pkg, update, NO_PRINTERS(pkg)).catch(() => undefined);
+      return {state: 'gone'};
     }
     const previous = new Map(members.map(member => [member.id, this.#override(member.id, member.config)]));
     const own = members.filter(member => (member.mcpId === mcpId || member.runs === mcpId));
@@ -747,9 +866,13 @@ export class McpUpdater {
     let undo: (() => Promise<void>) | undefined, finish: (() => Promise<void>) | undefined;
     // Kept past a failed restore of the swap: the next start tries again from it.
     let keepJournal = false, stagingDir: string | undefined;
+    // Something the person runs has been changed (a copy moved, an override saved): an automatic update that fails
+    // from here says so; one that fails before it (npm couldn't install) changed nothing and is tried again later.
+    let changed = false;
     const saved = Object.fromEntries(members.map(member => [member.id, this.#deps.overrides.saved(member.id) ?? null]));
     try {
-      await this.#emit('mcp.update.started', pkg, update);
+      // Automatic: said afterwards, never before (Q9).
+      if (!options.auto) await this.#emit('mcp.update.started', pkg, update);
       const install: McpInstall = options.fresh ? this.#freshInstall(first.config) : first.install;
       const plan = this.#plan(install, latest);
       if ('fail' in plan) throw Object.assign(new Error(plan.fail), {sentence: plan.fail});
@@ -766,6 +889,7 @@ export class McpUpdater {
         this.#verifyPostinstall(staged, output);
         await this.#fs.mkdir(dirname(live));
         const hadLive = this.#deps.env.exists(live);
+        changed = true;
         // A step of putting the previous copy back that fails says so; `staging` (which holds `kept`) then stays.
         const restore = async (step: () => Promise<void>, sentence = `Counterpart couldn't put the previous version back. It is kept in ${kept}: move it to ${live}, or install a fresh copy.`) => {
           try { await step(); } catch { keepJournal = true; throw Object.assign(new Error('restore failed'), {restoreFailed: true, sentence}); }
@@ -779,6 +903,10 @@ export class McpUpdater {
         await this.#fs.rename(staged, live);
         undo = hadLive ? () => restore(async () => { await this.#fs.rm(live); await this.#fs.rename(kept, live); })
           : () => restore(() => this.#fs.rm(live), `Counterpart couldn't remove the new copy at ${live}. Remove it, or install a fresh copy.`);
+        if (options.auto) {
+          const entry = 'entry' in install && install.entry?.startsWith(`${live}/`) ? install.entry : join(live, 'dist', 'index.js');
+          await this.#verify(pkg, {backend: first.config.backend, process: {command: ('node' in install && install.node) || this.#deps.node, args: [entry]}}, latest);
+        }
       } else if (plan.kind === 'checkout') {
         await run('git status', '/bin/sh', ['-c', `test -z "$(${plan.git} -C "$1" status --porcelain)" || { echo "This copy has local changes"; exit 3; }`, 'sh', plan.dir], undefined, process.env);
         const head = (await run('git rev-parse', plan.git, ['-C', plan.dir, 'rev-parse', 'HEAD'], undefined, process.env)).trim().split('\n').at(-1)!;
@@ -803,11 +931,15 @@ export class McpUpdater {
       } else await this.#note(update, pkg, {phase: 'changing', change: {kind: 'none'}, overrides: saved});
       // npx: each profile runs the new version; fresh: each runs the app's own copy, started the way its own profile
       // started its MCP (its own variables and directory: printers differ by them).
+      changed = true;
       for (const member of own) {
         if (member.install.type === 'npx') await this.#deps.overrides.set(member.id, {command: member.effective.process.command,
           args: (member.effective.process.args ?? []).map(arg => arg === (member.install as {spec?: string}).spec ? `${pkg}@${latest}` : arg)}, member.config);
         if (options.fresh && install.type === 'app') await this.#deps.overrides.set(member.id, this.#appCopyOverride(member.config), member.config);
       }
+      // An automatic npx update: the pinned version, started on its own, answers before any printer is moved to it.
+      const pinned = options.auto && plan.kind === 'none' ? own.map(member => this.#deps.overrides.peek(member.id, member.config)).find(Boolean) : undefined;
+      if (pinned) await this.#verify(pkg, {backend: first.config.backend, process: {command: pinned.command, args: pinned.args}}, latest);
       // Each restart and connect is bounded: an MCP that never answers puts the previous version back with a sentence,
       // instead of an update that never ends (and a Settings row that spins).
       const startMs = this.#deps.startTimeoutMs ?? MCP_START_MS;
@@ -830,7 +962,9 @@ export class McpUpdater {
       await finish?.().catch(() => undefined);
       await this.#forget(mcpId);
       this.#active.delete(mcpId);
-      await this.#emit('mcp.update.done', pkg, {...update, toVersion: catalog?.server.version ?? latest});
+      const toVersion = catalog?.server.version ?? latest;
+      await this.#emit('mcp.update.done', pkg, {...update, toVersion}, undefined, options.auto ? AUTO_DONE(update.fromVersion, toVersion) : undefined);
+      return {state: 'done', ...(update.fromVersion ? {fromVersion: update.fromVersion} : {}), toVersion};
     } catch (error) {
       // The previous version stays in use: the swap or checkout is undone, and an override is put back.
       let sentence = (error as {sentence?: string}).sentence, restoreFailed = false;
@@ -853,8 +987,15 @@ export class McpUpdater {
       }
       this.#active.delete(mcpId);
       if (!keepJournal) { await this.#note(update, pkg, {phase: 'ended', outcome: 'failed'}); await this.#forget(mcpId); }
+      const why = shortWhy(sentence ?? (error as Error).message);
+      const from = update.fromVersion ? {fromVersion: update.fromVersion} : {};
+      if (options.auto && !changed && !restoreFailed) {
+        if (options.report) await this.#emit('mcp.update.failed', pkg, update, tail(log || String((error as Error).message)), AUTO_NOT_INSTALLED(update.fromVersion, latest));
+        return {state: 'failed', ...from, toVersion: latest, why};
+      }
       await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)),
-        restoreFailed ? RESTORE_FAILED : undefined);
+        restoreFailed ? RESTORE_FAILED : options.auto ? AUTO_BACK(update.fromVersion, latest, why) : undefined);
+      return {state: restoreFailed ? 'stuck' : options.auto ? 'reverted' : 'failed', ...from, toVersion: latest, why};
     } finally { release(); }
   }
 
@@ -897,14 +1038,15 @@ export class McpUpdater {
     return work.then(update => ({...update}));
   }
 
-  async #performDownload(install: McpInstall & {type: 'app'}, update: McpUpdate, latest: string): Promise<void> {
+  async #performDownload(install: McpInstall & {type: 'app'}, update: McpUpdate, latest: string, options: {auto?: boolean; report?: boolean} = {}): Promise<AutoUpdateOutcome> {
     const pkg = install.pkg as PrinterHandoffConfig['backend'];
     let log = '';
     const staging = join(install.prefix, `.counterpart-update-${randomUUID()}`);
     const live = join(install.prefix, 'lib', 'node_modules', pkg), staged = join(staging, 'lib', 'node_modules', pkg), kept = join(staging, 'previous');
     const swap: Swap = {kind: 'npm', staging, live, kept, hadLive: this.#deps.env.exists(live)};
+    let changed = false;
     try {
-      await this.#emit('mcp.update.started', pkg, update);
+      if (!options.auto) await this.#emit('mcp.update.started', pkg, update);
       const plan = this.#plan(install, latest);
       if ('fail' in plan) throw Object.assign(new Error(plan.fail), {sentence: plan.fail});
       if (plan.kind !== 'npm') throw new Error('not an npm install');
@@ -917,20 +1059,31 @@ export class McpUpdater {
       this.#verifyPostinstall(staged, result.output);
       await this.#fs.mkdir(dirname(live));
       // A copy without its package.json (an interrupted install) isn't an install: it is set aside, then removed.
+      changed = true;
       if (this.#deps.env.exists(live)) await this.#fs.rename(live, kept);
       await this.#fs.rename(staged, live);
+      if (options.auto) await this.#verify(pkg, {backend: pkg, process: {command: this.#deps.node, args: [install.entry ?? join(live, 'dist', 'index.js')]}}, latest);
       await this.#note(update, pkg, {phase: 'ended', outcome: 'done', staging});
       await this.#fs.rm(staging).catch(() => undefined);
       await this.#forget(update.mcpId);
       this.#active.delete(update.mcpId);
-      await this.#emit('mcp.update.done', pkg, {...update, toVersion: installedVersion(install, this.#deps.env) ?? latest});
+      const toVersion = installedVersion(install, this.#deps.env) ?? latest;
+      await this.#emit('mcp.update.done', pkg, {...update, toVersion}, undefined, options.auto ? AUTO_DONE(update.fromVersion, toVersion) : undefined);
+      return {state: 'done', ...(update.fromVersion ? {fromVersion: update.fromVersion} : {}), toVersion};
     } catch (error) {
       // A copy set aside goes back before the staging folder (which holds it) is removed.
       const stuck = await this.#unswap(swap).then(() => false, () => true);
       this.#active.delete(update.mcpId);
       if (!stuck) { await this.#note(update, pkg, {phase: 'ended', outcome: 'failed'}); await this.#forget(update.mcpId); }
       const sentence = (error as {sentence?: string}).sentence;
-      await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)));
+      const why = shortWhy(sentence ?? (error as Error).message), from = update.fromVersion ? {fromVersion: update.fromVersion} : {};
+      if (options.auto && !changed) {
+        if (options.report) await this.#emit('mcp.update.failed', pkg, update, tail(log || String((error as Error).message)), AUTO_NOT_INSTALLED(update.fromVersion, latest));
+        return {state: 'failed', ...from, toVersion: latest, why};
+      }
+      await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)),
+        options.auto ? stuck ? RESTORE_FAILED : AUTO_BACK(update.fromVersion, latest, why) : undefined);
+      return {state: stuck ? 'stuck' : options.auto ? 'reverted' : 'failed', ...from, toVersion: latest, why};
     } finally {
       this.#changing.delete(update.mcpId);
     }

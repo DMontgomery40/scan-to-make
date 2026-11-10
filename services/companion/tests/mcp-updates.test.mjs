@@ -87,7 +87,7 @@ test('shell command lines: quotes, escapes, cd and variables', () => {
 });
 
 /** A scripted updater: commands are recorded, sessions are fakes, versions come from a fake registry. */
-async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest: published = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog, session: sessionFor, busyTimeoutMs, startTimeoutMs, inFlightWaitMs, journal = false} = {}) {
+async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest: published = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog, session: sessionFor, busyTimeoutMs, startTimeoutMs, inFlightWaitMs, journal = false, verify} = {}) {
   // The registry: a version, or a function when a test publishes a newer one partway through.
   const registry = () => typeof published === 'function' ? published() : published;
   const root = await tempDir('mcp-updates-');
@@ -107,7 +107,7 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
   const overrides = new McpOverrides(join(root, 'overrides.json'));
   await overrides.load();
   const updates = new McpUpdater({
-    ...(journal ? {journal: join(root, 'journal')} : {}),
+    ...(journal ? {journal: join(root, 'journal')} : {}), ...(verify ? {verify} : {}),
     catalog, gate, fs: {rename: async (from, to) => { moves.push(['rename', from, to]); if (failRename && failRename(from, to)) throw new Error('EXDEV'); }, rm: async path => { moves.push(['rm', path]); }, mkdir: async () => undefined},
     destinations: () => profiles ?? [{id: 'p1s', config: profile}, {id: 'a1', config: profile}],
     env, overrides, session, busy: async id => busy(id), runningVersion: id => id in installed ? installed[id] : '1.1.46',
@@ -1340,7 +1340,7 @@ async function restartable(t, {profile, npx = false, latest = '1.1.50', busy = (
   const under = path => Object.keys(files).filter(file => file === path || file.startsWith(path + '/'));
   const events = [], never = new Promise(() => undefined);
   const config = profile ?? (npx ? bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']) : bambu(node, [`${live}/dist/index.js`]));
-  const boot = ({hang = {}, failRename} = {}) => {
+  const boot = ({hang = {}, failRename, verify} = {}) => {
     const moves = [];
     let dead = false;
     if (hang.restart) lingersUntil = Date.now() + 5000; // two start waits: the new copy, then the one put back
@@ -1348,7 +1348,7 @@ async function restartable(t, {profile, npx = false, latest = '1.1.50', busy = (
     const overrides = new Proxy(saved, {get: (target, key) => key === 'set' ? (...args) => dead ? Promise.resolve() : target.set(...args)
       : typeof target[key] === 'function' ? target[key].bind(target) : target[key]});
     const updates = new McpUpdater({
-      journal: join(root, 'journal'), env, overrides, node, path: '/usr/bin:/bin', waitPollMs: 20, inFlightWaitMs, startTimeoutMs: 2000,
+      journal: join(root, 'journal'), env, overrides, node, path: '/usr/bin:/bin', waitPollMs: 20, inFlightWaitMs, startTimeoutMs: 2000, ...(verify ? {verify} : {}),
       fs: {
         rename: async (from, to) => {
           if (dead) return;
@@ -1609,4 +1609,198 @@ test('a checkout whose own undo fails keeps its journal, with the commit it was 
   await ok.updates.update(ok.mcpId);
   await ok.done();
   assert.deepEqual((await readdir(ok.journalDir).catch(() => [])).filter(name => name.endsWith('.json')), []);
+});
+
+// ---------------------------------------------------------------------------
+// Q9: Keep printer software up to date. An automatic update is the same journaled install as Update, run to its end.
+
+const appCopy = () => {
+  const prefix = `${APP}/printers/bambu-1.1.46`, live = `${prefix}/lib/node_modules/bambu-printer-mcp`;
+  const node = '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node';
+  return {prefix, live, profile: bambu(node, [`${live}/dist/index.js`]), files: {[`${live}/package.json`]: pkgJson('1.1.46'), [`${live}/dist/index.js`]: ''}};
+};
+
+test('Q9: an automatic update installs the newer version, proves the new copy answers counterpart/1 first, and says so only afterwards', async t => {
+  const copy = appCopy(), checked = [];
+  let f;
+  const verify = async (config, version) => { checked.push({config, version, restartsBefore: f.restarts.length}); return undefined; };
+  f = await updater(t, {profile: copy.profile, files: copy.files, verify, journal: true});
+  assert.deepEqual(f.updates.autoTargets(), [{mcpId: f.mcpId, pkg: 'bambu-printer-mcp', fromVersion: '1.1.46'}], 'both printers share one copy: one target');
+  const outcome = await f.updates.autoUpdate(f.mcpId, '1.1.50');
+  assert.deepEqual(outcome, {state: 'done', fromVersion: '1.1.46', toVersion: '1.1.50'}, 'it runs to its end before answering');
+  // The same staged install and swap as Update.
+  assert.ok(f.commands.some(line => / install --global --prefix .+\.counterpart-update-[0-9a-f-]+ .*bambu-printer-mcp@1\.1\.50$/.test(line)));
+  assert.ok(f.moves.some(move => move[0] === 'rename' && move[2] === copy.live), 'the new copy swapped in');
+  // The new copy answered counterpart/1, started on its own, before any printer was moved to it.
+  assert.equal(checked.length, 1);
+  assert.deepEqual(checked[0].config.process.args, [`${copy.live}/dist/index.js`]);
+  assert.equal(checked[0].version, '1.1.50');
+  assert.equal(checked[0].restartsBefore, 0, 'checked before the printers restart on it');
+  assert.ok(f.restarts.length >= 2, 'then every printer on it restarts on the new version');
+  // Told afterwards, never before: no started or waiting event, one done saying from which version to which.
+  assert.deepEqual(f.events.map(event => event.type), ['mcp.update.done']);
+  assert.deepEqual([f.events[0].data.fromVersion, f.events[0].data.toVersion], ['1.1.46', '1.1.50']);
+  assert.equal(f.events[0].reason, 'Updated automatically from 1.1.46. Your printers use 1.1.50 now.');
+  const {eventWords} = await import('../dist/events/words.js');
+  const words = eventWords('mcp.update.done', f.events[0].data, {title: 'Counterpart', package: 'bambu-printer-mcp', reason: f.events[0].reason});
+  assert.deepEqual([words.title, words.body], ['Updated bambu-printer-mcp to 1.1.50', 'Updated automatically from 1.1.46. Your printers use 1.1.50 now.']);
+  assert.deepEqual(await readdir(f.journalDir).catch(() => []), [], 'nothing left to undo');
+  // Pressing Update still says what it always said.
+  assert.equal(eventWords('mcp.update.done', {mcpId: f.mcpId, toVersion: '1.1.50'}, {title: 'Counterpart', package: 'bambu-printer-mcp'}).body, 'Your printers use it now.');
+});
+
+test('Q9: a new copy that fails the counterpart/1 check is put back by itself, and the person hears once what was tried', async t => {
+  const f = await restartable(t);
+  const companion = f.boot({verify: async () => "didn't answer Counterpart's contract (counterpart/1)."});
+  const mcpId = companion.updates.mcpId('p1s');
+  const outcome = await companion.updates.autoUpdate(mcpId, '1.1.50');
+  assert.equal(outcome.state, 'reverted');
+  assert.match(outcome.why, /didn't answer Counterpart's contract/);
+  assert.equal(f.version(), '1.1.46', 'the previous copy is live again');
+  assert.deepEqual(f.staging(), [], 'the new copy is gone');
+  assert.deepEqual(await f.journals(), []);
+  assert.deepEqual(f.events.map(event => event.type), ['mcp.update.failed'], 'one event, afterwards');
+  assert.deepEqual([f.events[0].data.fromVersion, f.events[0].data.toVersion], ['1.1.46', '1.1.50']);
+  assert.match(f.events[0].reason, /^Counterpart tried 1\.1\.50 by itself and put 1\.1\.46 back: The updated bambu-printer-mcp didn't answer Counterpart's contract \(counterpart\/1\)\. It won't try 1\.1\.50 again by itself\./);
+  assert.match(f.events[0].data.log, /didn't answer Counterpart's contract/, 'and why, in its log');
+});
+
+test('Q9: a new copy that fails to start is put back by itself and said', async t => {
+  const f = await restartable(t);
+  const companion = f.boot({verify: async () => { throw new Error('spawn ENOENT'); }});
+  const outcome = await companion.updates.autoUpdate(companion.updates.mcpId('p1s'), '1.1.50');
+  assert.equal(outcome.state, 'reverted');
+  assert.equal(f.version(), '1.1.46');
+  assert.match(f.events.at(-1).reason, /put 1\.1\.46 back: The updated bambu-printer-mcp didn't start \(spawn ENOENT\)\./);
+  // A printer session that can't connect to the new copy is the same: put back.
+  const copy = appCopy();
+  const g = await updater(t, {profile: copy.profile, files: copy.files, connectFail: () => true, startTimeoutMs: 500, verify: async () => undefined});
+  const second = await g.updates.autoUpdate(g.mcpId, '1.1.50');
+  assert.equal(second.state, 'reverted');
+  assert.deepEqual(g.events.map(event => event.type), ['mcp.update.failed']);
+  assert.match(g.events[0].reason, /put 1\.1\.46 back: spawn ENOENT\. It won't try/);
+});
+
+test('Q9: a companion restarted in the middle of an automatic update puts the previous copy back at its next start', async t => {
+  const f = await restartable(t);
+  const first = f.boot({hang: {rename: (from, to) => to === f.live}, verify: async () => undefined});
+  const mcpId = first.updates.mcpId('p1s');
+  void first.updates.autoUpdate(mcpId, '1.1.50');
+  await until(() => first.moves.some(move => move[0] === 'rename' && move[1] === f.live));
+  assert.equal(f.version(), undefined, 'killed with no live copy');
+  assert.equal((await f.journals()).length, 1, 'the automatic update is journaled like Update');
+  first.kill();
+  await f.boot().updates.applyOverrides();
+  assert.equal(f.version(), '1.1.46');
+  assert.deepEqual(f.staging(), []);
+  assert.deepEqual(await f.journals(), []);
+  assert.match(f.events.at(-1).data.log, /so it put the previous version back/);
+});
+
+test('Q9: an automatic update never waits and touches nothing while Counterpart is working; it runs once the work ends', async t => {
+  const copy = appCopy(), gate = new PrintGate();
+  const f = await updater(t, {profile: copy.profile, files: copy.files, gate, verify: async () => undefined, journal: true});
+  const release = gate.hold('a1');
+  assert.deepEqual(await f.updates.autoUpdate(f.mcpId, '1.1.50'), {state: 'busy'});
+  assert.ok(!f.commands.some(line => line.includes(' install ')), 'nothing installed');
+  assert.deepEqual(f.events, [], 'nothing said');
+  assert.deepEqual(await readdir(f.journalDir).catch(() => []), [], 'nothing left in the journal');
+  assert.equal(f.updates.busy(), false, 'and nothing held');
+  release();
+  assert.equal((await f.updates.autoUpdate(f.mcpId, '1.1.50')).state, 'done');
+  // Already current: nothing to do.
+  assert.deepEqual(await f.updates.autoUpdate(f.mcpId, '1.1.46'), {state: 'current'});
+});
+
+test('Q9: an npm install that fails before anything changed is quiet, and said once when asked to report', async t => {
+  const copy = appCopy();
+  const f = await updater(t, {profile: copy.profile, files: copy.files, fail: 'install', verify: async () => assert.fail('nothing to check')});
+  const quiet = await f.updates.autoUpdate(f.mcpId, '1.1.50');
+  assert.equal(quiet.state, 'failed');
+  assert.deepEqual(f.events, [], 'quiet');
+  assert.ok(!f.moves.some(move => move[0] === 'rename'), 'nothing moved');
+  const told = await f.updates.autoUpdate(f.mcpId, '1.1.50', {report: true});
+  assert.equal(told.state, 'failed');
+  assert.deepEqual(f.events.map(event => event.type), ['mcp.update.failed']);
+  assert.match(f.events[0].reason, /couldn't install 1\.1\.50 by itself after several tries, so 1\.1\.46 is still in use/);
+  assert.match(f.events[0].data.log, /npm ERR! network/);
+});
+
+test('Q9: only Counterpart\'s own copies are updated by themselves; a global npm install, a checkout and ssh-wrapped npx are left to Update', async t => {
+  const global = await updater(t, {profile: bambu('/opt/homebrew/bin/bambu-printer-mcp'), files: {
+    '/opt/homebrew/lib/node_modules/bambu-printer-mcp/package.json': pkgJson('1.1.44'), '/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js': ''},
+    links: {'/opt/homebrew/bin/bambu-printer-mcp': '/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js'}});
+  assert.deepEqual(global.updates.autoTargets(), []);
+  assert.deepEqual(await global.updates.autoUpdate(global.mcpId, '1.1.50'), {state: 'skipped'});
+  const checkout = await updater(t, {profile: bambu('node', ['dist/index.js'], {cwd: `${HOME}/src/bambu-printer-mcp`}), files: {
+    [`${HOME}/src/bambu-printer-mcp/package.json`]: pkgJson('1.1.40'), [`${HOME}/src/bambu-printer-mcp/.git/HEAD`]: 'ref', [`${HOME}/src/bambu-printer-mcp/dist/index.js`]: '', '/usr/bin/node': ''}});
+  assert.deepEqual(checkout.updates.autoTargets(), []);
+  assert.deepEqual(await checkout.updates.autoUpdate(checkout.mcpId, '1.1.50'), {state: 'skipped'});
+  assert.ok(![...global.commands, ...checkout.commands].some(line => line.includes(' install ') || line.includes(' pull')), 'nothing ran');
+  // An npx profile Counterpart pins itself is its own: updated, and the pinned version is what is checked.
+  const checked = [];
+  const npx = await updater(t, {profile: bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']), verify: async config => { checked.push(config.process); }});
+  assert.equal(npx.updates.autoTargets().length, 1);
+  assert.equal((await npx.updates.autoUpdate(npx.mcpId, '1.1.50')).state, 'done');
+  assert.deepEqual(checked, [{command: '/usr/local/bin/npx', args: ['-y', 'bambu-printer-mcp@1.1.50']}]);
+  // A pin whose check fails is put back to the version it was.
+  const failing = await updater(t, {profile: bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']), verify: async () => "didn't answer Counterpart's contract (counterpart/1)."});
+  assert.equal((await failing.updates.autoUpdate(failing.mcpId, '1.1.50')).state, 'reverted');
+  assert.equal(failing.overrides.saved('p1s'), undefined, 'no pin left on the failed version');
+});
+
+test('Q9: Counterpart\'s own copy with no printer yet is kept up to date too, through the same check', async t => {
+  const {appMcpId} = await import('../dist/printing/mcp-install.js');
+  const live = `${APP}/printers/generic/lib/node_modules/mcp-3d-printer-server`, checked = [];
+  const f = await updater(t, {profiles: [], files: {[`${live}/package.json`]: pkgJson('1.1.40', 'mcp-3d-printer-server'), [`${live}/dist/index.js`]: ''},
+    verify: async config => { checked.push(config.process.args); }});
+  const id = appMcpId('mcp-3d-printer-server', {appPrinters: `${APP}/printers`});
+  assert.deepEqual(f.updates.autoTargets(), [{mcpId: id, pkg: 'mcp-3d-printer-server', fromVersion: '1.1.40'}]);
+  const outcome = await f.updates.autoUpdate(id, '1.1.50');
+  assert.equal(outcome.state, 'done');
+  assert.deepEqual(checked, [[`${live}/dist/index.js`]]);
+  // (This fake disk doesn't move files, so the copy still reads 1.1.40 afterwards: the version said is the copy's own.)
+  assert.deepEqual(f.events.map(event => [event.type, event.data.mcpId, event.data.fromVersion]), [['mcp.update.done', id, '1.1.40']]);
+  assert.match(f.events[0].reason, /^Updated automatically from 1\.1\.40\./);
+  const broken = await updater(t, {profiles: [], files: {[`${live}/package.json`]: pkgJson('1.1.40', 'mcp-3d-printer-server'), [`${live}/dist/index.js`]: ''},
+    verify: async () => "didn't answer Counterpart's contract (counterpart/1)."});
+  assert.equal((await broken.updates.autoUpdate(id, '1.1.50')).state, 'reverted');
+  assert.deepEqual(broken.events.map(event => event.type), ['mcp.update.failed']);
+});
+
+test('Q9: the schedule over the real updater: off does nothing, busy defers without touching anything, idle installs', async t => {
+  const {McpAutoUpdater, companionBusy} = await import('../dist/printing/mcp-auto-update.js');
+  const copy = appCopy(), gate = new PrintGate();
+  const f = await updater(t, {profile: copy.profile, files: copy.files, gate, verify: async () => undefined});
+  let on = false;
+  const auto = new McpAutoUpdater({enabled: () => on, targets: () => f.updates.autoTargets(), latest: pkg => f.updates.checkLatest(pkg),
+    update: (id, latest, options) => f.updates.autoUpdate(id, latest, options),
+    busy: () => companionBusy({gate, updates: f.updates, printers: () => [{id: 'p1s', name: 'P1S'}, {id: 'a1', name: 'A1'}], printing: async () => false})});
+  assert.deepEqual(await auto.runOnce(), {state: 'off'});
+  assert.deepEqual(f.commands, [], 'off: npm is not even asked');
+  on = true;
+  const release = gate.hold('current');
+  assert.deepEqual(await auto.runOnce(), {state: 'deferred', why: 'Counterpart is sending, slicing or designing'});
+  assert.ok(!f.commands.some(line => line.includes(' install ')));
+  release();
+  const ran = await auto.runOnce();
+  assert.equal(ran.state, 'ran');
+  assert.equal(ran.results[0].outcome.state, 'done');
+  assert.deepEqual(f.events.map(event => event.type), ['mcp.update.done']);
+});
+
+test('Q9: an Update in progress makes the updater busy, so an automatic one waits for it; it is idle again when the Update ends', async t => {
+  const f = await restartable(t);
+  const first = f.boot({hang: {install: true}});
+  assert.equal(first.updates.busy(), false);
+  const mcpId = first.updates.mcpId('p1s');
+  assert.equal((await first.updates.update(mcpId)).state, 'started');
+  assert.equal(first.updates.busy(), true, 'Update is installing');
+  assert.deepEqual(await first.updates.autoUpdate(mcpId, '1.1.50'), {state: 'busy'});
+  first.kill();
+  const second = f.boot();
+  await second.updates.applyOverrides();
+  assert.equal((await second.updates.update(mcpId)).state, 'started');
+  await until(() => f.events.some(event => event.type === 'mcp.update.done'));
+  assert.equal(second.updates.busy(), false);
 });
