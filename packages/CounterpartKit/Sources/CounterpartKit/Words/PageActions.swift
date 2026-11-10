@@ -1,7 +1,7 @@
 import Foundation
 
-/// The one action a project's page leads with. Every state has exactly one, or none while Counterpart itself is the
-/// one working. Named apart from `ProjectAction` because a page's lead can be something the action list never held
+/// The one action a project's page leads with. Every state has exactly one, or none: while Counterpart itself is the
+/// one working, where several answers are equals, and after a pass that failed for good. Named apart from `ProjectAction` because a page's lead can be something the action list never held
 /// (answering with the size card, opening the Printing screen).
 public enum MainAction: String, Codable, Equatable, Sendable {
     case scan, finishSending, confirmSizes, openCamera, chooseFile, review, print, openPrinting, itWorks, retry
@@ -93,8 +93,10 @@ public struct PageActions: Equatable, Sendable {
                     // Refused before anything was sent: it has not been printed, so it is not "again".
                     decided = printing(.print, rest(prints), "Print", .card)
                 } else {
-                    // A pass failed and can't be picked up again; the result from before it is what there is.
-                    decided = printing(.print, rest(prints), "Print the last version", .card)
+                    // A pass failed and can't be picked up again. Nothing leads: the person asked for a change, and a
+                    // filled "Print the last version" would steer them to print the very version they asked to
+                    // change. It is there, plain, in the card; Ask for changes is in the bar.
+                    decided = printing(nil, actions, "Print the last version", .card)
                 }
             case .unknown:
                 decided = (nil, [], nil, nil)

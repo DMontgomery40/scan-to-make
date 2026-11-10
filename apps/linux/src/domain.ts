@@ -924,8 +924,10 @@ export function pageActions(p: Project, sending = false): PageActions {
       if (!p.current) return { main: "retry", others: ["correct"] };
       if (p.canRetryCleanup) return printing("retry", made, "Print the last version", "card");
       // The print failed and the model is fine: the same file goes again; refused before send is not "again".
-      // A pass that failed for good, with no print in the picture, leaves the result from before it.
-      return printing("print", correct, p.print?.dispatchedAt ? "Print Again" : p.print ? "Print" : "Print the last version", "card");
+      if (p.print) return printing("print", correct, p.print.dispatchedAt ? "Print Again" : "Print", "card");
+      // A pass failed for good. Nothing leads: a filled "Print the last version" would steer the person to print the
+      // very version they asked to change. It is offered plain; Ask for changes stays.
+      return printing(undefined, made, "Print the last version", "card");
     }
     default: return { others: [] };
   }

@@ -633,14 +633,16 @@
     "failure": "Blender stopped."
    },
    "expected": {
-    "main": "print",
+    "main": null,
     "others": [
+     "print",
      "correct"
     ],
     "printWords": "Print the last version",
     "printPlace": "card",
     "printNote": "Your last version is still here."
-   }
+   },
+   "why": "The person asked for a change; it failed and cannot be retried. A filled Print the last version would steer them to print the very version they asked to change, so nothing leads: the card says why and that the last version is still here, with the print plain."
   },
   {
    "row": 15,

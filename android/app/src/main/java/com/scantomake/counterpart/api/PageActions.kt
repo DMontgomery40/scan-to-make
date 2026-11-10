@@ -78,8 +78,9 @@ class PageActions(project: Project, phase: ProjectPhase, actions: List<ProjectAc
                 project.print?.dispatchedAt != null -> printing(MainAction.Print, restOfPrints(), "Print Again", PrintPlace.Card)
                 // Refused before anything was sent: it has not been printed, so it is not "again".
                 project.print != null -> printing(MainAction.Print, restOfPrints(), "Print", PrintPlace.Card)
-                // A pass failed and can't be picked up again; the result from before it is what there is.
-                else -> printing(MainAction.Print, restOfPrints(), "Print the last version", PrintPlace.Card)
+                // A pass failed and can't be picked up again. Nothing leads: a filled "Print the last version" would
+                // steer the person to print the very version they asked to change. It is offered plain.
+                else -> printing(null, actions, "Print the last version", PrintPlace.Card)
             }
             Project.State.Unknown -> none
         }
