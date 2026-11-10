@@ -276,14 +276,18 @@ struct SidebarList: View {
         .scrollEdgeEffectStyle(.hard, for: .bottom)
         .scrollIndicatorsFlash(onAppear: true)
         .safeAreaBar(edge: .bottom) {
-            Button(action: newProject) {
-                Label("New Project", systemImage: "plus").fontWeight(.semibold).frame(maxWidth: .infinity)
+            // While a search is typed, New steps aside: riding above the keyboard it covered the only results' lines on an
+            // iPad Air in landscape (train gate, Nov 10: the match's reason sat under it). ⌘N still works (below).
+            if !searching {
+                Button(action: newProject) {
+                    Label("New Project", systemImage: "plus").fontWeight(.semibold).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent).controlSize(.large)
+                .accessibilityIdentifier("new-project")
+                .padding(.horizontal, 16).padding(.vertical, 10)
             }
-            .buttonStyle(.glassProminent).controlSize(.large)
-            .accessibilityIdentifier("new-project")
-            .keyboardShortcut("n", modifiers: .command)
-            .padding(.horizontal, 16).padding(.vertical, 10)
         }
+        .background { Button("New Project", action: newProject).keyboardShortcut("n", modifiers: .command).hidden() }
         }
         .sheet(item: $openedStarter) { starter in StarterDetail(project: starter, unavailableMessage: store.starterUnavailableMessage, start: addStarter) }
         .navigationTitle("Projects")
