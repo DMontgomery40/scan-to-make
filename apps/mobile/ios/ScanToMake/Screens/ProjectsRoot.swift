@@ -90,8 +90,11 @@ struct ProjectsRoot: View {
     private var split: some View {
         NavigationSplitView(preferredCompactColumn: $preferredColumn) {
             if width == .regular {
+                // Only a row opens a project here. The list clears its selection to nil when the split collapses
+                // (a fold, an iPad resize), and that must not close the project the detail shows; the project
+                // page's own close button and Back in the collapsed split close it.
                 SidebarList(store: store, selection: Binding(get: { selected }, set: { id in
-                    if let id { open(id) } else { closeProject() }
+                    if let id { open(id) }
                 }), newProject: { newSheet = NewSheetRequest(job: nil) },
                             addStarter: addStarter, openPrinters: { showPrinters = true }, openSettings: { showSettings = true })
             } else {
@@ -104,7 +107,7 @@ struct ProjectsRoot: View {
         } detail: {
             NavigationStack(path: $detailPath) {
                 Group {
-                    if let selected { projectPage(selected, close: closeProject).id(selected) }
+                    if let selected { projectPage(selected, close: closeProject) }
                     else {
                         StartPane(hasProjects: !store.projects.isEmpty, unavailableMessage: store.starterUnavailableMessage,
                                   newProject: { newSheet = NewSheetRequest(job: $0) }, addStarter: addStarter)
@@ -112,6 +115,9 @@ struct ProjectsRoot: View {
                 }
                 .navigationDestination(for: String.self) { id in page(id, close: closeProject) }
             }
+            // A new project gets a new stack, built with the path set beside the selection (a Live Activity or print
+            // notification opens Printing on top of its project). With only the root keyed, the iPad dropped that push.
+            .id(selected)
         }
     }
 

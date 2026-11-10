@@ -32,9 +32,6 @@ import CounterpartKit
     var debugFirstRun: String?
     /// DEBUG: the Settings page `-CounterpartScreen notifications` or `about` opens.
     var debugSettings: String?
-    #if DEBUG
-    var fixtureWidth: UserInterfaceSizeClass?
-    #endif
     private var lastLink: (url: String, at: Date)?
     private var observer: NSObjectProtocol?
 
@@ -124,13 +121,24 @@ import CounterpartKit
 
     // MARK: Links and routes
 
+    #if DEBUG
+    /// `-CounterpartLayoutTesting YES` with fixtures: the resize UI tests may change the window's size class.
+    static var layoutTesting: Bool { Fixtures.folder != nil && UserDefaults.standard.bool(forKey: "CounterpartLayoutTesting") }
+
+    /// The window's own size class, as a Duo fold or an iPad resize changes it, set on each root view controller so
+    /// UIKit's split view really collapses and expands. (Overriding only SwiftUI's environment value, or the scene's
+    /// traits, left the split as it was: the gate and agent-device, Nov 9.)
+    static func setFixtureWidth(_ width: UIUserInterfaceSizeClass) {
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows { window.rootViewController?.traitOverrides.horizontalSizeClass = width }
+        }
+    }
+    #endif
+
     /// A link that opened the app. A cold start can deliver the same pairing link twice within moments.
     func open(_ url: URL) {
         #if DEBUG
-        if Fixtures.folder != nil, UserDefaults.standard.bool(forKey: "CounterpartLayoutTesting"), url.host == "fixture-width" {
-            fixtureWidth = url.path == "/compact" ? .compact : .regular
-            return
-        }
+        if Self.layoutTesting, url.host == "fixture-width" { Self.setFixtureWidth(url.path == "/compact" ? .compact : .regular); return }
         #endif
         guard let route = AppRoute(url: url) else { return }
         if case .pair(let link) = route {
