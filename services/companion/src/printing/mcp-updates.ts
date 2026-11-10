@@ -161,7 +161,10 @@ const NOT_STARTED = (pkg: string, seconds: number) => `The updated ${pkg} didn't
 const RESTARTED = (pkg: string) => `Counterpart was restarted while it was updating ${pkg}`;
 const RESTARTED_UNCHANGED = (pkg: string) => `${RESTARTED(pkg)}, before anything changed. The previous version is still in use. Try Update again.`;
 const RESTARTED_BACK = (pkg: string) => `${RESTARTED(pkg)}, so it put the previous version back. Try Update again.`;
-const RESTARTED_CHECKOUT = (pkg: string, dir: string) => `${RESTARTED(pkg)} in ${dir}, so that copy may be half built. Press Update again to finish it.`;
+const RESTARTED_REMOVED = (pkg: string) => `${RESTARTED(pkg)}, so it removed the new copy, which had not started yet. There was no earlier copy. Try again.`;
+const RESTARTED_CHECKOUT = (pkg: string, dir: string, head?: string) =>
+  `${RESTARTED(pkg)} in ${dir}, so that copy may be half built${head ? ` (it was at commit ${head.slice(0, 12)})` : ''}. Press Update again to finish it.`;
+const JOURNAL_UNREADABLE = (pkg: string) => `Counterpart found a record of an unfinished ${pkg} update that it couldn't read, so it changed nothing. If this printer's MCP doesn't start, press Update again.`;
 const RESTARTED_KEPT = (pkg: string, kept: string, live: string) =>
   `${RESTARTED(pkg)} and couldn't put the previous version back. It is kept in ${kept}: move it to ${live}, or install a fresh copy.`;
 const tail = (text: string) => { const bytes = Buffer.from(text); return bytes.length <= LOG_TAIL_BYTES ? text : bytes.subarray(bytes.length - LOG_TAIL_BYTES).toString('utf8').replace(/^�+/, ''); };
@@ -215,15 +218,69 @@ const realFs: UpdateFs = {
 
 /** The staged swap an npm update makes: `live` set aside as `kept` inside `staging`, then the staged copy moved to `live`. */
 type Swap = {kind: 'npm'; staging: string; live: string; kept: string; hadLive: boolean};
+type Change = Swap | {kind: 'checkout'; dir: string; head?: string} | {kind: 'none'};
+type JournalState =
+  | {phase: 'admitted'}
+  | {phase: 'changing'; change: Change; overrides: Record<string, Override | null>}
+  /** The update reached its own end (done, or failed and undone). Nothing is left to undo; `staging` may be left to remove. */
+  | {phase: 'ended'; outcome: 'done' | 'failed'; staging?: string};
 /**
  * An update in progress, written before each thing it changes. Until Nov 10 the only record of how far an update had
  * got was a closure in memory: a companion restarted between the two moves left no live MCP and nothing to put the
  * previous one back, and no client ever heard how the update ended. `admitted` has changed nothing yet; `changing`
- * names what is being changed and the overrides as they were saved before it.
+ * names what is being changed and the overrides as they were saved before it; `ended` is written before the previous
+ * copy is deleted, so a journal that couldn't be removed is never mistaken for an update cut short.
  */
-export type UpdateJournal = {version: 1; mcpId: string; pkg: string; fromVersion?: string; toVersion?: string} & (
-  | {phase: 'admitted'}
-  | {phase: 'changing'; change: Swap | {kind: 'checkout'; dir: string} | {kind: 'none'}; overrides: Record<string, Override | null>});
+export type UpdateJournal = {version: 1; mcpId: string; pkg: string; fromVersion?: string; toVersion?: string} & JournalState;
+/** A journal file that isn't one: what it names, if anything, and where it was set aside. */
+export type UnreadableJournal = {file: string; mcpId?: string; pkg?: string};
+
+const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+function parseOverride(value: unknown): Override | null | undefined {
+  if (value === null) return null;
+  const o = value as Partial<Override> | undefined;
+  if (!o || typeof o !== 'object' || !text(o.command) || !Array.isArray(o.args) || !o.args.every(arg => typeof arg === 'string')) return undefined;
+  if (o.env !== undefined && (typeof o.env !== 'object' || o.env === null || !Object.values(o.env).every(item => typeof item === 'string'))) return undefined;
+  if ((o.cwd !== undefined && typeof o.cwd !== 'string') || (o.source !== undefined && typeof o.source !== 'string')) return undefined;
+  return {command: o.command, args: [...o.args], ...(o.env ? {env: {...o.env}} : {}), ...(o.cwd ? {cwd: o.cwd} : {}), ...(o.source ? {source: o.source} : {})};
+}
+function parseChange(value: unknown): Change | undefined {
+  const c = value as Record<string, unknown> | undefined;
+  if (!c || typeof c !== 'object') return undefined;
+  if (c.kind === 'none') return {kind: 'none'};
+  if (c.kind === 'checkout') return text(c.dir) && (c.head === undefined || text(c.head)) ? {kind: 'checkout', dir: c.dir, ...(text(c.head) ? {head: c.head} : {})} : undefined;
+  if (c.kind === 'npm') {
+    // Recovery deletes and moves these paths: all four must be there, and `kept` must be the one inside `staging`.
+    if (!text(c.staging) || !text(c.live) || !text(c.kept) || typeof c.hadLive !== 'boolean') return undefined;
+    if (!/\/\.counterpart-update-[0-9a-f-]+$/.test(c.staging) || c.kept !== join(c.staging, 'previous') || c.live.startsWith(c.staging)) return undefined;
+    return {kind: 'npm', staging: c.staging, live: c.live, kept: c.kept, hadLive: c.hadLive};
+  }
+  return undefined;
+}
+/** The journal a file holds, or undefined when any part of it isn't what this build writes. */
+export function parseJournal(value: unknown): UpdateJournal | undefined {
+  const j = value as Record<string, unknown> | undefined;
+  if (!j || typeof j !== 'object' || j.version !== 1 || !text(j.mcpId) || !text(j.pkg)) return undefined;
+  if ((j.fromVersion !== undefined && typeof j.fromVersion !== 'string') || (j.toVersion !== undefined && typeof j.toVersion !== 'string')) return undefined;
+  const base = {version: 1 as const, mcpId: j.mcpId, pkg: j.pkg, ...(text(j.fromVersion) ? {fromVersion: j.fromVersion} : {}), ...(text(j.toVersion) ? {toVersion: j.toVersion} : {})};
+  if (j.phase === 'admitted') return {...base, phase: 'admitted'};
+  if (j.phase === 'ended') {
+    if ((j.outcome !== 'done' && j.outcome !== 'failed') || (j.staging !== undefined && (!text(j.staging) || !/\/\.counterpart-update-[0-9a-f-]+$/.test(j.staging)))) return undefined;
+    return {...base, phase: 'ended', outcome: j.outcome, ...(text(j.staging) ? {staging: j.staging} : {})};
+  }
+  if (j.phase === 'changing') {
+    const change = parseChange(j.change);
+    if (!change || !j.overrides || typeof j.overrides !== 'object' || Array.isArray(j.overrides)) return undefined;
+    const overrides: Record<string, Override | null> = {};
+    for (const [id, saved] of Object.entries(j.overrides as Record<string, unknown>)) {
+      const override = parseOverride(saved);
+      if (override === undefined) return undefined;
+      overrides[id] = override;
+    }
+    return {...base, phase: 'changing', change, overrides};
+  }
+  return undefined;
+}
 
 /** One file per install being updated, each written in full and renamed into place. */
 export class UpdateJournals {
@@ -237,18 +294,32 @@ export class UpdateJournals {
     await rename(temporary, path);
   }
   async remove(mcpId: string): Promise<void> { await fsRm(this.#path(mcpId), {force: true}); }
-  /** Every update that never reached its end. A file that can't be read is not one. */
-  async all(): Promise<UpdateJournal[]> {
+  /**
+   * Every update that never reached its end, and every file here that isn't a journal (torn, hand-edited, another
+   * build's shape, someone else's). Those are renamed aside, never deleted and never read again, so one bad file
+   * can't be met at every start.
+   */
+  async all(): Promise<{journals: {name: string; journal: UpdateJournal}[]; unreadable: UnreadableJournal[]}> {
     const names = await readdir(this.#dir).catch(() => [] as string[]);
-    const found: UpdateJournal[] = [];
+    const journals: {name: string; journal: UpdateJournal}[] = [], unreadable: UnreadableJournal[] = [];
     for (const name of names.filter(name => name.endsWith('.json')).sort()) {
-      try {
-        const journal = JSON.parse(await readFile(join(this.#dir, name), 'utf8')) as UpdateJournal;
-        if (journal?.version === 1 && typeof journal.mcpId === 'string' && typeof journal.pkg === 'string' && (journal.phase === 'admitted' || journal.phase === 'changing')) found.push(journal);
-      } catch { /* a torn or foreign file */ }
+      let raw: unknown;
+      try { raw = JSON.parse(await readFile(join(this.#dir, name), 'utf8')); } catch { raw = undefined; }
+      const journal = parseJournal(raw);
+      if (journal) { journals.push({name, journal}); continue; }
+      unreadable.push(await this.setAside(name, raw));
     }
-    return found;
+    return {journals, unreadable};
   }
+  /** Renames a journal file so it is kept for a person to read and never read as a journal again. */
+  async setAside(name: string, raw?: unknown): Promise<UnreadableJournal> {
+    const named = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    const file = join(this.#dir, `${name}.unreadable-${randomUUID().slice(0, 8)}`);
+    await rename(join(this.#dir, name), file).catch(() => undefined);
+    return {file, ...(text(named.mcpId) ? {mcpId: named.mcpId} : {}), ...(text(named.pkg) ? {pkg: named.pkg} : {})};
+  }
+  /** Removes the file a journal was read from, whatever it is called. */
+  async removeFile(name: string): Promise<void> { await fsRm(join(this.#dir, name), {force: true}); }
 }
 
 /**
@@ -278,7 +349,7 @@ export class McpUpdater {
   }
 
   /** Writes down where an update is. An update never fails because its journal couldn't be written. */
-  async #note(update: McpUpdate, pkg: string, state: {phase: 'admitted'} | {phase: 'changing'; change: Swap | {kind: 'checkout'; dir: string} | {kind: 'none'}; overrides: Record<string, Override | null>}): Promise<void> {
+  async #note(update: McpUpdate, pkg: string, state: JournalState): Promise<void> {
     await this.#journals?.write({version: 1, mcpId: update.mcpId, pkg, ...(update.fromVersion ? {fromVersion: update.fromVersion} : {}),
       ...(update.toVersion ? {toVersion: update.toVersion} : {}), ...state}).catch(() => undefined);
   }
@@ -286,47 +357,78 @@ export class McpUpdater {
   async #forget(mcpId: string): Promise<void> { await this.#journals?.remove(mcpId).catch(() => undefined); }
 
   /**
-   * Puts back what a staged swap displaced, from what is on disk now: true when it changed anything. `kept` exists only
-   * between the two moves and until the update ends, so its presence says the previous copy is not in place.
+   * Puts back what a staged swap displaced, from what is on disk now. `kept` exists only between the two moves and
+   * until the update ends, so its presence says the previous copy is not in place.
    */
-  async #unswap(swap: Swap): Promise<boolean> {
+  async #unswap(swap: Swap): Promise<'restored' | 'removed' | 'untouched'> {
     const exists = (path: string) => this.#deps.env.exists(path);
-    let changed = false;
+    let did: 'restored' | 'removed' | 'untouched' = 'untouched';
     if (exists(swap.kept)) {
       if (exists(swap.live)) await this.#fs.rm(swap.live);
       await this.#fs.rename(swap.kept, swap.live);
-      changed = true;
+      did = 'restored';
     } else if (!swap.hadLive && exists(swap.live)) {
       // There was no copy before, so this one is the new copy, which never proved it starts.
       await this.#fs.rm(swap.live);
-      changed = true;
+      did = 'removed';
     }
     await this.#fs.rm(swap.staging).catch(() => undefined);
-    return changed;
+    return did;
   }
 
   /**
    * At start, before any session connects: ends every update a restart cut short. A half-made swap is undone, the
    * overrides go back to what was saved before it, and every client hears one mcp.update.failed with what happened,
-   * so none waits on an update that will never report.
+   * so none waits on an update that will never report. An update that had reached its own end only has its journal
+   * cleared. Nothing here can stop the companion starting: a journal that can't be read, or whose recovery throws,
+   * is set aside (kept on disk, never read again) and said once.
    */
   async recover(): Promise<void> {
-    for (const journal of await this.#journals?.all() ?? []) {
-      const pkg = journal.pkg;
-      let sentence = RESTARTED_UNCHANGED(pkg), reason: string | undefined, keep = false;
-      if (journal.phase === 'changing') {
-        const change = journal.change;
-        if (change.kind === 'npm') {
-          try { if (await this.#unswap(change)) sentence = RESTARTED_BACK(pkg); }
-          // The journal stays: the next start tries again, and `kept` is still named in it.
-          catch { keep = true; reason = RESTORE_FAILED; sentence = RESTARTED_KEPT(pkg, change.kept, change.live); }
-        } else if (change.kind === 'checkout') sentence = RESTARTED_CHECKOUT(pkg, change.dir);
-        for (const [id, saved] of Object.entries(journal.overrides)) await this.#deps.overrides.set(id, saved ?? undefined).catch(() => undefined);
+    const journals = this.#journals;
+    if (!journals) return;
+    let found: Awaited<ReturnType<UpdateJournals['all']>>;
+    try { found = await journals.all(); }
+    catch (error) { console.error(`mcp update journals couldn't be read: ${String((error as Error)?.message ?? error)}`); return; }
+    for (const bad of found.unreadable) await this.#unreadable(bad).catch(() => undefined);
+    for (const {name, journal} of found.journals) {
+      try { await this.#recoverOne(journal, () => journals.removeFile(name).catch(() => undefined)); }
+      catch (error) {
+        console.error(`mcp update journal for ${journal.pkg} couldn't be recovered: ${String((error as Error)?.message ?? error)}`);
+        await journals.setAside(name, journal).then(bad => this.#unreadable(bad)).catch(() => undefined);
       }
-      if (!keep) await this.#forget(journal.mcpId);
-      await this.#emit('mcp.update.failed', pkg, {mcpId: journal.mcpId, state: 'started', ...(journal.fromVersion ? {fromVersion: journal.fromVersion} : {}),
-        ...(journal.toVersion ? {toVersion: journal.toVersion} : {})}, `${sentence}\n`, reason);
     }
+  }
+
+  async #unreadable(bad: UnreadableJournal): Promise<void> {
+    console.error(`mcp update journal set aside as ${bad.file}`);
+    if (bad.mcpId && bad.pkg) await this.#emit('mcp.update.failed', bad.pkg, {mcpId: bad.mcpId, state: 'started'}, `${JOURNAL_UNREADABLE(bad.pkg)}\n`);
+  }
+
+  async #recoverOne(journal: UpdateJournal, clear: () => Promise<void>): Promise<void> {
+    const pkg = journal.pkg;
+    if (journal.phase === 'ended') {
+      // It finished, or failed and was undone, and said so then: only the record (and a leftover staging folder) goes.
+      if (journal.staging) await this.#fs.rm(journal.staging).catch(() => undefined);
+      await clear();
+      return;
+    }
+    let sentence = RESTARTED_UNCHANGED(pkg), reason: string | undefined, keep = false;
+    if (journal.phase === 'changing') {
+      const change = journal.change;
+      if (change.kind === 'npm') {
+        try {
+          const did = await this.#unswap(change);
+          if (did === 'restored') sentence = RESTARTED_BACK(pkg);
+          if (did === 'removed') sentence = RESTARTED_REMOVED(pkg);
+        }
+        // The journal stays: the next start tries again, and `kept` is still named in it.
+        catch { keep = true; reason = RESTORE_FAILED; sentence = RESTARTED_KEPT(pkg, change.kept, change.live); }
+      } else if (change.kind === 'checkout') sentence = RESTARTED_CHECKOUT(pkg, change.dir, change.head);
+      for (const [id, saved] of Object.entries(journal.overrides)) await this.#deps.overrides.set(id, saved ?? undefined).catch(() => undefined);
+    }
+    if (!keep) await clear();
+    await this.#emit('mcp.update.failed', pkg, {mcpId: journal.mcpId, state: 'started', ...(journal.fromVersion ? {fromVersion: journal.fromVersion} : {}),
+      ...(journal.toVersion ? {toVersion: journal.toVersion} : {})}, `${sentence}\n`, reason);
   }
 
   /**
@@ -433,8 +535,8 @@ export class McpUpdater {
   }
   async applyOverrides(): Promise<void> {
     await this.#deps.overrides.load();
-    // Before the sessions get their overrides: an update a restart cut short is undone first.
-    await this.recover();
+    // Before the sessions get their overrides: an update a restart cut short is undone first. Never a reason not to start.
+    await this.recover().catch(error => console.error(`mcp update recovery failed: ${String((error as Error)?.message ?? error)}`));
     for (const entry of this.#destinations()) await this.applyOverride(entry.id);
   }
 
@@ -644,7 +746,7 @@ export class McpUpdater {
     };
     let undo: (() => Promise<void>) | undefined, finish: (() => Promise<void>) | undefined;
     // Kept past a failed restore of the swap: the next start tries again from it.
-    let keepJournal = false;
+    let keepJournal = false, stagingDir: string | undefined;
     const saved = Object.fromEntries(members.map(member => [member.id, this.#deps.overrides.saved(member.id) ?? null]));
     try {
       await this.#emit('mcp.update.started', pkg, update);
@@ -657,6 +759,7 @@ export class McpUpdater {
         const live = join(plan.prefix, 'lib', 'node_modules', install.pkg), staged = join(staging, 'lib', 'node_modules', install.pkg), kept = join(staging, 'previous');
         finish = () => this.#fs.rm(staging);
         undo = finish;
+        stagingDir = staging;
         await this.#note(update, pkg, {phase: 'changing', change: {kind: 'npm', staging, live, kept, hadLive: this.#deps.env.exists(live)}, overrides: saved});
         const output = await run('npm install', plan.command, [...plan.args, 'install', '--global', '--prefix', staging, `--allow-scripts=${install.pkg}`, '--ignore-scripts=false', '--foreground-scripts', '--loglevel=notice', `${install.pkg}@${latest}`], undefined, plan.env);
         if (!this.#deps.env.exists(join(staged, 'package.json'))) throw new Error('npm install left no package');
@@ -679,7 +782,7 @@ export class McpUpdater {
       } else if (plan.kind === 'checkout') {
         await run('git status', '/bin/sh', ['-c', `test -z "$(${plan.git} -C "$1" status --porcelain)" || { echo "This copy has local changes"; exit 3; }`, 'sh', plan.dir], undefined, process.env);
         const head = (await run('git rev-parse', plan.git, ['-C', plan.dir, 'rev-parse', 'HEAD'], undefined, process.env)).trim().split('\n').at(-1)!;
-        await this.#note(update, pkg, {phase: 'changing', change: {kind: 'checkout', dir: plan.dir}, overrides: saved});
+        await this.#note(update, pkg, {phase: 'changing', change: {kind: 'checkout', dir: plan.dir, head}, overrides: saved});
         undo = async () => {
           // Back to the commit that was running, rebuilt; the checkout had no local changes to lose. Each step is
           // checked: if one fails, the failure says the previous version couldn't be put back, rather than claiming it.
@@ -721,16 +824,19 @@ export class McpUpdater {
         const connected = session ? await within(session.connect({signal: AbortSignal.timeout(startMs)}), startMs, stuck) : undefined;
         if (member.id === first.id) catalog = connected;
       }
-      // Forgotten before the previous copy goes: a restart from here on has nothing to undo.
-      await this.#forget(mcpId);
+      // Said finished before the previous copy goes: from here a restart has nothing to undo, and a journal that
+      // can't be removed is never read as an update cut short.
+      await this.#note(update, pkg, {phase: 'ended', outcome: 'done', ...(stagingDir ? {staging: stagingDir} : {})});
       await finish?.().catch(() => undefined);
+      await this.#forget(mcpId);
       this.#active.delete(mcpId);
       await this.#emit('mcp.update.done', pkg, {...update, toVersion: catalog?.server.version ?? latest});
     } catch (error) {
       // The previous version stays in use: the swap or checkout is undone, and an override is put back.
       let sentence = (error as {sentence?: string}).sentence, restoreFailed = false;
       await undo?.().catch((failure: {sentence?: string}) => {
-        restoreFailed = true;
+        // Whatever couldn't be put back (the swap, or a checkout's reset and rebuild): the next start says so again.
+        restoreFailed = true; keepJournal = true;
         sentence = [sentence, failure?.sentence ?? "Counterpart couldn't put the previous version back."].filter(Boolean).join(' ');
       });
       const startMs = this.#deps.startTimeoutMs ?? MCP_START_MS;
@@ -746,7 +852,7 @@ export class McpUpdater {
         });
       }
       this.#active.delete(mcpId);
-      if (!keepJournal) await this.#forget(mcpId);
+      if (!keepJournal) { await this.#note(update, pkg, {phase: 'ended', outcome: 'failed'}); await this.#forget(mcpId); }
       await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)),
         restoreFailed ? RESTORE_FAILED : undefined);
     } finally { release(); }
@@ -813,15 +919,16 @@ export class McpUpdater {
       // A copy without its package.json (an interrupted install) isn't an install: it is set aside, then removed.
       if (this.#deps.env.exists(live)) await this.#fs.rename(live, kept);
       await this.#fs.rename(staged, live);
-      await this.#forget(update.mcpId);
+      await this.#note(update, pkg, {phase: 'ended', outcome: 'done', staging});
       await this.#fs.rm(staging).catch(() => undefined);
+      await this.#forget(update.mcpId);
       this.#active.delete(update.mcpId);
       await this.#emit('mcp.update.done', pkg, {...update, toVersion: installedVersion(install, this.#deps.env) ?? latest});
     } catch (error) {
       // A copy set aside goes back before the staging folder (which holds it) is removed.
       const stuck = await this.#unswap(swap).then(() => false, () => true);
       this.#active.delete(update.mcpId);
-      if (!stuck) await this.#forget(update.mcpId);
+      if (!stuck) { await this.#note(update, pkg, {phase: 'ended', outcome: 'failed'}); await this.#forget(update.mcpId); }
       const sentence = (error as {sentence?: string}).sentence;
       await this.#emit('mcp.update.failed', pkg, update, tail(sentence ? `${log}${sentence}\n` : log || String((error as Error).message)));
     } finally {
