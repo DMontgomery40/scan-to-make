@@ -29,6 +29,8 @@ export const AUTO_BUSY_RETRY_MS = 60_000;
 export const AUTO_OFF_POLL_MS = 5 * 60_000;
 /** An install that fails before anything changed (npm) is tried at this many intervals, then said once and left. */
 export const AUTO_QUIET_TRIES = 3;
+/** npm's answer for a package is used again for this long (review F3: not asked every minute through a long print). */
+export const AUTO_LATEST_TTL_MS = 30 * 60_000;
 
 /** What a failed version left: never tried again by itself once put back, or after AUTO_QUIET_TRIES quiet failures. */
 interface FailedVersion {toVersion: string; tries: number; reverted?: boolean; why?: string; at: number}
@@ -45,6 +47,11 @@ export interface McpAutoUpdaterDeps {
   update(mcpId: string, latest: string, options: {report: boolean}): Promise<AutoUpdateOutcome>;
   /** `<data root>/printers/auto-update.json`: the versions that failed, so a restart doesn't try them again. */
   statePath?: string;
+  /**
+   * Automatic updates a restart cut short after they had changed something (McpUpdater.recoveredAutoUpdates): each
+   * version is recorded as failed and not tried again by itself (review F4).
+   */
+  recovered?(): {mcpId: string; toVersion: string}[];
   now?: () => number;
   random?: () => number;
   log?: (line: string) => void;
@@ -67,6 +74,9 @@ export class McpAutoUpdater {
   #running?: Promise<AutoRun>;
   #lastChecked = 0;
   #wasOff = false;
+  /** The last run found an update to install and Counterpart was busy: the next run asks "busy?" before npm. */
+  #deferred = false;
+  readonly #latest = new Map<string, {version: string; at: number}>();
   #closed = false;
   constructor(deps: McpAutoUpdaterDeps) { this.#deps = deps; this.#now = deps.now ?? Date.now; }
 
@@ -107,12 +117,36 @@ export class McpAutoUpdater {
     return this.#running;
   }
 
+  /** npm's newest version, reused for AUTO_LATEST_TTL_MS; an answer npm couldn't give isn't kept. */
+  async #latestOf(pkg: string): Promise<string | undefined> {
+    const known = this.#latest.get(pkg);
+    if (known && this.#now() - known.at < AUTO_LATEST_TTL_MS) return known.version;
+    const version = await this.#deps.latest(pkg).catch(() => undefined);
+    if (version) this.#latest.set(pkg, {version, at: this.#now()});
+    return version;
+  }
+
   async #run(): Promise<AutoRun> {
     if (!await this.#deps.enabled()) return {state: 'off'};
     const state = await this.#load();
+    const recovered = this.#deps.recovered?.() ?? [];
+    for (const {mcpId, toVersion} of recovered)
+      state.failed[mcpId] = {toVersion, tries: AUTO_QUIET_TRIES, reverted: true, why: 'Counterpart stopped in the middle of installing it.', at: this.#now()};
+    if (recovered.length) await this.#save().catch(error => this.#deps.log?.(`mcp auto-update state couldn't be saved: ${String((error as Error)?.message ?? error)}`));
+    // An update already known to be waiting for Counterpart to finish: ask whether it has before asking npm again.
+    if (this.#deferred) {
+      const why = await this.#deps.busy();
+      if (why) return {state: 'deferred', why};
+    }
+    const run = await this.#runTargets(state);
+    this.#deferred = run.state === 'deferred';
+    return run;
+  }
+
+  async #runTargets(state: AutoState): Promise<AutoRun> {
     const targets = this.#deps.targets();
     const latest = new Map<string, string | undefined>();
-    for (const pkg of new Set(targets.map(target => target.pkg))) latest.set(pkg, await this.#deps.latest(pkg).catch(() => undefined));
+    for (const pkg of new Set(targets.map(target => target.pkg))) latest.set(pkg, await this.#latestOf(pkg));
     this.#lastChecked = this.#now();
     const pending = targets.flatMap(target => {
       const version = latest.get(target.pkg);
@@ -203,14 +237,21 @@ export interface IdleSources {
 export async function companionBusy(sources: IdleSources): Promise<string | undefined> {
   if (sources.gate.busy()) return 'Counterpart is sending, slicing or designing';
   if (sources.updates.busy()) return 'an MCP update is running';
-  if (sources.setup?.working()) return 'a printer is being set up';
-  if (sources.cad?.current().state === 'setting-up') return 'the code design engine is being set up';
-  if (sources.fusion?.fusionSettingUp()) return 'Fusion is being set up';
+  const setting = settingUp(sources);
+  if (setting) return setting;
   // The cheap checks first: a printer's report is read only when nothing else is working.
   for (const printer of sources.printers()) {
     // A check that fails can't say the printer is idle.
     if (sources.printing && await sources.printing(printer.id).catch(() => true)) return `${printer.name} is printing`;
   }
+  return undefined;
+}
+
+/** Add printer…'s steps, the code engine's or Fusion's Set Up: work that starts or talks to an MCP outside PrintGate. */
+export function settingUp(sources: Pick<IdleSources, 'setup' | 'cad' | 'fusion'>): string | undefined {
+  if (sources.setup?.working()) return 'a printer is being set up';
+  if (sources.cad?.current().state === 'setting-up') return 'the code design engine is being set up';
+  if (sources.fusion?.fusionSettingUp()) return 'Fusion is being set up';
   return undefined;
 }
 

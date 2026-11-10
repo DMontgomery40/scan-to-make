@@ -231,6 +231,8 @@ export interface PrinterSetupDeps {
   /** Every catalog profile, winners and duplicates, as configured and as the companion runs it. */
   configs(): {id: string; config: PrinterHandoffConfig}[];
   effective?(id: string, config: PrinterHandoffConfig): PrinterHandoffConfig;
+  /** Why this printer's MCP is never updated by itself (McpUpdater.autoReason); without it, the install's own reason. */
+  autoReason?(destinationId: string): string | undefined;
   download?(pkg: PrinterBackend): Promise<McpUpdate>;
   /** The published version; Settings may wait briefly for a check it starts (McpUpdater.latestVersionSettled). */
   latestVersion?(pkg: PrinterBackend, options?: {view?: boolean}): string | undefined | Promise<string | undefined>;
@@ -292,7 +294,8 @@ export class PrinterSetup {
   readonly deps: PrinterSetupDeps;
   constructor(deps: PrinterSetupDeps) { this.deps = deps; }
 
-  /** Add printer…'s steps running now (Find Printers, Check, Add, Complete Settings, a Printer MCP choice). */
+  /** Add printer…'s steps running now (Find Printers, Check, Add, Complete Settings, a Printer MCP choice, Remove, and
+   * Settings → Printers reading each MCP's fields). */
   #working = 0;
   async #tracked<T>(work: () => Promise<T>): Promise<T> {
     this.#working++;
@@ -310,10 +313,12 @@ export class PrinterSetup {
   }
 
   /** `printers.mcps`: both packages, always, with every copy of each the companion can see, and Add printer…'s choices from them. */
-  async mcps(): Promise<{packages: McpPackageView[]; options: SetupOptions}> {
-    // Settings answers within its deadline from the fields already read; reading them again never holds it up.
+  mcps(): Promise<{packages: McpPackageView[]; options: SetupOptions}> { return this.#tracked(() => this.#mcps()); }
+  async #mcps(): Promise<{packages: McpPackageView[]; options: SetupOptions}> {
+    // Settings answers within its deadline from the fields already read; reading them again never holds it up. That
+    // read starts each MCP to ask it, so it counts as setting up too (review F2).
     const options = setupOptions(await this.#setups({cachedOnly: true}));
-    void this.#setups().catch(() => undefined);
+    void this.#tracked(() => this.#setups()).catch(() => undefined);
     return {packages: await this.#packages(), options};
   }
 
@@ -372,7 +377,7 @@ export class PrinterSetup {
         const version = install.type === 'npx' ? undefined : installedVersion(install, env);
         const printer = catalog?.destinations.find(destination => destination.id === catalog.canonical(id))?.name ?? id;
         const managed = install.type === 'app' && install.prefix === own.prefix;
-        const reason = autoUpdateReason(install);
+        const reason = this.deps.autoReason ? this.deps.autoReason(id) : autoUpdateReason(install);
         return {destinationId: id, printerId: catalog?.canonical(id) ?? id, printer, mcpId: mcpIdFor(resolveMcpInstall(config, env), config), kind: install.type,
           ...(path ? {path} : {}), ...(version ? {version} : {}), canMove: !managed, managed,
           words: `${printer} uses ${copyWords(install, path, managed, home)} (${version ?? 'version unknown'})`
@@ -941,7 +946,8 @@ export class PrinterSetup {
   }
 
   /** `printers.remove`: a printer added in Counterpart, between prints. Its folder goes only if Counterpart made it. */
-  async remove(destinationId: string): Promise<{removed: true}> {
+  remove(destinationId: string): Promise<{removed: true}> { return this.#tracked(() => this.#remove(destinationId)); }
+  async #remove(destinationId: string): Promise<{removed: true}> {
     const saved = await readProfiles(this.#profilesPath);
     if (!saved.profiles.some(item => item.id === destinationId)) throw new PrinterSetupError('not-found', 'Only printers added in Counterpart can be removed here.');
     const listed = this.deps.catalog?.()?.canonical(destinationId) ?? destinationId;

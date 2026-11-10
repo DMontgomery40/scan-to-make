@@ -27,6 +27,8 @@ export class PrintGate {
   }
   held(destinationId: string): boolean { return (this.#holds.get(destinationId) ?? 0) > 0; }
   updating(destinationId: string): boolean { return this.#updating.has(destinationId); }
+  /** MCP work admitted on any printer now (a send, a slice, a design pass, an answer), not counting update marks. */
+  holding(): boolean { return this.#holds.size > 0; }
   /** Any MCP work admitted anywhere (a send, a slice, a design pass, an answer), or any printer marked as updating. */
   busy(): boolean { return this.#holds.size > 0 || this.#updating.size > 0; }
 

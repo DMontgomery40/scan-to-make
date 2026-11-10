@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {rm} from 'node:fs/promises';
 import {join} from 'node:path';
-import {McpAutoUpdater, companionBusy, contractCheck, AUTO_EVERY_MS, AUTO_JITTER_MS, AUTO_FIRST_MS, AUTO_FIRST_JITTER_MS, AUTO_BUSY_RETRY_MS, AUTO_OFF_POLL_MS, AUTO_QUIET_TRIES} from '../dist/printing/mcp-auto-update.js';
+import {McpAutoUpdater, companionBusy, contractCheck, AUTO_EVERY_MS, AUTO_JITTER_MS, AUTO_FIRST_MS, AUTO_FIRST_JITTER_MS, AUTO_BUSY_RETRY_MS, AUTO_OFF_POLL_MS, AUTO_QUIET_TRIES, AUTO_LATEST_TTL_MS} from '../dist/printing/mcp-auto-update.js';
 import {PrintGate} from '../dist/printing/print-gate.js';
 import {tempDir} from './support/temp.mjs';
 
@@ -11,10 +11,10 @@ import {tempDir} from './support/temp.mjs';
 
 /** A scheduler over fakes: targets and versions by package, a scripted busy, and every update recorded. */
 function scheduler({targets = [{mcpId: 'mcp-a', pkg: 'bambu-printer-mcp', fromVersion: '1.1.46'}], versions = {'bambu-printer-mcp': '1.1.50'}, busy = async () => undefined,
-  update, enabled = () => true, statePath} = {}) {
+  update, enabled = () => true, statePath, now, recovered} = {}) {
   const calls = {latest: [], update: [], busy: 0}, scheduled = [];
   const auto = new McpAutoUpdater({
-    enabled, targets: () => targets, statePath, random: () => 0.5,
+    enabled, targets: () => targets, statePath, random: () => 0.5, ...(now ? {now} : {}), ...(recovered ? {recovered} : {}),
     latest: async pkg => { calls.latest.push(pkg); const version = typeof versions === 'function' ? versions(pkg) : versions[pkg]; if (version instanceof Error) throw version; return version; },
     busy: async () => { calls.busy++; return busy(); },
     update: async (mcpId, latest, options) => { calls.update.push({mcpId, latest, ...options}); return update ? update(mcpId, latest, options) : {state: 'done', toVersion: latest}; },
@@ -135,12 +135,15 @@ test('Q9: a version put back is never tried again by itself, across a restart; a
   assert.deepEqual(await first.auto.runOnce(), {state: 'current'}, 'the same version is left alone');
   assert.equal(first.calls.update.length, 1);
   // A restarted companion reads what failed.
-  const second = scheduler({statePath, versions: () => versions['bambu-printer-mcp']});
+  let now = 1_000_000;
+  const second = scheduler({statePath, versions: () => versions['bambu-printer-mcp'], now: () => now});
   assert.deepEqual(await second.auto.runOnce(), {state: 'current'});
   assert.equal(second.calls.update.length, 0);
   assert.match((await second.auto.failed())['mcp-a'].why, /counterpart\/1/);
   // A newer version is tried, and its success clears the record.
   versions = {'bambu-printer-mcp': '1.1.51'};
+  // The next run is hours later (every six), past the time npm's last answer is reused for.
+  now += AUTO_LATEST_TTL_MS + 1;
   assert.equal((await second.auto.runOnce()).results[0].outcome.state, 'done');
   assert.deepEqual(second.calls.update, [{mcpId: 'mcp-a', latest: '1.1.51', report: false}]);
   assert.deepEqual(await second.auto.failed(), {});
@@ -305,4 +308,54 @@ test('Q9 contract check: a copy that doesn\'t start, doesn\'t offer the contract
     assert.match(await contractCheck({cwd, client, timeoutMs: 1000})(config, '1.1.50'), expected);
     assert.equal(seen.closed, 1, 'the probe is always closed');
   }
+});
+
+test('review F3: through a ten-hour print with an update waiting, npm is asked once, not every minute; its answer is reused for 30 minutes', async () => {
+  let now = 1_000_000, printing = true;
+  const s = scheduler({busy: async () => printing ? 'P1S is printing' : undefined, now: () => now});
+  for (let minute = 0; minute < 600; minute++) {
+    assert.equal((await s.auto.runOnce()).state, 'deferred');
+    now += AUTO_BUSY_RETRY_MS;
+  }
+  assert.deepEqual(s.calls.latest, ['bambu-printer-mcp'], 'npm asked at the first run only');
+  assert.equal(s.calls.busy, 600, 'one cheap "busy?" a minute, asked before npm');
+  assert.deepEqual(s.calls.update, []);
+  printing = false;
+  assert.equal((await s.auto.runOnce()).state, 'ran');
+  assert.equal(s.calls.latest.length, 2, 'the print ended ten hours later: npm is asked again, its last answer being old');
+  assert.equal(s.calls.update.length, 1);
+  // Within 30 minutes the answer is used again; after, npm is asked.
+  now += AUTO_LATEST_TTL_MS - 60_000;
+  await s.auto.runOnce();
+  assert.equal(s.calls.latest.length, 2);
+  now += 120_000;
+  await s.auto.runOnce();
+  assert.equal(s.calls.latest.length, 3);
+  // npm that can't answer isn't remembered: the next run asks again.
+  const failing = scheduler({versions: {'bambu-printer-mcp': new Error('offline')}, now: () => now});
+  assert.equal((await failing.auto.runOnce()).state, 'current');
+  assert.equal((await failing.auto.runOnce()).state, 'current');
+  assert.equal(failing.calls.latest.length, 2);
+});
+
+test('review F4: an automatic update a restart cut short is recorded as failed: its version is not tried again by itself, a newer one is', async t => {
+  const root = await tempDir('mcp-auto-recovered-');
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const statePath = join(root, 'auto-update.json');
+  let now = 1_000_000, version = '1.1.50', given = [{mcpId: 'mcp-a', toVersion: '1.1.50'}];
+  const recovered = () => { const found = given; given = []; return found; };
+  const s = scheduler({versions: () => version, statePath, now: () => now, recovered});
+  assert.deepEqual(await s.auto.runOnce(), {state: 'current'}, 'not retried');
+  assert.deepEqual(s.calls.update, []);
+  assert.equal((await s.auto.failed())['mcp-a'].toVersion, '1.1.50');
+  assert.equal((await s.auto.failed())['mcp-a'].reverted, true);
+  // After the companion starts again (a new scheduler on the same file), still not retried.
+  const again = scheduler({versions: () => version, statePath, now: () => now});
+  assert.deepEqual(await again.auto.runOnce(), {state: 'current'});
+  assert.deepEqual(again.calls.update, []);
+  version = '1.1.51';
+  now += AUTO_LATEST_TTL_MS + 1;
+  const ran = await again.auto.runOnce();
+  assert.equal(ran.state, 'ran');
+  assert.deepEqual(again.calls.update.map(call => call.latest), ['1.1.51'], 'a newer version is tried');
 });
