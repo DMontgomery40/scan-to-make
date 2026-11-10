@@ -16,7 +16,8 @@ struct ProjectsRoot: View {
     var body: some View {
         split
         .preferredColorScheme(.dark)
-        // One sheet at a time: a route that asks for another replaces the one that is up.
+        // One sheet at a time. A route's sheet takes the place of Settings or Printers, never of New or Print
+        // (`ProjectsNavigation.apply`).
         .sheet(item: Binding(get: { nav.presented }, set: { if $0 == nil { nav.dismissSheet() } })) { presented in
             switch presented.sheet {
             case .new(let job):
@@ -87,6 +88,8 @@ struct ProjectsRoot: View {
                          openPrinters: { nav.present(.printers) }, openSettings: { nav.present(.settings) })
             }
         } detail: {
+            // Invariant: the only value this stack ever pushes is `printing:<open project id>`. `nav.path` is derived
+            // from `nav.detail`, and its setter ignores anything else.
             NavigationStack(path: $nav.path) {
                 Group {
                     if let selected = nav.project { projectPage(selected, close: { nav.close() }) }

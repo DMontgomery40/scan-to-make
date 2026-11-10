@@ -96,15 +96,46 @@ final class ProjectsNavigationTests: XCTestCase {
         nav.apply(.print(ring))
         XCTAssertEqual(nav.sheet, .print(ring), "the route's sheet replaces Settings")
         XCTAssertEqual(nav.project, ring)
-        nav.apply(.printers)
-        XCTAssertEqual(nav.sheet, .printers)
+        nav.dismissSheet()
+        nav.present(.printers)
         nav.apply(.newProject)
-        XCTAssertEqual(nav.sheet, .new(job: nil))
+        XCTAssertEqual(nav.sheet, .new(job: nil), "and Printers")
         let first = nav.presented?.id
         nav.dismissSheet()
         nav.present(.new(job: "fit"))
         XCTAssertNotEqual(nav.presented?.id, first, "New presented again is a new sheet")
         XCTAssertEqual(nav.sheet, .new(job: "fit"))
+    }
+
+    /// A tapped notification or link must not throw away an unsent New draft or a prepared Print sheet. Its
+    /// navigation still happens underneath; its own sheet, if it has one, is dropped.
+    func testARouteNeverReplacesANewOrPrintSheetThatIsUp() {
+        let routes: [AppRoute] = [.home, .project(bracket), .print(bracket), .camera(bracket), .printing(bracket), .printers, .newProject, .pair("scantomake://pair")]
+        for held in [ProjectsNavigation.Sheet.new(job: "fit"), .print(ring)] {
+            for route in routes {
+                var nav = ProjectsNavigation()
+                nav.open(ring)
+                nav.present(held)
+                let up = nav.presented
+                nav.apply(route)
+                XCTAssertEqual(nav.presented, up, "\(held) stays up through \(route): the same sheet, not a new one")
+                // What the route navigates to is there when the sheet is closed.
+                switch route {
+                case .project, .print, .camera: XCTAssertEqual(nav.detail, .init(project: bracket, page: .project), "\(route)")
+                case .printing: XCTAssertEqual(nav.detail, .init(project: bracket, page: .printing), "\(route)")
+                case .home, .pair: XCTAssertNil(nav.detail, "\(route)")
+                case .printers, .newProject: XCTAssertEqual(nav.project, ring, "\(route)")
+                }
+            }
+        }
+        // Settings and Printers hold nothing, so a route's sheet takes their place.
+        for light in [ProjectsNavigation.Sheet.settings, .printers] {
+            var nav = ProjectsNavigation()
+            nav.present(light)
+            XCTAssertFalse(nav.sheetHoldsWork)
+            nav.apply(.print(ring))
+            XCTAssertEqual(nav.sheet, .print(ring))
+        }
     }
 
     func testRoutesOpenWhatTheyName() {
