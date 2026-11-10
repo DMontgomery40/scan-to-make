@@ -189,6 +189,47 @@ class HomeLayoutTests {
         assertEquals("Your project’s picture. No picture came with this question.", AskPicture.caption(null))
     }
 
+    /** Review F2 on #456: a question picture that fails to load (the computer asleep) draws nothing, not an empty box
+     *  under "The outlined part is what this question is about."; the question and its answers stay. */
+    @Test fun aQuestionPictureThatFailsToLoadDrawsNothing() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04"
+        val data = WireJson.parseToJsonElement(
+            """{"id":"$id","title":"Wall holder for three","state":"needs-closeup","createdAtMs":1,"updatedAtMs":2,"photos":[],
+               "passes":[{"startedAtMs":1,"endedAtMs":2,"status":"needs_closeup"}],
+               "ask":{"id":"1af638c1-ec63-46fc-aa2f-e74cd29df231","question":"Can you confirm the size?",
+                      "photo":"asks/1af638c1-ec63-46fc-aa2f-e74cd29df231.jpg","region":{"x":0.42,"y":0.3,"width":0.28,"height":0.34},
+                      "answers":["camera","photos","best-guess","text"],"status":"open"}}""").jsonObject
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(503, mapOf("error" to mapOf("code" to "unreachable", "message" to "asleep")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
+        compose.waitUntil(5_000) { fake.paths.any { "/asks/" in it } }
+        compose.waitForIdle()
+        compose.onNodeWithText("Can you confirm the size?").assertExists()
+        compose.onAllNodes(hasTestTag("ask-picture")).assertCountEquals(0)
+        compose.onAllNodes(hasText("The outlined part is what this question is about.")).assertCountEquals(0)
+    }
+
+    /** Review F6 on #456: all eight EXIF orientations stand the photo upright, mirrored ones included. */
+    @Test fun everyExifOrientationStandsThePhotoUpright() {
+        val e = android.media.ExifInterface::class.java
+        fun o(name: String) = e.getField(name).getInt(null)
+        assertEquals(0f to false, com.scantomake.counterpart.ui.uprightTurn(o("ORIENTATION_NORMAL")))
+        assertEquals(0f to true, com.scantomake.counterpart.ui.uprightTurn(o("ORIENTATION_FLIP_HORIZONTAL")))
+        assertEquals(180f to false, com.scantomake.counterpart.ui.uprightTurn(o("ORIENTATION_ROTATE_180")))
+        assertEquals(180f to true, com.scantomake.counterpart.ui.uprightTurn(o("ORIENTATION_FLIP_VERTICAL")))
+        assertEquals(90f to true, com.scantomake.counterpart.ui.uprightTurn(o("ORIENTATION_TRANSPOSE")))
+        assertEquals(90f to false, com.scantomake.counterpart.ui.uprightTurn(o("ORIENTATION_ROTATE_90")))
+        assertEquals(-90f to true, com.scantomake.counterpart.ui.uprightTurn(o("ORIENTATION_TRANSVERSE")))
+        assertEquals(-90f to false, com.scantomake.counterpart.ui.uprightTurn(o("ORIENTATION_ROTATE_270")))
+    }
+
     @Test fun printerAttentionAndPrintingStayVisibleWithProjects() {
         state.projects.value = listOf(requireNotNull(Project.decode(WireJson.parseToJsonElement(
             """{"id":"clip","title":"Cable clip","state":"printing","createdAtMs":0,"updatedAtMs":0,"photos":[],"passes":[],"print":{"destinationId":"p1","monitor":{"phase":"watching"}}}"""

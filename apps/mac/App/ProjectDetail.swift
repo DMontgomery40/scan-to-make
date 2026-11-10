@@ -709,10 +709,29 @@ struct MacAskPhoto: View {
     let region: Project.Region?
     let caption: String
     let version: Double
-    @State private var image: CGImage?
+    /// The picture for the current file and version; a missing or undecodable file hides the figure (review F2, F3).
+    @State private var load = PictureLoad<CGImage>()
     @State private var preview: URL?
 
+    private var key: String { "\(url.path)#\(version)" }
+    private var image: CGImage? { load.key == key ? load.picture : nil }
+
     var body: some View {
+        Group { if !(load.key == key && load.hidden) { figure } }
+            .task(id: key) {
+                let key = key, url = url
+                load.start(key, cached: nil)
+                // `Project.file(_:)` only builds the path; the ask's file may not be on this Mac.
+                guard FileManager.default.fileExists(atPath: url.path) else { load.downloaded(nil, for: key); return }
+                load.downloaded(url, for: key)
+                let decoded = await Task.detached(priority: .userInitiated) { AskPicture.upright(url, maxPixels: 1600) }.value
+                // A slow decode of the previous project's picture must not land on this one.
+                guard !Task.isCancelled else { return }
+                load.decoded(decoded, for: key)
+            }
+    }
+
+    private var figure: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button { open() } label: {
                 ZStack {
@@ -732,14 +751,12 @@ struct MacAskPhoto: View {
             Text(caption).font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
         }
         .quickLookPreview($preview)
-        .task(id: "\(url.path)#\(version)") {
-            let url = url
-            image = await Task.detached(priority: .userInitiated) { AskPicture.upright(url, maxPixels: 1600) }.value
-        }
     }
 
     private func open() {
-        let target = FileManager.default.temporaryDirectory.appendingPathComponent("counterpart-ask-\(abs(url.path.hashValue))-\(Int64(version)).jpg")
+        // Keyed on the region too, so a moved region never opens a stale marked picture.
+        let name = "\(url.path)|\(region.map { "\($0.x),\($0.y),\($0.width),\($0.height)" } ?? "")"
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("counterpart-ask-\(abs(name.hashValue))-\(Int64(version)).jpg")
         let url = url, region = region
         Task {
             let ok = await Task.detached { FileManager.default.fileExists(atPath: target.path) || AskPicture.markedFile(from: url, region: region, to: target) }.value

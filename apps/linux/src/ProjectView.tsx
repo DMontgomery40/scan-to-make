@@ -32,10 +32,12 @@ function AskPhoto({ project, ask }: { project: Project; ask: Ask }) {
   const path = ask.photo ?? projectThumbnail(project);
   const region = ask.photo ? clampRegion(ask.region) : undefined;
   const caption = askCaption(ask);
-  if (!path) return null;
+  // A picture that fails to load hides the whole figure; a new question starts over (review F2, F3 on #456).
+  const [failedPath, setFailedPath] = useState<string>();
+  if (!path || failedPath === `${project.id}/${path}`) return null;
   const marked = (zoom = 1) => (
     <span className="ask-photo-frame" style={zoom === 1 ? undefined : { transform: `scale(${zoom})` }}>
-      <Picture id={project.id} path={path} alt={caption} />
+      <Picture id={project.id} path={path} alt={caption} onFailed={() => setFailedPath(`${project.id}/${path}`)} />
       {region && (
         <span
           className="region"

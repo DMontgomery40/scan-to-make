@@ -40,6 +40,10 @@ final class AskPictureTests: XCTestCase {
         XCTAssertGreaterThan(try red(Int(0.56 * Double(width)), Int(0.47 * Double(height))), 250, "the region's middle is untouched")
         XCTAssertLessThan(try red(20, 20), 140, "outside the region is dimmed")
         XCTAssertLessThan(try red(200, 280), 140, "below the region too (top-left origin)")
+        // The region runs 0.30–0.64 from the top. Without the flip to Core Graphics' bottom-left origin it would land at
+        // 0.36–0.70, so these two rows tell the two apart (review F8a on #456).
+        XCTAssertGreaterThan(try red(Int(0.56 * Double(width)), Int(0.33 * Double(height))), 250, "0.33 from the top is inside")
+        XCTAssertLessThan(try red(Int(0.56 * Double(width)), Int(0.67 * Double(height))), 140, "0.67 from the top is outside")
     }
 }
 
