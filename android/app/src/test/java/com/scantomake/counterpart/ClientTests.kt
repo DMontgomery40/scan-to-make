@@ -161,6 +161,9 @@ class CompanionClientTests {
         assertEquals("generation:health", CompanionClient.scope("GET", "/healthz"))
         assertEquals("projects:read", CompanionClient.scope("GET", "/v1/objects/printers"))
         assertEquals("printer-handoff:use", CompanionClient.scope("GET", "/v1/objects/$id/filaments"))
+        // A project's pictures and See It Together (PRD §5.1, §5.4).
+        assertEquals("projects:read", CompanionClient.scope("GET", "/v1/objects/$id/pictures/part-0123456789abcdef.png"))
+        assertEquals("captures:import", CompanionClient.scope("POST", "/v1/objects/$id/locate"))
         assertEquals("printer-handoff:use", CompanionClient.scope("GET", "/v1/objects/$id/camera.jpg"))
         assertEquals("printer-handoff:use", CompanionClient.scope("GET", "/v1/objects/printers/mcp-1a2b/camera.jpg"))
         assertEquals("printer-handoff:use", CompanionClient.scope("POST", "/v1/objects/$id/print/pause"))

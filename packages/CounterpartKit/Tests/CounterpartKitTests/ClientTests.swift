@@ -699,6 +699,16 @@ final class CompanionClientTests: XCTestCase {
         do { _ = try await c.download(p, "plate.jpg"); XCTFail("there's no plate photo to fetch") } catch {}
         XCTAssertEqual(fake.calls.count, 1)
         do { _ = try await c.download(p, "../../etc/passwd"); XCTFail() } catch {}
+        // The project's pictures the Mac drew (PRD §5.1): only `pictures/<name>.png`.
+        let picture = try await c.download(p, "pictures/part-0123456789abcdef.png")
+        XCTAssertTrue(picture.lastPathComponent.hasSuffix("pictures_part-0123456789abcdef.png"))
+        XCTAssertEqual(fake.calls.last?.request.url?.path, "/v1/objects/\(p.id)/pictures/part-0123456789abcdef.png")
+        do { _ = try await c.download(p, "pictures/../object.json"); XCTFail() } catch {}
+        // See it together reaches the Mac: `POST …/locate` with the write scope Duplicate uses.
+        let located = FakeTransport { _, _ in HTTPReply(status: 200, body: try JSONSerialization.data(withJSONObject: ["object": ["id": p.id, "createdAtMs": 1, "updatedAtMs": 2, "state": "touching-up", "photos": [], "passes": []]])) }
+        _ = try await client(located).locate(p.id)
+        XCTAssertEqual(located.calls.last?.request.httpMethod, "POST")
+        XCTAssertEqual(located.calls.last?.request.url?.path, "/v1/objects/\(p.id)/locate")
     }
 
     func testDesignedMultiColour3MFExportDoesNotMasqueradeAsSTL() async throws {
