@@ -808,3 +808,7 @@ export function sizesAnswer(fields: SizeField[]): { id: string; mm: number }[] |
 export const sizesUnchanged = (fields: SizeField[]) => fields.every((field) => millimetres(field.text) === millimetres(sizeText(field.asked)));
 
 export const sizeSource = (from: string) => (from === "published" ? "from the maker" : "from your scan");
+/** The line under a project's title in the list grouped by phase (CounterpartKit `ProjectWords.row`). */
+export function rowWords(p: Project): string {
+  return p.status?.detail?.trim() || words(p);
+}

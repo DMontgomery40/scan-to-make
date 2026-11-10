@@ -286,3 +286,7 @@ object ScanPhotos {
     }
     fun words(count: Int) = if (count == 1) "1 photo" else "$count photos"
 }
+
+/** The line under a project's title where its phase is already named beside it (CounterpartKit `ProjectWords.row`):
+ *  the computer's own detail for that row, else the card line as it is. */
+fun rowLine(project: Project, line: String): String = project.status?.detail?.trim()?.takeIf { it.isNotEmpty() } ?: line

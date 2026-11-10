@@ -180,7 +180,8 @@ export interface Project {
   ask?: Ask;
   reconstructionReview?: ReconstructionReview;
   question?: { closeup: string };
-  status?: { text: string; phase: string; tint: string };
+  /** `detail`: what a list row shows under its phase's heading, never the heading again. */
+  status?: { text: string; phase: string; tint: string; detail?: string };
   printerDestinationId?: string;
   settings?: {
     status: string;

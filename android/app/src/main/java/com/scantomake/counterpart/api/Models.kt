@@ -113,7 +113,8 @@ data class Project(
     @Serializable data class Settings(val status: String? = null, val archived: Boolean? = null, val printerDestinationId: String? = null,
                                       val designEngine: String? = null, val notifications: String? = null)
     /** The companion's state line (`ObjectStatus`). Show `text` as is. */
-    @Serializable data class Status(val phase: String, val text: String, val symbol: String = "", val tint: String = "secondary")
+    /** `detail`: what a list row shows under its phase's heading or capsule, never the heading again. */
+    @Serializable data class Status(val phase: String, val text: String, val symbol: String = "", val tint: String = "secondary", val detail: String? = null)
     @Serializable data class Activity(val atMs: Double, val kind: String, val text: String)
     @Serializable data class Stage(val id: String, val words: String, val startedAtMs: Double, val endedAtMs: Double? = null, val typicalSec: Double? = null)
     @Serializable data class Estimate(val remainingSec: Double, val endsAtMs: Double)

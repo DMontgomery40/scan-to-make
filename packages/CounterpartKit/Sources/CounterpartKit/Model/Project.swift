@@ -275,6 +275,10 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// sending, working, needs-you, ready, preparing, printing, printed, sent, failed
         public var phase: String
         public var text: String
+        /// What a list row shows under the title when the row sits under its phase's heading: only what differs
+        /// there (the question, the size, the stage), never the heading again. Nil from an older Mac, or when the
+        /// whole line is already that.
+        public var detail: String?
         public var symbol: String
         /// blue, orange, accent, green, secondary, red
         public var tint: String
@@ -283,6 +287,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             phase = try c.decode(String.self, forKey: .phase); text = try c.decode(String.self, forKey: .text)
+            detail = try? c.decodeIfPresent(String.self, forKey: .detail)
             symbol = try c.decodeIfPresent(String.self, forKey: .symbol) ?? ""; tint = try c.decodeIfPresent(String.self, forKey: .tint) ?? "secondary"
         }
     }

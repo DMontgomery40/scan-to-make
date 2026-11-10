@@ -6,7 +6,7 @@ import type {CounterpartEvent, CounterpartEventType, NotifyLevel, ObjectStatus} 
  * the same thing. Kept free of I/O: callers pass what they know.
  */
 
-export interface TitleSource {title?: string; instructions?: string; scan?: string; capture?: string[]}
+export interface TitleSource {title?: string; instructions?: string; scan?: string; capture?: string[]; createdAtMs?: number; current?: {sizeMm?: readonly number[]}}
 
 /** The generated title, else the first words of the request, else a plain name. */
 export function projectTitle(object: TitleSource): string {
@@ -17,8 +17,16 @@ export function projectTitle(object: TitleSource): string {
     const short = words.slice(0, 6).join(' ').replace(/[.,;:!?]+$/, '');
     return (words.length > 6 ? `${short}…` : short).slice(0, 80);
   }
-  return object.scan || object.capture?.length ? 'Your scan' : 'Your project';
+  // A scan sent with no words gets a name of its own from what is known, never "Your scan" twice in one list:
+  // its size once there is a model, otherwise when it was scanned.
+  if (object.scan || object.capture?.length) {
+    const size = sizeText(object.current?.sizeMm);
+    if (size) return `Scan, ${size}`;
+    return object.createdAtMs ? `Scan from ${scanDate(object.createdAtMs)}` : 'Your scan';
+  }
+  return 'Your project';
 }
+const scanDate = (atMs: number) => new Intl.DateTimeFormat('en-US', {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}).format(new Date(atMs));
 
 /** "1 h 5 min", "25 min", "under a minute". */
 export function duration(seconds: number): string {
@@ -207,13 +215,14 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       const pass = object.passes?.at(-1);
       const stage = pass?.stages?.filter(item => item.endedAtMs === undefined).at(-1)?.words ?? object.progress;
       const minutes = pass?.estimate ? Math.max(1, Math.round(pass.estimate.remainingSec / 60)) : undefined;
-      return {phase: 'working', text: joined('Your Mac is working', stage, minutes ? `about ${minutes} min` : undefined).slice(0, 300), symbol: 'wand.and.sparkles', tint: 'blue'};
+      const doing = joined(stage, minutes ? `about ${minutes} min` : undefined);
+      return {phase: 'working', text: joined('Your Mac is working', stage, minutes ? `about ${minutes} min` : undefined).slice(0, 300), ...(doing ? {detail: doing.slice(0, 300)} : {}), symbol: 'wand.and.sparkles', tint: 'blue'};
     }
     case 'needs-closeup': {
       const question = object.ask?.question ?? (object.question?.closeup ? `Can you take a close-up of ${object.question.closeup}?` : undefined);
-      return {phase: 'needs-you', text: joined('Needs you', question).slice(0, 300), symbol: 'hand.raised', tint: 'orange'};
+      return {phase: 'needs-you', text: joined('Needs you', question).slice(0, 300), ...(question ? {detail: question.slice(0, 300)} : {}), symbol: 'hand.raised', tint: 'orange'};
     }
-    case 'ready': return {phase: 'ready', text: joined('Ready to print', sizeText(object.current?.sizeMm)), symbol: 'checkmark.seal', tint: 'accent'};
+    case 'ready': { const size = sizeText(object.current?.sizeMm); return {phase: 'ready', text: joined('Ready to print', size), ...(size ? {detail: size} : {}), symbol: 'checkmark.seal', tint: 'accent'}; }
     case 'printing': {
       const live = object.print?.live, watching = object.print?.monitor?.phase === 'watching';
       if (!object.print?.dispatchedAt || !watching || !live) return {phase: 'preparing', text: 'Getting the print ready', symbol: 'gearshape', tint: 'accent'};

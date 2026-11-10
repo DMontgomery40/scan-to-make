@@ -107,6 +107,12 @@ export const ObjectStatusSchema = z.strictObject({
   phase: ProjectPhaseSchema,
   /** The whole status line, e.g. "Printing on Bambu Lab P1S · 42% · 1 h 5 min left". */
   text: text(300),
+  /**
+   * What a list row shows under the project's title when the row already sits under its phase's heading ("Needs
+   * you", "Ready"): only what differs between rows there (the question, the size, the stage), never the heading
+   * again. Absent when the whole line is already that (a print's line, a failure's sentence).
+   */
+  detail: text(300).optional(),
   /** SF Symbol name from the PRD §4 table. */
   symbol: text(64),
   tint: z.enum(['blue', 'orange', 'accent', 'green', 'secondary', 'red']),

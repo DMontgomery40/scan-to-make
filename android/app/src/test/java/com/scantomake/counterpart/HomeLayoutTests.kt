@@ -44,6 +44,10 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.isHeading
@@ -291,6 +295,25 @@ class HomeLayoutTests {
         home()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Needs you"))
         compose.onNodeWithText("Needs you").assertExists()
+    }
+
+    @Test fun aCardsLineNeverRepeatsItsPhaseWithProjectsPresent() {
+        val asking = requireNotNull(Project.decode(WireJson.parseToJsonElement(
+            """{"id":"asking","title":"Wall holder","instructions":"A useful part","state":"needs-closeup","createdAtMs":1,"updatedAtMs":2,""" +
+                """"status":{"phase":"needs-you","text":"Needs you · Can you confirm these sizes?","detail":"Can you confirm these sizes?","symbol":"hand.raised","tint":"orange"}}"""
+        ).jsonObject))
+        state.projects.value = listOf(asking, project("other", "Mic mount", "ready"))
+        state.loaded.value = true
+        home()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Wall holder"))
+        // The card is clickable and merges its children, so its line's tag is in the unmerged tree.
+        compose.onNodeWithTag("row-line-asking", useUnmergedTree = true).assertTextEquals("Can you confirm these sizes?")
+        compose.onAllNodes(SemanticsMatcher("text starts with the phase") { node ->
+            node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text.startsWith("Needs you · ") }
+        }, useUnmergedTree = true).assertCountEquals(0)
+        // With no detail from the computer (an older one), the line shows as before.
+        val plain = project("plain", "Cable clip", "ready")
+        assertEquals("Ready to print", com.scantomake.counterpart.api.rowLine(plain, "Ready to print"))
     }
 
     @Test fun anOngoingPrintShowsTheCounterpartMarkAndTheRealObjectsPicture() = kotlinx.coroutines.runBlocking {
