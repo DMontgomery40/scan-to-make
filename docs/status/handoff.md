@@ -12,12 +12,12 @@ One screen, updated in place; git history keeps the rest. This is the only hando
 
 | Where | Installed |
 |---|---|
-| Mac, iPhone Davica3, iPad Air | **202611100531** from main `8ee2a829` (#439). Receipts `~/scan-to-make-work/mac-202611100531/`, `iphone-202611100531/`, `ipad-202611100531b/`. Mac rollback: `Counterpart-202611100126.app` in the Mac receipt folder. |
+| Mac, iPhone Davica3, iPad Air | **202611100531** from main `8ee2a829` (#439); main is at `7eb88332` (#443) and installs with the second Nov 10 train (#456). Receipts `~/scan-to-make-work/mac-202611100531/`, `iphone-202611100531/`, `ipad-202611100531b/`. Mac rollback: `Counterpart-202611100126.app` in the Mac receipt folder. |
 | Mac MCP copies | bambu-printer-mcp 1.1.77, mcp-3d-printer-server 1.2.58. Ten newer MCP pull requests wait for David's "publish them" (board W1). |
 | Android, Linux (agents-136) | Nov 5 builds. Stale. |
 | Public | Mac beta 6 and TestFlight 2.0 (4), both from `30e3afdd` (Nov 6). |
 
-Printer: P1S, LAN Only + Developer Mode. David starts every print. **A print is running now**: "Wall holder for three", started 06:49Z, ends about 09:05Z; check its reports at every wake.
+Printer: P1S, LAN Only + Developer Mode. David starts every print. Nobody watches a print once it has started (David, Nov 10: "if a print starts, it's fine, and if it's not, it's a slicer issue, and we're not a slicer").
 
 **What changed since #427** (all installed): worker rules per pass with "recognise and regularise" (#430); closed bottom after support removal (#434); pass limits and resume, the Nov 8 home and print UX, Live Activity identity and milestone alerts (#437); the companion uses the printer MCP's code engine for fit designs and scan cleanup when the MCP offers it (#439, inert until the MCPs are published and updated).
 
