@@ -7,7 +7,7 @@ import {z} from 'zod';
 import {PrinterMcpClient, toolResultJson, type PrinterBackend, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {appInstall, appMcpId, autoUpdateReason, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
 import type {McpUpdate} from './mcp-updates.js';
-import type {PrinterCatalog} from '../objects/printers.js';
+import {unnamedPrinterName, type PrinterCatalog} from '../objects/printers.js';
 import {envOf, field, kindFor, modelForSerial, names, readMcpSetup, readSetupCache, setupOptions, writeSetupCache, type McpSetup, type SetupKind, type SetupOptions} from './mcp-setup.js';
 import type {PrintGate} from './print-gate.js';
 import {newerVersion} from './directory.js';
@@ -528,11 +528,15 @@ export class PrinterSetup {
       ...(model && /^[a-z0-9]{1,16}$/.test(model) ? {model} : {})};
   }
 
-  /** "Bambu Lab P1S", "OctoPrint at octopi.local": the kind and model in the MCP's own words; "via <MCP>" when another MCP is the usual one. */
+  /**
+   * A found printer's name in Add printer, before the person names it: the model in its MCP's own words (its setup
+   * choice's label, else the model as the MCP gave it), else where it is; "via <MCP>" when another MCP is the usual one.
+   * No brand is composed and no casing applied (review F1 follow-up).
+   */
   #nameFor(options: SetupOptions, printerType: string, model?: string, host?: string, backend?: PrinterBackend): string {
     const type = options.types.find(item => item.printerType === printerType);
-    const modelLabel = model ? (backend ? options.models[backend] : undefined)?.find(choice => choice.value === model)?.label ?? model.toUpperCase() : undefined;
-    const base = `${type?.label ?? 'Printer'}${modelLabel ? ` ${modelLabel}` : host ? ` at ${host}` : ''}`;
+    const modelLabel = model ? (backend ? options.models[backend] : undefined)?.find(choice => choice.value === model)?.label ?? model : undefined;
+    const base = modelLabel ?? unnamedPrinterName(host);
     const via = backend && type && type.backends.length > 1 && type.backends[0] !== backend ? ` via ${this.#label(backend)}` : '';
     return (base + via).slice(0, 120);
   }
@@ -803,7 +807,8 @@ export class PrinterSetup {
         throw new PrinterSetupError('conflict', 'That printer MCP is one of your printers already.');
       // Its .env gains only what its MCP needs and lacks, and only the model; nothing there is changed.
       const model = await this.#completeEnv(read.found.dir, read.found.package, input.model, join(read.found.dir, 'dist', 'index.js'));
-      profile = {id, name: this.#nameFor(await this.#cachedOptions(), read.printerType, model ?? read.model, read.host, read.found.package), backend: read.found.package,
+      // No name typed: the generic one, which the printer list replaces with what the MCP reports (`PrinterDirectory.list`).
+      profile = {id, name: unnamedPrinterName(read.host), backend: read.found.package,
         process: {command: this.#node, args: [join(read.found.dir, 'dist', 'index.js')], cwd: read.found.dir}, owned: false,
         ...((model ?? read.model) && /^[a-z0-9]{1,16}$/.test(model ?? read.model!) ? {model: model ?? read.model!} : {})};
     } else {
@@ -813,7 +818,7 @@ export class PrinterSetup {
       const {kind, setup} = await this.#kindForForm(input, {budgetMs: ADD_SETUP_BUDGET_MS});
       const env = envFor(input, kind, setup.slicer);
       await writeFile(join(created, '.env'), envFile(env), {mode: 0o600, flag: 'wx'});
-      profile = {id, name: input.name ?? this.#nameFor(await this.#cachedOptions(), input.printerType, input.model, input.host, input.backend), backend: input.backend,
+      profile = {id, name: input.name ?? unnamedPrinterName(input.host), backend: input.backend,
         process: {command: this.#node, args: [entry], cwd: created}, owned: true, ...(input.model ? {model: input.model} : {})};
     }
     try { await changeProfiles(this.#profilesPath, state => { state.profiles.push(profile); }); }
