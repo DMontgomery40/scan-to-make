@@ -70,7 +70,7 @@ fun StarterProjects(open: (String) -> Unit) {
             }
         }
     }
-    val reachable by state.reachable.collectAsState()
+    val reachable = state.link.collectAsState().value.reachable
     selected?.let { starter ->
         AlertDialog(onDismissRequest = { if (!adding) selected = null }, title = { Text(starter.title) },
             text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
