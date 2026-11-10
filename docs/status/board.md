@@ -109,17 +109,17 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 | X36 | #459: no real fit has been sent from a real phone with the Fit brief as fields; its real-data captures on every layout are owed (needs I3's tool) | SM, Nov 10 |
 | X17 | Older T3 worktrees in the MCP repos that are not this session's: mcp-3D `feat-bambu-parity-pauses`, `feat-tool-annotations`; bambu `feat-control-route-pr`, `research-control-refusal` | Lead, Nov 10 |
 
-## Carried from before Nov 9 (still open)
+## Carried from before Nov 9 (checked against the code and both MCP repos on Nov 10)
 
 | ID | What | Owner |
 |---|---|---|
 | C1 | ~~A large print from Counterpart is unproven~~ **Removed: the row was wrong.** It was carried from the Nov 9 handoff without being checked. The app's own data on the Mac holds 28 print records across 9 of 16 projects. David, Nov 10: "we've printed a lot of shit, like, a lot." | Lead (the error) |
-| C2 | A send refused before anything was sent must read "not started" | SM, with Q2 |
-| C3 | Move title, designer and licence into `list_3mf_plates` in both MCPs, publish, install, then delete `inspectModelFile`'s 3MF parsing (PRD §8.0 item 9); port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D | No owner yet |
-| C4 | The FULU drain change (pause, resume, stop) was checked only against mocked hosts: check on the P1S the next time David pauses, resumes or stops from Counterpart | Lead |
-| C5 | OctoPrint follow-ups: one printer typed two ways lists once; Bonjour TXT `path`; layer progress, Cancelobject, Spoolman, thumbnails | No owner yet |
-| C6 | Studio-audit leftovers: external-spool mapping needs a camera-checked print; AMS Lite trays 24–27; plate-filament edge cases (bambu-printer-mcp#121, mcp-3D#81) | No owner yet |
-| C7 | The rest of the PRD's not-accepted list (§0) | Lead, after X11 |
+| C2 | "Not started" for a refused send: the app says it when it knows nothing reached the printer (`service.ts:1666`). When it cannot tell, it still shows "failed"; telling the two apart needs the MCPs to say whether anything was sent (bambu-printer-mcp #129, mcp-3D #87, both in W1), then Q2 | SM, with Q2 |
+| C3 | Title, designer and licence are already in both MCPs' `list_3mf_plates` (bambu 1.1.69, mcp-3D 1.2.49; installed). Left: switch `service.ts:2619` and `:2813` to it and delete the app's 3MF parsing (`inspectModelFile`, PRD §8.0 item 9). Separately: port bambu 1.1.69's M624 skip-object exemption to mcp-3D (no PR yet) | No owner yet |
+| C4 | The pause, resume and stop fix (bambu 1.1.79, mcp-3D 1.2.60, on npm since Nov 7) is **not installed**: the Mac runs 1.1.77 and 1.2.58, so nothing sent from Counterpart has used it, and it has only been checked against mocked hosts. It arrives with the next MCP update (Update in Settings → Printers, or Q9 once auto-update ships) | Lead |
+| C5 | OctoPrint follow-ups, all in mcp-3D and all open (nothing since 1.2.55): one printer typed two ways lists once; Bonjour TXT `path`; layer progress, Cancelobject, Spoolman, thumbnails | No owner yet |
+| C6 | Studio-audit leftovers, all in the MCPs: external-spool mapping; AMS Lite trays 24–27 (waits for A2L support); the plate-filament gaps listed as follow-ups in merged bambu-printer-mcp #121 and mcp-3D #81 (paint on modifiers, feature filaments overriding, layer ranges) | No owner yet |
+| C7 | PRD §0's "not accepted" list is out of date (last checked at `4baf0cd8`, Nov 4): starters, a scan-based print, design passes, MCP Update and many prints have all been used for real since. Re-mark §0 as part of X11 from `~/scan-to-make-work/board-check-2026-11-10/carried-rows.md`, which has a line per item | Lead, after X11 |
 
 ## What David said, Nov 9–10, and where it went
 
