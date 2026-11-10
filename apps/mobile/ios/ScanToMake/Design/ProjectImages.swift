@@ -44,6 +44,20 @@ extension Project {
     }
 }
 
+/// At most three pictures decode at once, off the main thread; the rest wait their turn.
+actor DecodeLane {
+    static let shared = DecodeLane()
+    private var running = 0
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func run<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        if running < 3 { running += 1 } else { await withCheckedContinuation { waiting.append($0) } }
+        let result = await Task.detached(priority: .userInitiated) { work() }.value
+        if waiting.isEmpty { running -= 1 } else { waiting.removeFirst().resume() }
+        return result
+    }
+}
+
 /// One of a project's images, downloaded once per project version and decoded at the size shown.
 struct ProjectImage: View {
     @Environment(AppModel.self) private var app
@@ -71,7 +85,11 @@ struct ProjectImage: View {
             image = nil
             guard let path, let url = try? await app.projects.mac.download(project, path) else { return }
             let size = maxPixelSize
-            let decoded = await Task.detached { ImageMemory.thumbnail(at: url, maxPixelSize: size) }.value
+            // A few at a time: a grid of scan frames decoding two dozen HEICs at once got nothing back (Nov 10).
+            var decoded: UIImage?
+            for _ in 0..<2 where decoded == nil && !Task.isCancelled {
+                decoded = await DecodeLane.shared.run { ImageMemory.thumbnail(at: url, maxPixelSize: size) }
+            }
             guard !Task.isCancelled, let decoded else { return }
             ImageMemory.shared.store(decoded, key)
             image = decoded
