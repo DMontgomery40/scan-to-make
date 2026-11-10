@@ -38,6 +38,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -161,56 +165,28 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         }
     }
 
+    // Continue on a fit takes you to the words it still needs.
+    val describeFocus = remember { FocusRequester() }
     Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = close, enabled = working != "make") { Icon(CIcons.Close, "Close") }
             Text("New Project", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("What do you need?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-            OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 6,
-                placeholder = { Text(if (job == "copy") "Copy this. Close up the bottom." else "A hook for my stroller handle…") })
-            Text("Describe it, scan it, or both. Your computer can look up published sizes, like a phone or a mic. Paste a MakerWorld or Printables link to print a published model.",
-                color = Palette.secondary, fontSize = 13.sp)
-            if (link != null) GlassCard(Modifier.fillMaxWidth()) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) { Icon(CIcons.Link, null, tint = Palette.filament); Text("  " + (Uri.parse(link).host ?: "Published model"), fontWeight = FontWeight.SemiBold) }
-                    Text("Your computer will get the designer’s file and keep its credit.", color = Palette.secondary, fontSize = 13.sp)
-                }
-            }
-            Text("Show it", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SourceTile(CIcons.Cube, "Scan it", "Walk around it. First version.", Palette.filament, Modifier.weight(1f), enabled = working == null && link == null) {
-                    run("scan") { val d = draft(); scan(d.id) }
-                }
-                SourceTile(CIcons.Camera, "Take photos", if (photos.size < 24) "A few angles is plenty." else "24 photos is the most.", Color(0xFFBF5AF2), Modifier.weight(1f),
-                    enabled = working == null && photos.size < 24) {
-                    val (file, uri) = Media.newPhotoTarget(context); pendingCamera = file; takePhoto.launch(uri)
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SourceTile(CIcons.Photo, "From Photos", "Pick what you have.", Palette.okGreen, Modifier.weight(1f), enabled = working == null && photos.size < 24) {
-                    pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                }
-                Spacer(Modifier.weight(1f))
-            }
-            if (scanned || photos.isNotEmpty()) {
-                Text("Added", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (scanned) Chip(CIcons.Cube, "Scan · ${Media.captureFrames(context, draftId).size} frames")
-                    photos.toList().forEach { f ->
-                        Box {
-                            val bmp = remember(f) { ImageCache.decode(f, 300) }
-                            if (bmp != null) androidx.compose.foundation.Image(bmp, null, Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-                            Icon(CIcons.Close, "Remove", Modifier.align(Alignment.TopEnd).size(22.dp).clip(RoundedCornerShape(11.dp)).background(Color.Black.copy(alpha = 0.6f))
-                                .clickable(enabled = working == null) { photos.remove(f); f.delete() }.padding(3.dp))
-                        }
-                    }
-                }
-            }
+            // After a scan the screen opens on its question, first and whole (U5): nothing half-hidden above it.
             if (scanned) {
-                Text("What should this scan become?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.testTag("scan-use"))
+                // The scan being decided about, beside its question (lead, Nov 10): one of its own frames, else the scan symbol.
+                // Small, so all three answers still fit on a phone.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val frames = remember(draftId, scanned) { Media.captureFrames(context, draftId) }
+                    val picture = remember(frames) { frames.getOrNull(frames.size / 3)?.let { ImageCache.decode(it, 168) } }
+                    Box(Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)).background(Palette.card).testTag("scan-use-scan")
+                        .semantics { contentDescription = "Your scan" }, contentAlignment = Alignment.Center) {
+                        if (picture != null) androidx.compose.foundation.Image(picture, null, Modifier.size(56.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                        else Icon(CIcons.Cube, null, tint = Palette.filament)
+                    }
+                    Text("What should this scan become?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.testTag("scan-use"))
+                }
                 ScanUseChoice("Copy this object", "Clean up the scan and print the same thing.", scanUse == "copy", "scan-use-copy") { scanUse = "copy" }
                 ScanUseChoice("Make something that fits this", "A holder, mount, case or adapter. The scan is what it must fit, not the print.", scanUse == "fit", "scan-use-fit") { scanUse = "fit" }
                 ScanUseChoice("Just save this scan", "Keep its shape with this project and decide later.", scanUse == "later", "scan-use-later") { scanUse = "later" }
@@ -239,6 +215,48 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
                 } }
                 if (scanUse == "later") Text("Nothing is sent or printed yet. This screen keeps the scan, so you can choose here later.", color = Palette.secondary, fontSize = 13.sp)
             }
+            Text("What do you need?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+            OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth().focusRequester(describeFocus).testTag("describe"), minLines = 3, maxLines = 6,
+                placeholder = { Text(if (job == "copy") "Copy this. Close up the bottom." else "A hook for my stroller handle…") })
+            Text("Describe it, scan it, or both. Your computer can look up published sizes, like a phone or a mic. Paste a MakerWorld or Printables link to print a published model.",
+                color = Palette.secondary, fontSize = 13.sp)
+            if (link != null) GlassCard(Modifier.fillMaxWidth()) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) { Icon(CIcons.Link, null, tint = Palette.filament); Text("  " + (Uri.parse(link).host ?: "Published model"), fontWeight = FontWeight.SemiBold) }
+                    Text("Your computer will get the designer’s file and keep its credit.", color = Palette.secondary, fontSize = 13.sp)
+                }
+            }
+            Text("Show it", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SourceTile(CIcons.Cube, "Scan it", "Walk around it. First version.", Palette.filament, Modifier.weight(1f), enabled = working == null && link == null) {
+                    run("scan") { val d = draft(); scan(d.id) }
+                }
+                SourceTile(CIcons.Camera, "Take photos", if (photos.size < 24) "A few angles is plenty." else "24 photos is the most.", Color(0xFFBF5AF2), Modifier.weight(1f),
+                    enabled = working == null && photos.size < 24) {
+                    val (file, uri) = Media.newPhotoTarget(context); pendingCamera = file; takePhoto.launch(uri)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SourceTile(CIcons.Photo, "From Photos", "Pick what you have.", Palette.okGreen, Modifier.weight(1f), enabled = working == null && photos.size < 24) {
+                    pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+                Spacer(Modifier.weight(1f))
+            }
+            // The scan sits beside its question (above); Added is what else you attach.
+            if (photos.isNotEmpty()) {
+                Text("Added", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    photos.toList().forEach { f ->
+                        Box {
+                            val bmp = remember(f) { ImageCache.decode(f, 300) }
+                            if (bmp != null) androidx.compose.foundation.Image(bmp, null, Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                            Icon(CIcons.Close, "Remove", Modifier.align(Alignment.TopEnd).size(22.dp).clip(RoundedCornerShape(11.dp)).background(Color.Black.copy(alpha = 0.6f))
+                                .clickable(enabled = working == null) { photos.remove(f); f.delete() }.padding(3.dp))
+                        }
+                    }
+                }
+            }
             problem?.let { Text(it, color = Palette.failed) }
         }
         val missing = when {
@@ -248,15 +266,22 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
             !scanned && text.isBlank() -> "Describe what to make, or add a scan."
             else -> null
         }
+        // After a scan the button is greyed out and says what to do until a use is chosen, then names that use's
+        // action: an instruction never looks like the action (U5).
+        val describeFirst = scanned && scanUse == "fit" && text.isBlank()
         val sendLabel = when {
             working == "make" -> if (scanUse == "later") "Saving…" else "Sending…"
-            scanned && scanUse == null -> "Choose what to make"
-            scanned && scanUse == "copy" -> "Send copy to ${macName ?: "your computer"}"
-            scanned && scanUse == "later" -> "Save scan for later"
+            scanned && scanUse == null -> "Choose what this scan becomes"
+            scanned && scanUse == "copy" -> "Copy this object"
+            describeFirst -> "Continue"
+            scanned && scanUse == "later" -> "Save this scan"
             else -> "Send to ${macName ?: "your computer"}"
         }
+        // Upload only when it sends: not while it asks for a choice or words, and not for saving.
+        val sendIcon = if (scanned && (scanUse == null || scanUse == "later" || describeFirst)) null else CIcons.Upload
         PrimaryButton(sendLabel, Modifier.fillMaxWidth().padding(20.dp, 8.dp).testTag("send"),
-            enabled = working == null, icon = CIcons.Upload) {
+            enabled = working == null && !(scanned && scanUse == null), icon = sendIcon) {
+            if (describeFirst) { describeFocus.requestFocus(); return@PrimaryButton }
             if (missing != null) { problem = missing; return@PrimaryButton }
             if (scanned && scanUse == "later") { close(); return@PrimaryButton }
             run("make") {

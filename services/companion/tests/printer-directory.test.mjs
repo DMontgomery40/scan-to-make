@@ -189,3 +189,23 @@ test('concurrent fresh camera requests share one snapshot, while a later fresh r
   assert.equal(snapshots, 2);
   camera.close();
 });
+
+test('a printer nobody named is listed by the model its MCP reports, never a bare brand; a name someone gave stays (first look U9)', async () => {
+  const unnamed = {defaultDestinationId: 'current', destinations: [{id: 'current', name: 'Printer at 192.0.2.1', address: '192.0.2.1', backend: 'bambu-printer-mcp', source: 'current', origin: 'printer-handoff'}],
+    resolve: () => undefined, canonical: id => id === 'current' ? 'current' : undefined};
+  const d = destination({tools: [...CONTRACT], status: () => progress('idle')});
+  const directory = new PrinterDirectory(unnamed, id => id === 'current' ? d.session : undefined, {now: () => 1_000_000});
+  d.set(directory);
+  assert.equal(directory.list().destinations[0].name, 'Printer at 192.0.2.1', 'before its MCP answers: where it is');
+  await directory.refresh('current');
+  await until(() => directory.capabilities('current')?.contract);
+  assert.equal(directory.list().destinations[0].name, 'Bambu Lab P1S', 'then the model its MCP reports');
+
+  const named = {...unnamed, destinations: [{...unnamed.destinations[0], name: 'Garage printer'}]};
+  const e = destination({tools: [...CONTRACT], status: () => progress('idle')});
+  const kept = new PrinterDirectory(named, id => id === 'current' ? e.session : undefined, {now: () => 1_000_000});
+  e.set(kept);
+  await kept.refresh('current');
+  await until(() => kept.capabilities('current')?.contract);
+  assert.equal(kept.list().destinations[0].name, 'Garage printer');
+});

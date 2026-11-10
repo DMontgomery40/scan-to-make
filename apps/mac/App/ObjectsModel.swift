@@ -304,6 +304,12 @@ struct SocketObjects: ObjectsCompanion {
         return (shown, objects.count - shown.reduce(0) { $0 + $1.objects.count }, starters)
     }
 
+    /// Why a search found a project whose title doesn't say (first look U10): read from the same values `groups(matching:)`
+    /// searches, so every result that needs a reason has one.
+    func searchReason(_ object: Project, query: String) -> SearchSnippet? {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : object.searchSnippet(query, additional: [printer(for: object)?.name ?? ""])
+    }
+
     /// The phone people know, for the footer: the most recently seen paired device, one row per name.
     /// The phone heard from most recently; a pairing from before stable identity is never the one shown.
     var latestDevice: ControlDevice? { devices.filter { $0.legacy != true }.max { ($0.lastSeenAt ?? $0.pairedAt) < ($1.lastSeenAt ?? $1.pairedAt) } }
