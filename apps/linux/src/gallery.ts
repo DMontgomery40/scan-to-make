@@ -60,8 +60,9 @@ export function printableParts(p: Project): PrintablePart[] {
   const label = p.kind === "copy" ? "Your copy" : p.kind === "published" ? "Model" : "Your part";
   if (current.model.toLowerCase().endsWith(".3mf")) {
     // The computer's drawing of all the file's objects first, as on the other clients (Nov 10).
-    const render = p.pictures?.part ?? (current.renders[0] ? renderPath(current.renders[0]) : plates[0]?.thumbnail);
-    return render ? [{ id: "result", label, drawing: { picture: render }, colour: "own", sizeMm: current.sizeMm }] : [];
+    // Always an entry (review B2 on #539): with no picture yet ("") the stage says it is coming or that it can't be had.
+    const render = p.pictures?.part ?? (current.renders[0] ? renderPath(current.renders[0]) : plates[0]?.thumbnail) ?? "";
+    return [{ id: "result", label, drawing: { picture: render }, colour: "own", sizeMm: current.sizeMm }];
   }
   return [{ id: "result", label, drawing: { model: "model.stl" }, colour: spoolColour(p) ?? "neutral", sizeMm: current.sizeMm }];
 }
@@ -114,12 +115,25 @@ export function photoPicture(p: Project): string | undefined {
   return p.pictures?.photo;
 }
 
-/** The computer's picture of one entry, for the still view. */
+/** The computer's picture of one entry, for the still view. Undefined when there is none yet (`still` says whether one is coming). */
 export function pictureFor(p: Project, entry: GalleryEntry): string | undefined {
   if ("picture" in entry.drawing) return entry.drawing.picture || undefined;
   if (entry.kind === "part") return p.pictures?.part ?? (p.current?.renders[0] ? renderPath(p.current.renders[0]) : undefined);
   if (entry.kind === "together") return p.pictures?.together;
   return p.pictures?.scan ?? p.pictures?.photo;
+}
+
+/**
+ * What the stage shows for an entry while no model is drawn (CounterpartKit `Project.still(for:)`): its own picture, or
+ * "waiting" (one is coming), or "not available" (the computer's drawing failed, or a plate came without its picture). A
+ * picture of something else never stands in for it.
+ */
+export type Still = { picture: string } | "waiting" | "not available";
+export function still(p: Project, entry: GalleryEntry): Still {
+  const picture = pictureFor(p, entry);
+  if (picture) return { picture };
+  if (entry.kind === "plate") return "not available";
+  return p.pictureStates?.[entry.kind === "together" ? "together" : entry.kind === "scan" ? "scan" : "part"] === "failed" ? "not available" : "waiting";
 }
 
 /** A companion path as a file in the project's folder: renders by name, the model at its own path. */

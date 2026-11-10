@@ -167,6 +167,8 @@ data class Project(
     val picture: String? get() = raw["picture"].str
     /** Each gallery picture the computer drew: `part`, `scan`, `together`, `photo`. */
     val pictures: Map<String, String> get() = raw["pictures"].obj?.mapNotNull { (key, value) -> value.str?.let { key to it } }?.toMap() ?: emptyMap()
+    /** A picture the computer has not drawn, by role: `drawing`, or `failed` (none is coming until what it shows changes). */
+    val pictureStates: Map<String, String> get() = raw["pictureStates"].obj?.mapNotNull { (key, value) -> value.str?.let { key to it } }?.toMap() ?: emptyMap()
 }
 
 /** The latest normalized printer report for a print (`PrintLive`). */

@@ -183,6 +183,8 @@ export interface Project {
   /** The project's picture (PRD §5.1): the object alone on the stage, drawn by the computer. */
   picture?: string;
   pictures?: { part?: string; scan?: string; together?: string; photo?: string };
+  /** A picture the computer has not drawn, by role: drawing now, or failed (none is coming until what it shows changes). */
+  pictureStates?: { part?: "drawing" | "failed"; scan?: "drawing" | "failed"; together?: "drawing" | "failed"; photo?: "drawing" | "failed" };
   files?: { original: string[] };
   plates?: Plate[];
   ask?: Ask;
