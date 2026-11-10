@@ -649,9 +649,10 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 20))
         field.tap()
         field.typeText("bigger")
-        let reason = app.descendants(matching: .any).matching(identifier: "search-reason").firstMatch
+        // Found by its words: a List cell may read its row and reason as one element.
+        let reason = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Copy this clip, 20% bigger.")).firstMatch
         XCTAssertTrue(reason.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(reason.label.contains("Copy this clip, 20% bigger."), reason.label)
+        XCTAssertTrue(reason.isHittable, "the reason is on screen")
     }
 
     /// David, Nov 9: "I SCANNED A PINK UNICORN TOO BUT THE APP IS TOO GLITCHY I DON'T EVEN KNOW WHERE IT IS". A scan
@@ -942,9 +943,10 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertTrue(project.waitForExistence(timeout: 5))
             project.tap()
             XCTAssertTrue(app.buttons["starter-scan-platform"].waitForNonExistence(timeout: 10), "the project replaced the start pane")
+            // The sidebar scrolls under New's bar (U11): both rows can be reached, the last one above the bar.
             let row = app.buttons["sidebar-starter-scan-platform"]
+            reveal(app.buttons["sidebar-starter-long-vernier-caliper"], in: projectList(app))
             reveal(row, in: projectList(app))
-            XCTAssertTrue(app.buttons["sidebar-starter-long-vernier-caliper"].exists)
             opensStarter(row, app)
         } else {
             let card = app.buttons["starter-scan-platform"]

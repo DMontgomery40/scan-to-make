@@ -246,9 +246,9 @@ struct SidebarList: View {
                 Section(isExpanded: Binding(get: { showArchived || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }, set: { showArchived = $0 })) {
                     ForEach(archived) { project in
                         SidebarRow(store: store, project: project)
+                            .accessibilityIdentifier("sidebar-project-\(project.id)")
                             .searchReason(reason(project), indent: 56)
                             .tag(project.id)
-                            .accessibilityIdentifier("sidebar-project-\(project.id)")
                             .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : nil)
                             .contextMenu {
                                 Button("Unarchive", systemImage: "tray.and.arrow.up") {
@@ -315,9 +315,10 @@ struct SidebarList: View {
             Section(title) {
                 ForEach(projects) { project in
                     SidebarRow(store: store, project: project)
+                        // The row's identifier first: on the whole cell it would replace the reason's own.
+                        .accessibilityIdentifier("sidebar-project-\(project.id)")
                         .searchReason(reason(project), indent: 56)
                         .tag(project.id)
-                        .accessibilityIdentifier("sidebar-project-\(project.id)")
                         .listRowBackground(selection == project.id ? Color.filament.opacity(0.32) : nil)
                         .contextMenu { DeleteProjectButton(store: store, project: project) }
                 }
