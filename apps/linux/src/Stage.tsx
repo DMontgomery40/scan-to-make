@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { artifact } from "./bridge";
 import type { Project } from "./types";
-import { canLocate, filePath, gallery, lightStage, pictureFor, sizeText } from "./gallery";
+import { canLocate, filePath, gallery, lightStage, photoPicture, pictureFor, sizeText } from "./gallery";
 export function Picture({
   id,
   path,
@@ -273,7 +273,8 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
   const drawn = entry ? pictureFor(project, entry) : undefined;
   // The pass's own views stay one click away on the part while the computer hasn't drawn its picture.
   const showRenders = entry?.kind === "part" && !project.pictures?.part && renders.length > 1;
-  const path = showRenders ? renders[renderIndex] ?? renders[0] : drawn ? filePath(project, drawn) : project.credit?.thumbnail;
+  // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card.
+  const path = showRenders ? renders[renderIndex] ?? renders[0] : drawn ? filePath(project, drawn) : project.credit?.thumbnail ?? photoPicture(project);
   useEffect(() => {
     setMode("still");
     setBytes(undefined);

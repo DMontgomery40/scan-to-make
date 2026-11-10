@@ -16,6 +16,7 @@ final class ProjectGalleryTests: XCTestCase {
             let expected = item["entries"] as! [[String: Any]]
             let gallery = ProjectGallery(project: project)
             XCTAssertEqual(gallery.entries.map(\.id), expected.map { $0["id"] as! String }, name)
+            if let photo = item["photoPicture"] as? String { XCTAssertEqual(project.photoPicture, photo, name) }
             for (entry, want) in zip(gallery.entries, expected) {
                 XCTAssertEqual(entry.kind.rawValue, want["kind"] as? String, name)
                 XCTAssertEqual(entry.label, want["label"] as? String, name)
@@ -82,6 +83,28 @@ final class ProjectGalleryTests: XCTestCase {
         XCTAssertFalse(StageContrast.lightStage(hex: "#FEC600"))
         XCTAssertFalse(StageContrast.lightStage(for: .neutral))
         XCTAssertFalse(StageContrast.lightStage(for: .own), "a scan's own colours stay on the dark stage")
+    }
+
+    /// Review of #451, finding 5: a locate pass changes no file, so the phone doesn't download the model and scan again.
+    func testALocatePassNeverRollsTheMediaVersionOver() {
+        let made = project(["state": "ready", "kind": "fit", "passes": [["startedAtMs": 10, "endedAtMs": 20, "status": "done", "trigger": "new"],
+                                                                         ["startedAtMs": 30, "endedAtMs": 40, "status": "done", "trigger": "locate"]]])
+        XCTAssertEqual(made.mediaVersion, 20)
+    }
+
+    /// Finding 8: the same colour written two ways is one spool, as on Android and Linux.
+    func testOneColourWrittenTwoWaysIsOneSpool() {
+        let p = project(["state": "printed", "kind": "fit", "current": ["model": "current/model.stl", "renders": []],
+                         "print": ["bundleId": "b", "spools": [["index": 1, "colour": "#fec600"], ["index": 2, "colour": "FEC600"]]]])
+        XCTAssertEqual(p.spoolColour, "#FEC600")
+    }
+
+    /// Finding 7: a project with only photos shows the subject the Mac cut out, on its page as on its card.
+    func testAPhotoOnlyProjectHasThePhotoPicture() {
+        let p = project(["state": "new", "kind": "fit", "photos": ["clip.jpg"], "picture": "pictures/photo-1.png", "pictures": ["photo": "pictures/photo-1.png"]])
+        XCTAssertTrue(ProjectGallery(project: p).entries.isEmpty)
+        XCTAssertEqual(p.photoPicture, "pictures/photo-1.png")
+        XCTAssertEqual(p.picturePath, "pictures/photo-1.png")
     }
 
     func testASeatIsTheTransformTheFitCheckTakes() {

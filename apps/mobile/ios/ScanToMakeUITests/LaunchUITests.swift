@@ -751,6 +751,14 @@ final class LayoutParityUITests: XCTestCase {
         last.tap()
         let chosen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: last)
         XCTAssertEqual(XCTWaiter().wait(for: [chosen], timeout: 5), .completed, "the last plate's picture is shown")
+        plates.terminate()
+
+        // Photos sent and no model yet: the page shows the subject the Mac cut out of the photo, not a bare symbol.
+        let photos = XCUIApplication()
+        photos.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "photo-only",
+                                  "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        photos.launch()
+        XCTAssertTrue(photos.images["gallery-photo-picture"].waitForExistence(timeout: 20), "a photo-only project shows its photo's subject")
     }
 
     func testEveryPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() throws {

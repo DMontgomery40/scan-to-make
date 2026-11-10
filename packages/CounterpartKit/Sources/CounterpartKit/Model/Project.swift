@@ -204,7 +204,8 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// Progress updates do not change saved media. A finished pass can replace the model and renders at the
     /// same paths, so their cached copies expire only when a pass finishes.
-    public var mediaVersion: Double { passes.last(where: { $0.endedAtMs != nil })?.endedAtMs ?? createdAtMs }
+    /// A locate pass changes no file (docs/protocols/seats.md), so it never rolls the version over.
+    public var mediaVersion: Double { passes.last(where: { $0.endedAtMs != nil && $0.trigger != "locate" })?.endedAtMs ?? createdAtMs }
 
     /// The pass in progress, if the Mac is working.
     public var runningPass: Pass? { state == .touchingUp ? passes.last(where: { $0.endedAtMs == nil }) : nil }

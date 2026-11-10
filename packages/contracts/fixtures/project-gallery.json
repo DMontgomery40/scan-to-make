@@ -1,5 +1,5 @@
 {
- "about": "ProjectGallery (PRD §5.4 Pictures): the pictures at the top of a project page, derived from its data. CounterpartKit ProjectGallery.swift, Android ProjectGallery.kt and Linux gallery.ts each read every case. drawing.assembly.seats is the seat count; colour is neutral, own, or the spool's #RRGGBB.",
+ "about": "ProjectGallery (PRD §5.4 Pictures): the pictures at the top of a project page, derived from its data. CounterpartKit ProjectGallery.swift, Android ProjectGallery.kt and Linux gallery.ts each read every case. drawing.assembly.seats is the seat count; colour is neutral, own, or the spool's #RRGGBB. photoPicture, when present, is the page's picture while the gallery is empty (photos sent, no model yet): the subject the computer cut out of the first photo.",
  "cases": [
   {
    "name": "a fit with a scan, its seats and a black spool: the part, together, what you scanned",
@@ -662,6 +662,137 @@
      ]
     }
    ]
+  },
+  {
+   "name": "a fit with seats on a handheld STL scan offers no Together: its frame isn't the one the stages draw (USDZ only, for now)",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printed",
+    "kind": "fit",
+    "scan": "scan.stl",
+    "capture": [
+     "0001.heic",
+     "0002.heic"
+    ],
+    "current": {
+     "model": "current/model.stl",
+     "renders": [
+      "current/renders/1_overview.png"
+     ],
+     "sizeMm": [
+      213,
+      43,
+      82
+     ],
+     "seats": [
+      {
+       "name": "left",
+       "rotationDeg": [
+        0,
+        0,
+        0
+       ],
+       "translationMm": [
+        38,
+        22,
+        4
+       ]
+      },
+      {
+       "name": "middle",
+       "rotationDeg": [
+        0,
+        0,
+        0
+       ],
+       "translationMm": [
+        106.5,
+        22,
+        4
+       ]
+      },
+      {
+       "name": "right",
+       "rotationDeg": [
+        0,
+        0,
+        0
+       ],
+       "translationMm": [
+        175,
+        22,
+        4
+       ]
+      }
+     ]
+    },
+    "print": {
+     "bundleId": "b",
+     "spools": [
+      {
+       "colour": "#000000",
+       "material": "PLA",
+       "name": "Black PLA Basic"
+      }
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "model": "model.stl"
+     },
+     "colour": "#000000",
+     "measures": "Part",
+     "sizeMm": [
+      213,
+      43,
+      82
+     ]
+    },
+    {
+     "id": "scan-0",
+     "kind": "scan",
+     "label": "What you scanned",
+     "drawing": {
+      "model": "scan/scan.stl"
+     },
+     "colour": "own",
+     "measures": "Scan",
+     "photos": [
+      "capture/0001.heic",
+      "capture/0002.heic"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "photos sent and no model yet: no entries, and the page shows the subject the computer cut out of the photo",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [
+     "0001.jpg",
+     "0002.jpg"
+    ],
+    "passes": [],
+    "state": "touching-up",
+    "kind": "fit",
+    "picture": "pictures/photo-k1.png",
+    "pictures": {
+     "photo": "pictures/photo-k1.png"
+    }
+   },
+   "entries": [],
+   "photoPicture": "pictures/photo-k1.png"
   }
  ]
 }

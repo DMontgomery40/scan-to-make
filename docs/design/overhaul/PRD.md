@@ -571,6 +571,13 @@ What a person can see and reach, checked in code on `main` Nov 5 (after this PR:
 | Print identity (mark, project picture and words), §9.4 | Counterpart mark + cached project picture (§5.1) on Lock Screen and Dynamic Island; mark while artwork refreshes. An ended activity opens the project | same Lock Screen activity and project link | iPhone-mirrored Live Activity uses the same views; native Mac status item keeps its cube and native print notifications use the app icon and camera frame | Counterpart mark on ongoing and milestone notifications; ongoing print shows the cached project picture (§5.1), refreshes separately, and opens the project (`HomeLayoutTests`) | No print notifications or tray item; print identity is the project picture and words in Printing |
 | Progress milestones while a print's Live Activity runs (§9.1, David, Nov 8: an alert on the activity, not a separate notification) | † an alert on the Live Activity through the Mac's relay; a notification when no activity can carry it | † the same on the iPad | The Mac chooses delivery for every paired phone/tablet together (`EventRelayTests`); its own progress notifications stay off by default | unchanged: no Live Activity, so milestones stay notifications | no print notifications |
 
+On every layout, Together (and See it together) is offered only for a scan in USDZ: the seats are in that scan's frame
+(`scan.usdz` world ×1000, Y-up → Z-up), the frame every stage draws. A handheld STL or another mesh has a frame of its
+own, so a fit on one shows the part and What you scanned but no Together until a pass records which frame its seats use
+(the shared case "a fit with seats on a handheld STL scan" in `project-gallery.json`). With photos sent and no model yet,
+the page shows the subject the computer cut out of the first photo (`photoPicture`, the shared photo-only case; iPhone
+and iPad in the same UI test).
+
 **Add printer on the phones** (David, 2026-11-06: "adding a printer is filling out a form that hsould be mostly autofilled by discovery"). The iPhone, iPad and Android call the companion's own `printers.discover`, `.check`, `.obtain` and `.add` over `/v1/printers/setup/*` (objects-api.md), so the MCPs still find the printers and declare the fields, and their `.env` files stay on the computer. A found printer opens filled in; the person types only what discovery can't know, such as the access code or API key, or approves it in the printer's own page when the MCP offers that.
 
 **Public site** (`site/public`): Help is in every page's nav. The scan rig is in help.html and index.html; the starters are listed only on beta.html.

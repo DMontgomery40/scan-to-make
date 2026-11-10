@@ -194,7 +194,10 @@ struct ProjectDetail: View {
             case .picture(let path):
                 still(object.projectFile(path))
             }
-        } else { still(nil) }
+        } else {
+            // Photos sent, no scan model or result yet: the subject this Mac cut out, as the sidebar shows it.
+            still(object.photoPicture.flatMap(object.projectFile))
+        }
     }
 
     private func still(_ url: URL?) -> some View {

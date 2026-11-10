@@ -76,7 +76,8 @@ export function gallery(p: Project, parts: PrintablePart[] = printableParts(p)):
   }));
   const scans = scanModels(p);
   const seats = p.current?.seats ?? [];
-  if (parts.length === 1 && "model" in parts[0]!.drawing && seats.length && scans.length)
+  // Only where it is drawn right today: a USDZ scan. A handheld STL scan gets no Together until the project carries its frame.
+  if (parts.length === 1 && "model" in parts[0]!.drawing && seats.length && scans.length && scans[0]!.toLowerCase().endsWith(".usdz"))
     entries.push({ id: "together", kind: "together", label: "Together", drawing: { assembly: { part: parts[0]!.drawing.model, object: scans[0]!, seats } },
       colour: parts[0]!.colour, measures: "Together" });
   const photos = p.photos.length ? p.photos.map((name) => `photos/${name}`) : (p.capture ?? []).map((name) => `capture/${name}`);
@@ -105,6 +106,11 @@ export function sizeText(entry: GalleryEntry): string | undefined {
 export function picturePath(p: Project): string | undefined {
   const plate = p.plates?.find((item) => item.selected)?.thumbnail ?? p.plates?.[0]?.thumbnail;
   return p.picture ?? plate ?? (p.current?.renders[0] ? renderPath(p.current.renders[0]) : undefined) ?? p.credit?.thumbnail;
+}
+
+/** The page's picture while the gallery is empty (photos sent, no model yet): the subject the computer cut out of the photo. */
+export function photoPicture(p: Project): string | undefined {
+  return p.pictures?.photo;
 }
 
 /** The computer's picture of one entry, for the still view. */

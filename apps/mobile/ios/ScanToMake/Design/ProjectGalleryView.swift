@@ -63,6 +63,16 @@ struct ProjectGalleryView: View {
                     ProjectImage(project: project, path: path.isEmpty ? nil : path, maxPixelSize: 1200, contentMode: .fit)
                 }
             }
+        } else if let photo = project.photoPicture {
+            // Photos sent, no scan model or result yet: the subject the Mac cut out, as the project's card shows it.
+            ZStack {
+                StageBackground()
+                ProjectImage(project: project, path: photo, maxPixelSize: 1200, contentMode: .fit)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Your photo")
+            .accessibilityAddTraits(.isImage)
+            .accessibilityIdentifier("gallery-photo-picture")
         } else {
             ZStack {
                 StageBackground()

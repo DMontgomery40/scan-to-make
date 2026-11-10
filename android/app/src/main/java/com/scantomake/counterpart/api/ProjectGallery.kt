@@ -42,7 +42,8 @@ data class ProjectGallery(val entries: List<Entry>) {
             val scans = scanModels(project, scanOnThisDevice)
             val part = parts.singleOrNull()
             val seats = project.current?.seats.orEmpty()
-            if (part != null && part.drawing is Drawing.Model && seats.isNotEmpty() && scans.isNotEmpty())
+            // Only where it is drawn right today: a USDZ scan. A handheld STL scan gets no Together until the project carries its frame.
+            if (part != null && part.drawing is Drawing.Model && seats.isNotEmpty() && scans.isNotEmpty() && scans[0].lowercase(Locale.ROOT).endsWith(".usdz"))
                 entries += Entry("together", Kind.Together, "Together", Drawing.Assembly(part.drawing.path, scans[0], seats), part.colour, "Together")
             scans.forEachIndexed { index, scan ->
                 entries += Entry("scan-$index", Kind.Scan, if (scans.size > 1) "Scan ${index + 1}" else "What you scanned", Drawing.Model(scan), Colour.Own, "Scan",
@@ -112,6 +113,9 @@ data class PrintablePart(
  */
 fun Project.picturePath(): String? = picture ?: selectedPlate?.thumbnail ?: plates?.firstOrNull()?.thumbnail
     ?: current?.renders?.firstOrNull()?.let(ProjectGallery::renderPath)
+
+/** The page's picture while the gallery is empty (photos sent, no model yet): the subject the computer cut out of the photo. */
+fun Project.photoPicture(): String? = pictures["photo"]
 
 /** The computer's picture of one gallery entry. */
 fun Project.pictureFor(entry: ProjectGallery.Entry): String? = when (entry.kind) {
