@@ -79,19 +79,32 @@ struct NewObjectView: View {
     }
     private var canSend: Bool { missing == nil }
 
-    /// The one bottom action, in the words for what it will do now.
+    /// The one bottom action, in the words for what it will do now. After a scan it is greyed out and says what to
+    /// do until a use is chosen, then names that use's action: an instruction never looks like the action (U5).
     private var sendLabel: String {
         if working == "make" { return scanUse == .later ? "Saving…" : "Sending…" }
         if attached != nil {
             switch scanUse {
-            case .copy: return "Send copy to \(store.macName ?? "your Mac")"
-            case .fit: return "Send to \(store.macName ?? "your Mac")"
-            case .later: return "Save scan for later"
-            case nil: return "Choose what to make"
+            case .copy: return "Copy this object"
+            // A fit needs words first: Continue takes you to them, then Send.
+            case .fit: return described ? "Send to \(store.macName ?? "your Mac")" : "Continue"
+            case .later: return "Save this scan"
+            case nil: return "Choose what this scan becomes"
             }
         }
         return "Send to \(store.macName ?? "your Mac")"
     }
+    private var sendSymbol: String? {
+        guard attached != nil else { return "arrow.up" }
+        switch scanUse {
+        case .copy: return "doc.on.doc"
+        case .fit: return described ? "arrow.up" : nil
+        case .later: return "tray.and.arrow.down"
+        case nil: return nil
+        }
+    }
+    /// Greyed out after a scan until its use is chosen.
+    private var awaitingUse: Bool { attached != nil && scanUse == nil }
 
     /// A job card's choice, kept as the starting answer but still changeable after the scan.
     private func useJobDefault() {
@@ -122,6 +135,8 @@ struct NewObjectView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    // After a scan the sheet opens on its question, first and whole (U5): nothing half-hidden above it.
+                    if attached != nil { scanUseSection }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("What do you need?").font(.headline)
                         TextField(job == .copy ? "Copy this. Close up the bottom." : "A hook for my stroller handle…", text: $instructions, axis: .vertical)
@@ -130,6 +145,7 @@ struct NewObjectView: View {
                             .padding(14)
                             .glassEffect(.regular, in: .rect(cornerRadius: 20))
                             .accessibilityIdentifier("describe")
+                            .id("describe")
                         Text(askedForDescription ? missing ?? Self.hint : Self.hint)
                             .font(.footnote).foregroundStyle(askedForDescription && !canSend ? .red : .secondary)
                     }
@@ -172,7 +188,6 @@ struct NewObjectView: View {
                             }
                         }
                     }
-                    if attached != nil { scanUseSection }
                     if let captureWarning {
                         Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange)
                     }
@@ -184,8 +199,14 @@ struct NewObjectView: View {
                 .frame(maxWidth: 640)
                 .frame(maxWidth: .infinity)
             }
+            // A scan arrives after the sheet opens (a saved draft resolves, or a capture returns while the Scan tile is
+            // in view): back to the top, where its question now is.
             .onChange(of: attached) { _, now in
                 if now != nil { withAnimation { proxy.scrollTo("scan-use", anchor: .top) } }
+            }
+            // Continue on a fit takes you to the words it still needs.
+            .onChange(of: describing) { _, now in
+                if now, attached != nil { withAnimation { proxy.scrollTo("describe", anchor: .center) } }
             }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -197,11 +218,13 @@ struct NewObjectView: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button { Task { await make() } } label: {
-                    Label(sendLabel, systemImage: scanUse == .later && attached != nil ? "tray.and.arrow.down" : "arrow.up")
-                        .fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 40)
+                    Group {
+                        if let sendSymbol { Label(sendLabel, systemImage: sendSymbol) } else { Text(sendLabel) }
+                    }
+                    .fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 40)
                 }
                 .buttonStyle(.glassProminent).controlSize(.large).padding(.horizontal, 20)
-                .disabled(working != nil)
+                .disabled(working != nil || awaitingUse)
                 .accessibilityIdentifier("send")
                 .frame(maxWidth: 640)
             }
@@ -216,6 +239,10 @@ struct NewObjectView: View {
             useJobDefault()
             _ = try? await savedDraft()
             if let created, attached == nil { attached = await savedCapture(created.id) }
+            #if DEBUG
+            // `-CounterpartNewScan walk-around` (scripts/ux_screens.py): New as it looks after a scan, which a simulator can't take.
+            if attached == nil, UserDefaults.standard.string(forKey: "CounterpartNewScan") == "walk-around" { attached = .walkAround }
+            #endif
             store.refreshStoppedScans()
         }
     }
@@ -227,6 +254,7 @@ struct NewObjectView: View {
     @ViewBuilder private var scanUseSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("What should this scan become?").font(.headline)
+                .accessibilityAddTraits(.isHeader).accessibilityIdentifier("scan-use-question")
             ScanUseRow(symbol: "doc.on.doc", title: "Copy this object",
                        detail: "Clean up the scan and print the same thing.",
                        selected: scanUse == .copy, identifier: "scan-use-copy") { scanUse = .copy }
@@ -242,8 +270,8 @@ struct NewObjectView: View {
                     .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
+        // No identifier on the whole block: it would replace each answer's own (ux_screens' taps missed them).
         .id("scan-use")
-        .accessibilityIdentifier("scan-use")
     }
 
     /// How the fit's exact size is settled, chosen before the scan is sent.

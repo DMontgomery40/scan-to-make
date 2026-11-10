@@ -55,6 +55,9 @@ struct WelcomeView: View {
                     .frame(maxWidth: .infinity, minHeight: g.size.height, alignment: .center)
                 }
                 .scrollBounceBehavior(.basedOnSize)
+                // Nothing legible behind Continue (first look U14): a card that runs under the bar is cut at its edge by
+                // the system's nearly opaque edge, not shown through the button.
+                .scrollEdgeEffectStyle(.hard, for: .bottom)
                 // The content is forced to the full height above, so give the scroll content its own
                 // bottom margin: the last card scrolls clear of Continue in the safeAreaBar (F16).
                 .contentMargins(.bottom, 72, for: .scrollContent)

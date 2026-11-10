@@ -840,6 +840,23 @@ private func project(_ item: [String: Any]) throws -> Project {
         }
     }
 
+    /// First look U10 (Nov 10): "holder" listed projects with nothing to show why. Every result whose title lacks the word
+    /// carries the line it matched in, with projects present; one whose title has it carries none.
+    func testEverySearchResultWhoseTitleLacksTheWordSaysWhereItMatched() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("h", "ready", ["title": "AirPods Max desk hanger", "instructions": "The main holder hooks over the desk edge."]),
+                             item("w", "ready", ["title": "Wall holder for three"]), item("s", "ready", ["title": "Stove gap filler"])])
+        await companion.setCapabilities(.init(objectsCreate: true, projectSettings: true))
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let found = model.groups(matching: "holder").groups.flatMap(\.objects)
+        XCTAssertEqual(Set(found.map(\.id)), ["h", "w"])
+        let hanger = try XCTUnwrap(found.first { $0.id == "h" })
+        XCTAssertEqual(model.searchReason(hanger, query: "holder")?.text, "The main holder hooks over the desk edge.")
+        XCTAssertNil(model.searchReason(try XCTUnwrap(found.first { $0.id == "w" }), query: "holder"), "the title says it")
+        XCTAssertNil(model.searchReason(hanger, query: " "))
+    }
+
     /// David, Nov 5: "where did the 'start with these things' thing go, to print the 3d scan rig and the calipers?"
     /// The Mac showed the starters only with no project selected, and it selects the first project on launch.
     func testTheSidebarListsTheStartersWhileProjectsExist() async {

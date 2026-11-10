@@ -783,10 +783,12 @@ struct ProjectView: View {
 
 // MARK: Sections
 
-/// What changed, and the print's time, filament and printer.
+/// What changed, and the print's time, filament and printer. No card says nothing (first look U9): before slicing
+/// there are no numbers, so the printer's row says when they come; with no printer, it says so and offers one.
 struct ResultSection: View {
     let store: ProjectsStore
     let project: Project
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -810,15 +812,53 @@ struct ResultSection: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             if project.current != nil {
-                HStack(spacing: 12) {
-                    InfoTile(title: "Print time", value: Format.duration(project.print?.estimate?.seconds) ?? "—", symbol: "clock")
-                    InfoTile(title: "Filament", value: Format.grams(project.print?.estimate?.grams) ?? "—", symbol: "scalemass")
-                    InfoTile(title: "Printer", value: store.printerName(project) ?? "—", symbol: "printer")
-                }
-                if project.print?.estimate == nil {
-                    Text("Time and filament come from slicing on your Mac when you print.").font(.caption).foregroundStyle(.secondary)
+                let time = Format.duration(project.print?.estimate?.seconds), grams = Format.grams(project.print?.estimate?.grams)
+                let printer = store.printerName(project)
+                if time != nil || grams != nil {
+                    HStack(spacing: 12) {
+                        if let time { InfoTile(title: "Print time", value: time, symbol: "clock") }
+                        if let grams { InfoTile(title: "Filament", value: grams, symbol: "scalemass") }
+                        if let printer { InfoTile(title: "Printer", value: printer, symbol: "printer") }
+                    }
+                    if printer == nil { noPrinter }
+                } else if let printer {
+                    printerRow(printer)
+                } else {
+                    noPrinter
                 }
             }
+        }
+    }
+
+    /// Before it's sliced: the printer it goes to, and when the numbers come. One row, nothing empty.
+    private func printerRow(_ name: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.headline)
+                Text("Print time and filament show here once it’s sliced for printing.")
+                    .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color.card, in: .rect(cornerRadius: 20))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("result-printer")
+    }
+
+    /// No printer to print on: say so, with the way to choose one. Nothing while the Mac's printers are still loading.
+    @ViewBuilder private var noPrinter: some View {
+        if store.catalog != nil {
+            HStack(spacing: 12) {
+                Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
+                Text("No printer chosen yet.").font(.headline)
+                Spacer(minLength: 8)
+                Button("Choose a Printer") { app.route = .printers }.buttonStyle(.glass)
+                    .accessibilityIdentifier("result-choose-printer")
+            }
+            .padding(14)
+            .background(Color.card, in: .rect(cornerRadius: 20))
         }
     }
 }

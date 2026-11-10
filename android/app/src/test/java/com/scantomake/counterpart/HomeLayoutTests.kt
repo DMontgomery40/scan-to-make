@@ -6,6 +6,7 @@ import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -32,6 +33,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.isSelected
@@ -295,11 +297,50 @@ class HomeLayoutTests {
         File(capture, "0000.jpg").writeBytes(byteArrayOf(1))
         compose.setContent { WithApp { NewProjectScreen(job = null, close = {}, started = {}, scan = {}) } }
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("scan-use")).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("scan-use-copy").assertExists()
+        // U5: the question is first, above "What do you need?", and its three choices are on screen without scrolling.
+        val question = compose.onNodeWithTag("scan-use").fetchSemanticsNode().boundsInRoot
+        val describe = compose.onNodeWithTag("describe").fetchSemanticsNode().boundsInRoot
+        assertTrue("the question is above the description", question.bottom <= describe.top)
+        for (tag in listOf("scan-use-copy", "scan-use-fit", "scan-use-later")) compose.onNodeWithTag(tag).assertIsDisplayed()
+        // Greyed out, saying what to do, until a use is chosen; then the action for that use.
+        compose.onNodeWithTag("send").assertIsNotEnabled().assertTextContains("Choose what this scan becomes")
+        compose.onNodeWithTag("scan-use-copy").performClick()
+        compose.onNodeWithTag("send").assertIsEnabled().assertTextContains("Copy this object")
         compose.onNodeWithTag("scan-use-fit").performScrollTo().performClick()
+        compose.onNodeWithTag("send").assertIsEnabled().assertTextContains("Continue")
         compose.onNodeWithTag("fit-size-lookup").assertExists()
         compose.onNodeWithTag("fit-caliper-photo").assertExists()
-        compose.onNodeWithTag("scan-use-later").assertExists()
+        compose.onNodeWithTag("scan-use-later").performScrollTo().performClick()
+        compose.onNodeWithTag("send").assertTextContains("Save this scan")
+    }
+
+    /** First look U14 (Nov 10): the second starter was cut off at the margin. Two fit whole on a phone; a third peeks. */
+    @Test fun starterCardsFitWholeOrPeekDeliberately() {
+        assertTrue(com.scantomake.counterpart.ui.starterCardWidth(800.dp, 2) == 256.dp)
+        val phone = com.scantomake.counterpart.ui.starterCardWidth(372.dp, 2)
+        assertTrue("two whole cards on a phone: $phone", phone * 2 + 12.dp <= 372.dp)
+        val three = com.scantomake.counterpart.ui.starterCardWidth(372.dp, 3)
+        val shown = (372.dp - (three + 12.dp) * 2) / three
+        assertTrue("a deliberate peek of the third: $shown", shown > 0.2f && shown < 0.6f)
+    }
+
+    /** First look U10 (Nov 10): "holder" listed projects with no hint why. A result whose title lacks it says where it matched. */
+    @Test fun aSearchResultSaysWhereItMatched() {
+        val hanger = project("h", "AirPods Max desk hanger", "ready").copy(instructions = "The main holder hooks over the desk edge and keeps the cups level while it charges overnight.")
+        val wall = project("w", "Wall holder for three", "ready")
+        assertTrue(com.scantomake.counterpart.ui.searchProjects(listOf(hanger, wall), "holder") { null }.size == 2)
+        val snippet = requireNotNull(com.scantomake.counterpart.ui.searchSnippet(hanger, "holder") { null })
+        assertTrue(snippet.text, snippet.text.contains("main holder hooks"))
+        assertTrue(snippet.text.substring(snippet.start, snippet.end).equals("holder", ignoreCase = true))
+        assertTrue("the title says it", com.scantomake.counterpart.ui.searchSnippet(wall, "holder") { null } == null)
+        // On Home, with projects present.
+        state.projects.value = listOf(hanger, wall)
+        state.loaded.value = true
+        home()
+        compose.onNodeWithContentDescription("Search").performClick()
+        compose.onNodeWithText("Projects, printers, notes").performTextInput("holder")
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("search-reason")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodes(hasTestTag("search-reason")).assertCountEquals(1)
     }
 
     @Test fun theStartersAreOnTheEmptyHomeToo() {

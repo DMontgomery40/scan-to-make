@@ -16,6 +16,7 @@ import {
   guardPlate,
   parseLayers,
   searchProject,
+  searchSnippet,
   projectThumbnail,
   words,
   startersShown,
@@ -649,3 +650,27 @@ test("David's Nov 9 bottle: the question's caption is true for any question, and
   assert.deepEqual(scanSample(3), [0, 1, 2]);
   assert.equal(scanWords(130), "130 photos");
 });
+
+test("a search result whose title lacks the words says where it matched (first look U10)", () => {
+  const hanger = {
+    ...project,
+    title: "AirPods Max desk hanger",
+    messages: [
+      {
+        id: "m",
+        text: "okay the main holder is actually terrible cause the ridge of teh rails holds it too high and it wobbles when I take the headphones off",
+        atMs: 2,
+        photos: [],
+      },
+    ],
+  };
+  assert.equal(searchProject(hanger, "holder"), true);
+  const snippet = searchSnippet(hanger, "holder");
+  assert.ok(snippet);
+  assert.match(snippet.text, /main holder is actually terrible/);
+  assert.ok(snippet.text.length < 120, snippet.text);
+  assert.equal(snippet.text.slice(...snippet.match).toLowerCase(), "holder");
+  assert.equal(searchSnippet(hanger, "desk"), undefined, "the title says it");
+  assert.equal(searchSnippet(hanger, "  "), undefined);
+});
+

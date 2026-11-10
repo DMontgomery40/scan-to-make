@@ -11,4 +11,20 @@ final class StarterProjectTests: XCTestCase {
         XCTAssertTrue(StarterProject.all.allSatisfy { !$0.instructions.isEmpty && !$0.designer.isEmpty })
         XCTAssertNotNil(try XCTUnwrap(StarterProject.all.first { $0.id == "long-vernier-caliper" }).imageFile)
     }
+
+    /// First look U14 (Nov 10): on the iPhone the second starter was cut off at the margin. Cards keep their natural
+    /// width where all fit (the Mac, the iPad), shrink so two fit whole on a phone, and with more than two show a
+    /// deliberate peek of the next.
+    func testStarterCardsFitWholeOrPeekDeliberately() throws {
+        guard #available(iOS 26.0, macOS 26.0, *) else { throw XCTSkip("needs the 26 SDKs") }
+        // Mac and iPad: both at 188 pt.
+        XCTAssertEqual(StarterProjectsView.cardWidth(available: 600, count: 2), 188)
+        // iPhone 17 Pro, 402 pt less 20 pt each side: both whole, side by side.
+        let phone = StarterProjectsView.cardWidth(available: 362, count: 2)
+        XCTAssertLessThanOrEqual(2 * phone + 12, 362)
+        // A third starter on a phone: two whole cards and part of the next, never a sliver.
+        let three = StarterProjectsView.cardWidth(available: 362, count: 3)
+        let shown = (362 - 2 * (three + 12)) / three
+        XCTAssertGreaterThan(shown, 0.2); XCTAssertLessThan(shown, 0.6)
+    }
 }

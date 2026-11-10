@@ -203,7 +203,9 @@ private struct Sidebar: View {
 
     private func rows(_ objects: [Project]) -> some View {
         ForEach(objects) { object in
-            ProjectRow(object: object, selected: model.selection == object.id).tag(object.id)
+            ProjectRow(object: object, selected: model.selection == object.id)
+                .searchReason(model.searchReason(object, query: query), indent: 46)
+                .tag(object.id)
                 .contextMenu {
                     if object.words.printRunning && model.capabilities?.printControl == true {
                         let capabilities = model.printer(for: object)?.capabilities

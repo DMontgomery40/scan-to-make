@@ -584,6 +584,76 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["scan-rig-link"].exists, "Kass 3D's rig is still linked")
     }
 
+    /// First look U5 (Nov 10, iPad): New after a scan opened already scrolled, its own tiles cut off under the header,
+    /// and its orange button read "Choose what to make" with nothing chosen. It opens on the question with the three
+    /// answers whole; the button is greyed out and says what to do, then names the chosen answer's action.
+    func testNewAfterAScanOpensOnItsQuestionAndNamesTheChosenAction() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
+                               "-CounterpartScreen", "new", "-CounterpartNewScan", "walk-around"]
+        app.launch()
+        let question = app.staticTexts["scan-use-question"]
+        XCTAssertTrue(question.waitForExistence(timeout: 20), app.debugDescription)
+        let send = app.buttons["send"], copy = app.buttons["scan-use-copy"], fit = app.buttons["scan-use-fit"], later = app.buttons["scan-use-later"]
+        let bar = app.navigationBars["New Project"].frame
+        XCTAssertGreaterThanOrEqual(question.frame.minY, bar.maxY - 1, "the question isn't under the header: \(question.frame) \(bar)")
+        let describe = app.staticTexts["What do you need?"]
+        XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
+        for row in [copy, fit, later] {
+            XCTAssertTrue(row.isHittable, "\(row.identifier) can be tapped without scrolling")
+            XCTAssertLessThanOrEqual(row.frame.maxY, send.frame.minY + 1, "\(row.identifier) is clear of the button")
+        }
+        XCTAssertFalse(send.isEnabled, "nothing chosen: greyed out")
+        XCTAssertEqual(send.label, "Choose what this scan becomes")
+        copy.tap()
+        XCTAssertTrue(send.isEnabled)
+        XCTAssertEqual(send.label, "Copy this object")
+        fit.tap()
+        XCTAssertEqual(send.label, "Continue", "a fit asks for its words first")
+        for _ in 0..<4 where !later.isHittable { app.swipeUp() }
+        later.tap()
+        XCTAssertEqual(send.label, "Save this scan")
+    }
+
+    /// First look U9 (Nov 10, iPad): a ready scan's Result showed two "—" cards for print time and filament and a third
+    /// that said only "Bambu printer". Before slicing, one row names the printer and says when the numbers come.
+    func testAResultBeforeSlicingNamesItsPrinterAndShowsNoEmptyCards() {
+        let app = launch(screen: "printed")
+        let row = app.descendants(matching: .any)["result-printer"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), app.debugDescription)
+        for _ in 0..<6 where !row.isHittable { app.swipeUp() }
+        XCTAssertTrue(row.label.contains("P1S"), row.label)
+        XCTAssertTrue(row.label.contains("once it’s sliced for printing"), row.label)
+        XCTAssertFalse(app.staticTexts["—"].exists, "no card that says nothing")
+        XCTAssertFalse(app.staticTexts["Print time"].exists)
+    }
+
+    /// First look U14 (Nov 10, iPhone): Welcome's second starter was cut off at the margin. Both starters show whole,
+    /// side by side, inside the margins, on the iPhone and the iPad.
+    func testWelcomeShowsBothStartersWhole() {
+        let app = launch(screen: "welcome")
+        let first = app.buttons["starter-scan-platform"], second = app.buttons["starter-long-vernier-caliper"]
+        XCTAssertTrue(first.waitForExistence(timeout: 20))
+        let window = app.windows.firstMatch.frame
+        XCTAssertEqual(first.frame.minY, second.frame.minY, accuracy: 2, "one row")
+        XCTAssertGreaterThanOrEqual(first.frame.minX, window.minX + 15, "\(first.frame)")
+        XCTAssertLessThanOrEqual(second.frame.maxX, window.maxX - 15, "the second starter is whole: \(second.frame) in \(window)")
+        XCTAssertTrue(app.buttons["welcome-continue"].isHittable)
+    }
+
+    /// First look U10 (Nov 10, iPad): "holder" listed projects with no hint why. A result whose title lacks the word says
+    /// where it matched, on iPhone Home and in the iPad sidebar.
+    func testASearchResultSaysWhereItMatched() {
+        let app = launch()
+        let field = app.textFields["project-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        field.tap()
+        field.typeText("bigger")
+        let reason = app.descendants(matching: .any).matching(identifier: "search-reason").firstMatch
+        XCTAssertTrue(reason.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(reason.label.contains("Copy this clip, 20% bigger."), reason.label)
+    }
+
     /// David, Nov 9: "I SCANNED A PINK UNICORN TOO BUT THE APP IS TOO GLITCHY I DON'T EVEN KNOW WHERE IT IS". A scan
     /// stopped after it kept photos says so on Home and on its project, with Send to your Mac and Scan again.
     func testAStoppedScanThatKeptPhotosShowsOnHomeAndItsProject() throws {
@@ -937,10 +1007,13 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(new.waitForExistence(timeout: 20))
         let list = projectList(app)
         if regular {
-            // The sidebar list ends where New's bar begins, so no row can be under it.
-            XCTAssertLessThanOrEqual(list.frame.maxY, new.frame.minY + 1, "New \(new.frame) over the list \(list.frame)")
+            // First look U11 (Nov 10): New is a bottom bar the list scrolls under, behind a hard edge, so the list's
+            // scroll is evident; scrolled to the end, the last row ends above New, and New stays tappable.
+            XCTAssertTrue(new.isHittable)
             for _ in 0..<12 { list.swipeUp() }
-            XCTAssertLessThanOrEqual(list.frame.maxY, new.frame.minY + 1)
+            let last = app.buttons["sidebar-starter-long-vernier-caliper"]
+            XCTAssertTrue(last.exists)
+            XCTAssertLessThanOrEqual(last.frame.maxY, new.frame.minY + 1, "New \(new.frame) covers the last row \(last.frame)")
             XCTAssertTrue(new.isHittable)
         } else {
             // iPhone Home's New floats over the scroll view (PRD §5.1); the end of Home scrolls clear of it.

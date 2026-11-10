@@ -38,6 +38,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -160,14 +162,47 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         }
     }
 
+    // Continue on a fit takes you to the words it still needs.
+    val describeFocus = remember { FocusRequester() }
     Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = close, enabled = working != "make") { Icon(CIcons.Close, "Close") }
             Text("New Project", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            // After a scan the screen opens on its question, first and whole (U5): nothing half-hidden above it.
+            if (scanned) {
+                Text("What should this scan become?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.testTag("scan-use"))
+                ScanUseChoice("Copy this object", "Clean up the scan and print the same thing.", scanUse == "copy", "scan-use-copy") { scanUse = "copy" }
+                ScanUseChoice("Make something that fits this", "A holder, mount, case or adapter. The scan is what it must fit, not the print.", scanUse == "fit", "scan-use-fit") { scanUse = "fit" }
+                ScanUseChoice("Just save this scan", "Keep its shape with this project and decide later.", scanUse == "later", "scan-use-later") { scanUse = "later" }
+                if (scanUse == "fit") GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Exact size", fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SecondaryButton("Look up", Modifier.weight(1f).testTag("fit-size-lookup"), enabled = working == null) { dimensionSource = "lookup" }
+                        SecondaryButton("I measured", Modifier.weight(1f).testTag("fit-size-measured"), enabled = working == null) { dimensionSource = "measured" }
+                        SecondaryButton("Use scan", Modifier.weight(1f).testTag("fit-size-scan"), enabled = working == null) { dimensionSource = "scan" }
+                    }
+                    when (dimensionSource) {
+                        "measured" -> {
+                            Text("Measure the outside of the real thing. Leave a side blank if you don't know it.", color = Palette.secondary, fontSize = 13.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(measuredLongest, { measuredLongest = it }, Modifier.weight(1f).testTag("fit-size-longest"), label = { Text("Longest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                                OutlinedTextField(measuredMiddle, { measuredMiddle = it }, Modifier.weight(1f).testTag("fit-size-middle"), label = { Text("Middle mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                                OutlinedTextField(measuredShortest, { measuredShortest = it }, Modifier.weight(1f).testTag("fit-size-shortest"), label = { Text("Shortest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                            }
+                        }
+                        "scan" -> Text("Uses the scan's size as an estimate. Best for loose holders; your computer says the clearance it allowed.", color = Palette.secondary, fontSize = 13.sp)
+                        else -> Text("Your computer identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.", color = Palette.secondary, fontSize = 13.sp)
+                    }
+                    SecondaryButton("Add a caliper photo", Modifier.fillMaxWidth().testTag("fit-caliper-photo"), enabled = working == null && photos.size < 24, icon = CIcons.Camera) {
+                        val (file, uri) = Media.newPhotoTarget(context); pendingCamera = file; takePhoto.launch(uri)
+                    }
+                } }
+                if (scanUse == "later") Text("Nothing is sent or printed yet. This screen keeps the scan, so you can choose here later.", color = Palette.secondary, fontSize = 13.sp)
+            }
             Text("What do you need?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-            OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 6,
+            OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth().focusRequester(describeFocus).testTag("describe"), minLines = 3, maxLines = 6,
                 placeholder = { Text(if (job == "copy") "Copy this. Close up the bottom." else "A hook for my stroller handle…") })
             Text("Describe it, scan it, or both. Your computer can look up published sizes, like a phone or a mic. Paste a MakerWorld or Printables link to print a published model.",
                 color = Palette.secondary, fontSize = 13.sp)
@@ -208,36 +243,6 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
                     }
                 }
             }
-            if (scanned) {
-                Text("What should this scan become?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.testTag("scan-use"))
-                ScanUseChoice("Copy this object", "Clean up the scan and print the same thing.", scanUse == "copy", "scan-use-copy") { scanUse = "copy" }
-                ScanUseChoice("Make something that fits this", "A holder, mount, case or adapter. The scan is what it must fit, not the print.", scanUse == "fit", "scan-use-fit") { scanUse = "fit" }
-                ScanUseChoice("Just save this scan", "Keep its shape with this project and decide later.", scanUse == "later", "scan-use-later") { scanUse = "later" }
-                if (scanUse == "fit") GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Exact size", fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SecondaryButton("Look up", Modifier.weight(1f).testTag("fit-size-lookup"), enabled = working == null) { dimensionSource = "lookup" }
-                        SecondaryButton("I measured", Modifier.weight(1f).testTag("fit-size-measured"), enabled = working == null) { dimensionSource = "measured" }
-                        SecondaryButton("Use scan", Modifier.weight(1f).testTag("fit-size-scan"), enabled = working == null) { dimensionSource = "scan" }
-                    }
-                    when (dimensionSource) {
-                        "measured" -> {
-                            Text("Measure the outside of the real thing. Leave a side blank if you don't know it.", color = Palette.secondary, fontSize = 13.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(measuredLongest, { measuredLongest = it }, Modifier.weight(1f).testTag("fit-size-longest"), label = { Text("Longest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
-                                OutlinedTextField(measuredMiddle, { measuredMiddle = it }, Modifier.weight(1f).testTag("fit-size-middle"), label = { Text("Middle mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
-                                OutlinedTextField(measuredShortest, { measuredShortest = it }, Modifier.weight(1f).testTag("fit-size-shortest"), label = { Text("Shortest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
-                            }
-                        }
-                        "scan" -> Text("Uses the scan's size as an estimate. Best for loose holders; your computer says the clearance it allowed.", color = Palette.secondary, fontSize = 13.sp)
-                        else -> Text("Your computer identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.", color = Palette.secondary, fontSize = 13.sp)
-                    }
-                    SecondaryButton("Add a caliper photo", Modifier.fillMaxWidth().testTag("fit-caliper-photo"), enabled = working == null && photos.size < 24, icon = CIcons.Camera) {
-                        val (file, uri) = Media.newPhotoTarget(context); pendingCamera = file; takePhoto.launch(uri)
-                    }
-                } }
-                if (scanUse == "later") Text("Nothing is sent or printed yet. This screen keeps the scan, so you can choose here later.", color = Palette.secondary, fontSize = 13.sp)
-            }
             problem?.let { Text(it, color = Palette.failed) }
         }
         val missing = when {
@@ -247,15 +252,22 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
             !scanned && text.isBlank() -> "Describe what to make, or add a scan."
             else -> null
         }
+        // After a scan the button is greyed out and says what to do until a use is chosen, then names that use's
+        // action: an instruction never looks like the action (U5).
+        val describeFirst = scanned && scanUse == "fit" && text.isBlank()
         val sendLabel = when {
             working == "make" -> if (scanUse == "later") "Saving…" else "Sending…"
-            scanned && scanUse == null -> "Choose what to make"
-            scanned && scanUse == "copy" -> "Send copy to ${macName ?: "your computer"}"
-            scanned && scanUse == "later" -> "Save scan for later"
+            scanned && scanUse == null -> "Choose what this scan becomes"
+            scanned && scanUse == "copy" -> "Copy this object"
+            describeFirst -> "Continue"
+            scanned && scanUse == "later" -> "Save this scan"
             else -> "Send to ${macName ?: "your computer"}"
         }
+        // Upload only when it sends: not while it asks for a choice or words, and not for saving.
+        val sendIcon = if (scanned && (scanUse == null || scanUse == "later" || describeFirst)) null else CIcons.Upload
         PrimaryButton(sendLabel, Modifier.fillMaxWidth().padding(20.dp, 8.dp).testTag("send"),
-            enabled = working == null, icon = CIcons.Upload) {
+            enabled = working == null && !(scanned && scanUse == null), icon = sendIcon) {
+            if (describeFirst) { describeFocus.requestFocus(); return@PrimaryButton }
             if (missing != null) { problem = missing; return@PrimaryButton }
             if (scanned && scanUse == "later") { close(); return@PrimaryButton }
             run("make") {
