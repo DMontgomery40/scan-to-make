@@ -82,6 +82,9 @@ export function leadPicture(names: ProjectPictureNames | undefined, object?: Pic
   return names?.part ?? names?.scan ?? names?.photo;
 }
 
+/** How the pictures are drawn (`mac-reconstruct picture`): raised when the drawing changes, so every picture is redrawn. 2: the light stage; 3: pale parts keep their shading. */
+const PICTURE_VERSION = 3;
+
 /** The picture's file name: changes whenever what it draws changes (a file, a spool, a seat), so client caches refresh. */
 export async function pictureName(dir: string, role: PictureRole, spec: PictureSpec): Promise<string | undefined> {
   const sources = [spec.model, spec.object, spec.photo].filter((path): path is string => !!path);
@@ -92,7 +95,7 @@ export async function pictureName(dir: string, role: PictureRole, spec: PictureS
     if (!info?.isFile()) return undefined;
     files.push([info.size, Math.round(info.mtimeMs)]);
   }
-  const key = createHash('sha256').update(JSON.stringify({v: 1, spec, files})).digest('hex').slice(0, 16);
+  const key = createHash('sha256').update(JSON.stringify({v: PICTURE_VERSION, spec, files})).digest('hex').slice(0, 16);
   return `pictures/${role}-${key}.png`;
 }
 

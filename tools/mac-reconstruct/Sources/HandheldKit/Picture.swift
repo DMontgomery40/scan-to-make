@@ -70,9 +70,11 @@ private func loadNode(_ url: URL, zUp: Bool, tint: NSColor?, own: Bool) -> SCNNo
 
 /// Scene lights for a printed part: a key from above and in front, a fill, a rim, and enough ambient that black PLA
 /// still reads on the dark stage.
-private func addLights(_ root: SCNNode, dark: Bool) {
+private func addLights(_ root: SCNNode, dark: Bool, bright: Bool = false) {
+    // A white or pale part keeps its shading instead of washing out.
+    let scale: CGFloat = bright ? 0.72 : 1
     func light(_ type: SCNLight.LightType, _ intensity: CGFloat, _ euler: SCNVector3 = SCNVector3Zero) {
-        let node = SCNNode(); node.light = SCNLight(); node.light!.type = type; node.light!.intensity = intensity
+        let node = SCNNode(); node.light = SCNLight(); node.light!.type = type; node.light!.intensity = intensity * scale
         node.eulerAngles = euler; root.addChildNode(node)
     }
     light(.ambient, dark ? 420 : 260)
@@ -122,7 +124,7 @@ public func renderPicture(_ spec: PictureSpec, to output: URL) throws {
         if spec.zUp { frame.eulerAngles.x = -.pi / 2 }
         root.addChildNode(frame)
         scene.rootNode.addChildNode(root)
-        if !own { addLights(scene.rootNode, dark: luminance(spec.tint) < 0.2) }
+        if !own { addLights(scene.rootNode, dark: luminance(spec.tint) < 0.2, bright: luminance(spec.tint) > 0.8) }
         let (low, high) = root.boundingBox
         let lowW = root.convertPosition(low, to: nil), highW = root.convertPosition(high, to: nil)
         let centre = SIMD3<Double>(Double(lowW.x + highW.x) / 2, Double(lowW.y + highW.y) / 2, Double(lowW.z + highW.z) / 2)
