@@ -958,7 +958,7 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertLessThan(toggle.frame.minY, app.staticTexts["Counterpart’s copy 1.2.45"].frame.minY, "above the MCP copies it updates")
         if let folder = ProcessInfo.processInfo.environment["STM_SHOTS"], !folder.isEmpty {
             try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-            try app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: folder).appendingPathComponent(regular ? "ipad.png" : "iphone.png"))
+            try XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: folder).appendingPathComponent(regular ? "ipad.png" : "iphone.png"))
         }
     }
 
