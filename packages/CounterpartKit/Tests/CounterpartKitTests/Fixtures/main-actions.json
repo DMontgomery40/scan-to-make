@@ -606,6 +606,43 @@
    }
   },
   {
+   "row": 14,
+   "name": "pass-failed-for-good-earlier-result",
+   "project": {
+    "id": "p",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [
+     {
+      "startedAtMs": 1,
+      "endedAtMs": 2,
+      "status": "done"
+     },
+     {
+      "startedAtMs": 3,
+      "endedAtMs": 4,
+      "status": "failed"
+     }
+    ],
+    "state": "failed",
+    "current": {
+     "model": "current/model.stl",
+     "renders": []
+    },
+    "failure": "Blender stopped."
+   },
+   "expected": {
+    "main": "print",
+    "others": [
+     "correct"
+    ],
+    "printWords": "Print the last version",
+    "printPlace": "card",
+    "printNote": "Your last version is still here."
+   }
+  },
+  {
    "row": 15,
    "name": "print-failed",
    "project": {
@@ -649,7 +686,10 @@
      "model": "current/model.stl",
      "renders": []
     },
-    "failure": "The printer is busy. Nothing was sent."
+    "failure": "The printer is busy. Nothing was sent.",
+    "print": {
+     "bundleId": "b"
+    }
    },
    "expected": {
     "main": "print",

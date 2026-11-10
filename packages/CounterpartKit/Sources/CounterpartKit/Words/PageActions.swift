@@ -89,9 +89,12 @@ public struct PageActions: Equatable, Sendable {
                 } else if project.print?.dispatchedAt != nil {
                     // The print failed and the model is fine: the same file goes again.
                     decided = printing(.print, rest(prints), "Print Again", .card)
-                } else {
+                } else if project.print != nil {
                     // Refused before anything was sent: it has not been printed, so it is not "again".
                     decided = printing(.print, rest(prints), "Print", .card)
+                } else {
+                    // A pass failed and can't be picked up again; the result from before it is what there is.
+                    decided = printing(.print, rest(prints), "Print the last version", .card)
                 }
             case .unknown:
                 decided = (nil, [], nil, nil)
