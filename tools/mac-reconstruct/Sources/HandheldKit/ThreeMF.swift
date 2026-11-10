@@ -27,11 +27,12 @@ public struct ThreeMF {
         let root = try archive.rootModel()
         var reader = Reader(archive: archive)
         try reader.load(root)
+        guard !(reader.parts[root]?.build.isEmpty ?? true) else { throw ThreeMFError.unsupported("build has no items") }
         var meshes: [Mesh] = []
         for item in reader.parts[root]?.build ?? [] {
             try reader.place(part: item.path ?? root, object: item.objectId, transform: threeMFMillimetreTransform(item.transform, unit: reader.parts[root]?.scale ?? 1), depth: 0, into: &meshes)
         }
-        guard !meshes.isEmpty else { throw HandheldError.io("\(url.lastPathComponent) has no objects to draw") }
+        guard !meshes.isEmpty else { throw ThreeMFError.unsupported("no supported mesh triangles in the build" + (reader.skipped.isEmpty ? "" : ": " + reader.skipped.joined(separator: "; "))) }
         return ThreeMF(meshes: meshes)
     }
 }
@@ -93,7 +94,8 @@ final class ZipEntries {
     func data(_ name: String) throws -> Data {
         guard !name.lowercased().hasPrefix("metadata/") else { throw ThreeMFError.unsupported("private metadata is not model geometry") }
         guard let bytes = sizes[name] else { throw ThreeMFError.unreadable("\(url.lastPathComponent) has no \(name)") }
-        let literal = name
+        // unzip accepts patterns even after the archive argument. Escape metacharacters, including a literal backslash.
+        let literal = name.map { "\\[]*?-".contains($0) ? "\\\($0)" : String($0) }.joined()
         guard bytes <= limits.totalBytes - readBytes else { throw ThreeMFError.budget("total inflated bytes") }
         let data = try Self.run(["-qq", "-p", url.path, literal], maxBytes: bytes, reason: "inflated bytes (\(name))")
         readBytes += data.count
@@ -127,10 +129,10 @@ final class ZipEntries {
 }
 
 /// A 3MF transform (core spec §3.3): the row-vector 3×4 matrix "m00 m01 m02 m10 … m32", as a 4×4 acting on columns.
-func threeMFTransform(_ text: String?) -> simd_float4x4 {
+func threeMFTransform(_ text: String?) throws -> simd_float4x4 {
     guard let text else { return matrix_identity_float4x4 }
     let v = text.split(whereSeparator: \.isWhitespace).compactMap { Float($0) }
-    guard v.count == 12 else { return matrix_identity_float4x4 }
+    guard v.count == 12, text.split(whereSeparator: \.isWhitespace).count == 12, v.allSatisfy(\.isFinite) else { throw ThreeMFError.unreadable("malformed transform") }
     return simd_float4x4(rows: [SIMD4(v[0], v[3], v[6], v[9]), SIMD4(v[1], v[4], v[7], v[10]),
                                 SIMD4(v[2], v[5], v[8], v[11]), SIMD4(0, 0, 0, 1)])
 }
@@ -155,6 +157,10 @@ func threeMFColour(_ text: String?) -> SIMD4<Float>? {
 private struct Reader {
     let archive: ZipEntries
     var parts: [String: Part] = [:]
+    var failed: [String: ThreeMFError] = [:]
+    var skipped: [String] = []
+
+    mutating func skip(_ reason: String) { if skipped.count < 8 { skipped.append(String(reason.prefix(256))) } }
     let limits: ThreeMFLimits
     var vertices = 0, triangles = 0, colours = 0, placements = 0
     var placed: ThreeMFPlacementBudget
@@ -185,13 +191,20 @@ private struct Reader {
 
     mutating func load(_ path: String) throws {
         guard parts[path] == nil else { return }
-        var remaining = limits
-        remaining.vertices -= vertices; remaining.triangles -= triangles; remaining.colours -= colours
-        let parser = try ModelParser(data: archive.data(path), limits: remaining)
-        let parsed = parser.parse()
-        vertices += parser.vertices; triangles += parser.triangles; colours += parser.colours
-        guard parsed else { throw parser.failure ?? ThreeMFError.unreadable("\(path): XML error") }
-        parts[path] = parser.part
+        if let error = failed[path] { throw error }
+        do {
+            var remaining = limits
+            remaining.vertices -= vertices; remaining.triangles -= triangles; remaining.colours -= colours
+            let parser = try ModelParser(data: archive.data(path), limits: remaining)
+            let parsed = parser.parse()
+            vertices += parser.vertices; triangles += parser.triangles; colours += parser.colours
+            guard parsed else { throw parser.failure ?? ThreeMFError.unreadable("\(path): XML error") }
+            parts[path] = parser.part
+        } catch let error as ThreeMFError {
+            if case .budget = error { throw error }
+            failed[path] = error
+            throw error
+        }
     }
 
     mutating func place(part path: String, object id: String, transform: simd_float4x4, depth: Int, into meshes: inout [ThreeMF.Mesh]) throws {
@@ -199,14 +212,24 @@ private struct Reader {
         guard placements < limits.placements else { throw ThreeMFError.budget("component placements") }
         placements += 1
         let clean = path.hasPrefix("/") ? String(path.dropFirst()) : path
-        try load(clean)
-        guard let part = parts[clean], let object = part.objects[id] else { return }
+        do { try load(clean) }
+        catch let error as ThreeMFError {
+            if case .unreadable = error { skip(error.description); return }
+            throw error
+        }
+        guard let part = parts[clean], let object = part.objects[id] else { skip("missing object \(id) in \(clean)"); return }
         // Millimetres in the build's frame: the part's unit, then the placement.
         let scale = simd_float4x4(diagonal: SIMD4(part.scale, part.scale, part.scale, 1))
+        if !object.positions.isEmpty && object.triangles.isEmpty {
+            throw ThreeMFError.unsupported("object \(id) has no supported mesh triangles")
+        }
         if !object.positions.isEmpty {
             try placed.consume(vertices: object.positions.count, triangles: object.triangles.count)
             let m = transform * scale
             let positions = object.positions.map { p -> SIMD3<Float> in let q = m * SIMD4(p, 1); return SIMD3(q.x, q.y, q.z) }
+            guard positions.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }) else {
+                throw ThreeMFError.unsupported("non-finite placed geometry")
+            }
             let fallback = object.pid.flatMap { pid in object.pindex.flatMap { part.colours[pid]?[safe: $0] ?? nil } }
             let colours = object.properties.map { property -> SIMD4<Float>? in
                 guard let (pid, index) = property else { return fallback }
@@ -261,7 +284,9 @@ private final class ModelParser: NSObject, XMLParserDelegate {
         switch Self.local(element) {
         case "model":
             let units: [String: Float] = ["micron": 0.001, "millimeter": 1, "centimeter": 10, "inch": 25.4, "foot": 304.8, "meter": 1000]
-            part.scale = units[attributes["unit"] ?? "millimeter"] ?? 1
+            let unit = attributes["unit"] ?? "millimeter"
+            guard let scale = units[unit] else { fail(.unsupported("unknown unit \(unit)")); return }
+            part.scale = scale
         case "object":
             guard let id = attributes["id"] else { return }
             var value = Reader.Object()
@@ -272,6 +297,7 @@ private final class ModelParser: NSObject, XMLParserDelegate {
         case "vertex":
             guard object != nil, let x = attributes["x"].flatMap(Float.init), let y = attributes["y"].flatMap(Float.init),
                   let z = attributes["z"].flatMap(Float.init) else { return }
+            guard x.isFinite && y.isFinite && z.isFinite else { fail(.unreadable("non-finite vertex")); return }
             guard vertices < limits.vertices else { fail(.budget("parsed vertices")); return }
             vertices += 1
             object!.value.positions.append(SIMD3(x, y, z))
@@ -280,13 +306,16 @@ private final class ModelParser: NSObject, XMLParserDelegate {
                   let c = attributes["v3"].flatMap(UInt32.init) else { return }
             guard triangles < limits.triangles else { fail(.budget("parsed triangles")); return }
             triangles += 1
+            // Core meshes put vertices before triangles. Invalid indices cannot become an empty SceneKit success.
+            guard Int(a) < object!.value.positions.count, Int(b) < object!.value.positions.count, Int(c) < object!.value.positions.count else { return }
             object!.value.triangles.append(SIMD3(a, b, c))
             let pid = attributes["pid"] ?? object!.value.pid
             let index = attributes["p1"].flatMap(Int.init) ?? (attributes["pid"] == nil ? object!.value.pindex : nil)
             object!.value.properties.append(pid.flatMap { pid in index.map { (pid, $0) } })
         case "component":
             guard object != nil, let id = attributes["objectid"] else { return }
-            object!.value.components.append(.init(objectId: id, transform: threeMFTransform(attributes["transform"]), path: Self.path(attributes)))
+            guard let transform = try? threeMFTransform(attributes["transform"]) else { fail(.unreadable("malformed component transform")); return }
+            object!.value.components.append(.init(objectId: id, transform: transform, path: Self.path(attributes)))
         case "basematerials", "colorgroup":
             guard let id = attributes["id"] else { return }
             group = (id, [])
@@ -302,7 +331,8 @@ private final class ModelParser: NSObject, XMLParserDelegate {
             inBuild = true
         case "item":
             guard inBuild, let id = attributes["objectid"] else { return }
-            part.build.append(.init(objectId: id, transform: threeMFTransform(attributes["transform"]), path: Self.path(attributes)))
+            guard let transform = try? threeMFTransform(attributes["transform"]) else { fail(.unreadable("malformed build transform")); return }
+            part.build.append(.init(objectId: id, transform: transform, path: Self.path(attributes)))
         default: break
         }
     }
