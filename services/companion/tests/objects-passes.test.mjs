@@ -475,3 +475,12 @@ for (const answered of [false,true]) test(`a shutdown throw ${answered ? 'after 
  const stopped=await f.store.get(o.id);
  assert.equal(stopped.passes.at(-1).resumable,!answered);
 });
+
+test('a file-copy throw after the worker answered becomes a non-resumable failed pass', async t => {
+ const f=await setup(t,[{liveSession:'answered-file-copy',answered:true,result:{model:'/missing/answered-model.stl',sessionId:'answered-file-copy',resumable:false}},{status:'done'}]);
+ const o=await f.service.create('A unicorn','fit');await f.service.start(o.id);
+ const failed=await f.service.settled(o.id);
+ assert.equal(failed.state,'failed');assert.equal(failed.passes.at(-1).resumable,false);
+ await f.service.start(o.id);await f.service.settled(o.id);
+ assert.equal(f.inputs[1].resume,undefined);
+});

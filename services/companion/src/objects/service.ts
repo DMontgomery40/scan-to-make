@@ -2473,8 +2473,8 @@ export class ObjectService {
       try { return await this.#deps.runTouchup({...input, signal: controller.signal, onProgress}); }
       finally { stage('saving'); await writing; }
     })()
-      .then(result => this.#finish(object.id, startedAtMs, result, kind),
-        error => error instanceof ReconstructionReviewNeeded
+      .then(result => this.#finish(object.id, startedAtMs, result, kind))
+      .catch(error => error instanceof ReconstructionReviewNeeded
           ? this.#finishReconstructionReview(object.id, startedAtMs, error)
           : this.#fail(object.id, startedAtMs, error))
       .finally(() => { release(); this.#running.delete(object.id); this.#controllers.delete(object.id); });
