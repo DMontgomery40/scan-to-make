@@ -2,7 +2,7 @@ import test from 'node:test';
 import {mcpPlates} from './support/shown-print.mjs';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
-import {mkdir, readFile, writeFile, symlink} from 'node:fs/promises';
+import {mkdir, open, readFile, rm, writeFile, symlink} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
@@ -900,6 +900,35 @@ test('exports refuse recorded final and intermediate symlinks that leave the pro
   }
 });
 
+
+// Nov 10: every "What you scanned" on David's phone was blank. A full-detail rebuild (192 MB) was refused with 413 and the
+// phone had nothing else to draw. The project says which scan files there are and how big; the phone's own model kept
+// beside a rebuild is served; over the limit nothing is read; and a file is streamed, not read whole first.
+test('the project lists its scan files and their sizes, serves the phone\'s own model, and refuses an oversized scan unread', async t => {
+  const {call, service, store} = await fixture(t);
+  const project = await service.create('Copy this bottle', 'copy');
+  const dir = join(store.dir(project.id), 'scan');
+  await mkdir(dir, {recursive: true});
+  const preview = Buffer.alloc(3 * 1024 * 1024 + 17, 7);
+  await writeFile(join(dir, 'phone-preview.usdz'), preview);
+  // A sparse file: 65 MB on paper, nothing on disk, so the test stays fast.
+  const big = await open(join(dir, 'scan.usdz'), 'w'); await big.truncate(65 * 1024 * 1024); await big.close();
+  await store.update(project.id, o => ({...o, scan: 'scan.usdz', scanSource: 'mac'}));
+  const listed = (await call('GET', `/v1/objects/${project.id}`)).json.object;
+  assert.deepEqual(listed.scanFiles, [{name: 'scan.usdz', bytes: 65 * 1024 * 1024}, {name: 'phone-preview.usdz', bytes: preview.length}]);
+  assert.deepEqual((await call('GET', '/v1/objects')).json.objects.find(o => o.id === project.id).scanFiles, listed.scanFiles, 'the list says the same');
+  const served = await call('GET', `/v1/objects/${project.id}/scan/phone-preview.usdz`);
+  assert.equal(served.status, 200);
+  assert.equal(served.type, 'model/vnd.usdz+zip');
+  assert.ok(served.bytes.equals(preview), 'the whole file, streamed');
+  assert.equal((await call('GET', `/v1/objects/${project.id}/scan/scan.usdz`)).status, 413, 'over 64 MB: refused before a byte is read');
+  assert.equal((await call('GET', `/v1/objects/${project.id}/scan/other.usdz`)).status, 404, 'only the files the project lists');
+  // The rebuild replaced by a smaller one, and the preview gone: the list follows the files.
+  await writeFile(join(dir, 'scan.usdz'), Buffer.alloc(1024, 1));
+  await rm(join(dir, 'phone-preview.usdz'));
+  assert.deepEqual((await call('GET', `/v1/objects/${project.id}`)).json.object.scanFiles, [{name: 'scan.usdz', bytes: 1024}]);
+  assert.equal((await call('GET', `/v1/objects/${project.id}/scan/phone-preview.usdz`)).status, 404);
+});
 
 test('saved project engine reaches the next worker and copies reject Fusion', async t => {
   const {service, inputs, store} = await fixture(t);

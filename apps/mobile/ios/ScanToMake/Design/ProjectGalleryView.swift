@@ -19,7 +19,7 @@ struct ProjectGalleryView: View {
     /// "See it together": asks the Mac where the scanned object sits in a part made before passes said.
     var locate: (() -> Void)? = nil
     @State private var selected: String?
-    @State private var scanURL: URL?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var measured: [String: [Double]] = [:]
     @State private var showingPhotos = false
 
@@ -35,12 +35,78 @@ struct ProjectGalleryView: View {
                 .frame(height: height)
                 .clipped()
                 .overlay(alignment: .bottom) { controls }
+            if let entry { unavailable(entry) }
             if gallery.entries.count > 1 { labels }
         }
-        .task(id: "\(project.id)#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(localScan?.path ?? "")") {
-            // The Mac's scan when it has one; this phone's own until then.
-            if project.scan != nil, let scan = project.scanModels().first, let url = try? await store.mac.download(project, scan) { scanURL = url }
-            else { scanURL = localScan }
+        .task(id: "\(project.id)#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(String(describing: project.scanFiles))#\(scenePhase)") {
+            // The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to
+            // the app starts again one that failed meanwhile (a suspended app's transfer drops).
+            guard scenePhase == .active else { return }
+            if case .file(let path) = scanModel { store.models.want(project, path) }
+            if gallery.entries.contains(where: { $0.kind == .together }), case .file(let path) = togetherModel { store.models.want(project, path) }
+        }
+    }
+
+    // MARK: The models the stage draws
+
+    private var limit: Double { Double(CompanionClient.scanLimit) }
+    /// What you scanned: the scan model the Mac offers that this phone takes (the phone's own beside a Mac rebuild).
+    private var scanModel: Project.ScanModel { project.scanModel(limit: limit) }
+    /// Together: the scan whose frame the seats are in.
+    private var togetherModel: Project.ScanModel { project.scanModel(together: true, limit: limit) }
+    /// The scan to draw: the Mac's once it is here; this phone's own (before the Mac has one, or while it comes).
+    private var scanURL: URL? {
+        if case .file(let path) = scanModel, let file = store.models.file(project, path) { return file }
+        return localScan
+    }
+    private var togetherScanURL: URL? {
+        if case .file(let path) = togetherModel { return store.models.file(project, path) }
+        return nil
+    }
+
+    /// The Mac's picture of an entry, which the stage shows until its model is drawn, and if it can't be.
+    private func still(_ entry: ProjectGallery.Entry) -> AnyView? {
+        guard let path = project.picture(for: entry) else {
+            // Nothing drawn by the Mac (a Mac that can't draw, a picture still being drawn): what it is and that it's
+            // coming, never an empty stage.
+            return AnyView(VStack(spacing: 10) {
+                ProgressView()
+                Text(entry.label).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+            }.accessibilityElement(children: .combine).accessibilityIdentifier("gallery-stage-waiting"))
+        }
+        return AnyView(ProjectImage(project: project, path: path, maxPixelSize: 1200, contentMode: .fit)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(entry.label), as your Mac drew it")
+            .accessibilityAddTraits(.isImage)
+            .accessibilityIdentifier("gallery-stage-picture"))
+    }
+
+    /// One plain line under the stage when an entry's model can't be had: its picture stays above it.
+    @ViewBuilder private func unavailable(_ entry: ProjectGallery.Entry) -> some View {
+        let (path, model): (String?, Project.ScanModel?) = switch entry.drawing {
+        case .model(let drawn) where drawn == "model.stl": ("model.stl", nil)
+        case .model: (nil, scanURL == nil ? scanModel : nil)
+        case .assembly: (nil, togetherScanURL == nil ? togetherModel : nil)
+        case .picture: (nil, nil)
+        }
+        let fetch: ModelFiles.Fetch? = if let path { modelURL == nil ? store.models.fetch(project, path) : nil }
+            else if case .file(let file)? = model { store.models.fetch(project, file) }
+            else if case .tooLarge? = model { .tooLarge } else { nil }
+        let retryPath: String? = path ?? { if case .file(let file)? = model { return file }; return nil }()
+        switch fetch {
+        case .failed?:
+            HStack(spacing: 8) {
+                Text("The 3D view isn’t here yet.").font(.footnote).foregroundStyle(.secondary)
+                if let retryPath {
+                    Button("Try Again") { store.models.retry(project, retryPath) }.font(.footnote.weight(.semibold))
+                        .accessibilityIdentifier("gallery-model-retry")
+                }
+            }
+            .accessibilityElement(children: .contain).accessibilityIdentifier("gallery-model-unavailable")
+        case .tooLarge?:
+            Text("This scan is too large to turn on a phone. The picture is your Mac’s.").font(.footnote).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).padding(.horizontal, 16).accessibilityIdentifier("gallery-model-unavailable")
+        default: EmptyView()
         }
     }
 
@@ -51,11 +117,13 @@ struct ProjectGalleryView: View {
             switch entry.drawing {
             case .model(let path):
                 ModelStage(url: path == "model.stl" ? modelURL : scanURL, tint: tint(entry.colour),
-                           lightStage: StageContrast.lightStage(for: entry.colour), measured: { measured[entry.id] = $0 })
+                           lightStage: StageContrast.lightStage(for: entry.colour), measured: { measured[entry.id] = $0 },
+                           placeholder: still(entry))
                     .id(entry.id)
             case .assembly(_, _, let seats):
-                ModelStage(url: modelURL, tint: tint(entry.colour), lightStage: StageContrast.lightStage(for: entry.colour),
-                           object: scanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 })
+                // Both models or neither: a part with no scan at its seats would not be Together.
+                ModelStage(url: togetherScanURL == nil ? nil : modelURL, tint: tint(entry.colour), lightStage: StageContrast.lightStage(for: entry.colour),
+                           object: togetherScanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 }, placeholder: still(entry))
                     .id(entry.id)
             case .picture(let path):
                 ZStack {

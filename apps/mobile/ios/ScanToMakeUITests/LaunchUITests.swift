@@ -1273,6 +1273,33 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "The outlined part is what this question is about.")).firstMatch.exists)
     }
 
+    /// Nov 10: every "What you scanned" on David's phone was blank. With projects present: a scan the Mac lists but can't
+    /// send leaves the Mac's picture on the stage and one line with Try Again; a scan too large for a phone keeps its
+    /// picture and says so. Never an empty stage.
+    func testAScanThatCantBeHadKeepsTheMacsPictureAndSaysWhyWithProjectsPresent() {
+        if regular { XCUIDevice.shared.orientation = .landscapeLeft }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = launch(set: "scan-stage")
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Bottle copy")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "projects are present")
+        app.terminate()
+        for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "The 3D view isn’t here yet."),
+                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "This scan is too large to turn on a phone. The picture is your Mac’s.")] {
+            let page = XCUIApplication()
+            page.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
+                                    "-CounterpartOpen", "counterpart://project/\(id)"]
+            page.launch()
+            let picture = page.images["gallery-stage-picture"]
+            XCTAssertTrue(picture.waitForExistence(timeout: 20), "What you scanned shows the Mac's picture, not an empty stage")
+            XCTAssertGreaterThan(picture.frame.height, 150, "the picture fills the stage: \(picture.frame)")
+            let said = page.staticTexts[line]
+            XCTAssertTrue(said.waitForExistence(timeout: 15), "one plain line says why: \(line)")
+            if id.hasSuffix("01") { XCTAssertTrue(page.buttons["gallery-model-retry"].exists, "and how to try again") }
+            else { XCTAssertFalse(page.buttons["gallery-model-retry"].exists, "too large: trying again won't change it") }
+            page.terminate()
+        }
+    }
+
     /// A question that came without a picture shows the project's picture at the same size, and says so.
     func testAQuestionWithoutAPictureShowsTheProjectsPictureAndSaysSo() throws {
         let (app, _) = try launchBottle(noPhoto: true)
