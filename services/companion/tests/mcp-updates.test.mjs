@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {rm} from 'node:fs/promises';
+import {rm, readdir, readFile, writeFile, mkdir} from 'node:fs/promises';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {runTouchup} from '../dist/touchup/touchup.js';
@@ -87,7 +87,7 @@ test('shell command lines: quotes, escapes, cd and variables', () => {
 });
 
 /** A scripted updater: commands are recorded, sessions are fakes, versions come from a fake registry. */
-async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest: published = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog, session: sessionFor, busyTimeoutMs, startTimeoutMs, inFlightWaitMs} = {}) {
+async function updater(t, {profile, profiles, files = {}, links = {}, busy = () => false, latest: published = '1.1.50', fail, gate, failRename, installed = {}, connectFail, postinstall, installOutput = '', catalog, session: sessionFor, busyTimeoutMs, startTimeoutMs, inFlightWaitMs, journal = false} = {}) {
   // The registry: a version, or a function when a test publishes a newer one partway through.
   const registry = () => typeof published === 'function' ? published() : published;
   const root = await tempDir('mcp-updates-');
@@ -107,6 +107,7 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
   const overrides = new McpOverrides(join(root, 'overrides.json'));
   await overrides.load();
   const updates = new McpUpdater({
+    ...(journal ? {journal: join(root, 'journal')} : {}),
     catalog, gate, fs: {rename: async (from, to) => { moves.push(['rename', from, to]); if (failRename && failRename(from, to)) throw new Error('EXDEV'); }, rm: async path => { moves.push(['rm', path]); }, mkdir: async () => undefined},
     destinations: () => profiles ?? [{id: 'p1s', config: profile}, {id: 'a1', config: profile}],
     env, overrides, session, busy: async id => busy(id), runningVersion: id => id in installed ? installed[id] : '1.1.46',
@@ -122,7 +123,7 @@ async function updater(t, {profile, profiles, files = {}, links = {}, busy = () 
     },
   });
   const done = () => until(() => events.some(event => event.type === 'mcp.update.done' || event.type === 'mcp.update.failed'));
-  return {updates, commands, events, restarts, overrides, moves, done, mcpId: updates.mcpId('p1s')};
+  return {updates, commands, events, restarts, overrides, moves, done, mcpId: updates.mcpId('p1s'), journalDir: join(root, 'journal')};
 }
 const until = async check => { for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('timed out'); };
 
@@ -1312,4 +1313,300 @@ test('paired update and move require settings scope and retain the desktop print
     assert.ok(f.restarts.length > 0);
     if (fresh) assert.equal(f.commands.some(command => command.startsWith('git ')), false, 'moving never edits the checkout');
   }
+});
+
+/**
+ * A Mac whose files really move, and a companion that can be started again over them: `boot()` is one companion
+ * process (its own updater and memory) on the shared disk, journal, overrides and event log. A step named in `hang`
+ * never returns, and `kill()` then stops that companion touching anything (its own timers may still fire in the test
+ * process): together, what a companion killed at that step looks like to the next one.
+ */
+async function restartable(t, {profile, npx = false, latest = '1.1.50', busy = () => false, inFlightWaitMs} = {}) {
+  const root = await tempDir('mcp-update-journal-');
+  // A killed companion that was waiting for an MCP to restart still has its start timer in this process; when it
+  // fires, that companion records its failed update. The folder goes only after that, so nothing is written into it later.
+  let lingersUntil = 0;
+  t.after(async () => {
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, lingersUntil - Date.now())));
+    await rm(root, {recursive: true, force: true});
+  });
+  const node = '/Applications/Scan to Make.app/Contents/Resources/Payload/node/bin/node';
+  const prefix = `${APP}/printers/bambu-1.1.46`, live = `${prefix}/lib/node_modules/bambu-printer-mcp`;
+  const files = {'/opt/homebrew/bin/npm': '', '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js': '',
+    [`${live}/package.json`]: pkgJson('1.1.46'), [`${live}/dist/index.js`]: ''};
+  const env = mac(files, {'/opt/homebrew/bin/npm': '/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js'});
+  const readFile = env.readFile;
+  env.readFile = path => /\.counterpart-update-[0-9a-f-]+\/lib\/node_modules\/[^/]+\/package\.json$/.test(path) ? pkgJson(latest) : readFile(path);
+  const under = path => Object.keys(files).filter(file => file === path || file.startsWith(path + '/'));
+  const events = [], never = new Promise(() => undefined);
+  const config = profile ?? (npx ? bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']) : bambu(node, [`${live}/dist/index.js`]));
+  const boot = ({hang = {}, failRename} = {}) => {
+    const moves = [];
+    let dead = false;
+    if (hang.restart) lingersUntil = Date.now() + 5000; // two start waits: the new copy, then the one put back
+    const saved = new McpOverrides(join(root, 'overrides.json'));
+    const overrides = new Proxy(saved, {get: (target, key) => key === 'set' ? (...args) => dead ? Promise.resolve() : target.set(...args)
+      : typeof target[key] === 'function' ? target[key].bind(target) : target[key]});
+    const updates = new McpUpdater({
+      journal: join(root, 'journal'), env, overrides, node, path: '/usr/bin:/bin', waitPollMs: 20, inFlightWaitMs, startTimeoutMs: 2000,
+      fs: {
+        rename: async (from, to) => {
+          if (dead) return;
+          if (hang.rename?.(from, to)) await never;
+          if (failRename?.(from, to)) throw new Error('EXDEV');
+          moves.push(['rename', from, to]);
+          const moved = under(from);
+          // npm's staged copy isn't in the fake disk until it is moved into place.
+          if (!moved.length && from.includes('.counterpart-update-')) { files[`${to}/package.json`] = pkgJson(latest); files[`${to}/dist/index.js`] = ''; }
+          for (const file of moved) { files[to + file.slice(from.length)] = files[file]; delete files[file]; }
+        },
+        rm: async path => { if (dead) return; if (hang.rm?.(path)) await never; moves.push(['rm', path]); for (const file of under(path)) delete files[file]; },
+        mkdir: async () => undefined,
+      },
+      destinations: () => [{id: 'p1s', config}],
+      session: () => ({restart: async () => { if (hang.restart) await never; }, connect: async () => ({server: {name: 'bambu-printer-mcp', version: latest}, tools: []})}),
+      busy: async id => busy(id), runningVersion: () => '1.1.46',
+      emit: async event => { if (!dead) events.push(event); },
+      run: async (command, args) => {
+        if (args.includes('view')) return {code: 0, output: `${latest}\n`};
+        if (args.includes('install') && hang.install) await never;
+        return {code: 0, output: ''};
+      },
+    });
+    return {updates, overrides, moves, kill: () => { dead = true; }};
+  };
+  const journals = async () => (await readdir(join(root, 'journal')).catch(() => [])).filter(name => name.endsWith('.json'));
+  const version = () => files[`${live}/package.json`] && JSON.parse(files[`${live}/package.json`]).version;
+  const staging = () => Object.keys(files).filter(file => file.includes('.counterpart-update-'));
+  return {boot, events, files, live, journals, version, staging, journalDir: join(root, 'journal')};
+}
+
+test('a companion restarted between the two moves of an update puts the previous copy back and tells every client', async t => {
+  const f = await restartable(t);
+  const first = f.boot({hang: {rename: (from, to) => to === f.live}});
+  const mcpId = first.updates.mcpId('p1s');
+  assert.equal((await first.updates.update(mcpId)).state, 'started');
+  // The previous copy has been set aside and the new one never arrived: there is no live MCP.
+  await until(() => first.moves.some(move => move[0] === 'rename' && move[1] === f.live));
+  assert.equal(f.version(), undefined, 'no live copy at the moment the companion dies');
+  assert.equal((await f.journals()).length, 1, 'the update is written down');
+  first.kill();
+  const second = f.boot();
+  await second.updates.applyOverrides();
+  assert.equal(f.version(), '1.1.46', 'the previous copy is live again');
+  assert.deepEqual(f.staging(), [], 'nothing of the staged install is left');
+  assert.deepEqual(await f.journals(), []);
+  const failed = f.events.filter(event => event.type === 'mcp.update.failed');
+  assert.equal(failed.length, 1);
+  assert.deepEqual([failed[0].data.mcpId, failed[0].data.fromVersion, failed[0].data.toVersion], [mcpId, '1.1.46', '1.1.50']);
+  assert.match(failed[0].data.log, /restarted while it was updating bambu-printer-mcp, so it put the previous version back\. Try Update again\./);
+  assert.equal(failed[0].reason, undefined);
+  // Starting once more finds nothing to do and says nothing.
+  await f.boot().updates.applyOverrides();
+  assert.equal(f.events.filter(event => event.type === 'mcp.update.failed').length, 1);
+});
+
+test('a restart at any other point of an update leaves the previous version in use and ends the update with a sentence', async t => {
+  for (const [point, hang, sentence] of [
+    ['during npm install', {install: true}, /before anything changed\. The previous version is still in use/],
+    // The new copy is live but never proved it starts: the previous one comes back, as a failed start does.
+    ['while the MCP restarts on the new copy', {restart: true}, /so it put the previous version back/],
+  ]) {
+    const f = await restartable(t);
+    const first = f.boot({hang});
+    await first.updates.update(first.updates.mcpId('p1s'));
+    await until(async () => (await f.journals()).length === 1 && (hang.install || f.version() === '1.1.50'));
+    first.kill();
+    await f.boot().updates.applyOverrides();
+    assert.equal(f.version(), '1.1.46', point);
+    assert.deepEqual(f.staging(), [], point);
+    assert.deepEqual(await f.journals(), [], point);
+    assert.match(f.events.findLast(event => event.type === 'mcp.update.failed').data.log, sentence, point);
+  }
+});
+
+test('a restart while an update waits for Counterpart\'s own work ends that wait for every client', async t => {
+  const f = await restartable(t, {busy: () => true, inFlightWaitMs: 60_000});
+  const first = f.boot();
+  assert.equal((await first.updates.update(first.updates.mcpId('p1s'))).state, 'waiting');
+  assert.equal((await f.journals()).length, 1);
+  first.kill();
+  await f.boot().updates.applyOverrides();
+  assert.deepEqual(f.events.map(event => event.type), ['mcp.update.waiting', 'mcp.update.failed']);
+  assert.match(f.events[1].data.log, /before anything changed/);
+  assert.equal(f.version(), '1.1.46');
+});
+
+test('a restart after an npx profile was repointed puts its saved override back', async t => {
+  const f = await restartable(t, {npx: true});
+  const first = f.boot({hang: {restart: true}});
+  await first.overrides.load();
+  await first.updates.update(first.updates.mcpId('p1s'));
+  await until(() => first.overrides.saved('p1s')?.args.includes('bambu-printer-mcp@1.1.50'));
+  first.kill();
+  const second = f.boot();
+  await second.updates.applyOverrides();
+  assert.equal(second.overrides.saved('p1s'), undefined, 'the profile runs what it ran before the update');
+  assert.deepEqual(await f.journals(), []);
+  assert.match(f.events.findLast(event => event.type === 'mcp.update.failed').data.log, /restarted while it was updating/);
+});
+
+test('an update that ends by itself leaves no journal, and a restore that fails keeps it for the next start', async t => {
+  const done = await restartable(t);
+  const ok = done.boot();
+  await ok.updates.update(ok.updates.mcpId('p1s'));
+  await until(() => done.events.some(event => event.type === 'mcp.update.done'));
+  assert.deepEqual(await done.journals(), []);
+  assert.equal(done.version(), '1.1.50');
+
+  const f = await restartable(t);
+  const first = f.boot({hang: {rename: (from, to) => to === f.live}});
+  await first.updates.update(first.updates.mcpId('p1s'));
+  await until(() => first.moves.some(move => move[0] === 'rename' && move[1] === f.live));
+  first.kill();
+  // The disk refuses the move back: the journal and the kept copy stay, and the client is told where it is.
+  await f.boot({failRename: () => true}).updates.applyOverrides();
+  assert.equal((await f.journals()).length, 1);
+  const failed = f.events.findLast(event => event.type === 'mcp.update.failed');
+  assert.match(failed.data.log, /couldn't put the previous version back\. It is kept in .*\/previous: move it to/);
+  assert.match(failed.reason, /previous version couldn't be put back/);
+  assert.ok(f.staging().some(file => file.includes('/previous/')), 'the previous copy is still on disk');
+  // The next start, on a disk that works, finishes the job.
+  await f.boot().updates.applyOverrides();
+  assert.equal(f.version(), '1.1.46');
+  assert.deepEqual(await f.journals(), []);
+});
+
+test('Update of the app\'s own unused copy that fails after setting the copy aside puts it back', async t => {
+  const f = await restartable(t);
+  const prefix = `${APP}/printers/bambu`, live = `${prefix}/lib/node_modules/bambu-printer-mcp`;
+  f.files[`${live}/package.json`] = pkgJson('1.1.46'); f.files[`${live}/dist/index.js`] = '';
+  const c = f.boot({failRename: (from, to) => to === live && !from.endsWith('/previous')});
+  const update = await c.updates.download('bambu-printer-mcp', {update: true});
+  await until(() => f.events.some(event => event.type === 'mcp.update.failed' && event.data.mcpId === update.mcpId));
+  assert.equal(JSON.parse(f.files[`${live}/package.json`]).version, '1.1.46', 'the copy that was there is there again');
+  assert.deepEqual(await f.journals(), []);
+});
+
+test('a file in the journal folder that is not a journal never stops the companion starting, and is met only once', async t => {
+  const bad = {
+    'foreign.json': JSON.stringify({hello: 'world'}),
+    'truncated.json': '{"version": 1, "mcpId": "global:/opt/homebrew:bambu-printer-mcp", "pkg": "bambu-printer-mcp", "phase": "chang',
+    // Another build's idea of version 1: a kind this build doesn't know, and a swap with no paths.
+    'unknown-kind.json': JSON.stringify({version: 1, mcpId: 'app:x', pkg: 'bambu-printer-mcp', phase: 'changing', change: {kind: 'docker', image: 'x'}, overrides: {}}),
+    'no-paths.json': JSON.stringify({version: 1, mcpId: 'app:y', pkg: 'mcp-3d-printer-server', phase: 'changing', change: {kind: 'npm', hadLive: true}, overrides: {}}),
+    'bad-overrides.json': JSON.stringify({version: 1, mcpId: 'app:z', pkg: 'bambu-printer-mcp', phase: 'changing', change: {kind: 'none'}, overrides: {p1s: {command: 5}}}),
+    'escaping-paths.json': JSON.stringify({version: 1, mcpId: 'app:w', pkg: 'bambu-printer-mcp', phase: 'changing', change: {kind: 'npm', staging: '/Users/ada', live: '/Users/ada/Documents', kept: '/Users/ada/previous', hadLive: true}, overrides: {}}),
+  };
+  const f = await restartable(t);
+  await mkdir(f.journalDir, {recursive: true});
+  for (const [name, text] of Object.entries(bad)) await writeFile(join(f.journalDir, name), text);
+  const c = f.boot();
+  await c.updates.applyOverrides();
+  assert.deepEqual(c.moves, [], 'nothing on the Mac is moved or removed because of a file that could not be read');
+  assert.equal(f.version(), '1.1.46');
+  assert.deepEqual(await f.journals(), [], 'none is read as a journal again');
+  const kept = (await readdir(f.journalDir)).filter(name => name.includes('.unreadable-'));
+  assert.equal(kept.length, Object.keys(bad).length, 'each is kept on disk for a person to read');
+  // One that names an MCP is said once to every client; one that names nothing is only logged.
+  const said = f.events.filter(event => event.type === 'mcp.update.failed');
+  assert.deepEqual(said.map(event => event.data.mcpId).sort(), ['app:w', 'app:x', 'app:y', 'app:z']);
+  assert.ok(said.every(event => /couldn't read, so it changed nothing/.test(event.data.log)));
+  await f.boot().updates.applyOverrides();
+  assert.equal(f.events.filter(event => event.type === 'mcp.update.failed').length, 4, 'the next start says nothing more');
+});
+
+test('two updates cut short at once are both undone', async t => {
+  const f = await restartable(t);
+  const first = f.boot({hang: {rename: (from, to) => to === f.live}});
+  await first.updates.update(first.updates.mcpId('p1s'));
+  await until(() => first.moves.some(move => move[0] === 'rename' && move[1] === f.live));
+  first.kill();
+  // A second install's journal beside it: admitted, nothing changed.
+  await writeFile(join(f.journalDir, '0000.json'), JSON.stringify({version: 1, mcpId: 'app:other', pkg: 'mcp-3d-printer-server', phase: 'admitted', toVersion: '1.2.60'}));
+  await f.boot().updates.applyOverrides();
+  assert.equal(f.version(), '1.1.46');
+  assert.deepEqual(await f.journals(), []);
+  const failed = f.events.filter(event => event.type === 'mcp.update.failed');
+  assert.deepEqual(failed.map(event => event.package).sort(), ['bambu-printer-mcp', 'mcp-3d-printer-server']);
+});
+
+test('a companion killed during recovery itself finishes the recovery at the next start', async t => {
+  const f = await restartable(t);
+  const first = f.boot({hang: {rename: (from, to) => to === f.live}});
+  await first.updates.update(first.updates.mcpId('p1s'));
+  await until(() => first.moves.some(move => move[0] === 'rename' && move[1] === f.live));
+  first.kill();
+  // The second companion dies while moving the previous copy back.
+  const second = f.boot({hang: {rename: (from, to) => to === f.live}});
+  void second.updates.applyOverrides();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  second.kill();
+  assert.equal(f.version(), undefined, 'still no live copy');
+  assert.equal((await f.journals()).length, 1, 'and still written down');
+  await f.boot().updates.applyOverrides();
+  assert.equal(f.version(), '1.1.46');
+  assert.deepEqual(await f.journals(), []);
+});
+
+test('a finished update is never undone at the next start, even when its journal could not be removed', async t => {
+  // Killed after the update said it was done, while removing the previous copy: the journal on disk says ended.
+  const f = await restartable(t);
+  const first = f.boot({hang: {rm: path => path.includes('.counterpart-update-')}});
+  await first.updates.update(first.updates.mcpId('p1s'));
+  await until(async () => (await f.journals()).length === 1 && JSON.parse(await readFile(join(f.journalDir, (await f.journals())[0]), 'utf8')).phase === 'ended');
+  first.kill();
+  assert.equal(f.version(), '1.1.50');
+  const before = f.events.length;
+  await f.boot().updates.applyOverrides();
+  assert.equal(f.version(), '1.1.50', 'the new copy stays');
+  assert.deepEqual(f.staging(), [], 'the leftover previous copy is cleared');
+  assert.deepEqual(await f.journals(), []);
+  assert.equal(f.events.length, before, 'and nothing is said: the update had not failed');
+
+  // A first download with no earlier copy, finished, whose journal was left behind: the good copy is not deleted.
+  const g = await restartable(t);
+  const prefix = `${APP}/printers/generic`, live = `${prefix}/lib/node_modules/mcp-3d-printer-server`;
+  g.files[`${live}/package.json`] = pkgJson('1.2.60', 'mcp-3d-printer-server');
+  await mkdir(g.journalDir, {recursive: true});
+  await writeFile(join(g.journalDir, 'left.json'), JSON.stringify({version: 1, mcpId: 'app:generic', pkg: 'mcp-3d-printer-server', phase: 'ended', outcome: 'done'}));
+  await g.boot().updates.applyOverrides();
+  assert.ok(g.files[`${live}/package.json`], 'still installed');
+  assert.deepEqual(await g.journals(), []);
+});
+
+test('a first copy cut short is removed and says so, never that a previous version was put back', async t => {
+  const f = await restartable(t);
+  const prefix = `${APP}/printers/generic`, live = `${prefix}/lib/node_modules/mcp-3d-printer-server`, staging = `${prefix}/.counterpart-update-0a0a0a0a-0000-4000-8000-000000000000`;
+  f.files[`${live}/package.json`] = pkgJson('1.2.60', 'mcp-3d-printer-server');
+  await mkdir(f.journalDir, {recursive: true});
+  await writeFile(join(f.journalDir, 'first.json'), JSON.stringify({version: 1, mcpId: 'app:generic', pkg: 'mcp-3d-printer-server', phase: 'changing',
+    change: {kind: 'npm', staging, live, kept: `${staging}/previous`, hadLive: false}, overrides: {}}));
+  await f.boot().updates.applyOverrides();
+  assert.equal(f.files[`${live}/package.json`], undefined);
+  const log = f.events.at(-1).data.log;
+  assert.match(log, /removed the new copy, which had not started yet\. There was no earlier copy/);
+  assert.doesNotMatch(log, /put the previous version back/);
+});
+
+test('a checkout whose own undo fails keeps its journal, with the commit it was at, and the next start says so again', async t => {
+  const dir = `${HOME}/src/bambu-printer-mcp`;
+  const files = {[`${dir}/package.json`]: pkgJson('1.1.46'), [`${dir}/.git/HEAD`]: '', [`${dir}/dist/index.js`]: ''};
+  let ci = 0;
+  const f = await updater(t, {journal: true, profile: bambu('/opt/homebrew/bin/node', [`${dir}/dist/index.js`]), files, fail: args => args[0] === 'ci' && ++ci >= 1});
+  await f.updates.update(f.mcpId);
+  await f.done();
+  assert.match(f.events.at(-1).data.log, /couldn't put the previous version back \(npm ci failed\)/);
+  const names = (await readdir(f.journalDir)).filter(name => name.endsWith('.json'));
+  assert.equal(names.length, 1, 'the half-built checkout is still written down');
+  const journal = JSON.parse(await readFile(join(f.journalDir, names[0]), 'utf8'));
+  assert.deepEqual(journal.change, {kind: 'checkout', dir, head: 'abc123'});
+  await f.updates.recover();
+  assert.match(f.events.at(-1).data.log, /may be half built \(it was at commit abc123\)\. Press Update again to finish it\./);
+  assert.deepEqual((await readdir(f.journalDir)).filter(name => name.endsWith('.json')), [], 'said once more, then cleared');
+  // A checkout update that fails and IS put back leaves nothing.
+  const ok = await updater(t, {journal: true, profile: bambu('/opt/homebrew/bin/node', [`${dir}/dist/index.js`]), files, fail: 'pull'});
+  await ok.updates.update(ok.mcpId);
+  await ok.done();
+  assert.deepEqual((await readdir(ok.journalDir).catch(() => [])).filter(name => name.endsWith('.json')), []);
 });
