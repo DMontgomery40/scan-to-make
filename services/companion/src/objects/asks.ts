@@ -29,8 +29,16 @@ export function answeredSizes(ask: Ask | undefined, sent: {id: string; mm: numbe
   if (byId.size !== sent.length || sent.some(item => !ask.sizes!.some(size => size.id === item.id)))
     throw new InvalidSizesError('Those sizes are not the ones this question asked for. Update Counterpart and try again.');
   if (sent.some(item => !Number.isFinite(item.mm) || item.mm <= 0 || item.mm > 10_000)) throw new InvalidSizesError('Enter each size in millimetres.');
-  return ask.sizes.filter(size => byId.has(size.id)).map(size => ({id: size.id, label: size.label, mm: byId.get(size.id)!, asked: size.mm}));
+  // Every client shows the asked number rounded to two decimals, so a field nobody touched comes back as that
+  // rounded echo. It is the asked number, confirmed: it is kept exactly as asked, never stored or reported as a
+  // measurement the person made (asked 68.412, shown 68.41, Confirm pressed).
+  return ask.sizes.filter(size => byId.has(size.id)).map(size => {
+    const sent = byId.get(size.id)!;
+    return {id: size.id, label: size.label, mm: shown(sent) === shown(size.mm) ? size.mm : sent, asked: size.mm};
+  });
 }
+/** A size at the precision every client shows it (`AskSizesForm.text`, its Kotlin and Linux twins). */
+const shown = (value: number) => Math.round(value * 100) / 100;
 
 const mm = (value: number) => String(Number(value.toPrecision(12)));
 

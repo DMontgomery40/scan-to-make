@@ -25,6 +25,16 @@ class AskSizesFormTests {
         assertEquals(listOf(AskSizesForm.Answer("size-1", 64.0), AskSizesForm.Answer("size-2", 53.5), AskSizesForm.Answer("size-3", 107.0)), form.answer)
     }
 
+    /** The computer's number can be finer than the field shows; untouched, that is still Confirm (the computer keeps its own number). */
+    @Test fun aNumberFinerThanTheFieldShowsIsStillUnchanged() {
+        val fine = listOf(Project.Ask.Size("a", "width", 68.412, "scan"), Project.Ask.Size("b", "waist", 53.4567, "scan"))
+        val form = AskSizesForm.of(ask(sizes = fine))!!
+        assertEquals(listOf("68.41", "53.46"), form.fields.map { it.text })
+        assertTrue(form.unchanged)
+        assertEquals(listOf(AskSizesForm.Answer("a", 68.41), AskSizesForm.Answer("b", 53.46)), form.answer)
+        assertFalse(form.with("a", "68.42").unchanged)
+    }
+
     @Test fun aCorrectionACommaAndABlankField() {
         var form = AskSizesForm.of(ask())!!.with("size-1", " 63 ").with("size-2", "53,2")
         assertFalse(form.unchanged)

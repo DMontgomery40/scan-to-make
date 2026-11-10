@@ -19,6 +19,18 @@ final class AskSizesFormTests: XCTestCase {
         XCTAssertEqual(form.answer, [.init(id: "size-1", mm: 64), .init(id: "size-2", mm: 53.5), .init(id: "size-3", mm: 107)])
     }
 
+    /// The Mac's number can be finer than the field shows (68.412 shown as 68.41). Untouched, that is still Confirm,
+    /// and the Mac keeps its own number for it (`answeredSizes`), never the rounded echo sent here.
+    func testANumberFinerThanTheFieldShowsIsStillUnchanged() throws {
+        var form = try XCTUnwrap(AskSizesForm(ask([.init(id: "a", label: "width", mm: 68.412, from: "scan"),
+                                                   .init(id: "b", label: "waist", mm: 53.4567, from: "scan")])))
+        XCTAssertEqual(form.fields.map(\.text), ["68.41", "53.46"])
+        XCTAssertTrue(form.unchanged)
+        XCTAssertEqual(form.answer, [.init(id: "a", mm: 68.41), .init(id: "b", mm: 53.46)])
+        form.fields[0].text = "68.42"
+        XCTAssertFalse(form.unchanged)
+    }
+
     func testACorrectionAComma_AndABlankField() throws {
         var form = try XCTUnwrap(AskSizesForm(ask(waisted)))
         form.fields[0].text = " 63 "

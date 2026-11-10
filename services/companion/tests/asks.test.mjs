@@ -47,4 +47,12 @@ test('answered sizes keep the question\'s labels and order, and say which were c
   for (const bad of [[], [{id: 'c', mm: 1}], [{id: 'a', mm: 1}, {id: 'a', mm: 2}], [{id: 'a', mm: Number.NaN}], [{id: 'a', mm: 10_001}]])
     assert.throws(() => answeredSizes(question, bad));
   assert.throws(() => answeredSizes(ask({}), [{id: 'a', mm: 1}]), /did not ask for sizes/);
+  // A number nobody touched comes back as the two-decimal echo every client shows. It is confirmed, and what is
+  // kept is the asked number, never the echo.
+  const fine = ask({kind: 'sizes', sizes: [{id: 'a', label: 'width', mm: 68.412, from: 'scan'}, {id: 'b', label: 'waist', mm: 53.4567, from: 'scan'}, {id: 'c', label: 'height', mm: 149.2049, from: 'scan'}]});
+  const echoed = answeredSizes(fine, [{id: 'a', mm: 68.41}, {id: 'b', mm: 53.46}, {id: 'c', mm: 149.3}]);
+  assert.deepEqual(echoed, [{id: 'a', label: 'width', mm: 68.412, asked: 68.412}, {id: 'b', label: 'waist', mm: 53.4567, asked: 53.4567}, {id: 'c', label: 'height', mm: 149.3, asked: 149.2049}]);
+  assert.equal(sizesNote(echoed), 'The person checked the sizes you asked about on the real object. Treat these as measured:\n- width: 68.412 mm (confirmed)\n- waist: 53.4567 mm (confirmed)\n- height: 149.3 mm (corrected; you had 149.2049 mm)');
+  // One hundredth away is a correction.
+  assert.equal(answeredSizes(fine, [{id: 'a', mm: 68.42}])[0].mm, 68.42);
 });
