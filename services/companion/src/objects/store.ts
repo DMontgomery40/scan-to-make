@@ -100,6 +100,12 @@ export interface StmObject {
   /** File name under scan/. */
   scan?: string;
   /**
+   * The project's picture (PRD §5.1): the object alone on the stage, drawn by the companion (`pictures/…png`), and
+   * each of its gallery pictures for clients that show pictures (`part`, `scan`, `together`, `photo`).
+   */
+  picture?: string;
+  pictures?: import('./pictures.js').ProjectPictureNames;
+  /**
    * Where `scan` came from when the phone sent an Object Capture session's photos with it: `phone-preview` is the
    * phone's own quick model, kept until this Mac rebuilds from the photos (and kept as the scan, said in words, when
    * it can't); `mac` is that rebuild, with the phone's preview kept as scan/phone-preview.usdz.

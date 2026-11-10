@@ -62,7 +62,7 @@ export function seatMatrix(seat: Pick<Seat, 'translationMm' | 'rotationDeg'>): n
     sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx, ty,
     -sy, cy * sx, cy * cx, tz,
     0, 0, 0, 1,
-  ];
+  ].map(value => value + 0);
 }
 
 export function transformPoint(matrix: number[], [x, y, z]: [number, number, number]): [number, number, number] {

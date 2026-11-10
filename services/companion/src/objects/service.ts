@@ -39,6 +39,7 @@ import {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './
 import type {TouchupInput} from '../touchup/touchup.js';
 import {carriedSeats, scanBoundsFromObj, seatsProblem, stlBounds, stlFileBounds, type Bounds, type Seat} from './seats.js';
 import {createCaptureConverter} from '../capture-converter.js';
+import {ProjectPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
@@ -221,6 +222,11 @@ export interface ObjectServiceDeps {
    * computer) such a scan is touched up as before.
    */
   scanToStl?: ScanToStl;
+  /**
+   * Draws a project's pictures, the object alone on the stage (PRD §5.1; `mac-reconstruct picture` on a Mac). Without
+   * it the clients show a project's render, or a neutral placeholder, and never a photo of the room.
+   */
+  drawPicture?: DrawPicture;
   /** The scan's box in the seat frame (docs/protocols/seats.md), for the seats' nonsense check; the capture converter by default. */
   scanBounds?: (scanPath: string) => Promise<Bounds | undefined>;
   /** This computer has Apple's PhotogrammetrySession and the bundled `mac-reconstruct` (a Mac). */
@@ -490,7 +496,18 @@ export class ObjectService {
   /** One action at a time per object, so a double tap can't start the same work twice. */
   readonly #gates = new Map<string, Promise<unknown>>();
   #closed = false;
-  constructor(deps: ObjectServiceDeps) { this.#deps = deps; }
+  constructor(deps: ObjectServiceDeps) {
+    this.#deps = deps;
+    this.#pictures = new ProjectPictures(deps.drawPicture, async (id, names) => {
+      const updated = await deps.store.update(id, o => ({...o, pictures: names, picture: leadPicture(names)})).catch(() => undefined);
+      if (!updated) return;
+      deps.onChange?.(updated);
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['picture']}});
+    });
+  }
+  readonly #pictures: ProjectPictures;
+  /** Waits for the pictures being drawn (tests). */
+  picturesDrawn(): Promise<void> { return this.#pictures.idle(); }
 
   #gate<T>(id: string, action: () => Promise<T>): Promise<T> {
     const next = (this.#gates.get(id) ?? Promise.resolve()).catch(() => undefined).then(() => {
@@ -766,6 +783,8 @@ export class ObjectService {
     for (const object of objects) if (object.state !== 'new') this.#title(object, {backfill: true});
     // Whether each 3MF prints with its own settings, asked once per file and in the background.
     for (const object of objects) void this.#askOwnSettings(object);
+    // Each project's picture, drawn once when what it shows changes (PRD §5.1).
+    for (const object of objects) this.#pictures.ensure(object, this.dir(object.id));
     return objects;
   }
 
@@ -3350,5 +3369,9 @@ export class ObjectService {
   #handoff(): PrinterHandoffConfig { return this.#deps.runningHandoff?.() ?? this.#deps.handoff; }
   #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#handoff().process.env}); }
 
-  #changed(object: StmObject): StmObject { this.#deps.onChange?.(object); return object; }
+  #changed(object: StmObject): StmObject {
+    this.#deps.onChange?.(object);
+    if (object.state !== 'touching-up') this.#pictures.ensure(object, this.dir(object.id));
+    return object;
+  }
 }

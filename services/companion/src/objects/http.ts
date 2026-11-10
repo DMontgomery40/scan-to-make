@@ -19,7 +19,7 @@ import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 /** Settings -> Printers: the printer MCP's connection (`route`) and which MCP a printer uses (`mcp`). */
 const PRINTER_CHOICE = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
@@ -359,6 +359,20 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           response.setHeader('content-type', type);
           response.setHeader('x-content-type-options', 'nosniff');
           response.setHeader('cache-control', 'private, no-store');
+          response.end(bytes);
+          return;
+        }
+        if (action.startsWith('pictures/')) {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          const object = await service.get(id);
+          // Only the project's own current pictures (PRD §5.1), never another file under it.
+          if (!Object.values(object.pictures ?? {}).includes(action)) throw new HttpFailure(404, 'not-found');
+          const bytes = await readFile(join(service.dir(id), action)).catch(() => { throw new HttpFailure(404, 'not-found'); });
+          response.statusCode = 200;
+          response.setHeader('content-type', 'image/png');
+          response.setHeader('cache-control', 'private, max-age=86400');
+          response.setHeader('x-content-type-options', 'nosniff');
           response.end(bytes);
           return;
         }
