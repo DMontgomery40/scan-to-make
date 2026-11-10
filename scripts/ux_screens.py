@@ -34,6 +34,8 @@ import fcntl
 import json
 import os
 import re
+import shlex
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -44,13 +46,23 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 REAL = Path.home() / 'Library/Application Support/Scan to Make'
 LOCK = Path(os.environ.get('STM_IOS_LOCK', str(Path.home() / '.stm-ios.lock')))
-AGENT_DEVICE = os.environ.get('AGENT_DEVICE', str(Path.home() / '.t3/userdata/device/bin/agent-device'))
+def agent_device() -> list[str]:
+    """The agent-device CLI with its own local daemon (T3's bundled copy, or AGENT_DEVICE). T3's `agent-device` wrapper only
+    runs as the command device_open returns, and device_open boots its device outside any lock, so the script drives the
+    simulators it creates itself with the CLI directly."""
+    if os.environ.get('AGENT_DEVICE'): return shlex.split(os.environ['AGENT_DEVICE'])
+    found = sorted(Path.home().glob('.t3/tools/agent-device/*/node_modules/agent-device/bin/agent-device.mjs'))
+    if not found: raise SystemExit('agent-device not found: set AGENT_DEVICE to its command')
+    return ['node', str(found[-1])]
 BUNDLE = 'com.scantomake'
 MARK = b'Library/Application Support/Scan to Make'
 # Only project data. Everything else under the state root (auth, tls, companion.env, printer-handoff*,
 # printers/, live-activity-tokens.json, diagnostics, logs, releases) stays where it is.
 COPY = ['capture/objects', 'capture/starters', 'events.ndjson', 'events.meta.json', 'settings.json', 'pass-timings.json']
 TEXT = {'.json', '.ndjson', '.jsonl', '.txt', '.log', '.md', '.py', '.csv', '.yaml', '.yml'}
+# Projects never copied, nor their events. David, Nov 10, through the lead: leave the unicorn projects out entirely.
+EXCLUDE = {'176821af-8d48-4485-b4b4-7718a5ac3305'}
+EXCLUDE_WORDS = (b'unicorn', b'Unicorn')
 NAMESPACE = uuid.UUID('6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a00')
 
 # The real projects shown, by id prefix: (name in file names, the state it shows).
@@ -62,7 +74,6 @@ PROJECTS = [
     ('guitar-pick', 'a2bfa85a', 'done: printed, marked works'),
     ('caliper-card', '1f1c5515', 'done: a designer 3MF copy, printed'),
     ('pink-box', '874333ab', 'failed: the printer stopped'),
-    ('unicorn', '176821af', 'failed: cancelled before a model'),
     ('stove-gap-limit', 'synth:limit', 'stopped at a limit (copy of stove-gap-filler, last pass capped)'),
     ('scan-platform-3mf', '7f1a9e33', 'ready: an imported multi-plate 3MF from a starter'),
     ('crochet-potato', 'c302d5db', 'ready: a copy with 24 photos'),
@@ -144,7 +155,16 @@ def prepare(source: Path, data: Path) -> dict:
     state = data / 'state'
     if state.exists(): raise SystemExit(f'{state} exists: move it away (Spillover) or choose another --work')
     for rel in COPY:
-        if (source / rel).exists(): clone(source / rel, state / rel)
+        if not (source / rel).exists(): continue
+        if rel == 'capture/objects':
+            for project in sorted((source / rel).iterdir()):
+                if project.name not in EXCLUDE and not any(w in (project / 'object.json').read_bytes() for w in EXCLUDE_WORDS if (project / 'object.json').exists()):
+                    clone(project, state / rel / project.name)
+        elif rel == 'events.ndjson':
+            (state / rel).parent.mkdir(parents=True, exist_ok=True)
+            (state / rel).write_bytes(b''.join(line for line in (source / rel).read_bytes().splitlines(keepends=True)
+                                               if not any(x.encode() in line for x in EXCLUDE) and not any(w in line for w in EXCLUDE_WORDS)))
+        else: clone(source / rel, state / rel)
     objects = state / 'capture/objects'
     ids = {}
     for name, prefix, _ in PROJECTS:
@@ -152,7 +172,9 @@ def prepare(source: Path, data: Path) -> dict:
     ids['wall-holder-question'] = synth_question(objects, ids['wall-holder'])
     ids['stove-gap-limit'] = synth_limit(objects, resolve_id(objects, '2f0a0229'))
     rewrite_paths(state, source)
-    manifest = {'source': str(source), 'copiedAt': dt.datetime.now().isoformat(timespec='seconds'), 'ids': ids, 'copied': COPY}
+    leftover = [str(p) for p in state.rglob('*.json') if any(w in p.read_bytes() for w in EXCLUDE_WORDS)]
+    if leftover or any((objects / x).exists() for x in EXCLUDE): raise SystemExit(f'excluded projects remain in the copy: {leftover[:5]}')
+    manifest = {'source': str(source), 'copiedAt': dt.datetime.now().isoformat(timespec='seconds'), 'ids': ids, 'copied': COPY, 'excluded': sorted(EXCLUDE)}
     (data / 'manifest.json').write_text(json.dumps(manifest, indent=1))
     return manifest
 
@@ -212,7 +234,7 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
         return ['-CounterpartFixtures', str(folder), '-CounterpartFixtureSet', set_, *more]
     out: list[dict] = []
     def add(name, screen, state, data, args, actions=(), pages=1, note=''):
-        out.append({'name': name, 'screen': screen, 'state': state, 'data': data, 'args': args, 'actions': list(actions),
+        out.append({'order': len(out), 'name': name, 'screen': screen, 'state': state, 'data': data, 'args': args, 'actions': list(actions),
                     'pages': pages, 'note': note})
     # First run, on a fresh install: no pairing anywhere.
     add('first-run-welcome', 'First run: Welcome', 'not paired', 'none', [])
@@ -270,15 +292,19 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
 
 
 class Device:
-    def __init__(self, key: str, udid: str, out: Path, results: list):
-        self.key, self.udid, self.out, self.results = key, udid, out, results
+    def __init__(self, key: str, udid: str, out: Path, record):
+        self.key, self.udid, self.out, self.record = key, udid, out, record
         self.session = f'ux-screens-{key}'
+        self.cli = agent_device()
 
     def ad(self, *args: str, timeout: int = 90) -> dict:
-        cmd = [AGENT_DEVICE, *args, '--udid', self.udid, '--session', self.session, '--json']
+        cmd = [*self.cli, *args, '--udid', self.udid, '--session', self.session, '--json']
         run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        try: reply = json.loads(run.stdout.strip().splitlines()[-1]) if run.stdout.strip() else {}
-        except json.JSONDecodeError: reply = {'raw': run.stdout[-500:]}
+        text = run.stdout.strip()
+        try: reply = json.loads(text) if text else {}
+        except json.JSONDecodeError:
+            try: reply = json.loads(text.splitlines()[-1])
+            except (json.JSONDecodeError, IndexError): reply = {'raw': text[-500:]}
         if run.returncode != 0:
             raise RuntimeError(f'agent-device {" ".join(args[:3])}: {(run.stderr or run.stdout)[-400:]}')
         return reply
@@ -297,15 +323,20 @@ class Device:
                 time.sleep(1.5)
             except Exception as failure:  # the screen is still captured, with what happened
                 error = str(failure)
+        previous = b''
         for page in range(1, item['pages'] + 1):
             path = self.out / f'{item["name"]}-p{page}.png'
             self.ad('screenshot', str(path), '--pixel-density', '2', '--normalize-status-bar')
-            self.results.append({**item, 'device': self.key, 'image': path, 'page': page, 'error': error})
+            image = path.read_bytes()
+            if image == previous:  # the scroll didn't move: this page repeats the last one
+                path.unlink()
+                break
+            previous = image
+            self.record('results', {**item, 'args': [], 'device': self.key, 'image': str(path), 'page': page, 'error': error})
             if page == item['pages']: break
-            try: moved = self.ad('scroll', 'down', '0.7')
+            try: moved = json.dumps(self.ad('scroll', 'down', '0.7'))
             except Exception: break
-            if json.dumps(moved).find('"moved"') < 0 and json.dumps(moved).find('moved') < 0: break
-            if any(word in json.dumps(moved) for word in ('"at-edge"', '"unchanged"')): break
+            if '"unchanged"' in moved: break
             time.sleep(1)
 
 
@@ -313,22 +344,42 @@ def simctl(*args: str, check: bool = True) -> str:
     return subprocess.run(['xcrun', 'simctl', *args], capture_output=True, text=True, check=check).stdout.strip()
 
 
+def source_fingerprint() -> str:
+    git = lambda *a: subprocess.run(['git', '-C', str(REPO), *a], capture_output=True, text=True).stdout
+    return hashlib.sha256((git('rev-parse', 'HEAD') + git('diff', 'HEAD', '--', 'apps/mobile', 'packages/CounterpartKit')).encode()).hexdigest()
+
+
+def find_app(derived: Path) -> Path | None:
+    for app in (derived / 'Build/Products/Debug-iphonesimulator').glob('*.app'):
+        info = subprocess.run(['/usr/libexec/PlistBuddy', '-c', 'Print :CFBundleIdentifier', str(app / 'Info.plist')], capture_output=True, text=True).stdout.strip()
+        if info == BUNDLE: return app
+    return None
+
+
 def build_app(work: Path) -> Path:
     derived = work / 'build'
+    stamp, fingerprint = derived / 'ux-screens-source', source_fingerprint()
+    if (app := find_app(derived)) and stamp.exists() and stamp.read_text() == fingerprint:
+        log('reusing the app built from this source')
+        return app
     log('building the Debug app for the simulator')
     subprocess.run(['xcodebuild', 'build', '-project', str(REPO / 'apps/mobile/ios/ScanToMake.xcodeproj'), '-scheme', 'ScanToMake',
                     '-configuration', 'Debug', '-destination', 'generic/platform=iOS Simulator', '-derivedDataPath', str(derived),
                     'CODE_SIGN_IDENTITY=-', 'CODE_SIGN_STYLE=Manual', '-quiet'], check=True, stdout=open(work / 'xcodebuild.log', 'w'), stderr=subprocess.STDOUT)
-    for app in (derived / 'Build/Products/Debug-iphonesimulator').glob('*.app'):
-        info = subprocess.run(['/usr/libexec/PlistBuddy', '-c', 'Print :CFBundleIdentifier', str(app / 'Info.plist')], capture_output=True, text=True).stdout.strip()
-        if info == BUNDLE: return app
-    raise SystemExit('built app not found')
+    app = find_app(derived)
+    if not app: raise SystemExit('built app not found')
+    stamp.write_text(fingerprint)
+    return app
 
 
-def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, results: list, failures: list) -> None:
+def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record, done: set, deadline: float) -> int:
+    """Captures what isn't done yet, until the deadline; returns how many screens are left."""
     created: dict[str, str] = {}
+    left = sum(1 for key in keys for item in items if (key, item['name']) not in done)
     try:
         for key in keys:
+            todo = [item for item in items if (key, item['name']) not in done]
+            if not todo or time.time() > deadline: continue
             name, kind, runtime, pose = DEVICES[key]
             base = 'duo' if pose else key
             if base not in created:
@@ -338,22 +389,26 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, result
                 simctl('bootstatus', udid, '-b')
                 simctl('install', udid, str(app))
             udid = created[base]
-            device = Device(key, udid, out / key, results)
+            device = Device(key, udid, out / key, record)
             device.out.mkdir(parents=True, exist_ok=True)
             started = time.time()
             for setting in (['settings', 'permission', 'grant', 'notifications', '--app', BUNDLE], ['settings', 'appearance', 'light']):
                 try: device.ad(*setting)
-                except Exception as failure: failures.append((key, ' '.join(setting), str(failure)))
+                except Exception as failure: record('failures', {'device': key, 'name': ' '.join(setting), 'why': str(failure)})
             if pose:
                 try: device.ad('open', BUNDLE, '--relaunch', timeout=120); device.ad('fold', pose, timeout=120)
-                except Exception as failure: failures.append((key, f'fold {pose}', str(failure)))
-            for item in items:
+                except Exception as failure: record('failures', {'device': key, 'name': f'fold {pose}', 'why': str(failure)})
+            for item in todo:
+                if time.time() > deadline: break
+                left -= 1
                 try:
                     if item['name'].startswith('first-run'):
                         device.ad('settings', 'clear-app-state', BUNDLE)
                     device.shoot(item)
+                    record('done', {'device': key, 'name': item['name']})
                 except Exception as failure:
-                    failures.append((key, item['name'], str(failure)))
+                    record('failures', {'device': key, 'name': item['name'], 'why': str(failure)})
+                    record('done', {'device': key, 'name': item['name']})
                     log(key, item['name'], 'FAILED', str(failure)[:200])
             log(key, f'done in {time.time() - started:.0f} s')
             try: device.ad('close')
@@ -362,13 +417,23 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, result
         for udid in created.values():
             simctl('shutdown', udid, check=False)
             simctl('delete', udid, check=False)
+    return left
 
 
-def write_index(out: Path, results: list, failures: list, info: dict, manifest: dict, minutes: float, processes: list[str]) -> None:
+def read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
+
+
+def write_index(out: Path, info: dict, manifest: dict, minutes: float, processes: list[str]) -> None:
+    images = {r['image']: r for r in read_jsonl(out / 'results.jsonl') if Path(r['image']).exists()}
+    results = sorted(images.values(), key=lambda r: (list(DEVICES).index(r['device']), r['order'], r['page']))
+    captured = {(r['device'], r['name']) for r in results}
+    failures = {(f['device'], f['name']): f['why'] for f in read_jsonl(out / 'failures.jsonl') if (f['device'], f['name']) not in captured}
+    failures = [(d, n, w) for (d, n), w in failures.items()]
     lines = ['# Counterpart screens', '',
              f'Made by `scripts/ux_screens.py` on {dt.datetime.now():%Y-%m-%d %H:%M} from commit '
              f'`{subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()}`'
-             f' ({minutes:.0f} min holding the simulator lock).', '',
+             f' (this run held the simulator lock {minutes:.0f} min; earlier runs\' images are kept).', '',
              '**Data.** *real*: a copy of this Mac\'s projects (copied ' + manifest['copiedAt'] + '), served by the real companion '
              '(`server-cli.js`) to the real app client over http://127.0.0.1:9078. The pairing exchange was made by the script, not the pairing UI. '
              'No printer: the printer MCP is `/usr/bin/false`, so printer screens with *real (printer stub)* show what the app says when its '
@@ -384,7 +449,7 @@ def write_index(out: Path, results: list, failures: list, info: dict, manifest: 
     for device in dict.fromkeys(r['device'] for r in results):
         lines += [f'## {DEVICES[device][0]} (`{device}`)', '', '| Image | Screen | State | Data | Note |', '|---|---|---|---|---|']
         for r in (r for r in results if r['device'] == device):
-            rel = r['image'].relative_to(out)
+            rel = Path(r['image']).relative_to(out)
             note = '; '.join(x for x in [r['note'], f'page {r["page"]}' if r['page'] > 1 else '', f'action failed: {r["error"][:120]}' if r['error'] else ''] if x)
             lines.append(f'| [{rel}]({rel}) | {r["screen"]} | {r["state"]} | {r["data"]} | {note.replace("|", "/")} |')
         lines.append('')
@@ -399,6 +464,8 @@ def main() -> None:
     parser.add_argument('--devices', default=','.join(DEVICES))
     parser.add_argument('--screens', default='', help='comma-separated substrings of screen names to keep')
     parser.add_argument('--prepare-only', action='store_true', help='copy the data, start the companion, check it, stop')
+    parser.add_argument('--max-minutes', type=float, default=10, help='end this lock hold after starting no new screen for this long (default 10); run again to go on')
+    parser.add_argument('--redo', action='store_true', help='capture the selected screens again (with --devices/--screens)')
     args = parser.parse_args()
     out, work = args.out.resolve(), (args.work or args.out.resolve().parent / 'ux-screens-work').resolve()
     keys = [k for k in args.devices.split(',') if k]
@@ -430,7 +497,14 @@ def main() -> None:
             return
         items = screens(ids, record, offline_record, fixtures, offline)
         if args.screens: items = [i for i in items if any(s in i['name'] for s in args.screens.split(','))]
-        results, failures = [], []
+        done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
+        if args.redo: done -= {(k, i['name']) for k in keys for i in items}
+        def record(kind: str, row: dict) -> None:
+            with open(out / f'{kind}.jsonl', 'a') as file: file.write(json.dumps(row) + '\n')
+        if all((k, i['name']) in done for k in keys for i in items):
+            log('every screen is captured; --redo captures them again')
+            write_index(out, info, manifest, 0, processes)
+            return
         with open(LOCK, 'a') as handle:
             try: fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -438,11 +512,11 @@ def main() -> None:
             locked = time.time()
             log('holding the simulator lock')
             app = build_app(work)
-            run_devices(keys, items, app, out, results, failures)
+            left = run_devices(keys, items, app, out, record, done, time.time() + args.max_minutes * 60)
             minutes = (time.time() - locked) / 60
         log(f'released the lock after {minutes:.1f} min')
-        write_index(out, results, failures, info, manifest, minutes, processes)
-        log(f'{len(results)} images, {len(failures)} not captured: {out / "index.md"}')
+        write_index(out, info, manifest, minutes, processes)
+        log(f'{len(read_jsonl(out / "results.jsonl"))} images so far; {left} screens left' + (' (run the same command again)' if left else '') + f': {out / "index.md"}')
         log(f'the copy of the projects is in {data}; move {work} to /Volumes/Spillover when done')
     finally:
         companion.stop()
