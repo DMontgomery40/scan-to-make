@@ -442,8 +442,9 @@ final class PrintScreensUITests: XCTestCase {
         XCTAssertTrue(footer.waitForExistence(timeout: 20))
         // At rest, before any scrolling: the note sits above Pause and Stop, never under them.
         XCTAssertLessThanOrEqual(footer.frame.maxY, app.buttons["Pause"].frame.minY + 1, "the note is under the controls at rest")
+        // The note is on the page now (F8); only Pause and Stop ride in the bar, and nothing scrolls under them.
         let bed = app.staticTexts["Bed"]
-        assertLastControlClearsTheBar(app, last: bed, bar: footer, "printing")
+        assertLastControlClearsTheBar(app, last: bed, bar: app.buttons["Pause"], "printing")
     }
 
     func testAPrinterNamesTheUpdateItsMCPNeeds() {
@@ -694,8 +695,9 @@ final class LayoutParityUITests: XCTestCase {
         let app = launch(screen: "print-finished")
         let works = app.buttons["it-works"]
         XCTAssertTrue(works.waitForExistence(timeout: 20), "Did it fit? on the finished Printing screen")
+        // On the iPad the project page under Printing has the same card, so wait for Printing's own Open Project.
+        XCTAssertTrue(app.buttons["open-project"].waitForExistence(timeout: 10), "the finished Printing screen")
         XCTAssertTrue(app.staticTexts["Did it fit?"].exists)
-        XCTAssertTrue(app.buttons["open-project"].exists)
         XCTAssertFalse(app.staticTexts["Nozzle"].exists, "a finished print's temperatures aren't shown as live")
         XCTAssertFalse(app.buttons["Stop"].exists)
         works.tap()
