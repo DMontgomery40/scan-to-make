@@ -213,7 +213,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Icon(CIcons.Hand, null, tint = Palette.needsYou); Spacer(Modifier.width(8.dp)); Text("Your computer asks", fontWeight = FontWeight.SemiBold) }
                     Text(ask.question)
-                    ask.photo?.let { ProjectImage(project, "asks/" + it.substringAfterLast('/'), Modifier.fillMaxWidth().aspectRatio(1.3f).clip(RoundedCornerShape(18.dp)), ContentScale.Fit) }
+                    if (ask.type != "choice" && ask.type != "file") AskPhoto(project, ask)
                     when (ask.type) {
                         "choice" -> ask.options?.forEach { o ->
                             SecondaryButton(o.label + (o.detail?.let { " · $it" } ?: ""), Modifier.fillMaxWidth(), enabled = working == null) {
@@ -294,6 +294,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 if (designer != null || site != null) Text(listOfNotNull(designer?.let { "by $it" }, site?.let { "on $it" }).joinToString(" "), color = Palette.secondary)
             }
             project.instructions?.takeIf { it.isNotBlank() }?.let { SectionTitle("You asked"); Text(it, color = Palette.secondary) }
+            // The scan as one strip and its count, never every frame (David, Nov 9).
+            ScanStrip(project)
             Text("Sent: " + ProjectWords.sentLine(project), color = Palette.secondary, fontSize = 13.sp)
             Spacer(Modifier.height(24.dp))
         }

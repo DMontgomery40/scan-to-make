@@ -709,3 +709,28 @@ export function codeEngineRow(view: CodeEngineView | undefined): {
     ...(view.result ? { result: { ok: view.result.ok, message: view.result.message, ...(view.result.suggestion ? { suggestion: view.result.suggestion } : {}) } } : {}),
   };
 }
+
+type Region = { x: number; y: number; width: number; height: number };
+
+/** Inside the picture, or undefined when nothing of it is (CounterpartKit `Region.clamped`). */
+export function clampRegion(r: Region | undefined): Region | undefined {
+  if (!r || ![r.x, r.y, r.width, r.height].every(Number.isFinite)) return undefined;
+  const c = (v: number) => Math.min(Math.max(v, 0), 1);
+  const left = c(r.x), top = c(r.y), right = c(r.x + r.width), bottom = c(r.y + r.height);
+  return right - left > 0.001 && bottom - top > 0.001 ? { x: left, y: top, width: right - left, height: bottom - top } : undefined;
+}
+
+/** The words under a question's picture, true for any question (David, Nov 9; CounterpartKit `AskPicture.caption`). */
+export function askCaption(ask: { photo?: string; region?: Region } | undefined): string {
+  if (!ask?.photo) return "Your project’s picture. No picture came with this question.";
+  return clampRegion(ask.region) ? "The outlined part is what this question is about." : "The picture that goes with this question.";
+}
+
+/** The scan frames a strip shows: the first, the last and evenly between; 130 give 0, 32, 65, 97, 129 on every client. */
+export function scanSample(count: number, shown = 5): number[] {
+  if (count <= shown) return Array.from({ length: count }, (_, i) => i);
+  if (shown <= 1) return [0];
+  return Array.from({ length: shown }, (_, i) => Math.floor((i * (count - 1) + Math.floor((shown - 1) / 2)) / (shown - 1)));
+}
+
+export const scanWords = (count: number) => (count === 1 ? "1 photo" : `${count} photos`);

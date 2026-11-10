@@ -29,12 +29,16 @@ struct SettingsView: View {
                             .glassEffect(.regular.tint(connectionTint.opacity(0.28)), in: .rect(cornerRadius: 16))
                         VStack(alignment: .leading, spacing: 3) {
                             Text(store.macName ?? "Your Mac").font(.headline)
-                            if checking || (store.reachable == nil && store.error == nil) {
-                                Label("Checking…", systemImage: "arrow.triangle.2.circlepath").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                            } else if store.reachable == false || store.error != nil {
-                                Label("Can't reach it right now", systemImage: "exclamationmark.circle.fill").font(.subheadline.weight(.medium)).foregroundStyle(.orange)
-                            } else {
-                                Label("Connected now", systemImage: "checkmark.circle.fill").font(.subheadline.weight(.medium)).foregroundStyle(Color.okGreen)
+                            // One line per state of the link, in its own words (`MacLink.settingsWords`).
+                            switch checking ? MacLink.checking : store.link {
+                            case .checking:
+                                Label(MacLink.checking.settingsWords, systemImage: "arrow.triangle.2.circlepath").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                            case .connected:
+                                Label(MacLink.connected.settingsWords, systemImage: "checkmark.circle.fill").font(.subheadline.weight(.medium)).foregroundStyle(Color.okGreen)
+                            case .notAnswering:
+                                Label(MacLink.notAnswering.settingsWords, systemImage: "exclamationmark.circle.fill").font(.subheadline.weight(.medium)).foregroundStyle(.orange)
+                            case .needsPairing:
+                                Label(store.link.settingsWords, systemImage: "desktopcomputer.trianglebadge.exclamationmark").font(.subheadline.weight(.medium)).foregroundStyle(.orange)
                             }
                             if let host = store.connection?.host { Text("On your network · \(host)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
                         }
@@ -113,8 +117,8 @@ struct SettingsView: View {
     private var notificationSummary: String { app.cloud.alertsMessage }
 
     private var connectionTint: Color {
-        if checking || (store.reachable == nil && store.error == nil) { return .secondary }
-        return store.reachable == false || store.error != nil ? .orange : .okGreen
+        if checking || store.link == .checking { return .secondary }
+        return store.link == .connected ? .okGreen : .orange
     }
 
     private func link<Label: View>(_ url: URL, _ label: Label) -> some View {
