@@ -17,7 +17,7 @@ What it does, in order:
    environment, HOME inside the copy, its own auth store, and a printer MCP of /usr/bin/false, so nothing can
    reach a printer. The simulator reaches it at http://127.0.0.1:9078 (the app's simulator-only test address).
    It pairs once (POST /v1/pair) and hands the record to the app with -CounterpartPairingRecord.
-3. Holding ~/.stm-ios.lock: builds the Debug app, creates its own simulators (iPhone 17 Pro, iPad Pro 13-inch,
+3. Holding the whole lane (scripts/lane.py --exclusive, re-run by the script itself): builds the Debug app, creates its own simulators (iPhone 17 Pro, iPad Pro 13-inch,
    iPhone Duo), drives them with agent-device (launch arguments, taps, scrolls, screenshots), then deletes them.
    Screens that need a printer or a running pass use the app's own fixtures and say so.
 4. Writes <out>/index.md: every image with its screen, state, device, and whether the data is real.
@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import fcntl
 import json
 import os
 import re
@@ -45,7 +44,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 REAL = Path.home() / 'Library/Application Support/Scan to Make'
-LOCK = Path(os.environ.get('STM_IOS_LOCK', str(Path.home() / '.stm-ios.lock')))
+STARTED = time.time()
+sys.path.insert(0, str(REPO / 'scripts'))
+import lane  # noqa: E402  (scripts/lane.py: the Mac's build lane)
 def agent_device() -> list[str]:
     """The agent-device CLI with its own local daemon (T3's bundled copy, or AGENT_DEVICE). T3's `agent-device` wrapper only
     runs as the command device_open returns, and device_open boots its device outside any lock, so the script drives the
@@ -254,10 +255,7 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
             [['find', rows['fit'], 'click'], ['find', label, 'click']], pages=2)
     for name, _, state in PROJECTS:
         data = 'real (state synthesised)' if name in ('wall-holder-question', 'stove-gap-limit') else 'real'
-        link = f'counterpart://project/{ids[name]}'
-        add(f'project-{name}-result', 'Project: Result', state, data, real + ['-CounterpartOpen', link], pages=4)
-        add(f'project-{name}-sent', 'Project: What you sent', state, data, real + ['-CounterpartOpen', link, '-CounterpartSection', 'inputs'], pages=4)
-        add(f'project-{name}-activity', 'Project: Activity', state, data, real + ['-CounterpartOpen', link, '-CounterpartSection', 'activity'], pages=3)
+        for item in project_screens(name, ids[name], state, data, record): item['order'] = len(out); out.append(item)
     add('print-wall-holder', 'Print sheet', 'wall-holder, stub printer MCP', 'real (printer stub)', real + ['-CounterpartOpen', f'counterpart://print/{ids["wall-holder"]}'], pages=3)
     add('print-scan-platform-3mf', 'Print sheet: plates', 'multi-plate 3MF, stub printer MCP', 'real (printer stub)', real + ['-CounterpartOpen', f'counterpart://print/{ids["scan-platform-3mf"]}'], pages=3)
     add('printing-guitar-pick', 'Printing', 'finished print', 'real', real + ['-CounterpartOpen', f'counterpart://printing/{ids["guitar-pick"]}'], pages=2)
@@ -290,6 +288,15 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
     add('fx-live-activity', 'Live Activity (Home screen)', 'print halfway', 'fixture', fixture('-CounterpartScreen', 'live-activity'), [['home']],
         note='after Home; the Lock Screen cannot be shown in a simulator by agent-device')
     return out
+
+
+def project_screens(name: str, pid: str, state: str, data: str, record: str) -> list[dict]:
+    """A project's three tabs, opened by its link."""
+    base = ['-CounterpartPairingRecord', record, '-CounterpartOpen', f'counterpart://project/{pid}']
+    tabs = [('result', 'Project: Result', [], 4), ('sent', 'Project: What you sent', ['-CounterpartSection', 'inputs'], 4),
+            ('activity', 'Project: Activity', ['-CounterpartSection', 'activity'], 3)]
+    return [{'order': 0, 'name': f'project-{name}-{tab}', 'screen': screen, 'state': state, 'data': data, 'args': base + extra,
+             'actions': [], 'pages': pages, 'note': ''} for tab, screen, extra, pages in tabs]
 
 
 class Device:
@@ -448,7 +455,7 @@ def write_index(out: Path, info: dict, manifest: dict, minutes: float, processes
     lines = ['# Counterpart screens', '',
              f'Made by `scripts/ux_screens.py` on {dt.datetime.now():%Y-%m-%d %H:%M} from commit '
              f'`{subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()}`'
-             f' (this run held the simulator lock {minutes:.0f} min; earlier runs\' images are kept).', '',
+             f' (this run held the lane {minutes:.0f} min; earlier runs\' images are kept).', '',
              '**Data.** *real*: a copy of this Mac\'s projects (copied ' + manifest['copiedAt'] + '), served by the real companion '
              '(`server-cli.js`) to the real app client over http://127.0.0.1:9078. The pairing exchange was made by the script, not the pairing UI. '
              'No printer: the printer MCP is `/usr/bin/false`, so printer screens with *real (printer stub)* show what the app says when its '
@@ -479,9 +486,16 @@ def main() -> None:
     parser.add_argument('--devices', default=','.join(DEVICES))
     parser.add_argument('--screens', default='', help='comma-separated substrings of screen names to keep')
     parser.add_argument('--prepare-only', action='store_true', help='copy the data, start the companion, check it, stop')
-    parser.add_argument('--max-minutes', type=float, default=10, help='end this lock hold after starting no new screen for this long (default 10); run again to go on')
+    parser.add_argument('--max-minutes', type=float, default=10, help='the lane hold\'s length: no new screen starts after it, less 90 s to clean up (default 10); run again to go on')
+    parser.add_argument('--project', action='append', default=[], metavar='ID',
+                        help="only this project's Result, What you sent and Activity, by id (any project in the copy; repeatable)")
     parser.add_argument('--redo', action='store_true', help='capture the selected screens again (with --devices/--screens)')
     args = parser.parse_args()
+    if not args.prepare_only and not lane.nested_holder():
+        # Every hold that boots a simulator takes the whole lane (both slots), labelled, in arrival order.
+        python = sys.executable
+        os.execv(python, [python, str(REPO / 'scripts/lane.py'), '--exclusive', '--label', f'ux-screens: {args.devices}',
+                          '--max-minutes', str(args.max_minutes), '--', python, str(Path(__file__).resolve()), *sys.argv[1:]])
     out, work = args.out.resolve(), (args.work or args.out.resolve().parent / 'ux-screens-work').resolve()
     keys = [k for k in args.devices.split(',') if k]
     if any(k not in DEVICES for k in keys): raise SystemExit(f'devices: {", ".join(DEVICES)}')
@@ -512,6 +526,10 @@ def main() -> None:
             return
         items = screens(ids, record, offline_record, fixtures, offline)
         if args.screens: items = [i for i in items if any(s in i['name'] for s in args.screens.split(','))]
+        if args.project:
+            unknown = [p for p in args.project if p not in served]
+            if unknown: raise SystemExit(f'not in the copy: {unknown}')
+            items = [item for pid in args.project for item in project_screens(pid[:8], pid, 'by id', 'real', record)]
         done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
         if args.redo: done -= {(k, i['name']) for k in keys for i in items}
         def record(kind: str, row: dict) -> None:
@@ -520,16 +538,12 @@ def main() -> None:
             log('every screen is captured; --redo captures them again')
             write_index(out, info, manifest, 0, processes)
             return
-        with open(LOCK, 'a') as handle:
-            try: fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                log(f'waiting for {LOCK}'); fcntl.flock(handle, fcntl.LOCK_EX)
-            locked = time.time()
-            log('holding the simulator lock')
-            app = build_app(work)
-            left = run_devices(keys, items, app, out, record, done, time.time() + args.max_minutes * 60)
-            minutes = (time.time() - locked) / 60
-        log(f'released the lock after {minutes:.1f} min')
+        # Inside the lane (see main's re-run through scripts/lane.py --exclusive): screens stop starting a minute and a
+        # half before --max-minutes, leaving time to delete the simulator.
+        log('holding the lane')
+        app = build_app(work)
+        left = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90)
+        minutes = (time.time() - STARTED) / 60
         write_index(out, info, manifest, minutes, processes)
         log(f'{len(read_jsonl(out / "results.jsonl"))} images so far; {left} screens left' + (' (run the same command again)' if left else '') + f': {out / "index.md"}')
         log(f'the copy of the projects is in {data}; move {work} to /Volumes/Spillover when done')
