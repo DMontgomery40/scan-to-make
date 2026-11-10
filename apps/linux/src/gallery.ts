@@ -59,7 +59,8 @@ export function printableParts(p: Project): PrintablePart[] {
   if (!current) return [];
   const label = p.kind === "copy" ? "Your copy" : p.kind === "published" ? "Model" : "Your part";
   if (current.model.toLowerCase().endsWith(".3mf")) {
-    const render = current.renders[0] ? renderPath(current.renders[0]) : plates[0]?.thumbnail;
+    // The computer's drawing of all the file's objects first, as on the other clients (Nov 10).
+    const render = p.pictures?.part ?? (current.renders[0] ? renderPath(current.renders[0]) : plates[0]?.thumbnail);
     return render ? [{ id: "result", label, drawing: { picture: render }, colour: "own", sizeMm: current.sizeMm }] : [];
   }
   return [{ id: "result", label, drawing: { model: "model.stl" }, colour: spoolColour(p) ?? "neutral", sizeMm: current.sizeMm }];

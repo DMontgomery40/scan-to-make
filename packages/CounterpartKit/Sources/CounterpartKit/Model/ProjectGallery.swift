@@ -104,8 +104,9 @@ extension Project {
         guard let current else { return [] }
         let label = usesCopyWorkflow ? "Your copy" : kind == "published" ? "Model" : "Your part"
         if preservesPublishedFilaments {
-            // A 3MF's parts and colours are in the file, which only the printer MCP reads: its picture stands for it.
-            guard let render = current.renders.first.map(Self.renderPath) ?? plates?.first?.thumbnail else { return [] }
+            // A 3MF's parts and colours are in the file, which only the printer MCP reads: a picture stands for it, the
+            // Mac's drawing of all its objects first (Nov 10: a 3MF with four objects had none and couldn't be told apart).
+            guard let render = pictures?["part"] ?? current.renders.first.map(Self.renderPath) ?? plates?.first?.thumbnail else { return [] }
             return [PrintablePart(id: "result", label: label, drawing: .picture(render), colour: .own, sizeMm: current.sizeMm)]
         }
         return [PrintablePart(id: "result", label: label, drawing: .model("model.stl"), colour: spoolColour.map { .spool($0) } ?? .neutral, sizeMm: current.sizeMm)]
