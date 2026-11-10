@@ -706,6 +706,44 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(reason.isHittable, "the reason is on screen")
     }
 
+    /// Lead, Nov 10 (iPad, Stove gap filler, Activity): the page's red and grey lines read through and around "Ask for
+    /// changes…" and Print. The page's content ends where its bottom bar begins, on every tab, scrolled to the end, and with
+    /// the keyboard up; the bar keeps Print's whole label beside the field (the project-picture work's rule).
+    func testTheProjectPagesContentEndsAtItsBottomBarOnEveryTab() {
+        let app = launch(screen: "ready")
+        let print = app.buttons["print"], ask = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertTrue(print.waitForExistence(timeout: 20), app.debugDescription)
+        func nothingReachesTheBar(_ state: String) {
+            // The bar is what's shown of the ask field and Print (Print gives way while typing).
+            let parts = [print, ask, app.buttons["attach-photos"]].filter(\.exists)
+            let bar = parts.map(\.frame).reduce(CGRect.null) { $0.union($1) }
+            let own = Set((parts + parts.flatMap { $0.descendants(matching: .any).allElementsBoundByIndex }).map { NSCoder.string(for: $0.frame) })
+            let into = (app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex).filter { element in
+                let frame = element.frame
+                return !own.contains(NSCoder.string(for: frame)) && frame.height > 0 && frame.intersects(bar.insetBy(dx: 0, dy: -8))
+            }
+            XCTAssertTrue(into.isEmpty, "\(state): \(into.map { "'\($0.label)' \($0.frame)" }) reach into the bar \(bar)")
+        }
+        for tab in ["Result", "What you sent", "Activity"] {
+            let button = app.buttons[tab]
+            for _ in 0..<6 where !button.isHittable { app.swipeDown() }
+            button.tap()
+            for _ in 0..<8 { app.swipeUp() }
+            nothingReachesTheBar("\(tab), scrolled to the end")
+            if tab == "Activity" {
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = "project-activity-end"; shot.lifetime = .keepAlways
+                add(shot)
+            }
+        }
+        ask.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the keyboard is up")
+        nothingReachesTheBar("keyboard up")
+        let typing = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        typing.name = "project-keyboard-up"; typing.lifetime = .keepAlways
+        add(typing)
+    }
+
     /// Review F4: a fit with words and "I measured" but no measurement: Send takes you to the measurement fields, focuses the
     /// first, and says there what's missing, instead of seeming to do nothing.
     func testSendOnAFitMissingItsMeasurementGoesToTheFields() {

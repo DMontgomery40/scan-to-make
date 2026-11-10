@@ -184,6 +184,9 @@ struct ProjectView: View {
 
     @ViewBuilder private func page(_ object: Project) -> some View {
         let words = store.words(object)
+        // The page's content ends where the bottom bar begins (lead, Nov 10, as New and first run): Activity's lines never
+        // read through or around "Ask for changes…" and Print, on any tab, with the keyboard up too.
+        VStack(spacing: 0) {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 hero(object, words)
@@ -295,7 +298,8 @@ struct ProjectView: View {
                 }
                 .padding(.horizontal, 16)
             }
-            .padding(.bottom, 120)
+            // The bar is below the scroll now, not over it: only a little room after the last line.
+            .padding(.bottom, 24)
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
         }
@@ -334,10 +338,12 @@ struct ProjectView: View {
                 .accessibilityLabel("More")
             }
         }
-        .safeAreaBar(edge: .bottom) {
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
-            if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) { bottomBar(object, words) }
+            if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) {
+                bottomBar(object, words).padding(.top, 8)
+            }
         }
+        .background(Color.black)
         .fileImporter(isPresented: $choosingModelFiles, allowedContentTypes: [UTType(filenameExtension: "3mf") ?? .data, UTType(filenameExtension: "stl") ?? .data], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let files): act {
