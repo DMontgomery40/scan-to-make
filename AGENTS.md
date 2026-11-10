@@ -58,6 +58,7 @@ tstack (github.com/t3dotgg/tstack) is installed in ~/.claude/skills and ~/.codex
 - Council members: Claude Opus 5.5 (claude-opus-5-5), Muse Wonder (muse-wonder-1.0), Codex GPT-6.1 Sol (gpt-6.1-sol), each at high reasoning effort. For UI work, council scores screenshots of the real app out of 10, compared with the best apps Apple features, and iterates until every member gives 9 or more.
 - In this repo, full-send's merge gate also includes this repo's own gate: `scripts/ci_local.py` and `scripts/branch_check.py --merge` printing SAFE (hosted Actions have no runner).
 - In bambu-printer-mcp and mcp-3D-printer-server, merging publishes to npm. David lifted the release hold on 2026-11-04 (bambu-printer-mcp 1.1.52, mcp-3D-printer-server 1.2.26 are published), so branch new work from those mains. Publishing them is the lead's call (David, 2026-11-10: "NO PUBLISHING IS YOURS TOO ... this codebase is yours, what it's for and how it's built are your call"): the lead decides when a reviewed, green MCP PR merges, follows that repo's own release rules (no agent attribution there), verifies the version on npm, and gets it into the app through the app's own update. A delegate merges there only when the lead's brief says so.
+- Prints: the lead may start one when David has said the bed is clear (David, 2026-11-10: "bed clear and all yours"), after a camera check of the bed, through the companion's own route. Nobody else starts a print, and nobody stops, pauses or resumes his printer outside Counterpart.
 
 ## Local PR checks
 
