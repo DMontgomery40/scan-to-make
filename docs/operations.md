@@ -36,6 +36,16 @@ David, Nov 8. These apply to the lead and to every delegate; put them in each br
   - Never touch `/Volumes/Spillover/bambu-printer-mcp-testing/` (FULU's live VM), another project's files, or a booted simulator someone else holds.
   - The report lists each thing removed or moved with its size, and `df` before and after.
 
+## Looking at the app
+
+David, Nov 9, after a question's highlighted area showed in a 64-point thumbnail and "What you sent" showed 77 near-identical scan photos: "is there no reviewing thing that actually looks at what was just made and says 'huh... is this logical and human readable and intuitive and visible and the best ux experience possible?'" Reviews read diffs and UI tests use one-photo fixtures, so look at the screens filled with real projects before a UI change is called done.
+
+- `python3 scripts/ux_screens.py <out> --work <scratch>` on the Mac makes screenshots of every iPhone/iPad screen on the iPhone, iPad, and iPhone Duo folded and unfolded, and writes `<out>/index.md` (screen, state, device, and whether the data is real or fixture). Names are stable, so two runs compare side by side. `--devices iphone` and `--screens home,project-wall` narrow a run.
+- Real data, never the real app: it clones the projects (not `auth`, `tls`, `companion.env`, printer handoff or profiles) into `<scratch>`, rewrites paths into the copy, and serves them with the real companion on port 19077 with an empty environment and a printer MCP of `/usr/bin/false`. The simulator reaches it at its test address `http://127.0.0.1:9078`. Screens that need a printer or a running pass use the app's fixtures and are labelled so.
+- It builds the Debug app and creates, drives (`agent-device`) and deletes its own simulators, all inside one hold of `~/.stm-ios.lock` (about an hour for all four layouts). Don't start it while a print is starting.
+- Build the companion first (`npm ci --ignore-scripts` in `packages/contracts`, `services/project`, `services/printer-handoff`, `services/companion`, then `npm run build` in `packages/contracts` and `services/companion`). The scratch folder holds the person's photos: keep it out of Git and move it to `/Volumes/Spillover` afterwards.
+- Not covered yet: the Mac app (its design mode opens windows on David's screen; it needs an off-screen renderer), Android and Linux, the Lock Screen.
+
 ## Changing code: one trunk
 
 - `main` is the only trunk. Feature branches never ship, and none lives long: finished work lands on main the day it is finished, on a train.
