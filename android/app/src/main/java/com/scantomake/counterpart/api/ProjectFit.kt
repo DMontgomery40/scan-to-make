@@ -18,7 +18,7 @@ data class ProjectFit(val sizeSource: String, val measured: List<Size> = emptyLi
     val json: JsonObject get() = JsonObject(buildMap {
         put("sizeSource", JsonPrimitive(sizeSource))
         if (sizeSource == "measured") put("measured", JsonArray(measured.map {
-            JsonObject(mapOf("id" to JsonPrimitive(it.id), "label" to JsonPrimitive(it.label), "mm" to JsonPrimitive(it.mm)))
+            JsonObject(mapOf("id" to JsonPrimitive(it.id), "label" to JsonPrimitive(it.label), "mm" to JsonPrimitive(it.mm.wireNumber)))
         }))
     })
 
@@ -31,6 +31,10 @@ data class ProjectFit(val sizeSource: String, val measured: List<Size> = emptyLi
         }
     }
 }
+
+/** A whole number of millimetres goes out as `107`, as CounterpartKit and the companion write it, not `107.0`. */
+private val Double.wireNumber: Number get() =
+    if (this == Math.rint(this) && kotlin.math.abs(this) < 1e15) toLong() else this
 
 /** The body of a create request. `instructions` is what the person typed; how a fit's size is settled goes beside
  *  it as `fit`, never inside it. */
