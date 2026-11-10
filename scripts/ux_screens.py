@@ -310,9 +310,14 @@ class Device:
         return reply
 
     def shoot(self, item: dict) -> None:
-        launch = []
-        for value in item['args']: launch += [f'--launch-args={value}']
-        self.ad('open', BUNDLE, '--relaunch', *launch, timeout=120)
+        # The screen's settings go into the app's defaults domain (what its launch arguments would set), fresh for each
+        # screen: agent-device's --launch-args did not reach the app (Nov 10), and defaults reach UserDefaults the same way.
+        simctl('terminate', self.udid, BUNDLE, check=False)
+        simctl('spawn', self.udid, 'defaults', 'delete', BUNDLE, check=False)
+        pairs = item['args']
+        for key, value in zip(pairs[0::2], pairs[1::2]):
+            simctl('spawn', self.udid, 'defaults', 'write', BUNDLE, key.lstrip('-'), '-string', value)
+        self.ad('open', BUNDLE, '--relaunch', timeout=120)
         time.sleep(4)
         error = ''
         for action in item['actions']:
@@ -392,7 +397,8 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
             device = Device(key, udid, out / key, record)
             device.out.mkdir(parents=True, exist_ok=True)
             started = time.time()
-            for setting in (['settings', 'permission', 'grant', 'notifications', '--app', BUNDLE], ['settings', 'appearance', 'light']):
+            simctl('ui', udid, 'appearance', 'light', check=False)
+            for setting in (['settings', 'permission', 'grant', 'notifications', '--app', BUNDLE],):
                 try: device.ad(*setting)
                 except Exception as failure: record('failures', {'device': key, 'name': ' '.join(setting), 'why': str(failure)})
             if pose:
@@ -402,8 +408,6 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
                 if time.time() > deadline: break
                 left -= 1
                 try:
-                    if item['name'].startswith('first-run'):
-                        device.ad('settings', 'clear-app-state', BUNDLE)
                     device.shoot(item)
                     record('done', {'device': key, 'name': item['name']})
                 except Exception as failure:
@@ -490,8 +494,8 @@ def main() -> None:
         processes = companion.processes()
         if any(re.search(r'\bssh\b|bambu|mcp-3d|printer-mcp', p, re.I) for p in processes): raise SystemExit(f'companion started {processes}')
         log(f'companion serves {len(served)} projects; children: {processes}')
-        record = json.dumps(info['record'])
-        offline_record = json.dumps({**info['record'], 'baseUrl': 'https://127.0.0.1:9079'})
+        record = json.dumps(info['record'], separators=(',', ':'))
+        offline_record = json.dumps({**info['record'], 'baseUrl': 'https://127.0.0.1:9079'}, separators=(',', ':'))
         if args.prepare_only:
             for o in info['objects']: print(f"  {o['id'][:8]}  {o['state']:<14} {o['title']}")
             return
