@@ -53,6 +53,9 @@ Wire types are zod schemas in `packages/contracts/src/counterpart.ts` (`@scan-to
 | `GET /v1/objects/<id>/passes/<n>/activity` | READ | | `{activity: [{atMs, kind: "message"\|"tool", text}]}` |
 | `GET /v1/objects/<id>/model.stl`, `…/renders/<name>` | READ | | the file |
 | `GET /v1/objects/<id>/photos/<name>`, `…/capture/<name>` | READ | | the image |
+| `GET /v1/objects/<id>/scan/<name>` | READ | | The scan model (`scan.usdz`): the gallery's "What you scanned" and Together (Nov 10) |
+| `GET /v1/objects/<id>/pictures/<name>` | READ | | One of the project's pictures, PNG (`picture`, `pictures`; Nov 10). Only the names the project lists. |
+| `POST /v1/objects/<id>/locate` | WRITE | `{}` | `{object}`: a short pass that finds where the scanned object sits in the existing part and changes nothing ([seats.md](seats.md)) |
 | `GET /v1/objects/<id>/asks/<askId>.jpg` | READ | | The Ask's picture (PR 4). Draw `ask.region` over it. |
 
 ## Printing
@@ -282,7 +285,7 @@ Then the companion restarts every session on that install (each waits for any pr
 | `current.design` | `{f3d, parameters}` paths (relative) when the engine was Fusion; `{script, parameters, inputs?, step?, result?}` (relative, under `current/design/`; `result` is the selected run's cad/1 receipt with its validation) when it was the code engine. A change starts from it | PR 4; code Nov 10 |
 | `passes[].limit` | Optional `{kind, value}` when the worker stopped at a limit: `inactivity` or `absolute` with milliseconds, `tool-calls` with calls. Pass `status` is `capped`; project stays `failed`, with `canRetryCleanup`, and `failure` / `status.text` name the actual limit. A saved checkpoint is reviewable, not a completed model. | Nov 9 |
 | `passes[].toolCalls` | Number of tool calls observed by this attempt. Earlier passes may omit it. | Nov 9 |
-| `passes[].trigger` | `new`, `changes`, `late-photos` or `ask-answer` | PR 4 |
+| `passes[].trigger` | `new`, `changes`, `late-photos`, `ask-answer` or `locate` ([seats.md](seats.md)) | PR 4; `locate` Nov 10 |
 | `passes[].stages` | `[{id, words, startedAtMs, endedAtMs?, typicalSec}]` (`id`: `building`, `preparing`, `working`, `saving`) | PR 4 |
 | `passes[].estimate` | `{remainingSec, endsAtMs}` while the pass runs | PR 4 |
 | `passes[].engine` | `code`, `blender` or `fusion` | PR 4; `code` Nov 10 |
@@ -295,6 +298,10 @@ Then the companion restarts every session on that install (each waits for any pr
 | `print.jobName` | The job name the printer reports for it | PR 2 |
 | `print.taskId` | The printer's task id, when the MCP returns one | PR 2 |
 | `print.settings` | The `PrintSettings` it was printed with | PR 2 |
+| `print.spools` | `[{index?, colour: "#RRGGBB", material?, name?}]`: the spools the print uses, as the printer MCP reported them when it was sent: one for a one-spool print, one per model filament (`index`) for a multi-part model. The result is drawn in them (PRD §5.4). Absent for a print sent with the MCP's own choice (`colour: {auto}`), which then wears `print.live.activeFilament.color` once the printer reports it. | Nov 10 |
+| `current.seats` | Where the scanned object sits in a fit part: `[{name?, rotationDeg, translationMm, check?}]` ([seats.md](seats.md)) | Nov 10 |
+| `picture` | The project's picture, everywhere it appears (PRD §5.1): the gallery's first entry drawn by the Mac as the object alone on the stage (`pictures/<role>-<key>.png`). Absent until drawn, and on a computer that can't draw (Linux): clients then show a design's render or a designer's plate, never a photo. | Nov 10 |
+| `pictures` | `{part?, scan?, together?, photo?}`: each picture the Mac drew. `part` is the result in its spool (or the neutral material), `scan` the scan model in its own colours, `together` the part with the scan at each seat, `photo` a photo's subject cut out of its room, only before any model exists. A name changes whenever what it draws changes (the model, the spool, the seats), so caches refresh. | Nov 10 |
 | `print.live` | `PrintLive`: the latest normalized printer report for this print (state, job progress, layer, time left, `endsAt`, temperatures, active filament, problems). Replaces reading `printerStatus` once present. | PR 2 |
 | `print.monitor` | `PrintMonitor` `{phase: starting\|watching\|ended, startedAt, lastReportAt?, milestonesSent, firstLayerSent, unreachableSince?, endState?, endedAt?}` | PR 2 |
 

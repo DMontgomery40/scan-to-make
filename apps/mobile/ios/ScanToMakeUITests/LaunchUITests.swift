@@ -744,6 +744,38 @@ final class LayoutParityUITests: XCTestCase {
     /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
     /// on them". Plate 1's start couldn't be confirmed; on the iPhone and the iPad every plate stays choosable on the
     /// project and inside Print, and only plate 1 asks for the printer check again.
+    /// PRD §5.4 Pictures (David, Nov 9: "i am no longer allowed to see the scanned object, anywhere, ever"; Nov 10: "now
+    /// you're beyond the hardcoded three things"). The project page shows each thing that will print and what was scanned,
+    /// chosen with labels under the stage; a designer's six plates are six labels in a row that scrolls.
+    func testTheProjectGalleryShowsEachThingAndTheProjectPictureIsTheObject() throws {
+        let app = launch(screen: "printed")
+        let result = app.buttons["gallery-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 20), "the thing that will print is the first picture")
+        let scan = app.buttons["gallery-scan-0"]
+        XCTAssertTrue(scan.exists, "what was scanned stays reachable once there is a result")
+        XCTAssertTrue(result.isSelected)
+        scan.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: scan)
+        XCTAssertEqual(XCTWaiter().wait(for: [selected], timeout: 5), .completed)
+        app.terminate()
+
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let rig = try String(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/six-plate-unconfirmed.json"), encoding: .utf8)
+        let plates = XCUIApplication()
+        plates.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "plates-unconfirmed",
+                                  "-CounterpartScreen", "ready"]
+        plates.launchEnvironment["COUNTERPART_RIG_FIXTURE"] = rig
+        plates.launch()
+        let labels = plates.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "gallery-plate-"))
+        XCTAssertTrue(labels.firstMatch.waitForExistence(timeout: 20))
+        XCTAssertEqual(labels.count, 6, "one label per plate")
+        let last = labels.element(boundBy: 5)
+        if !last.isHittable { labels.firstMatch.swipeLeft() }
+        XCTAssertTrue(last.isHittable, "the row scrolls to the last plate")
+        last.tap()
+    }
+
     func testEveryPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() throws {
         // The shared fixture the companion's own tests check (packages/contracts/fixtures/six-plate-unconfirmed.json).
         var root = URL(fileURLWithPath: #filePath)
