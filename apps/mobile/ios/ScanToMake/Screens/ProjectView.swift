@@ -39,6 +39,7 @@ struct ProjectView: View {
     @State private var askWorking = false
     @State private var askProblem: String?
     @State private var askText = ""
+    @Environment(\.horizontalSizeClass) private var widthClass
     /// The size card's fields as they stand (`AskSizesFields` reports them), for the card's other answers.
     @State private var askSizes: AskSizesForm?
     @State private var notice: String?
@@ -598,7 +599,11 @@ struct ProjectView: View {
                 Text(note).font(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("failed-print-note")
             }
             GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
+                // On a phone's width two buttons side by side cut the second one's name ("Print the last v…", seen
+                // with a real project): there they stack, each with the card's whole width.
+                let stacked = widthClass == .compact && words.actions.contains(.retry) && words.page.printPlace == .card
+                let row = stacked ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+                row {
                     // One filled control, the page's main action (`PageActions`): Try Again when a pass stopped, or
                     // printing again when the print failed. Printing is offered here under its true name, and then
                     // not in the bar.
