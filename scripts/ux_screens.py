@@ -177,9 +177,13 @@ def prepare(source: Path, data: Path) -> dict:
         raise SystemExit(f'The copy needs exactly one project whose id starts {PROJECTS[0][1]} in {objects}; there are no projects at {source}.')
     ids = {}
     for name, prefix, _ in PROJECTS:
-        if not prefix.startswith('synth:'): ids[name] = resolve_id(objects, prefix)
-    ids['wall-holder-question'] = synth_question(objects, ids['wall-holder'])
-    ids['stove-gap-limit'] = synth_limit(objects, resolve_id(objects, '2f0a0229'))
+        if prefix.startswith('synth:'): continue
+        # A named project the person has since deleted is skipped, not an error (Nov 10: the bike-oil scan was gone).
+        if any(p.name.startswith(prefix) for p in objects.iterdir()): ids[name] = resolve_id(objects, prefix)
+        else: log(f'{name} ({prefix}) is no longer in the projects; its screens are skipped')
+    if 'wall-holder' in ids: ids['wall-holder-question'] = synth_question(objects, ids['wall-holder'])
+    if any(p.name.startswith('2f0a0229') for p in objects.iterdir()):
+        ids['stove-gap-limit'] = synth_limit(objects, resolve_id(objects, '2f0a0229'))
     rewrite_paths(state, source)
     leftover = [str(p) for p in state.rglob('*.json') if any(w in p.read_bytes() for w in EXCLUDE_WORDS)]
     if leftover or any((objects / x).exists() for x in EXCLUDE): raise SystemExit(f'excluded projects remain in the copy: {leftover[:5]}')
@@ -206,13 +210,14 @@ def fixture_assets(state: Path, ids: dict, folder: Path) -> None:
 # ---------------------------------------------------------------- the companion
 
 class Companion:
-    def __init__(self, state: Path, log_path: Path):
+    def __init__(self, state: Path, log_path: Path, condition: str = 'none'):
         dist = REPO / 'services/companion/dist'
         if not (dist / 'server-cli.js').exists():
             raise SystemExit('The companion is not built. Build it first: npm ci --ignore-scripts in packages/contracts, services/project, '
                              'services/printer-handoff, services/companion; then npm run build in packages/contracts and services/companion')
         self.log = open(log_path, 'w')
-        self.proc = subprocess.Popen(['node', str(REPO / 'scripts/ux_screens/companion.mjs'), '--state', str(state), '--dist', str(dist)],
+        self.proc = subprocess.Popen(['node', str(REPO / 'scripts/ux_screens/companion.mjs'), '--state', str(state), '--dist', str(dist),
+                                      '--condition', condition],
                                      stdout=subprocess.PIPE, stderr=self.log, text=True)
         line = self.proc.stdout.readline()
         if not line:
@@ -267,7 +272,7 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
         add(f'new-scan-fit-{label.lower()}', f'New, after a scan: fit, size from {label.lower()}', f'fit, "{label}" size', 'real (scan faked)',
             real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', 'walk-around'],
             [['find', rows['fit'], 'click'], ['find', label, 'click']], pages=2)
-    for name, _, state in PROJECTS:
+    for name, _, state in [p for p in PROJECTS if p[0] in ids]:
         data = 'real (state synthesised)' if name in ('wall-holder-question', 'stove-gap-limit') else 'real'
         for item in project_screens(name, ids[name], state, data, record): item['order'] = len(out); out.append(item)
     add('print-wall-holder', 'Print sheet', 'wall-holder, stub printer MCP', 'real (printer stub)', real + ['-CounterpartOpen', f'counterpart://print/{ids["wall-holder"]}'], pages=3)
@@ -332,6 +337,31 @@ def project_screens(name: str, pid: str, state: str, data: str, record: str) -> 
              'actions': [], 'pages': pages, 'note': ''} for tab, screen, extra, pages in tabs]
 
 
+class LoadSampler:
+    """The Mac's 1-minute load average every 5 s while this hold runs, to a CSV, and its summary."""
+    def __init__(self, path: Path):
+        import threading
+        self.path, self.rows, self.before = path, [], os.getloadavg()[0]
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self) -> None:
+        with open(self.path, 'w') as file:
+            file.write('seconds,load1,load5\n')
+            start = time.time()
+            while not self.stopped.wait(5):
+                one, five, _ = os.getloadavg()
+                self.rows.append(one)
+                file.write(f'{time.time() - start:.0f},{one:.1f},{five:.1f}\n'); file.flush()
+
+    def stop(self) -> dict:
+        self.stopped.set(); self.thread.join(10)
+        rows = self.rows or [self.before]
+        return {'loadBefore': round(self.before, 1), 'loadMean': round(sum(rows) / len(rows), 1), 'loadMax': round(max(rows), 1),
+                'loadSamples': len(self.rows)}
+
+
 class Device:
     def __init__(self, key: str, udid: str, out: Path, record):
         self.key, self.udid, self.out, self.record = key, udid, out, record
@@ -352,6 +382,24 @@ class Device:
             raise RuntimeError(f'agent-device {" ".join(args[:3])}: {(run.stderr or run.stdout)[-400:]}')
         return reply
 
+    def wait_for_app(self, limit: float = 45) -> str:
+        """Until the app's own tree can be read (it is on screen), at most `limit` seconds, then a moment to settle. Nov 10:
+        at load 300+ a fixed 4 s wait took frames of the home screen while the app was still launching."""
+        deadline, last = time.time() + limit, ''
+        while time.time() < deadline:
+            try:
+                tree = self.ad('snapshot', '-d', '3', timeout=30)
+                if len((tree.get('data') or {}).get('nodes') or []) > 3:
+                    time.sleep(2)
+                    return ''
+                last = f'{len((tree.get("data") or {}).get("nodes") or [])} elements'
+            except Exception as failure:
+                last = str(failure)[-300:].replace('\n', ' ')
+            time.sleep(1.5)
+        # Take the frame anyway: what is on the screen is the evidence, and the blank check flags a frame without a tree.
+        log(self.key, f'the app\'s tree was not readable {limit:.0f} s after it was opened: {last}')
+        return f'the app\'s tree was not readable {limit:.0f} s after it was opened'
+
     def shoot(self, item: dict) -> None:
         # The screen's settings go into the app's defaults domain (what its launch arguments would set), fresh for each
         # screen: agent-device's --launch-args did not reach the app (Nov 10), and defaults reach UserDefaults the same way.
@@ -360,9 +408,13 @@ class Device:
         pairs = item['args']
         for key, value in zip(pairs[0::2], pairs[1::2]):
             simctl('spawn', self.udid, 'defaults', 'write', BUNDLE, key.lstrip('-'), '-string', value)
-        self.ad('open', BUNDLE, '--relaunch', timeout=120)
-        time.sleep(4)
-        error = ''
+        console = self.out / f'{item["name"]}.console.log'  # the app's own output from launch, for when it isn't on screen
+        self.ad('open', BUNDLE, '--relaunch', '--launch-console', str(console), timeout=120)
+        error = self.wait_for_app()
+        if error and console.exists():
+            tail = console.read_text(errors='replace')[-600:].replace('\n', ' | ')
+            log(self.key, item['name'], 'console:', tail)
+            error += f' (console: {tail[-300:]})'
         for action in item['actions']:
             try:
                 if action[0] == 'type': self.ad('type', action[1])
@@ -379,6 +431,11 @@ class Device:
             if previous and same_screen(previous, path):  # the scroll didn't move: this page repeats the last one
                 path.unlink()
                 break
+            try:  # the accessibility tree of this frame, for the blank check (blank.py), which also runs without a simulator
+                tree = self.ad('snapshot', '--raw', timeout=60)
+                path.with_suffix('.ax.json').write_text(json.dumps(tree))
+            except Exception as failure:
+                log(self.key, item['name'], 'no accessibility snapshot:', str(failure)[:120])
             previous = path
             self.record('results', {**item, 'args': [], 'device': self.key, 'image': str(path), 'page': page, 'error': error})
             self.captured += 1
@@ -402,6 +459,14 @@ def same_screen(a: Path, b: Path) -> bool:
 def simctl(*args: str, check: bool = True) -> str:
     return subprocess.run(['xcrun', 'simctl', *args], capture_output=True, text=True, check=check).stdout.strip()
 
+
+# The capture companion's proxy conditions (scripts/ux_screens/conditions.mjs, which applies them).
+CONDITIONS = {
+    'none': 'replies as the companion gives them',
+    'slow': 'every reply waits 1.5 s, and files arrive at about 1 MB/s (a 16 MB scan takes 16 s)',
+    'refusing': 'file downloads answer 413 (models and scans) or 404 (pictures); the JSON API works',
+    'away': 'the project list loads once; after that nothing answers',
+}
 
 APP_SOURCES = ['apps/mobile', 'packages/CounterpartKit']
 # What the capture companion is built from: `npm run build` in services/companion builds project and printer-handoff too.
@@ -470,9 +535,37 @@ def build_app(work: Path) -> Path:
     return app
 
 
-def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record, done: set, deadline: float) -> tuple[int, int, str]:
-    """Captures what isn't done yet, until the deadline; returns the screens left, the images taken and the first failure."""
+KEPT_PREFIX = 'stm-ux-'
+
+
+def kept_simulator(base: str, kind: str, runtime: str) -> str:
+    """The one simulator kept for this kind of device (stm-ux-iphone, stm-ux-ipad, stm-ux-duo), created the first time
+    only. Nov 10: creating a simulator per run meant a first boot per run, dozens of system services each time, with the
+    Mac's load at 150–600 while David used his app on it."""
+    listing = json.loads(simctl('list', 'devices', '-j'))
+    for runtime_id, devices in listing['devices'].items():
+        for device in devices:
+            if device['name'] == KEPT_PREFIX + base:
+                if runtime_id == runtime and device.get('deviceTypeIdentifier') == kind and device.get('isAvailable', True):
+                    return device['udid']
+                simctl('delete', device['udid'], check=False)  # another type or runtime than the tool wants now
+    return simctl('create', KEPT_PREFIX + base, kind, runtime)
+
+
+def fresh_app(udid: str, app: Path) -> None:
+    """This run's app on a kept simulator, with nothing left from the last run: its data, defaults and keychain."""
+    simctl('terminate', udid, BUNDLE, check=False)
+    simctl('uninstall', udid, BUNDLE, check=False)
+    simctl('keychain', udid, 'reset', check=False)
+    simctl('install', udid, str(app))
+
+
+def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record, done: set, deadline: float,
+                fresh_simulator: bool = False) -> tuple[int, int, str]:
+    """Captures what isn't done yet, until the deadline; returns the screens left, the images taken and the first failure.
+    Each kind of device uses its kept simulator, shut down at the end; --fresh-simulator creates and deletes one instead."""
     created: dict[str, str] = {}
+    kept: dict[str, str] = {}
     devices: list[Device] = []
     first_failure = ''
     left = sum(1 for key in keys for item in items if (key, item['name']) not in done)
@@ -482,13 +575,15 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
             if not todo or time.time() > deadline: continue
             name, kind, runtime, pose = DEVICES[key]
             base = 'duo' if key.startswith('duo') else key
-            if base not in created:
-                udid = simctl('create', f'ux-screens-{base}-{RUN_ID}', kind, runtime)
-                created[base] = udid
-                simctl('boot', udid)
+            if base not in created and base not in kept:
+                if fresh_simulator:
+                    udid = created[base] = simctl('create', f'ux-screens-{base}-{RUN_ID}', kind, runtime)
+                else:
+                    udid = kept[base] = kept_simulator(base, kind, runtime)
+                simctl('boot', udid, check=False)  # already booted is fine
                 simctl('bootstatus', udid, '-b')
-                simctl('install', udid, str(app))
-            udid = created[base]
+                fresh_app(udid, app)
+            udid = created.get(base) or kept[base]
             device = Device(key, udid, out / key, record)
             devices.append(device)
             device.out.mkdir(parents=True, exist_ok=True)
@@ -520,6 +615,8 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
         for udid in created.values():
             simctl('shutdown', udid, check=False)
             simctl('delete', udid, check=False)
+        for udid in kept.values():
+            simctl('shutdown', udid, check=False)  # kept for the next run, never left booted
     return left, sum(d.captured for d in devices), first_failure
 
 
@@ -534,6 +631,7 @@ def write_index(out: Path, info: dict, manifest: dict, minutes: float, processes
     failures = {(f['device'], f['name']): f['why'] for f in read_jsonl(out / 'failures.jsonl') if (f['device'], f['name']) not in captured}
     failures = [(d, n, w) for (d, n), w in failures.items()]
     lines = ['# Counterpart screens', '',
+             f'**Condition: {info.get("condition", "none")}** ({CONDITIONS.get(info.get("condition", "none"), "")}).', '',
              f'Made by `scripts/ux_screens.py` on {dt.datetime.now():%Y-%m-%d %H:%M}; this run\'s app and companion were built from '
              f'`{info.get("source", describe_source())}`'
              f' (this run held the lane {minutes:.0f} min; earlier runs\' images are kept).', '',
@@ -569,7 +667,13 @@ def main() -> int:
     parser.add_argument('--prepare-only', action='store_true', help='copy the data, start the companion, check it, stop')
     parser.add_argument('--max-minutes', type=float, default=10, help='the lane hold\'s length: no new screen starts after it, less 90 s to clean up (default 10); run again to go on')
     parser.add_argument('--project', action='append', default=[], metavar='ID',
-                        help="only this project's Result, What you sent and Activity, by id (any project in the copy; repeatable)")
+                        help="only this project's Result, What you sent and Activity, by id (any project in the copy; repeatable), or all: "
+                             "every project in the copy. With --project, --screens picks tabs (result, sent, activity)")
+    parser.add_argument('--condition', choices=CONDITIONS, default='none',
+                        help='the Mac on a bad day: ' + '; '.join(f'{k}: {v}' for k, v in CONDITIONS.items()) + '. One condition per output folder')
+    parser.add_argument('--fresh-simulator', action='store_true',
+                        help='create and delete a simulator for this run (the behaviour before Nov 10) instead of the kept stm-ux-* one')
+    parser.add_argument('--pages', type=int, help='at most this many scrolled pages per screen')
     parser.add_argument('--redo', action='store_true', help='capture the selected screens again (with --devices/--screens)')
     args = parser.parse_args()
     out, work = args.out.resolve(), (args.work or args.out.resolve().parent / 'ux-screens-work').resolve()
@@ -580,6 +684,10 @@ def main() -> int:
     if held and lane.nested_holder():
         return capture(args, out, work, keys, json.loads(Path(held).read_text()))
     out.mkdir(parents=True, exist_ok=True); work.mkdir(parents=True, exist_ok=True)
+    marker = out / 'condition.txt'
+    if marker.exists() and marker.read_text().strip() != args.condition:
+        raise SystemExit(f'{out} holds frames under the condition "{marker.read_text().strip()}"; use another folder for "{args.condition}".')
+    marker.write_text(args.condition + '\n')
 
     # Everything that can fail without a simulator happens here, before the lane is taken.
     data = work / 'data'
@@ -594,11 +702,11 @@ def main() -> int:
     source = describe_source()
     log(f'source: {source}')
     ensure_companion()
-    companion = Companion(state, work / 'companion.log')
+    companion = Companion(state, work / 'companion.log', args.condition)
     try:
         info = companion.info
         served = {o['id'] for o in info['objects']}
-        missing = [name for name, _, _ in PROJECTS if ids[name] not in served]
+        missing = [name for name, _, _ in PROJECTS if name in ids and ids[name] not in served]
         if info.get('objectsStatus') != 200 or missing:
             raise SystemExit(f'The companion does not serve every project the screens need (missing {missing}, status {info.get("objectsStatus")}).')
         time.sleep(6)  # the companion reads its printer MCPs 5 s after start: check what it started
@@ -610,7 +718,10 @@ def main() -> int:
         if args.prepare_only:
             for o in info['objects']: print(f"  {o['id'][:8]}  {o['state']:<14} {o['title']}")
             return 0
-        if args.project and (unknown := [p for p in args.project if p not in served]):
+        if args.project == ['all']:
+            args.project = sorted(served)
+            sys.argv[sys.argv.index('all')] = ','.join(args.project)  # the run inside the lane gets the same list
+        if args.project and (unknown := [p for v in args.project for p in v.split(',') if p not in served]):
             raise SystemExit(f'These projects are not in the copy: {unknown}.')
         handoff = work / 'companion-info.json'
         info['source'] = source
@@ -652,13 +763,19 @@ def handoff_context(held: dict, work: Path) -> dict:
 def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set]:
     items = screens(ctx['ids'], ctx['record'], ctx['offline_record'], ctx['fixtures'], ctx['offline'])
     if args.screens:
-        items = [i for i in items if any(s in i['name'] for s in args.screens.split(','))]
+        wanted = args.screens.split(',')
+        items = [i for i in items if any(i['name'] == w[1:] if w.startswith('=') else w in i['name'] for w in wanted)]
         if not items:
             valid = ', '.join(i['name'] for i in screens(ctx['ids'], '', '', Path(), Path()))
             raise SystemExit(f'No screen matches --screens {args.screens!r}, so there is nothing to capture. The screens are: {valid}.')
     if args.project:
-        names = project_names(args.project, ctx['info']['objects'])
-        items = [item for pid in args.project for item in project_screens(names[pid], pid, 'by id', 'real', ctx['record'])]
+        wanted = [p for value in args.project for p in value.split(',')]
+        names = project_names(wanted, ctx['info']['objects'])
+        items = [item for pid in wanted for item in project_screens(names[pid], pid, 'by id', 'real', ctx['record'])]
+        if args.screens:  # with --project, --screens picks tabs: result, sent, activity
+            items = [i for i in items if any(i['name'].endswith('-' + w.lstrip('=')) for w in args.screens.split(','))]
+    if getattr(args, 'pages', None):  # --pages N: at most N scrolled pages per screen (the stage is on the first)
+        items = [{**i, 'pages': min(i['pages'], args.pages)} for i in items]
     done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
     if args.redo: done -= {(k, i['name']) for k in keys for i in items}
     return items, done
@@ -669,18 +786,34 @@ def capture(args, out: Path, work: Path, keys: list[str], held: dict) -> int:
     ctx = handoff_context(held, work)
     items, done = select(args, out, keys, ctx)
     def record(kind: str, row: dict) -> None:
-        row = {**row, 'source': ctx['info'].get('source', '')}  # which build each image came from, as runs accumulate
+        row = {**row, 'source': ctx['info'].get('source', ''), 'condition': ctx['info'].get('condition', 'none')}  # which build each image came from, as runs accumulate
         with open(out / f'{kind}.jsonl', 'a') as file: file.write(json.dumps(row) + '\n')
     # Screens stop starting a minute and a half before --max-minutes, leaving time to delete the simulator.
     log('holding the lane')
+    sampler = LoadSampler(out / f'load-{RUN_ID}.csv')
     app = build_app(work)
-    left, captured, why = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90)
+    built = time.time()
+    left, captured, why = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90,
+                                      fresh_simulator=getattr(args, 'fresh_simulator', False))
     minutes = (time.time() - STARTED) / 60
+    load = sampler.stop()
+    run = {'run': RUN_ID, 'source': ctx['info'].get('source'), 'condition': ctx['info'].get('condition'), 'devices': keys,
+           'freshSimulator': getattr(args, 'fresh_simulator', False), 'images': captured, 'screens': len(items) - left,
+           'buildSeconds': round(built - STARTED), 'captureSeconds': round(time.time() - built), **load}
+    with open(out / 'runs.jsonl', 'a') as file: file.write(json.dumps(run) + '\n')
+    log(f'load average during the hold: {load["loadBefore"]:.0f} before, mean {load["loadMean"]:.0f}, max {load["loadMax"]:.0f}; '
+        f'{run["screens"]} screens in {run["captureSeconds"]} s after the build')
     write_index(out, ctx['info'], ctx['manifest'], minutes, ctx['processes'])
     log(f'{len(read_jsonl(out / "results.jsonl"))} images so far; {left} screens left' + (' (run the same command again)' if left else '') + f': {out / "index.md"}')
     log(f'the copy of the projects is in {work / "data"}; move {work} to /Volumes/Spillover when done')
     if not captured:
         raise SystemExit(f'This hold captured no screens, so it failed: {why or "no screen started before --max-minutes"}.')
+    import ux_blank  # the blank check reads every frame in <out> with its accessibility tree
+    flagged = ux_blank.check_folder(out)
+    report = ux_blank.write_report(out, flagged)
+    if flagged:
+        raise SystemExit(f'{len(flagged)} frames show a blank stage or picture with nothing to say why: {report}')
+    log(f'blank check: none of the frames is blank ({report})')
     return 0
 
 
