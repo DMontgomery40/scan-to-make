@@ -42,8 +42,21 @@ David, Nov 9, after a question's highlighted area showed in a 64-point thumbnail
 
 - `python3 scripts/ux_screens.py <out> --work <scratch>` on the Mac makes screenshots of every iPhone/iPad screen on the iPhone, iPad, and iPhone Duo folded and unfolded, and writes `<out>/index.md` (screen, state, device, and whether the data is real or fixture). Names are stable, so two runs compare side by side. `--devices iphone` and `--screens home,project-wall` narrow a run; `--project <id>` captures any copied project's three tabs.
 - Real data, never the real app: it clones the projects (not `auth`, `tls`, `companion.env`, printer handoff or profiles) into `<scratch>`, rewrites paths into the copy, and serves them with the real companion on a free port of its own, with an empty environment and a printer MCP of `/usr/bin/false`. The simulator reaches it through a proxy on the first free simulator test address (`http://127.0.0.1` on 9078, or 9080–9097 in Debug builds), so several prepared runs can wait for the lane at once. Screens that need a printer or a running pass use the app's fixtures and are labelled so.
-- It runs itself through `scripts/lane.py --exclusive` (label `ux-screens: <devices>`): builds the Debug app once per app source, creates, drives (the agent-device CLI) and deletes its own simulator, and stops starting screens at `--max-minutes` (default 10). Images are kept as they are taken; run the same command again to go on. A full layout takes three or four holds.
-- Build the companion first (`npm ci --ignore-scripts` in `packages/contracts`, `services/project`, `services/printer-handoff`, `services/companion`, then `npm run build` in `packages/contracts` and `services/companion`). The scratch folder holds the person's photos: keep it out of Git and move it to `/Volumes/Spillover` afterwards.
+- It runs itself through `scripts/lane.py --exclusive` (label `ux-screens: <devices>`) and stops starting screens at `--max-minutes` (default 10). Images are kept as they are taken; run the same command again to go on. A full layout takes three or four holds.
+- It builds the app and the companion from the checkout whenever their source differs from what they were last built from, and prints and records (per image, in `index.md`) the commit. Each kind of device has one kept simulator (`stm-ux-iphone`, `stm-ux-ipad`, `stm-ux-duo`): created once, the app reinstalled and the keychain reset between runs, shut down at the end of every hold. `--fresh-simulator` creates and deletes one instead (the old way). Every hold logs the Mac's load average and its time per screen to `<out>/runs.jsonl`.
+- **A bad day** (David, Nov 10, after "What you scanned" stayed blank on his phone while it fetched a large scan: "you are STILL ALLLOWING BAD UX TO MAKE IT THROUGH THE GATE"). `--condition` makes the capture companion's proxy behave like a real Mac on a bad day; the app and the companion run unchanged:
+  - `slow`: every reply waits 1.5 s, and files arrive at about 1 MB/s (a 16 MB scan takes 16 s);
+  - `refusing`: file downloads answer 413 (models and scans) or 404 (pictures), while the JSON API works;
+  - `away`: the project list loads once, then nothing answers.
+
+  Use one output folder per condition (the tool refuses to mix them), for example `--condition slow <out>-slow`.
+- **The blank check.** At the end of every capture, `scripts/ux_blank.py` reads each frame with its accessibility tree (`<frame>.ax.json`) and flags three kinds of frame:
+  - a picture stage (known by its controls: the size chip, "N photos", "AR", "Explore in 3D") with nothing drawn above them and no progress or words;
+  - an unlabelled picture of 64 pt or more that is one flat colour;
+  - a frame where the app was not on screen.
+
+  It writes `<out>/blank.md` and the run exits non-zero when anything is flagged, so a gate can run `python3 scripts/ux_screens.py <out>-slow --condition slow --devices iphone --screens <the changed screens>` and fail on a blank. `python3 scripts/ux_blank.py <out>` re-checks saved frames without a simulator.
+- The companion is built from the checkout when needed (`npm ci` then `npm run build`), and needs Node. The scratch folder holds the person's photos: keep it out of Git and move it to `/Volumes/Spillover` afterwards.
 - Not covered yet: the Mac app (its design mode opens windows on David's screen; it needs an off-screen renderer), Android and Linux, the Lock Screen.
 
 ## Changing code: one trunk
