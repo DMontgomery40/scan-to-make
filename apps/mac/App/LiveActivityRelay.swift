@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import enum CounterpartKit.SettingsSchema
 #if canImport(ControlKit)
 import ControlKit
 #endif
@@ -37,7 +38,6 @@ import ControlKit
     private var recovery: LiveActivityRecovery
     private let session: URLSession
     private let now: () -> Date
-    private var phoneChoices: [String: [String: Bool]] = [:]
     private var flushAt: Date?
     private var flushTask: Task<Void, Never>?
     private static let logger = Logger(subsystem: "com.scantomake.mac", category: "MilestoneDelivery")
@@ -55,18 +55,20 @@ import ControlKit
     deinit { flushTask?.cancel() }
 
     func deliver(_ event: CounterpartEvent, title: String, client: ControlClient, cloudTokens: LiveActivityTokens) async {
+        let choices = try? await client.companionSettings().notificationsDevices
         let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
-        deliver(event, title: title, local: local, cloudTokens: cloudTokens)
+        deliver(event, title: title, local: local, cloudTokens: cloudTokens, phoneChoices: choices)
     }
 
-    func deliver(_ event: CounterpartEvent, title: String, local: LiveActivityTokens, cloudTokens: LiveActivityTokens) {
+    func deliver(_ event: CounterpartEvent, title: String, local: LiveActivityTokens, cloudTokens: LiveActivityTokens,
+                 phoneChoices: [String: [String: Bool]]? = nil) {
         guard enabled, endpoint != nil, event.type.hasPrefix("print.") else { return }
         recovery.record(event, title: title, now: Date())
         let candidates = event.type == "print.started" ? (local.pushToStart + cloudTokens.pushToStart).map(\.token) : []
         for token in Set(candidates.map { $0.lowercased() }) where !dead.contains(token) {
             if let push = LiveActivityPush.make(for: event, token: token, title: title, now: Date()) { enqueue(push) }
         }
-        recover(local: local, cloud: cloudTokens)
+        recover(local: local, cloud: cloudTokens, phoneChoices: phoneChoices)
     }
 
     /// Choose one transport before any push. The full paired-device list includes phones whose token
@@ -81,11 +83,10 @@ import ControlKit
     }
 
     func alertMilestone(_ event: CounterpartEvent, title: String, local: LiveActivityTokens, cloudTokens: LiveActivityTokens,
-                        pairedDeviceIds: Set<String>? = nil, phoneChoices: [String: [String: Bool]]? = [:]) -> Bool {
-        if let phoneChoices { self.phoneChoices = phoneChoices }
+                        pairedDeviceIds: Set<String>? = nil, phoneChoices: [String: [String: Bool]]?) -> Bool {
         // A pending decision must be resumed even if Settings changed or the token disappeared.
         if alerted.contains(event.id) { return true }
-        if milestones.entries[event.id] != nil { resumeMilestones(local: local, cloud: cloudTokens); return true }
+        if milestones.entries[event.id] != nil { resumeMilestones(local: local, cloud: cloudTokens, phoneChoices: phoneChoices); return true }
         guard let phoneChoices, enabled, endpoint != nil,
               let activities = MilestoneAlert.tokens(for: event, relayOn: true, local: local, cloud: cloudTokens,
                                                      dead: dead, pairedDeviceIds: pairedDeviceIds) else { return false }
@@ -96,23 +97,23 @@ import ControlKit
         if let pausedUntil, pausedUntil > soon { return false }
         if activities.contains(where: { (tokenPausedUntil[$0.token.lowercased()] ?? .distantPast) > soon }) { return false }
         milestones.begin(event, title: title, devices: activities.map(\.deviceId), now: now())
-        resumeMilestones(local: local, cloud: cloudTokens)
+        resumeMilestones(local: local, cloud: cloudTokens, phoneChoices: phoneChoices)
         return true
     }
 
     func recover(client: ControlClient, cloudTokens: LiveActivityTokens) async {
-        if let settings = try? await client.companionSettings(), let choices = settings.notificationsDevices { phoneChoices = choices }
+        let choices = try? await client.companionSettings().notificationsDevices
         let local = (try? await client.liveActivityTokens()) ?? LiveActivityTokens()
-        recover(local: local, cloud: cloudTokens)
+        recover(local: local, cloud: cloudTokens, phoneChoices: choices)
     }
 
-    func recover(local: LiveActivityTokens, cloud: LiveActivityTokens) {
-        resumeMilestones(local: local, cloud: cloud)
+    func recover(local: LiveActivityTokens, cloud: LiveActivityTokens, phoneChoices: [String: [String: Bool]]? = nil) {
+        resumeMilestones(local: local, cloud: cloud, phoneChoices: phoneChoices)
         guard enabled, endpoint != nil else { return }
         for push in recovery.pushes(tokens: local.activities + cloud.activities, now: Date()) where !dead.contains(push.token) { enqueue(push) }
     }
 
-    private func resumeMilestones(local: LiveActivityTokens, cloud: LiveActivityTokens) {
+    private func resumeMilestones(local: LiveActivityTokens, cloud: LiveActivityTokens, phoneChoices: [String: [String: Bool]]?) {
         for entry in milestones.entries.values.sorted(by: { $0.event.seq < $1.event.seq }) {
             if entry.complete { decide(entry.event.id); continue }
             for (device, outcome) in entry.outcomes where outcome == .pending {
@@ -132,7 +133,11 @@ import ControlKit
                     }
                     continue
                 }
-                if phoneChoices[device]?[entry.event.type] == false || dead.contains(token.lowercased()) {
+                // Never reuse a prior process/poll's choices. Unknown current settings leave
+                // this recipient pending; ordinary activity state can still catch up silently.
+                guard let phoneChoices else { continue }
+                let allowed = phoneChoices[device]?[entry.event.type] ?? SettingsSchema.defaultValue(entry.event.type, mac: false)
+                if !allowed || dead.contains(token.lowercased()) {
                     milestones.resolve(entry.event.id, device: device, outcome: .failed)
                     decide(entry.event.id); continue
                 }
