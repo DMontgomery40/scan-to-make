@@ -240,7 +240,8 @@ class HomeLayoutTests {
         state.loaded.value = true
         state.requestFailed(com.scantomake.counterpart.api.CompanionException.unreachable)
         home()
-        compose.onNode(hasText("isn't answering", substring = true) and hasText("Your computer", substring = true)).assertExists()
+        // The line, exactly; the banner says the same thing in its longer sentence.
+        compose.onNodeWithText("Your computer isn't answering").assertExists()
         compose.onNodeWithText("Try Again").assertExists()
         // The computer answers, with a refusal about something else.
         state.requestFailed(com.scantomake.counterpart.api.CompanionException("invalid-state", "That project is printing."))
