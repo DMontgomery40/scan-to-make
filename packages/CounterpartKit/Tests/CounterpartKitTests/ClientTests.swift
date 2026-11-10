@@ -644,6 +644,10 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(catalog.listed("current"), "current")
         XCTAssertEqual(catalog.listed("mcp-1a2b"), "current")
         XCTAssertNil(catalog.listed("gone"))
+        // Review F2: the Result row and every name resolve a saved id the way the print sheet does.
+        XCTAssertEqual(catalog.resolved("mcp-1a2b")?.id, "current", "listed under its other MCP's id: still on the Mac")
+        XCTAssertEqual(catalog.resolved(nil)?.id, "current", "no id: the default printer")
+        XCTAssertNil(catalog.resolved("gone"), "really gone")
     }
 
     func testPrinterConnectionReadsTheMCPsOwnWordsAndChangesGoThroughTheMac() async throws {

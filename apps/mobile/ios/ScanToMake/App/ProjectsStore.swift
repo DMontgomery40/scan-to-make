@@ -110,7 +110,7 @@ import CounterpartKit
     }
 
     func printerName(_ project: Project) -> String? {
-        project.print?.destination?.name ?? catalog?.destination(project.printerDestinationId)?.name
+        project.print?.destination?.name ?? catalog?.resolved(project.printerDestinationId)?.name
     }
 
     /// "Mac mini connected · 2 printers ready"

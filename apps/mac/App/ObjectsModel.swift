@@ -416,7 +416,8 @@ struct SocketObjects: ObjectsCompanion {
 
     func printer(for object: Project) -> PrinterDestination? {
         guard let catalog = printerCatalog else { return nil }
-        return catalog.destinations.first { $0.id == object.printerDestinationId }
+        // Resolved as the print sheet does: an id under the printer's other MCP is the same printer (review F2).
+        return catalog.resolved(object.printerDestinationId)
             ?? catalog.destinations.first { $0.id == catalog.defaultDestinationId }
             ?? catalog.destinations.first
     }

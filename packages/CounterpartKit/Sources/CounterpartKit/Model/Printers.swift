@@ -152,6 +152,12 @@ public struct PrinterCatalog: Codable, Equatable, Sendable {
         if destinations.contains(where: { $0.id == id }) { return id }
         return destinations.first { $0.mcps?.contains { $0.destinationId == id } == true }?.id
     }
+    /// The printer a saved id stands for now, as the print sheet resolves it: itself, or the printer it became under its
+    /// other MCP's id (review F2: matched exactly, the Result row said a listed printer "isn't on your Mac anymore").
+    /// Nil id: the default printer.
+    public func resolved(_ id: String?) -> PrinterDestination? {
+        destination(id.flatMap { listed($0) } ?? id)
+    }
 }
 
 /// A spool the printer reports (`GET /v1/objects/<id>/filaments`): an AMS slot or the external spool.

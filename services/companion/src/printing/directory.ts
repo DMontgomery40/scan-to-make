@@ -2,11 +2,9 @@ import {
   detectCapabilities, readPrinterInfo, readPrintReport, readiness,
   type PrinterCapabilities, type PrinterSession, type PrinterToolCatalog, type PrintReport,
 } from '@scan-to-make/printer-handoff';
-import {defaultName, type PrinterCatalog, type PrinterDestination} from '../objects/printers.js';
+import {isGeneratedName, type PrinterCatalog, type PrinterDestination} from '../objects/printers.js';
 
 export type Readiness = ReturnType<typeof readiness>;
-/** Names older builds generated for a printer nobody named; a saved profile may still carry one (review F6). */
-const LEGACY_GENERATED_NAMES = new Set(['Bambu printer', 'Configured printer']);
 export interface PublicDestination extends PrinterDestination {
   state?: Readiness;
   stateCheckedAt?: string;
@@ -114,12 +112,12 @@ export class PrinterDirectory {
   }
 
   /**
-   * A printer nobody named is shown by the model its MCP reports, not "Printer at 192.0.2.1" (first look U9). A name the
+   * A printer nobody named is shown by the model its MCP reports, not "Your printer" (first look U9). A name the
    * person gave, or one already made from a known model, stays.
    */
   #named(destination: PrinterDestination): Pick<PrinterDestination, 'name'> {
     const reported = this.#models.get(destination.id);
-    const unnamed = destination.name === defaultName(destination.address) || LEGACY_GENERATED_NAMES.has(destination.name);
+    const unnamed = isGeneratedName(destination.name);
     // Also when its config names a model: what the MCP reports is what's shown, not the config's code ("p1s").
     if (!reported || !unnamed) return {name: destination.name};
     // The MCP's own display name, exactly as it says it ("A1 Mini", "H2D Pro"): no brand added, nothing reformatted, no

@@ -229,7 +229,7 @@ enum Fixtures {
         if set == "ask-bottle" { shown = shown.map { $0["id"] as? String == ids.plush ? bottle(ago) : $0 } }
         // `-CounterpartFixtureSet stale-printer` / `no-printers` (review F3): the mic mount, never sliced, with a printer
         // chosen that's no longer on the Mac, or with no printers set up at all.
-        if set == "stale-printer" || set == "no-printers" {
+        if ["stale-printer", "no-printers", "printers-slow", "printers-refused"].contains(set) {
             shown = shown.map { project in
                 guard project["id"] as? String == ids.mic else { return project }
                 var changed = project
@@ -503,7 +503,12 @@ struct FixtureTransport: HTTPTransport {
             default: return json(["error": ["code": "not-found"]], 404)
             }
         }
-        if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
+        if path == "/v1/objects/printers" {
+            // Review F3: `printers-slow` keeps the printer list waiting; `printers-refused` is a Mac that won't give it.
+            if Fixtures.set == "printers-slow" { try await Task.sleep(for: .seconds(60)) }
+            if Fixtures.set == "printers-refused" { return json(["error": ["code": "unavailable", "message": "refused"]], 503) }
+            return json(Fixtures.catalog)
+        }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/route") {
             guard path.contains("/current/") else { return json(["route": NSNull()]) }
             if method == "PUT", let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let route = body["route"] as? String {

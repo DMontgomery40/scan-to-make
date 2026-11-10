@@ -180,6 +180,29 @@ test('paired clients can read every MCP copy, including hidden profiles, without
   assert.equal((await f.call('/v1/printers/mcps', 'POST', {}, f.readOnly)).status, 405);
 });
 
+// Lead, Nov 10: an address is never part of a printer's name. Names reach read-only clients, notifications and the Live
+// Activity, so no name on any route a read-only client can call carries a host, port or serial from a profile's environment.
+test('no printer name a read-only client can read carries a host, port or serial from a profile', async t => {
+  const f = await fixture(t);
+  const secrets = ['192.0.2.1', '01P00A123456789'];
+  const names = [];
+  const collect = (value, key) => {
+    if (Array.isArray(value)) { for (const item of value) collect(item, key); return; }
+    if (value && typeof value === 'object') { for (const [k, v] of Object.entries(value)) collect(v, k); return; }
+    if (typeof value === 'string' && /name|printer|title|label/i.test(key ?? '')) names.push(`${key}: ${value}`);
+  };
+  for (const path of ['/v1/printers/mcps', '/v1/objects/printers', '/v1/objects']) {
+    const response = await f.call(path, 'GET', undefined, f.readOnly);
+    if (response.status !== 200) continue;
+    collect(response.body);
+  }
+  // The catalog every other surface (events, notifications, the Live Activity) takes its names from.
+  for (const destination of f.catalog.destinations) names.push(`catalog: ${destination.name}`);
+  assert.ok(names.length > 0);
+  for (const name of names) for (const secret of secrets) assert.equal(name.includes(secret), false, name);
+  assert.ok(f.catalog.destinations.every(destination => !/^Printer at /.test(destination.name)));
+});
+
 // Add printer… on the phone (PRD §6.1): the Mac's own printers.* methods behind HTTP, with the shared answers the
 // iPhone and Android tests also read (packages/contracts/fixtures/printer-setup-phone.json).
 test('a paired phone adds a printer through the same discover, check, obtain and add calls as the Mac', async t => {
