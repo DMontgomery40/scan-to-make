@@ -423,7 +423,7 @@ test('a code pass stopped at a limit keeps its latest final run, as any capped p
   assert.deepEqual(capped.design, {script: join(draft, 'holder.py'), parameters: join(draft, 'holder.parameters.json'), step: join(draft, 'holder.step'), result: join(draft, 'cad-result.json')});
 });
 
-test('after a companion restart, the pass folder alone gives the selected run and its validation, without building', async () => {
+test('the pass folder alone gives the selected run and its validation, without building (the receipt read from disk, nothing in memory)', async () => {
   const {mkdir, readFile: read} = await import('node:fs/promises');
   const root = await tempDir('touchup-code-restart-');
   const pass = await prepareTouchupPass({root, objectId: 'obj', scan: [], photos: [], requirePhotos: false});

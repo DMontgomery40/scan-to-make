@@ -92,7 +92,7 @@ type StlCheck = (path: string) => Promise<boolean>;
 /**
  * One run's receipt, as the MCP writes it to `cad-result.json` in each immediate `cad-*` run folder (cad/1): protected
  * from the script, it records whether the run completed, whether the worker selected it (`final`), when, and the full
- * validation and artifact paths, so it is read from disk after any ending or restart, without building again.
+ * validation and artifact paths, so it is read from disk once the worker ends, without building again.
  */
 interface CadReceipt {
   status?: unknown; final?: unknown; completed_at?: unknown; valid?: unknown;
@@ -137,8 +137,9 @@ async function selectedRuns(cadDir: string, validStl: StlCheck): Promise<CadRun[
  * `cad-result.json`): each becomes a checkpoint (`out/checkpoints/001.stl`, …), the latest becomes `out/touched.stl`
  * with its views as the pass's renders, and its script, parameters and receipt are the pass's design source. Runs
  * not marked final (measuring the scan, one colour's part) never become the model, so a pass that measures and then
- * asks, or stops before selecting a run, leaves the project's model alone. Reads only what is on disk, on any ending
- * and after a restart. Nothing is changed.
+ * asks, or stops before selecting a run, leaves the project's model alone. Reads only what is on disk, on any worker
+ * ending; a companion stopped mid-pass doesn't collect that attempt, and the resumed attempt starts from its run folders.
+ * Nothing the worker made is changed.
  */
 export async function collectCodeRuns(pass: Pick<TouchupPass, 'dir' | 'outDir' | 'checkpointsDir'>, validStl: StlCheck): Promise<{design?: CodeDesign}> {
   const runs = await selectedRuns(passCadDir(pass), validStl);
