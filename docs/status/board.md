@@ -25,9 +25,9 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 
 ## Right now
 
-- **A print is running**: "Wall holder for three" (`30a2a33c`), started from Counterpart 06:49Z, about 2 h 10 m, 410 layers, ends about 09:05Z. Printing beats gating: one simulator or build at a time under `~/.stm-ios.lock`, and the lead checks the print's reports at every wake and owns any failure.
+- **Nobody watches a print once it has started** (David, Nov 10: "you don't have to monitor prints once they start. we're past that point lol, thank god. if a print starts, it's fine, and if it's not, it's a slicer issue, and we're not a slicer"). The lead no longer checks a running print at each wake, and a running print holds up nothing: not installs, not gates. What stays is the one build lane (`~/.stm-ios.lock`), for the moment a print is being started and so simulator tests do not fail under load.
 - **One simulator lane, and who is on it** (David, Nov 10: "it seems like every delegate is just waiting ... is everyone waiting on someone and it's gridlocked forever?"). It was a queue, not a deadlock, but two delegates had ended their turns "waiting for the lane" with nothing to wake them. The rule: nobody ends a turn waiting; a hold is queued as a background `lockf` command so its exit wakes its owner, holds are 10 minutes at most except a gate's test job, and the lead keeps this order: I1's test job, I9's test job, then captures (SM's Fit brief build, I5, I3). About two hours of simulator work is queued; X5 (two simulators for the gate) is what shortens it.
-- **Installed**: Mac, iPhone and iPad all on **202611100531** from main `8ee2a829`. **Main is ahead of every device**: `7eb88332` has the first Nov 10 train (#443). Installing restarts the companion that is watching the print, and an install needs an idle app, so Mac, iPhone and iPad install after the print ends (about 09:05Z), with the second train too if it is on main by then. MCP copies bambu-printer-mcp 1.1.77, mcp-3d-printer-server 1.2.58. Android and Linux (agents-136) on Nov 5 builds.
+- **Installed**: Mac, iPhone and iPad all on **202611100531** from main `8ee2a829`. **Main is ahead of every device**: `7eb88332` has the first Nov 10 train (#443). Mac, iPhone and iPad install once, when the second train (I9) is on main; the running print no longer delays it. MCP copies bambu-printer-mcp 1.1.77, mcp-3d-printer-server 1.2.58. Android and Linux (agents-136) on Nov 5 builds.
 
 ## Waiting on David
 
@@ -113,7 +113,7 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 
 | ID | What | Owner |
 |---|---|---|
-| C1 | A large print from Counterpart is unproven; rig plate 5 (Lifting Parts) is David's to start | David starts; Lead watches |
+| C1 | ~~A large print from Counterpart is unproven~~ **Dropped by David, Nov 10**: "we're past that point lol, thank god." The 213 mm "Wall holder for three" started from Counterpart on Nov 10 and printed past halfway before he said so | David |
 | C2 | A send refused before anything was sent must read "not started" | SM, with Q2 |
 | C3 | Move title, designer and licence into `list_3mf_plates` in both MCPs, publish, install, then delete `inspectModelFile`'s 3MF parsing (PRD §8.0 item 9); port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D | No owner yet |
 | C4 | The FULU drain change (pause, resume, stop) was checked only against mocked hosts: check on the P1S the next time David pauses, resumes or stops from Counterpart | Lead |
@@ -149,6 +149,7 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 | Nov 10 | "like many (most?) apps in todays world, there should be an 'auto update' toggle and ours should default to on. would be cool if we could just pull the diff" | Q9 |
 | Nov 10 | "i really hope it's on the todo list everything we talked about around 4pm mst regarding the whole potential replacement or partial replacement of other mcps and the separate kernel build specifically for this app's needs ... i sure hope that's highlighted on your list" | It was not highlighted (it was idea L1). Now K1–K3 at the top, and started |
 | Nov 10 | "it seems like every delegate is just waiting but if every delegate is waiting is everyone waiting on someone and it's gridlocked forever?" | Right now (the lane rule), X5 |
+| Nov 10 | "you don't have to monitor prints once they start. we're past that point lol, thank god. if a print starts, it's fine, and if it's not, it's a slicer issue, and we're not a slicer" | Right now (prints are not watched), C1 dropped, operations.md |
 | (seen by the lead in his screenshots) | A "Fit brief:" block he never wrote is shown as his request | Q3 |
 | (seen by the lead) | A size question offers Camera, Photos, Best guess | Q3 |
 
