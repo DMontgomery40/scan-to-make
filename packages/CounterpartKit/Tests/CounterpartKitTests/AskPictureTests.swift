@@ -42,3 +42,23 @@ final class AskPictureTests: XCTestCase {
         XCTAssertLessThan(try red(200, 280), 140, "below the region too (top-left origin)")
     }
 }
+
+extension AskPictureTests {
+    /// David's photo is stored on its side (EXIF orientation 6) and its region is measured upright, so the marked file is
+    /// upright too.
+    func testTheMarkedFileIsUprightForAPhotoStoredOnItsSide() throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let sideways = folder.appendingPathComponent("ask.jpg"), marked = folder.appendingPathComponent("marked.jpg")
+        let out = try XCTUnwrap(CGImageDestinationCreateWithURL(sideways as CFURL, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(out, try XCTUnwrap(context.makeImage()), [kCGImagePropertyOrientation: 6] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(out))
+        XCTAssertTrue(AskPicture.markedFile(from: sideways, region: .init(x: 0.42, y: 0.3, width: 0.28, height: 0.34), to: marked))
+        let image = try XCTUnwrap(AskPicture.upright(marked))
+        XCTAssertEqual([image.width, image.height], [300, 400], "portrait, as the photo is meant to be seen")
+    }
+}

@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import QuickLook
 import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
@@ -70,7 +71,10 @@ private struct RequestTab: View {
                                                    queueFailed: model.corrections.failures[object.id] != nil)
             LazyVStack(alignment: .leading, spacing: 16) {
                 ForEach(conversation.entries) { entry in
-                    ConversationBubble(entry: entry) { pictures(entry.photos) }
+                    ConversationBubble(entry: entry) {
+                        pictures(entry.photos)
+                        if let scan = entry.scan { MacScanStrip(object: object, scan: scan) }
+                    }
                 }
             }
             if conversation.entries.isEmpty { Text("No request was saved with this project.").foregroundStyle(.secondary) }
@@ -350,5 +354,59 @@ private struct PrintTab: View {
 
     static func readiness(_ state: String) -> String {
         switch state { case "ready": return "ready"; case "busy": return "busy"; case "offline": return "offline"; default: return "not checked yet" }
+    }
+}
+
+/// A scan as one thing in the Request tab (David, Nov 9): five frames round the orbit and the count. Show All opens every
+/// frame in a sheet, decoded only as each scrolls into view.
+struct MacScanStrip: View {
+    let object: Project
+    let scan: ScanPhotos
+    @State private var all = false
+    @State private var shown: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                ForEach(scan.preview, id: \.self) { path in
+                    if let url = object.file(path) {
+                        FillImage(url: url, version: object.updatedAtMs).aspectRatio(3 / 4, contentMode: .fit).clipShape(.rect(cornerRadius: 6))
+                    }
+                }
+            }
+            .onTapGesture { all = true }
+            HStack {
+                Label("Your scan · \(scan.words)", systemImage: "cube.transparent").font(.callout.weight(.medium))
+                Spacer(minLength: 0)
+                Button("Show All") { all = true }.buttonStyle(.link).accessibilityIdentifier("scan-show-all")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Your scan, \(scan.words)")
+        .accessibilityIdentifier("scan-strip")
+        .sheet(isPresented: $all) {
+            VStack(spacing: 12) {
+                HStack {
+                    Text("Your scan").font(.headline)
+                    Text(scan.words).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Done") { all = false }.keyboardShortcut(.cancelAction)
+                }
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 6)], spacing: 6) {
+                        ForEach(scan.frames, id: \.self) { path in
+                            if let url = object.file(path) {
+                                Button { shown = url } label: {
+                                    FillImage(url: url, version: object.updatedAtMs).aspectRatio(3 / 4, contentMode: .fit).clipShape(.rect(cornerRadius: 6))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(20).frame(minWidth: 640, minHeight: 520)
+            .quickLookPreview($shown, in: scan.frames.compactMap(object.file))
+        }
     }
 }

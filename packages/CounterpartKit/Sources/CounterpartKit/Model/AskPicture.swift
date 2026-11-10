@@ -51,10 +51,18 @@ public enum AskPicture {
         return context.makeImage()
     }
 
+    /// A photo on disk as it is meant to be seen: its EXIF orientation applied (an iPhone photo is often stored on its side,
+    /// and the region is measured on the upright picture), at most `maxPixels` on its longer side.
+    public static func upright(_ source: URL, maxPixels: Int = 4096) -> CGImage? {
+        guard let input = CGImageSourceCreateWithURL(source as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(input, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixels] as CFDictionary)
+    }
+
     /// `marked` for a photo on disk, written as a JPEG beside nothing else: what Quick Look and the full-screen view open.
     public static func markedFile(from source: URL, region: Project.Region?, to target: URL) -> Bool {
-        guard let input = CGImageSourceCreateWithURL(source as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(input, 0, nil),
+        guard let image = upright(source),
               let marked = marked(image, region: region),
               let output = CGImageDestinationCreateWithURL(target as CFURL, UTType.jpeg.identifier as CFString, 1, nil)
         else { return false }

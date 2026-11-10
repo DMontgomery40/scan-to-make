@@ -138,8 +138,10 @@ struct AskPhoto: View {
     let path: String?
     let region: Project.Region?
     let caption: String
-    /// The tallest it gets, so the answers stay in view on an iPad; it keeps its aspect ratio, so it narrows instead.
-    var maxHeight: CGFloat = 460
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The tallest it gets, so the answers stay near it (a portrait photo on an iPhone, any photo on an iPad); it keeps its
+    /// aspect ratio, so it narrows instead of cropping.
+    private var maxHeight: CGFloat { sizeClass == .compact ? 380 : 460 }
     @State private var image: UIImage?
     @State private var file: URL?
     @State private var full = false
@@ -221,11 +223,7 @@ struct AskPhotoFullScreen: View {
         .task {
             let file = file, region = region
             marked = await Task.detached {
-                guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
-                      let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceThumbnailMaxPixelSize: 4096] as CFDictionary),
-                      let marked = AskPicture.marked(image, region: region) else { return nil }
+                guard let image = AskPicture.upright(file), let marked = AskPicture.marked(image, region: region) else { return nil }
                 return UIImage(cgImage: marked)
             }.value
         }
