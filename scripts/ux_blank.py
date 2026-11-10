@@ -84,7 +84,9 @@ def check_frame(png: Path, tree) -> list[str]:
     elements = nodes(tree)
     if not elements:
         return []
-    width = max(n['rect']['x'] + n['rect']['width'] for n in elements)
+    # The screen is the app's root element (its window); elements scrolled off it can be wider or lower.
+    windows = [n['rect'] for n in elements if n['role'] in ('Window', 'Application') and n['rect']['width'] > 0]
+    width = windows[0]['width'] if windows else min(image.width / 2, max(n['rect']['x'] + n['rect']['width'] for n in elements))
     scale = image.width / width if width else 1.0
     screen_h = image.height / scale
     problems = []

@@ -404,8 +404,13 @@ class Device:
         pairs = item['args']
         for key, value in zip(pairs[0::2], pairs[1::2]):
             simctl('spawn', self.udid, 'defaults', 'write', BUNDLE, key.lstrip('-'), '-string', value)
-        self.ad('open', BUNDLE, '--relaunch', timeout=120)
+        console = self.out / f'{item["name"]}.console.log'  # the app's own output from launch, for when it isn't on screen
+        self.ad('open', BUNDLE, '--relaunch', '--launch-console', str(console), timeout=120)
         error = self.wait_for_app()
+        if error and console.exists():
+            tail = console.read_text(errors='replace')[-600:].replace('\n', ' | ')
+            log(self.key, item['name'], 'console:', tail)
+            error += f' (console: {tail[-300:]})'
         for action in item['actions']:
             try:
                 if action[0] == 'type': self.ad('type', action[1])
