@@ -2,6 +2,7 @@
 a long --work path no longer breaks the companion (its control socket used to live under --work: over ~104 bytes,
 "Local control startup failed"). These run the real script with a synthetic project copy, never the Mac's own data,
 and point the lane at a temporary folder, so they never queue in the real lane."""
+import lane_isolation  # noqa: F401  (first: no test may reach the real build lane)
 import json
 import os
 import shutil
