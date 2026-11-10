@@ -235,24 +235,25 @@ def hold(label, exclusive=False, max_minutes=DEFAULT_MAX_MINUTES, log=None):
             if not announced:
                 log('lane: waiting behind %d caller(s).\n%s' % (len(waiters) - 1, describe(status()))); announced = True
             time.sleep(poll_seconds())
+        while not held:  # Take whichever slot frees first (slot 2 first, leaving slot 1 to direct lockf callers).
+            for index in (1, 0):
+                if try_lock(handles[index]):
+                    held.append(index); break
+            else:
+                if not announced:
+                    log('lane: waiting for %s.\n%s' % ('both slots' if exclusive else 'a free slot', describe(status())))
+                    announced = True
+                time.sleep(poll_seconds())
         if exclusive:
-            for index in (1, 0):  # Block in the kernel: everyone else is queued behind this ticket.
-                if not try_lock(handles[index]):
-                    if not announced:
-                        log('lane: waiting for both slots.\n' + describe(status())); announced = True
-                    try_lock(handles[index], blocking=True)
-                held.append(index)
-                if len(held) == 1:  # Say who holds this slot while the other one is awaited.
-                    record = Record(state / 'holders', holder_name, describe_holding(True))
-        else:
-            while not held:
-                for index in (1, 0):  # Slot 2 first, leaving slot 1 to callers still using lockf directly.
-                    if try_lock(handles[index]):
-                        held.append(index); break
-                else:
-                    if not announced:
-                        log('lane: waiting for a free slot.\n' + describe(status())); announced = True
-                    time.sleep(poll_seconds())
+            other = 1 - held[0]
+            if not try_lock(handles[other]):
+                # Say who holds the first slot, then block in the kernel for the other. Lane callers are queued
+                # behind this ticket; blocking (not polling) keeps its turn among direct lockf callers, which block too.
+                record = Record(state / 'holders', holder_name, describe_holding(True))
+                if not announced:
+                    log('lane: waiting for both slots.\n' + describe(status())); announced = True
+                try_lock(handles[other], blocking=True)
+            held.append(other)
         info = describe_holding(False)
         if record:
             record.replace(info)
