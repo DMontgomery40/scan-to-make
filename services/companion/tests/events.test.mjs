@@ -435,8 +435,11 @@ test('a row under its phase heading shows only what differs: the question, the s
   const created = Date.UTC(2026, 10, 9, 21, 41);
   const first = projectTitle({scan: 'scan.usdz', createdAtMs: created, current: {sizeMm: [68.4, 34.6, 149.2]}});
   const second = projectTitle({capture: ['0001.heic'], createdAtMs: created + 3_600_000, current: {sizeMm: [192.3, 21.3, 10.4]}});
-  assert.equal(first, 'Scan, 68.4 × 34.6 × 149.2 mm');
+  assert.match(first, /^Scan from Nov \d+, \d+:\d\d [AP]M$/);
   assert.notEqual(first, second);
+  // The size is the row's line, so the title never repeats it.
+  assert.equal(first.includes('68.4'), false);
+  assert.equal(objectStatus({state: 'ready', scan: 'scan.usdz', createdAtMs: created, current: {sizeMm: [68.4, 34.6, 149.2]}}).detail, '68.4 × 34.6 × 149.2 mm');
   assert.match(projectTitle({scan: 'scan.usdz', createdAtMs: created}), /^Scan from Nov \d+, \d+:\d\d [AP]M$/);
   assert.equal(projectTitle({scan: 'scan.usdz'}), 'Your scan', 'nothing known at all');
   assert.equal(projectTitle({title: 'Bike oil bottle', scan: 'scan.usdz', current: {sizeMm: [1, 2, 3]}}), 'Bike oil bottle', 'a name the worker gave wins');

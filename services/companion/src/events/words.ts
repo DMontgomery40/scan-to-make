@@ -17,11 +17,10 @@ export function projectTitle(object: TitleSource): string {
     const short = words.slice(0, 6).join(' ').replace(/[.,;:!?]+$/, '');
     return (words.length > 6 ? `${short}…` : short).slice(0, 80);
   }
-  // A scan sent with no words gets a name of its own from what is known, never "Your scan" twice in one list:
-  // its size once there is a model, otherwise when it was scanned.
+  // A scan sent with no words gets a name of its own, never "Your scan" twice in one list: when it was scanned.
+  // Not its size: every list already shows the size on the line under the title (seen on the iPad with real
+  // projects, Nov 10: "Scan, 68.4 × 34.6 × 14…" over "68.4 × 34.6 × 149.9 mm").
   if (object.scan || object.capture?.length) {
-    const size = sizeText(object.current?.sizeMm);
-    if (size) return `Scan, ${size}`;
     return object.createdAtMs ? `Scan from ${scanDate(object.createdAtMs)}` : 'Your scan';
   }
   return 'Your project';
