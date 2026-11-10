@@ -18,6 +18,9 @@ David, 2026-11-04: "we need to make sure regressions and overwrites dont happen 
 
 - `main` is the only trunk. Feature branches merge to main by PR (gate: `scripts/ci_local.py` and
   `scripts/branch_check.py --merge` printing SAFE). There is no long-lived release branch.
+- Finished branches land together, the day they finish, on a train: one combined branch, one review, one gate
+  (`docs/operations.md`, "Changing code: one trunk"). David, 2026-11-09, after eight finished branches sat unmerged:
+  "I was presumably NEVER using the app with all fixes included."
 - Nothing installs from a non-main SHA: Mac, iPhone, TestFlight, Linux and Android builds refuse a dirty tree
   or a HEAD that isn't on `origin/main` (`scripts/trunk_guard.sh`, listed in `scripts/README.md`). The
   `STM_TRUNK_OVERRIDE` escape is logged and only for local debugging; never install that build for David.
