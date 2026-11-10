@@ -351,7 +351,7 @@ def simctl(*args: str, check: bool = True) -> str:
 
 def source_fingerprint() -> str:
     git = lambda *a: subprocess.run(['git', '-C', str(REPO), *a], capture_output=True, text=True).stdout
-    return hashlib.sha256((git('rev-parse', 'HEAD') + git('diff', 'HEAD', '--', 'apps/mobile', 'packages/CounterpartKit')).encode()).hexdigest()
+    return hashlib.sha256((git('rev-parse', 'HEAD:apps/mobile', 'HEAD:packages/CounterpartKit') + git('diff', 'HEAD', '--', 'apps/mobile', 'packages/CounterpartKit')).encode()).hexdigest()
 
 
 def find_app(derived: Path) -> Path | None:
