@@ -97,6 +97,8 @@ class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolea
     val busy: Boolean
     val size: String? = Format.size(project.current?.sizeMm)
     val actions: List<ProjectAction>
+    /** What the page leads with and what else it offers: the one decision the project page draws from. */
+    val page: PageActions
 
     companion object {
         const val WAIT = "You can leave this project and return to it while your computer works."
@@ -252,6 +254,7 @@ class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolea
             Project.State.Unknown -> { s = "Update Counterpart to see this one."; b = false; a = emptyList(); l = "Update Counterpart to see this one" }
         }
         status = s; busy = b; actions = a
+        page = PageActions(project, phase, a, sending)
         // The Mac's own words win when it writes them, except while this phone is still sending.
         val mac = project.status?.takeIf { it.text.isNotEmpty() && project.state != Project.State.New }
         line = if (mac != null && !(phase == ProjectPhase.Confirmed && mac.phase != ProjectPhase.Confirmed.wire)) mac.text else l
