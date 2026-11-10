@@ -3,6 +3,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   codeEngineRow,
+  passEnding,
+  stageMark,
+  passHeading,
+  sizeFields,
+  sizesAnswer,
+  sizesUnchanged,
+  sizeSource,
+  KNOWN_ASK_KINDS,
+  rowWords,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -609,6 +618,9 @@ test("all three shared limit reasons survive project words with projects present
   const projects = [project, ...stopped.map((row: {expected: Project}) => row.expected)];
   assert.equal(projects.length, 4);
   for (const row of stopped) {
+    // The pass's own line is the companion's words too, never the wire status ("capped").
+    assert.equal(passHeading(row.expected.passes.at(-1), 0), `Pass 1 · ${reasons[row.name]}`);
+    assert.equal(passHeading({}, 1), "Pass 2 · Working");
     assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
@@ -680,4 +692,55 @@ test("David's Nov 9 bottle: the question's caption is true for any question, and
   assert.deepEqual(scanSample(130), [0, 32, 65, 97, 129], "the same frames as the iPhone, Mac and Android");
   assert.deepEqual(scanSample(3), [0, 1, 2]);
   assert.equal(scanWords(130), "130 photos");
+});
+
+test("a pass that stopped to ask or stopped short never reads as all ticks", () => {
+  const stages = [{ id: "preparing", words: "Getting ready", endedAtMs: 2 }, { id: "working", words: "Designing it", endedAtMs: 3 }];
+  const marks = (status: string | undefined, endedAtMs: number | undefined = 3) => stages.map((_, i) => stageMark({ endedAtMs, status, stages }, i));
+  assert.deepEqual(marks("done"), ["✓", "✓"]);
+  assert.deepEqual(marks("unchanged"), ["✓", "✓"]);
+  assert.deepEqual(marks("needs_closeup"), ["✓", "?"]);
+  assert.deepEqual(marks("needs_file"), ["✓", "?"]);
+  for (const status of ["capped", "failed", "interrupted"]) assert.deepEqual(marks(status), ["✓", "✕"], status);
+  assert.equal(passEnding({ status: "failed" }), undefined, "a running pass has not ended");
+  assert.deepEqual(stages.map((_, i) => stageMark({ stages: [stages[0], { id: "working", words: "Designing it" }] }, i)), ["✓", "◌"]);
+});
+
+test("a size question is number fields with the companion's labels, prefilled, with projects present", () => {
+  const ask = {
+    kind: "sizes",
+    sizes: [
+      { id: "size-1", label: "width at the widest point", mm: 64, from: "scan" },
+      { id: "size-2", label: "width at the waist", mm: 53.5, from: "scan" },
+      { id: "size-3", label: "height to the cap tip", mm: 107, from: "published" },
+    ],
+  };
+  const fields = sizeFields(ask)!;
+  assert.deepEqual(fields.map((f) => [f.label, f.text]), [["width at the widest point", "64"], ["width at the waist", "53.5"], ["height to the cap tip", "107"]]);
+  assert.equal(sizesUnchanged(fields), true);
+  assert.deepEqual(sizesAnswer(fields), [{ id: "size-1", mm: 64 }, { id: "size-2", mm: 53.5 }, { id: "size-3", mm: 107 }]);
+  // A correction with a comma, and a size the person doesn't know left out (never sent as confirmed).
+  const edited = fields.map((f, i) => (i === 0 ? { ...f, text: " 63,2 " } : i === 2 ? { ...f, text: "" } : f));
+  assert.equal(sizesUnchanged(edited), false);
+  assert.deepEqual(sizesAnswer(edited), [{ id: "size-1", mm: 63.2 }, { id: "size-2", mm: 53.5 }]);
+  // Nothing is sent while a field isn't a number, or all are blank.
+  for (const bad of ["about 60", "0", "-4", "10001", "6 3", "1e3"]) assert.equal(sizesAnswer(fields.map((f, i) => (i === 0 ? { ...f, text: bad } : f))), undefined, bad);
+  assert.equal(sizesAnswer(fields.map((f) => ({ ...f, text: " " }))), undefined);
+  // Only a sizes question with sizes is one; every other kind keeps its own card.
+  assert.equal(sizeFields({ kind: "closeup", sizes: ask.sizes }), undefined);
+  assert.equal(sizeFields({ kind: "sizes", sizes: [] }), undefined);
+  assert.equal(sizeFields(undefined), undefined);
+  assert.equal(sizeSource("published"), "from the maker");
+  assert.equal(sizeSource("scan"), "from your scan");
+  assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
+});
+
+test("a row under its phase heading shows the companion's detail, never the heading again, with projects present", () => {
+  const asking = { ...project, id: "a", state: "needs-closeup", status: { phase: "needs-you", tint: "orange", text: "Needs you · Can you confirm these sizes?", detail: "Can you confirm these sizes?" } } as Project;
+  const ready = { ...project, id: "b", state: "ready", status: { phase: "ready", tint: "accent", text: "Ready to print · 68.4 × 34.6 × 149.2 mm", detail: "68.4 × 34.6 × 149.2 mm" } } as Project;
+  const failed = { ...project, id: "c", state: "failed", status: { phase: "failed", tint: "red", text: "The printer stopped." } } as Project;
+  assert.equal(rowWords(asking), "Can you confirm these sizes?");
+  assert.equal(rowWords(ready), "68.4 × 34.6 × 149.2 mm");
+  assert.equal(rowWords(failed), "The printer stopped.", "no detail: the line as it is");
+  for (const p of [asking, ready]) assert.doesNotMatch(rowWords(p), /^(Needs you|Ready to print)/);
 });

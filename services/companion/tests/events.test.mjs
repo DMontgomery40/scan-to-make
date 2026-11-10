@@ -413,3 +413,35 @@ test('local and HTTP device lists keep request presence separate from fresh cred
   const never = await f.pair('Never requested');
   assert.equal((await f.dispatch('devices.list', {})).devices.find(d => d.deviceId === never.deviceId).lastSeenAt, undefined);
 });
+
+test('a row under its phase heading shows only what differs: the question, the size, the stage; never the heading again', async () => {
+  const {projectTitle} = await import('../dist/events/words.js');
+  const question = "Kroger doesn't publish this bottle's size. Can you confirm these?";
+  const asking = objectStatus({state: 'needs-closeup', ask: {question}});
+  assert.equal(asking.text, `Needs you · ${question}`);
+  assert.equal(asking.detail, question);
+  const ready = objectStatus({state: 'ready', current: {sizeMm: [68.4, 34.6, 149.2]}});
+  assert.equal(ready.detail, '68.4 × 34.6 × 149.2 mm');
+  assert.equal(ready.text, `Ready to print · ${ready.detail}`);
+  assert.equal(objectStatus({state: 'ready'}).detail, undefined, 'nothing to add: the row shows the status');
+  const working = objectStatus({state: 'touching-up', passes: [{startedAtMs: 1, stages: [{id: 'working', words: 'Designing it', startedAtMs: 1, typicalSec: 60}], estimate: {remainingSec: 240, endsAtMs: 2}}]});
+  assert.equal(working.detail, 'Designing it · about 4 min');
+  for (const status of [asking, ready, working]) assert.doesNotMatch(status.detail, /^(Needs you|Ready to print|Your Mac is working)/);
+  // A line that is already only what differs has no separate detail.
+  assert.equal(objectStatus({state: 'failed', failure: 'The printer stopped.'}).detail, undefined);
+  assert.equal(objectStatus({state: 'printing', print: {destination: {name: 'Bambu Lab P1S'}}}).detail, undefined);
+
+  // A scan sent with no words is named from what is known, never "Your scan" twice in one list.
+  const created = Date.UTC(2026, 10, 9, 21, 41);
+  const first = projectTitle({scan: 'scan.usdz', createdAtMs: created, current: {sizeMm: [68.4, 34.6, 149.2]}});
+  const second = projectTitle({capture: ['0001.heic'], createdAtMs: created + 3_600_000, current: {sizeMm: [192.3, 21.3, 10.4]}});
+  assert.match(first, /^Scan from Nov \d+, \d+:\d\d [AP]M$/);
+  assert.notEqual(first, second);
+  // The size is the row's line, so the title never repeats it.
+  assert.equal(first.includes('68.4'), false);
+  assert.equal(objectStatus({state: 'ready', scan: 'scan.usdz', createdAtMs: created, current: {sizeMm: [68.4, 34.6, 149.2]}}).detail, '68.4 × 34.6 × 149.2 mm');
+  assert.match(projectTitle({scan: 'scan.usdz', createdAtMs: created}), /^Scan from Nov \d+, \d+:\d\d [AP]M$/);
+  assert.equal(projectTitle({scan: 'scan.usdz'}), 'Your scan', 'nothing known at all');
+  assert.equal(projectTitle({title: 'Bike oil bottle', scan: 'scan.usdz', current: {sizeMm: [1, 2, 3]}}), 'Bike oil bottle', 'a name the worker gave wins');
+  assert.equal(projectTitle({instructions: 'A hook for my bag', scan: 'scan.usdz'}), 'A hook for my bag');
+});

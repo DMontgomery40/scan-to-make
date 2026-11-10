@@ -155,7 +155,10 @@ enum Fixtures {
                        "monitor": ["phase": "watching", "milestonesSent": [], "firstLayerSent": true]]],
             ["id": ids.plush, "createdAtMs": ago(30), "updatedAtMs": ago(12), "state": "needs-closeup", "title": "Plush, underside",
              "instructions": "Copy this plush, including the bottom.", "scan": "scan.usdz", "photos": [], "capture": ["potato.jpg"],
-             "passes": [["startedAtMs": ago(25), "endedAtMs": ago(12), "status": "needs-closeup"]],
+             "passes": [["startedAtMs": ago(25), "endedAtMs": ago(12), "status": "needs_closeup", "words": "Asked you a question"]],
+             // As the Mac sends it (`objectStatus`): `detail` is the row's line under a Needs you heading.
+             "status": ["phase": "needs-you", "text": "Needs you · Can you send a close-up of the underside? The scan never saw the bottom.",
+                        "detail": "Can you send a close-up of the underside? The scan never saw the bottom.", "symbol": "hand.raised", "tint": "orange"],
              "question": ["closeup": "the underside"],
              "ask": ["id": "1b6f1c1e-2d1e-4c3a-9a51-0e7a0b9e1a03", "question": "Can you send a close-up of the underside? The scan never saw the bottom.",
                      "photo": "asks/1b6f1c1e-2d1e-4c3a-9a51-0e7a0b9e1a03.jpg", "region": ["x": 0.15, "y": 0.55, "width": 0.7, "height": 0.4],
@@ -361,6 +364,16 @@ enum Fixtures {
             "photo": "asks/\(bottleAsk).jpg", "region": ["x": 0.42, "y": 0.3, "width": 0.28, "height": 0.34],
             "answers": ["camera", "photos", "best-guess", "text"], "status": "open", "askedAtMs": ago(4)]
         if ProcessInfo.processInfo.environment["COUNTERPART_ASK_NO_PHOTO"] != nil { ask["photo"] = nil; ask["region"] = nil }
+        // The same question as its own kind: the sizes to confirm or correct, as the Mac sends them now. The bottle
+        // is waisted, so there are more than three and none is "width".
+        if ProcessInfo.processInfo.environment["COUNTERPART_ASK_SIZES"] != nil {
+            ask["kind"] = "sizes"; ask["answers"] = ["sizes", "text", "camera"]
+            ask["question"] = "Kroger doesn't publish this bottle's size. Can you confirm or correct what the scan reads?"
+            ask["sizes"] = [["id": "size-1", "label": "width at the widest point", "mm": 64, "from": "scan"],
+                            ["id": "size-2", "label": "width at the waist", "mm": 53.5, "from": "scan"],
+                            ["id": "size-3", "label": "thickness", "mm": 32, "from": "scan"],
+                            ["id": "size-4", "label": "height to the cap tip", "mm": 107, "from": "scan"]]
+        }
         return ["id": ids.plush, "createdAtMs": ago(25), "updatedAtMs": ago(4), "state": "needs-closeup", "kind": "fit",
                 "title": "Wall holder for three", "scan": "scan.usdz", "photos": [], "requestPhotos": [], "messages": [],
                 "instructions": "Make something that holds three of these, on a wall. I don’t care if it’s in front of each other or side to side whatever makes more sense just need three of them in a holder thing that I screwed to drywall\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size.",

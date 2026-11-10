@@ -314,6 +314,13 @@ public extension ControlClient {
     func answerCloseup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> Project {
         let result: ObjectReply = try await call("objects.answerCloseup", ["id": .string(id), "bestGuess": .bool(bestGuess), "photoNames": .array(photoNames.map(JSONValue.string))]); return result.object
     }
+    /// A size question's numbers (`AskSizesForm.answer`): the sizes it listed, confirmed or corrected.
+    func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project {
+        let result: ObjectReply = try await call("objects.answerCloseup", Self.sizesParams(id, sizes)); return result.object
+    }
+    static func sizesParams(_ id: String, _ sizes: [AskSizesForm.Answer]) -> [String: JSONValue] {
+        ["id": .string(id), "bestGuess": .bool(false), "sizes": .array(sizes.map { .object(["id": .string($0.id), "mm": .number($0.mm)]) })]
+    }
     /// Prints the current model. `checked` only after an
     /// uncertain print, once the user has looked at the printer. Like every mutation, a deadline after
     /// sending has an unknown outcome: read the object again, never resend.

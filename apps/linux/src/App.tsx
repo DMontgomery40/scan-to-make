@@ -21,6 +21,7 @@ import {
   searchProject,
   startersShown,
   words,
+  rowWords,
 } from "./domain";
 import { useWorkspace } from "./useWorkspace";
 import { useChangeQueue } from "./useChangeQueue";
@@ -150,7 +151,7 @@ export function App() {
                   onClick={() => setSelected(p.id)}
                 >
                   {p.title}
-                  <small>{words(p)}</small>
+                  <small>{rowWords(p)}</small>
                 </button>
               ))}
             </section>

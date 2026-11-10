@@ -238,13 +238,18 @@ class CompanionClient(
     suspend fun correct(id: String, note: String, photoNames: List<String>? = null): Project =
         one(request("POST", "/v1/objects/$id/corrections", jsonOf("note" to note, "photoNames" to photoNames)))
     /** Answers the open Ask with uploaded photos, a best guess, or words. */
-    suspend fun answerAsk(id: String, bestGuess: Boolean = false, text: String? = null, photoNames: List<String> = emptyList()): Project {
+    /** `sizes`: a size question's numbers (`AskSizesForm.answer`), which may go with words and photos. */
+    suspend fun answerAsk(id: String, bestGuess: Boolean = false, text: String? = null, photoNames: List<String> = emptyList(), sizes: List<AskSizesForm.Answer> = emptyList()): Project {
         val json = LinkedHashMap<String, Any?>()
         if (bestGuess) json["bestGuess"] = true
         text?.let { json["text"] = it }
         json["photoNames"] = photoNames
+        if (sizes.isNotEmpty()) json["sizes"] = sizes.map { mapOf("id" to it.id, "mm" to wholeOrDecimal(it.mm)) }
         return one(request("POST", "/v1/objects/$id/closeup", com.scantomake.counterpart.core.toJson(json) as JsonObject))
     }
+    /** A whole number goes out as `64`, not `64.0`, as the other clients send it. */
+    private fun wholeOrDecimal(mm: Double): Number =
+        if (mm % 1.0 == 0.0 && kotlin.math.abs(mm) < 1e15) mm.toLong() else mm
     suspend fun choosePublishedPlate(id: String, askId: String, choice: String): Project =
         one(request("POST", "/v1/objects/$id/ask", jsonOf("askId" to askId, "choices" to listOf(choice))))
     suspend fun addModelFile(id: String, name: String, bytes: ByteArray): Project {
