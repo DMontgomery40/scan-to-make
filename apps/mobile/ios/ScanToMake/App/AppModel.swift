@@ -160,6 +160,8 @@ import CounterpartKit
     #if DEBUG
     /// `-CounterpartScreen <name>` opens one screen directly, as the mockup app's `-screen` does.
     private func debugRoute() {
+        // `-CounterpartProject <id>` opens that project, for screenshots of real projects (`-CounterpartFixtureSet real`).
+        if let project = UserDefaults.standard.string(forKey: "CounterpartProject"), !project.isEmpty { route = .project(project); return }
         guard let screen = UserDefaults.standard.string(forKey: "CounterpartScreen") else { return }
         let ids = Fixtures.ids
         switch screen {
