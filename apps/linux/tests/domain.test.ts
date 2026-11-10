@@ -8,6 +8,9 @@ import {
   sizesUnchanged,
   sizeSource,
   KNOWN_ASK_KINDS,
+  passEnding,
+  stageMark,
+  passHeading,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -614,6 +617,9 @@ test("all three shared limit reasons survive project words with projects present
   const projects = [project, ...stopped.map((row: {expected: Project}) => row.expected)];
   assert.equal(projects.length, 4);
   for (const row of stopped) {
+    // The pass's own line is the companion's words too, never the wire status ("capped").
+    assert.equal(passHeading(row.expected.passes.at(-1), 0), `Pass 1 · ${reasons[row.name]}`);
+    assert.equal(passHeading({}, 1), "Pass 2 · Working");
     assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
@@ -714,4 +720,16 @@ test("a size question is number fields with the companion's labels, prefilled, w
   assert.equal(sizeSource("published"), "from the maker");
   assert.equal(sizeSource("scan"), "from your scan");
   assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
+});
+
+test("a pass that stopped to ask or stopped short never reads as all ticks", () => {
+  const stages = [{ id: "preparing", words: "Getting ready", endedAtMs: 2 }, { id: "working", words: "Designing it", endedAtMs: 3 }];
+  const marks = (status: string | undefined, endedAtMs: number | undefined = 3) => stages.map((_, i) => stageMark({ endedAtMs, status, stages }, i));
+  assert.deepEqual(marks("done"), ["✓", "✓"]);
+  assert.deepEqual(marks("unchanged"), ["✓", "✓"]);
+  assert.deepEqual(marks("needs_closeup"), ["✓", "?"]);
+  assert.deepEqual(marks("needs_file"), ["✓", "?"]);
+  for (const status of ["capped", "failed", "interrupted"]) assert.deepEqual(marks(status), ["✓", "✕"], status);
+  assert.equal(passEnding({ status: "failed" }), undefined, "a running pass has not ended");
+  assert.deepEqual(stages.map((_, i) => stageMark({ stages: [stages[0], { id: "working", words: "Designing it" }] }, i)), ["✓", "◌"]);
 });

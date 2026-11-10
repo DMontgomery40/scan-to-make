@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {rm} from 'node:fs/promises';
 import {join} from 'node:path';
-import {endPass, withPassEnded, passResume, canRetryPass, PASS_STATUSES} from '../dist/objects/pass-end.js';
+import {endPass, withPassEnded, passResume, canRetryPass, passWords, PASS_STATUSES} from '../dist/objects/pass-end.js';
 import {ObjectStore} from '../dist/objects/store.js';
 import {publicObject} from '../dist/objects/http.js';
 import {tempDir} from './support/temp.mjs';
@@ -88,4 +88,18 @@ test('a project failed before the owner was recorded still offers Retry, told th
   const legacy = {state: 'failed', failure, passes: [{startedAtMs: 10, endedAtMs: 50, status: 'capped', activity: [{atMs: 50, kind: 'message', text: failure}]}]};
   assert.equal(canRetryPass(legacy), true);
   assert.equal(canRetryPass({...legacy, failure: 'The printer reported a failure.'}), false);
+});
+
+test('every ending has words, sent to every client with the pass, and a running pass has none', () => {
+  assert.equal(passWords(running()), undefined);
+  const words = Object.fromEntries(PASS_STATUSES.map(status => [status, passWords({endedAtMs: 50, status})]));
+  assert.deepEqual(words, {done: 'Finished', unchanged: 'Nothing needed changing', needs_closeup: 'Asked you a question', needs_file: "Asked for the designer's file",
+    capped: 'Stopped at a limit', failed: 'Stopped before it finished', interrupted: 'Stopped when Counterpart restarted'});
+  // A limit says which one, in the words the failure uses.
+  assert.equal(passWords({endedAtMs: 50, status: 'capped', limit: {kind: 'tool-calls', value: 120}}), 'Stopped at the 120 tool-call limit');
+  assert.equal(passWords({endedAtMs: 50}), 'Finished', 'a pass from before statuses were kept');
+  for (const said of Object.values(words)) assert.doesNotMatch(said, /_|needs-|capped/, 'never the wire spelling');
+  const shown = publicObject({id: 'p', createdAtMs: 1, updatedAtMs: 2, state: 'ready', photos: [], requestPhotos: [], pendingPhotos: [], messages: [],
+    passes: [endPass(running(), {status: 'needs_closeup'}, 50), running()]});
+  assert.deepEqual(shown.passes.map(pass => pass.words), ['Asked you a question', undefined]);
 });

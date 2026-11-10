@@ -128,6 +128,8 @@ export interface Pass {
   photos?: string[];
   summary?: string;
   status?: string;
+  /** How it ended, in the companion's words; absent while it runs. */
+  words?: string;
   activityCount?: number;
   stages?: { id: string; words: string; endedAtMs?: number }[];
 }

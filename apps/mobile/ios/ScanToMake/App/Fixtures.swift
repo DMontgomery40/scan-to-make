@@ -155,7 +155,7 @@ enum Fixtures {
                        "monitor": ["phase": "watching", "milestonesSent": [], "firstLayerSent": true]]],
             ["id": ids.plush, "createdAtMs": ago(30), "updatedAtMs": ago(12), "state": "needs-closeup", "title": "Plush, underside",
              "instructions": "Copy this plush, including the bottom.", "scan": "scan.usdz", "photos": [], "capture": ["potato.jpg"],
-             "passes": [["startedAtMs": ago(25), "endedAtMs": ago(12), "status": "needs-closeup"]],
+             "passes": [["startedAtMs": ago(25), "endedAtMs": ago(12), "status": "needs_closeup", "words": "Asked you a question"]],
              "question": ["closeup": "the underside"],
              "ask": ["id": "1b6f1c1e-2d1e-4c3a-9a51-0e7a0b9e1a03", "question": "Can you send a close-up of the underside? The scan never saw the bottom.",
                      "photo": "asks/1b6f1c1e-2d1e-4c3a-9a51-0e7a0b9e1a03.jpg", "region": ["x": 0.15, "y": 0.55, "width": 0.7, "height": 0.4],
