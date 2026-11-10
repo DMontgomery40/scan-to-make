@@ -464,12 +464,15 @@ class HomeLayoutTests {
     @Test fun settingsShowsTheCodeDesignEngineAndSetsItUpOnTheComputer() {
         app.pairingStore.save(v2Record(), false)
         val paths = mutableListOf<String>()
+        // As the computer does: once Set Up starts, the row's own read says it is setting up.
+        val settingUp = mapOf("state" to "setting-up", "message" to "Setting up… 0 s so far.", "seconds" to 0, "canSetUp" to false)
+        var started = false
         val transport = FakeTransport { request, _ ->
             paths += "${request.method} ${request.url.substringAfter("/v1/")}"
             when {
-                request.url.endsWith("/v1/settings/cad/setup") -> json(200, mapOf("settings" to mapOf("milestones" to "50",
-                    "cad" to mapOf("state" to "setting-up", "message" to "Setting up… 0 s so far.", "seconds" to 0, "canSetUp" to false))))
-                request.url.endsWith("/v1/settings/cad") -> json(200, mapOf("cad" to mapOf("state" to "not-set-up", "message" to "Not set up yet.", "server" to "bambu-printer-mcp", "canSetUp" to true)))
+                request.url.endsWith("/v1/settings/cad/setup") -> { started = true; json(200, mapOf("settings" to mapOf("milestones" to "50", "cad" to settingUp))) }
+                request.url.endsWith("/v1/settings/cad") -> json(200, mapOf("cad" to if (started) settingUp
+                    else mapOf("state" to "not-set-up", "message" to "Not set up yet.", "server" to "bambu-printer-mcp", "canSetUp" to true)))
                 request.url.endsWith("/v1/settings") -> json(200, mapOf("settings" to mapOf("milestones" to "50")))
                 else -> json(404, mapOf("error" to "not-found"))
             }
