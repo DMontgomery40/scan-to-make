@@ -308,6 +308,36 @@ private func project(_ item: [String: Any]) throws -> Project {
                       "AISettings renders the code design engine's section, wired to ObjectsModel")
     }
 
+    /// Q9, PRD §6.1: Settings → Printers has "Keep printer software up to date" in Printer MCPs, beside the MCPs and
+    /// their Update buttons, with projects present; it shows the companion's value and changes `general.autoUpdateMcps`.
+    func testKeepPrinterSoftwareUpToDateIsInPrintersSettingsWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("caliper", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertFalse(model.objects.isEmpty, "projects are present")
+        func general(_ json: String) throws -> CompanionSettings.General? {
+            try JSONDecoder().decode(CompanionSettings.self, from: Data(json.utf8)).general
+        }
+        XCTAssertEqual(try general(#"{"milestones":"50","general":{"autoUpdateMcps":true}}"#)?.autoUpdateMcps, true, "on, as the companion sends it")
+        XCTAssertEqual(try general(#"{"milestones":"50","general":{"autoUpdateMcps":false}}"#)?.autoUpdateMcps, false, "off stays off")
+        XCTAssertNil(try general(#"{"milestones":"50","general":{"keepAwake":true}}"#)?.autoUpdateMcps, "an older companion: no switch")
+        XCTAssertEqual(SettingsSchema.autoUpdateMcps.label, "Keep printer software up to date", "Linux's words")
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("App/SettingsViews.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains(#"Tab("Printers", systemImage:"printer", value:.printers) { PrintersSettings(objects:objects) }"#), "the Printers tab shows PrintersSettings")
+        let printers = try XCTUnwrap(source.range(of: "struct PrintersSettings: View {"), "PrintersSettings exists")
+        let body = source[printers.upperBound...]
+        let end = body.range(of: "\n}\n")?.lowerBound ?? body.endIndex
+        let view = String(body[..<end])
+        let toggle = try XCTUnwrap(view.range(of: "if let on = companion.settings?.general?.autoUpdateMcps {"), "shown only when the companion sends it")
+        XCTAssertTrue(view.contains("companion.setGeneral(CounterpartKit.SettingsSchema.autoUpdateMcps.key, value)"), "changes general.autoUpdateMcps")
+        XCTAssertTrue(view.contains("Text(CounterpartKit.SettingsSchema.autoUpdateMcps.footer)"), "says what it does")
+        let section = try XCTUnwrap(view.range(of: #"header: { Text("Printer MCPs") }"#))
+        let rows = try XCTUnwrap(view.range(of: "McpPackageRow(package:package"))
+        XCTAssertTrue(toggle.lowerBound < rows.lowerBound && rows.lowerBound < section.lowerBound, "in Printer MCPs, above the MCPs it updates")
+    }
+
     func testAddPrinterSlicerControlsComeFromTheChosenMCPWithProjectsPresent() async throws {
         let companion = FakeObjects()
         await companion.set([item("caliper", "ready")])
