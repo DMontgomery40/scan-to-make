@@ -74,7 +74,9 @@ export function withCheckedSizes<T extends Pick<StmObject, 'fit'>>(object: T, an
  */
 export function checkedSizesBrief(sizes: CheckedSize[] | undefined): string | undefined {
   if (!sizes?.length) return undefined;
-  return ['Sizes the person checked on the real object, each for the feature it names. They are the most certain sizes you have: use them for those features, and do not ask for them again.',
+  // New's overall sizes come earlier in the request under looser names ("width"); a checked size can be about the
+  // same feature under its own ("width at the widest point"). The worker is told which wins, not left to choose.
+  return ['Sizes the person checked on the real object, each for the feature it names. They are newer than any size earlier in this request: where one is about the same feature as an earlier size (an overall width and the width at the widest point), use this one. They are the most certain sizes you have: use them for those features, and do not ask for them again.',
     ...sizes.map(size => `- ${size.label}: ${mm(size.mm)} mm, ${size.certainty === 'confirmed' ? 'confirmed' : 'measured by the person'}`)].join('\n');
 }
 

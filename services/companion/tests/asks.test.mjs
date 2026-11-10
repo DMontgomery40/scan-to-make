@@ -71,7 +71,14 @@ test('checked sizes merge by label, stay on any project, and are worded by label
   assert.equal(checkedSizesBrief([]), undefined);
   const brief = checkedSizesBrief(first);
   assert.match(brief, /^Sizes the person checked on the real object[^\n]*do not ask for them again\.\n- width at the waist: 53\.5 mm, confirmed\n- height to the cap tip: 107\.3 mm, measured by the person$/);
-  assert.doesNotMatch(brief, /overall/);
+  assert.doesNotMatch(brief, /exact overall size/);
+  // New measured "width" 64; the question then had "width at the widest point" corrected to 63. Not the same label,
+  // so both numbers reach the worker, and the brief says which one wins rather than leaving two to choose between.
+  const near = {instructions: 'A wall holder', fit: {sizeSource: 'measured', measured: [{id: 'a', label: 'width', mm: 64}]},
+    checkedSizes: mergeCheckedSizes(undefined, [answered('width at the widest point', 63, 64)])};
+  const request = workerRequest(near);
+  assert.ok(request.indexOf('width 64 mm') < request.indexOf('width at the widest point: 63 mm, measured by the person'), 'New\'s size first, the checked one after it');
+  assert.match(request, /They are newer than any size earlier in this request: where one is about the same feature as an earlier size[^\n]*use this one\./);
 
   // A fit: New's choice and its overall sizes are kept; the brief is the fit brief, then the checked sizes.
   const measured = {sizeSource: 'measured', measured: [{id: 'a', label: 'longest', mm: 107}, {id: 'b', label: 'width', mm: 64}]};
