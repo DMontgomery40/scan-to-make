@@ -85,6 +85,9 @@ export function gallery(p: Project, parts: PrintablePart[] = printableParts(p)):
     entries.push({ id: `scan-${index}`, kind: "scan", label: scans.length > 1 ? `Scan ${index + 1}` : "What you scanned", drawing: { model: scan },
       colour: "own", measures: "Scan", photos }),
   );
+  // A copy before a spool is chosen leads with the scanned object in its own colours (the mockup's potato).
+  const scanAt = entries.findIndex((e) => e.kind === "scan");
+  if (p.kind === "copy" && !spoolColour(p) && scanAt > 0) entries.unshift(...entries.splice(scanAt, 1));
   return entries;
 }
 

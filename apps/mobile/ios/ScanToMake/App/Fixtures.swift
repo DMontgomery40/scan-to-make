@@ -57,6 +57,10 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        // `-CounterpartFixtureSet real`: a throwaway copy of real projects, as the companion serves them, for screenshots
+        // with real data (`objects.json` in the folder, each project's files under `objects/<id>/`). Never the Mac's own.
+        if set == "real", let base = folder, let data = try? Data(contentsOf: base.appending(path: "objects.json")),
+           let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] { return rows }
         if set == "limit-stops", let json = ProcessInfo.processInfo.environment["COUNTERPART_LIMIT_FIXTURES"],
            let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
             return rows.enumerated().compactMap { index, row in
@@ -504,6 +508,15 @@ struct FixtureTransport: HTTPTransport {
                     ["atMs": Date().timeIntervalSince1970 * 1000 - 30_000, "kind": "tool", "text": "blender  sculpt  draw_sharp  strength 0.25"],
                     ["atMs": Date().timeIntervalSince1970 * 1000 - 20_000, "kind": "tool", "text": "render  front, left  → compare with photo 3"],
                 ]])
+            }
+            if method == "GET", Fixtures.set == "real", parts.count >= 4, let project = object(id) {
+                // The companion's own paths: the model, renders by name, the scan, photos, capture frames, pictures.
+                let rest = parts[3...].joined(separator: "/").removingPercentEncoding ?? ""
+                let current = project["current"] as? [String: Any]
+                let relative = rest == "model.stl" ? (current?["model"] as? String ?? "current/model.stl")
+                    : rest.hasPrefix("renders/") ? ((current?["renders"] as? [String])?.first { $0.hasSuffix("/" + rest.dropFirst(8)) } ?? rest)
+                    : rest
+                if let data = try? Data(contentsOf: folder.appending(path: "objects/\(id)/\(relative)")) { return HTTPReply(status: 200, body: data) }
             }
             if method == "GET", let name = Fixtures.file(path) {
                 let data = try Data(contentsOf: folder.appending(path: name))

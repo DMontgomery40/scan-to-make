@@ -64,6 +64,11 @@ public struct ProjectGallery: Equatable, Sendable {
             entries.append(Entry(id: "scan-\(index)", kind: .scan, label: scans.count > 1 ? "Scan \(index + 1)" : "What you scanned",
                                  drawing: .model(scan), colour: .own, measures: "Scan", sizeMm: nil, photos: project.scanPhotos))
         }
+        // A copy before a spool is chosen: the scanned object in its own colours is the truest picture of it (the
+        // mockup's potato), so it leads, and the project's picture is the same (§5.1). A spool puts the copy first.
+        if project.usesCopyWorkflow, project.spoolColour == nil, let scan = entries.firstIndex(where: { $0.kind == .scan }) {
+            entries.insert(entries.remove(at: scan), at: 0)
+        }
         self.entries = entries
     }
 }

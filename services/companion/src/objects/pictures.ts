@@ -73,8 +73,14 @@ export function pictureSpecs(object: StmObject): Partial<Record<PictureRole, Pic
   return specs;
 }
 
-/** The project's picture (the gallery's first entry): its result, else its scan, else a photo's subject. */
-export const leadPicture = (names: ProjectPictureNames | undefined): string | undefined => names?.part ?? names?.scan ?? names?.photo;
+/**
+ * The project's picture (the gallery's first entry): its result, else its scan, else a photo's subject. A copy before
+ * a spool is chosen leads with its scan in its own colours, the truest picture of it (the mockup's potato).
+ */
+export function leadPicture(names: ProjectPictureNames | undefined, object?: Pick<StmObject, 'kind' | 'print'>): string | undefined {
+  if (object?.kind === 'copy' && !spoolColour(object) && names?.scan) return names.scan;
+  return names?.part ?? names?.scan ?? names?.photo;
+}
 
 /** The picture's file name: changes whenever what it draws changes (a file, a spool, a seat), so client caches refresh. */
 export async function pictureName(dir: string, role: PictureRole, spec: PictureSpec): Promise<string | undefined> {
@@ -96,12 +102,12 @@ export async function pictureName(dir: string, role: PictureRole, spec: PictureS
  */
 export class ProjectPictures {
   readonly #draw: DrawPicture | undefined;
-  readonly #save: (id: string, names: ProjectPictureNames) => Promise<void>;
+  readonly #save: (id: string, names: ProjectPictureNames, object: StmObject) => Promise<void>;
   readonly #failed = new Set<string>();
   readonly #pending = new Set<string>();
   #queue: Promise<unknown> = Promise.resolve();
 
-  constructor(draw: DrawPicture | undefined, save: (id: string, names: ProjectPictureNames) => Promise<void>) {
+  constructor(draw: DrawPicture | undefined, save: (id: string, names: ProjectPictureNames, object: StmObject) => Promise<void>) {
     this.#draw = draw; this.#save = save;
   }
 
@@ -117,7 +123,8 @@ export class ProjectPictures {
       }
       const have = object.pictures ?? {};
       const same = (Object.keys(wanted) as PictureRole[]).every(role => have[role] === wanted[role])
-        && (Object.keys(have) as PictureRole[]).every(role => wanted[role] !== undefined);
+        && (Object.keys(have) as PictureRole[]).every(role => wanted[role] !== undefined)
+        && object.picture === leadPicture(wanted, object);
       if (same) return;
       const key = `${object.id}/${JSON.stringify(wanted)}`;
       if (this.#pending.has(key)) return;
@@ -137,7 +144,7 @@ export class ProjectPictures {
           const keep = new Set(Object.values(drawn));
           for (const file of await readdir(join(dir, 'pictures')).catch(() => [] as string[]))
             if (!keep.has(`pictures/${file}`)) await rm(join(dir, 'pictures', file), {force: true});
-          await this.#save(object.id, drawn);
+          await this.#save(object.id, drawn, object);
         } finally { this.#pending.delete(key); }
       }).catch(() => undefined);
     })().catch(() => undefined);
