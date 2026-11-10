@@ -46,7 +46,7 @@ test('API cancellation and deadline interrupt the HTTP request',async t=>{
  const opts={access:{kind:'endpoint',url,model:'slow'}};
  const c=new AbortController();const running=runProjectModel(req,opts,c.signal);setTimeout(()=>c.abort(),30);
  assert.equal((await running).stopReason,'cancelled');
- assert.equal((await runProjectModel({...req,timeoutMs:30},opts)).stopReason,'time limit exceeded');
+ assert.deepEqual((await runProjectModel({...req,timeoutMs:30},opts)).limit,{kind:'absolute',value:30});
 });
 
 test('legacy initialization preserves configured Claude only when no saved choice exists; explicit Off survives restart',async t=>{
@@ -64,7 +64,7 @@ test('Codex uses its own login and only the pass MCP; cancellation reaps the wor
  const recorded=JSON.parse(await readFile(receipt,'utf8'));assert.equal(recorded.auth,'login-fixture');assert.equal(recorded.hasKey,false);assert.match(recorded.config,/mcp_servers\."printer"/);assert.match(recorded.config,/project-mcp-cli/);
  assert.equal(await readFile(join(root,'.codex','auth.json'),'utf8'),'login-fixture');
  await writeFile(cli,`#!${process.execPath}\nsetInterval(()=>{},1000);`,{mode:0o700});
- assert.equal((await runProjectModel({...request(root),timeoutMs:40},{access:{kind:'codex-cli'},codexPath:cli,env:{HOME:root}})).stopReason,'time limit exceeded');
+ assert.deepEqual((await runProjectModel({...request(root),timeoutMs:40},{access:{kind:'codex-cli'},codexPath:cli,env:{HOME:root}})).limit,{kind:'absolute',value:40});
 });
 
 test('provider-supplied key echoes are redacted from final results',async t=>{
@@ -72,4 +72,19 @@ test('provider-supplied key echoes are redacted from final results',async t=>{
  const req=request(root);req.mcpConfig={mcpServers:{}};
  const result=await runProjectModel(req,{access:{kind:'endpoint',url,model:'test',keyEnv:'MODEL_SECRET'},env:{MODEL_SECRET:'private-key'}});
  assert.equal(result.resultEvent.structured_output.summary,'[redacted]');assert(!JSON.stringify(result).includes('private-key'));
+});
+
+test('Claude helper reports its own deadline as an absolute limit, never a person cancelling', async t => {
+ const root=await fixture(t),cli=join(root,'claude-hang');
+ await writeFile(cli,`#!${process.execPath}\nconsole.log(JSON.stringify({type:'system',subtype:'init',session_id:'helper-session'}));setInterval(()=>{},1000);`,{mode:0o700});
+ const result=await runProjectModel({...request(root),timeoutMs:300,inactivityMs:10000},{access:{kind:'claude-code'},claudePath:cli,env:{HOME:root}});
+ assert.deepEqual(result.limit,{kind:'absolute',value:300});
+ assert.notEqual(result.stopReason,'cancelled');
+ assert.equal(result.sessionId,'helper-session');
+});
+
+test('a silent API worker records its inactivity limit', async t => {
+ const root=await fixture(t),url=await server(t,()=>{}),req={...request(root),inactivityMs:30,timeoutMs:1000};req.mcpConfig={mcpServers:{}};
+ const result=await runProjectModel(req,{access:{kind:'endpoint',url,model:'slow'}});
+ assert.deepEqual(result.limit,{kind:'inactivity',value:30});assert.notEqual(result.stopReason,'cancelled');
 });

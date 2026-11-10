@@ -280,6 +280,8 @@ Then the companion restarts every session on that install (each waits for any pr
 | `current.changes` | `[{tag: "added"\|"changed"\|"assumed"\|"estimated", text, toleranceMm?}]`: the what-changed list | PR 4 |
 | `current.engine` | `blender` or `fusion` | PR 4 |
 | `current.design` | `{f3d, parameters}` paths (relative) when the engine was Fusion | PR 4 |
+| `passes[].limit` | Optional `{kind, value}` when the worker stopped at a limit: `inactivity` or `absolute` with milliseconds, `tool-calls` with calls. Pass `status` is `capped`; project stays `failed`, with `canRetryCleanup`, and `failure` / `status.text` name the actual limit. A saved checkpoint is reviewable, not a completed model. | Nov 9 |
+| `passes[].toolCalls` | Number of tool calls observed by this attempt. Earlier passes may omit it. | Nov 9 |
 | `passes[].trigger` | `new`, `changes`, `late-photos` or `ask-answer` | PR 4 |
 | `passes[].stages` | `[{id, words, startedAtMs, endedAtMs?, typicalSec}]` (`id`: `building`, `preparing`, `working`, `saving`) | PR 4 |
 | `passes[].estimate` | `{remainingSec, endsAtMs}` while the pass runs | PR 4 |
@@ -386,3 +388,11 @@ not guessed from file order or a project's modification time.
 `GET /v1/printers/mcps` requires `projects:read` and returns `{packages}` from the local-control `printers.mcps` catalog, without setup options. Each `uses` entry includes `printerId` (the selected/canonical printer), `destinationId` (the particular profile), its effective copy’s path/version, stable `mcpId`, and `canMove`. `mcpCopies` in `/healthz` advertises this read. Clients keep `appCopy.version` separate from each use’s version. An explicit move uses the existing `POST /v1/printers/mcp/<mcpId>/update` with `{fresh:true}` and requires `projects:write`; it names all profiles sharing that installation, preserves the checkout and settings, and reports waiting/progress via the existing reply/events. Reads never change a profile.
 
 Read-only and print-only credentials receive 403 for update or move; a write-only credential receives 403 for the copy catalog. Update and move share the desktop updater and print guard: active prints defer replacement and process restarts until the guard is released.
+
+### Local pass recovery (Nov 9)
+
+The companion's on-disk `ObjectPass` additionally retains `sessionId`, `sessionCwd`, `resumable`, validated `checkpoints` paths, `dir`, and optional `resume: {sessionId, outcome: "resumed" | "cold-start" | "attempted", reason?}`. These recovery fields are omitted from HTTP/control public projections, including local paths and session IDs. Session init and pass folder are persisted during progress, without exposing transcript contents. Restart marks the open pass `interrupted` and preserves these fields. A later request on the same project resumes its immediately preceding unfinished Claude Code session with `--resume`; completed answers and person cancellations do not resume. A rejected missing session gets one cold start and an Activity message explaining it. No automatic budget renewal follows a limit stop. Existing historical passes without session metadata retain cold-start behavior.
+
+Resume admission is explicit (`resumable: true`), never inferred from a failed/interrupted status or a saved session ID. The final worker result clears the live flag before post-worker file checks. A thrown pass step disables resume; shutdown can retain it only while the saved session was still live. Restart recovery preserves only that explicit live flag.
+
+Missing-session fallback uses the installed CLI's terminal loader error (exit 1, `error_during_execution`, `is_error: true`, zero model turns/API duration, and the exact requested session ID in `errors`), with no observed tool calls or structured answer. Init presence is irrelevant. If the cold-start attempt fails too, the pass reason explicitly explains both failures.

@@ -105,7 +105,7 @@ test('worker boundary sends only metadata on stdin and removes inherited provide
  const old=process.env.BAMBU_TOKEN;process.env.BAMBU_TOKEN='SECRET';
  t.after(()=>{if(old===undefined)delete process.env.BAMBU_TOKEN;else process.env.BAMBU_TOKEN=old;});
  const choice=api(),result=await createModelWorker(helper)(choice,['check'],{}),value=JSON.parse(result.stdout);
- assert.equal(result.exitCode,0);assert.deepEqual(value.argv,['--model-worker','check']);assert.deepEqual(value.choice,choice);assert.equal(value.leaked,false);assert.deepEqual(value.envNames,[]);
+ assert.equal(result.exitCode,0);assert.deepEqual(value.argv,['--model-worker','check']);assert.deepEqual(value.choice,choice);assert.equal(value.leaked,false);assert.deepEqual(value.envNames.filter(name=>process.platform!=='darwin'||name!=='__CF_USER_TEXT_ENCODING'),[]); // CoreFoundation injects this into a new Darwin process even with env:{}.
  await assert.rejects(createModelWorker(undefined)(choice,['check'],{}));
 });
 
@@ -198,4 +198,17 @@ test('project helper streams public progress while keeping its final response pa
  await writeFile(helper,`#!${process.execPath}\nprocess.stdin.resume();process.stdin.on('end',()=>{console.log(JSON.stringify({type:'progress',progress:{seconds:1,toolCalls:1,activity:[{atMs:1,kind:'tool',text:'design_view'}]}}));console.log(JSON.stringify({toolCalls:1,seconds:1,exitCode:0}));});`,{mode:0o700});
  const progress=[];const result=await createModelWorker(helper)({kind:'codex-cli'},['project','/unused'],{onProgress:p=>progress.push(p)});
  assert.equal(progress.length,1);assert.equal(progress[0].activity[0].text,'design_view');assert.equal(JSON.parse(result.stdout).toolCalls,1);
+});
+
+test('project supervisor forwards limits and gives the helper time to report its own absolute limit', async t => {
+ const root=await tempDir('stm-model-'),seen=[];
+ const service=await ModelAccessService.open(root,async(_choice,args,opts)=>{
+  seen.push({request:JSON.parse(await readFile(args[1],'utf8')),timeoutMs:opts.timeoutMs});
+  return {exitCode:0,stdout:JSON.stringify({toolCalls:0,seconds:1,exitCode:null,limit:{kind:'absolute',value:2000},stopReason:'absolute limit'})};
+ });
+ await service.set(service.get().revision,{kind:'claude-code'});
+ const inv={args:[],cwd:root,mcpConfig:{mcpServers:{}}};
+ const run=await service.projectWorker()(inv,{timeoutMs:2000,inactivityMs:500});
+ assert.equal(seen[0].request.inactivityMs,500);assert.equal(seen[0].timeoutMs,17000);
+ assert.deepEqual(run.limit,{kind:'absolute',value:2000});assert.notEqual(run.stopReason,'cancelled');
 });

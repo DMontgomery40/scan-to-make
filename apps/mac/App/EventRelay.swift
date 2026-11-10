@@ -30,6 +30,9 @@ import ControlKit
     func start() {
         guard loop == nil else { return }
         notifier.prepare()
+        // The notification buttons (It Works, Pause, …) run as the phone's commands do: one control method each.
+        notifier.runCommand = { [weak self] command in await self?.run(command, photos: []) ?? (false, "Counterpart isn't running.") }
+        relay.undelivered = { [weak self] event in await self?.saveUndeliveredMilestone(event) ?? false }
         cloud.start(runCommand: { [weak self] command, photos in await self?.run(command, photos: photos) ?? (false, "Counterpart isn't running.") })
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.cloud.fetchCommands() }
@@ -111,7 +114,11 @@ import ControlKit
                 notified.insert(event.id)
             }
             let frame = event.frame.flatMap { project?.projectFile($0) }
-            if event.notify != "none" { await cloud.save(event, frame: frame) }
+            // A milestone while the print's Live Activity runs alerts on the activity instead (David, Nov 8): no CloudKit
+            // event, so no separate notification. Without a running activity it is a notification as before.
+            let onActivity = await relay.alertMilestone(event, title: project?.words.title ?? event.title, client: client,
+                                                        cloudTokens: cloud.deviceTokens)
+            if event.notify != "none", !onActivity { await cloud.save(event, frame: frame) }
             // A pause or resume keeps the stage at printing, so the printer's own state counts as a change too, and so
             // does the printer asking (or no longer asking) to confirm something.
             let state = [project?.words.stage.rawValue, project?.print?.live?.state ?? project?.print?.printerStatus?.state,
@@ -123,6 +130,11 @@ import ControlKit
             if event.type == "print.started", !LiveActivityStart.stillRunning(event, project: project) { continue }
             await relay.deliver(event, title: project?.words.title ?? event.title, client: client, cloudTokens: cloud.deviceTokens)
         }
+    }
+
+    private func saveUndeliveredMilestone(_ event: CounterpartEvent) async -> Bool {
+        let project = event.projectId.flatMap { projects[$0] }
+        return await cloud.save(event, frame: event.frame.flatMap { project?.projectFile($0) })
     }
 
     /// Runs one command from the phone through the control method that already does the job. A deadline after
@@ -141,6 +153,7 @@ import ControlKit
                 return (false, command.refusal)
             }
             _ = try await client.run(prepared.method, prepared.params)
+            if let next = command.followUp { return await run(next, photos: []) }
             return (true, "Done on your Mac.")
         } catch let error as ControlRemoteError {
             return (false, error.code == "conflict" && !error.message.isEmpty ? error.message : ObjectsModel.sentence(for: error))
@@ -153,10 +166,15 @@ import ControlKit
 }
 
 /// Mac notifications (PRD §9.1, Mac column), with the event's frame attached and one thread per project.
+/// Each carries the buttons for its moment (PRD §9.1, §5.4: "Did it fit?" answered from the done notification),
+/// shared with the iPhone (`NotificationActions`).
 @MainActor final class MacNotifier: NSObject, UNUserNotificationCenterDelegate {
+    var runCommand: ((PhoneCommand) async -> (Bool, String))?
+
     func prepare() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        center.setNotificationCategories(NotificationActions.categories())
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
@@ -165,7 +183,8 @@ import ControlKit
         content.title = event.title
         content.body = event.body
         content.threadIdentifier = event.projectId ?? event.type
-        content.userInfo = ["eventId": event.id].merging(event.projectId.map { ["projectId": $0] } ?? [:]) { $1 }
+        content.userInfo = ["eventId": event.id, "type": event.type].merging(event.projectId.map { ["projectId": $0] } ?? [:]) { $1 }
+        if let category = NotificationActions.category(for: event.type) { content.categoryIdentifier = category.rawValue }
         content.sound = event.notify == "passive" ? nil : .default
         content.interruptionLevel = event.notify == "timeSensitive" ? .timeSensitive : event.notify == "passive" ? .passive : .active
         if let frame = event.frame.flatMap({ project?.projectFile($0) }), FileManager.default.fileExists(atPath: frame.path) {
@@ -179,7 +198,15 @@ import ControlKit
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        let projectId = response.notification.request.content.userInfo["projectId"] as? String
+        let content = response.notification.request.content
+        let projectId = content.userInfo["projectId"] as? String
+        if NotificationActions.Action(rawValue: response.actionIdentifier)?.background == true {
+            // Answered from the notification; no window opens.
+            guard let command = NotificationActions.command(action: response.actionIdentifier, type: content.userInfo["type"] as? String ?? "",
+                                                            projectId: projectId ?? "", text: (response as? UNTextInputNotificationResponse)?.userText) else { return }
+            await run(command, title: content.title)
+            return
+        }
         await MainActor.run {
             if let projectId { AppModels.objects.selection = projectId }
             AppRouter.shared.open(.main)
@@ -188,6 +215,25 @@ import ControlKit
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .list]
+    }
+
+    /// Each step as the phone's `CounterpartCommand` (Needs Changes: the status, then the words); a refusal is said.
+    private func run(_ command: NotificationActions.Command, title: String) async {
+        for step in command.cloudCommands {
+            // CounterpartKit's JSON value, read as this app's own.
+            let payload = (try? JSONDecoder().decode([String: JSONValue].self, from: JSONEncoder().encode(step.payload))) ?? [:]
+            let (ok, message) = await runCommand?(PhoneCommand(id: UUID().uuidString.lowercased(), type: step.type, projectId: command.projectId, payload: payload))
+                ?? (false, "Counterpart isn't running.")
+            guard ok else {
+                let notice = UNMutableNotificationContent()
+                notice.title = "\(command.failedWords): \(title)"
+                notice.body = message
+                notice.threadIdentifier = command.projectId
+                notice.userInfo = ["projectId": command.projectId]
+                try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "action-failed-\(command.projectId)", content: notice, trigger: nil))
+                return
+            }
+        }
     }
 }
 

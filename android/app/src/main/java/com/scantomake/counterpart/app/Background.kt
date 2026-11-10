@@ -21,6 +21,7 @@ import com.scantomake.counterpart.MainActivity
 import com.scantomake.counterpart.R
 import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.ProjectWords
+import com.scantomake.counterpart.api.Project
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -80,6 +81,8 @@ class EventCheckWorker(context: Context, params: WorkerParameters) : CoroutineWo
 class WatchService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
+    private var pictureJob: Job? = null
+    private var pictureKey: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -99,21 +102,40 @@ class WatchService : Service() {
             state.load()
             val running = state.projects.value.firstOrNull { state.words(it).busy }
             if (running == null && state.sending.value.isEmpty()) break
-            running?.let { updateOngoing(state.words(it)) }
+            running?.let { updateOngoing(it, state.words(it)) }
             if (!ok) delay(15_000)
         }
         stopSelf()
     }
 
-    private fun updateOngoing(words: ProjectWords) {
+    private fun updateOngoing(project: Project, words: ProjectWords) {
         val manager = getSystemService(android.app.NotificationManager::class.java)
-        try { manager.notify(7, ongoing(words.title, words.line)) } catch (_: SecurityException) {}
+        try { manager.notify(7, ongoing(words.title, words.line, project)) } catch (_: SecurityException) {}
+        val key = NotificationPictures.key(project)
+        if (pictureKey == key && (pictureJob?.isActive == true || NotificationPictures.cached(project) != null)) return
+        pictureKey = key
+        pictureJob?.cancel()
+        pictureJob = scope.launch {
+            // The status above is already visible. Optional LAN artwork never holds up event delivery.
+            val picture = NotificationPictures.refresh(project)
+            if (picture != null && pictureKey == key) {
+                val current = Counterpart.instance.state.projects.value.firstOrNull { it.id == project.id }
+                if (current != null && Counterpart.instance.state.words(current).busy && NotificationPictures.key(current) == key) {
+                    try { manager.notify(7, ongoing(Counterpart.instance.state.words(current).title,
+                        Counterpart.instance.state.words(current).line, current)) } catch (_: SecurityException) {}
+                }
+            }
+        }
     }
 
-    private fun ongoing(title: String, text: String? = null): Notification {
-        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+    internal fun ongoing(title: String, text: String? = null, project: Project? = null): Notification {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            project?.let { putExtra(MainActivity.EXTRA_PROJECT, it.id) }
+        }
+        val open = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         return NotificationCompat.Builder(this, Notifications.WATCHING)
             .setSmallIcon(R.drawable.ic_notification).setColor(0xFFFF732E.toInt())
+            .setLargeIcon(project?.let(NotificationPictures::cached))
             .setContentTitle(title).setContentText(text ?: "You'll get a notification when it changes.")
             .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open).build()
     }

@@ -49,6 +49,7 @@
 		4365BA8A690868D5B00F9159 /* AppDataModel+Orbit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BEA440CD42BB2FD917F9FEE /* AppDataModel+Orbit.swift */; };
 		43ED0BBAE889BCB9B1098C03 /* PrintSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F78441601D6F6ECA5D0E42 /* PrintSheet.swift */; };
 		451618A3C2377383F4895633 /* AddPrinterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E46B72D9936A00D3BCEB76B /* AddPrinterView.swift */; };
+		484E4FFA3F6F5CF5C971E445 /* ActivityPictures.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6C0A3E312E6994E4DA04B9B /* ActivityPictures.swift */; };
 		4DCD99C6397EA55B63AA5030 /* PrintActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586EDFD70C34B0EBC02B0A04 /* PrintActivityWidget.swift */; };
 		4DD922974705BF4C9D953A24 /* NativeCaptureDraftStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB6F1E4471FB2873747B61B6 /* NativeCaptureDraftStore.swift */; };
 		5329F95F0621A5807E8F42B7 /* TimedMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B853771AAFFE9BF14BB4AC13 /* TimedMessageList.swift */; };
@@ -217,6 +218,7 @@
 		8019B8C2DFCB98298CC19BAA /* ScanPasses-iPhone-FixedHeight-unflippable-low.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-unflippable-low.mp4"; sourceTree = "<group>"; };
 		835B280F8D54D99191129EA2 /* PrintersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintersView.swift; sourceTree = "<group>"; };
 		8552441AB54E2F389FDC741F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		88FE5C40DD569C1FFC8766AC /* CounterpartWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CounterpartWidgets.entitlements; sourceTree = "<group>"; };
 		8D4965A66484FC46855A3AAC /* CounterpartNotificationService.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CounterpartNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		8D886630D48544F53D4F3EBB /* ReconstructionPrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconstructionPrimaryView.swift; sourceTree = "<group>"; };
 		8DE67E84E9BAB798590CFEE6 /* ModelStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStage.swift; sourceTree = "<group>"; };
@@ -244,6 +246,7 @@
 		DEC1CB1BEA42C7C0DEC8500C /* CapturePrimaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePrimaryView.swift; sourceTree = "<group>"; };
 		E0E1BC6DF676254261850DAB /* CounterpartNotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CounterpartNotificationService.entitlements; sourceTree = "<group>"; };
 		E18DE1728EDA573CA4AEDB22 /* THIRD_PARTY_NOTICES.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = THIRD_PARTY_NOTICES.md; sourceTree = "<group>"; };
+		E6C0A3E312E6994E4DA04B9B /* ActivityPictures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityPictures.swift; sourceTree = "<group>"; };
 		E6D13F2A86633F4FB30BD9CB /* ScanPasses-iPad-FixedHeight-unflippable-high.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPad-FixedHeight-unflippable-high.mp4"; sourceTree = "<group>"; };
 		E8387F4BCF55830449FB51CA /* ScanPasses-iPhone-FixedHeight-2.mp4 */ = {isa = PBXFileReference; path = "ScanPasses-iPhone-FixedHeight-2.mp4"; sourceTree = "<group>"; };
 		E841C2B38AE2D69622809C0A /* ProgressBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressBarView.swift; sourceTree = "<group>"; };
@@ -417,6 +420,7 @@
 		8E2F60EBCE0C3B3C4AD20293 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				E6C0A3E312E6994E4DA04B9B /* ActivityPictures.swift */,
 				668B7EE5735002D15D701BD0 /* AppModel.swift */,
 				09C0C6AF585976E2695DC983 /* CounterpartApp.swift */,
 				BD84D2AFBCE4D6A6AA2583E2 /* Fixtures.swift */,
@@ -489,6 +493,7 @@
 		BA61248F3CA257BE98983C71 /* CounterpartWidgets */ = {
 			isa = PBXGroup;
 			children = (
+				88FE5C40DD569C1FFC8766AC /* CounterpartWidgets.entitlements */,
 				586EDFD70C34B0EBC02B0A04 /* PrintActivityWidget.swift */,
 			);
 			path = CounterpartWidgets;
@@ -838,6 +843,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				484E4FFA3F6F5CF5C971E445 /* ActivityPictures.swift in Sources */,
 				451618A3C2377383F4895633 /* AddPrinterView.swift in Sources */,
 				8F26AFE65ED0BD6954AA6AFD /* AppModel.swift in Sources */,
 				FA61FDA2987122046286A377 /* CloudPairingView.swift in Sources */,
@@ -962,6 +968,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = CounterpartWidgets/CounterpartWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				INFOPLIST_FILE = CounterpartWidgets/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -980,6 +987,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = CounterpartWidgets/CounterpartWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				INFOPLIST_FILE = CounterpartWidgets/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (

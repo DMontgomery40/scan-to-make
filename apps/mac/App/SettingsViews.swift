@@ -780,7 +780,7 @@ struct AISettings: View {
 
 struct AdvancedSettings: View {
     @ObservedObject var mac: MacStatusModel
-    @AppStorage(LiveActivityRelay.enabledKey) private var relayOn = false
+    @AppStorage(LiveActivityRelay.enabledKey) private var relayOn = LiveActivityRelay.enabledByDefault
     @State private var relayURL = UserDefaults.standard.string(forKey:LiveActivityRelay.urlKey) ?? ""
     @State private var exporting = false
     @State private var exportProblem: String?
@@ -814,7 +814,7 @@ struct AdvancedSettings: View {
                 }
                 Toggle(isOn:$relayOn) {
                     Text("Live Activity relay")
-                    Text("Updates your phone's Lock Screen while it prints, through counterpart.dtmont.com. It stores nothing.")
+                    Text("Keeps your phone's Live Activity moving while it's locked, through counterpart.dtmont.com. It stores nothing.")
                 }
                 if relayOn {
                     TextField("Relay address", text:$relayURL, prompt:Text(verbatim:LiveActivityRelay.defaultURL))
@@ -822,7 +822,7 @@ struct AdvancedSettings: View {
                     LabeledContent("Last update") { Text(EventRelay.shared.relay.lastResult).foregroundStyle(.secondary) }
                 }
             } header: { Text("Your phone away from home") } footer: {
-                Text("Without the relay, your phone starts and updates its Live Activity itself.").font(.caption).foregroundStyle(.secondary)
+                Text("Without the relay, your phone's Live Activity falls behind while the phone is locked and catches up when you open Counterpart, and progress milestones come as separate notifications.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Logs") {
                 LabeledContent("Companion") {

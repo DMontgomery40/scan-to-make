@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { artifact, call, importFiles, openLink, openProject } from "./bridge";
-import { activePrint, canSelectPlate, duration, words } from "./domain";
+import {
+  AFTER_PRINTING,
+  activePrint,
+  canSelectPlate,
+  didItFitQuestion,
+  duration,
+  words,
+} from "./domain";
 import { Picture, Stage } from "./Stage";
 import { Question } from "./Question";
 import { PrintSheet } from "./PrintSheet";
@@ -233,6 +240,7 @@ export function ProjectView({
   const destination = printers.find(
     (x) => x.id === (p.print?.destinationId ?? p.printerDestinationId),
   );
+  const fit = didItFitQuestion(p);
 
   return (
     <>
@@ -266,6 +274,44 @@ export function ProjectView({
       <div className="project-layout">
         <div className="project-main">
           <Stage project={p} />
+          {fit && (
+            // After the print (Nov 8 walkthrough F1, PRD §5.4): the same question and answers as the other clients.
+            <section className="question" aria-label={fit}>
+              <div className="eyebrow">After printing</div>
+              <h3>{fit}</h3>
+              <p>
+                Try it where it goes. Your answer stays with the project on
+                this computer.
+              </p>
+              <div className="actions">
+                <Action
+                  className="primary"
+                  run={() =>
+                    mutate("objects.settings.set", { id: p.id, status: "works" })
+                  }
+                >
+                  It Works
+                </Action>
+                <Action
+                  run={async () => {
+                    await mutate("objects.settings.set", {
+                      id: p.id,
+                      status: "needs-changes",
+                    });
+                    setTab("Request");
+                    setNote((n) =>
+                      n.startsWith(AFTER_PRINTING) ? n : AFTER_PRINTING + n,
+                    );
+                    setTimeout(() =>
+                      document.getElementById("changes-note")?.focus(),
+                    );
+                  }}
+                >
+                  Needs Changes
+                </Action>
+              </div>
+            </section>
+          )}
           {p.reconstructionReview && (
             <ReconstructionReviewCard
               key={p.reconstructionReview.id}

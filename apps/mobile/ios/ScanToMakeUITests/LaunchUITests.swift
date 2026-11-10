@@ -12,6 +12,8 @@ final class LaunchUITests: XCTestCase {
         if codeFallback.waitForExistence(timeout: 20) {
             XCTAssertTrue(app.staticTexts["Connect to your Mac"].exists)
             XCTAssertTrue(codeFallback.isEnabled, "an unavailable iCloud account keeps code pairing available")
+            XCTAssertTrue(app.descendants(matching: .any)["get-counterpart-mac"].exists,
+                          "a tester who doesn't have the Mac app yet can get it from here (F14)")
         } else {
             XCTAssertTrue(app.buttons["new-project"].exists, "an already paired app opens its projects")
         }
@@ -41,6 +43,13 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Needs you"].exists)
         XCTAssertTrue(app.buttons["Camera"].exists && app.buttons["Best guess"].exists, "the ask card answers in place")
         XCTAssertTrue(app.buttons["new-project"].exists)
+        // Inline in one compact row (§5.1), and never under the floating New button (F13). A blind swipe could
+        // carry the card under the navigation bar instead, so scroll only until the answers can be tapped.
+        let camera = app.buttons["Camera"], photos = app.buttons["Photos"], guess = app.buttons["Best guess"]
+        XCTAssertTrue(reach(app, camera) && photos.isHittable && guess.isHittable, "every answer can be tapped")
+        let new = app.buttons["new-project"].frame
+        for answer in [camera, photos, guess] { XCTAssertFalse(answer.frame.intersects(new), "\(answer.label) is under New") }
+        XCTAssertEqual(camera.frame.minY, photos.frame.minY, accuracy: 2, "Camera and Photos share one row")
         // The Mac's real name and what its printer is doing, never "0 printers ready" while one prints.
         XCTAssertTrue(app.staticTexts["Mac mini connected · Bambu Lab P1S printing"].exists)
     }
@@ -433,8 +442,9 @@ final class PrintScreensUITests: XCTestCase {
         XCTAssertTrue(footer.waitForExistence(timeout: 20))
         // At rest, before any scrolling: the note sits above Pause and Stop, never under them.
         XCTAssertLessThanOrEqual(footer.frame.maxY, app.buttons["Pause"].frame.minY + 1, "the note is under the controls at rest")
+        // The note is on the page now (F8); only Pause and Stop ride in the bar, and nothing scrolls under them.
         let bed = app.staticTexts["Bed"]
-        assertLastControlClearsTheBar(app, last: bed, bar: footer, "printing")
+        assertLastControlClearsTheBar(app, last: bed, bar: app.buttons["Pause"], "printing")
     }
 
     func testAPrinterNamesTheUpdateItsMCPNeeds() {
@@ -467,11 +477,13 @@ final class SettingsAndFirstRunUITests: XCTestCase {
 
     func testNotificationsForThisIPhoneAndTheMac() {
         let app = launch("notifications")
-        // This device's Live Activity switch is off; the Mac alert is a separate setting.
-        let started = app.switches["Print started (Live Activity)"].firstMatch
-        XCTAssertTrue(started.waitForExistence(timeout: 20))
-        XCTAssertEqual(started.value as? String, "0")
-        XCTAssertTrue(app.switches["Ready to print"].firstMatch.exists)
+        // Per-event switches for this iPhone aren't ready yet (F9): one sentence and the way to the
+        // app's iOS notification settings at the top, never a list of disabled switches.
+        XCTAssertTrue(app.buttons["open-notification-settings"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Counterpart sends every alert to this iPhone; turn them off in iOS Settings → Notifications."].exists)
+        XCTAssertFalse(app.switches["Print started (Live Activity)"].exists, "no disabled iPhone switch list")
+        // The Mac's own alert is a separate, working setting below.
+        XCTAssertTrue(reach(app, app.switches["Ready to print"].firstMatch))
         XCTAssertFalse(app.switches.matching(NSPredicate(format: "label CONTAINS[c] 'plate'")).firstMatch.exists, "no plate notification")
     }
 
@@ -529,13 +541,33 @@ final class LayoutParityUITests: XCTestCase {
 
     private var regular: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
-    private func launch(set: String = "all", largeText: Bool = false) -> XCUIApplication {
+    private func launch(set: String = "all", largeText: Bool = false, screen: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", set]
         // Larger text makes any list longer than the screen, as David's ten projects are.
         if largeText { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"] }
+        if let screen { app.launchArguments += ["-CounterpartScreen", screen] }
         app.launch()
         return app
+    }
+
+    func testLimitStopNamesItsLimitOnHomeAndTheProject() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/capped-projects.json"))
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let selected = rows.filter { ($0["name"] as? String) == "limit-inactivity" }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "limit-stops"]
+        app.launchEnvironment["COUNTERPART_LIMIT_FIXTURES"] = String(data: try JSONSerialization.data(withJSONObject: selected), encoding: .utf8)
+        app.launch()
+        let words = NSPredicate(format: "label CONTAINS %@", "Stopped after 10 minutes without worker activity")
+        let listed = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "limit-inactivity")).firstMatch
+        XCTAssertTrue(listed.waitForExistence(timeout: 20))
+        listed.tap()
+        XCTAssertTrue(app.buttons["Try Again"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any).matching(words).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["cancelled"].exists)
     }
 
     /// David, Nov 9: New showed two scan tiles ("On a scan rig", "Scan it") that ran the same capture. One Scan it tile,
@@ -581,6 +613,132 @@ final class LayoutParityUITests: XCTestCase {
         let send = app.buttons["draft.send"]
         XCTAssertTrue(send.waitForExistence(timeout: 10), "its project offers Send to your Mac")
         XCTAssertTrue(send.isEnabled)
+    }
+
+    /// Nov 8 walkthrough F6: "Your Mac isn't answering… then try again" carries Try Again and the way to another Mac,
+    /// on iPhone Home and in the iPad sidebar. Try Again brings the Mac's projects back.
+    func testTheOfflineBannerOffersTryAgainAndADifferentMac() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        let offline = folder.appendingPathComponent("offline")
+        try Data().write(to: offline)
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all"]
+        app.launch()
+        let retry = app.buttons["connection-try-again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertEqual(app.buttons["connection-different-mac"].label, "Connect a Different Mac")
+        try FileManager.default.removeItem(at: offline)
+        retry.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: retry)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 15), .completed, "the Mac answered, so the banner goes")
+        let mic = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch
+        XCTAssertTrue(mic.waitForExistence(timeout: 10), "with its projects")
+    }
+
+    /// XCTest has no hinge API. These fixture-only links set the window scene's horizontal size class (UIKit
+    /// `traitOverrides`), as a fold or an iPad resize does, without relaunching; agent-device gives the Duo hinge proof.
+    private func resize(_ app: XCUIApplication, to width: String) {
+        app.open(URL(string: "scantomake://fixture-width/\(width)")!)
+    }
+
+    /// Skipped until they can be driven reliably (Nov 9): an iPhone simulator can't widen into a side-by-side split,
+    /// and on the iPad XCTest's URL open lands the link where the open project isn't (the same link through
+    /// `agent-device open` collapses and expands the split with the project kept). The fold itself was checked on
+    /// the iPhone Duo simulator with `agent-device fold open|closed`: open project kept both ways, Back while folded
+    /// returns Home, and unfolding then shows the start pane, not a stale project.
+    private func launchResizable() throws -> XCUIApplication {
+        try XCTSkipIf(true, "fixture resize isn't reliable under XCTest; the Duo hinge is checked with agent-device")
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartLayoutTesting", "YES"]
+        app.launch()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))
+        resize(app, to: "regular")
+        return app
+    }
+
+    func testOpenProjectSurvivesCompactAndRegularResizesWithoutStaleSelection() throws {
+        let app = try launchResizable()
+        let project = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10), app.debugDescription)
+        project.tap()
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10))
+        resize(app, to: "compact")
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "fold keeps the project\n\(app.debugDescription)")
+        // The split really collapsed: Home sits under the project, not beside it.
+        XCTAssertFalse(app.buttons["new-project"].isHittable, "folded, the project covers Home")
+        resize(app, to: "regular")
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "unfold keeps the project")
+        resize(app, to: "compact")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 10))
+        resize(app, to: "regular")
+        XCTAssertTrue(app.buttons["starter-scan-platform"].waitForExistence(timeout: 10), "Back to Home clears the old selection")
+        XCTAssertFalse(app.buttons["print"].exists)
+    }
+
+    func testProjectAndPrintSheetSurviveCompactAndRegularResizes() throws {
+        let app = try launchResizable()
+        let project = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        XCTAssertTrue(project.waitForExistence(timeout: 10), app.debugDescription)
+        project.tap()
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10))
+        app.buttons["print"].tap()
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
+        resize(app, to: "compact")
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
+        resize(app, to: "regular")
+        XCTAssertTrue(app.buttons["print-now"].waitForExistence(timeout: 10))
+        resize(app, to: "compact")
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["print"].waitForExistence(timeout: 10), "Cancel returns to the same project, not Home")
+    }
+
+    func testPrinterAttentionAndPrintingSummaryAtBothWidths() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["Printers, 1 needs attention"].waitForExistence(timeout: 20))
+        if regular {
+            let status = app.staticTexts["projects-status"]
+            XCTAssertTrue(status.label.contains("Mac mini connected"), status.label)
+            XCTAssertTrue(status.label.contains("Bambu Lab P1S printing"), status.label)
+            XCTAssertTrue(app.staticTexts["Needs you"].exists)
+            XCTAssertFalse(app.staticTexts["Other"].exists, "the failed project belongs to Needs you")
+        }
+    }
+
+    /// UX walkthrough Nov 8, F1: the Live Activity and print notifications land on Printing, and a finished print's
+    /// Printing screen was a dead end (100%, old temperatures, nothing to do). Now it asks "Did it fit?" there, and
+    /// Open Project goes to the project, on the iPhone stack and in the iPad's detail.
+    func testAFinishedPrintAsksDidItFitOnPrintingAndOpensTheProject() {
+        let app = launch(screen: "print-finished")
+        let works = app.buttons["it-works"]
+        XCTAssertTrue(works.waitForExistence(timeout: 20), "Did it fit? on the finished Printing screen")
+        // On the iPad the project page under Printing has the same card, so wait for Printing's own Open Project.
+        XCTAssertTrue(app.buttons["open-project"].waitForExistence(timeout: 10), "the finished Printing screen")
+        XCTAssertTrue(app.staticTexts["Did it fit?"].exists)
+        XCTAssertFalse(app.staticTexts["Nozzle"].exists, "a finished print's temperatures aren't shown as live")
+        XCTAssertFalse(app.buttons["Stop"].exists)
+        works.tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: works)], timeout: 10) == .completed,
+                      "answered on the Mac: the card goes")
+        let open = app.buttons["open-project"]
+        XCTAssertTrue(open.exists, "the way on stays")
+        open.tap()
+        XCTAssertTrue(app.buttons["Print Another"].waitForExistence(timeout: 10), "the project page, Done, and still printable")
+        XCTAssertFalse(app.buttons["open-project"].exists, "Printing is gone from the stack")
+    }
+
+    /// Needs Changes on the finished Printing screen starts the change on the project page, as the project's own card does.
+    func testNeedsChangesOnAFinishedPrintStartsTheChangeOnTheProject() {
+        let app = launch(screen: "print-finished")
+        let changes = app.buttons["needs-changes"]
+        XCTAssertTrue(changes.waitForExistence(timeout: 20))
+        changes.tap()
+        let field = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        XCTAssertEqual(field.value as? String, "After printing: ")
+        XCTAssertFalse(app.buttons["open-project"].exists)
     }
 
     /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click

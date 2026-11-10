@@ -14,6 +14,8 @@ still change on main, files that conflict with main. The --merge gate fails when
   - conflicts with another branch active in the last --active-hours, merged in either order
     (agree the order; the later one rebases on the earlier).
 Files shared without a conflict are listed as warnings: merge, then re-test the later branch.
+A branch named train/<date> may carry other live branches whole (docs/operations.md): they are listed, not
+blockers, and its boundary check covers every chunk they bring.
 Read-only: it fetches, never pushes, merges or deletes.
 """
 import argparse
@@ -94,6 +96,8 @@ def main():
         return 1
     b = branches[name]
     problems, warnings = [], []
+    # A train (docs/operations.md, "Changing code: one trunk") lands the finished branches it carries, together.
+    train, carried = name.startswith('train/'), []
     if b['behind']:
         problems.append(f'{b["behind"]} commits behind main: rebase, re-run stm-ci / ci_local.py at the new head, push, then merge.')
     if b['conflicts']:
@@ -102,6 +106,9 @@ def main():
         o = branches[other]
         # Stacked branches land in ancestor order, so the reverse order is impossible and not a conflict.
         if is_ancestor(o['ref'], b['ref']):
+            if train:
+                carried.append(other)
+                continue
             problems.append(f'stacked on {other}: merge {other} first (merging this one now would land {other}\'s unmerged commits too).')
             continue
         if is_ancestor(b['ref'], o['ref']):
@@ -121,6 +128,10 @@ def main():
             warnings.append(f'shares {", ".join(shared)} with {other} (merges cleanly): re-test whichever lands second.')
     # PRD §8.0: printer/slicer/firmware/Blender/Fusion knowledge belongs in the MCPs, not app code.
     import boundary_check
+    if carried:
+        warnings.append(f'carries {", ".join(carried)}: they land with this train.')
+        # Each carried branch could bring a full boundary budget of its own; a train checks all of it at once.
+        boundary_check.MAX_CHUNKS *= len(carried)
     if boundary_check.check(a.main, b['ref']) != 0:
         if a.boundary_reviewed:
             warnings.append(f'boundary check not clean; merging as reviewed: {a.boundary_reviewed}')

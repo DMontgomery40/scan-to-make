@@ -1,0 +1,72 @@
+name: Android and Linux client checks
+on:
+  pull_request:
+    branches: [main]
+    paths: ['android/**', 'apps/linux/**', 'packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/**', 'packages/contracts/fixtures/**', '.github/workflows/clients.yml']
+  push:
+    branches: [main]
+    paths: ['android/**', 'apps/linux/**', 'packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/**', 'packages/contracts/fixtures/**', '.github/workflows/clients.yml']
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Prepare Java 17 and Android SDK 35
+        run: |
+          set -euo pipefail
+          JAVA_HOME="${JAVA_HOME_17_X64:-${JAVA_HOME:-}}"
+          if [ ! -x "$JAVA_HOME/bin/java" ] && command -v java >/dev/null; then
+            JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
+          fi
+          if [ ! -x "$JAVA_HOME/bin/java" ]; then
+            test "$(uname -m)" = x86_64
+            JAVA_HOME="$RUNNER_TEMP/java17"
+            mkdir -p "$JAVA_HOME"
+            curl --fail --location --retry 3 'https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.21%2B9/OpenJDK17U-jdk_x64_linux_hotspot_17.0.21_9.tar.gz' -o "$RUNNER_TEMP/java17.tar.gz"
+            echo "8b9b611d917e3dfd8419d3566b5949226f69b052fed7e109c1368add1dfe8711  $RUNNER_TEMP/java17.tar.gz" | sha256sum -c -
+            tar -xzf "$RUNNER_TEMP/java17.tar.gz" --strip-components=1 -C "$JAVA_HOME"
+          fi
+          export JAVA_HOME PATH="$JAVA_HOME/bin:$PATH"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+          java -version
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+          if [ ! -f "$sdk/platforms/android-35/android.jar" ]; then
+            sdk="$RUNNER_TEMP/android-sdk"
+            curl --fail --location --retry 3 'https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip' -o "$RUNNER_TEMP/android-tools.zip"
+            echo "7ec965280a073311c339e571cd5de778b9975026cfcbe79f2b1cdcb1e15317ee  $RUNNER_TEMP/android-tools.zip" | sha256sum -c -
+            unzip -q "$RUNNER_TEMP/android-tools.zip" -d "$RUNNER_TEMP/android-tools"
+            mkdir -p "$sdk/cmdline-tools"
+            mv "$RUNNER_TEMP/android-tools/cmdline-tools" "$sdk/cmdline-tools/19.0"
+            manager="$sdk/cmdline-tools/19.0/bin/sdkmanager"
+            # yes exits on SIGPIPE after sdkmanager finishes; sdkmanager's status is the relevant one.
+            set +o pipefail
+            yes | "$manager" --sdk_root="$sdk" --licenses > "$RUNNER_TEMP/android-licenses.log"
+            set -o pipefail
+            "$manager" --sdk_root="$sdk" 'platforms;android-35' 'build-tools;34.0.0' 'build-tools;35.0.0'
+          fi
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+          echo "GRADLE_USER_HOME=$RUNNER_TEMP/gradle" >> "$GITHUB_ENV"
+      - name: Android unit and layout tests
+        working-directory: android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+      - run: apps/linux/scripts/prepare-frontend.sh
+      - run: npm ci --prefix apps/linux --ignore-scripts
+      - run: npm test --prefix apps/linux
+      - run: npm run build --prefix apps/linux

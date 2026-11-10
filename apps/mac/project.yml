@@ -71,6 +71,7 @@ targets:
       - App/FusionSetup.swift
       - App/Diagnostics.swift
       - App/EventRelayPolicy.swift
+      - App/LiveActivityRelay.swift
       - App/PrinterUpdates.swift
       - App/PublishedModel.swift
       - App/BlenderBridge.swift

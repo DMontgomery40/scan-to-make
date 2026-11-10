@@ -975,3 +975,17 @@ hr {
 .crop-field input[type="range"] { width: 100%; }
 
 .search-summary { display: flex; align-items: center; gap: 12px; flex-basis: 100%; flex-wrap: wrap; }
+
+.sidebar-projects h3 {
+  font-size: 12px;
+  color: #66766c;
+  margin: 18px 10px 6px;
+}
+.attention-badge {
+  background: #d83a46;
+  color: white;
+  border-radius: 999px;
+  min-width: 20px;
+  text-align: center;
+  padding: 1px 5px;
+}

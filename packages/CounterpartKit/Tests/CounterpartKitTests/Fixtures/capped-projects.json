@@ -341,5 +341,251 @@
       },
       "kind": "copy"
     }
+  },
+  {
+    "name": "limit-inactivity",
+    "input": {
+      "id": "11111111-1111-4111-8111-111111111101",
+      "createdAtMs": 1,
+      "updatedAtMs": 3,
+      "instructions": "Repair this scan.",
+      "title": "limit-inactivity",
+      "state": "failed",
+      "scan": "scan.usdz",
+      "photos": [],
+      "current": {
+        "model": "current/model.stl",
+        "renders": []
+      },
+      "passes": [
+        {
+          "startedAtMs": 1,
+          "endedAtMs": 2,
+          "status": "capped",
+          "activity": [
+            {
+              "atMs": 2,
+              "kind": "message",
+              "text": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint."
+            }
+          ],
+          "limit": {
+            "kind": "inactivity",
+            "value": 600000
+          },
+          "sessionId": "private-worker-session",
+          "resumable": true,
+          "checkpoints": [
+            "/private/pass/out/checkpoints/01.stl"
+          ]
+        }
+      ],
+      "failure": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint."
+    },
+    "retry": true,
+    "checkedPrint": false,
+    "expected": {
+      "id": "11111111-1111-4111-8111-111111111101",
+      "createdAtMs": 1,
+      "updatedAtMs": 3,
+      "instructions": "Repair this scan.",
+      "title": "limit-inactivity",
+      "state": "failed",
+      "scan": "scan.usdz",
+      "photos": [],
+      "current": {
+        "model": "current/model.stl",
+        "renders": []
+      },
+      "passes": [
+        {
+          "startedAtMs": 1,
+          "endedAtMs": 2,
+          "status": "capped",
+          "activityCount": 1,
+          "limit": {
+            "kind": "inactivity",
+            "value": 600000
+          }
+        }
+      ],
+      "failure": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.",
+      "canRetryCleanup": true,
+      "status": {
+        "phase": "failed",
+        "text": "Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.",
+        "symbol": "exclamationmark.triangle",
+        "tint": "red"
+      },
+      "settings": {
+        "status": "not-printed",
+        "archived": false
+      },
+      "kind": "copy"
+    }
+  },
+  {
+    "name": "limit-absolute",
+    "input": {
+      "id": "11111111-1111-4111-8111-111111111102",
+      "createdAtMs": 1,
+      "updatedAtMs": 3,
+      "instructions": "Repair this scan.",
+      "title": "limit-absolute",
+      "state": "failed",
+      "scan": "scan.usdz",
+      "photos": [],
+      "current": {
+        "model": "current/model.stl",
+        "renders": []
+      },
+      "passes": [
+        {
+          "startedAtMs": 1,
+          "endedAtMs": 2,
+          "status": "capped",
+          "activity": [
+            {
+              "atMs": 2,
+              "kind": "message",
+              "text": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint."
+            }
+          ],
+          "limit": {
+            "kind": "absolute",
+            "value": 7200000
+          },
+          "sessionId": "private-worker-session",
+          "resumable": true,
+          "checkpoints": [
+            "/private/pass/out/checkpoints/01.stl"
+          ]
+        }
+      ],
+      "failure": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint."
+    },
+    "retry": true,
+    "checkedPrint": false,
+    "expected": {
+      "id": "11111111-1111-4111-8111-111111111102",
+      "createdAtMs": 1,
+      "updatedAtMs": 3,
+      "instructions": "Repair this scan.",
+      "title": "limit-absolute",
+      "state": "failed",
+      "scan": "scan.usdz",
+      "photos": [],
+      "current": {
+        "model": "current/model.stl",
+        "renders": []
+      },
+      "passes": [
+        {
+          "startedAtMs": 1,
+          "endedAtMs": 2,
+          "status": "capped",
+          "activityCount": 1,
+          "limit": {
+            "kind": "absolute",
+            "value": 7200000
+          }
+        }
+      ],
+      "failure": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint.",
+      "canRetryCleanup": true,
+      "status": {
+        "phase": "failed",
+        "text": "Stopped at the absolute time limit of 2 hours. Try again or review the saved checkpoint.",
+        "symbol": "exclamationmark.triangle",
+        "tint": "red"
+      },
+      "settings": {
+        "status": "not-printed",
+        "archived": false
+      },
+      "kind": "copy"
+    }
+  },
+  {
+    "name": "limit-tool-calls",
+    "input": {
+      "id": "11111111-1111-4111-8111-111111111103",
+      "createdAtMs": 1,
+      "updatedAtMs": 3,
+      "instructions": "Repair this scan.",
+      "title": "limit-tool-calls",
+      "state": "failed",
+      "scan": "scan.usdz",
+      "photos": [],
+      "current": {
+        "model": "current/model.stl",
+        "renders": []
+      },
+      "passes": [
+        {
+          "startedAtMs": 1,
+          "endedAtMs": 2,
+          "status": "capped",
+          "activity": [
+            {
+              "atMs": 2,
+              "kind": "message",
+              "text": "Stopped at the 120 tool-call limit. Try again or review the saved checkpoint."
+            }
+          ],
+          "limit": {
+            "kind": "tool-calls",
+            "value": 120
+          },
+          "sessionId": "private-worker-session",
+          "resumable": true,
+          "checkpoints": [
+            "/private/pass/out/checkpoints/01.stl"
+          ]
+        }
+      ],
+      "failure": "Stopped at the 120 tool-call limit. Try again or review the saved checkpoint."
+    },
+    "retry": true,
+    "checkedPrint": false,
+    "expected": {
+      "id": "11111111-1111-4111-8111-111111111103",
+      "createdAtMs": 1,
+      "updatedAtMs": 3,
+      "instructions": "Repair this scan.",
+      "title": "limit-tool-calls",
+      "state": "failed",
+      "scan": "scan.usdz",
+      "photos": [],
+      "current": {
+        "model": "current/model.stl",
+        "renders": []
+      },
+      "passes": [
+        {
+          "startedAtMs": 1,
+          "endedAtMs": 2,
+          "status": "capped",
+          "activityCount": 1,
+          "limit": {
+            "kind": "tool-calls",
+            "value": 120
+          }
+        }
+      ],
+      "failure": "Stopped at the 120 tool-call limit. Try again or review the saved checkpoint.",
+      "canRetryCleanup": true,
+      "status": {
+        "phase": "failed",
+        "text": "Stopped at the 120 tool-call limit. Try again or review the saved checkpoint.",
+        "symbol": "exclamationmark.triangle",
+        "tint": "red"
+      },
+      "settings": {
+        "status": "not-printed",
+        "archived": false
+      },
+      "kind": "copy"
+    }
   }
 ]

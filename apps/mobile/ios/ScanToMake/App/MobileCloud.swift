@@ -14,7 +14,10 @@ import Observation
     private var records: [CKRecord.ID: CKRecord] = [:]
     private var accountID: CKRecord.ID?
     private var subscribed: CloudNotificationSubscriptions.Availability?
-    private(set) var alertsMessage = "Connect to your Mac to check your saved notification choices."
+    // With no iCloud in this build, say that (F9) — never "Connect to your Mac" under "Connected now".
+    private(set) var alertsMessage = MobileCloud.configured
+        ? "Connect to your Mac to check your saved notification choices."
+        : "iCloud isn't available in this build, so alerts arrive only while Counterpart is open on your home network."
 
     static var configured: Bool {
         #if targetEnvironment(simulator)
@@ -29,12 +32,17 @@ import Observation
 
     func refresh() async {
         guard !reading else { return }
-        guard Self.configured else { message = "This build isn't signed for iCloud. You can still connect with your Mac's code."; return }
+        guard Self.configured else {
+            message = "This build isn't signed for iCloud. You can still connect with your Mac's code."
+            alertsMessage = "iCloud isn't available in this build, so alerts arrive only while Counterpart is open on your home network."
+            return
+        }
         reading = true; defer { reading = false }
         do {
             let container = CKContainer(identifier: CounterpartIdentifiers.cloudKitContainer)
             guard try await container.accountStatus() == .available else {
                 clear(); message = "Sign in to the same Apple Account on this iPhone and your Mac, or use your Mac's code."
+                alertsMessage = "iCloud isn't available on this iPhone, so alerts arrive only while Counterpart is open on your home network. Sign in to the same Apple Account on both for alerts anywhere."
                 return
             }
             let current = try await container.userRecordID()
@@ -66,6 +74,32 @@ import Observation
         do {
             let result = try await database.modifyRecords(saving: [record], deleting: [], savePolicy: .allKeys)
             for outcome in result.saveResults.values { _ = try outcome.get() }
+            return true
+        } catch { return false }
+    }
+
+    /// Commands for the Mac when the phone can't reach it (PRD §9.3): `CounterpartCommand` records in the private
+    /// zone, which the Mac runs through the control method that does the same job and answers within 10 minutes.
+    /// Needs no earlier `refresh`, so a notification button can send them with no window open.
+    static func send(_ commands: [(type: String, payload: [String: JSONValue])], projectId: String) async -> Bool {
+        guard configured, !commands.isEmpty else { return false }
+        let records = commands.map { command -> CKRecord in
+            let id = UUID().uuidString.lowercased()
+            let record = CKRecord(recordType: CloudKitRecords.command, recordID: CKRecord.ID(recordName: id, zoneID: CloudNotificationSubscriptions.zoneID))
+            // Only fields deployed in Production (docs/protocols/cloudkit-schema.ckdb). The record name is the command's
+            // id and its creation date is the server's, which the Mac's 10-minute check reads.
+            record["type"] = command.type
+            record["projectId"] = projectId
+            record["payload"] = (try? JSONEncoder().encode(command.payload)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            return record
+        }
+        do {
+            let database = CKContainer(identifier: CounterpartIdentifiers.cloudKitContainer).privateCloudDatabase
+            // One at a time, in order: Needs Changes marks the project before its words start a change.
+            for record in records {
+                let result = try await database.modifyRecords(saving: [record], deleting: [], savePolicy: .allKeys)
+                for outcome in result.saveResults.values { _ = try outcome.get() }
+            }
             return true
         } catch { return false }
     }

@@ -60,7 +60,7 @@ async function json<T>(request: IncomingMessage, limit = MAX_JSON): Promise<T> {
   try { return JSON.parse(bytes.toString('utf8')) as T; } catch { throw new HttpFailure(400, 'invalid-request'); }
 }
 
-export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {plates?: ProjectPlate[]; title: string; canRetryCleanup: boolean; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity'> & {activityCount: number})[]};
+export type PublicObject = Omit<StmObject, 'passes' | 'title'> & {plates?: ProjectPlate[]; title: string; canRetryCleanup: boolean; status: ObjectStatus; settings: ReturnType<typeof projectSettingsView>; passes: (Omit<ObjectPass, 'dir' | 'activity' | 'sessionId' | 'resumable' | 'checkpoints' | 'resume' | 'sessionCwd'> & {activityCount: number})[]};
 
 // Earlier generic failures asserted a capture mistake without evidence. Correct the displayed
 // advice for those retained attempts too, leaving their original stored records intact.
@@ -77,16 +77,17 @@ export function projectSettingsView(object: StmObject) {
 
 export function publicObject(object: StmObject): PublicObject {
   const failure = currentFailureText(object.failure);
-  // Pass activity is omitted below. Carry the current capped failure's retry decision to both apps;
-  // a later printer failure must not inherit Retry from an older capped pass.
+  // Carry this worker stop's retry decision to every client, without exposing its local recovery fields.
+  // A later printer failure must not inherit Retry from an older worker stop.
   const lastPass = object.passes.at(-1);
-  const canRetryCleanup = object.state === 'failed' && lastPass?.status === 'capped'
+  const canRetryCleanup = object.state === 'failed' && (lastPass?.status === 'capped'
+    || (!!lastPass?.sessionId && lastPass.resumable === true && ['failed', 'interrupted'].includes(lastPass.status ?? '')))
     && !!object.failure && lastPass.activity?.at(-1)?.text === object.failure;
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
   // The companion's decision (copy, new design or published), so neither app re-derives it.
   return {...object, ...(object.kind === 'published' ? {plates: projectPlates(object)} : {}), kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
-    passes: object.passes.map(({dir: _dir, activity, ...pass}) => ({...pass,
+    passes: object.passes.map(({dir: _dir, activity, sessionId: _session, sessionCwd: _sessionCwd, resumable: _resumable, checkpoints: _checkpoints, resume: _resume, ...pass}) => ({...pass,
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
 }
 

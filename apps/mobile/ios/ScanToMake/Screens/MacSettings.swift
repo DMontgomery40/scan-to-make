@@ -84,25 +84,29 @@ import CounterpartKit
     }
 }
 
-/// Settings → Notifications: this iPhone's switches and the Mac's, and the progress updates (PRD §9.1).
+/// Settings → Notifications: this iPhone's alerts and the Mac's switches, and the progress updates
+/// (PRD §9.1). Per-event switches for this iPhone aren't ready yet, so instead of a disabled list
+/// (F9) the top says so in one sentence and links to the app's iOS notification settings; the Mac's
+/// own switches below are live.
 struct MacNotificationSettings: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.openURL) private var openURL
     let model: MacSettingsModel
 
     var body: some View {
         List {
             // Skipped or denied: Turn On, or the way to iOS Settings.
             NotificationPermissionRow()
-            if let settings = model.settings, settings.notifications != nil, let deviceId = model.deviceId {
-                Section {
-                    ForEach(SettingsSchema.notificationTypes) { type in
-                        toggle(type.id == "print.started" ? "Print started (Live Activity)" : type.label, settings.phoneNotifies(type.id, deviceId: deviceId)) { on in
-                            SettingsPatch.phoneNotification(type.id, on, deviceId: deviceId)
-                        }.disabled(true)
-                    }
-                } header: { Text("Saved iPhone preferences") } footer: {
-                    Text(app.cloud.alertsMessage + " Your saved choices are kept. Use iOS Settings to control all alerts.")
+            Section {
+                Text("Counterpart sends every alert to this iPhone; turn them off in iOS Settings → Notifications.")
+                Button("Open Notification Settings") {
+                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
                 }
+                .accessibilityIdentifier("open-notification-settings")
+            } footer: {
+                Text(app.cloud.alertsMessage + " Your saved choices are kept.")
+            }
+            if let settings = model.settings, settings.notifications != nil {
                 Section {
                     ForEach(SettingsSchema.notificationTypes) { type in
                         toggle(type.label, settings.macNotifies(type.id)) { on in SettingsPatch.macNotification(type.id, on) }

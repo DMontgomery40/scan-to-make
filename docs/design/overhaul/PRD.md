@@ -255,6 +255,8 @@ Screenshot: `screens/phone-new.jpg`.
 
 ### 5.4 Project
 
+**Worker stops and retry (Nov 9):** a design or touch-up stopped by inactivity, its tool-call budget or its absolute time ceiling stays stopped, with **Try Again** and **Ask for changes**. The project names the actual limit (including its value), never says the person cancelled it, and never announces Ready merely because a checkpoint exists. Any valid saved mesh remains reviewable. All five layouts render the companion's `failure` / `status.text` unchanged. The next request resumes an unfinished Claude Code session from its saved checkpoints; a session that has disappeared starts cold once and records that fact in Activity. No automatic retry spends another budget after a stop.
+
 **Status:** Built. Done/Works checked on both devices Nov 2–3; Claude names projects. Not accepted: rename and Project Settings (partial), Ask for changes from both. **Compare versions** in the menu is not built (archived, §18).
 
 Screenshots:
@@ -389,7 +391,8 @@ Screenshot: `screens/phone-printing.jpg`.
   - the printer camera at the top, full bleed, as a photo refreshed every 3 s with "Updated *n* s ago", plus full-screen (§8.6);
   - a progress ring, layer, time left, finish time and filament;
   - nozzle, bed and speed tiles;
-  - Pause and Stop in the bottom glass bar. Stop asks for confirmation.
+  - Pause and Stop in the bottom glass bar. Stop asks for confirmation. Only the controls are in the bar; the note ("You'll get a notification…") is on the page under the progress, so it never sits over the tiles.
+- **After the print.** The camera stops, and "Did it fit?" (the project page's card, §5.4) and **Open Project** replace the nozzle and bed tiles. This is where a Live Activity or print notification tap lands, so it never ends on 100% with nothing to do.
 - **Live Activity.** It starts when the print starts (§9.4) and appears on:
   - the Lock Screen;
   - the Dynamic Island (compact: ring and minutes left; expanded: camera still, Pause, Open);
@@ -497,7 +500,7 @@ Every starter is a real designer's model. Removed Nov 5: a bundled "Counterpart 
 
 ## 6. iPad and iPhone Duo
 
-**Status:** Built (`NavigationSplitView` at regular width). Not accepted on an iPad or a Duo.
+**Status:** Built (one `NavigationSplitView` at both widths, with a shared selection/detail path and `preferredCompactColumn`). Not accepted on an iPad or a Duo.
 
 Screenshots: `screens/ipad-split.jpg` and `screens/duo-closed.jpg`.
 Screenshots, reflow: `screens/duo-home-empty.jpg` and `screens/ipad-welcome.jpg`.
@@ -514,16 +517,20 @@ Screenshots, reflow: `screens/duo-home-empty.jpg` and `screens/ipad-welcome.jpg`
 
 ### 6.1 Every layout
 
-**The parity rule.** David, Nov 5, after the starters went missing on the Mac and iPad: "how do make sure thing like that don't happen again?" A user-facing feature lands on every layout in the same PR: iPhone (compact), iPad and iPhone apps at regular width, Mac, Android and Linux. Where a layout can't have it, this table names the exception and quotes David's decision. Each client has a test that the feature is reachable on a layout with projects present: `LayoutParityUITests` runs on an iPhone and an iPad simulator in the mobile gate, `ObjectsModelTests` on the Mac, `HomeLayoutTests` on Android, `domain.test.ts` on Linux.
+**The parity rule.** David, Nov 5, after the starters went missing on the Mac and iPad: "how do make sure thing like that don't happen again?" A user-facing feature lands on every layout in the same PR: iPhone (compact), iPad and iPhone apps at regular width, Mac, Android and Linux. Where a layout can't have it, this table names the exception and quotes David's decision. Each client has a test that the feature is reachable on a layout with projects present: `LayoutParityUITests` runs on an iPhone and an iPad simulator in the mobile gate, `ObjectsModelTests` on the Mac, `HomeLayoutTests` on Android, `domain.test.ts` on Linux. Android and Linux client tests now run through `clients.yml`, including shared fixture changes, in the same local gate; they were previously absent from the workflow list.
 
-What a person can see and reach, checked in code on `main` Nov 5 (after this PR: †):
+What a person can see and reach, checked in code on `main` Nov 5 (after this PR: †; after the Nov 8 after-the-print fix: ‡):
 
 | Feature | iPhone (compact) | iPad, regular width | Mac | Android | Linux |
 |---|---|---|---|---|---|
+| Design/touch-up limit stop and retry (§5.4, §8.9) | Home → project: exact limit, Try Again; `LayoutParityUITests` | Same words and action in the regular layout; `LayoutParityUITests` | Same shared `ProjectWords`, `ObjectsModelTests` retries with another project present | Home → project with projects present: exact limit and Retry (`HomeLayoutTests`, `ClientTests`) | Home with projects: companion status names limit (`domain.test.ts`), project retains failure and Retry |
 | Starters (§5.11) | Home, under the projects, whenever no search is typed; Welcome before pairing | † the start pane (nothing selected, which is how the app opens) and a sidebar "Start with these" section. **Before: never** | † a sidebar "Start with These" section, and New Project. **Before: only with no project selected, and the Mac selects the first project on launch** | Home, above the projects, whenever no search is typed | Home's Projects view, under the grid, whenever no search is typed |
 | New Project: fit, copy, scan, published link | New sheet: the five ways to show it, a published link in the text; fit/copy cards on an empty Home. † After a scan: Copy / Make something that fits this / Just save this scan, and for a fit its exact-size source (look up and confirm, measured mm, or scan estimate) with a caliper photo | the same sheet; fit/copy cards in the start pane † (before: only with no projects); † the same post-scan question on LiDAR iPads | New Project pane: fit/copy picker, dropped files, a published link. No scan: the Mac has no LiDAR, scans come from the phone; the fit brief and its confirmation Ask arrive with the project | New: ARCore scan, photos, a published link; fit/copy/published cards only on an empty Home. † After a scan: the same Copy / Fit / Save question and exact-size source (`HomeLayoutTests`) | New dialog: fit, copy, published. No camera scan: Linux imports scans from files and chooses fit or copy in the dialog; the confirmation Ask is answered on the project |
 | Search, "N of M match", Show All | a pinned field above Home (#329) | a pinned field above the sidebar (#329) | sidebar search (#326) | top-bar search (#329) | Home search; counts within the selected view (#329) |
 | Archived | "Archived · N" on Home | "Archived · N" sidebar section | Archived sidebar group | "Archived · N" on Home | Archive view in the sidebar |
+| Fold / resize continuity (F4, Nov 8) | One collapsed split: project and Printing history survive; Back clears selection. Checked on the iPhone Duo simulator with `agent-device fold open/closed` (Nov 9): the open project survives both ways, Back while folded returns Home, unfolding then shows the start pane | Same selection on the Duo's inner display and iPad resizes; a notification or Live Activity opens Printing over its project in the detail (`testAFinishedPrintAsksDidItFitOnPrintingAndOpensTheProject` on the iPad). The resize UI tests (`testOpenProjectSurvivesCompactAndRegularResizesWithoutStaleSelection`, `testProjectAndPrintSheetSurviveCompactAndRegularResizes`) are skipped: XCTest can't yet drive the size class reliably | Existing single selection | Existing Home/project route | Existing single selection |
+| Printer attention and printing summary (F10) | Home's badge and shared summary; “1 needs attention” | Same badge; full wrapping summary above sidebar search | Per-printer attention and printing words; attention count in Printers heading (`ObjectsModelTests`) | Home badge and wrapping summary (`HomeLayoutTests`) | Sidebar Printers button badge; printing summary on Home and sidebar (`domain.test.ts`) |
+| Failed projects / Ready rows (F11) | Existing Home grid with explicit failure status | Couldn't finish under Needs you; only selection fills a row | Already under Needs you; only selection fills a row (`ObjectsModelTests`) | Failed cards under Needs you; neutral Ready cards (`HomeLayoutTests`) | Grouped sidebar: Now / Needs you / Ready / Printed (plus Done and Drafts); failed under Needs you; only selection fills a row (`domain.test.ts`) |
 | Project page | yes | yes, in the detail | yes, with the inspector | yes | yes, with the side panel |
 | Print sheet, What will print | yes (#321) | yes, the same sheet | yes (#321) | yes (#324) | yes (#324) |
 | Print sheet: a designer's 3MF prints with its own settings, and says so (#336) | † yes: starts at Standard, "Prints with the designer’s settings saved in this file." (`testADesignersFilePrintsWithItsOwnSettings`) | † the same sheet (the same test on the iPad) | † yes (`ObjectsModelTests`) | † yes (`HomeLayoutTests`) | † yes (`domain.test.ts`) |
@@ -535,6 +542,13 @@ What a person can see and reach, checked in code on `main` Nov 5 (after this PR:
 | Settings, pairing | Settings sheet; Connect a Different Mac | the same | Settings; Add a Phone | Settings; Connect a Different Computer | Settings; Add a phone |
 | Scan it: one capture, paced by the app (a photo each 5°), Done after 60 from two heights; a stopped scan's photos findable; what it stood on cut away on the Mac (§5.2, §5.3; #420) | New → one **Scan it** tile with the Kass 3D link; "Scan stopped · 9 photos kept" on Home and the project. † A finished scan still on the phone says "Scan saved · send to your Mac" with an enabled Send on its project (`LayoutParityUITests`), and project pictures are the real object first | † the same tile on LiDAR iPads; the stopped and saved words in the sidebar row and on the project. iPads without LiDAR and the iPhone Duo show the tile disabled ("Needs an iPhone or iPad with LiDAR.") | No camera scan; rebuilds the photos and cuts away the support. † Sidebar and CloudKit pictures are the real object first (`ObjectsClientTests`) | **Exception for now: Android keeps its current scan until the iPhone path is proven** (David, Nov 8/9). † Its finished local scan still offers Send (`ClientTests`), asks Copy / Fit / Save in New, and its project picture is the real object first | No camera scan. † Project cards show the real object first (`domain.test.ts`) |
 | Help | Settings → Help: guide, scanning, the scan rig | the same | Help menu: Counterpart Help, the scan rig | † Settings → Help: the guide and the scan rig. **Before: none** | Settings → About → Open guide |
+| Offline banner, first run, notification switches (UX walkthrough 2026-11-08, F6/F9/F13/F14/F16) | † Home's banner: **Try Again** (`store.load()`) and **Connect a Different Mac** (`LayoutParityUITests.testTheOfflineBannerOffersTryAgainAndADifferentMac`); a starter's error sits beside **Add to Projects** and says the Mac isn't answering before the tap when the store knows; Welcome's Continue and Home's New never cover content (scroll bottom inset, Needs-you answers inline); first run: dark `CloudPairingView`, **Get Counterpart for Mac** (beta.html), Back from the code screen; Settings → Notifications: one sentence and a link to the app's iOS notification settings instead of disabled switches, and iCloud-unavailable wording. **Before: no banner button, the starter error off-screen, a light pairing screen with no Mac download link or way back, ten disabled switches under a "Connect to your Mac" line** | † the same banner at the top of the sidebar, above the status line (the same test on the iPad); the start pane's and the sidebar's starters show the error, and the pre-tap unreachable line, beside the button (shared `StarterDetail`) | The Mac *is* the computer: no offline-Mac banner and no Mac download link apply. Its notification switches are live (`companion.setNotification`), never disabled. The starter error-beside-the-button fix is shared `CounterpartKit`, so it lands here too | † Home's banner: **Try Again** and **Connect a Different Computer**, which opens pairing (`HomeLayoutTests`); the starter dialog shows its error and the unreachable line at the top; first run: **Get Counterpart for your computer** (beta.html); Settings → Notifications already links to the system notification settings and shows no disabled switches. **Before: banner text only, the starter error under the scroll, no computer download link** | Linux *is* the computer: no offline-Mac banner (its workspace error sits under a **Refresh** action in `App.tsx`) and no download link. Settings shows no unsupported notification switches ("no unsupported switches are shown", `Settings.tsx`), only the live milestone choice |
+| After the print (UX walkthrough Nov 8, F1): a finished print's Printing screen, where the Live Activity and print notifications land, asks "Did it fit?" (§5.4) and opens the project | ‡ "Did it fit?" and **Open Project** replace the temperature tiles (`LayoutParityUITests.testAFinishedPrintAsksDidItFitOnPrintingAndOpensTheProject`, `testNeedsChangesOnAFinishedPrintStartsTheChangeOnTheProject`). **Before: 100%, the last temperatures and "The print finished", nothing to do** | ‡ the same, in the detail (the same tests on the iPad) | no Printing screen: a notification selects the project, whose inspector already asks "Did it fit?" | ‡ the same card and **Open Project** (`HomeLayoutTests.aFinishedPrintAsksDidItFitOnPrintingAndOpensTheProject`). **Before: a "Project" button only** | no Printing screen; ‡ the project page asks the same "Did it fit?" (It Works; Needs Changes starts "After printing: " in Ask for changes) once the printer says the print finished (`domain.test.ts`). **Before: only the Status menu** |
+| Notification buttons (§9.1, F3) | ‡ each moment's own buttons (`NotificationActions`, CounterpartKit `NotificationActionsTests`); the service extension picks them from the event type | ‡ the same | ‡ the same buttons on Mac notifications, run through the control method a phone command uses (`EventRelayTests`) | ‡ the same buttons, Needs Changes… and Ask for Changes… as replies (`HomeLayoutTests.theDoneNotificationAnswersDidItFitFromItsButtons`). LAN only: Android has no iCloud route | Linux posts no desktop notifications (Settings: "desktop notifications depend on host support"); nothing to add buttons to |
+| Notifications while the app is open (§9.2, F7) | ‡ shown, unless that project's page or Printing screen is on screen. **Before: none shown** | ‡ the same | shown (unchanged) | ‡ the same rule. **Before: none posted while open** | none (above) |
+| Mac relay default (§8.8, David, Nov 8) | No phone setting; Mac owns push delivery | Same | Settings → Advanced: on by default only for production signing; saved choice wins. Without it, the activity catches up when Counterpart opens | No ActivityKit relay; ongoing print follows the companion | No ActivityKit relay or print notifications |
+| Print identity (mark, project picture and words), §9.4 | Counterpart mark + cached real-object-first picture on Lock Screen and Dynamic Island; mark while artwork refreshes. An ended activity opens the project | same Lock Screen activity and project link | iPhone-mirrored Live Activity uses the same views; native Mac status item keeps its cube and native print notifications use the app icon and camera frame | Counterpart mark on ongoing and milestone notifications; ongoing print shows the cached real-object-first picture, refreshes separately, and opens the project (`HomeLayoutTests`) | No print notifications or tray item; print identity is the project picture and words in Printing |
+| Progress milestones while a print's Live Activity runs (§9.1, David, Nov 8: an alert on the activity, not a separate notification) | † an alert on the Live Activity through the Mac's relay; a notification when no activity can carry it | † the same on the iPad | The Mac chooses delivery for every paired phone/tablet together (`EventRelayTests`); its own progress notifications stay off by default | unchanged: no Live Activity, so milestones stay notifications | no print notifications |
 
 **Add printer on the phones** (David, 2026-11-06: "adding a printer is filling out a form that hsould be mostly autofilled by discovery"). The iPhone, iPad and Android call the companion's own `printers.discover`, `.check`, `.obtain` and `.add` over `/v1/printers/setup/*` (objects-api.md), so the MCPs still find the printers and declare the fields, and their `.env` files stay on the computer. A found printer opens filled in; the person types only what discovery can't know, such as the access code or API key, or approves it in the printer's own page when the MCP offers that.
 
@@ -930,7 +944,7 @@ The design, Scrypted's shape at a 3D printer's pace:
 1. **One camera connection per printer, only while someone is looking.** The printer MCP gains a camera stream (`camera_stream_start`/`camera_frame`/`camera_stream_stop`, or a long-lived tool result). It keeps the one TLS socket on 6000 (or one ffmpeg reading RTSP and writing MJPEG to stdout) open, holds the latest frame in memory, and closes 30 s after the last viewer. No per-frame reconnects, no per-frame processes. With nobody looking, there is no camera traffic at all.
 2. **Push, don't poll.** The companion serves one long-lived stream per viewer (`GET …/camera.mjpeg`, multipart; or frames on the existing events connection). It sends a frame only when the picture has changed (a 32×18 grayscale difference over a threshold) and at most every 2 s full-screen or every 10 s for a 300 px card, sized for that viewer. A printer slowly laying plastic sends very little.
 3. **Away from home:** the same stream through Tailscale, which is peer-to-peer WireGuard and so works like Scrypted's WebRTC. Without Tailscale there is no live camera away from home; notifications still carry a frame.
-4. **Lock Screen, Watch and widgets:** the notification at each milestone (first layer, halfway, done, problem) carries **one** frame, attached by the Notification Service Extension (§9.2), and it reaches the Watch like any notification. The Live Activity shows progress, layer and time left with no image, because iOS doesn't allow pushed images in a Live Activity. Widgets refresh on the system's budget. There is no 15 s camera on the Lock Screen, by design.
+4. **Lock Screen, Watch and widgets:** the notification at each milestone (first layer, halfway, done, problem) carries **one** frame, attached by the Notification Service Extension (§9.2), and it reaches the Watch like any notification. The Live Activity shows progress, layer and time left with the cached real-object-first project picture (§9.4); it does not show a live camera frame. ActivityKit pushes carry state, while the app and notification extension refresh the shared project picture separately. Widgets refresh on the system's budget. There is no 15 s camera on the Lock Screen, by design.
 5. **No timer polling while events work.** The phone re-reads only on events (§8.7). If the event stream is down, it retries the stream and polls no faster than every 30 s meanwhile.
 
 **Budgets (added to §9.6):**
@@ -974,13 +988,13 @@ type CounterpartEvent = {
 
 ### 8.8 Delivery: Mac, CloudKit, and the Live Activity relay
 
-**Status:** Built. The relay is provisioned for Sandbox and Production. CloudKit owns the discrete alerts, with their camera frames. A Live Activity push carries an alert only on push-to-start, so a pause or completion never shows two banners. Not accepted: production push delivery.
+**Status:** Built. The relay is provisioned for Sandbox and Production. It is on by default in production-signed (Developer ID) Mac builds; a saved Settings choice wins. Development-signed builds stay off by default because their phones use Sandbox tokens. CloudKit owns the pause, done and problem alerts, with their camera frames. A Live Activity push carries an alert on push-to-start, and on a progress milestone while that print's activity runs (§9.1, David, Nov 8); a pause or completion never shows two banners. Not accepted: production push delivery.
 
 **Mac app `EventRelay` (new, Swift).** It loops on `events.wait` and persists its cursor. After a restart it doesn't notify for events older than 10 minutes; it only syncs them.
 
 For every event with `notify ≠ none`:
 1. **A Mac notification** (`UNUserNotificationCenter`), according to Settings. Its defaults are the Mac column of §9.1: `pass.ready`, `pass.ask`, `pass.failed`, `print.confirm`, `print.paused`, `print.done`, `print.failed` and `print.not-started` are on; progress, `print.sent` and `print.unreachable` are off.
-2. **CloudKit.** Save a `CounterpartEvent` record in the custom zone `Counterpart` of the private database, in container `iCloud.com.scantomake.counterpart`.
+2. **CloudKit.** Except for a progress milestone (`print.first-layer`, `print.milestone`) that the running Live Activity carries as an alert (§9.1): save a `CounterpartEvent` record in the custom zone `Counterpart` of the private database, in container `iCloud.com.scantomake.counterpart`.
    - Fields: `eventId`, `seq`, `type`, `projectId`, `printId`, `title`, `body`, `notify`, `progress`, `remainingSec`, `createdAt`, and `frame` (a `CKAsset`: a JPEG at most 1280 px on the long edge and about 300 KB, made with ImageIO).
    - A daily sweep deletes records older than 7 days.
 
@@ -1008,7 +1022,7 @@ For every event with `notify ≠ none`:
 - **Worker → APNs:** HTTP/2 to `api.push.apple.com`, with these headers:
   - `apns-push-type: liveactivity`;
   - `apns-topic: com.scantomake.push-type.liveactivity`;
-  - `apns-priority`: 5 for progress, 10 for start, paused, done and failed.
+  - `apns-priority`: 5 for progress, 10 for start, paused, done, failed and a milestone alert.
 
   The body is `{"aps": {"timestamp", "event": "start"|"update"|"end", "content-state", "stale-date", "attributes-type": "PrintAttributes", "attributes", "alert", "dismissal-date"}}`. The app sets `NSSupportsLiveActivitiesFrequentUpdates = YES`.
 - **When the Mac sends:**
@@ -1020,14 +1034,25 @@ For every event with `notify ≠ none`:
   - The app opens at login by default (journey.md §3.3).
   - Its **Quit** menu item reads "Quit Counterpart (your phone stops getting updates)".
   - On the next launch, catch-up writes every missed record to CloudKit. It notifies only for terminal events (`print.done`, `print.failed`, `pass.ready`, `pass.ask`) that are still unanswered, once each.
-- **Without the relay** (no key yet, or the Worker is unreachable):
+- **Without the relay** (turned off, no key yet, or the Worker is unreachable):
   - The phone starts the activity itself when the user taps Print, or the next time the app opens during a print.
-  - It updates the activity whenever it gets time: in the foreground, on CloudKit content-available pushes, and on `BGAppRefreshTask`.
+  - It updates the activity when it gets time: in the foreground, and only occasionally while locked (CloudKit content-available pushes are throttled; `BGAppRefreshTask` runs when iOS allows). So a locked phone's activity falls behind and catches up when Counterpart opens; the Mac's Settings footer says so.
+  - Progress milestones come as separate notifications, because nothing can alert the activity.
   - In both modes the activity renders with `Text(timerInterval:)` and `ProgressView(timerInterval:countsDown:)` up to `endsAt`, so it keeps counting between updates. `staleDate = endsAt + 10 min` shows "Checking…" if nothing has arrived.
 
 ### 8.9 Design engine: Blender, or Fusion when the user has it
 
 **Status:** Built. Blender runs only while a pass needs it and closes afterwards. A Fusion pass made and exported a parametric cube without touching David's open documents. Not accepted.
+
+**Worker lifetime and recovery (Nov 9).** One headless `claude -p --output-format stream-json` process owns a design/touch-up attempt. `touchup/runner.ts` reads its events and enforces **10 minutes without a parsed stream event**, **120 tool calls** (the existing budget), and a **2-hour absolute ceiling**; tests can inject all three. Messages, tool activity, tool replies and system events reset inactivity; stderr and malformed output do not. `project-worker.ts` is the signed credential helper's provider adapter: its Claude branch calls that same runner. Its old independent 900-second timer raced the runner and turned a deadline into cancellation; Claude now has one timer owner, and `model-access.ts` leaves the helper 15 seconds beyond the absolute ceiling to return its result and clean up. Codex/API workers share the limit values and structured limit outcome, but do not claim Claude session recovery.
+
+The read-only state-root survey (`capture/objects/*/object.json`, Nov 9) found 32 `done`/`unchanged` passes; 31 have worker seconds, ranging **44–705 s**. The longest were Vernier caliper (705 s), AirPods hanger revisions (671 and 663 s), Leatherman replica (645 s) and stacking letters (637 s). Retained public tool activity reaches **64 calls** (a lower bound where history was truncated); the largest gap between retained public events in a finished pass was **438.164 s**. Ten minutes leaves headroom over that observed gap; 120 calls retains the prior budget at nearly twice the observed maximum; two hours is a hard safety ceiling roughly ten times the longest completed worker, rather than a normal completion deadline. These observations are bounded by the old 900-second cap and incomplete public activity; they do not prove a production latency target. Articulated unicorn `176821af` has two failed 901-second attempts, both falsely saying `cancelled`.
+
+Each pass keeps validated checkpoint paths, `toolCalls`, a typed `limit` (`inactivity` / `absolute` in milliseconds, `tool-calls` in calls), and the Claude `sessionId`. The session and original session cwd are saved during init, before exit, so restart recovery can use them. The next request on that same project resumes only its immediately previous unfinished session (limit, process crash without a final answer, or companion restart); completed answers and a person's cancel start fresh. Each attempt has new output/checkpoint folders. The continuation prompt names the previous checkpoints, the new folders, the new request and any new photos; the session cwd stays stable across repeated resumptions. A precise missing-session rejection before any work gets one cold start, recorded with a reason. Authentication, tool and model failures do not trigger that fallback. The first limit stop **does not automatically resume**: an inactivity hang or exhausted tool budget should not silently repeat, hide the stop, or spend another budget. Try Again and Ask for changes are the explicit continuation.
+
+Resume admission is explicit (`resumable: true`), never inferred from a failed/interrupted status or a saved session ID. The final worker result clears the live flag before post-worker file checks. A thrown pass step disables resume; shutdown can retain it only while the saved session was still live. Restart recovery preserves only that explicit live flag.
+
+Engineering proof: installed Claude Code **2.1.321**, one tiny `-p --output-format stream-json --verbose` conversation and `--resume <session-id>` returned its remembered token with the same session ID (total reported cost **$0.003067**). No app-state migration, existing session backfill, installed-app replacement or real modeling acceptance is claimed.
 
 **Both Blender and Autodesk Fusion are optional dependencies of Counterpart.** Printing existing models that need no changes and reprinting projects must work without either. Their installation and readiness only gate the cleanup, design or editing operation that actually uses them, never pairing, printer setup or printing an existing model.
 
@@ -1233,14 +1258,20 @@ Screenshot: `screens/phone-notifications.jpg` (an approximation: the system draw
 | `pass.ask` | "*Title*: *the question*", with the region picture | **Camera** (opens it), **Best Guess** (background) | active | on |
 | `print.confirm` | "*Printer* needs a yes before printing *title*" | opens the confirmation | time-sensitive | on |
 | `print.started` | no banner; the Live Activity starts | — | passive | off |
-| `print.first-layer` | "*Title*: first layer's down", with the frame | **Open**, **Pause** | passive | off |
-| `print.milestone` | "*Title* is halfway" · time left, layer, printer, with the frame | **Open**, **Pause** | active | off |
-| `print.paused` | "*Printer* paused *title*" · reason, with the frame | **Open**, **Resume** | time-sensitive | on |
-| `print.done` | "*Title* is done. Take it off the plate.", with the frame | **Open**, **It Works** (background), **Needs Changes** (text input, background) | active | on |
-| `print.failed` / `print.not-started` / `pass.failed` | what happened and what to do | **Open** / **Try Again** | time-sensitive (print) / active (pass) | on |
+| `print.first-layer` | while the print's Live Activity runs: an alert on the activity, no sound; otherwise "*Title*: first layer's down", with the frame | **Open Print**, **Pause** (notification only) | passive | off |
+| `print.milestone` | while the print's Live Activity runs: an alert on the activity; otherwise "*Title* is halfway" · time left, layer, printer, with the frame | **Open Print**, **Pause** (notification only) | active | off |
+| `print.paused` | "*Printer* paused *title*" · reason, with the frame | **Open Print**, **Resume** | time-sensitive | on |
+| `print.done` | "*Title* is done. Take it off the plate.", with the frame | **It Works** (background), **Needs Changes…** (text input, background), **Open Project** | active | on |
+| `print.failed` / `print.not-started` / `pass.failed` | what happened and what to do | **Try Again** (a print: opens Print, never prints by itself; a pass: opens the project), **Open Project** | time-sensitive (print) / active (pass) | on |
 | `print.unreachable` | "Lost contact with *printer*. Still trying." | — | passive | off |
 
 Each row has its own switch in Settings → Notifications, on both devices. The milestone choice is in the same place (§8.6).
+
+**Buttons** (`NotificationActions` in CounterpartKit; Android `NotificationActions.kt`). Each **Open** says where it goes: **Open Print** opens the Printing screen, **Open Project** the project. The same buttons are on Mac notifications. A button only acts on its own moment: a cancelled or sent print (`ENDED`) and a lost connection (`PROBLEM`) get only Open Project. The CloudKit subscriptions carry one category for several types, so the service extension sets the category from the event's `type` before it fetches the record. Background buttons need the phone unlocked (`.authenticationRequired`): the pairing is in the Keychain, readable only while unlocked, so Pause from the Lock Screen asks for Face ID first.
+
+**Milestones on the Live Activity** (David, Nov 8; delivery decision refined by the lead Nov 9). Before sending anything, the Mac chooses activity alerts only when every paired device returned by `devices.list`, plus the devices known through LAN/iCloud activity registrations, has a live token for this print. Saved phone notification choices must also allow that milestone; an opt-out or an unreadable choice stays on the existing CloudKit path. Otherwise the milestone goes to CloudKit for everyone. If the device list cannot be read, only a known single-device account can use activity alerting.
+
+Once activity delivery is chosen, the full event and each recipient's pending/result/retry state are persisted before the event cursor advances. Distinct milestones queue in order; statuses can refresh their content without replacing an alert. Network failures and short 429/503 waits retain the alert for up to three attempts, including across a restart; an unconfigured relay or a long wait resolves the recipient as failed. A confirmed recipient is never replayed during recovery. Each resume uses a fresh settings reply: unknown phone choices leave the recipient pending while silent progress updates continue; a saved opt-out receives no ActivityKit milestone alert. A missing activity registration gets a 30-second grace period from first enqueue, then recovery resolves it as failed so a dismissed activity cannot strand the decision. Push-to-start retries retain their required alert; only optional milestone alerts can be stripped, preserving the underlying update's priority (including immediate paused updates). After all recipients finish: all failed means one CloudKit fallback, retained until the CloudKit write is confirmed; any success means no CloudKit fallback, and each missed device is logged. A device that misses a progress alert receives current progress on the next activity update. Pause, problems and done remain normal notifications. Alerting updates use priority 10 and the companion's title/body; the passive first layer has no sound. The activity shows the project's real-object-first picture (§9.4), rather than the notification's camera frame. The phone does not add a second local alert while foregrounded. See [ActivityKit push notifications](https://developer.apple.com/documentation/activitykit/starting-and-updating-live-activities-with-activitykit-push-notifications) and the [Live Activities HIG](https://developer.apple.com/design/human-interface-guidelines/live-activities).
 
 ### 9.2 iPhone: subscriptions, extension and actions
 
@@ -1283,24 +1314,24 @@ If the fetch runs past the extension's time limit, the notification is delivered
 - Everything needs the same iCloud account on both devices. Without iCloud, the phone gets events only from the LAN long poll while the app is running or has background time. Settings says so.
 
 **Actions:**
-- Background actions without a destructive outcome run without opening the app: **Ask for Changes…** (`UNTextInputNotificationAction`), **Best Guess**, **Pause** and **Resume**.
+- Background actions without a destructive outcome run without opening the app: **Ask for Changes…** (`UNTextInputNotificationAction`), **Best Guess**, **Pause**, **Resume**, **It Works** and **Needs Changes…** (`UNTextInputNotificationAction`; it marks the project and sends "After printing: " and the words as a change).
 - Each one sends its command to the Mac:
-  - directly on the LAN, through the existing routes: `POST …/corrections`, `…/closeup`; pause and resume go through the new `POST …/print/pause` and `…/print/resume`;
-  - otherwise as a `CounterpartCommand` record (§9.3).
+  - directly on the LAN, through the existing routes: `POST …/corrections`, `…/closeup`, `PATCH …/settings {"status"}`; pause and resume go through `POST …/print/pause` and `…/print/resume`;
+  - otherwise, only when the Mac can't be reached at all (`/healthz` doesn't answer), as `CounterpartCommand` records (§9.3). Never after the Mac took the request: a second try could start a second change.
+  - A failure is said in a notification ("Couldn't pause the print: *title*").
 - **Print** and **Camera** open the app at the right screen.
 
 **No double banners.**
-- In the foreground, `userNotificationCenter(_:willPresent:)` suppresses events the app already showed from its LAN long poll, matched by `eventId`.
-- The in-app UI then shows the change instead.
+- In the foreground, `userNotificationCenter(_:willPresent:)` suppresses a notification only while its project's page or Printing screen is on screen: that screen already shows the change. Anywhere else (Home, Settings, another project's Print sheet) it shows as a banner. Android posts from its foreground event stream by the same rule.
 
 ### 9.3 Commands from anywhere (CloudKit)
 
 **Status:** Built. Not accepted away from home.
 
 - **How a command travels.** When the phone can't reach the Mac directly, it writes a `CounterpartCommand` record into the same private zone:
-  - `{commandId, type, projectId, payload, photos[CKAsset], createdAt}`, where `type` is one of `print | correct | answerAsk | confirm | pause | resume | cancel`.
+  - `{type, projectId, payload, photos[CKAsset]}` (the fields deployed in Production, `docs/protocols/cloudkit-schema.ckdb`); the record name is the command's id and the server's creation date is its age. `type` is one of `print | correct | answerAsk | confirm | pause | resume | cancel | status`. `status` (`{"status": "works" | "needs-changes", "note"?}`) is "Did it fit?" answered from a notification; Needs Changes' words ride in the same record, so the Mac sets the status before it starts the change.
 - **How the Mac receives it.** The Mac app subscribes to that record type (content-available) and also fetches on launch and on wake.
-  - It runs each command through the control socket method that already does the same job: `objects.print`, `objects.correct`, `objects.answerCloseup`, `objects.answerPrintConfirmation`, plus the new pause, resume and cancel.
+  - It runs each command through the control socket method that already does the same job: `objects.print`, `objects.correct`, `objects.answerCloseup`, `objects.answerPrintConfirmation`, `objects.settings.set` (status), plus the new pause, resume and cancel.
   - It writes the result back as `status: done|failed` with a message, and deletes the record a day later.
 - **Commands are bounded.** The Mac acts only on commands from its own private database that are less than 10 minutes old.
 - **The print confirmation is unchanged.** Starting a physical print still answers the printer MCP's own confirmation:
@@ -1315,15 +1346,21 @@ Screenshots: `screens/phone-lock.jpg` and `screens/phone-island.jpg` (approximat
 
 `PrintAttributes {projectId, printId, title, printerName}`; content state `{state, progress, layer, totalLayers, endsAt, stage, problem?}`.
 
-| Presentation | Content |
-|---|---|
-| **Lock Screen** | title, a progress bar running on its own toward `endsAt`, minutes left, "*printer* · layer *l*/*L*", and **Pause** and **Camera** buttons (`LiveActivityIntent`) |
-| **Dynamic Island, compact** | a ring and minutes left |
-| **Dynamic Island, minimal and limited-width** | the ring (iOS 27 adds limited-width layouts for landscape) |
-| **Dynamic Island, expanded** | the Lock Screen layout plus the stage text |
+**Identity** (David, Nov 8: "the live activities thing on ios uses some generic printer svg not our logo, the critical updates come through with our logo and a thumbnail that looks nice … you'd think for sure you were using two different apps to track this print"). The activity wears the notifications' identity: the Counterpart mark (`CounterpartMark`, drawn from `docs/brand/counterpart-mark.svg`) in filament orange, the project's own picture, and the notifications' words. Apple's HIG for Live Activities says to show a logo mark "without a container … Don't use the entire app icon", and on the Lock Screen "Don't replicate notification layouts", so the mark, colour, picture and words are shared and the layout is the activity's own. The default system background follows Light and Dark like the notifications beside it.
 
-- It also appears automatically in StandBy, on the Watch Smart Stack, in CarPlay and in the Mac menu bar.
+| Presentation | Content (built) |
+|---|---|
+| **Lock Screen** (and StandBy, which scales it up) | the project's picture (56 pt), or the mark when there is none; the title, led by a small mark when the picture shows; the percent; "Printing · *37:59* left", counting down on its own toward `endsAt`; the milestone notification's detail, "layer *l* of *L* · *printer*", or the printer's problem; an orange bar. **Pause** and **Camera** buttons (`LiveActivityIntent`) are not built. |
+| **Dynamic Island, compact** | the mark and the percent |
+| **Dynamic Island, limited width** (iPhone Duo, landscape, two activities: Apple's 28 pt circle) | the mark and a progress ring |
+| **Dynamic Island, minimal** | a progress ring around the mark |
+| **Dynamic Island, expanded** | the picture (or the mark), the title, the percent, the bar, and "Printing · *37:59* left · layer *l* of *L* · *printer*"; the island's key line is orange |
+
+- **The picture.** The widget can't reach the Mac, so the app refreshes each live or ready project's picture (`thumbnailPath`: first photo, else first scan frame, render only as fallback) into the App Group `group.com.scantomake.counterpart` independently of activity updates. Updates use the cached picture or mark immediately, keyed by project id (`PrintActivityThumbnails`, at most 168 px, as Apple requires images no larger than the presentation). The notification service preserves the enriched notification (including its camera frame and interruption level), then gives the Mac's copy of the same real-object-first picture from `CounterpartProject` at most two seconds. On timeout or expiry it delivers the enriched content, so an activity the Mac started by push has it too. The newer project `updatedAt` wins. `PrintAttributes` is unchanged, so the relay's contract is too.
+- It also appears automatically in StandBy, on the Watch Smart Stack, in CarPlay and in the Mac menu bar. Apple: the Smart Stack and CarPlay combine the compact views, and the Mac menu bar uses the compact, minimal and expanded views unchanged, so the mark carries to all of them. Not seen on a Watch, in CarPlay or in a Mac menu bar yet.
+- **Tapping it** opens Printing while the print runs, and the project once it has finished, failed or been cancelled (`PrintActivityLink`): an ended activity stays on the Lock Screen for up to four hours, and Printing has nothing left to follow.
 - Starting and updating it follow §8.8: through the relay when there's an APNs key, and from the phone itself otherwise.
+- **Progress milestones alert on it** when all known paired recipients have this print's activity (§9.1). Delivery is selected once per milestone. A partial miss is logged with the device and does not trigger account-wide CloudKit fallback; all recipients failing does. When device enumeration is unavailable, a single-device guard applies.
 
 ### 9.5 Widgets and system surfaces
 

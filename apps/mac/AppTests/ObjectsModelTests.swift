@@ -600,6 +600,27 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(after.last, "list", "a refusal reads the object again to show where it is now")
     }
 
+    func testLimitStopsKeepTheirWordsAndRetryWithProjectsPresent() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/capped-projects.json"))
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let companion = FakeObjects()
+        for row in rows where (row["name"] as? String)?.hasPrefix("limit-") == true {
+            let stopped = try XCTUnwrap(row["expected"] as? [String: Any])
+            await companion.set([item("other", "ready"), stopped])
+            let model = ObjectsModel(companion: companion)
+            await model.refresh()
+            let project = try XCTUnwrap(model.objects.first { $0.id == (stopped["id"] as? String) })
+            XCTAssertEqual(ProjectWords(project).status, project.failure)
+            XCTAssertTrue(ProjectWords(project).actions.contains(.retry))
+            let retried = await model.perform(.retry, on: project.id)
+            XCTAssertTrue(retried)
+            let calls = await companion.calls
+            XCTAssertEqual(calls.last, "start")
+        }
+    }
+
     func testAFailedTouchUpStartsAgain() async {
         let companion = FakeObjects()
         await companion.set([item("b", "failed", ["failure": "Blender is not open on your Mac.", "current": NSNull()])])
@@ -682,6 +703,20 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(oldBytes.count, newBytes.count)
         XCTAssertGreaterThan(stride(from: 3, to: newBytes.count, by: 4).filter { newBytes[$0] > 240 }.count, 100)
         XCTAssertLessThanOrEqual(zip(oldBytes, newBytes).map { abs(Int($0) - Int($1)) }.max() ?? 0, 1, "Only GPU channel rounding may differ; keep geometry, lighting and transparency")
+    }
+
+    func testSidebarPrinterAttentionAndPrintingRemainVisibleWithProjects() async throws {
+        let companion = FakeObjects()
+        await companion.enableDiscovery()
+        let printer = try JSONDecoder().decode(PrinterDestination.self, from: Data(#"{"id":"p1","name":"P1S","backend":"test","state":"ready","aliases":["old"]}"#.utf8))
+        let offline = try JSONDecoder().decode(PrinterDestination.self, from: Data(#"{"id":"p2","name":"Desk","backend":"test","state":"offline"}"#.utf8))
+        await companion.setPrinters([printer, offline])
+        await companion.set([item("clip", "printing", ["print": ["bundleId": "clip", "monitor": ["phase": "watching"], "destination": ["id": "old", "name": "P1S"]]])])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertEqual(model.printerProblems, 1)
+        XCTAssertEqual(model.sidebarPrinterStatus(printer), "P1S printing")
+        XCTAssertEqual(model.sidebarPrinterStatus(offline), "Desk")
     }
 
     func testTheSidebarGroupsEveryProjectAndStartsAtTheTop() async {

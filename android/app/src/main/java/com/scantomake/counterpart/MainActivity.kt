@@ -66,7 +66,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handle(intent: Intent?) {
         intent ?: return
-        intent.getStringExtra(EXTRA_PROJECT)?.let { state.route.value = it }
+        intent.getStringExtra(EXTRA_PROJECT)?.let { id ->
+            // A notification opens Printing for a print still going, Print for "Print"/"Try Again", else the project.
+            state.route.value = when (intent.getStringExtra(Notifications.EXTRA_SCREEN)) { "printing" -> "printing/$id"; "print" -> "print/$id"; else -> id }
+        }
         val data = intent.dataString
         if (intent.action == Intent.ACTION_VIEW && data != null && PairingLink.isPairingLink(data)) state.pendingLink.value = data
         if (intent.action == Intent.ACTION_SEND) {
@@ -120,7 +123,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(route) {
             val r = route ?: return@LaunchedEffect
             state.route.value = null
-            if (r == "new") nav.navigate("new") else nav.navigate("project/$r")
+            if (r == "new") nav.navigate("new") else if (r.startsWith("printing/") || r.startsWith("print/")) nav.navigate(r) else nav.navigate("project/$r")
         }
         LaunchedEffect(pendingLink) { if (pendingLink != null) nav.navigate("pair") }
         NavHost(nav, startDestination = "home") {
@@ -130,6 +133,8 @@ class MainActivity : ComponentActivity() {
                     newProject = { job -> nav.navigate(if (job != null) "new?job=$job" else "new") },
                     printers = { nav.navigate("printers") },
                     settings = { nav.navigate("settings") },
+                    // The banner's Connect a Different Computer is the same pairing screen Settings opens.
+                    pairAgain = { nav.navigate("pair") },
                 )
             }
             composable("new?job={job}", arguments = listOf(navArgument("job") { type = NavType.StringType; nullable = true; defaultValue = null })) { entry ->
@@ -148,7 +153,12 @@ class MainActivity : ComponentActivity() {
             }
             composable("printing/{id}") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable
-                PrintingScreen(id, back = { nav.popBackStack() }, project = { nav.navigate("project/$id") })
+                // Open Project from Printing goes back to the project when it's underneath, never a second copy of it.
+                PrintingScreen(id, back = { nav.popBackStack() }, project = {
+                    val under = nav.previousBackStackEntry
+                    nav.popBackStack()
+                    if (under?.destination?.route != "project/{id}" || under.arguments?.getString("id") != id) nav.navigate("project/$id")
+                })
             }
             composable("scan/{id}") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable

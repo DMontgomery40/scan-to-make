@@ -30,6 +30,7 @@ test('done', async () => {
   assert.deepEqual(result.renders, [join(pass.outDir, 'front.png')]);
   assert.deepEqual(result.checkpoints, [join(pass.checkpointsDir, '01.stl')]);
   assert.ok(progress.some(p => p.lastText === 'Restored the texture on the underside.'));
+  assert.equal(progress.at(-1).resumable, false, 'the final answer clears live recovery before later file steps');
 });
 
 test('a request in several colours keeps the printer MCP\'s multi-part 3MF beside the merged mesh', async () => {
@@ -84,7 +85,7 @@ test('tool-call cap', async () => {
   const started = Date.now();
   const result = await runTouchupWorker(inv, pass, {maxToolCalls: 120});
   assert.equal(result.status, 'capped');
-  assert.match(result.reason, /120 tool calls/);
+  assert.match(result.reason, /120 tool-call limit/);
   assert.equal(result.model, join(pass.checkpointsDir, '02.stl'));
   assert.ok(Date.now() - started < 10000, 'the hung worker was killed');
 });
@@ -224,3 +225,87 @@ for (const [answer, expected] of [
     assert.deepEqual(result.supports, expected);
   });
 }
+
+for (const kind of ['inactivity', 'absolute', 'tool-calls']) {
+  test(`${kind} stop keeps the init session and only valid checkpoints`, async t => {
+    const {EventEmitter} = await import('node:events');
+    const {PassThrough} = await import('node:stream');
+    const {pass, inv} = await setup('hang');
+    const good = join(pass.checkpointsDir, '01.stl');
+    await writeFile(good, 'solid x\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid x\n');
+    await writeFile(join(pass.checkpointsDir, '02.stl'), 'broken');
+    const child = Object.assign(new EventEmitter(), {pid: 99999999, stdout: new PassThrough(), stderr: new PassThrough()});
+    t.mock.method(process, 'kill', () => { queueMicrotask(() => child.emit('close', null)); return true; });
+    t.mock.timers.enable({apis: ['setTimeout', 'Date']});
+    const progress = [];
+    const pending = runTouchupWorker(inv, pass, {spawn: () => child, inactivityMs: kind === 'absolute' ? 1000 : 60, timeoutMs: 300, maxToolCalls: 1, onProgress: p => progress.push(p)});
+    child.stdout.write('{"type":"system","subtype":"init","session_id":"saved-session"}\n');
+    if (kind === 'tool-calls') child.stdout.write('{"type":"assistant","message":{"content":[{"type":"tool_use"},{"type":"tool_use"}]}}\n');
+    t.mock.timers.tick(kind === 'absolute' ? 300 : 60);
+    const result = await pending;
+    assert.equal(result.status, 'capped');
+    assert.deepEqual(result.limit, {kind, value: kind === 'absolute' ? 300 : kind === 'inactivity' ? 60 : 1});
+    assert.equal(result.sessionId, 'saved-session');
+    assert.equal(result.resumable, true);
+    assert.deepEqual(result.checkpoints, [good]);
+    assert.equal(result.model, good);
+    assert.ok(progress.some(p => p.sessionId === 'saved-session' && p.resumable === true));
+  });
+}
+
+test('every worker event resets inactivity so active work can run beyond 900 seconds', async t => {
+  const {EventEmitter} = await import('node:events');
+  const {PassThrough} = await import('node:stream');
+  const {runClaudeWorker} = await import('../dist/touchup/runner.js');
+  const {inv} = await setup('hang');
+  const child = Object.assign(new EventEmitter(), {pid: 99999999, stdout: new PassThrough(), stderr: new PassThrough()});
+  const kills = t.mock.method(process, 'kill', () => { queueMicrotask(() => child.emit('close', null)); return true; });
+  t.mock.timers.enable({apis: ['setTimeout', 'Date']});
+  const pending = runClaudeWorker(inv, {spawn: () => child, inactivityMs: 60000, timeoutMs: 2000000});
+  for (let i = 0; i < 20; i++) { t.mock.timers.tick(50000); child.stdout.write('{"type":"user","session_id":"still-active"}\n'); }
+  assert.equal(kills.mock.callCount(), 0);
+  child.stdout.write('{"type":"result","structured_output":{"status":"done"}}\n'); child.emit('close', 0);
+  const result = await pending;
+  assert.equal(result.stopReason, undefined);
+  assert.equal(result.sessionId, 'still-active');
+});
+
+test('a crashed worker without a final answer remains resumable, while a person cancel does not', async t => {
+  const {EventEmitter} = await import('node:events');const {PassThrough} = await import('node:stream');
+  for (const cancelled of [false,true,'error']) {
+    const {pass,inv}=await setup('hang'),controller=new AbortController();
+    const child=Object.assign(new EventEmitter(),{pid:99999999,stdout:new PassThrough(),stderr:new PassThrough()});
+    t.mock.method(process,'kill',()=>{queueMicrotask(()=>child.emit('close',null));return true;});
+    const pending=runTouchupWorker(inv,pass,{spawn:()=>child,signal:controller.signal});
+    child.stdout.write('{"type":"system","subtype":"init","session_id":"crash-session"}\n');
+    if(cancelled === true)controller.abort();else if(cancelled === 'error')child.emit('error',new Error('worker pipe failed'));else child.emit('close',1);
+    const result=await pending;
+    assert.equal(result.status,'failed');assert.equal(result.sessionId,'crash-session');assert.equal(result.resumable,cancelled !== true);
+    if(cancelled === true)assert.equal(result.reason,'cancelled');
+  }
+});
+
+test('limit words use minutes and hours a person can read', async () => {
+ const {limitWords}=await import('../dist/touchup/runner.js');
+ assert.equal(limitWords({kind:'inactivity',value:600000}),'Stopped after 10 minutes without worker activity');
+ assert.equal(limitWords({kind:'absolute',value:7200000}),'Stopped at the absolute time limit of 2 hours');
+ assert.equal(limitWords({kind:'tool-calls',value:120}),'Stopped at the 120 tool-call limit');
+});
+
+for (const initialized of [false,true]) test(`real missing-session terminal event identifies loader rejection${initialized ? ' even after init' : ''}`, async () => {
+ const {pass,inv}=await setup('hang');
+ const raw=await readFile(join(fixtures,'missing-session.ndjson'),'utf8'),stderr=await readFile(join(fixtures,'missing-session.stderr'),'utf8');
+ const event=JSON.parse(raw),exit=Number(await readFile(join(fixtures,'missing-session.exit-code'),'utf8'));
+ const prefix=initialized?JSON.stringify({type:'system',subtype:'init',session_id:event.session_id})+'\n':'';
+ inv.args=['-e',`process.stdout.write(${JSON.stringify(prefix+raw)});process.stderr.write(${JSON.stringify(stderr)});process.exit(${exit});`,'--','--resume',event.session_id];
+ const result=await runTouchupWorker(inv,pass);
+ assert.equal(result.status,'failed');assert.equal(result.resumeUnavailable,true);
+ assert.equal(result.resumable,false);assert.equal(result.sessionId,event.session_id);
+});
+
+for (const [name,changes] of [['model turn',{num_turns:1}],['API work',{duration_api_ms:5}],['another session',{errors:['No conversation found with session ID: another-session']}]]) test(`a ${name} is not the CLI loader rejection`, async () => {
+ const {pass,inv}=await setup('hang');const event=JSON.parse(await readFile(join(fixtures,'missing-session.ndjson'),'utf8'));
+ inv.args=['--resume',event.session_id];
+ inv.worker=async()=>({resultEvent:{...event,...changes},sessionId:event.session_id,exitCode:1,toolCalls:0,seconds:0,stderrTail:'',publicText:text=>text});
+ assert.equal((await runTouchupWorker(inv,pass)).resumeUnavailable,undefined);
+});

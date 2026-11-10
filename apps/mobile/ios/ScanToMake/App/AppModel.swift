@@ -36,14 +36,9 @@ import CounterpartKit
     private var observer: NSObjectProtocol?
 
     init(store: SecureStore = KeychainStore()) {
-        var store = store
-        var transport: HTTPTransport = PinnedTransport()
-        #if DEBUG
-        if let folder = Fixtures.folder { store = Fixtures.store(); transport = FixtureTransport(folder: folder) }
-        #endif
-        let pairingStore = PairingStore(store: store)
-        pairing = PairingClient(store: pairingStore, transport: transport)
-        companion = CompanionClient(pairing: pairing, transport: transport, deviceName: pairing.store.userAssignedName())
+        let (pairing, companion, transport) = Self.clients(store: store)
+        self.pairing = pairing
+        self.companion = companion
         nearby = NearbyPairing(client: pairing, transport: transport)
         projects = ProjectsStore(mac: MacConnection(client: companion), pairing: pairing)
         observer = NotificationCenter.default.addObserver(forName: PairingStore.changed, object: nil, queue: .main) { [weak self] _ in
@@ -57,6 +52,30 @@ import CounterpartKit
         #if DEBUG
         debugRoute()
         #endif
+    }
+
+    /// The pairing and the companion client, from the stored pairing (or the debug build's canned Mac). Also used
+    /// alone by a notification button pressed while the app isn't running, before any window exists.
+    static func clients(store: SecureStore = KeychainStore()) -> (PairingClient, CompanionClient, HTTPTransport) {
+        var store = store
+        var transport: HTTPTransport = PinnedTransport()
+        #if DEBUG
+        if let folder = Fixtures.folder { store = Fixtures.store(); transport = FixtureTransport(folder: folder) }
+        #endif
+        let pairing = PairingClient(store: PairingStore(store: store), transport: transport)
+        return (pairing, CompanionClient(pairing: pairing, transport: transport, deviceName: pairing.store.userAssignedName()), transport)
+    }
+
+    /// Projects whose page or Printing screen is showing now, counted, so a push then a pop never loses one.
+    /// A notification about one of them isn't shown again as a banner: the screen already shows it (PRD §9.2).
+    private(set) var onScreen: [String: Int] = [:]
+    /// A sheet (Settings, Printers, New, Print) covers the page: a page under a sheet doesn't disappear, but isn't seen.
+    var sheetUp = false
+    /// The project whose page or Printing screen the person is looking at now, for `willPresent`.
+    func isShowing(_ id: String) -> Bool { !sheetUp && onScreen[id] != nil }
+    func showing(_ id: String, _ visible: Bool) {
+        let count = (onScreen[id] ?? 0) + (visible ? 1 : -1)
+        onScreen[id] = count > 0 ? count : nil
     }
 
     /// No usable pairing: Find your Mac is the first screen.
@@ -102,8 +121,25 @@ import CounterpartKit
 
     // MARK: Links and routes
 
+    #if DEBUG
+    /// `-CounterpartLayoutTesting YES` with fixtures: the resize UI tests may change the window's size class.
+    static var layoutTesting: Bool { Fixtures.folder != nil && UserDefaults.standard.bool(forKey: "CounterpartLayoutTesting") }
+
+    /// The window's own size class, as a Duo fold or an iPad resize changes it, set on each root view controller so
+    /// UIKit's split view really collapses and expands. (Overriding only SwiftUI's environment value, or the scene's
+    /// traits, left the split as it was: the gate and agent-device, Nov 9.)
+    static func setFixtureWidth(_ width: UIUserInterfaceSizeClass) {
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows { window.rootViewController?.traitOverrides.horizontalSizeClass = width }
+        }
+    }
+    #endif
+
     /// A link that opened the app. A cold start can deliver the same pairing link twice within moments.
     func open(_ url: URL) {
+        #if DEBUG
+        if Self.layoutTesting, url.host == "fixture-width" { Self.setFixtureWidth(url.path == "/compact" ? .compact : .regular); return }
+        #endif
         guard let route = AppRoute(url: url) else { return }
         if case .pair(let link) = route {
             let now = Date()
@@ -136,6 +172,7 @@ import CounterpartKit
         case "failed": route = .project(ids.failed); debugSection = "activity"
         case "printing": route = .printing(ids.clip)
         case "print-finished": Fixtures.finished = true; route = .printing(ids.clip)
+        case "live-activity": Fixtures.liveActivity = true
         // The one-colour sheet: v1 prints one filament (PRD §5.5); "print" shows the same until parts arrive (M3b).
         case "print", "print-one": route = .print(ids.mic)
         case "print-pauses": Fixtures.pauses = [12, 140]; route = .print(ids.mic)

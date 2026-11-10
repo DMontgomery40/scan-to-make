@@ -23,6 +23,10 @@ enum Fixtures {
     /// `-CounterpartScreen preparing`: the cable clip is on the printer, getting ready (layer 0).
     nonisolated(unsafe) static var preparing = false
     nonisolated(unsafe) static var finished = false
+    /// `-CounterpartScreen live-activity`: the mic mount halfway through its print, its Live Activity started
+    /// the way a real print starts it, and the halfway notification as the notification service composes it
+    /// (PRD §9.1, §9.4). Its render is `render-live.png` in the assets folder, if there.
+    nonisolated(unsafe) static var liveActivity = false
     /// Statuses set on this run (`PATCH …/settings`), by project id.
     nonisolated(unsafe) static var statuses: [String: String] = [:]
     nonisolated(unsafe) static var titles: [String: String] = [:]
@@ -53,6 +57,15 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        if set == "limit-stops", let json = ProcessInfo.processInfo.environment["COUNTERPART_LIMIT_FIXTURES"],
+           let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
+            return rows.enumerated().compactMap { index, row in
+                guard var project = row["expected"] as? [String: Any] else { return nil }
+                project["id"] = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a0\(index + 1)"
+                project["title"] = row["name"]
+                return project
+            }
+        }
         // A copy of a designer's 3MF whose printer MCP says it prints with its own settings, saved at Fine/Strong
         // (Nov 5, caliper card 1f1c5515): the sheet must start at Standard and say it prints the designer's settings.
         if set == "designer" {
@@ -172,7 +185,8 @@ enum Fixtures {
         var shown = set == "grid" ? list.filter { ["ready", "printed", "confirmed", "failed"].contains($0["state"] as? String ?? "") } : list
         // `-CounterpartScreen printer-connection`: the P1S idle, so its Settings → Printers choices can be changed.
         if idlePrinter { shown = shown.filter { $0["state"] as? String != "printing" } }
-        return (stopped + shown + duplicates).map(withStatus).map(withPreparing).map(withFinished).map { original in
+        // A status set on this run applies last, so It Works on the finished print (Printing screen) makes it Done.
+        return (stopped + shown + duplicates).map(withPreparing).map(withFinished).map(withLiveActivity).map(withStatus).map { original in
             guard let id = original["id"] as? String else { return original }
             var object = original
             if let title = titles[id] { object["title"] = title }
@@ -185,6 +199,19 @@ enum Fixtures {
             }
             return object
         }
+    }
+
+    /// The clip's print, as the mic mount halfway through (`-CounterpartScreen live-activity`).
+    private static func withLiveActivity(_ object: [String: Any]) -> [String: Any] {
+        guard liveActivity, object["id"] as? String == ids.clip, var print = object["print"] as? [String: Any],
+              var live = print["live"] as? [String: Any] else { return object }
+        var object = object
+        object["title"] = "Mic mount"
+        object["current"] = ["model": "current/model.stl", "renders": ["current/renders/live.png"], "sizeMm": [48.2, 50.4, 53.9]]
+        live["job"] = ["name": "mic-mount", "progress": 50, "remainingSec": 2280, "layer": 106, "totalLayers": 212, "stage": "Printing"]
+        print["live"] = live
+        object["print"] = print
+        return object
     }
 
     private static func withFinished(_ object: [String: Any]) -> [String: Any] {
@@ -226,7 +253,7 @@ enum Fixtures {
         } else {
             object["archived"] = nil; object["outcome"] = nil
             switch status {
-            case "works": object["state"] = "confirmed"; object["outcome"] = "works"
+            case "works": object["state"] = "confirmed"; object["outcome"] = "works"; object["status"] = nil
             case "printed": object["state"] = "printed"
             case "not-printed": object["state"] = "ready"
             case "needs-changes": object["outcome"] = "needs-changes"; if object["state"] as? String == "confirmed" { object["state"] = "printed" }
@@ -313,6 +340,7 @@ enum Fixtures {
         if path.contains("/renders/mic.png") { return "thumb-mic.png" }
         if path.contains("/renders/potato.png") || path.contains("/asks/") || path.hasSuffix("/capture/potato.jpg") { return "thumb-potato.png" }
         if path.contains("/renders/clip.png") { return "bed.jpg" }
+        if path.contains("/renders/live.png") { return "render-live.png" }
         if let range = path.range(of: #"/photos/(photo[1-4]\.jpg)$"#, options: .regularExpression) { return String(path[range].dropFirst("/photos/".count)) }
         return nil
     }
@@ -329,6 +357,8 @@ struct FixtureTransport: HTTPTransport {
     let folder: URL
 
     func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        // An `offline` file in the folder: the Mac isn't answering. A UI test deletes it to bring the Mac back (Try Again).
+        if FileManager.default.fileExists(atPath: folder.appending(path: "offline").path) { throw TransportError("network") }
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
         func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }

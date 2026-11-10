@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import type {TouchupActivity, TouchupChange} from '../touchup/runner.js';
+import type {TouchupActivity, TouchupChange, WorkerLimit} from '../touchup/runner.js';
 import type {PassStage} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
 import type {Ask} from '@scan-to-make/contracts/counterpart';
@@ -38,6 +38,14 @@ export interface ObjectPass {
   summary?: string;
   seconds?: number;
   costUsd?: number;
+  toolCalls?: number;
+  limit?: WorkerLimit;
+  /** Local worker recovery; never sent to clients. */
+  sessionId?: string;
+  sessionCwd?: string;
+  resumable?: boolean;
+  checkpoints?: string[];
+  resume?: {sessionId: string; outcome: 'resumed' | 'cold-start' | 'attempted'; reason?: string};
   dir?: string;
   /** The most recent public worker messages and tool names, in stream order. */
   activity?: TouchupActivity[];
@@ -246,7 +254,7 @@ export class ObjectStore {
         const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
         await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined, printConfirmation: undefined,
           passes: o.state !== 'touching-up' ? o.passes : o.passes.map((pass, index) => index !== o.passes.length - 1 || pass.endedAtMs !== undefined ? pass : {
-            ...pass, endedAtMs: atMs, status: 'interrupted',
+            ...pass, endedAtMs: atMs, status: 'interrupted', resumable: pass.resumable === true && !!pass.sessionId,
             activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200),
           }),
         }));
