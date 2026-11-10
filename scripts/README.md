@@ -33,14 +33,39 @@ The private directory must contain `codex-review-rubric.md` and `cursor-bugbot-r
 The first review uses native `codex review --base origin/main`, which supplies its stock rubric. The second supplies the stored Cursor prompt verbatim plus the diff to Muse Wonder Full at xhigh; for a Muse author it uses Codex in read-only mode instead. `--author` is required so the second review comes from another lab. CLI authentication must already be configured. Review processes run locally and synchronously; they do not push or request GitHub reviews. Read both logs and resolve actionable findings: successful process exit means the review completed, not that it found no bugs.
 
 
-## One iOS job at a time on the Mac
+## The Mac's build lane: `lane.py`
 
-Every `macos`/`xcode-` job, whether started on the Mac or sent from a Linux box, holds `~/.stm-ios.lock` (flock) for its whole run; a second one waits and prints who holds it. Wrap any other xcodebuild or simulator run the same way:
+Every `xcodebuild` and every simulator session on the Mac (boot to shutdown) runs in one of two slots
+(docs/operations.md, "Printing beats gating"):
 
 ```
-python3 scripts/ci_local.py --ios-lock xcodebuild test ...
-/usr/bin/lockf -k ~/.stm-ios.lock xcodebuild test ...   # same lock
+python3 scripts/lane.py --label "<who>: <what>" -- xcodebuild build ...       # one slot
+python3 scripts/lane.py --exclusive --label "<who>: start print" -- <command> # both slots
+python3 scripts/lane.py --status                                              # holders, waiters, ages
 ```
+
+- **Two slots.** Slot 1 is `~/.stm-ios.lock`, slot 2 is `~/.stm-ios-2.lock` (flock(2) locks on the open files).
+  A normal caller takes whichever is free. `--exclusive` takes both: the gate's iPhone/iPad UI test job and
+  anything that starts a print. Anything still calling `/usr/bin/lockf -k ~/.stm-ios.lock` holds slot 1, so it
+  still excludes one slot and blocks an exclusive caller; switch it to `lane.py` so it queues and shows up.
+- **Arrival order.** Each caller takes a numbered ticket in `~/.stm-lane/queue` and waits until it is the
+  oldest live ticket; only then does it take slots. So callers of the same kind go in arrival order, and normal
+  callers that arrive after a waiting exclusive one wait behind it instead of overtaking it.
+- **Who holds it.** Each holder records its label, pid, slots, start time and `--max-minutes` (default 10) in
+  `~/.stm-lane/holders`. `--status` (or `--status --json`) prints them with their ages, flags a hold past its
+  `--max-minutes` as overdue (it does not kill it), and lists the waiters in order. A slot held with no record
+  is shown as held by a process outside the lane.
+- **Stale state blocks nobody.** The kernel locks are the truth. A ticket or record counts only while its owner
+  keeps it flock'ed and its pid is alive, so a caller killed even with SIGKILL drops out of the queue and
+  `--status`. If `lane.py` itself is killed, its command keeps running outside the lane (as with `lockf`).
+- **Nested calls.** The command runs with `STM_LANE_HELD=<holder pid>`; a `lane.py` call inside it (an install
+  script run from a gate job) runs straight away instead of waiting behind its own holder.
+- **Exit code** is the command's; a command killed by a signal gives 128 + the signal number.
+- `ci_local.py` holds a slot for every `macos`/`xcode-` job, whether started on the Mac or sent from a Linux box
+  (`mobile/app`, the UI job, holds both), and its wait message prints `--status`. `ci_local.py --ios-lock
+  <command>` is the same as `lane.py -- <command>`.
+- Agents: queue a hold as a background command so its exit wakes you, and never end a turn while it is queued or
+  running. Tests use temporary slots (`STM_LANE_SLOT1`, `STM_LANE_SLOT2`, `STM_LANE_DIR`, `STM_LANE_POLL`).
 
 ## One trunk: `trunk_guard.sh`
 
