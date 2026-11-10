@@ -65,7 +65,7 @@
           "version": "1.2.25",
           "canMove": true,
           "managed": false,
-          "words": "Bambu Lab P1S uses your copy at ~/mcp-3D-printer-server (1.2.25), older than Counterpart’s copy (1.2.50)."
+          "words": "Bambu Lab P1S uses your copy at ~/mcp-3D-printer-server (1.2.25), older than Counterpart’s copy (1.2.50). Runs from a folder you manage, so Counterpart doesn't update it by itself."
         }
       ],
       "moves": [

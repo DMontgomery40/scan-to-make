@@ -192,8 +192,9 @@ test('a fit lookup is confirmed before fit-critical geometry', () => {
 // #427, Nov 10: a code fit pass measured the scan 29.8 deep and 150 tall against calipers of 28 and 145, judged the
 // difference unimportant, designed without asking, and chose 1.5 mm a side so the cavity swallowed the inflated scan.
 // The order is fixed for every engine: measurements define the interface, a disagreement stops the pass with the ask
-// before any fit-critical geometry, the stated clearance is applied to the measurements, and a fit check is information.
-test('a fit settles a scan disagreement with the person before any fit-critical geometry, then sizes from the measurements plus a stated clearance', () => {
+// before any fit-critical geometry, each interface is sized from the measurements with a fit chosen by its function, and a
+// fit check is information.
+test('a fit settles a scan disagreement with the person before any fit-critical geometry, then sizes each interface from the measurements', () => {
   for (const engine of ['blender', 'fusion', 'code']) {
     const rules = systemRules({kind: 'fit', engine, request: true});
     const fit = rules.slice(rules.indexOf(RULE_SECTIONS.fitSizes), rules.indexOf('\n\n', rules.indexOf(RULE_SECTIONS.fitSizes)) >>> 0);
@@ -202,14 +203,14 @@ test('a fit settles a scan disagreement with the person before any fit-critical 
     const measured = step('come from measurements');
     const compare = step('When there is a scan, compare each measured or confirmed size with it');
     const ask = step('stop with needs_closeup before modelling any fit-critical geometry');
-    const size = step('Size the interface from the measured or confirmed sizes plus a clearance you state');
+    const size = step('Size each place the part meets a real object from the measured or confirmed sizes');
     assert.ok(measured < compare && compare < ask && ask < size, `${engine}: the steps are in order`);
     assert.match(fit, /2 mm or 2%/);
     assert.match(fit, /however little you judge the difference to matter/, `${engine}: the worker's own judgement is no reason to skip the ask`);
     assert.match(fit, /names both sets of numbers/, `${engine}: the question gives the measurement and the scan reading`);
     assert.match(fit, /already answered/, `${engine}: an answered question isn't asked again`);
-    assert.match(fit, /never choose the clearance to make room for the scan/i, `${engine}: the clearance isn't sized to swallow the scan`);
-    assert.match(fit, /clearance per side in your summary/, `${engine}: the clearance is said`);
+    assert.match(fit, /never choose a fit to make room for the scan/i, `${engine}: the fit isn't sized to swallow the scan`);
+    assert.match(fit, /In your summary, give each interface its function, the fit chosen/, `${engine}: each fit is said`);
     assert.match(fit, /manufacturer's own published dimensions/, `${engine}: the lookup stays`);
     assert.doesNotMatch(fit, /still win over the scan/, `${engine}: no line reads as permission to skip the ask`);
     if (engine === 'code') {
@@ -219,6 +220,31 @@ test('a fit settles a scan disagreement with the person before any fit-critical 
       assert.match(fit, /report the interference and gap, with what you changed in the reference, in your changes/);
       assert.doesNotMatch(fit, /never rescale|as information/, 'no sentence duplicates cad_design');
     } else assert.doesNotMatch(fit, /cad_check_fit/);
+  }
+});
+
+// Nov 10: 0.5 mm a side was right for a bottle holder bottles drop into and would ruin a mic clamp that must grip a pole.
+// The fit is chosen per interface from what it has to do, never one clearance offered as the example for everything.
+test('a fit is chosen per interface from its function, not one clearance for everything', () => {
+  for (const engine of ['blender', 'fusion', 'code']) {
+    const rules = systemRules({kind: 'fit', engine, request: true});
+    const fit = rules.slice(rules.indexOf(RULE_SECTIONS.fitSizes), rules.indexOf('\n\n', rules.indexOf(RULE_SECTIONS.fitSizes)) >>> 0);
+    assert.match(fit, /with a fit chosen by what that interface has to do/, `${engine}: function first`);
+    for (const fn of ['drops in and lifts out', 'slides', 'locates without rattle', 'grips so it does not slip or turn', 'clamps closed with a screw', 'snaps over', 'presses in to stay'])
+      assert.ok(fit.includes(fn), `${engine}: the function "${fn}" is named`);
+    assert.match(fit, /Keep three things apart: the object's size, with how it was measured .* how sure it is; the correction for how that feature prints; and the fit, which comes only from the function/, `${engine}: size, print correction and fit stay apart`);
+    assert.match(fit, /a plain clearance where loose is the point/, `${engine}: clearance only where loose is the point`);
+    assert.match(fit, /crush ribs, a split with a pinch screw, a flexure, a snap/, `${engine}: mechanisms that take up uncertainty`);
+    assert.match(fit, /less sure than the function tolerates/, `${engine}: uncertainty against what the function tolerates`);
+    assert.match(fit, /ask for the one caliper measurement that settles it/, `${engine}: or ask for the measurement`);
+    assert.match(fit, /a wall holder that bottles drop into .* while a pole clamp/, `${engine}: two contrasting examples`);
+    assert.match(fit, /Never reuse one number for every interface/, `${engine}: no single number`);
+    assert.match(fit, /stop with needs_closeup and ask about behaviour the person can answer/, `${engine}: an unclear function is asked about`);
+    assert.match(fit, /clearance or interference per side, or the mechanism and the range of sizes it holds\) and why/, `${engine}: reported per interface`);
+    assert.doesNotMatch(fit, /\+ 0\.4 mm per side/, `${engine}: no single clearance example`);
+    assert.doesNotMatch(fit, /plus a clearance you state/, `${engine}: no interface is framed as size plus a clearance`);
+    const rule3 = fit.split('\n').find(line => line.startsWith('3. '));
+    assert.doesNotMatch(rule3, /\d+(\.\d+)? ?mm/, `${engine}: rule 3 offers no number as a default`);
   }
 });
 

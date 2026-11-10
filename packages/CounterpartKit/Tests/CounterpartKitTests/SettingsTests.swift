@@ -36,6 +36,26 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(SettingsSchema.defaultValue("print.new-thing", mac: true), "and off for the Mac")
     }
 
+    /// Q9: the companion always sends `general.autoUpdateMcps`, so a settings file whose General has only that key
+    /// (`notification-settings.json`) still asks the person to open Counterpart on the Mac for the General switches,
+    /// and the automatic-update switch has its own place beside the printer MCPs instead of a second row in General.
+    func testAutoUpdateMcpsDecodesWithoutCountingAsAGeneralSetting() throws {
+        struct Reply: Decodable { var settings: CompanionSettings }
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "notification-settings", withExtension: "json", subdirectory: "Fixtures"))
+        let general = try XCTUnwrap(try JSONDecoder().decode(Reply.self, from: Data(contentsOf: url)).settings.general)
+        XCTAssertEqual(general.autoUpdateMcps, true)
+        XCTAssertEqual(general[SettingsSchema.autoUpdateMcps.key], true)
+        XCTAssertTrue(SettingsSchema.general.allSatisfy { general[$0.key] == nil }, "General still says to open Counterpart on the Mac")
+        XCTAssertFalse(SettingsSchema.general.contains { $0.key == SettingsSchema.autoUpdateMcps.key }, "one switch, not a second one in General")
+        let off = try JSONDecoder().decode(Reply.self, from: Data(#"{"settings":{"milestones":"50","general":{"autoUpdateMcps":false}}}"#.utf8)).settings
+        XCTAssertEqual(off.general?.autoUpdateMcps, false, "off stays off")
+        let older = try JSONDecoder().decode(Reply.self, from: Data(full.utf8)).settings
+        XCTAssertNil(older.general?.autoUpdateMcps, "a companion without automatic updates: no switch")
+        XCTAssertEqual(try String(data: JSONSerialization.data(withJSONObject: SettingsPatch.general(SettingsSchema.autoUpdateMcps.key, false)), encoding: .utf8),
+                       #"{"general":{"autoUpdateMcps":false}}"#)
+        XCTAssertEqual(SettingsSchema.autoUpdateMcps.label, "Keep printer software up to date", "Linux's words")
+    }
+
     func testPatchesNameOnlyWhatChanges() throws {
         func json(_ patch: [String: Any]) throws -> String {
             String(data: try JSONSerialization.data(withJSONObject: patch, options: .sortedKeys), encoding: .utf8)!

@@ -5,7 +5,7 @@ import {parseEnv} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {PrinterMcpClient, toolResultJson, type PrinterBackend, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
-import {appInstall, appMcpId, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
+import {appInstall, appMcpId, autoUpdateReason, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
 import type {McpUpdate} from './mcp-updates.js';
 import type {PrinterCatalog} from '../objects/printers.js';
 import {envOf, field, kindFor, modelForSerial, names, readMcpSetup, readSetupCache, setupOptions, writeSetupCache, type McpSetup, type SetupKind, type SetupOptions} from './mcp-setup.js';
@@ -231,6 +231,8 @@ export interface PrinterSetupDeps {
   /** Every catalog profile, winners and duplicates, as configured and as the companion runs it. */
   configs(): {id: string; config: PrinterHandoffConfig}[];
   effective?(id: string, config: PrinterHandoffConfig): PrinterHandoffConfig;
+  /** Why this printer's MCP is never updated by itself (McpUpdater.autoReason); without it, the install's own reason. */
+  autoReason?(destinationId: string): string | undefined;
   download?(pkg: PrinterBackend): Promise<McpUpdate>;
   /** The published version; Settings may wait briefly for a check it starts (McpUpdater.latestVersionSettled). */
   latestVersion?(pkg: PrinterBackend, options?: {view?: boolean}): string | undefined | Promise<string | undefined>;
@@ -292,16 +294,31 @@ export class PrinterSetup {
   readonly deps: PrinterSetupDeps;
   constructor(deps: PrinterSetupDeps) { this.deps = deps; }
 
+  /** Add printer…'s steps running now (Find Printers, Check, Add, Complete Settings, a Printer MCP choice, Remove, and
+   * Settings → Printers reading each MCP's fields). */
+  #working = 0;
+  async #tracked<T>(work: () => Promise<T>): Promise<T> {
+    this.#working++;
+    try { return await work(); } finally { this.#working--; }
+  }
+  /**
+   * A printer is being set up: one of Add printer…'s steps is running, or an approval it started (OctoPrint's key) is
+   * still open. Each starts or talks to an MCP, so an automatic MCP update waits for it (McpAutoUpdater).
+   */
+  working(): boolean { return this.#working > 0 || this.#obtaining.size > 0; }
+
   #list(path: string): string[] {
     if (this.deps.list) return this.deps.list(path);
     try { return readdirSync(path); } catch { return []; }
   }
 
   /** `printers.mcps`: both packages, always, with every copy of each the companion can see, and Add printer…'s choices from them. */
-  async mcps(): Promise<{packages: McpPackageView[]; options: SetupOptions}> {
-    // Settings answers within its deadline from the fields already read; reading them again never holds it up.
+  mcps(): Promise<{packages: McpPackageView[]; options: SetupOptions}> { return this.#tracked(() => this.#mcps()); }
+  async #mcps(): Promise<{packages: McpPackageView[]; options: SetupOptions}> {
+    // Settings answers within its deadline from the fields already read; reading them again never holds it up. That
+    // read starts each MCP to ask it, so it counts as setting up too (review F2).
     const options = setupOptions(await this.#setups({cachedOnly: true}));
-    void this.#setups().catch(() => undefined);
+    void this.#tracked(() => this.#setups()).catch(() => undefined);
     return {packages: await this.#packages(), options};
   }
 
@@ -360,10 +377,13 @@ export class PrinterSetup {
         const version = install.type === 'npx' ? undefined : installedVersion(install, env);
         const printer = catalog?.destinations.find(destination => destination.id === catalog.canonical(id))?.name ?? id;
         const managed = install.type === 'app' && install.prefix === own.prefix;
+        const reason = this.deps.autoReason ? this.deps.autoReason(id) : autoUpdateReason(install);
         return {destinationId: id, printerId: catalog?.canonical(id) ?? id, printer, mcpId: mcpIdFor(resolveMcpInstall(config, env), config), kind: install.type,
           ...(path ? {path} : {}), ...(version ? {version} : {}), canMove: !managed, managed,
           words: `${printer} uses ${copyWords(install, path, managed, home)} (${version ?? 'version unknown'})`
-            + (!managed && version && appVersion && newerVersion(appVersion, version) ? `, older than Counterpart’s copy (${appVersion}).` : '.')};
+            + (!managed && version && appVersion && newerVersion(appVersion, version) ? `, older than Counterpart’s copy (${appVersion}).` : '.')
+            // Q9: a copy that "Keep printer software up to date" never touches says so here, on every layout.
+            + (reason ? ` ${reason}` : '')};
       });
       // In the order the uses are listed: two Moves for one printer (one per MCP profile) read differently and in screen order.
       const moves = [...new Set(uses.filter(use => use.canMove).map(use => use.mcpId))].map(mcpId => {
@@ -522,7 +542,8 @@ export class PrinterSetup {
    * (`counterpart_discover_printers`), asked one MCP at a time so two never listen on the same port. A printer both
    * MCPs find is listed once, with the MCP listed first for its kind (PRD §8.2). About 4 s per MCP.
    */
-  async discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: SetupOptions}> {
+  discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: SetupOptions}> { return this.#tracked(() => this.#discover()); }
+  async #discover(): Promise<{found: SetupCandidate[]; network: 'complete' | 'unavailable'; options: SetupOptions}> {
     // All of it inside the request's 15 s: what doesn't fit is left out, never the whole answer.
     const until = Date.now() + (this.deps.discoverBudgetMs ?? 13_000), remainingMs = () => Math.max(0, until - Date.now());
     const [folders, saved, setups] = await Promise.all([
@@ -641,7 +662,8 @@ export class PrinterSetup {
    * when the MCP has it) camera_snapshot. Never a print, heating, motion or settings tool. Only this projection is
    * returned: no telemetry, MCP error text or credentials (KAN-163's check).
    */
-  async check(input: PrinterForm): Promise<CheckResult> {
+  check(input: PrinterForm): Promise<CheckResult> { return this.#tracked(() => this.#check(input)); }
+  async #check(input: PrinterForm): Promise<CheckResult> {
     // One budget for the whole check, inside local-control's 60 s: reading the MCP's fields comes out of it too.
     const total = this.deps.checkBudgetMs ?? 55_000;
     const until = Date.now() + total, remainingMs = () => Math.max(0, Math.floor(until - Date.now()));
@@ -684,7 +706,8 @@ export class PrinterSetup {
   readonly #obtaining = new Map<string, {client: ProbeClient; tool: string; requestId: string; key: string; field: string; env: string; timer: NodeJS.Timeout; seen: number; asking: boolean}>();
 
   /** `printers.obtain` (ObtainRequestSchema). */
-  async obtain(input: ObtainRequest): Promise<ObtainResult> {
+  obtain(input: ObtainRequest): Promise<ObtainResult> { return this.#tracked(() => this.#obtain(input)); }
+  async #obtain(input: ObtainRequest): Promise<ObtainResult> {
     const key = JSON.stringify([input.backend, input.printerType, input.host, input.port ?? '', input.field]);
     if (input.session) {
       const open = this.#obtaining.get(input.session);
@@ -768,7 +791,8 @@ export class PrinterSetup {
    * `<appPrinters>/profiles/<id>/.env` (0600) with exactly the MCP's variables. Either way it joins Counterpart's list
    * and the catalog reads it as a destination.
    */
-  async add(input: PrinterForm): Promise<{id: string; destinationId?: string; sameAs?: string}> {
+  add(input: PrinterForm): Promise<{id: string; destinationId?: string; sameAs?: string}> { return this.#tracked(() => this.#add(input)); }
+  async #add(input: PrinterForm): Promise<{id: string; destinationId?: string; sameAs?: string}> {
     const id = newProfileId();
     let profile: SavedProfile;
     let created: string | undefined;
@@ -893,7 +917,8 @@ export class PrinterSetup {
    * `printers.completeSettings`: a printer added in Counterpart whose `.env` lacks the model its MCP needs gets it
    * (as on Add), the profile records it, and its MCP restarts so it reads the file again.
    */
-  async completeSettings(destinationId: string, model?: string): Promise<{destinationId: string; model?: string}> {
+  completeSettings(destinationId: string, model?: string): Promise<{destinationId: string; model?: string}> { return this.#tracked(() => this.#completeSettings(destinationId, model)); }
+  async #completeSettings(destinationId: string, model?: string): Promise<{destinationId: string; model?: string}> {
     const saved = await readProfiles(this.#profilesPath);
     const profile = saved.profiles.find(item => item.id === destinationId)
       ?? saved.profiles.find(item => this.deps.catalog?.()?.canonical(item.id) === destinationId);
@@ -921,7 +946,8 @@ export class PrinterSetup {
   }
 
   /** `printers.remove`: a printer added in Counterpart, between prints. Its folder goes only if Counterpart made it. */
-  async remove(destinationId: string): Promise<{removed: true}> {
+  remove(destinationId: string): Promise<{removed: true}> { return this.#tracked(() => this.#remove(destinationId)); }
+  async #remove(destinationId: string): Promise<{removed: true}> {
     const saved = await readProfiles(this.#profilesPath);
     if (!saved.profiles.some(item => item.id === destinationId)) throw new PrinterSetupError('not-found', 'Only printers added in Counterpart can be removed here.');
     const listed = this.deps.catalog?.()?.canonical(destinationId) ?? destinationId;
@@ -931,7 +957,8 @@ export class PrinterSetup {
   }
 
   /** `printers.chooseMcp`: which MCP a printer reachable through both uses. Counterpart's own preference, kept with its list. */
-  async chooseMcp(destinationId: string, backend: PrinterBackend): Promise<{destinationId: string}> {
+  chooseMcp(destinationId: string, backend: PrinterBackend): Promise<{destinationId: string}> { return this.#tracked(() => this.#chooseMcp(destinationId, backend)); }
+  async #chooseMcp(destinationId: string, backend: PrinterBackend): Promise<{destinationId: string}> {
     const catalog = this.deps.catalog?.();
     const listed = catalog?.canonical(destinationId);
     const destination = catalog?.destinations.find(item => item.id === listed);

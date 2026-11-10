@@ -142,7 +142,10 @@ struct MacSettingsSections: View {
 
     var body: some View {
         printers
-        Section("Printer software") { MCPCopiesView(store: model.store) }
+        Section("Printer software") {
+            autoUpdateSwitch
+            MCPCopiesView(store: model.store)
+        }
         // PRD §8.9: the printer MCP's code design engine; hidden when the computer's companion predates it.
         CodeEngineSettingsSection { action in try await model.store.mac.client.codeEngine(action) }
         if model.store.macCapabilities.contains("blenderAddon") {
@@ -156,6 +159,24 @@ struct MacSettingsSections: View {
         }
         if let problem = model.problem {
             Section { Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.subheadline) }
+        }
+    }
+
+    // MARK: Printer software
+
+    /// Q9, `general.autoUpdateMcps`: beside the MCP copies and their Update buttons, as on the Mac (Settings → Printers),
+    /// Linux (Printer tools) and Android (Printers). Only when the Mac sends it; an older companion has no automatic updates.
+    @ViewBuilder private var autoUpdateSwitch: some View {
+        let item = SettingsSchema.autoUpdateMcps
+        if let on = model.settings?.general?.autoUpdateMcps {
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(item.label, isOn: Binding(get: { on },
+                    set: { value in Task { await model.change(item.key, SettingsPatch.general(item.key, value)) } }))
+                    .accessibilityIdentifier("auto-update-mcps")
+                    .disabled(model.working != nil)
+                Text(item.footer).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("auto-update-mcps-words")
+            }
         }
     }
 

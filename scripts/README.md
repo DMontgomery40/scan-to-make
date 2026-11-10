@@ -116,3 +116,14 @@ When two active branches conflict, the one that lands first passes `--lands-firs
 `--merge` also runs `scripts/boundary_check.py` (PRD §8.0). It sends each added chunk of app code (not tests, docs or fixtures) to the configured Jev checker with one question: does it put printer, slicer, firmware, filament-system, Blender or Fusion knowledge into the app? A flagged chunk, or a checker that can't answer, makes the gate NOT SAFE. Move that code to the MCPs, or pass `--boundary-reviewed "<why it belongs in the app>"`, which is printed with the result. Jev's answer is a review signal, not proof. It uses David's Jev provider chain: TypeSafe, then Jev through OpenRouter when TypeSafe answers 401/402/403. Keys come from `TYPESAFE_API_KEY`/`OPENROUTER_API_KEY`, `~/.config/jev/env` or `~/.env`. The 0.3 threshold was calibrated on 14 real hunks; the calibration is noted in the script. The MCP names app code uses are pinned separately by `services/companion/tests/mcp-contract.test.mjs` against `docs/protocols/mcp-contract.md`.
 
 It uses git's real three-way merge, so squash-merged work counts as merged. If it says NOT SAFE: rebase on main, or agree the merge order with the other branch's owner (the later one rebases), re-run the tests at the new head (`stm-ci` / `ci_local.py`), push, and check again. Delete a branch or worktree only after GitHub shows the PR as merged.
+
+## Looking at the app: `ux_screens.py`
+
+```
+python3 scripts/ux_screens.py ~/scan-to-make-work/ux-<date>/screens --work ~/scan-to-make-work/ux-<date>/work
+python3 scripts/ux_screens.py <out> --work <scratch> --devices iphone --screens home,project-wall-holder
+python3 scripts/ux_screens.py <out> --work <scratch> --prepare-only   # copy, start and check the companion; no simulator
+python3 scripts/ux_screens.py <out> --work <scratch> --devices ipad --project 30a2a33c-75f9-4519-aaeb-f53affeffb61
+```
+
+Screenshots of every iPhone and iPad screen, on every Apple layout, filled with a copy of this Mac's real projects, and an `index.md` listing each image's screen, state, device and data source. How it isolates the copy and what it fakes: [`../docs/operations.md`](../docs/operations.md), "Looking at the app". Each simulator run takes the whole lane by re-running itself through `lane.py --exclusive`, capped by `--max-minutes`, and resumes where the last hold stopped. `scripts/ux_screens/companion.mjs` is the companion it starts. The app reads three Debug-only launch arguments for it: `-CounterpartPairingRecord`, `-CounterpartOpen` with `-CounterpartSection`, and `-CounterpartNewScan`. Not covered yet: the Mac app, Android, Linux.
