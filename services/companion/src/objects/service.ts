@@ -2551,7 +2551,10 @@ export class ObjectService {
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
     const first: PassStage = {id: plan[0]!, words: passWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
+    // A question is open until it is answered or the pass that asked it is superseded: once another pass starts,
+    // nobody can answer the old one, and a project that then finishes must not keep it "open".
     const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined, pendingMessageId: undefined,
+      ...(o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
       // A locate pass changes nothing: Marked Done stays marked, and what it clears for the run comes back at its end.
       ...(o.completion && !opts.locate ? {completion: {...o.completion, undone: true}} : {}),
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
