@@ -1439,9 +1439,15 @@ export class ObjectService {
   }
 
   /** Asks for changes; `photos` are files on this Mac added first (the Mac app's drop target). */
-  correct(id: string, note: string, photos: string[] = [], photoNames?: string[]): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note, photos, photoNames)); }
-  async #correct(id: string, note: string, photos: string[], photoNames?: string[]): Promise<StmObject> {
+  /** `messageId` is the client's own id for this note: asking again with it never records the note twice. */
+  correct(id: string, note: string, photos: string[] = [], photoNames?: string[], messageId?: string): Promise<StmObject> { return this.#gate(id, () => this.#correct(id, note, photos, photoNames, messageId)); }
+  async #correct(id: string, note: string, photos: string[], photoNames?: string[], messageId?: string): Promise<StmObject> {
     let object = await this.get(id);
+    // The same note arriving again (its first reply was lost, or the client queued it and sent it when the step
+    // ended): it is already recorded and its pass has started or ended. Answer with the project as it is. A message
+    // still held for a retry (its intent couldn't be checked) is not that: it goes on below.
+    const recorded = messageId ? object.messages?.find(message => message.clientId === messageId) : undefined;
+    if (recorded && recorded.id !== object.pendingMessageId) return object;
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!object.current && object.state !== 'failed') throw new InvalidStateError('There is no model to correct yet.');
     const imported: string[] = [];
@@ -1453,7 +1459,7 @@ export class ObjectService {
     const held = object.messages?.find(message => message.id === object.pendingMessageId && message.text === note.trim());
     // A retry owns its original evidence; later uploads belong to the next message unless explicitly selected.
     const attached = [...new Set([...(photoNames ?? held?.photos ?? object.pendingPhotos ?? []), ...imported])];
-    object = await this.#message(object, note.trim(), attached);
+    object = await this.#message(object, note.trim(), attached, true, messageId);
     const message = object.messages!.find(item => item.id === object.pendingMessageId)!;
     // Photos can document a successful print too. They must not force a mesh-changing pass.
     if (object.current && !object.question && object.ask?.status !== 'open' && this.#deps.reportsCompletion) {
@@ -1483,12 +1489,12 @@ export class ObjectService {
   }
 
   /** Record only known attachment ownership. Retry of a held message keeps its identity and timestamp. */
-  async #message(object: StmObject, text: string, photos: string[], reusePending = true): Promise<StmObject> {
+  async #message(object: StmObject, text: string, photos: string[], reusePending = true, clientId?: string): Promise<StmObject> {
     if (photos.some(name => !object.photos.includes(name))) throw new InvalidFileError('That photo is not in this project.');
     return this.#deps.store.update(object.id, o => {
       const previous = reusePending ? o.messages?.find(item => item.id === o.pendingMessageId && item.text === text) : undefined;
-      const message = previous ? {...previous, photos: [...new Set([...previous.photos, ...photos])]}
-        : {id: randomUUID(), text, photos, atMs: Date.now()};
+      const message = previous ? {...previous, photos: [...new Set([...previous.photos, ...photos])], ...(clientId && !previous.clientId ? {clientId} : {})}
+        : {id: randomUUID(), text, photos, atMs: Date.now(), ...(clientId ? {clientId} : {})};
       return {...o, messages: [...(o.messages ?? []).filter(item => item.id !== message.id), message],
         pendingFollowup: text, pendingMessageId: message.id,
         pendingPhotos: (o.pendingPhotos ?? []).filter(name => !photos.includes(name))};

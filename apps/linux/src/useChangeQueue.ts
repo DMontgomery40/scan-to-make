@@ -76,6 +76,9 @@ export function useChangeQueue(
           id: item.projectId,
           note: item.note,
           photoNames: item.photos,
+          // The queued change's own id: the companion records a note once per id, so a retry after an uncertain
+          // send cannot become a second message.
+          messageId: item.id,
         });
         await save((q) => q.filter((x) => x.id !== item.id));
       } catch (e) {

@@ -113,6 +113,15 @@ private actor FakeObjects: ObjectsCompanion {
         correctionPhotoNames.append(photoNames)
         return try change(id, "correct:\(note)", ["state": "touching-up"])
     }
+    private(set) var messageIds: [String] = []
+    private var correctionFailures: [Error] = []
+    func failNextCorrections(_ errors: [Error]) { correctionFailures = errors }
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]?, messageId: String) async throws -> Project {
+        messageIds.append(messageId)
+        correctionPhotoNames.append(photoNames)
+        if !correctionFailures.isEmpty { calls.append("correct:\(note)"); throw correctionFailures.removeFirst() }
+        return try change(id, "correct:\(note)", ["state": "touching-up"])
+    }
     func addPhotoFile(_ id: String, path: String, forMessage: Bool) async throws -> String {
         messageUploadFlags.append(forMessage)
         // The initial worker fails while this queued upload is in flight; another message's photo also arrives.
@@ -527,6 +536,57 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.objects.first?.state, .touchingUp)
         let after = await companion.calls
         XCTAssertEqual(after.filter { $0 == "correct:Widen the flange" }.count, 1)
+    }
+
+    // Nov 10, "Guitar pick": the reply to a send was lost, the words were sent again, and the project got the note
+    // twice and a design pass for each.
+    func testEveryTryAtOneNoteCarriesTheSameIdIncludingTheQueuedOne() async throws {
+        let suite = "counterpart-note-once-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let companion = FakeObjects()
+        await companion.set([item("hook", "ready")])
+        await companion.setCapabilities(.init(messagePhotos: true, messageIds: true))
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        // The first try's reply never arrives; the second finds a step running, so the note is saved for later.
+        await companion.failNextCorrections([ControlClientError.unavailable,
+            ControlRemoteError(code: "conflict", message: "Wait until the current step finishes.")])
+        let lost = await model.perform(.correct, on: "hook", note: "Thicker walls")
+        XCTAssertFalse(lost)
+        let saved = await model.perform(.correct, on: "hook", note: "Thicker walls")
+        XCTAssertTrue(saved)
+        // The saved note goes out at the next look at the project, as it does when its step ends.
+        await model.refresh()
+        for _ in 0..<200 where await companion.messageIds.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+        let ids = await companion.messageIds
+        XCTAssertEqual(ids.count, 3, "the lost try, the refused try and the saved note's own send")
+        XCTAssertEqual(Set(ids).count, 1, "one note, one id")
+        // The same words written again after that are a new note.
+        await companion.set([item("hook", "ready")])
+        await model.refresh()
+        let again = await model.perform(.correct, on: "hook", note: "Thicker walls")
+        XCTAssertTrue(again)
+        let later = await companion.messageIds
+        XCTAssertEqual(later.count, 4)
+        XCTAssertNotEqual(later[3], ids[0])
+    }
+
+    func testACompanionFromBeforeNoteIdsIsSentWhatItAlwaysWas() async throws {
+        let suite = "counterpart-note-old-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let companion = FakeObjects()
+        await companion.set([item("hook", "ready")])
+        await companion.setCapabilities(.init(messagePhotos: true))
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        let sent = await model.perform(.correct, on: "hook", note: "A chamfer")
+        XCTAssertTrue(sent)
+        let ids = await companion.messageIds
+        XCTAssertEqual(ids, [])
+        let calls = await companion.calls
+        XCTAssertEqual(calls.filter { $0 == "correct:A chamfer" }.count, 1)
     }
 
     func testRetryOfASavedMessageDoesNotSelectLaterUploadedPhotos() async throws {

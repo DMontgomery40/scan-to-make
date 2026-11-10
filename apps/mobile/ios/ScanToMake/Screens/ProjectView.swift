@@ -21,6 +21,7 @@ struct ProjectView: View {
     var openPrinting: (String) -> Void = { _ in }
     @State private var section = ProjectSection.result
     @State private var note = ""
+    @State private var attempts = NoteAttempts()
     @State private var showingSettings = false
     @State private var choosingModelFiles = false
     @State private var renaming = false
@@ -789,20 +790,25 @@ struct ProjectView: View {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         writing = false
+        // One id for this note across every try, so the Mac never records it twice.
+        let messageId = attempts.id(for: text, in: object.id)
         if object.changesWait {
             // The Mac takes changes between passes; this one is sent the moment the pass ends.
-            store.queue(note: text, for: object.id)
+            store.queue(note: text, for: object.id, messageId: messageId)
+            attempts.settled(object.id)
             note = ""
             return
         }
         act {
             do {
-                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object))
+                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object), messageId: messageId)
                 store.corrections.sent(text, for: object.id)
+                attempts.settled(object.id)
                 note = ""; section = .activity
                 return next
             } catch let failure as CompanionError where CorrectionQueue.waits(failure) {
-                store.queue(note: text, for: object.id)
+                store.queue(note: text, for: object.id, messageId: messageId)
+                attempts.settled(object.id)
                 note = ""
                 return nil
             }

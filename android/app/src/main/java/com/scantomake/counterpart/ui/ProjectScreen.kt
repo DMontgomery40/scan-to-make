@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import com.scantomake.counterpart.api.AskSizesForm
 import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.Format
+import com.scantomake.counterpart.api.NoteAttempt
 import com.scantomake.counterpart.api.PrintConfirmation
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectAction
@@ -97,6 +98,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
     var pendingCamera by remember { mutableStateOf<File?>(null) }
     var forAsk by remember { mutableStateOf(true) }
     val messagePhotos = remember { mutableStateOf(listOf<File>()) }
+    var noteAttempt by remember { mutableStateOf<NoteAttempt?>(null) }
 
     LaunchedEffect(id) { if (state.reload(id)?.code == "not-found") back() }
 
@@ -283,9 +285,10 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 }
                 PrimaryButton("Send Changes", Modifier.fillMaxWidth(), enabled = note.isNotBlank() && working == null, icon = CIcons.Send) {
                     run("correct") {
+                        val attempt = NoteAttempt.of(noteAttempt, note.trim()).also { noteAttempt = it }
                         val names = Media.sendPhotos(app.uploader, id, messagePhotos.value, forMessage = true)
-                        state.show(app.companion.correct(id, note.trim(), names.ifEmpty { null }))
-                        note = ""; messagePhotos.value = emptyList()
+                        state.show(app.companion.correct(id, note.trim(), names.ifEmpty { null }, attempt.id))
+                        noteAttempt = null; note = ""; messagePhotos.value = emptyList()
                     }
                 }
             } }

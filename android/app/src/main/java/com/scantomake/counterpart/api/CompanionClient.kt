@@ -235,8 +235,9 @@ class CompanionClient(
     suspend fun start(id: String, captureManifest: JsonObject? = null): Project =
         one(request("POST", "/v1/objects/$id/start", if (captureManifest != null) jsonOf("captureManifest" to captureManifest) else JsonObject(emptyMap())))
     /** Ask for changes: a new pass with your text. Upload new photos first. */
-    suspend fun correct(id: String, note: String, photoNames: List<String>? = null): Project =
-        one(request("POST", "/v1/objects/$id/corrections", jsonOf("note" to note, "photoNames" to photoNames)))
+    /** [messageId] is this note's own id ([NoteAttempt]): the Mac records a note once per id. */
+    suspend fun correct(id: String, note: String, photoNames: List<String>? = null, messageId: String? = null): Project =
+        one(request("POST", "/v1/objects/$id/corrections", jsonOf("note" to note, "photoNames" to photoNames, "messageId" to messageId)))
     /** Answers the open Ask with uploaded photos, a best guess, or words. */
     /** `sizes`: a size question's numbers (`AskSizesForm.answer`), which may go with words and photos. */
     suspend fun answerAsk(id: String, bestGuess: Boolean = false, text: String? = null, photoNames: List<String> = emptyList(), sizes: List<AskSizesForm.Answer> = emptyList()): Project {
