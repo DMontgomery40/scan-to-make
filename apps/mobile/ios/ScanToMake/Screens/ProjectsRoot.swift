@@ -318,7 +318,10 @@ struct SidebarRow: View {
         HStack(spacing: 12) {
             ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 160).frame(width: 44, height: 44).clipShape(.rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 2) {
-                Text(words.title).font(.body.weight(.semibold)).lineLimit(1)
+                // A project's name is how a person finds it: it wraps before it is ever cut (David's iPad, Nov 10:
+                // "Scan from Nov 9, 12:24…" and "…12:15…", cut exactly where they differ). Rows may grow taller.
+                Text(words.title).font(.body.weight(.semibold)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("sidebar-title-\(project.id)")
                 // A scan still on this phone, as on Home's card.
                 // Under its section's heading the row shows only what differs, on two lines so it isn't cut off
                 // where the meaning is (David's iPad, Nov 10).
