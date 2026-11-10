@@ -86,6 +86,110 @@ import CounterpartKit
         XCTAssertEqual(PrintActivityThumbnails(folder: folder).artwork(for: project.id), .mark)
     }
 
+    /// Nov 10, the Wall holder: its 15 MB scan took four minutes to reach David's phone and the stage stayed empty. The
+    /// download belongs to the store: the page leaving doesn't stop it, coming back doesn't start a second one, and it
+    /// lands for whoever looks next.
+    func testAModelDownloadOutlivesThePageThatAskedAndRunsOnce() async throws {
+        let gate = DownloadGate()
+        let files = ModelFiles { _, _ in try await gate.wait() }
+        let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready, scan: "scan.usdz")
+        let page = Task { @MainActor in files.want(project, "scan/phone-preview.usdz") }
+        await page.value
+        page.cancel() // the page closes
+        XCTAssertEqual(files.fetch(project, "scan/phone-preview.usdz"), .loading)
+        files.want(project, "scan/phone-preview.usdz") // and opens again while it comes
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("usdz".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        await gate.open(file)
+        let landed = await until(patience) { await MainActor.run { files.file(project, "scan/phone-preview.usdz") != nil } }
+        XCTAssertTrue(landed, "it lands with nobody waiting for it")
+        files.want(project, "scan/phone-preview.usdz")
+        let calls = await gate.calls
+        XCTAssertEqual(calls, 1, "one download, however often the page asks")
+    }
+
+    /// A dropped link tries again by itself; a download that still fails says so and Try Again starts it over; a file
+    /// too large for the phone is not asked for again.
+    func testADroppedLinkTriesAgainAndAFailureOffersTryAgain() async {
+        let counter = Counter()
+        let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready, scan: "scan.usdz")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("model-\(UUID().uuidString).stl")
+        let files = ModelFiles { _, path in
+            let n = await counter.next()
+            if path == "scan/scan.usdz" { throw CompanionError(code: "file-too-large", message: "This file is too large for this phone.") }
+            if n <= 3 { throw CompanionError(code: "network", message: "Your Mac stopped answering.") }
+            return file
+        }
+        files.pauses = [Duration.zero, Duration.zero]
+        files.want(project, "model.stl")
+        let failed = await until(patience) { await MainActor.run { files.fetch(project, "model.stl") == .failed } }
+        XCTAssertTrue(failed, "three tries, then it says so")
+        let tries = await counter.value
+        XCTAssertEqual(tries, 3)
+        files.retry(project, "model.stl")
+        let ready = await until(patience) { await MainActor.run { files.file(project, "model.stl") == file } }
+        XCTAssertTrue(ready, "Try Again starts it over")
+        files.want(project, "scan/scan.usdz")
+        let large = await until(patience) { await MainActor.run { files.fetch(project, "scan/scan.usdz") == .tooLarge } }
+        XCTAssertTrue(large)
+        files.want(project, "scan/scan.usdz"); files.retry(project, "scan/scan.usdz")
+        let after = await counter.value
+        XCTAssertEqual(after, 5, "a refusal for size is final: one ask")
+    }
+
+    func testForegroundAndLinkRecoveryRetryDemandAndLateOldResultCannotPublish() async throws {
+        let gate = HeldDownload(), counter = Counter()
+        let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        let old = FileManager.default.temporaryDirectory.appendingPathComponent("old-model.stl")
+        let current = FileManager.default.temporaryDirectory.appendingPathComponent("new-model.stl")
+        let files = ModelFiles { _, _ in
+            let call = await counter.next()
+            if call == 1 { return await gate.wait() }
+            if call == 2 { throw CompanionError(code: "device-locked", message: "Unlock your iPhone.") }
+            return current
+        }
+        files.pauses = []
+        files.want(project, "model.stl")
+        let started = await until(patience) { await counter.value == 1 }
+        XCTAssertTrue(started)
+        files.setActive(false)
+        XCTAssertEqual(files.fetch(project, "model.stl"), .failed)
+        files.setActive(true)
+        let locked = await until(patience) { await MainActor.run { files.fetch(project, "model.stl") == .failed } }
+        XCTAssertTrue(locked)
+        files.recover() // link restored / protected data became available
+        let ready = await until(patience) { await MainActor.run { files.file(project, "model.stl") == current } }
+        XCTAssertTrue(ready)
+        await gate.open(old)
+        await Task.yield()
+        XCTAssertEqual(files.file(project, "model.stl"), current, "The abandoned generation cannot overwrite a recovered file")
+    }
+
+    /// Review F5 on #525: this phone's own limit met mid-transfer is a size refusal like the Mac's, said as one, not
+    /// retried three times and shown as "not here yet".
+    func testAFileOverThePhonesLimitIsTooLargeNotFailed() async {
+        let counter = Counter()
+        let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready, scan: "scan.usdz")
+        let files = ModelFiles { _, _ in _ = await counter.next(); throw CompanionError(code: "too-large", message: "Too large.") }
+        files.pauses = [Duration.zero, Duration.zero]
+        files.want(project, "scan/scan.usdz")
+        let large = await until(patience) { await MainActor.run { files.fetch(project, "scan/scan.usdz") == .tooLarge } }
+        XCTAssertTrue(large)
+        let asked = await counter.value
+        XCTAssertEqual(asked, 1)
+    }
+
+    /// Review F4 on #525: while the stage's picture loads it shows the project's list picture when this phone has it.
+    func testTheStageFindsTheListsPictureAtAnySize() {
+        let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        XCTAssertNil(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png"))
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4)) }
+        ImageMemory.shared.store(image, "p#\(Int64(project.mediaVersion))#pictures/part-0123456789abcdef.png#300")
+        XCTAssertTrue(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png") === image)
+        XCTAssertNil(ImageMemory.shared.anySize(project, nil))
+    }
+
     func testAnEstimateShowsOnlyForItsOwnSettings() throws {
         var state = EstimateState()
         let estimate = try JSONDecoder().decode(SliceEstimate.self, from: Data(#"{"destinationId":"current","quality":"standard","strength":"standard","seconds":4320,"grams":22,"layers":212}"#.utf8))
@@ -505,4 +609,31 @@ private final class RefusingMac: HTTPTransport, @unchecked Sendable {
         let body: [String: Any] = ["error": ["code": code, "message": "Refused."]]
         return HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: body)) ?? Data())
     }
+}
+
+/// A download that waits until the test lets it finish, counting how often it was asked.
+private actor DownloadGate {
+    private(set) var calls = 0
+    private var opened: URL?
+    func wait() async throws -> URL {
+        calls += 1
+        let end = ContinuousClock.now.advanced(by: .seconds(patience))
+        while opened == nil, ContinuousClock.now < end { try await Task.sleep(for: .milliseconds(10)) }
+        guard let opened else { throw CompanionError(code: "timeout", message: "Timed out.") }
+        return opened
+    }
+    func open(_ url: URL) { opened = url }
+}
+
+private actor Counter {
+    private(set) var value = 0
+    func next() -> Int { value += 1; return value }
+}
+
+
+/// Ignores task cancellation so an old transfer can deliberately finish after recovery.
+private actor HeldDownload {
+    private var continuation: CheckedContinuation<URL, Never>?
+    func wait() async -> URL { await withCheckedContinuation { continuation = $0 } }
+    func open(_ url: URL) { continuation?.resume(returning: url); continuation = nil }
 }

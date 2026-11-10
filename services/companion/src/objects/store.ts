@@ -134,12 +134,21 @@ export interface StmObject {
    */
   picture?: string;
   pictures?: import('./pictures.js').ProjectPictureNames;
+  /** Each gallery picture with no current drawing: `drawing` or `failed` (review B2 on #539). */
+  pictureStates?: import('./pictures.js').ProjectPictureStates;
   /**
    * Where `scan` came from when the phone sent an Object Capture session's photos with it: `phone-preview` is the
    * phone's own quick model, kept until this Mac rebuilds from the photos (and kept as the scan, said in words, when
    * it can't); `mac` is that rebuild, with the phone's preview kept as scan/phone-preview.usdz.
    */
   scanSource?: 'phone-preview' | 'mac';
+  /**
+   * The scan files a client may fetch, with their sizes, kept by the companion as it reads the project (PRD §5.4): the
+   * scan itself, and the phone's own model (`phone-preview.usdz`) kept beside a Mac rebuild. A phone draws what it can
+   * take (its own model for What you scanned; the scan, whose frame the seats are in, for Together) and never asks
+   * for a file over its limit (Nov 10: a 192 MB rebuild was refused and the page stayed blank).
+   */
+  scanFiles?: {name: string; bytes: number}[];
   /** File names under photos/, in upload order. */
   photos: string[];
   /**

@@ -104,8 +104,10 @@ extension Project {
         guard let current else { return [] }
         let label = usesCopyWorkflow ? "Your copy" : kind == "published" ? "Model" : "Your part"
         if preservesPublishedFilaments {
-            // A 3MF's parts and colours are in the file, which only the printer MCP reads: its picture stands for it.
-            guard let render = current.renders.first.map(Self.renderPath) ?? plates?.first?.thumbnail else { return [] }
+            // A 3MF's parts and colours are in the file, which only the printer MCP reads: a picture stands for it, the
+            // Mac's drawing of all its objects first (Nov 10: a 3MF with four objects had none and couldn't be told apart).
+            // Always an entry (review B2 on #539): with no picture yet ("") the stage says it is coming or that it can't be had.
+            let render = pictures?["part"] ?? current.renders.first.map(Self.renderPath) ?? plates?.first?.thumbnail ?? ""
             return [PrintablePart(id: "result", label: label, drawing: .picture(render), colour: .own, sizeMm: current.sizeMm)]
         }
         return [PrintablePart(id: "result", label: label, drawing: .model("model.stl"), colour: spoolColour.map { .spool($0) } ?? .neutral, sizeMm: current.sizeMm)]
@@ -164,18 +166,70 @@ extension Project {
             && (current?.seats ?? []).isEmpty && state != .printing && state != .touchingUp
     }
 
+    /// What a stage fetches to draw a scan (PRD §5.4). Nov 10: every "What you scanned" on David's phone was blank; one
+    /// rebuild was 192 MB, the Mac refused it, and the stage had nothing else to draw.
+    public enum ScanModel: Equatable, Sendable {
+        /// A file this device may fetch: `scan/<name>`.
+        case file(String)
+        /// Every file of this scan is larger than this device takes: its picture stays, and says so.
+        case tooLarge
+        /// No scan model to fetch.
+        case none
+    }
+
+    /// The scan model a stage draws, never a file over `limit` (the bytes this device downloads). What you scanned draws
+    /// the phone's own model when a Mac rebuild sits beside it: made to be shown on a phone, a few MB where the rebuild
+    /// can be hundreds. Together draws the scan itself, the frame its seats are in (docs/protocols/seats.md); the two
+    /// models' frames differ. A Mac that doesn't list its scan files is asked for the scan as before; a refusal leaves
+    /// the picture.
+    public func scanModel(together: Bool = false, limit: Double) -> ScanModel {
+        guard let scan, ["usdz", "usdc", "usda", "stl"].contains((scan as NSString).pathExtension.lowercased()) else { return .none }
+        guard let files = scanFiles else { return .file("scan/\(scan)") }
+        for name in together ? [scan] : ["phone-preview.usdz", scan] {
+            if let file = files.first(where: { $0.name == name }), file.bytes <= limit { return .file("scan/\(name)") }
+        }
+        return files.contains { $0.name == scan } ? .tooLarge : .none
+    }
+
     /// The page's picture when the gallery has nothing yet (photos sent, no scan model or result): the subject the Mac
     /// cut out of the photo, the same picture the project's card shows.
     public var photoPicture: String? { pictures?["photo"] }
 
-    /// The Mac's picture of one gallery entry, for layouts that show pictures rather than a model to turn.
+    /// The Mac's picture of one gallery entry, for layouts that show pictures rather than a model to turn. Nil when there
+    /// is none yet (`still(for:)` says whether one is coming).
     public func picture(for entry: ProjectGallery.Entry) -> String? {
-        switch entry.kind {
-        case .part: if case .picture(let path) = entry.drawing { return path }; return pictures?["part"] ?? current?.renders.first.map(Self.renderPath)
-        case .plate: if case .picture(let path) = entry.drawing { return path }; return nil
-        case .together: return pictures?["together"]
-        case .scan: return pictures?["scan"] ?? pictures?["photo"]
+        let path: String? = switch entry.kind {
+        case .part: if case .picture(let path) = entry.drawing { path } else { pictures?["part"] ?? current?.renders.first.map(Self.renderPath) }
+        case .plate: if case .picture(let path) = entry.drawing { path } else { nil }
+        case .together: pictures?["together"]
+        case .scan: pictures?["scan"] ?? pictures?["photo"]
         }
+        return path?.isEmpty == false ? path : nil
+    }
+
+    /// What the stage shows for an entry while it has no model drawn (PRD §5.4; docs/operations.md "Waiting, failed and
+    /// empty are screens too"): its picture, or that one is coming, or that none can be had. Every layout uses this, so
+    /// no stage is ever a bare backdrop. A picture of something else never stands in for this one.
+    public enum Still: Equatable, Sendable {
+        /// This entry's picture, a project path.
+        case picture(String)
+        /// None yet, and one is coming: the Mac hasn't drawn it (queued, or drawing now).
+        case waiting
+        /// None, and none is coming: the Mac's drawing of it failed, or a designer's plate came without its picture.
+        case notAvailable
+    }
+
+    public func still(for entry: ProjectGallery.Entry) -> Still {
+        if let path = picture(for: entry) { return .picture(path) }
+        let role: String? = switch entry.kind {
+        case .part: "part"
+        case .together: "together"
+        case .scan: "scan"
+        case .plate: nil
+        }
+        // A plate's picture comes from the file or nowhere (the Mac draws the whole file, the project's picture).
+        guard let role else { return .notAvailable }
+        return pictureStates?[role] == "failed" ? .notAvailable : .waiting
     }
 }
 

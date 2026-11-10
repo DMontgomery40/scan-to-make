@@ -862,7 +862,9 @@ final class LayoutParityUITests: XCTestCase {
         photos.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "photo-only",
                                   "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
         photos.launch()
-        XCTAssertTrue(photos.images["gallery-photo-picture"].waitForExistence(timeout: 20), "a photo-only project shows its photo's subject")
+        let subject = photos.images["gallery-stage-picture"]
+        XCTAssertTrue(subject.waitForExistence(timeout: 20), "a photo-only project shows its photo's subject")
+        XCTAssertEqual(subject.label, "Your photo. The picture didn’t come from your Mac.", "this folder has no pictures, and the stage says so")
     }
 
     func testEveryPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() throws {
@@ -1271,6 +1273,120 @@ final class LayoutParityUITests: XCTestCase {
         let picture = app.descendants(matching: .any)["ask-picture"]
         XCTAssertTrue(picture.waitForNonExistence(timeout: 10), "no box once the fetch has failed")
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "The outlined part is what this question is about.")).firstMatch.exists)
+    }
+
+    /// Nov 10: every "What you scanned" on David's phone was blank. With projects present: a scan the Mac lists but can't
+    /// send says so in one line with Try Again; a scan too large for a phone says so. The stage itself is never empty: here
+    /// the Mac's picture can't be had either (an empty folder), so it shows the project's symbol and says that too.
+    func testAScanThatCantBeHadSaysWhyAndTheStageIsNeverEmptyWithProjectsPresent() {
+        if regular { XCUIDevice.shared.orientation = .landscapeLeft }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = launch(set: "scan-stage")
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Bottle copy")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "projects are present")
+        app.terminate()
+        for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "The 3D view isn’t here yet."),
+                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "This scan is too detailed to show in 3D on a phone. Open it on your Mac to see it from every side.")] {
+            let page = XCUIApplication()
+            page.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
+                                    "-CounterpartOpen", "counterpart://project/\(id)"]
+            page.launch()
+            let picture = page.images["gallery-stage-picture"]
+            XCTAssertTrue(picture.waitForExistence(timeout: 20), "What you scanned has its stage picture, not an empty stage")
+            XCTAssertGreaterThan(picture.frame.height, 150, "the picture fills the stage: \(picture.frame)")
+            // No pictures in this folder: the picture can't be had, so the stage draws the project's symbol, not a backdrop.
+            XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "not available"), object: picture)], timeout: 15) == .completed,
+                          "the symbol, not an empty stage: \(String(describing: picture.value))")
+            let said = page.staticTexts[line]
+            XCTAssertTrue(said.waitForExistence(timeout: 15), "one plain line says why: \(line)")
+            if id.hasSuffix("01") { XCTAssertTrue(page.buttons["gallery-model-retry"].exists, "and how to try again") }
+            else { XCTAssertFalse(page.buttons["gallery-model-retry"].exists, "too large: trying again won't change it") }
+            page.terminate()
+        }
+    }
+
+    /// Review F4 on #525: the stage's picture is itself never a bare backdrop. Its accessibility value is "shown" only
+    /// once a picture is decoded, "loading" while it comes (a progress mark, or the list's picture), "not available"
+    /// when it can't be had (the project's symbol). One page in each, with projects present.
+    func testTheStagePictureIsDrawnLoadingOrSaysItIsNotAvailable() throws {
+        if regular { XCUIDevice.shared.orientation = .landscapeLeft }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let assets = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: assets) }
+        try UIGraphicsImageRenderer(size: CGSize(width: 600, height: 600), format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }()).pngData { context in
+            UIColor(red: 0.13, green: 0.14, blue: 0.17, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 600))
+            UIColor(red: 0.85, green: 0.65, blue: 0.4, alpha: 1).setFill(); context.fill(CGRect(x: 150, y: 180, width: 300, height: 240))
+        }.write(to: assets.appendingPathComponent("thumb-potato.png"))
+        for (folder, slow, value) in [(assets.path, nil, "shown"), (assets.path, "60", "loading"), (NSTemporaryDirectory() + "no-assets", nil, "not available")] as [(String, String?, String)] {
+            let page = XCUIApplication()
+            page.launchArguments = ["-CounterpartFixtures", folder, "-CounterpartFixtureSet", "scan-stage",
+                                    "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+            if let slow { page.launchArguments += ["-CounterpartSlowPictures", slow] }
+            page.launch()
+            let picture = page.images["gallery-stage-picture"]
+            XCTAssertTrue(picture.waitForExistence(timeout: 20))
+            let state = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: picture)
+            XCTAssertEqual(XCTWaiter().wait(for: [state], timeout: 15), .completed, "\(value): \(String(describing: picture.value))")
+            page.terminate()
+        }
+    }
+
+    /// Review B1/B2 on #539: a 3MF's stage is a picture (`.picture`), and it was a bare backdrop while that picture came.
+    /// With projects present, one page in each state: shown; loading (a slow Mac: a progress mark and what is coming);
+    /// not available after a failed fetch (with Try Again); waiting while the Mac draws it; not available when the Mac
+    /// couldn't draw it (no Try Again: it would not help). The stage is never only the backdrop.
+    func testAPictureStageIsShownLoadingWaitingOrSaysItIsNotAvailable() throws {
+        if regular { XCUIDevice.shared.orientation = .landscapeLeft }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let assets = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: assets) }
+        try UIGraphicsImageRenderer(size: CGSize(width: 600, height: 600), format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }()).pngData { context in
+            UIColor(red: 0.13, green: 0.14, blue: 0.17, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 600))
+            UIColor(red: 0.85, green: 0.65, blue: 0.4, alpha: 1).setFill(); context.fill(CGRect(x: 150, y: 180, width: 300, height: 240))
+        }.write(to: assets.appendingPathComponent("thumb-potato.png"))
+        let none = NSTemporaryDirectory() + "no-assets"
+        let shown = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", drawing = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", failed = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a06"
+        let pages: [(name: String, folder: String, slow: String?, id: String, value: String, label: String, retry: Bool)] = [
+            ("shown", assets.path, nil, shown, "shown", "Model, as your Mac drew it", false),
+            ("loading", assets.path, "60", shown, "loading", "Model: coming from your Mac", false),
+            ("fetch-failed", none, nil, shown, "not available", "Model. The picture didn’t come from your Mac.", true),
+            ("drawing", assets.path, nil, drawing, "loading", "Model: coming from your Mac", false),
+            ("not-drawable", assets.path, nil, failed, "not available", "Model. Your Mac couldn’t draw a picture of this.", false),
+        ]
+        for page in pages {
+            let app = XCUIApplication()
+            app.launchArguments = ["-CounterpartFixtures", page.folder, "-CounterpartFixtureSet", "picture-stage", "-CounterpartOpen", "counterpart://project/\(page.id)"]
+            if let slow = page.slow { app.launchArguments += ["-CounterpartSlowPictures", slow] }
+            app.launch()
+            let picture = app.images["gallery-stage-picture"]
+            XCTAssertTrue(picture.waitForExistence(timeout: 20), "\(page.name): the stage has its picture element")
+            let state = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@ AND label == %@", page.value, page.label), object: picture)
+            XCTAssertEqual(XCTWaiter().wait(for: [state], timeout: 15), .completed, "\(page.name): \(picture.label) / \(String(describing: picture.value))")
+            // What is drawn, not only what is said: a bare stage is all dark (its gradient stays near #22-#30); the
+            // picture, the line, the progress mark and the symbol are bright.
+            let bright = Self.brightPixels(picture.screenshot().image)
+            XCTAssertGreaterThan(bright, 300, "\(page.name): something is drawn on the stage, not only its backdrop (\(bright) bright pixels)")
+            XCTAssertEqual(app.buttons["gallery-stage-retry"].exists, page.retry, "\(page.name): Try Again only where it can help")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "picture-stage-\(page.name)-\(regular ? "ipad" : "iphone")"; shot.lifetime = .keepAlways; add(shot)
+            if let folder = ProcessInfo.processInfo.environment["STAGE_SHOTS"] {
+                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: folder).appendingPathComponent("\(shot.name!).png"))
+            }
+            app.terminate()
+        }
+    }
+
+    /// Pixels with any channel above half: what a picture, a line or a symbol puts on the dark stage.
+    static func brightPixels(_ image: UIImage) -> Int {
+        guard let cg = image.cgImage else { return 0 }
+        let width = cg.width, height = cg.height
+        var data = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &data, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 0 }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return stride(from: 0, to: data.count, by: 4).reduce(0) { $0 + (max(data[$1], data[$1 + 1], data[$1 + 2]) > 128 ? 1 : 0) }
     }
 
     /// A question that came without a picture shows the project's picture at the same size, and says so.

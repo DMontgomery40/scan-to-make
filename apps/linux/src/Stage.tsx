@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { artifact } from "./bridge";
 import type { Project } from "./types";
-import { canLocate, filePath, gallery, lightStage, photoPicture, pictureFor, sizeText } from "./gallery";
+import { canLocate, filePath, gallery, lightStage, photoPicture, still, sizeText, type Still } from "./gallery";
 export function Picture({
   id,
   path,
   alt,
   className = "",
   onFailed,
+  loadingText = "Loading preview…",
 }: {
   id: string;
   path?: string;
@@ -15,6 +16,8 @@ export function Picture({
   className?: string;
   /** Called when the picture can't be fetched or decoded, so a caller can hide what it framed (review F2 on #456). */
   onFailed?: () => void;
+  /** What the placeholder says while the picture comes. */
+  loadingText?: string;
 }) {
   const [src, setSrc] = useState<string>();
   const [failed, setFailed] = useState(false);
@@ -65,7 +68,7 @@ export function Picture({
     />
   ) : (
     <div className={`picture-placeholder ${className}`} aria-label={alt}>
-      {failed ? "Preview unavailable" : path ? "Loading preview…" : "◇"}
+      {failed ? "Preview unavailable" : path ? loadingText : "◇"}
     </div>
   );
 }
@@ -255,6 +258,35 @@ export function ModelStage({ bytes, tint }: { bytes: Uint8Array; tint?: string }
   );
 }
 /**
+ * The one still picture on a project's stage (review B1/S7 on #539, CounterpartKit `Project.still(for:)`): every still
+ * goes through it, and it is never a bare mark. Shown: the picture. Waiting: what is coming, in one line. Not available:
+ * a symbol and one line saying so, with Try again where it can help (a fetch that failed). Never a picture of something else.
+ */
+export function StagePicture({ project, still: shown, label, unavailableLine }: { project: Project; still: Still; label: string; unavailableLine: string }) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const path = typeof shown === "object" ? shown.picture : undefined;
+  useEffect(() => setFailed(false), [project.id, path]);
+  const coming = `${label}: coming from your computer`;
+  if (path && !failed)
+    return (
+      <Picture key={`${path}#${attempt}`} id={project.id} path={path} alt={`${label}, as your computer drew it`} className="hero-picture"
+        loadingText={coming} onFailed={() => setFailed(true)} />
+    );
+  const line = path ? "The picture didn't come from your computer." : shown === "waiting" ? coming : unavailableLine;
+  const state = shown === "waiting" ? "loading" : "not available";
+  return (
+    <div className="picture-placeholder hero-picture stage-still" role="img" aria-label={`${label}. ${line}`} data-state={state}>
+      <span aria-hidden="true">{shown === "waiting" ? "…" : "◇"}</span>
+      <p>{line}</p>
+      {path && (
+        <button onClick={() => { setFailed(false); setAttempt((n) => n + 1); }}>Try again</button>
+      )}
+    </div>
+  );
+}
+
+/**
  * The project's pictures (PRD §5.4): each entry of its gallery (what will print in its spool, the two together, what
  * was scanned, a designer's plates), one at a time, chosen by a row of labels under the stage; none for one entry.
  * The part turns in 3D in its spool; the others show the pictures the computer drew of them.
@@ -270,11 +302,16 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
   const model = project.current?.model;
   const renders = project.current?.renders ?? [];
   const turnable = entry?.kind === "part" && "model" in entry.drawing && !!model;
-  const drawn = entry ? pictureFor(project, entry) : undefined;
   // The pass's own views stay one click away on the part while the computer hasn't drawn its picture.
   const showRenders = entry?.kind === "part" && !project.pictures?.part && renders.length > 1;
-  // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card.
-  const path = showRenders ? renders[renderIndex] ?? renders[0] : drawn ? filePath(project, drawn) : project.credit?.thumbnail ?? photoPicture(project);
+  // With nothing in the gallery yet (photos sent, no model): the subject the computer cut out, as on its card; a
+  // published model's own page picture before its file is here. Otherwise the stage says it is coming or that it can't.
+  const first = photoPicture(project) ?? project.credit?.thumbnail;
+  const shown: Still = showRenders
+    ? { picture: renders[renderIndex] ?? renders[0]! }
+    : entry
+      ? (() => { const s = still(project, entry); return typeof s === "object" ? { picture: filePath(project, s.picture) } : s; })()
+      : first ? { picture: first } : project.state === "new" || project.state === "touching-up" ? "waiting" : "not available";
   useEffect(() => {
     setMode("still");
     setBytes(undefined);
@@ -309,7 +346,8 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
           <p>{error || "Opening model…"}</p>
         )
       ) : (
-        <Picture id={project.id} path={path} alt={`${entry?.label ?? project.title} picture`} className="hero-picture" />
+        <StagePicture project={project} still={shown} label={entry?.label ?? (first ? "Your photo" : project.title ?? "Your project")}
+          unavailableLine={!entry ? "Nothing to show yet." : entry.kind === "plate" ? "No picture of this plate came with the file." : "Your computer couldn't draw a picture of this."} />
       )}
       {entries.length > 1 && (
         <div className="gallery-labels" role="tablist" aria-label="Pictures">

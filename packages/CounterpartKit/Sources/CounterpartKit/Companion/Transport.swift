@@ -41,12 +41,24 @@ public protocol HTTPTransport: Sendable {
     /// Calls response once, then each bounded line in order on the calling task. Error bodies are bounded too.
     func lines(_ request: URLRequest, trust: TrustPolicy, lineLimit: Int,
                response: (HTTPReply) throws -> Void, line: (Data) throws -> Void) async throws
+    /// A reply written to a file as it arrives (a scan can be tens of MB): never held in memory whole. The file is the
+    /// caller's to move or delete; an error reply comes back with its (bounded) body and no file.
+    func download(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> (reply: HTTPReply, file: URL?)
 }
 
 public extension HTTPTransport {
     func lines(_ request: URLRequest, trust: TrustPolicy, lineLimit: Int,
                response: (HTTPReply) throws -> Void, line: (Data) throws -> Void) async throws {
         throw CompanionError.unsupported
+    }
+
+    /// Through `send` (test transports): the reply's body written to a temporary file.
+    func download(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> (reply: HTTPReply, file: URL?) {
+        let reply = try await send(request, trust: trust, limit: limit, resourceTimeout: resourceTimeout)
+        guard reply.status == 200 else { return (reply, nil) }
+        let file = FileManager.default.temporaryDirectory.appending(path: "download-\(UUID().uuidString)")
+        try reply.body.write(to: file)
+        return (HTTPReply(status: reply.status, body: Data(), headers: reply.headers), file)
     }
 }
 
@@ -89,6 +101,48 @@ public struct PinnedTransport: HTTPTransport {
         }
     }
 
+    /// A URLSession download task, pinned as every request is: the reply goes to disk as it arrives. Over `limit` (by
+    /// its declared length, or by what arrived) the file is deleted and the transfer refused.
+    public func download(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> (reply: HTTPReply, file: URL?) {
+        let delegate = TrustDelegate(trust: trust)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = request.timeoutInterval
+        configuration.timeoutIntervalForResource = resourceTimeout
+        let session = URLSession(configuration: configuration)
+        defer { session.finishTasksAndInvalidate() }
+        let file: URL, answer: URLResponse
+        do { (file, answer) = try await session.download(for: request, delegate: delegate) }
+        catch {
+            if Task.isCancelled || error is CancellationError { throw TransportError("cancelled") }
+            throw TransportError(delegate.rejectedPin ? "certificate-changed" : Self.code(for: error))
+        }
+        var headers: [String: String] = [:]
+        for (key, value) in (answer as? HTTPURLResponse)?.allHeaderFields ?? [:] {
+            if let key = key as? String, let value = value as? String { headers[key] = value }
+        }
+        let status = (answer as? HTTPURLResponse)?.statusCode ?? 0
+        let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
+        guard status == 200 else {
+            // An error reply is a few bytes of JSON: read it (bounded) and drop the file.
+            let body = size <= 16_384 ? ((try? Data(contentsOf: file)) ?? Data()) : Data()
+            try? FileManager.default.removeItem(at: file)
+            return (HTTPReply(status: status, body: body, headers: headers), nil)
+        }
+        guard size <= limit, answer.expectedContentLength <= Int64(limit) else {
+            try? FileManager.default.removeItem(at: file)
+            throw TransportError("too-large")
+        }
+        // URLSession owns the file it hands back and may remove it once the session is invalidated (the `defer` above
+        // runs as this returns). The caller is promised a file that is its own to move or delete, so it is moved to one
+        // of ours before the session goes (review of #527, part 2, F1).
+        let kept = FileManager.default.temporaryDirectory.appending(path: "download-\(UUID().uuidString)")
+        do { try FileManager.default.moveItem(at: file, to: kept) }
+        catch { try? FileManager.default.removeItem(at: file); throw TransportError("network") }
+        return (HTTPReply(status: status, body: Data(), headers: headers), kept)
+    }
+
     public func lines(_ request: URLRequest, trust: TrustPolicy, lineLimit: Int,
                       response: (HTTPReply) throws -> Void, line: (Data) throws -> Void) async throws {
         let delegate = TrustDelegate(trust: trust)
@@ -100,6 +154,11 @@ public struct PinnedTransport: HTTPTransport {
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
         do {
+            // A cancel must never invalidate the session before `bytes(for:)` has made its task. URLSession raises an
+            // Objective-C exception for a task made on an invalidated session; no Swift `catch` sees it and the app
+            // dies. A camera view that went away as its stream started did exactly that (Nov 10: 24 simulator crash
+            // reports, all here). So a cancel stops the session's tasks, and the session stays valid until this returns.
+            try Task.checkCancellation()
             try await withTaskCancellationHandler {
                 let (bytes, answer) = try await session.bytes(for: request, delegate: delegate)
                 var headers: [String: String] = [:]
@@ -123,7 +182,7 @@ public struct PinnedTransport: HTTPTransport {
                     if let complete = try buffer.append(byte) { try line(complete) }
                 }
                 guard buffer.isEmpty else { throw TransportError("network") }
-            } onCancel: { session.invalidateAndCancel() }
+            } onCancel: { session.getAllTasks { tasks in for task in tasks { task.cancel() } } }
         } catch {
             if Task.isCancelled || error is CancellationError { throw TransportError("cancelled") }
             if error is CompanionError || error is TransportError { throw error }

@@ -43,8 +43,66 @@ private func stage(_ size: Int, light: Bool = false) -> CGContext? {
 
 private func neutral() -> NSColor { NSColor(red: 0.58, green: 0.58, blue: 0.60, alpha: 1) }
 
+/// A 3MF's objects as they sit in its build (millimetres, Z up), each triangle in the colour the file gives it (the 3MF
+/// materials extension), else the spool's colour or neutral. Flat-shaded, as a printed part's facets read.
+func threeMFNode(_ url: URL, tint: NSColor?) throws -> SCNNode {
+    try threeMFNode(ThreeMF.read(url), tint: tint)
+}
+
+func threeMFNode(_ model: ThreeMF, tint: NSColor?, limits: ThreeMFLimits = ThreeMFLimits()) throws -> SCNNode {
+    // Refuse the entire scene before allocating any expanded geometry or SceneKit-owned copies.
+    var budget = ThreeMFPlacementBudget(limits: limits)
+    var materials = 0
+    for mesh in model.meshes {
+        try budget.consume(vertices: mesh.positions.count, triangles: mesh.triangles.count)
+        let count = max(1, Set(mesh.colours).count)
+        guard count <= limits.materials - materials else { throw ThreeMFError.budget("rendered materials") }
+        materials += count
+    }
+    let holder = SCNNode()
+    func material(_ colour: SIMD4<Float>?) -> SCNMaterial {
+        let m = SCNMaterial()
+        m.lightingModel = .physicallyBased
+        m.diffuse.contents = colour.map { NSColor(srgbRed: CGFloat($0.x), green: CGFloat($0.y), blue: CGFloat($0.z), alpha: 1) } ?? tint ?? neutral()
+        m.roughness.contents = 0.55
+        m.metalness.contents = 0.0
+        m.isDoubleSided = true
+        return m
+    }
+    for mesh in model.meshes where !mesh.triangles.isEmpty {
+        // One element per colour; each triangle's three corners get their face's normal.
+        var groups: [SIMD4<Float>?: (colour: SIMD4<Float>?, start: Int, indices: [UInt32])] = [:]
+        var positions: [SCNVector3] = [], normals: [SCNVector3] = []
+        positions.reserveCapacity(mesh.triangles.count * 3); normals.reserveCapacity(mesh.triangles.count * 3)
+        for (n, t) in mesh.triangles.enumerated() {
+            guard Int(t.x) < mesh.positions.count, Int(t.y) < mesh.positions.count, Int(t.z) < mesh.positions.count else { continue }
+            let a = mesh.positions[Int(t.x)], b = mesh.positions[Int(t.y)], c = mesh.positions[Int(t.z)]
+            let normal = simd_normalize(simd_cross(b - a, c - a))
+            let face = normal.x.isFinite ? normal : SIMD3<Float>(0, 0, 1)
+            let colour = mesh.colours[safe: n] ?? nil
+            let key = colour
+            let base = UInt32(positions.count)
+            for p in [a, b, c] { positions.append(SCNVector3(p.x, p.y, p.z)); normals.append(SCNVector3(face.x, face.y, face.z)) }
+            groups[key, default: (colour, 0, [])].indices.append(contentsOf: [base, base + 1, base + 2])
+        }
+        let ordered = groups.values.sorted { ($0.indices.first ?? 0) < ($1.indices.first ?? 0) }
+        let geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: positions), SCNGeometrySource(normals: normals)],
+                                   elements: ordered.map { SCNGeometryElement(indices: $0.indices, primitiveType: .triangles) })
+        geometry.materials = ordered.map { material($0.colour) }
+        let node = SCNNode(geometry: geometry)
+        node.name = mesh.name
+        holder.addChildNode(node)
+    }
+    return holder
+}
+
 /// The model's nodes, turned Y up, with one material for an STL (its spool, or neutral) and a scan's own textures.
-private func loadNode(_ url: URL, zUp: Bool, tint: NSColor?, own: Bool) -> SCNNode {
+private func loadNode(_ url: URL, zUp: Bool, tint: NSColor?, own: Bool) throws -> SCNNode {
+    if url.pathExtension.lowercased() == "3mf" {
+        let node = try threeMFNode(url, tint: tint)
+        if zUp { node.eulerAngles.x = -.pi / 2 }
+        return node
+    }
     let asset = MDLAsset(url: url)
     asset.loadTextures()
     let scene = SCNScene(mdlAsset: asset)
@@ -107,13 +165,13 @@ public func renderPicture(_ spec: PictureSpec, to output: URL) throws {
         scene.background.contents = NSColor.clear
         let own = !spec.zUp && spec.tint == nil
         let root = SCNNode()
-        let part = loadNode(model, zUp: false, tint: spec.tint, own: own)
+        let part = try loadNode(model, zUp: false, tint: spec.tint, own: own)
         let frame = SCNNode()
         frame.addChildNode(part)
         if let object = spec.object, !spec.seats.isEmpty {
             // The scan's frame (metres, Y up) into the part's frame (millimetres, Z up), then each seat.
             let toSeatFrame = simd_float4x4(rows: [SIMD4(1000, 0, 0, 0), SIMD4(0, 0, -1000, 0), SIMD4(0, 1000, 0, 0), SIMD4(0, 0, 0, 1)])
-            let scan = loadNode(object, zUp: false, tint: nil, own: true)
+            let scan = try loadNode(object, zUp: false, tint: nil, own: true)
             for seat in spec.seats where seat.count == 16 {
                 let m = simd_float4x4(rows: (0..<4).map { r in SIMD4<Float>((0..<4).map { Float(seat[r * 4 + $0]) }) })
                 let placed = scan.clone()
