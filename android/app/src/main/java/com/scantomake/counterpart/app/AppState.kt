@@ -6,6 +6,7 @@ import android.content.Context
 import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.CounterpartEvent
 import com.scantomake.counterpart.api.EventUpdate
+import com.scantomake.counterpart.api.MacLink
 import com.scantomake.counterpart.api.PrinterCatalog
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectPhase
@@ -36,7 +37,19 @@ class AppState(private val app: Counterpart) {
     val loaded = MutableStateFlow(false)
     val error = MutableStateFlow<CompanionException?>(null)
     val catalog = MutableStateFlow<PrinterCatalog?>(null)
-    val reachable = MutableStateFlow<Boolean?>(null)
+    /** Whether the computer is answering: the one value Home and the starters read (`MacLink`). */
+    val link = MutableStateFlow<MacLink>(MacLink.Checking)
+
+    /** The computer replied, so nothing is wrong with the connection any more. */
+    private fun answered() {
+        link.value = link.value.answered()
+        error.value?.let { if (it.isUnreachable || it.needsPairing) error.value = null }
+    }
+
+    /** A request failed. Only "didn't answer" and "pair again" are the whole app's problem and show in the banner. */
+    fun requestFailed(failure: CompanionException) {
+        if (failure.isUnreachable || failure.needsPairing) { link.value = link.value.failed(failure); error.value = failure } else answered()
+    }
     val capabilities = MutableStateFlow<Set<String>>(emptySet())
     val sending = MutableStateFlow<Set<String>>(emptySet())
     val sendFailures = MutableStateFlow<Map<String, String>>(emptyMap())
@@ -88,10 +101,11 @@ class AppState(private val app: Counterpart) {
     suspend fun load() {
         try {
             projects.value = app.companion.list()
-            error.value = null; reachable.value = true
+            error.value = null; link.value = link.value.answered()
         } catch (e: CancellationException) { throw e } catch (e: CompanionException) {
-            if (e.code != "cancelled") { error.value = e; if (e.isUnreachable) reachable.value = false }
-        } catch (e: Exception) { error.value = CompanionException.unreachable; reachable.value = false }
+            // The list couldn't be read: the banner says why, whatever the reason.
+            if (e.code != "cancelled") { link.value = link.value.failed(e); error.value = e }
+        } catch (e: Exception) { requestFailed(CompanionException.unreachable) }
         loaded.value = true
     }
 
@@ -125,7 +139,7 @@ class AppState(private val app: Counterpart) {
 
     fun reset() {
         following?.cancel(); following = null
-        projects.value = emptyList(); loaded.value = false; error.value = null; catalog.value = null; reachable.value = null
+        projects.value = emptyList(); loaded.value = false; error.value = null; catalog.value = null; link.value = MacLink.Checking
         capabilities.value = emptySet(); eventsSupported.value = null; sendFailures.value = emptyMap()
         mcpUpdateAttempts.value = emptyMap()
         mcpUpdateEvents.value = emptyMap(); mcpCopies.value = null; mcpCopiesProblem.value = null
@@ -149,7 +163,7 @@ class AppState(private val app: Counterpart) {
             if (eventsSupported.value != false) {
                 try {
                     eventStream(app.companion).collect { update ->
-                        eventsSupported.value = true; reachable.value = true
+                        eventsSupported.value = true; answered()
                         when (update) {
                             EventUpdate.Resync -> { load(); loadPrinters() }
                             is EventUpdate.Event -> {
@@ -169,7 +183,7 @@ class AppState(private val app: Counterpart) {
                     }
                 } catch (e: CancellationException) { throw e } catch (e: CompanionException) {
                     if (e.isUnsupported) eventsSupported.value = false
-                    if (e.needsPairing) { error.value = e; return@launch }
+                    if (e.needsPairing) { requestFailed(e); return@launch }
                 } catch (_: Exception) {}
             }
             while (true) { delay(if (anyRunning) 5_000 else 30_000); load() }
