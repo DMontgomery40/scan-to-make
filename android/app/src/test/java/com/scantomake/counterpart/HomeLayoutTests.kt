@@ -28,9 +28,12 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.isSelected
 import com.scantomake.counterpart.ui.ProjectPlates
@@ -309,6 +312,70 @@ class HomeLayoutTests {
         org.junit.Assert.assertEquals("{\"fresh\":true}", String(moves.first().request.body!!))
         org.junit.Assert.assertEquals(listOf("mcp-0000000000000002"), pkg.moveIds)
         org.junit.Assert.assertEquals("projects:read", CompanionClient.scope("GET", "/v1/printers/mcps"))
+    }
+
+    /**
+     * Q9, PRD §6.1: with projects present, Home → Printers has "Keep printer software up to date" once, after the printers
+     * and their MCP copies, on as the computer sends it; turning it off sends `general.autoUpdateMcps: false`. A computer
+     * that doesn't send the key shows no switch.
+     */
+    @Test fun keepPrinterSoftwareUpToDateIsInPrintersWithProjectsPresent() {
+        val pkg = WireJson.decodeFromString<com.scantomake.counterpart.api.McpPackageCopies>(contractFixture("mcp-profile-copies.json").readText())
+        app.pairingStore.save(v2Record(), false)
+        val patches = mutableListOf<String>()
+        var sendsKey = true
+        var on = true
+        var reads = 0
+        val transport = FakeTransport { request, _ ->
+            when {
+                request.url.endsWith("/healthz") -> json(200, mapOf("status" to "ok", "capabilities" to mapOf("mcpCopies" to true, "mcpUpdates" to true)))
+                request.url.endsWith("/mcps") -> HttpReply(200, ("{\"packages\":[" + contractFixture("mcp-profile-copies.json").readText() + "]}").toByteArray())
+                request.url.endsWith("/v1/settings") && request.method == "PATCH" -> {
+                    patches += String(request.body!!)
+                    on = WireJson.parseToJsonElement(String(request.body!!)).jsonObject["general"]!!.jsonObject["autoUpdateMcps"]!!.jsonPrimitive.content == "true"
+                    json(200, mapOf("settings" to mapOf("milestones" to "50", "general" to mapOf("autoUpdateMcps" to on))))
+                }
+                request.url.endsWith("/v1/settings") -> { reads++; json(200, mapOf("settings" to mapOf("milestones" to "50",
+                    "general" to if (sendsKey) mapOf("autoUpdateMcps" to on) else emptyMap<String, Any>()))) }
+                else -> json(404, mapOf("error" to "not-found"))
+            }
+        }
+        app.pairing = PairingClient(app.pairingStore, transport)
+        app.companion = CompanionClient(app.pairing, transport, null, null, app.cacheDir)
+        state.projects.value = listOf(project("a", "Existing project", "ready"))
+        state.mcpCopies.value = listOf(pkg)
+        state.capabilities.value = setOf("mcpCopies", "mcpUpdates")
+        state.loaded.value = true
+        state.catalog.value = PrinterCatalog(listOf(PrinterDestination(id = "current", name = "Bambu Lab P1S", backend = "bambu-printer-mcp")), "current")
+        var showPrinters by mutableStateOf(false)
+        compose.setContent {
+            WithApp {
+                if (showPrinters) PrintersScreen(back = { showPrinters = false })
+                else HomeScreen(open = { _, _ -> }, newProject = {}, printers = { showPrinters = true }, settings = {})
+            }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Existing project"))
+        compose.onNodeWithText("Existing project").assertExists()
+        compose.onNodeWithContentDescription("Printers").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("auto-update-mcps")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodes(hasTestTag("auto-update-mcps")).assertCountEquals(1)
+        compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
+        val switch = compose.onNodeWithTag("auto-update-mcps")
+        switch.performScrollTo().assertIsOn().assertTextContains("Keep printer software up to date")
+        compose.onNodeWithText(com.scantomake.counterpart.ui.AUTO_UPDATE_MCPS_WORDS).assertExists()
+        switch.performClick()
+        compose.waitUntil(5_000) { patches.isNotEmpty() }
+        assertEquals("{\"general\":{\"autoUpdateMcps\":false}}", patches.single())
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("auto-update-mcps") and androidx.compose.ui.test.isOff()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("auto-update-mcps").assertIsOff()
+        // An older computer: no switch.
+        compose.onNodeWithContentDescription("Back").performClick()
+        sendsKey = false
+        compose.onNodeWithContentDescription("Printers").performClick()
+        compose.onNodeWithText("Counterpart’s copy 1.2.45").assertExists()
+        compose.waitUntil(5_000) { reads == 2 }
+        compose.waitForIdle()
+        compose.onAllNodes(hasTestTag("auto-update-mcps")).assertCountEquals(0)
     }
 
     /**

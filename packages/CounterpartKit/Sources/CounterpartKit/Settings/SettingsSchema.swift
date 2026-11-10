@@ -49,6 +49,15 @@ public enum SettingsSchema {
         ("openAtLogin", "Open at login"), ("showInDock", "Show in Dock"), ("keepAwake", "Keep the Mac awake while working"),
     ]
 
+    /// `general.autoUpdateMcps` (Q9): on unless the person turned it off. It sits beside the printer MCPs and their Update
+    /// buttons on every layout (Linux: Settings → Printers → Printer tools), not in General, and only when the companion
+    /// sends the key: an older one has no automatic updates. The words are Linux's (`apps/linux/src/Settings.tsx`).
+    public static let autoUpdateMcps = (
+        key: "autoUpdateMcps",
+        label: "Keep printer software up to date",
+        footer: "Counterpart installs a newer version of Counterpart’s own copies by itself while nothing is printing or working, checks that it starts, and tells you afterwards. If it doesn’t start, the previous version is put back. Your own copies are updated only with Update."
+    )
+
     /// `ai.choice.kind`, and which of them a phone can choose (the others need a key in the Mac's Keychain).
     public static let aiKinds: [(kind: String, label: String, fromPhone: Bool)] = [
         ("none", "Off", true), ("claude-code", "Claude Code (your login)", true), ("codex-cli", "Codex (your login)", true),
@@ -74,8 +83,14 @@ public struct CompanionSettings: Codable, Equatable, Sendable {
         public var openAtLogin: Bool?
         public var showInDock: Bool?
         public var keepAwake: Bool?
+        /// Q9: the companion sends `true` unless the person turned it off; nil from a companion without automatic updates.
+        public var autoUpdateMcps: Bool?
         public subscript(key: String) -> Bool? {
-            switch key { case "openAtLogin": openAtLogin; case "showInDock": showInDock; case "keepAwake": keepAwake; default: nil }
+            switch key {
+            case "openAtLogin": openAtLogin; case "showInDock": showInDock; case "keepAwake": keepAwake
+            case "autoUpdateMcps": autoUpdateMcps
+            default: nil
+            }
         }
     }
     public struct AI: Codable, Equatable, Sendable {
