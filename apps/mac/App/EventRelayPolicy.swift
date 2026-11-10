@@ -208,6 +208,8 @@ struct LiveActivityPush: Encodable, Equatable {
     /// that event to CloudKit instead, so the phone still gets it as a notification.
     var alertEventId: String?
     var alertDeviceId: String?
+    /// The state's priority before an optional milestone alert raised it; never sent.
+    var unalertedPriority: Int?
     var attributes: Attributes?
     var contentState: ContentState
     var staleDate: Int?
@@ -272,6 +274,7 @@ struct LiveActivityPush: Encodable, Equatable {
     static func carryingAlert(of older: LiveActivityPush?, into newer: LiveActivityPush) -> LiveActivityPush {
         guard let older, older.alertEventId != nil, newer.alertEventId == nil, newer.kind == .update else { return newer }
         var push = newer
+        push.unalertedPriority = newer.priority
         push.alert = older.alert; push.alertEventId = older.alertEventId; push.alertDeviceId = older.alertDeviceId; push.priority = 10
         return push
     }
@@ -388,6 +391,7 @@ enum MilestoneAlert {
     /// Apple sends an alerting update at once. A passive milestone (the first layer) lights the screen without a sound.
     static func push(for event: CounterpartEvent, token: String, title: String, now: Date, deviceId: String? = nil) -> LiveActivityPush? {
         guard types.contains(event.type), var push = LiveActivityPush.make(for: event, token: token, title: title, now: now) else { return nil }
+        push.unalertedPriority = push.priority
         push.priority = 10
         push.alert = LiveActivityPush.alert(title: event.title, body: event.body, sound: event.notify == "passive" ? nil : "default")
         push.alertEventId = event.id

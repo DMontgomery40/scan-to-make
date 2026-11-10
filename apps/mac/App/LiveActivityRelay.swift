@@ -244,7 +244,8 @@ import ControlKit
         guard push.alertEventId != nil else { return push }
         resolved(push, .failed)
         var plain = push
-        plain.alert = nil; plain.alertEventId = nil; plain.alertDeviceId = nil; plain.priority = 5
+        plain.alert = nil; plain.alertEventId = nil; plain.alertDeviceId = nil
+        plain.priority = plain.unalertedPriority ?? 5; plain.unalertedPriority = nil
         return plain
     }
 
