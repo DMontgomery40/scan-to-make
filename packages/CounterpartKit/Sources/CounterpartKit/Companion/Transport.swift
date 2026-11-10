@@ -100,6 +100,11 @@ public struct PinnedTransport: HTTPTransport {
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
         do {
+            // A cancel must never invalidate the session before `bytes(for:)` has made its task. URLSession raises an
+            // Objective-C exception for a task made on an invalidated session; no Swift `catch` sees it and the app
+            // dies. A camera view that went away as its stream started did exactly that (Nov 10: 24 simulator crash
+            // reports, all here). So a cancel stops the session's tasks, and the session stays valid until this returns.
+            try Task.checkCancellation()
             try await withTaskCancellationHandler {
                 let (bytes, answer) = try await session.bytes(for: request, delegate: delegate)
                 var headers: [String: String] = [:]
@@ -123,7 +128,7 @@ public struct PinnedTransport: HTTPTransport {
                     if let complete = try buffer.append(byte) { try line(complete) }
                 }
                 guard buffer.isEmpty else { throw TransportError("network") }
-            } onCancel: { session.invalidateAndCancel() }
+            } onCancel: { session.getAllTasks { tasks in for task in tasks { task.cancel() } } }
         } catch {
             if Task.isCancelled || error is CancellationError { throw TransportError("cancelled") }
             if error is CompanionError || error is TransportError { throw error }
