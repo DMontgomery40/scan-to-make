@@ -18,6 +18,7 @@ import { Question } from "./Question";
 import { PrintSheet } from "./PrintSheet";
 import { ReconstructionReviewCard } from "./ReconstructionReview";
 import { Action, Modal } from "./ui";
+import { noteAttempt } from "./queue";
 import type { useChangeQueue } from "./useChangeQueue";
 import type { Project, Printer, Ask } from "./types";
 type Mutate = (
@@ -311,6 +312,8 @@ export function ProjectView({
   const [camera, setCamera] = useState(false);
   const [stop, setStop] = useState(false);
   const [uncertain, setUncertain] = useState(false);
+  // This note's id across every try at sending it (queue.ts noteAttempt).
+  const attempt = useRef<{ text: string; id: string } | undefined>(undefined);
   const [error, setError] = useState("");
   const [activity, setActivity] = useState<
     Record<
@@ -683,11 +686,15 @@ export function ProjectView({
                         return;
                       }
                       try {
+                        const sending = noteAttempt(attempt.current, note.trim());
+                        attempt.current = sending;
                         await mutate("objects.correct", {
                           id: p.id,
                           note: note.trim(),
                           photoNames: attached,
+                          messageId: sending.id,
                         });
+                        attempt.current = undefined;
                         setNote("");
                         setAttached([]);
                       } catch (e) {

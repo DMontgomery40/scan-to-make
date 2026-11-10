@@ -248,6 +248,43 @@ test('a corrections note runs another pass', async t => {
   await service.settled(id);
 });
 
+// Nov 10, "Guitar pick": one note was recorded twice, 98 seconds apart, and each copy started a design pass. The
+// reply to the first send never reached the phone, so the words stayed in the box and were sent again.
+test('a note sent again with the same message id is recorded once and starts one pass', async t => {
+  const {call, service} = await fixture(t);
+  const id = (await call('POST', '/v1/objects', {instructions: 'A hook.'})).json.object.id;
+  await call('POST', `/v1/objects/${id}/start`);
+  await service.settled(id);
+  const messageId = '6F1C0E0A-3B0E-4B55-9B0C-1D3E5A7C9E11';
+  const note = {note: 'make it 2 mm thicker', messageId};
+  const first = await call('POST', `/v1/objects/${id}/corrections`, note);
+  assert.equal(first.status, 200);
+  assert.equal(first.json.object.state, 'touching-up');
+  // The repeat while its own pass is running: not "Wait until the current step finishes", just the project.
+  const during = await call('POST', `/v1/objects/${id}/corrections`, note);
+  assert.equal(during.status, 200);
+  assert.equal(during.json.object.messages.length, 1);
+  await service.settled(id);
+  const passes = (await call('GET', `/v1/objects/${id}`)).json.object.passes.length;
+  // The repeat after the pass ended, which is when a queued copy is sent.
+  const after = await call('POST', `/v1/objects/${id}/corrections`, note);
+  assert.equal(after.status, 200);
+  assert.equal(after.json.object.state, 'ready');
+  assert.equal(after.json.object.messages.length, 1);
+  assert.equal(after.json.object.passes.length, passes);
+  assert.equal(JSON.stringify(after.json.object).includes(messageId), false, 'the id stays in the companion');
+  // The same words on purpose are a new message: a new id, or none (a client from before this).
+  const again = await call('POST', `/v1/objects/${id}/corrections`, {note: note.note, messageId: '0B1D2F3A-4C5E-4F60-8A9B-0C1D2E3F4A5B'});
+  assert.equal(again.json.object.state, 'touching-up');
+  assert.equal(again.json.object.messages.length, 2);
+  await service.settled(id);
+  const old = await call('POST', `/v1/objects/${id}/corrections`, {note: note.note});
+  assert.equal(old.json.object.messages.length, 3);
+  await service.settled(id);
+  for (const bad of ['short', 'has spaces in it', 7, 'x'.repeat(65)])
+    assert.equal((await call('POST', `/v1/objects/${id}/corrections`, {note: 'x', messageId: bad})).status, 400);
+});
+
 test('bad names, unknown objects and wrong states get clear errors', async t => {
   const {call} = await fixture(t);
   const id = (await call('POST', '/v1/objects', {})).json.object.id;

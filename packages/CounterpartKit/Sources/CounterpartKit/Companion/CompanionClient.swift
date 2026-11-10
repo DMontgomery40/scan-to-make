@@ -243,9 +243,11 @@ public final class CompanionClient: @unchecked Sendable {
         try await request("POST", "/v1/objects/\(id)/capture-manifest", json: manifest, as: One.self).object
     }
     /// Ask for changes: a new pass with your text. Upload new photos first.
-    public func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> Project {
+    /// `messageId` is this note's own id (`NoteAttempts`, `CorrectionQueue.Message.id`): the Mac records it once.
+    public func correct(_ id: String, _ note: String, photoNames: [String]? = nil, messageId: String? = nil) async throws -> Project {
         var json: [String: Any] = ["note": note]
         if let photoNames { json["photoNames"] = photoNames }
+        if let messageId { json["messageId"] = messageId }
         return try await request("POST", "/v1/objects/\(id)/corrections", json: json, as: One.self).object
     }
     /// Answers the open Ask with explicitly named uploaded photos, a best guess, or words.

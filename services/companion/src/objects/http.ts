@@ -88,6 +88,8 @@ export function publicObject(object: StmObject): PublicObject {
   const {failedPass: _failedPass, ...shown} = object;
   return {...shown, ...(object.kind === 'published' ? {plates: projectPlates(object)} : {}), kind: passKind(object), title: projectTitle(object), failure, canRetryCleanup, status: objectStatus({...object, ...(failure !== undefined ? {failure} : {})}, object.updatedAtMs),
     settings: projectSettingsView(object),
+    // The sender's own id for a message is how a repeat is recognised here; no client reads it back.
+    ...(object.messages ? {messages: object.messages.map(({clientId: _clientId, ...message}) => message)} : {}),
     passes: object.passes.map(({dir: _dir, activity, sessionId: _session, sessionCwd: _sessionCwd, resumable: _resumable, checkpoints: _checkpoints, resume: _resume, ...pass}) => ({...pass,
       summary: currentFailureText(pass.summary), activityCount: activity?.length ?? 0}))};
 }
@@ -514,10 +516,12 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           }
           case 'duplicate': { object = await service.duplicate(id); break; }
           case 'corrections': {
-            const {note, photoNames} = await json<{note?: unknown; photoNames?: unknown}>(request);
+            const {note, photoNames, messageId} = await json<{note?: unknown; photoNames?: unknown; messageId?: unknown}>(request);
             if (typeof note !== 'string' || !note.trim() || note.length > 4000) throw new HttpFailure(400, 'invalid-request');
+            // The client's own id for this note, so the same note sent again is never recorded twice.
+            if (messageId !== undefined && (typeof messageId !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(messageId))) throw new HttpFailure(400, 'invalid-request');
             if (photoNames !== undefined && (!Array.isArray(photoNames) || photoNames.length > 100 || photoNames.some(name => typeof name !== 'string' || name.length > 128))) throw new HttpFailure(400, 'invalid-request');
-            object = await service.correct(id, note, [], photoNames as string[] | undefined);
+            object = await service.correct(id, note, [], photoNames as string[] | undefined, messageId as string | undefined);
             break;
           }
           case 'closeup': {

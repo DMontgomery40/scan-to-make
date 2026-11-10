@@ -278,8 +278,10 @@ public extension ControlClient {
     }
     /// Sends a correction back to the touch-up; the object returns to touching up. `photos` are absolute paths on
     /// this Mac, sent only to a companion with `objectsCreate` (it copies them into the project).
-    func correctObject(_ id: String, note: String, photos: [String] = [], photoNames: [String]? = nil) async throws -> Project {
+    /// `messageId` (this note's own id) only to a companion with `messageIds`; an older one refuses the field.
+    func correctObject(_ id: String, note: String, photos: [String] = [], photoNames: [String]? = nil, messageId: String? = nil) async throws -> Project {
         var params: [String: JSONValue] = ["id": .string(id), "note": .string(note)]
+        if let messageId { params["messageId"] = .string(messageId) }
         if !photos.isEmpty { params["photos"] = .array(photos.map(JSONValue.string)) }
         if let photoNames { params["photoNames"] = .array(photoNames.map(JSONValue.string)) }
         let client = try ControlClient(socketPath: socketPath, timeout: max(timeout, Self.timeout(for: "objects.correct")))
