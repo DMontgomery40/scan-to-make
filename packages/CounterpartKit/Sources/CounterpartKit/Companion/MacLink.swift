@@ -32,6 +32,17 @@ public enum MacLink: Equatable, Sendable {
         }
     }
 
+    /// The Mac's row in Settings. Needing to pair again is not "can't reach it": the Mac answered, and the row says
+    /// what to do in the error's own sentence ("Connect to your Mac again.").
+    public var settingsWords: String {
+        switch self {
+        case .checking: "Checking…"
+        case .connected: "Connected now"
+        case .notAnswering: "Can't reach it right now"
+        case .needsPairing(let error): error.message
+        }
+    }
+
     /// What is wrong with the connection, for the banner; nil when nothing is.
     public var problem: CompanionError? {
         switch self {

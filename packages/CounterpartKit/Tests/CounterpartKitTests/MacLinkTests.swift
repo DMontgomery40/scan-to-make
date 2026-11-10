@@ -3,6 +3,7 @@ import XCTest
 
 final class MacLinkTests: XCTestCase {
     private let pairing = CompanionError(code: "pairing-changed", message: "Connect to your Mac again.")
+
     private let refusal = CompanionError(code: "invalid-state", message: "That project is printing.")
 
     func testNothingIsClaimedBeforeTheFirstAnswer() {
@@ -27,6 +28,15 @@ final class MacLinkTests: XCTestCase {
             link.failed(refusal)
             XCTAssertEqual(link, .connected, "\(start): a refusal still proves the Mac is there")
         }
+    }
+
+    /// Settings' row has a line for each state; needing to pair again is never "can't reach it" (the Mac answered).
+    func testSettingsSaysWhatIsActuallyWrong() {
+        XCTAssertEqual(MacLink.checking.settingsWords, "Checking…")
+        XCTAssertEqual(MacLink.connected.settingsWords, "Connected now")
+        XCTAssertEqual(MacLink.notAnswering.settingsWords, "Can't reach it right now")
+        XCTAssertEqual(MacLink.needsPairing(pairing).settingsWords, "Connect to your Mac again.")
+        XCTAssertNotEqual(MacLink.needsPairing(pairing).settingsWords, MacLink.notAnswering.settingsWords)
     }
 
     func testWhatEachStateSays() {

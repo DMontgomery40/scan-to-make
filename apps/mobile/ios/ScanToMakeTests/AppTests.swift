@@ -220,6 +220,25 @@ import CounterpartKit
         XCTAssertNil(store.error, "the connection error clears once the Mac answers again")
     }
 
+    /// A project refresh reports every failure to the link, not only "didn't answer": pairing lost on a refresh must
+    /// not leave Settings saying "Connected now", and a refusal ends a stale "isn't answering".
+    func testAProjectRefreshThatFailsForAnyReasonUpdatesTheLink() async {
+        let mac = RefusingMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        store.link = .connected
+        mac.status = 401; mac.code = "pairing-changed"
+        let lost = await store.reload("d79d4c15-d786-461c-b76e-ec687c8e2dad")
+        XCTAssertEqual(lost?.needsPairing, true)
+        guard case .needsPairing = store.link else { return XCTFail("pairing lost on a refresh: \(store.link)") }
+        XCTAssertEqual(store.error?.needsPairing, true)
+        store.link = .notAnswering; store.error = .unreachable
+        mac.status = 409; mac.code = "invalid-state"
+        _ = await store.reload("d79d4c15-d786-461c-b76e-ec687c8e2dad")
+        XCTAssertEqual(store.link, .connected, "a refusal proves the Mac is there")
+        XCTAssertNil(store.error)
+    }
+
     /// Home's line and banner and Settings' row read one value, so they can't say different things; and a request the
     /// Mac refused is that request's own problem (a refused delete once cleared a banner that was showing).
     func testARefusedRequestIsNotAConnectionProblemAndAConnectionProblemIsNotClearedByOne() {
@@ -424,5 +443,19 @@ private actor WaitingPictureMac: HTTPTransport {
         try await withCheckedThrowingContinuation {
             download = $0; waiting?.resume(); waiting = nil
         }
+    }
+}
+
+/// A Mac that answers every request with one refusal.
+private final class RefusingMac: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _status = 409, _code = "invalid-state"
+    var status: Int { get { lock.withLock { _status } } set { lock.withLock { _status = newValue } } }
+    var code: String { get { lock.withLock { _code } } set { lock.withLock { _code = newValue } } }
+
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        let (status, code) = lock.withLock { (_status, _code) }
+        let body: [String: Any] = ["error": ["code": code, "message": "Refused."]]
+        return HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: body)) ?? Data())
     }
 }

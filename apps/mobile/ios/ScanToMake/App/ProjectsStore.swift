@@ -172,7 +172,9 @@ import CounterpartKit
         } catch {
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return .cancelled }
             let failure = error as? CompanionError ?? .unreachable
-            if failure.isUnreachable { requestFailed(failure) }
+            // Every failure says something about the link: the Mac didn't answer, wants pairing again, or answered
+            // with a refusal (which ends a stale "isn't answering").
+            if failure.code != "cancelled" { requestFailed(failure) }
             if failure.code == "not-found" {
                 guard reads.accept(id, ticket: ticket) else { return .cancelled }
                 answered()
