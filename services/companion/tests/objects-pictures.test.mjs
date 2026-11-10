@@ -24,8 +24,47 @@ test("a project's picture is its result in its spool, else its scan, else a phot
   assert.equal(spoolColour({print: {bundleId: 'b', spools: [{index: 1, colour: '#F5547C'}, {index: 2, colour: '#000000'}]}}), undefined, 'a print in two spools is no one colour');
   assert.deepEqual(pictureSpecs({...base, state: 'touching-up', kind: 'fit', scan: 'scan.usdz'}), {scan: {model: 'scan/scan.usdz'}}, 'before a result: the scan');
   assert.deepEqual(pictureSpecs({...base, state: 'new', kind: 'fit', capture: ['0001.heic']}), {photo: {photo: 'capture/0001.heic'}}, 'before any model: a photo, cut out');
-  assert.deepEqual(pictureSpecs({...base, kind: 'published', current: {model: 'original/x.3mf', renders: []}}), {}, "a designer's plates keep their own pictures");
-  assert.deepEqual(pictureSpecs({...base, kind: 'fit', current: {model: 'current/model.3mf', renders: []}}), {}, 'a multi-colour 3MF keeps its pass\'s picture');
+});
+
+// Nov 10: a 3MF with four objects (the bottle holder and three fit rings, e4d404f2) had no picture, and David couldn't
+// tell what the project was. Every model file gets one; a designer's file with its own plate pictures keeps them.
+test('every model file is drawn, a 3MF like an STL, in the project\'s first colour; a designer\'s own plate pictures are kept', () => {
+  const plate = {...base, kind: 'published', current: {model: 'original/abc-first-plate.3mf', renders: []},
+    files: {receipts: [{format: '3mf', sha256: 'a'.repeat(64), name: 'first-plate.3mf', plates: [{index: 0, name: 'Plate 1', objects: [], sliced: false}]}]}};
+  assert.deepEqual(pictureSpecs(plate), {part: {model: 'original/abc-first-plate.3mf', zUp: true}}, 'the code engine\'s plain 3MF: all its objects, neutral');
+  const designer = {...plate, files: {receipts: [{...plate.files.receipts[0], plates: [{index: 0, name: 'Plate 1', objects: [], sliced: false, thumbnail: 'original/plate-1.png'}]}]}};
+  assert.deepEqual(pictureSpecs(designer), {}, "a designer's file keeps its own plate pictures: none drawn");
+  const box = {...base, kind: 'fit', current: {model: 'current/model.3mf', renders: ['current/renders/1.png'], filaments: [{name: 'Pink', colour: '#f5547c'}, {name: 'Black', colour: '#000000'}]}};
+  assert.deepEqual(pictureSpecs(box), {part: {model: 'current/model.3mf', zUp: true, tint: '#F5547C'}},
+    'a multi-colour result: drawn, in the first colour the design asked for until the MCP says which part is on which filament');
+  const printed = {...box, print: {bundleId: 'b', spools: [{index: 1, colour: '#5B6579'}, {index: 2, colour: '#FFFFFF'}]}};
+  assert.equal(pictureSpecs(printed).part.tint, '#5B6579', 'the first spool its print recorded');
+  assert.deepEqual(pictureSpecs({...base, kind: 'published', current: {model: 'original/x.stl', renders: []}}), {part: {model: 'original/x.stl', zUp: true}}, "a designer's STL too");
+  assert.deepEqual(pictureSpecs({...base, kind: 'fit', state: 'failed'}), {}, 'no model: nothing to draw');
+});
+
+test('a 3MF project from before gets its picture when the list is read, without becoming news', async t => {
+  const root = await tempDir('objects-pictures-');
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects')), drawn = [];
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
+    drawPicture: async (dir, spec, output) => { drawn.push(spec.model); await writeFile(output, `png ${spec.model}`); return true; }});
+  t.after(() => service.close());
+  const object = await store.create(undefined, 'published');
+  const dir = store.dir(object.id);
+  await mkdir(join(dir, 'original'), {recursive: true});
+  await writeFile(join(dir, 'original', 'abc-first-plate.3mf'), 'PK 3mf');
+  await store.update(object.id, o => ({...o, state: 'printed', current: {model: 'original/abc-first-plate.3mf', renders: []},
+    files: {original: ['original/abc-first-plate.3mf'], receipts: [{format: '3mf', sha256: 'a'.repeat(64), name: 'first-plate.3mf', plates: [{index: 0, name: 'Plate 1', objects: [], sliced: false}]}]}}));
+  const stamp = (await store.get(object.id)).updatedAtMs;
+  assert.equal((await service.get(object.id)).picture, undefined, 'none yet');
+  await service.list(); await service.picturesDrawn();
+  const drawnNow = await service.get(object.id);
+  assert.deepEqual(drawn, ['original/abc-first-plate.3mf']);
+  assert.match(drawnNow.picture, /^pictures\/part-[0-9a-f]+\.png$/);
+  assert.equal(drawnNow.pictures.part, drawnNow.picture, "the project's picture is its file's");
+  assert.equal(drawnNow.updatedAtMs, stamp, 'a backfilled picture keeps its place in the list');
 });
 
 test('the companion draws each picture once, records it on the project, and serves only those files', async t => {
