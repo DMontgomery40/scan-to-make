@@ -35,6 +35,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import hashlib
 import shutil
 import subprocess
@@ -46,6 +47,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 REAL = Path.home() / 'Library/Application Support/Scan to Make'
 STARTED = time.time()
+# One id per run, in every name it shares with other runs (simulators, agent-device sessions).
+RUN_ID = f'{os.getpid()}-{uuid.uuid4().hex[:6]}'
 sys.path.insert(0, str(REPO / 'scripts'))
 import lane  # noqa: E402  (scripts/lane.py: the Mac's build lane)
 def agent_device() -> list[str]:
@@ -330,7 +333,9 @@ def project_screens(name: str, pid: str, state: str, data: str, record: str) -> 
 class Device:
     def __init__(self, key: str, udid: str, out: Path, record):
         self.key, self.udid, self.out, self.record = key, udid, out, record
-        self.session = f'ux-screens-{key}'
+        # One agent-device session per simulator: a fixed name stayed bound to an earlier run's deleted simulator.
+        self.session = f'ux-screens-{key}-{RUN_ID}'
+        self.captured = 0
         self.cli = agent_device()
 
     def ad(self, *args: str, timeout: int = 90) -> dict:
@@ -374,6 +379,7 @@ class Device:
                 break
             previous = path
             self.record('results', {**item, 'args': [], 'device': self.key, 'image': str(path), 'page': page, 'error': error})
+            self.captured += 1
             if page == item['pages']: break
             try: moved = json.dumps(self.ad('scroll', 'down', '0.7'))
             except Exception: break
@@ -423,9 +429,11 @@ def build_app(work: Path) -> Path:
     return app
 
 
-def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record, done: set, deadline: float) -> int:
-    """Captures what isn't done yet, until the deadline; returns how many screens are left."""
+def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record, done: set, deadline: float) -> tuple[int, int, str]:
+    """Captures what isn't done yet, until the deadline; returns the screens left, the images taken and the first failure."""
     created: dict[str, str] = {}
+    devices: list[Device] = []
+    first_failure = ''
     left = sum(1 for key in keys for item in items if (key, item['name']) not in done)
     try:
         for key in keys:
@@ -434,13 +442,14 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
             name, kind, runtime, pose = DEVICES[key]
             base = 'duo' if pose else key
             if base not in created:
-                udid = simctl('create', f'ux-screens-{base}-{os.getpid()}', kind, runtime)
+                udid = simctl('create', f'ux-screens-{base}-{RUN_ID}', kind, runtime)
                 created[base] = udid
                 simctl('boot', udid)
                 simctl('bootstatus', udid, '-b')
                 simctl('install', udid, str(app))
             udid = created[base]
             device = Device(key, udid, out / key, record)
+            devices.append(device)
             device.out.mkdir(parents=True, exist_ok=True)
             started = time.time()
             simctl('ui', udid, 'appearance', 'light', check=False)
@@ -457,17 +466,20 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
                     device.shoot(item)
                     record('done', {'device': key, 'name': item['name']})
                 except Exception as failure:
-                    record('failures', {'device': key, 'name': item['name'], 'why': str(failure)})
-                    record('done', {'device': key, 'name': item['name']})
+                    record('failures', {'device': key, 'name': item['name'], 'why': str(failure)})  # not done: the next run retries it
+                    first_failure = first_failure or f'{item["name"]}: {str(failure)[:300]}'
                     log(key, item['name'], 'FAILED', str(failure)[:200])
             log(key, f'done in {time.time() - started:.0f} s')
             try: device.ad('close')
             except Exception: pass
     finally:
+        for device in devices:
+            try: device.ad('close', timeout=30)
+            except Exception: pass
         for udid in created.values():
             simctl('shutdown', udid, check=False)
             simctl('delete', udid, check=False)
-    return left
+    return left, sum(d.captured for d in devices), first_failure
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -545,8 +557,9 @@ def main() -> int:
             raise SystemExit(f'The companion does not serve every project the screens need (missing {missing}, status {info.get("objectsStatus")}).')
         time.sleep(6)  # the companion reads its printer MCPs 5 s after start: check what it started
         processes = companion.processes()
-        if any(re.search(r'\bssh\b|bambu|mcp-3d|printer-mcp', p, re.I) for p in processes):
-            raise SystemExit(f'The companion started a printer process, so the run stopped: {processes}')
+        printers = [p for p in processes if re.search(r'\bssh\b|bambu|mcp-3d|printer-mcp', p, re.I) and not re.search(r'\bnpm (view|show)\b', p)]
+        if printers:
+            raise SystemExit(f'The companion started a printer process, so the run stopped: {printers}')
         log(f'companion serves {len(served)} projects; children: {processes}')
         if args.prepare_only:
             for o in info['objects']: print(f"  {o['id'][:8]}  {o['state']:<14} {o['title']}")
@@ -599,15 +612,22 @@ def capture(args, out: Path, work: Path, keys: list[str], held: dict) -> int:
     # Screens stop starting a minute and a half before --max-minutes, leaving time to delete the simulator.
     log('holding the lane')
     app = build_app(work)
-    left = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90)
+    left, captured, why = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90)
     minutes = (time.time() - STARTED) / 60
     write_index(out, ctx['info'], ctx['manifest'], minutes, ctx['processes'])
     log(f'{len(read_jsonl(out / "results.jsonl"))} images so far; {left} screens left' + (' (run the same command again)' if left else '') + f': {out / "index.md"}')
     log(f'the copy of the projects is in {work / "data"}; move {work} to /Volumes/Spillover when done')
+    if not captured:
+        raise SystemExit(f'This hold captured no screens, so it failed: {why or "no screen started before --max-minutes"}.')
     return 0
 
 
+def stop_on_signal(signum, frame):
+    raise SystemExit(f'Stopped by signal {signum}; the simulators and the companion of this run were cleaned up.')
+
+
 if __name__ == '__main__':
+    for signum in (signal.SIGTERM, signal.SIGHUP): signal.signal(signum, stop_on_signal)
     try:
         sys.exit(main())
     except (SystemExit, KeyboardInterrupt):

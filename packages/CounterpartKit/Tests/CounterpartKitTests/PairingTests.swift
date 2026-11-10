@@ -131,6 +131,33 @@ final class PairingRecordTests: XCTestCase {
         XCTAssertEqual(PairingStatus(v2Record(expiresAt: 5)).state, .expired)
         XCTAssertEqual(PairingStatus(nil).state, .disconnected)
     }
+
+    /// The simulator test address. Release stays exactly http 9078 and https 9079; a Debug build also takes the capture
+    /// companions' http ports (scripts/ux_screens.py), so several prepared runs can wait at once. Never off the simulator.
+    func testFixtureAddressesAreSimulatorOnlyAndReleaseStaysStrict() {
+        func url(_ text: String) -> URL? { URL(string: text) }
+        for debug in [false, true] {
+            XCTAssertTrue(CompanionAddress.isFixture(url("http://127.0.0.1:9078"), simulator: true, debug: debug))
+            XCTAssertTrue(CompanionAddress.isFixture(url("https://127.0.0.1:9079"), simulator: true, debug: debug))
+            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:9079"), simulator: true, debug: debug), "9079 is https only")
+            XCTAssertFalse(CompanionAddress.isFixture(url("https://127.0.0.1:9078"), simulator: true, debug: debug))
+            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:9098"), simulator: true, debug: debug))
+            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:9077"), simulator: true, debug: debug), "the real companion's port")
+            XCTAssertFalse(CompanionAddress.isFixture(url("http://localhost:9080"), simulator: true, debug: debug))
+            XCTAssertFalse(CompanionAddress.isFixture(url("http://192.168.1.20:9080"), simulator: true, debug: debug))
+            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1"), simulator: true, debug: debug))
+            for port in [9078, 9080, 9097] {
+                XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:\(port)"), simulator: false, debug: debug), "never on a device")
+            }
+        }
+        for port in CompanionAddress.debugFixturePorts {
+            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:\(port)"), simulator: true, debug: false), "Release: \(port)")
+            XCTAssertTrue(CompanionAddress.isFixture(url("http://127.0.0.1:\(port)"), simulator: true, debug: true), "Debug: \(port)")
+        }
+        XCTAssertEqual(CompanionAddress.debugFixturePorts, 9080...9097)
+        // Built for macOS here, so the compiled rule refuses every fixture address.
+        XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:9078")))
+    }
 }
 
 final class TrustTests: XCTestCase {
@@ -270,32 +297,5 @@ final class PairingWordsTests: XCTestCase {
         XCTAssertFalse(PairingWords.expired.lowercased().contains("pair"))
         XCTAssertFalse(PairingWords.unreachable.lowercased().contains("pair"))
         XCTAssertFalse(PairingWords.failure(NSError(domain: "test", code: 1)).lowercased().contains("pair"))
-    }
-
-    /// The simulator test address. Release stays exactly http 9078 and https 9079; a Debug build also takes the capture
-    /// companions' http ports (scripts/ux_screens.py), so several prepared runs can wait at once. Never off the simulator.
-    func testFixtureAddressesAreSimulatorOnlyAndReleaseStaysStrict() {
-        func url(_ text: String) -> URL? { URL(string: text) }
-        for debug in [false, true] {
-            XCTAssertTrue(CompanionAddress.isFixture(url("http://127.0.0.1:9078"), simulator: true, debug: debug))
-            XCTAssertTrue(CompanionAddress.isFixture(url("https://127.0.0.1:9079"), simulator: true, debug: debug))
-            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:9079"), simulator: true, debug: debug), "9079 is https only")
-            XCTAssertFalse(CompanionAddress.isFixture(url("https://127.0.0.1:9078"), simulator: true, debug: debug))
-            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:9098"), simulator: true, debug: debug))
-            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:9077"), simulator: true, debug: debug), "the real companion's port")
-            XCTAssertFalse(CompanionAddress.isFixture(url("http://localhost:9080"), simulator: true, debug: debug))
-            XCTAssertFalse(CompanionAddress.isFixture(url("http://192.168.1.20:9080"), simulator: true, debug: debug))
-            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1"), simulator: true, debug: debug))
-            for port in [9078, 9080, 9097] {
-                XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:\(port)"), simulator: false, debug: debug), "never on a device")
-            }
-        }
-        for port in CompanionAddress.debugFixturePorts {
-            XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:\(port)"), simulator: true, debug: false), "Release: \(port)")
-            XCTAssertTrue(CompanionAddress.isFixture(url("http://127.0.0.1:\(port)"), simulator: true, debug: true), "Debug: \(port)")
-        }
-        XCTAssertEqual(CompanionAddress.debugFixturePorts, 9080...9097)
-        // Built for macOS here, so the compiled rule refuses every fixture address.
-        XCTAssertFalse(CompanionAddress.isFixture(url("http://127.0.0.1:9078")))
     }
 }

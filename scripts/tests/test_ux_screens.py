@@ -115,6 +115,36 @@ class UxScreensTests(unittest.TestCase):
         screens = [item['name'] for pid, name in names.items() for item in ux_screens.project_screens(name, pid, '', 'real', '{}')]
         self.assertEqual(len(screens), len(set(screens)), 'no two projects write the same image files')
 
+    def test_a_hold_that_captures_no_screens_fails(self):
+        """A lane hold whose every screen failed (for example an agent-device session bound to another run's simulator)
+        exits non-zero with the first reason, rather than 0 with nothing captured."""
+        import argparse
+        from unittest import mock
+        out, work = self.tmp / 'out', self.tmp / 'work'
+        out.mkdir(); work.mkdir()
+        held = {'info': {'record': {'baseUrl': 'http://127.0.0.1:9080'}, 'objects': [], 'url': 'http://127.0.0.1:9080'},
+                'manifest': {'ids': {name: f'{name}-id' for name, _, _ in ux_screens.PROJECTS}, 'copiedAt': 'now'},
+                'processes': [], 'served': []}
+        args = argparse.Namespace(screens='home', project=[], redo=False, max_minutes=10)
+        failure = 'home: agent-device open: session ux-screens-iphone is bound to another simulator'
+        with mock.patch.object(ux_screens, 'build_app', return_value=Path('/nonexistent.app')), \
+             mock.patch.object(ux_screens, 'run_devices', return_value=(1, 0, failure)):
+            with self.assertRaises(SystemExit) as stopped:
+                ux_screens.capture(args, out, work, ['iphone'], held)
+        self.assertNotIn(stopped.exception.code, (0, None))
+        self.assertIn('captured no screens', str(stopped.exception.code))
+        self.assertIn('bound to another simulator', str(stopped.exception.code))
+        with mock.patch.object(ux_screens, 'build_app', return_value=Path('/nonexistent.app')), \
+             mock.patch.object(ux_screens, 'run_devices', return_value=(0, 2, '')):
+            self.assertEqual(ux_screens.capture(args, out, work, ['iphone'], held), 0)
+
+    def test_every_run_names_its_simulators_and_sessions_uniquely(self):
+        run = subprocess.run([sys.executable, '-c', 'import sys; sys.path.insert(0, sys.argv[1]); import ux_screens; print(ux_screens.RUN_ID)',
+                              str(REPO / 'scripts')], capture_output=True, text=True, check=True)
+        self.assertNotEqual(run.stdout.strip(), ux_screens.RUN_ID)
+        device = ux_screens.Device('iphone', '10FBF416-0590-4874-86CD-5ABD67A941C0', self.tmp, lambda *_: None)
+        self.assertEqual(device.session, f'ux-screens-iphone-{ux_screens.RUN_ID}')
+
 
 if __name__ == '__main__':
     unittest.main()
