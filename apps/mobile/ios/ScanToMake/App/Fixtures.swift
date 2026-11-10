@@ -55,8 +55,13 @@ enum Fixtures {
         return memory
     }
 
+    /// When this run started: the bottle set's times hold still, so its pictures' version (`mediaVersion`) does too and
+    /// each picture is fetched once, as from a real Mac.
+    static let launched = Date()
+
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        let now = set == "ask-bottle" ? launched : now
         if set == "limit-stops", let json = ProcessInfo.processInfo.environment["COUNTERPART_LIMIT_FIXTURES"],
            let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
             return rows.enumerated().compactMap { index, row in
