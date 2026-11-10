@@ -52,7 +52,9 @@ import androidx.compose.ui.unit.sp
 import com.scantomake.counterpart.api.Format
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectPhase
+import androidx.compose.ui.platform.testTag
 import com.scantomake.counterpart.api.ProjectWords
+import com.scantomake.counterpart.api.rowLine
 import com.scantomake.counterpart.app.AppState
 import kotlinx.coroutines.launch
 
@@ -213,7 +215,8 @@ private fun NowCard(p: Project, w: ProjectWords, onClick: () -> Unit) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(w.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 StatusCapsule(w.phase)
-                Text(w.line, color = Palette.secondary, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                // The capsule already names the phase: the line shows only what differs.
+                Text(rowLine(p, w.line), Modifier.testTag("row-line-${p.id}"), color = Palette.secondary, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (w.phase == ProjectPhase.Printing && progress != null) LinearProgressIndicator({ (progress / 100).toFloat() }, Modifier.fillMaxWidth(), color = Palette.okGreen)
                 else if (w.phase.isRunning) LinearProgressIndicator(Modifier.fillMaxWidth(), color = w.phase.tone.color())
             }

@@ -374,4 +374,20 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertEqual(ProjectWords.workingLine(p, fallback: "Making it", now: now), "Matching your photos · about 2 min")
         XCTAssertNil(WorkProgress(project(["state": "touching-up", "passes": [["startedAtMs": 1]]])).fraction, "no stages, no made-up progress")
     }
+
+    /// In a list grouped by phase the row shows the Mac's detail, never its section's heading again (David's iPad,
+    /// Nov 10: "Needs you · Kroger doesn't publi…" under Needs you, "Ready to print · 68.4 × 34.6 × 149…" under Ready).
+    func testARowUnderItsHeadingShowsOnlyWhatDiffers() throws {
+        func project(_ status: String) throws -> Project {
+            try JSONDecoder().decode(Project.self, from: Data(#"{"id":"p","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[],"status":\#(status)}"#.utf8))
+        }
+        let asking = try project(#"{"phase":"needs-you","text":"Needs you · Can you confirm these sizes?","detail":"Can you confirm these sizes?","symbol":"hand.raised","tint":"orange"}"#)
+        XCTAssertEqual(ProjectWords.row(asking, line: "Needs you · Can you confirm these sizes?"), "Can you confirm these sizes?")
+        let ready = try project(#"{"phase":"ready","text":"Ready to print · 68.4 × 34.6 × 149.2 mm","detail":"68.4 × 34.6 × 149.2 mm","symbol":"checkmark.seal","tint":"accent"}"#)
+        XCTAssertEqual(ProjectWords.row(ready, line: "Ready to print · 68.4 × 34.6 × 149.2 mm"), "68.4 × 34.6 × 149.2 mm")
+        // An older Mac, or a line that is already only what differs: the line as it is.
+        let failed = try project(#"{"phase":"failed","text":"The printer stopped.","symbol":"exclamationmark.triangle","tint":"red"}"#)
+        XCTAssertEqual(ProjectWords.row(failed, line: "The printer stopped."), "The printer stopped.")
+        XCTAssertEqual(ProjectWords.row(try project(#"{"phase":"ready","text":"Ready to print","detail":"  ","symbol":"","tint":"accent"}"#), line: "Ready to print"), "Ready to print")
+    }
 }

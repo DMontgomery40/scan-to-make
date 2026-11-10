@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   codeEngineRow,
+  rowWords,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -648,4 +649,14 @@ test("David's Nov 9 bottle: the question's caption is true for any question, and
   assert.deepEqual(scanSample(130), [0, 32, 65, 97, 129], "the same frames as the iPhone, Mac and Android");
   assert.deepEqual(scanSample(3), [0, 1, 2]);
   assert.equal(scanWords(130), "130 photos");
+});
+
+test("a row under its phase heading shows the companion's detail, never the heading again, with projects present", () => {
+  const asking = { ...project, id: "a", state: "needs-closeup", status: { phase: "needs-you", tint: "orange", text: "Needs you · Can you confirm these sizes?", detail: "Can you confirm these sizes?" } } as Project;
+  const ready = { ...project, id: "b", state: "ready", status: { phase: "ready", tint: "accent", text: "Ready to print · 68.4 × 34.6 × 149.2 mm", detail: "68.4 × 34.6 × 149.2 mm" } } as Project;
+  const failed = { ...project, id: "c", state: "failed", status: { phase: "failed", tint: "red", text: "The printer stopped." } } as Project;
+  assert.equal(rowWords(asking), "Can you confirm these sizes?");
+  assert.equal(rowWords(ready), "68.4 × 34.6 × 149.2 mm");
+  assert.equal(rowWords(failed), "The printer stopped.", "no detail: the line as it is");
+  for (const p of [asking, ready]) assert.doesNotMatch(rowWords(p), /^(Needs you|Ready to print)/);
 });

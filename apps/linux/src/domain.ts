@@ -724,3 +724,8 @@ export function scanSample(count: number, shown = 5): number[] {
 }
 
 export const scanWords = (count: number) => (count === 1 ? "1 photo" : `${count} photos`);
+
+/** The line under a project's title in the list grouped by phase (CounterpartKit `ProjectWords.row`). */
+export function rowWords(p: Project): string {
+  return p.status?.detail?.trim() || words(p);
+}
