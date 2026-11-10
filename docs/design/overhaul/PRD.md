@@ -414,7 +414,7 @@ Screenshots, printer detail: `screens/phone-printer.jpg` and `screens/phone-prin
 
 ### 5.9 Settings and About
 
-**Status:** Built. General values come from the real Mac; keep-awake changed from the phone changed the Mac (Nov 3). Help opens the live help page on both. The phone's Mac row says "Checking…" until reachability is known and never "Connected now" before then (`b845a545`, covered by the engineering test). **Seen on device Nov 4:** David saw Settings show Connected while the Mac was reachable (build 202611041132).
+**Status:** Built. General values come from the real Mac; keep-awake changed from the phone changed the Mac (Nov 3). Help opens the live help page on both. The phone's Mac row says "Checking…" until reachability is known and never "Connected now" before then (`b845a545`, covered by the engineering test). Home's line and banner, the iPad sidebar and this row read one value (`MacLink` in CounterpartKit: checking, connected, not answering, needs pairing), so they can't say different things; a request the Mac refuses for any other reason counts as an answer and is that request's own error (engineering tests only: `MacLinkTests`, `AppTests`). **Seen on device Nov 4:** David saw Settings show Connected while the Mac was reachable (build 202611041132).
 
 Screenshots: `screens/phone-settings.jpg`, `screens/phone-settings-notifications.jpg` and `screens/phone-about.jpg`.
 

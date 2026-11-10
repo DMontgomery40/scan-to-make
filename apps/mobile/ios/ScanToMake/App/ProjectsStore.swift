@@ -11,8 +11,22 @@ import CounterpartKit
     var error: CompanionError?
     var catalog: PrinterCatalog?
     var printerProblem: String?
+    /// Whether the Mac is answering: the one value Home, the sidebar and Settings all read (`MacLink`).
+    var link = MacLink.checking
     /// The Mac answered the last request (nil until one has).
-    var reachable: Bool?
+    var reachable: Bool? { link.reachable }
+
+    /// The Mac replied, so nothing is wrong with the connection any more.
+    private func answered() {
+        link.answered()
+        if let shown = error, shown.isUnreachable || shown.needsPairing { error = nil }
+    }
+
+    /// A request failed. A connection failure (the Mac didn't answer, or wants pairing again) is the whole app's
+    /// problem and shows in the banner; any other refusal is that request's own and proves the Mac answered.
+    func requestFailed(_ failure: CompanionError) {
+        if failure.isUnreachable || failure.needsPairing { link.failed(failure); error = failure } else { answered() }
+    }
     var canScan = false
     /// Scans stopped after keeping photos, by project: still on this phone, shown as "Scan stopped · 9 photos kept".
     var stoppedScans: [String: MacConnection.StoppedScan] = [:]
@@ -135,14 +149,14 @@ import CounterpartKit
         do {
             let latest = try await mac.list()
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return }
-            projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; reachable = true
+            projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; link.answered()
             refreshStoppedScans()
             for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
         } catch let failure as CompanionError {
             guard !Task.isCancelled, reads.isCurrent(ticket), failure.code != "cancelled" else { return }
-            error = failure
-            if failure.isUnreachable { reachable = false }
-        } catch { if !Task.isCancelled, reads.isCurrent(ticket) { self.error = .unreachable; reachable = false } }
+            // The list couldn't be read: the banner says why, whatever the reason.
+            link.failed(failure); error = failure
+        } catch { if !Task.isCancelled, reads.isCurrent(ticket) { requestFailed(.unreachable) } }
         guard !Task.isCancelled, reads.isCurrent(ticket) else { return }
         loaded = true
     }
@@ -152,18 +166,16 @@ import CounterpartKit
         do {
             let latest = try await mac.get(id)
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return .cancelled }
-            reachable = true
-            if error?.isUnreachable == true { error = nil }
+            answered()
             if reads.accept(id, ticket: ticket) { show(latest) }
             return nil
         } catch {
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return .cancelled }
             let failure = error as? CompanionError ?? .unreachable
-            if failure.isUnreachable { reachable = false; self.error = failure }
+            if failure.isUnreachable { requestFailed(failure) }
             if failure.code == "not-found" {
                 guard reads.accept(id, ticket: ticket) else { return .cancelled }
-                reachable = true
-                if self.error?.isUnreachable == true { self.error = nil }
+                answered()
                 remove(id)
             }
             return failure
@@ -298,7 +310,7 @@ import CounterpartKit
     /// Clears everything read from the previous Mac.
     func reset() {
         reads.reset()
-        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; reachable = nil; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
+        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
         stoppedScans = [:]; readyScans = []; sendFailures = [:]
     }
 
@@ -313,14 +325,13 @@ import CounterpartKit
                     switch update {
                     case .resync: await load(); await loadPrinters()
                     case .event(let event):
-                        reachable = true
-                        if error?.isUnreachable == true { error = nil }
+                        answered()
                         await receive(event)
                     }
                 }
             } catch let failure as CompanionError {
                 if failure.isUnsupported { events = false }
-                if failure.needsPairing { error = failure; return }
+                if failure.needsPairing { requestFailed(failure); return }
             } catch {}
         }
         while !Task.isCancelled {

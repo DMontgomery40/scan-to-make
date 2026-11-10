@@ -208,15 +208,42 @@ import CounterpartKit
         let mac = SettingsMac()
         let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
         let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
-        store.reachable = true
+        store.link = .connected
         mac.answers = false
         _ = await store.reload("d79d4c15-d786-461c-b76e-ec687c8e2dad")
-        XCTAssertEqual(store.reachable, false, "a detail refresh that cannot reach the Mac must update Settings too")
+        XCTAssertEqual(store.link, .notAnswering, "a detail refresh that cannot reach the Mac must update Settings too")
+        XCTAssertEqual(store.reachable, false)
         XCTAssertEqual(store.error?.code, "unreachable")
         mac.answers = true
         _ = await store.reload("d79d4c15-d786-461c-b76e-ec687c8e2dad")
         XCTAssertEqual(store.reachable, true, "even a confirmed 404 proves the Mac answered")
         XCTAssertNil(store.error, "the connection error clears once the Mac answers again")
+    }
+
+    /// Home's line and banner and Settings' row read one value, so they can't say different things; and a request the
+    /// Mac refused is that request's own problem (a refused delete once cleared a banner that was showing).
+    func testARefusedRequestIsNotAConnectionProblemAndAConnectionProblemIsNotClearedByOne() {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        XCTAssertEqual(store.link, .checking)
+        store.requestFailed(.unreachable)
+        XCTAssertEqual(store.link, .notAnswering)
+        XCTAssertEqual(store.error, .unreachable)
+        XCTAssertEqual(store.reachable, false)
+        // The Mac answers, with a refusal: it is there, and the banner goes.
+        store.requestFailed(CompanionError(code: "invalid-state", message: "That project is printing."))
+        XCTAssertEqual(store.link, .connected)
+        XCTAssertNil(store.error)
+        // A list error that isn't about the connection stays through someone else's refused request.
+        let broken = CompanionError(code: "invalid-response", message: "Your Mac sent something this app can't read.")
+        store.error = broken
+        store.requestFailed(CompanionError(code: "not-found", message: "That project is gone."))
+        XCTAssertEqual(store.error, broken)
+        let again = CompanionError(code: "pairing-changed", message: "Connect to your Mac again.")
+        store.requestFailed(again)
+        XCTAssertEqual(store.link, .needsPairing(again))
+        XCTAssertEqual(store.error, again)
     }
 
     func testFailedEventPollDoesNotReportConnectedWhileResyncIsStillWaiting() async {
