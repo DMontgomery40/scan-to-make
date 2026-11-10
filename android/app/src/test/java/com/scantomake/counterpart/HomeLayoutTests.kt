@@ -196,7 +196,7 @@ class HomeLayoutTests {
         state.catalog.value = PrinterCatalog(listOf(PrinterDestination("p1", "P1S", model = "Bambu Lab P1S", state = "ready"),
             PrinterDestination("p2", "Desk", state = "offline")))
         state.macName.value = "Mac mini"
-        state.reachable.value = true
+        state.link.value = com.scantomake.counterpart.api.MacLink.Connected
         state.loaded.value = true
         home()
         compose.onNodeWithContentDescription("Printers, 1 needs attention").assertExists()
@@ -274,6 +274,24 @@ class HomeLayoutTests {
         home()
         compose.onNodeWithText("Try Again").assertExists()
         compose.onNodeWithText("Connect a Different Computer").assertExists()
+    }
+
+    /** Home's line and its banner read one value: a request the computer refused is not a connection problem, and
+     *  the connection problem it replaces goes from both at once. */
+    @Test fun homesConnectionLineAndBannerNeverDisagreeWithProjectsPresent() {
+        state.projects.value = listOf(project("a", "Stove gap filler", "ready"))
+        state.loaded.value = true
+        state.requestFailed(com.scantomake.counterpart.api.CompanionException.unreachable)
+        home()
+        // The line, exactly; the banner says the same thing in its longer sentence.
+        compose.onNodeWithText("Your computer isn't answering").assertExists()
+        compose.onNodeWithText("Try Again").assertExists()
+        // The computer answers, with a refusal about something else.
+        state.requestFailed(com.scantomake.counterpart.api.CompanionException("invalid-state", "That project is printing."))
+        compose.waitForIdle()
+        compose.onNodeWithText("Try Again").assertDoesNotExist()
+        compose.onNode(hasText("connected", substring = true)).assertExists()
+        assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
     }
 
     @Test fun printerSoftwareShowsTheHiddenCopyAndExplicitMoveWithProjectsPresent() = printerSoftwareMove(false)

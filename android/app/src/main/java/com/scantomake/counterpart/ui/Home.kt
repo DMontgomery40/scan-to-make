@@ -64,7 +64,7 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
     val projects by state.projects.collectAsState()
     val loaded by state.loaded.collectAsState()
     val error by state.error.collectAsState()
-    val reachable by state.reachable.collectAsState()
+    val link by state.link.collectAsState()
     val macName by state.macName.collectAsState()
     val catalog by state.catalog.collectAsState()
     state.sending.collectAsState().value
@@ -85,7 +85,7 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
     val grid = visible.filter { phase(it) != ProjectPhase.Confirmed }.sortedWith(compareByDescending<Project> { phase(it) == ProjectPhase.Ready }.thenByDescending { it.updatedAtMs })
 
     val mac = macName ?: "Your computer"
-    val connection = when (reachable) { false -> "$mac isn't answering"; true -> "$mac connected"; else -> mac }
+    val connection = when (link.reachable) { false -> "$mac isn't answering"; true -> "$mac connected"; else -> mac }
     val printing = catalog?.destinations.orEmpty().filter { printer ->
         projects.any { p -> phase(p) == ProjectPhase.Printing && (p.print?.destinationId ?: p.print?.destination?.id ?: p.printerDestinationId) == printer.id }
     }
