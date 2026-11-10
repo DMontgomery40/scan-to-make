@@ -11,7 +11,7 @@ The one list of open work. [`handoff.md`](handoff.md) is the one-screen summary 
 
 Owners: **Lead** = the lead session (Claude Fable 5.2, Mac, thread "Take Over Scan-to-Make Delivery"). **SM** = the state-machines session (Claude Fable 5.2, thread "Find Implicit State Machines"), which builds and hands PRs to the lead. **D:** a delegate of the lead, named by its T3 thread title. **David** = only he can do it.
 
-Last reconciled: 2026-11-10 07:25Z, main `256a22a5`, by the lead.
+Last reconciled: 2026-11-10 07:40Z, main `bf818db8`, by the lead.
 
 ## Right now
 
@@ -28,7 +28,6 @@ Last reconciled: 2026-11-10 07:25Z, main `256a22a5`, by the lead.
 | W4 | Overrule or keep four lead decisions | (a) a tapped notification never replaces a New or Print sheet that is up; (b) with several devices, a progress milestone alerts on the Live Activity only when every device has one, and a missed alert on one device is not re-sent as a notification; (c) scan regularisation is allowed when labelled `assumed`; (d) the boundary check's three low-confidence flags on #439 were recorded as reviewed. |
 | W5 | Fast tiers for delegates that block a landing | Opus 5.5 fast mode, GPT-6.1 Sol priority tier. Costs more; asked Nov 10, no answer. |
 | W6 | Archive the stale agent memory | `~/.claude/projects/-Users-davidmontgomery-fleet-scan-to-make/memory/` (16 files, Oct 30–Nov 1; React Native, KAN branches). Not loaded by this session. |
-| W7 | Two questions from the parts design (P1 waits on them) | (1) When you print a project with several parts, should Counterpart start with only the parts that changed since they were last printed ticked, or with everything ticked? (2) When a model or a scan holds several separate pieces, should Counterpart split them into parts by itself and show you, or only when you ask? |
 | W8 | Four buttons in one rail group on the open Duo with a project open (Printers, Settings, Share, More) | SM's judgement call on #445; before/after in `~/scan-to-make-work/state-machines-2026-11-09/duo-rail/`. |
 
 ## In flight
@@ -55,7 +54,7 @@ Last reconciled: 2026-11-10 07:25Z, main `256a22a5`, by the lead.
 | Q6 | A new TestFlight build and Mac beta from main (the public builds are from Nov 6 and predate the scan fix) | Lead | I1, I2, I5 landed and looked at |
 | Q7 | Refresh Android and Linux installs (Nov 5 builds) | Lead | After Q6 |
 | Q8 | A gate-run check that the real iPad view survives a resize (needs a driver other than XCTest's `open(URL)`), and whether a link opens a second iPad window in the shipped app (Info.plist allows multiple scenes). Starting point: the stash "F5 attempt…" on SM's #442 worktree | SM | After Q3 |
-| P1 | **Parts, slice 1** (proposal: `~/scan-to-make-work/parts-design-2026-11-10/proposal.md`): a project holds a list of parts; "Split into parts" on a model with separate pieces (the pink box `874333ab` is box + lid in one model); each part keeps its own print record ("printed Nov 7, unchanged since"); the Print sheet's Parts menu starts on what changed (Lid only); Ask for changes → To: Lid; a pass may change only the parts it is told to; Works is cleared only on parts a pass changed; old projects read as one part with no migration; all five layouts | Lead (delegate once W7 is answered) | W7; lands after I5 so parts feed the gallery |
+| P1 | **Parts, slice 1, as David set it on Nov 10.** Counterpart is not a slicer and does not find or split pieces itself: the separate objects in a model are what the slicer already reports through the printer MCP. They stay hidden until the person separates them ("don't show the separated objects ... unless the user separates them. duh"). After that each object is a part with its own print record, and Print offers which parts to print. On a **reprint**, the parts ticked are the ones whose model differs from what last printed (a change that alters other parts ticks them too, because they differ); on a first print, everything. Ask for changes can name one part. Old projects are unchanged until someone separates. All five layouts. Dropped from the proposal as overengineering: the worker pass that names the pieces and the companion's "pieces add up exactly" geometry check | Lead (to a delegate) | I5 (parts feed the gallery). Needs from both MCPs: the object list for a model that is not a designer's 3MF, a stable identity per object so "differs from what last printed" is the MCP's answer and not app geometry, and printing a chosen subset; check what `list_3mf_plate_objects` and `skip_objects` already give (bambu-printer-mcp has them; mcp-3D-printer-server does not: X18) before adding anything |
 | P2 | Parts, later slices: print any set of parts together (needs `counterpart_make_3mf {layout: "separate"}` in both MCPs); scan a second part into a project; split one scan that holds two things; plates in the parts list (with Q2) | Lead | P1; Q2; I5 |
 
 ## No owner yet (the lead clears this section each session)
@@ -80,7 +79,7 @@ Last reconciled: 2026-11-10 07:25Z, main `256a22a5`, by the lead.
 | X19 | Unverified in the Nov 10 train, as SM reported: #440's restart-mid-update was never reproduced on the real Mac (tests use a fake disk) and the per-journal catch in `recover()` has no test; #442's print sheet through a fold was not looked at on the Duo (unit test only) | SM, Nov 10 |
 | X20 | Unverified in the next train: #445's last merge commit was not rebuilt and it has not been seen on a real Duo; #444 was not looked at on a device and its Android port has unit tests only, no emulator run | SM, Nov 10 |
 | X21 | Two projects in David's list are both titled "Your scan": a scan sent with no words gets no name of its own | Lead, from David's Nov 10 screenshot |
-| X22 | The parts proposal's "pieces add up exactly" check assumes the code engine rebuilds an unchanged part identically (true for Blender on the box; not run on the code engine); no part of a multi-part design has been sliced on its own yet | Parts proposal, Nov 10 |
+| X22 | No part of a multi-part design has been sliced or printed on its own yet | Parts proposal, Nov 10 |
 | X23 | SM's cleanup owed when its PRs are past review: worktrees under `~/.t3/worktrees/scan-to-make/` (mcp-update-journal, projects-navigation, pass-end, mac-link, duo-rail, pass-words) and derived data in `/private/tmp` (`stm-nav-dd`, `stm-link-dd`, `stm-rail-dd`, `stm-words-mac-dd`) | SM, Nov 10 (owner: SM) |
 | X17 | Older T3 worktrees in the MCP repos that are not this session's: mcp-3D `feat-bambu-parity-pauses`, `feat-tool-annotations`; bambu `feat-control-route-pr`, `research-control-refusal` | Lead, Nov 10 |
 
@@ -118,6 +117,8 @@ Last reconciled: 2026-11-10 07:25Z, main `256a22a5`, by the lead.
 | Nov 9 | "how are you keeping track of this?? what is just getting forgotten" | This file |
 | Nov 9 11:58 pm | Projects grid of raw photos: "this option, of the photograph including everything in it is by far the worst ... it certainly doesn't match our mockups ... don't use it as gospel at this point" | I5 (the object alone on the stage, everywhere) |
 | Nov 9 11:58 pm | "i dunno how to update ui acceptance" | R2 |
+| Nov 10 | Reprint: "obviously ... not everything needs to be ticked ... or if one part fundamentally changes the other parts, obviously they all need new things. this is one of those things that is very very easy to massively overthink and overengineer" | P1 |
+| Nov 10 | Separate pieces: "that is literally what a slicer does? and we're not a slicer? ... we do what steve jobs would do if he was creating a frontend for an mcp server that can print from like 5 slicers ... don't show the separated objects (which again, the slicer does, so we therefore have them) unless the user separates them" | P1; a standing test for every design here: is this the slicer's job? then it is the MCP's, and the app shows the result |
 | (seen by the lead in his screenshots) | A "Fit brief:" block he never wrote is shown as his request | Q3 |
 | (seen by the lead) | A size question offers Camera, Photos, Best guess | Q3 |
 
