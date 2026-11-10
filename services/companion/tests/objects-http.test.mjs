@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
 import {createObjectRoutes} from '../dist/objects/http.js';
+import {splitFitBrief, workerRequest} from '../dist/objects/fit.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {tempDir} from './support/temp.mjs';
 
@@ -808,6 +809,26 @@ test('original model export reads only recorded model files with read authorizat
   }
   const denied = await fixture(t, {denied: ['projects:read']});
   assert.equal((await denied.call('GET', `/v1/objects/${project.id}/original/0`)).status, 403);
+});
+
+test('a duplicated fit project keeps how its size is settled, whichever way the source stored it', async t => {
+  const {call, service, store} = await fixture(t);
+  const fit = {sizeSource: 'measured', measured: [{id: 'a', label: 'width at the waist', mm: 53}, {id: 'b', label: 'height to the cap tip', mm: 107}]};
+  const fields = await service.create('A pegboard holder for this bottle.', 'fit', undefined, fit);
+  const legacy = await service.create('A pegboard holder for this bottle.', 'fit');
+  for (const project of [fields, legacy]) { await service.start(project.id); await service.settled(project.id); }
+  // A project from before the field: the request with the block a client appended.
+  const worker = workerRequest(await store.get(fields.id));
+  await store.update(legacy.id, o => ({...o, instructions: worker}));
+  for (const project of [fields, legacy]) {
+    const copied = (await call('POST', `/v1/objects/${project.id}/duplicate`, {})).json.object;
+    assert.equal(copied.instructions, 'A pegboard holder for this bottle.');
+    assert.deepEqual(copied.fit, project === fields ? fit : splitFitBrief(worker).fit);
+    const stored = await store.get(copied.id);
+    assert.equal(stored.instructions, 'A pegboard holder for this bottle.', 'the copy is stored as fields');
+    // A change asked of the copy is designed from the same brief as the source.
+    assert.equal(workerRequest(stored), worker);
+  }
 });
 
 test('duplicate keeps legacy print defaults and removes only its own partial copy on failure', async t => {
