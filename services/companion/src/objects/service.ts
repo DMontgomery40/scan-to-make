@@ -942,8 +942,9 @@ export class ObjectService {
    */
   #printerName(destinationId: string | undefined, name: string): string {
     if (!isGeneratedName(name)) return name;
+    // Read from what is already known, as the printer list shows it: a project read never asks a printer.
     const id = destinationId === undefined ? undefined : this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId;
-    const listed = id === undefined ? undefined : this.printers().destinations.find(item => item.id === id)?.name;
+    const listed = id === undefined ? undefined : this.#deps.printers?.nameOf(id) ?? this.#deps.printerCatalog?.destinations.find(item => item.id === id)?.name;
     return listed && !listed.startsWith('Printer at ') ? listed : UNNAMED_PRINTER;
   }
 

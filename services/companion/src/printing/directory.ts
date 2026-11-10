@@ -166,6 +166,13 @@ export class PrinterDirectory {
   }
 
   /** The list the phone and Mac show; starts background reads, never waits for them. */
+  /** A printer's name as `list` shows it, for any id that stands for it; nothing is asked of any printer. */
+  nameOf(destinationId: string): string | undefined {
+    const id = this.catalog.canonical(destinationId);
+    const destination = id === undefined ? undefined : this.catalog.destinations.find(item => item.id === id);
+    return destination ? this.#named(destination).name : undefined;
+  }
+
   list(): {defaultDestinationId: string; destinations: PublicDestination[]} {
     return {defaultDestinationId: this.catalog.defaultDestinationId, destinations: this.catalog.destinations.map(destination => {
       void this.refresh(destination.id);
