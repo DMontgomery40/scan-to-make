@@ -378,6 +378,21 @@ class Device:
             raise RuntimeError(f'agent-device {" ".join(args[:3])}: {(run.stderr or run.stdout)[-400:]}')
         return reply
 
+    def wait_for_app(self, limit: float = 45) -> None:
+        """Until the app's own tree can be read (it is on screen), at most `limit` seconds, then a moment to settle. Nov 10:
+        at load 300+ a fixed 4 s wait took frames of the home screen while the app was still launching."""
+        deadline = time.time() + limit
+        while time.time() < deadline:
+            try:
+                tree = self.ad('snapshot', '-d', '3', timeout=30)
+                if len((tree.get('data') or {}).get('nodes') or []) > 3: break
+            except Exception:
+                pass
+            time.sleep(1.5)
+        else:
+            raise RuntimeError(f'the app was not on screen {limit:.0f} s after it was opened')
+        time.sleep(2)
+
     def shoot(self, item: dict) -> None:
         # The screen's settings go into the app's defaults domain (what its launch arguments would set), fresh for each
         # screen: agent-device's --launch-args did not reach the app (Nov 10), and defaults reach UserDefaults the same way.
@@ -387,7 +402,7 @@ class Device:
         for key, value in zip(pairs[0::2], pairs[1::2]):
             simctl('spawn', self.udid, 'defaults', 'write', BUNDLE, key.lstrip('-'), '-string', value)
         self.ad('open', BUNDLE, '--relaunch', timeout=120)
-        time.sleep(4)
+        self.wait_for_app()
         error = ''
         for action in item['actions']:
             try:
@@ -772,6 +787,12 @@ def capture(args, out: Path, work: Path, keys: list[str], held: dict) -> int:
     log(f'the copy of the projects is in {work / "data"}; move {work} to /Volumes/Spillover when done')
     if not captured:
         raise SystemExit(f'This hold captured no screens, so it failed: {why or "no screen started before --max-minutes"}.')
+    import ux_blank  # the blank check reads every frame in <out> with its accessibility tree
+    flagged = ux_blank.check_folder(out)
+    report = ux_blank.write_report(out, flagged)
+    if flagged:
+        raise SystemExit(f'{len(flagged)} frames show a blank stage or picture with nothing to say why: {report}')
+    log(f'blank check: none of the frames is blank ({report})')
     return 0
 
 
