@@ -13,6 +13,7 @@ import {CompanionSettingsPatchSchema, FitSchema, type ObjectStatus, type Project
 import {z} from 'zod';
 import {fitRequest} from './fit.js';
 import {askKind} from './asks.js';
+import {withNotesOnce} from './notes.js';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
@@ -83,7 +84,8 @@ export function projectSettingsView(object: StmObject) {
 export function publicObject(stored: StmObject): PublicObject {
   // What the person typed, and the fit choice as fields: never the brief a client once appended to the request.
   const {typed, fit} = fitRequest(stored);
-  const {instructions: _instructions, fit: _fit, ...rest} = stored;
+  // A note sent again before any result came back is shown once (`withNotesOnce`); the stored record keeps them all.
+  const {instructions: _instructions, fit: _fit, ...rest} = withNotesOnce(stored);
   // Every question says its kind, also one saved before kinds were written.
   const kind = askKind(stored);
   const object: StmObject = {...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {}), ...(rest.ask && kind ? {ask: {...rest.ask, kind}} : {})};
