@@ -25,6 +25,7 @@ async function setup(t, outcomes) {
     inputs.push(input);
     const outcome = outcomes[inputs.length - 1];
     input.onStage?.('preparing', 'blender');
+    if (outcome.liveSession) input.onProgress?.({seconds: 0, toolCalls: 0, sessionId: outcome.liveSession, passDir: join(root, `pass-${inputs.length}`), resumable: true});
     if (outcome.wait) await new Promise(resolve => { gate = resolve; });
     input.onStage?.('working', outcome.engine ?? 'blender');
     const passDir = join(root, `pass-${inputs.length}`), out = join(passDir, 'out');
@@ -40,6 +41,8 @@ async function setup(t, outcomes) {
       await writeFile(join(out, 'touched.f3d'), 'f3d'); await writeFile(join(out, 'touched.parameters.json'), '{"width":40}');
       design = {f3d: join(out, 'touched.f3d'), parameters: join(out, 'touched.parameters.json')};
     }
+    if (outcome.answered) input.onProgress?.({seconds: 1, toolCalls: 1, resumable: false});
+    if (outcome.throw) throw new Error(outcome.throw);
     return {renders: [], checkpoints: [], stats: {seconds: 3, toolCalls: 2}, passDir, ...(outcome.status !== 'needs_closeup' && outcome.status !== 'failed' ? {model} : {}),
       ...(design ? {design} : {}), ...(parts ? {parts} : {}), ...outcome.result, status: outcome.status ?? 'done', ...(outcome.engine ? {engine: outcome.engine} : {}), ...(outcome.note ? {note: outcome.note} : {})};
   };
@@ -430,7 +433,7 @@ test('session init and pass folder survive a companion restart before a final an
  const f=await setup(t,[{wait:true},{status:'done'}]);
  const o=await f.service.create('A unicorn','fit');await f.service.start(o.id);
  await until(()=>f.inputs.length);
- f.inputs[0].onProgress({seconds:1,toolCalls:0,sessionId:'live-session',passDir:'/saved/pass'});
+ f.inputs[0].onProgress({seconds:1,toolCalls:0,sessionId:'live-session',resumable:true,passDir:'/saved/pass'});
  await until(async()=> (await f.store.get(o.id)).passes.at(-1).sessionId==='live-session');
  const restarted=new ObjectStore(join(f.root,'objects'));await restarted.recoverInterrupted();
  const recovered=await restarted.get(o.id);
@@ -439,7 +442,7 @@ test('session init and pass folder survive a companion restart before a final an
 });
 
 test('closing the companion interrupts a worker without attributing it to the person', async t => {
- const f=await setup(t,[{wait:true,status:'failed',result:{reason:'cancelled',sessionId:'shutdown-session',resumable:false}}]);
+ const f=await setup(t,[{wait:true,liveSession:'shutdown-session',status:'failed',result:{reason:'cancelled',sessionId:'shutdown-session',resumable:false}}]);
  const o=await f.service.create('A unicorn','fit');await f.service.start(o.id);await until(()=>f.inputs.length);
  const closing=f.service.close();f.release();await closing;
  const stopped=await f.store.get(o.id);
@@ -449,8 +452,35 @@ test('closing the companion interrupts a worker without attributing it to the pe
 
 test('a request after restart resumes the interrupted session from the saved cwd', async t => {
  const f=await setup(t,[{status:'done'}]),o=await f.service.create('A unicorn','fit');
- await f.store.update(o.id,old=>({...old,state:'touching-up',passes:[{startedAtMs:1,sessionId:'interrupted-session',sessionCwd:'/first/pass',dir:'/latest/pass'}]}));
+ await f.store.update(o.id,old=>({...old,state:'touching-up',passes:[{startedAtMs:1,resumable:true,sessionId:'interrupted-session',sessionCwd:'/first/pass',dir:'/latest/pass'}]}));
  await f.store.recoverInterrupted();
  await f.service.start(o.id);await f.service.settled(o.id);
  assert.deepEqual(f.inputs[0].resume,{sessionId:'interrupted-session',passDir:'/latest/pass',sessionCwd:'/first/pass'});
+});
+
+for (const answered of [true, false]) test(`a ${answered ? 'post-worker throw after the final answer' : 'non-limit throw mid-pass'} never opts into resume`, async t => {
+ const f=await setup(t,[{liveSession:'throw-session',answered,throw:'post-worker file step failed'},{status:'done'}]);
+ const o=await f.service.create('A unicorn','fit');await f.service.start(o.id);
+ const failed=await f.service.settled(o.id);
+ assert.equal(failed.passes.at(-1).sessionId,'throw-session');
+ assert.equal(failed.passes.at(-1).resumable,false);
+ await f.service.start(o.id);await f.service.settled(o.id);
+ assert.equal(f.inputs[1].resume,undefined);
+});
+
+for (const answered of [false,true]) test(`a shutdown throw ${answered ? 'after the final answer cannot resume' : 'during a live session can resume'}`, async t => {
+ const f=await setup(t,[{liveSession:'shutdown-throw',wait:true,answered,throw:'worker interrupted'}]);
+ const o=await f.service.create('A unicorn','fit');await f.service.start(o.id);await until(()=>f.inputs.length);
+ const closing=f.service.close();f.release();await closing;
+ const stopped=await f.store.get(o.id);
+ assert.equal(stopped.passes.at(-1).resumable,!answered);
+});
+
+test('a file-copy throw after the worker answered becomes a non-resumable failed pass', async t => {
+ const f=await setup(t,[{liveSession:'answered-file-copy',answered:true,result:{model:'/missing/answered-model.stl',sessionId:'answered-file-copy',resumable:false}},{status:'done'}]);
+ const o=await f.service.create('A unicorn','fit');await f.service.start(o.id);
+ const failed=await f.service.settled(o.id);
+ assert.equal(failed.state,'failed');assert.equal(failed.passes.at(-1).resumable,false);
+ await f.service.start(o.id);await f.service.settled(o.id);
+ assert.equal(f.inputs[1].resume,undefined);
 });

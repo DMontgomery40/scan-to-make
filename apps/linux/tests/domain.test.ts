@@ -591,14 +591,19 @@ test("while the printer MCP sends the file, a project shows the companion's perc
 });
 
 
-test("limit stops say which limit on Home with projects present", () => {
+test("all three shared limit reasons survive project words with projects present", () => {
   const rows = JSON.parse(readFileSync(new URL("../../../packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/capped-projects.json", import.meta.url), "utf8"));
-  const projects = [project, ...rows.filter((row: {name: string}) => row.name.startsWith("limit-")).map((row: {expected: Project}) => row.expected)];
+  const reasons: Record<string, string> = {
+    "limit-inactivity": "Stopped after 10 minutes without worker activity",
+    "limit-absolute": "Stopped at the absolute time limit of 2 hours",
+    "limit-tool-calls": "Stopped at the 120 tool-call limit",
+  };
+  const stopped = rows.filter((row: {name: string}) => row.name.startsWith("limit-"));
+  assert.deepEqual(stopped.map((row: {name: string}) => row.name).sort(), Object.keys(reasons).sort());
+  const projects = [project, ...stopped.map((row: {expected: Project}) => row.expected)];
   assert.equal(projects.length, 4);
-  for (const stopped of projects.slice(1)) {
-    assert.equal(words(stopped), stopped.failure);
-    assert.match(words(stopped), /^Stopped/);
-    assert.doesNotMatch(words(stopped), /cancelled/i);
-    assert.equal(stopped.canRetryCleanup, true);
+  for (const row of stopped) {
+    assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
+    assert.equal(row.expected.canRetryCleanup, true);
   }
 });

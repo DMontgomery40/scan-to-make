@@ -30,6 +30,7 @@ test('done', async () => {
   assert.deepEqual(result.renders, [join(pass.outDir, 'front.png')]);
   assert.deepEqual(result.checkpoints, [join(pass.checkpointsDir, '01.stl')]);
   assert.ok(progress.some(p => p.lastText === 'Restored the texture on the underside.'));
+  assert.equal(progress.at(-1).resumable, false, 'the final answer clears live recovery before later file steps');
 });
 
 test('a request in several colours keeps the printer MCP\'s multi-part 3MF beside the merged mesh', async () => {
@@ -248,7 +249,7 @@ for (const kind of ['inactivity', 'absolute', 'tool-calls']) {
     assert.equal(result.resumable, true);
     assert.deepEqual(result.checkpoints, [good]);
     assert.equal(result.model, good);
-    assert.ok(progress.some(p => p.sessionId === 'saved-session'));
+    assert.ok(progress.some(p => p.sessionId === 'saved-session' && p.resumable === true));
   });
 }
 
@@ -289,4 +290,22 @@ test('limit words use minutes and hours a person can read', async () => {
  assert.equal(limitWords({kind:'inactivity',value:600000}),'Stopped after 10 minutes without worker activity');
  assert.equal(limitWords({kind:'absolute',value:7200000}),'Stopped at the absolute time limit of 2 hours');
  assert.equal(limitWords({kind:'tool-calls',value:120}),'Stopped at the 120 tool-call limit');
+});
+
+for (const initialized of [false,true]) test(`real missing-session terminal event identifies loader rejection${initialized ? ' even after init' : ''}`, async () => {
+ const {pass,inv}=await setup('hang');
+ const raw=await readFile(join(fixtures,'missing-session.ndjson'),'utf8'),stderr=await readFile(join(fixtures,'missing-session.stderr'),'utf8');
+ const event=JSON.parse(raw),exit=Number(await readFile(join(fixtures,'missing-session.exit-code'),'utf8'));
+ const prefix=initialized?JSON.stringify({type:'system',subtype:'init',session_id:event.session_id})+'\n':'';
+ inv.args=['-e',`process.stdout.write(${JSON.stringify(prefix+raw)});process.stderr.write(${JSON.stringify(stderr)});process.exit(${exit});`,'--','--resume',event.session_id];
+ const result=await runTouchupWorker(inv,pass);
+ assert.equal(result.status,'failed');assert.equal(result.resumeUnavailable,true);
+ assert.equal(result.resumable,false);assert.equal(result.sessionId,event.session_id);
+});
+
+for (const [name,changes] of [['model turn',{num_turns:1}],['API work',{duration_api_ms:5}],['another session',{errors:['No conversation found with session ID: another-session']}]]) test(`a ${name} is not the CLI loader rejection`, async () => {
+ const {pass,inv}=await setup('hang');const event=JSON.parse(await readFile(join(fixtures,'missing-session.ndjson'),'utf8'));
+ inv.args=['--resume',event.session_id];
+ inv.worker=async()=>({resultEvent:{...event,...changes},sessionId:event.session_id,exitCode:1,toolCalls:0,seconds:0,stderrTail:'',publicText:text=>text});
+ assert.equal((await runTouchupWorker(inv,pass)).resumeUnavailable,undefined);
 });

@@ -380,7 +380,12 @@ class ContractTests {
             val expected = Project.decode(r["expected"].obj!!)!!
             val words = ProjectWords(expected)
             if (name?.startsWith("limit-") == true) {
-                assertEquals(expected.failure, words.status)
+                val reason = mapOf(
+                    "limit-inactivity" to "Stopped after 10 minutes without worker activity",
+                    "limit-absolute" to "Stopped at the absolute time limit of 2 hours",
+                    "limit-tool-calls" to "Stopped at the 120 tool-call limit"
+                ).getValue(name)
+                assertEquals("$reason. Try again or review the saved checkpoint.", words.status)
                 assertFalse(words.line.lowercase().contains("cancelled"))
             }
             val actions = words.actions
