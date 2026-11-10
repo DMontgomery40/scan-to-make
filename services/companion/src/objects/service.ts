@@ -526,7 +526,7 @@ export class ObjectService {
       if (!updated) return;
       deps.onChange?.(updated);
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['picture']}});
-    });
+    }, id => deps.store.get(id));
   }
   readonly #pictures: ProjectPictures;
   /** Waits for the pictures being drawn (tests). */
