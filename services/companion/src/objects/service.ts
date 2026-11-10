@@ -1,6 +1,6 @@
 import {starterModelId, starterProject as bundledStarter, type StarterProject} from '../starters/catalog.js';
 import {acknowledgePlate, plateNeedsPrinterCheck, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
-import {copyFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
+import {copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
@@ -520,9 +520,12 @@ export class ObjectService {
   #closed = false;
   constructor(deps: ObjectServiceDeps) {
     this.#deps = deps;
-    this.#pictures = new ProjectPictures(deps.drawPicture, async (id, names) => {
+    this.#pictures = new ProjectPictures(deps.drawPicture, async (id, names, _object, states) => {
       // A redrawn picture is not news: the project keeps its place on Home and in the sidebar.
-      const updated = await deps.store.update(id, o => ({...o, pictures: names, picture: leadPicture(names, o)}), {keepUpdatedAt: true}).catch(() => undefined);
+      const updated = await deps.store.update(id, o => {
+        const {pictureStates: _old, ...rest} = o;
+        return {...rest, pictures: names, picture: leadPicture(names, o), ...(Object.keys(states).length ? {pictureStates: states} : {})};
+      }, {keepUpdatedAt: true}).catch(() => undefined);
       if (!updated) return;
       deps.onChange?.(updated);
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['picture']}});
@@ -908,7 +911,7 @@ export class ObjectService {
     } catch { /* a failed call leaves it unknown; the next list or estimate asks again */ }
   }
   async get(id: string): Promise<StmObject> {
-    let object = await this.#deps.store.get(id);
+    let object = await this.#scanFiles(await this.#deps.store.get(id));
     if (object.state === 'touching-up') object = await this.#freshEstimate(object);
     if (!object.print) return object;
     // A watched print reads its monitor's last report instead of asking the printer again.
@@ -2988,6 +2991,9 @@ export class ObjectService {
       ...(!o.title && (first.title || info.model?.title) ? {title: first.title ?? info.model!.title} : {}), ...(credit.url ? {credit: credit as NonNullable<StmObject['credit']>} : {}),
       ...(ask ? {ask} : o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
       passes: info.startedAtMs === undefined ? o.passes : withPassEnded(o.passes, info.startedAtMs, {status: 'done'}, now, summary ? {summary} : {})}));
+    // The file gave no name: the person's words do (Nov 10: a model-file project sat in the list as its request cut
+    // off mid-sentence, "First plate from Counterpart's own kernel…", because published projects were never titled).
+    this.#title(updated);
     // A starter that is ready keeps the kit it accepted, once per computer: Try Again and a second tap never download it.
     const starter = object.starterId ? this.#starter(object.starterId) : undefined;
     // Only a whole kit (#kit) is recorded as one: a worker's or the person's partial or wrong set is kept as files, never replayed.
@@ -3244,11 +3250,14 @@ export class ObjectService {
   readonly #titling = new Set<string>();
   #backfills: Promise<unknown> = Promise.resolve();
   /**
-   * A quick title for a request, if the project has none yet: at its first pass, or (backfill) when an older
-   * project is listed. Tried once per project per run; backfills run one at a time. Never holds anything up.
+   * A quick title for a request, if the project has none yet: at its first pass, when a model file arrives without
+   * a name of its own, or (backfill) when an older project is listed. Tried once per project per run; backfills run one at a time. Never holds anything up.
    */
   #title(object: StmObject, options: {backfill?: boolean} = {}): void {
-    if (passKind(object) === 'published') return;
+    // A model file's project is named by its source (the file's own title or its page's). Only once the file is
+    // here and brought no name is it named from the person's words like any other project; before that, a generated
+    // title would take the place the source's real name is about to fill.
+    if (passKind(object) === 'published' && !object.current) return;
     // The title comes from the person's words, never from the brief below them.
     const request = fitRequest(object).typed, titleFor = this.#deps.titleFor;
     if (object.title || !request || !titleFor || this.#titling.has(object.id)) return;
@@ -3456,6 +3465,24 @@ export class ObjectService {
 
   #handoff(): PrinterHandoffConfig { return this.#deps.runningHandoff?.() ?? this.#deps.handoff; }
   #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#handoff().process.env}); }
+
+  /**
+   * The scan files a client may fetch, with their sizes (`scanFiles`, PRD §5.4): the scan, and the phone's own model
+   * kept beside a Mac rebuild. Read from disk as the project is read, and written to it only when they change.
+   */
+  async #scanFiles(object: StmObject): Promise<StmObject> {
+    const dir = join(this.dir(object.id), 'scan');
+    const names = [...new Set([object.scan, 'phone-preview.usdz'])].filter((name): name is string => !!name && /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name));
+    const files: {name: string; bytes: number}[] = [];
+    for (const name of names) {
+      // Only a regular file in the project: a link out of it is never offered (and never exported).
+      const info = await lstat(join(dir, name)).catch(() => undefined);
+      if (info?.isFile()) files.push({name, bytes: info.size});
+    }
+    const value = files.length ? files : undefined;
+    if (JSON.stringify(value) === JSON.stringify(object.scanFiles)) return object;
+    return this.#deps.store.update(object.id, o => ({...o, scanFiles: value}), {keepUpdatedAt: true}).catch(() => ({...object, scanFiles: value}));
+  }
 
   #changed(object: StmObject): StmObject {
     this.#deps.onChange?.(object);

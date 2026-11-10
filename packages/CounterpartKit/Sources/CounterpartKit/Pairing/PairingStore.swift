@@ -98,6 +98,8 @@ public struct PairingError: Error, Equatable, Sendable {
         case nearbyDenied = "nearby-denied", nearbyExpired = "nearby-expired", localNetwork = "local-network"
     }
     public var code: Code
+    /// Keychain protection during lock is recoverable after unlock; it is not a replaced pairing.
+    public var isLocked: Bool { code == .secureStorage && status == errSecInteractionNotAllowed }
     public var status: OSStatus?
     public init(_ code: Code, status: OSStatus? = nil) { self.code = code; self.status = status }
     public init(_ link: PairingLinkError) {

@@ -2,9 +2,9 @@ name: Mac app
 on:
   push:
     branches: [main]
-    paths: ['apps/mac/**', 'packages/CounterpartKit/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
+    paths: ['tools/mac-reconstruct/**', 'apps/mac/**', 'packages/CounterpartKit/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
   pull_request:
-    paths: ['apps/mac/**', 'packages/CounterpartKit/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
+    paths: ['tools/mac-reconstruct/**', 'apps/mac/**', 'packages/CounterpartKit/**', 'services/companion/src/local-control*', 'services/companion/src/model-access*', 'packages/contracts/src/model-access.ts', 'packages/contracts/fixtures/model-access*.json', '.github/workflows/mac.yml']
 permissions:
   contents: read
 jobs:
@@ -20,6 +20,8 @@ jobs:
           case "$(xcodebuild -version)" in "Xcode 27.2"*) ;; *) echo "Xcode 27.2 is required"; exit 1 ;; esac
       - name: Unit tests
         run: swift test --package-path apps/mac
+      - name: Model reader and picture tests
+        run: swift test --package-path tools/mac-reconstruct
       - name: ControlKit tests
         run: swift test --package-path apps/mac/ControlKit
       - name: Companion runtime configuration tests

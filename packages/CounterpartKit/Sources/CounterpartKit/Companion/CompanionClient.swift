@@ -8,6 +8,8 @@ public struct CompanionError: Error, Equatable, Sendable {
 
     /// The phone has to pair (again) before anything else will work.
     public var needsPairing: Bool { ["pairing-required", "pairing-changed", "certificate-changed", "scope-denied", "pairing"].contains(code) }
+    /// Protected storage is temporarily unavailable, without invalidating this pairing.
+    public var isLocked: Bool { code == "device-locked" }
     /// The Mac didn't answer: nothing is wrong with the project itself.
     public var isUnreachable: Bool { code == "unreachable" }
     /// An older Mac without this route or field.
@@ -108,15 +110,52 @@ public final class CompanionClient: @unchecked Sendable {
     /// The current record, if it is unexpired and holds `scope`.
     private func record(_ scope: String) throws -> PairingRecord {
         let record: PairingRecord?
-        do { record = try pairing.store.read() } catch { throw CompanionError.transport("pairing-required") }
+        do {
+            record = try pairing.store.read()
+            MediaTrace.record("pairing.read", ["success": "true"])
+        } catch {
+            MediaTrace.record("pairing.read", ["success": "false", "code": String((error as? PairingError)?.status ?? 0)])
+            throw Self.storageFailure(error)
+        }
         guard let record, record.requestBaseURL != nil, !record.isExpired() else { throw CompanionError.transport("pairing-required") }
         guard record.has(scope: scope) else { throw CompanionError.transport("scope-denied") }
         return record
     }
 
+    private static func storageFailure(_ error: Error) -> CompanionError {
+        if (error as? PairingError)?.isLocked == true {
+            return CompanionError(code: "device-locked", message: "Unlock your iPhone to load this model.")
+        }
+        return CompanionError(code: "secure-storage", message: "Your connection couldn't be read securely. Try again.")
+    }
+
     /// One request: pinned, size-limited, and refused afterwards if the pairing changed while it ran.
     public func send(_ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json",
                      limit: Int = CompanionClient.jsonLimit, timeout: TimeInterval = 90, ifNoneMatch: String? = nil) async throws -> HTTPReply {
+        try await exchange(method, path, body: body, contentType: contentType, limit: limit, timeout: timeout, ifNoneMatch: ifNoneMatch) {
+            let reply = try await self.transport.send($0, trust: $1, limit: limit, resourceTimeout: $2)
+            MediaTrace.record("request.response", ["status": String(reply.status), "bytes": String(reply.body.count)])
+            return reply
+        }
+    }
+
+    /// A project file fetched to disk as it arrives (`HTTPTransport.download`): never held in memory whole. The link may
+    /// be slow (a busy Mac over Wi-Fi), so the transfer has half an hour; a link that stops sending for 90 s still fails.
+    func fetchFile(_ path: String, limit: Int) async throws -> (reply: HTTPReply, file: URL?) {
+        try await exchange("GET", path, limit: limit, timeout: 90, resourceTimeout: 1800, discard: { value in
+            if let file = value.file { try? FileManager.default.removeItem(at: file) }
+        }) {
+            let result = try await self.transport.download($0, trust: $1, limit: limit, resourceTimeout: $2)
+            let bytes = result.file.flatMap { try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int } ?? result.reply.body.count
+            MediaTrace.record("request.response", ["status": String(result.reply.status), "bytes": String(bytes)])
+            return result
+        }
+    }
+
+    private func exchange<T>(_ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json",
+                             limit: Int, timeout: TimeInterval, ifNoneMatch: String? = nil, resourceTimeout fixed: TimeInterval? = nil,
+                             discard: (T) -> Void = { _ in },
+                             perform: (URLRequest, TrustPolicy, TimeInterval) async throws -> T) async throws -> T {
         guard let scope = Self.scope(method, path.components(separatedBy: "?")[0]) else { throw CompanionError.transport("invalid-request") }
         var attempt = try record(scope)
         // A GET that can't reach the Mac checks its other addresses once, moving to whichever answers.
@@ -132,17 +171,29 @@ public final class CompanionClient: @unchecked Sendable {
             if let deviceModel { request.setValue(deviceModel, forHTTPHeaderField: "X-Scan-Device-Model") }
             if let deviceName { request.setValue(deviceName, forHTTPHeaderField: "X-Scan-Device-Name") }
             if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+            MediaTrace.record("request.start", ["method": method, "route": path.contains("/model.stl") ? "model" : "other", "pairingRead": "true",
+                                                "pin": attempt.publicKeySha256 != nil ? "public-key" : attempt.certificateSha256 != nil ? "certificate" : "system",
+                                                "endpoint": base.host?.hasSuffix(".local") == true ? "mdns" : base.host?.hasSuffix(".ts.net") == true ? "tailscale" : "ip-or-dns",
+                                                "attempt": String(retry)])
             do {
                 // Metadata deadlines bound the whole reply, including a peer trickling bytes. Commands and
                 // file transfers keep their budgets; event long polls pass their own 40-second timeout.
                 let metadata = method == "GET" && limit <= Self.jsonLimit
-                let resourceTimeout = metadata ? timeout + 5 : (body?.count ?? 0) > Self.photoLimit ? 600 : max(180, timeout + 10)
-                let reply = try await transport.send(request, trust: .record(attempt), limit: limit,
-                                                     resourceTimeout: resourceTimeout)
-                let latest = try? pairing.store.read()
-                guard attempt.isSamePairing(as: latest ?? nil) else { throw CompanionError.transport("pairing-changed") }
-                return reply
+                let resourceTimeout = fixed ?? (metadata ? timeout + 5 : (body?.count ?? 0) > Self.photoLimit ? 600 : max(180, timeout + 10))
+                let reply = try await perform(request, .record(attempt), resourceTimeout)
+                do {
+                    let latest: PairingRecord?
+                    do { latest = try pairing.store.read(); MediaTrace.record("pairing.reread", ["success": "true"]) }
+                    catch {
+                        MediaTrace.record("pairing.reread", ["success": "false", "code": String((error as? PairingError)?.status ?? 0)])
+                        throw Self.storageFailure(error)
+                    }
+                    guard attempt.isSamePairing(as: latest) else { throw CompanionError.transport("pairing-changed") }
+                    MediaTrace.record("request.end")
+                    return reply
+                } catch { discard(reply); throw error }
             } catch let error as TransportError {
+                MediaTrace.record("request.error", ["code": error.code])
                 // A long poll that ends early says nothing about the address: only an ordinary request moves it.
                 if retry == 0, method == "GET", !path.hasPrefix("/v1/events"), ["network", "timeout"].contains(error.code), (attempt.addresses?.count ?? 0) > 1,
                    let checked = try? await pairing.check(), checked.activeUrl != attempt.activeUrl,
@@ -151,6 +202,9 @@ public final class CompanionClient: @unchecked Sendable {
                     continue
                 }
                 throw CompanionError.transport(error.code)
+            } catch {
+                MediaTrace.record("request.error", ["code": (error as? CompanionError)?.code ?? String((error as NSError).code)])
+                throw error
             }
         }
         throw CompanionError.unreachable
@@ -562,6 +616,11 @@ public final class CompanionClient: @unchecked Sendable {
 
     /// Downloads one project file into the cache, once per project version, and returns where it is.
     public func download(_ project: Project, _ name: String) async throws -> URL {
+        let context = MediaTrace.context ?? MediaTrace.Context(project: project.id, version: String(Int64(project.mediaVersion)))
+        return try await MediaTrace.$context.withValue(context) { try await downloadFile(project, name) }
+    }
+
+    private func downloadFile(_ project: Project, _ name: String) async throws -> URL {
         let allowed = Pattern(#"original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png"#)
         guard Pattern(Self.uuid).matches(project.id), allowed.matches(name), !name.contains("..") else { throw CompanionError.transport("invalid-request") }
         let version = String(Int64(project.mediaVersion))
@@ -583,24 +642,44 @@ public final class CompanionClient: @unchecked Sendable {
             filename += "_" + URL(fileURLWithPath: path).lastPathComponent
         }
         let target = folder.appending(path: filename)
-        if FileManager.default.fileExists(atPath: target.path) { return target }
+        let cachedBytes = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
+        MediaTrace.record(cachedBytes > 0 ? "file.hit" : "file.miss", ["bytes": String(cachedBytes)])
+        if cachedBytes > 0 { return target }
         let encoded = resource.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? resource
         // The Ask's picture is served by its id; the field gives `asks/<id>.<ext>`.
         let path = "/v1/objects/\(project.id)/\(encoded)"
-        let reply = try await send("GET", path, limit: Self.scanLimit)
-        guard reply.status == 200, !reply.body.isEmpty else {
+        let (reply, fetched) = try await fetchFile(path, limit: Self.scanLimit)
+        guard reply.status == 200, let fetched else {
+            MediaTrace.record("file.refused", ["status": String(reply.status)])
             throw reply.status == 404 ? CompanionError(code: "not-found", message: "This is no longer on your Mac.")
-                : CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
+                : reply.status == 413 ? CompanionError(code: "file-too-large", message: "This file is too large for this phone.")
+                : CompanionError(code: "http-\(reply.status)", message: "Your Mac couldn't send this file. Try again.")
+        }
+        defer { try? FileManager.default.removeItem(at: fetched) }
+        guard ((try? FileManager.default.attributesOfItem(atPath: fetched.path)[.size] as? Int) ?? 0) > 0 else {
+            throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
         }
         // Older versions of this project are no longer shown. The current version's folder stays: its other
         // files may be downloading at the same time.
         let projectFolder = folder.deletingLastPathComponent()
-        for other in (try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)) ?? [] where other.lastPathComponent != version {
+        // Only older ones: downloads outlive their page now, so a slow download of an earlier version can finish after
+        // a newer version's files have landed, and must not remove them (review of #527, part 2, F2).
+        let mine = Int64(version) ?? 0
+        for other in (try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)) ?? []
+        where (Int64(other.lastPathComponent) ?? Int64.min) < mine {
             try? FileManager.default.removeItem(at: other)
         }
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        do { try reply.body.write(to: target, options: .atomic) }
-        catch { throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.") }
+        do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        catch { MediaTrace.record("file.write-error", ["code": String((error as NSError).code)]); throw error }
+        // Moved into place whole, so a reader never sees half a file; another download of it may have won the race.
+        if FileManager.default.fileExists(atPath: target.path) { return target }
+        do { try FileManager.default.moveItem(at: fetched, to: target) }
+        catch {
+            if FileManager.default.fileExists(atPath: target.path) { return target }
+            MediaTrace.record("file.write-error", ["code": String((error as NSError).code)])
+            throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
+        }
+        MediaTrace.record("file.committed", ["bytes": String((try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0)])
         return target
     }
 }

@@ -275,6 +275,60 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertNil(none)
     }
 
+    func testLockedKeychainAfterResponseKeepsPairingAndRetriesAfterUnlock() async throws {
+        let secure = LockTransitionStore()
+        let store = PairingStore(store: secure, defaults: UserDefaults(suiteName: "locked-\(UUID().uuidString)")!)
+        try store.save(v2Record(), notify: false)
+        let fake = FakeTransport { _, _ in
+            secure.locked = true
+            return HTTPReply(status: 200, body: Data("mesh".utf8))
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let c = CompanionClient(pairing: PairingClient(store: store, transport: fake), transport: fake, cache: root)
+        let p = project([:])
+        do { _ = try await c.download(p, "model.stl"); XCTFail("Lock transition must defer publication") }
+        catch let error as CompanionError {
+            XCTAssertEqual(error.code, "device-locked")
+            XCTAssertFalse(error.needsPairing)
+        }
+        secure.locked = false
+        XCTAssertNotNil(try store.read(), "The stored credential survives locking")
+        fake.answer = { _, _ in HTTPReply(status: 200, body: Data("mesh".utf8)) }
+        let downloaded = try await c.download(p, "model.stl")
+        XCTAssertEqual(try Data(contentsOf: downloaded), Data("mesh".utf8))
+    }
+
+    func testActualSuccessfulAndFailedVisitsWriteTheirBoundariesWithoutSecrets() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let trace = MediaTrace(url: folder.appendingPathComponent("media-trace.ndjson"))
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: Data("mesh".utf8)) }
+        let c = try client(fake)
+        defer { try? FileManager.default.removeItem(at: c.cache) }
+        try await MediaTrace.$destination.withValue(trace) {
+            _ = try await c.download(project([:]), "model.stl")
+            fake.answer = { _, _ in throw TransportError("timeout") }
+            do { _ = try await c.download(project([:]), "renders/one.png"); XCTFail() } catch {}
+        }
+        let text = try String(contentsOf: trace.url, encoding: .utf8)
+        let rows = try text.split(separator: "\n").map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: String] }
+        for boundary in ["file.miss", "pairing.read", "request.start", "request.response", "pairing.reread", "file.committed", "request.error"] {
+            XCTAssertTrue(rows.contains { $0["event"] == boundary }, "Missing \(boundary)")
+        }
+        XCTAssertTrue(rows.contains { $0["event"] == "request.response" && $0["status"] == "200" && $0["bytes"] == "4" })
+        XCTAssertTrue(rows.allSatisfy { $0["project"] == project([:]).id && $0["generation"] != nil && $0["version"] != nil })
+        XCTAssertFalse(text.contains(token)); XCTAssertFalse(text.contains(keyPin)); XCTAssertFalse(text.contains("192.168"))
+    }
+
+    func testHTTPDownloadRefusalKeepsStatus() async throws {
+        let fake = FakeTransport { _, _ in HTTPReply(status: 503, body: Data()) }
+        let c = try client(fake)
+        defer { try? FileManager.default.removeItem(at: c.cache) }
+        do { _ = try await c.download(project([:]), "model.stl"); XCTFail("Refused") }
+        catch let error as CompanionError { XCTAssertEqual(error.code, "http-503") }
+    }
+
     private func client(_ fake: FakeTransport, record: PairingRecord = v2Record()) throws -> CompanionClient {
         let store = PairingStore(store: MemoryStore(), defaults: UserDefaults(suiteName: "cc-\(UUID().uuidString)")!)
         try store.save(record, notify: false)
@@ -686,6 +740,21 @@ final class CompanionClientTests: XCTestCase {
         catch let error as CompanionError { XCTAssertEqual(error.message, "This printer is printing. Change its connection when the print finishes.") }
     }
 
+    /// Nov 10: a 192 MB scan was refused (413) and the phone's stage stayed blank with nothing said. A refusal says what
+    /// it is, and a fetched file lands whole at its cached place.
+    func testAFileTooLargeForThePhoneSaysSoAndAFetchedOneLandsWhole() async throws {
+        let p = Project(id: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", createdAtMs: 1, updatedAtMs: 2, state: .ready, scan: "scan.usdz")
+        let refused = try client(FakeTransport { _, _ in json(413, ["error": ["code": "file-too-large", "message": "file-too-large"]]) })
+        do { _ = try await refused.download(p, "scan/scan.usdz"); XCTFail("refused") }
+        catch let error as CompanionError { XCTAssertEqual(error.code, "file-too-large") }
+        let bytes = Data(repeating: 7, count: 300_000)
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) }
+        let file = try await client(fake).download(p, "scan/phone-preview.usdz")
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+        XCTAssertTrue(file.lastPathComponent.hasSuffix("scan_phone-preview.usdz"))
+        XCTAssertEqual(fake.calls.last?.request.url?.path, "/v1/objects/\(p.id)/scan/phone-preview.usdz")
+    }
+
     func testDownloadsAreCachedPerVersion() async throws {
         let data = try fixture("objects.json")
         struct List: Decodable { var objects: [Project] }
@@ -709,6 +778,26 @@ final class CompanionClientTests: XCTestCase {
         _ = try await client(located).locate(p.id)
         XCTAssertEqual(located.calls.last?.request.httpMethod, "POST")
         XCTAssertEqual(located.calls.last?.request.url?.path, "/v1/objects/\(p.id)/locate")
+    }
+
+    /// Review of #527, part 2, F2: downloads outlive their page, so a slow download for an earlier version of a project
+    /// can finish after a newer version's files have landed. It tidies older folders only, never the newer one.
+    func testALateDownloadForAnOlderVersionLeavesTheNewerVersionsFiles() async throws {
+        func project(_ ended: Int) throws -> Project {
+            try JSONDecoder().decode(Project.self, from: Data(#"{"id":"0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a12","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[{"startedAtMs":1,"endedAtMs":\#(ended),"status":"done"}],"current":{"model":"current/model.stl","renders":["current/renders/1_overview.png"]}}"#.utf8))
+        }
+        let older = try project(1000), newer = try project(2000)
+        XCTAssertLessThan(older.mediaVersion, newer.mediaVersion)
+        let c = try client(FakeTransport { _, _ in HTTPReply(status: 200, body: Data("png".utf8)) })
+        let kept = try await c.download(newer, "renders/1_overview.png")
+        defer { try? FileManager.default.removeItem(at: kept.deletingLastPathComponent().deletingLastPathComponent()) }
+        let late = try await c.download(older, "renders/1_overview.png")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path), "the newer version's file is still there")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: late.path))
+        // The tidying itself still happens: the next download for the newer version removes the older folder.
+        _ = try await c.download(newer, "pictures/part-0123456789abcdef.png")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: late.path), "an older version's files go when a newer one lands")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
     }
 
     func testDesignedMultiColour3MFExportDoesNotMasqueradeAsSTL() async throws {
@@ -1171,4 +1260,16 @@ final class NotificationActionsTests: XCTestCase {
         XCTAssertTrue(CompanionClient.draftBody("A clip.", kind: "fit", fit: nil)["fit"] is NSNull)
         XCTAssertEqual((CompanionClient.draftBody("A clip.", kind: "fit", fit: ProjectFit(sizeSource: .scan))["fit"] as? [String: Any])?["sizeSource"] as? String, "scan")
     }
+}
+
+private final class LockTransitionStore: SecureStore, @unchecked Sendable {
+    private let memory = MemoryStore()
+    var locked = false
+    func read(_ account: String) throws -> Data? {
+        if locked { throw PairingError(.secureStorage, status: -25308) }
+        return try memory.read(account)
+    }
+    func write(_ account: String, _ data: Data) throws { try memory.write(account, data) }
+    func add(_ account: String, _ data: Data) throws -> Bool { try memory.add(account, data) }
+    func delete(_ account: String) throws { try memory.delete(account) }
 }

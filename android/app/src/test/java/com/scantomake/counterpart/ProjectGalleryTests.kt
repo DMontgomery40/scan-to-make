@@ -5,6 +5,8 @@ import com.scantomake.counterpart.api.ProjectGallery
 import com.scantomake.counterpart.api.canLocate
 import com.scantomake.counterpart.api.photoPicture
 import com.scantomake.counterpart.api.picturePath
+import com.scantomake.counterpart.api.Still
+import com.scantomake.counterpart.api.still
 import com.scantomake.counterpart.core.parseObject
 import kotlinx.serialization.json.*
 import org.junit.Assert.assertEquals
@@ -33,6 +35,10 @@ class ProjectGalleryTests {
                 assertEquals(name, want["measures"]!!.jsonPrimitive.content, entry.measures)
                 assertEquals(name, want["sizeMm"]?.jsonArray?.map { it.jsonPrimitive.double }, entry.sizeMm)
                 assertEquals(name, want["photos"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList<String>(), entry.photos)
+                want["still"]?.let {
+                    val got = when (val s = project.still(entry)) { is Still.Picture -> s.path; Still.Waiting -> "waiting"; Still.NotAvailable -> "not available" }
+                    assertEquals("$name: ${entry.id}'s stage", it.jsonPrimitive.content, got)
+                }
                 val colour = when (val c = entry.colour) { ProjectGallery.Colour.Neutral -> "neutral"; ProjectGallery.Colour.Own -> "own"; is ProjectGallery.Colour.Spool -> c.hex }
                 assertEquals(name, want["colour"]!!.jsonPrimitive.content, colour)
                 val drawing = want["drawing"]!!.jsonObject

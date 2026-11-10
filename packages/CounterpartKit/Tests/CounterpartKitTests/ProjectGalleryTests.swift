@@ -29,6 +29,14 @@ final class ProjectGalleryTests: XCTestCase {
                 case .own: XCTAssertEqual(want["colour"] as? String, "own", name)
                 case .spool(let hex): XCTAssertEqual(want["colour"] as? String, hex, name)
                 }
+                if let still = want["still"] as? String {
+                    let got: String = switch project.still(for: entry) {
+                    case .picture(let path): path
+                    case .waiting: "waiting"
+                    case .notAvailable: "not available"
+                    }
+                    XCTAssertEqual(got, still, "\(name): \(entry.id)'s stage")
+                }
                 let drawing = want["drawing"] as! [String: Any]
                 switch entry.drawing {
                 case .model(let path): XCTAssertEqual(drawing["model"] as? String, path, name)
@@ -115,5 +123,29 @@ final class ProjectGalleryTests: XCTestCase {
         let y = apply([0, 1, 0]), x = apply([1, 0, 0])
         XCTAssertEqual(y[0], 10, accuracy: 1e-9); XCTAssertEqual(y[1], 20, accuracy: 1e-9); XCTAssertEqual(y[2], 31, accuracy: 1e-9)
         XCTAssertEqual(x[0], 10, accuracy: 1e-9); XCTAssertEqual(x[1], 21, accuracy: 1e-9); XCTAssertEqual(x[2], 30, accuracy: 1e-9)
+    }
+
+    /// Nov 10, David's five scans: what each stage fetches. What you scanned draws the phone's own model beside a Mac
+    /// rebuild; Together draws the scan (the seats' frame); nothing over the phone's limit is asked for.
+    func testEachStageFetchesAScanThePhoneCanTake() {
+        let limit = Double(64 * 1024 * 1024)
+        func scanned(_ files: [Project.ScanFile]?) -> Project {
+            var p = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready, scan: "scan.usdz")
+            p.scanFiles = files
+            return p
+        }
+        let sign = scanned([.init(name: "scan.usdz", bytes: 191_981_699), .init(name: "phone-preview.usdz", bytes: 9_201_716)])
+        XCTAssertEqual(sign.scanModel(limit: limit), .file("scan/phone-preview.usdz"), "the 192 MB rebuild: the phone's own model")
+        XCTAssertEqual(sign.scanModel(together: true, limit: limit), .tooLarge, "Together needs the rebuild's frame: its picture instead")
+        let holder = scanned([.init(name: "scan.usdz", bytes: 15_961_620), .init(name: "phone-preview.usdz", bytes: 7_125_785)])
+        XCTAssertEqual(holder.scanModel(limit: limit), .file("scan/phone-preview.usdz"))
+        XCTAssertEqual(holder.scanModel(together: true, limit: limit), .file("scan/scan.usdz"))
+        let potato = scanned([.init(name: "scan.usdz", bytes: 7_088_924)])
+        XCTAssertEqual(potato.scanModel(limit: limit), .file("scan/scan.usdz"), "sent from the phone as it was: the scan is the phone's model")
+        XCTAssertEqual(scanned([.init(name: "scan.usdz", bytes: 70_000_000)]).scanModel(limit: limit), .tooLarge)
+        XCTAssertEqual(scanned(nil).scanModel(limit: limit), .file("scan/scan.usdz"), "a Mac that doesn't list them: asked as before")
+        XCTAssertEqual(scanned([]).scanModel(limit: limit), .none, "listed, and no file there")
+        var designer = scanned(nil); designer.scan = "scan.3mf"
+        XCTAssertEqual(designer.scanModel(limit: limit), .none, "a designer's 3MF is not a scanned object")
     }
 }

@@ -26,6 +26,12 @@ struct ModelStage: View {
     var seats: [[Double]] = []
     /// The size of what is drawn, in millimetres (width, depth, height), once it is loaded: the size chip's numbers.
     var measured: (([Double]) -> Void)? = nil
+    /// What the stage shows until the model is drawn, and if it can't be: the Mac's picture of it, never an empty stage.
+    var placeholder: AnyView? = nil
+    /// Told when the file is here but can't be drawn (review F7 on #525), so the page can say so under its picture.
+    var undrawable: (() -> Void)? = nil
+    /// Lets a gallery clear a previous failure after a retry succeeds.
+    var drawn: (() -> Void)? = nil
 
     @State private var holder = PivotHolder()
     @State private var turn: CGSize = .zero
@@ -38,20 +44,27 @@ struct ModelStage: View {
     @State private var live = false
     @State private var lastTouch = Date.distantPast
     @State private var failed = false
+    @State private var posterIdentity: String?
+    @State private var retryGeneration = 0
 
     private var identity: String { "\(url?.absoluteString ?? "empty")#\(tint?.description ?? "default")#\(twoTone)#\(yaw)#\(pitch)#\(fit)#\(object?.absoluteString ?? "")#\(seats.count)" }
 
     var body: some View {
         ZStack {
             if let backdrop { backdrop } else if lightStage { LightStageBackground() } else { StageBackground() }
-            if live && scenePhase == .active && interactive {
+            if live && poster != nil && scenePhase == .active && interactive {
                 realityView
             } else if let poster {
                 Image(decorative: poster, scale: 1).resizable().scaledToFit()
+            } else if let placeholder {
+                placeholder
             } else if failed {
                 Text("This model couldn't be shown.").font(.footnote).foregroundStyle(.secondary)
             } else if url != nil { ProgressView() }
-            if interactive && url != nil && !live {
+            if failed, placeholder != nil {
+                VStack { Spacer(); Button("Try 3D Again") { retryGeneration += 1 }.stageButton(light: lightStage) }.padding(16)
+            }
+            if interactive && url != nil && poster != nil && !live && !failed {
                 VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }.stageButton(light: lightStage) }; Spacer() }.padding(16)
             }
         }
@@ -69,26 +82,34 @@ struct ModelStage: View {
                 guard interactive && scenePhase == .active else { return }
                 settledZoom = zoom; touch()
             }, isEnabled: interactive)
-        .task(id: "\(identity)#\(scenePhase)") {
+        .task(id: "\(identity)#\(scenePhase)#\(retryGeneration)") {
             guard scenePhase == .active else { return }
-            live = false; poster = nil; failed = false
+            live = false; failed = false
+            if posterIdentity != identity { poster = nil }
             turn = .zero; settled = .zero; zoom = 1; settledZoom = 1
             guard let url, scenePhase == .active else { return }
-            let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
-            guard !Task.isCancelled else { return }
-            guard let entity = loaded else { failed = true; return }
-            let e = entity.visualBounds(relativeTo: nil).extents
-            measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
-            let image = await ModelPoster.image(key: identity, model: entity, yaw: yaw, pitch: pitch, fit: fit)
-            guard !Task.isCancelled else { return }
-            poster = image; failed = image == nil
+            await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: String(describing: scenePhase))) {
+                MediaTrace.record("stage.begin", ["scene": String(describing: scenePhase)])
+                defer { MediaTrace.record(Task.isCancelled ? "stage.cancelled" : "stage.end", ["scene": String(describing: scenePhase)]) }
+                let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
+                guard !Task.isCancelled, scenePhase == .active else { return }
+                guard let entity = loaded else { failed = true; undrawable?(); return }
+                let e = entity.visualBounds(relativeTo: nil).extents
+                measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
+                let image = await ModelPoster.image(key: identity, model: entity, yaw: yaw, pitch: pitch, fit: fit)
+                guard !Task.isCancelled, scenePhase == .active else { return }
+                if let image { poster = image; posterIdentity = identity; drawn?() }
+                failed = image == nil
+                if image == nil { undrawable?() }
+                MediaTrace.record("stage.published", ["picture": String(image != nil)])
+            }
         }
         .task(id: lastTouch) {
             guard live else { return }
             do { try await Task.sleep(for: .seconds(3)) } catch { return }
             live = false
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil } }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; Self.cache.removeAll(); ModelPoster.deferPending(); ModelEntityCache.deferExports() } }
         .onDisappear { live = false; holder.pivot = nil }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(url == nil ? "No model yet" : "3D model. Drag to turn it, pinch to zoom.")
@@ -163,17 +184,23 @@ struct ModelStage: View {
             guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count > 84 else { return [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)]() }
             return STLMesh.triangles(data)
         }.value
-        guard !triangles.isEmpty else { return nil }
+        MediaTrace.record("mesh.parse-end", ["triangles": String(triangles.count)])
+        guard !Task.isCancelled, !triangles.isEmpty else { return nil }
         let (positions, normals) = await Task.detached(priority: .userInitiated) {
             Self.geometry(triangles)
         }.value
         func part(_ indices: [UInt32], _ color: UIColor) async -> ModelEntity? {
-            guard !indices.isEmpty else { return nil }
+            guard !Task.isCancelled, !indices.isEmpty else { return nil }
             var d = MeshDescriptor()
             d.positions = MeshBuffers.Positions(positions)
             d.normals = MeshBuffers.Normals(normals)
             d.primitives = .triangles(indices)
-            guard let mesh = try? await MeshResource(from: [d]) else { return nil }
+            MediaTrace.record("mesh.resource-start")
+            let mesh: MeshResource
+            do { mesh = try await MeshResource(from: [d]) }
+            catch { MediaTrace.record("mesh.resource-error", ["code": String((error as NSError).code)]); return nil }
+            MediaTrace.record("mesh.resource-end")
+            guard !Task.isCancelled else { return nil }
             var m = PhysicallyBasedMaterial()
             m.baseColor = .init(tint: color)
             m.roughness = 0.55
@@ -197,7 +224,7 @@ struct ModelStage: View {
         } else if let one = await part(Array(0..<UInt32(positions.count)), tint ?? neutral) {
             entity.addChild(one)
         }
-        return entity
+        return ModelEntityCache.hasGeometry(entity) ? entity : nil
     }
     nonisolated private static func geometry(_ triangles: [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)]) -> ([SIMD3<Float>], [SIMD3<Float>]) {
         var positions: [SIMD3<Float>] = []
