@@ -71,6 +71,20 @@ class BranchCheckTests(unittest.TestCase):
         self.assertEqual(code, 1); self.assertIn('stacked on base-work: merge base-work first', out)
         self.assertNotIn('conflicts with', out)
 
+    def test_a_train_carries_finished_branches_instead_of_waiting_behind_them(self):
+        self.branch('one', {'a.txt': 'one\nONE\nthree\n'})
+        self.branch('two', {'b.txt': 'b from two\n'})
+        self.git('fetch', '-q', 'origin'); self.git('checkout', '-q', '-B', 'train/2026-11-09', 'origin/main')
+        self.git('merge', '-q', '--no-ff', '-m', 'one', 'origin/one'); self.git('merge', '-q', '--no-ff', '-m', 'two', 'origin/two')
+        self.git('push', '-q', '-f', 'origin', 'HEAD:train/2026-11-09')
+        code, out = self.check('--merge', 'train/2026-11-09')
+        self.assertEqual(code, 0, out); self.assertIn('carries one, two: they land with this train', out)
+        self.assertNotIn('stacked on', out)
+        # Any other branch that contains unmerged work is still stacked, not a train.
+        self.branch('not-a-train', {'c.txt': 'c\n'}, base='origin/one')
+        code, out = self.check('--merge', 'not-a-train')
+        self.assertEqual(code, 1); self.assertIn('stacked on one: merge one first', out)
+
     def test_squash_merged_branch_is_not_live(self):
         self.branch('done', {'b.txt': 'b changed\n'})
         self.git('checkout', '-q', '-B', 'main', 'origin/main'); self.write('b.txt', 'b changed\n'); self.commit('squash of done')
