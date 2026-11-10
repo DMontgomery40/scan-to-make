@@ -2473,11 +2473,13 @@ export class ObjectService {
     const pending = new Set(object.pendingPhotos ?? []);
     const photos = spreadPick([...object.photos.filter(name => !pending.has(name)).map(name => join(dir, 'photos', name)), ...capturePhotos], PHOTOS_PER_PASS);
     const startedAtMs = Date.now(), stateBefore = object.state;
+    // A locate pass designs nothing: it says what it is doing (docs/protocols/seats.md).
+    const passWords = (id: StageId, chosen: DesignEngine, passKindNow: PassKind) => opts.locate && id === 'working' ? 'Finding where the object sits' : stageWords(id, chosen, passKindNow);
     // PRD §8.9: copies are cleaned up in Blender; a new design may use Fusion (the touch-up decides).
     const plan: StageId[] = passPlan(build, touchup);
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
-    const first: PassStage = {id: plan[0]!, words: stageWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
+    const first: PassStage = {id: plan[0]!, words: passWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
     const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined, pendingMessageId: undefined,
       ...(o.completion ? {completion: {...o.completion, undone: true}} : {}),
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
@@ -2499,7 +2501,7 @@ export class ObjectService {
         const previous = latest?.stages?.at(-1);
         if (previous?.id === id) {
           // The pass chose its engine after this stage began (the code engine is ready, say): say what it is doing.
-          const words = stageWords(id, engine, kind);
+          const words = passWords(id, engine, kind);
           if (previous.words !== words) {
             this.#changed(await store.update(object.id, o => ({...o, passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, engine,
               stages: (p.stages ?? []).map((item, index, all) => index === all.length - 1 ? {...item, words, typicalSec: typical[id]} : item)})})));
@@ -2508,7 +2510,7 @@ export class ObjectService {
           return;
         }
         if (previous && previous.endedAtMs === undefined) void this.#deps.passTimings?.record(kind, engine, previous.id, (now - previous.startedAtMs) / 1000).catch(() => undefined);
-        const next: PassStage = {id, words: stageWords(id, engine, kind), startedAtMs: now, typicalSec: typical[id]};
+        const next: PassStage = {id, words: passWords(id, engine, kind), startedAtMs: now, typicalSec: typical[id]};
         const stages = [...(latest?.stages ?? []).map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), next];
         const estimate = passEstimate(stages, plan, typical, now);
         this.#changed(await store.update(object.id, o => ({...o, passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, stages, estimate, engine})})));
