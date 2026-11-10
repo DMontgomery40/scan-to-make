@@ -72,7 +72,7 @@ if (!Object.hasOwn(CONDITIONS, condition)) {
   process.stderr.write(`Unknown condition ${condition}; choose from ${Object.keys(CONDITIONS).join(', ')}.\n`);
   process.exit(1);
 }
-const proxy = conditionedProxy({target: started, headers: requestHeaders => ({
+const proxy = conditionedProxy({target: started, noCamera: true, headers: requestHeaders => ({
   ...requestHeaders, host, 'x-forwarded-host': host, 'x-forwarded-proto': 'https', 'tailscale-user-login': login,
 })});
 const listen = candidate => new Promise(done => {

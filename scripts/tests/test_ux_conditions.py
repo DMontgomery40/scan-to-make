@@ -98,6 +98,15 @@ class ConditionTests(unittest.TestCase):
         with self.assertRaises((ConnectionError, http.client.HTTPException, OSError)):
             self.get(port, '/v1/objects/one', timeout=5)
 
+    def test_the_stub_printer_has_no_camera(self):
+        port = self.proxy('slow', '--delay-ms', '0', '--no-camera', 'yes')
+        status, _, body, _ = self.get(port, '/v1/objects/printers/current/camera.jpg?stream=1')
+        self.assertEqual(status, 404)
+        error = json.loads(body)['error']
+        self.assertEqual(error['code'], 'not-found')
+        self.assertIn('camera', error['message'], 'the app reads this as "no camera" and stops retrying (CompanionClient.swift)')
+        self.assertEqual(self.get(port, '/v1/objects/one')[0], 200)
+
     def test_an_unknown_condition_is_refused(self):
         run = subprocess.run(['node', str(PROXY), '--target', 'http://127.0.0.1:1', '--condition', 'sunny'],
                              capture_output=True, text=True, timeout=30)

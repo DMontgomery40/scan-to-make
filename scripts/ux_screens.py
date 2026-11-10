@@ -378,20 +378,23 @@ class Device:
             raise RuntimeError(f'agent-device {" ".join(args[:3])}: {(run.stderr or run.stdout)[-400:]}')
         return reply
 
-    def wait_for_app(self, limit: float = 45) -> None:
+    def wait_for_app(self, limit: float = 45) -> str:
         """Until the app's own tree can be read (it is on screen), at most `limit` seconds, then a moment to settle. Nov 10:
         at load 300+ a fixed 4 s wait took frames of the home screen while the app was still launching."""
-        deadline = time.time() + limit
+        deadline, last = time.time() + limit, ''
         while time.time() < deadline:
             try:
                 tree = self.ad('snapshot', '-d', '3', timeout=30)
-                if len((tree.get('data') or {}).get('nodes') or []) > 3: break
-            except Exception:
-                pass
+                if len((tree.get('data') or {}).get('nodes') or []) > 3:
+                    time.sleep(2)
+                    return ''
+                last = f'{len((tree.get("data") or {}).get("nodes") or [])} elements'
+            except Exception as failure:
+                last = str(failure)[-300:].replace('\n', ' ')
             time.sleep(1.5)
-        else:
-            raise RuntimeError(f'the app was not on screen {limit:.0f} s after it was opened')
-        time.sleep(2)
+        # Take the frame anyway: what is on the screen is the evidence, and the blank check flags a frame without a tree.
+        log(self.key, f'the app\'s tree was not readable {limit:.0f} s after it was opened: {last}')
+        return f'the app\'s tree was not readable {limit:.0f} s after it was opened'
 
     def shoot(self, item: dict) -> None:
         # The screen's settings go into the app's defaults domain (what its launch arguments would set), fresh for each
@@ -402,8 +405,7 @@ class Device:
         for key, value in zip(pairs[0::2], pairs[1::2]):
             simctl('spawn', self.udid, 'defaults', 'write', BUNDLE, key.lstrip('-'), '-string', value)
         self.ad('open', BUNDLE, '--relaunch', timeout=120)
-        self.wait_for_app()
-        error = ''
+        error = self.wait_for_app()
         for action in item['actions']:
             try:
                 if action[0] == 'type': self.ad('type', action[1])

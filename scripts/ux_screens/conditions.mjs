@@ -49,11 +49,23 @@ const check = name => {
 
 /** An http.Server that forwards to `target` under a condition, changed with `setCondition` (the runner pairs and checks
  * the list under `none` first). `headers` rewrites the request headers. */
-export function conditionedProxy({target, condition = 'none', headers = h => h, delayMs = 1500, bytesPerSecond = 1_000_000}) {
+export function conditionedProxy({target, condition = 'none', headers = h => h, delayMs = 1500, bytesPerSecond = 1_000_000,
+                                  noCamera = false}) {
   check(condition);
   let away = false;
   const server = createServer((req, res) => {
     if (away) { req.socket.destroy(); return; }
+    // The capture's printer is a stub whose MCP can't start, so it has no camera. noCamera answers as the companion does
+    // for a printer without one (services/companion/src/objects/http.ts, CameraUnavailableError 'no-camera'), which the
+    // app takes as final. Without it the app retried its camera stream every few seconds and crashed on a cancellation
+    // race (PinnedTransport.lines, Nov 10), so no project page could be captured.
+    if (noCamera && /\/camera\.jpg(\?|$)/.test(req.url)) {
+      req.resume();
+      const body = JSON.stringify({error: {code: 'not-found', message: 'This printer has no camera Counterpart can use.'}});
+      res.writeHead(404, {'content-type': 'application/json', 'content-length': Buffer.byteLength(body)});
+      res.end(body);
+      return;
+    }
     const upstream = request(`${target}${req.url}`, {method: req.method, headers: headers(req.headers)}, async response => {
       if (condition === 'away' && req.method === 'GET' && isList(req.url) && response.statusCode === 200) away = true;
       if (condition === 'refusing' && req.method === 'GET' && response.statusCode === 200 && !isJson(response.headers)) {
@@ -79,7 +91,7 @@ export function conditionedProxy({target, condition = 'none', headers = h => h, 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const args = Object.fromEntries(process.argv.slice(2).reduce((pairs, value, index, all) =>
     value.startsWith('--') ? [...pairs, [value.slice(2), all[index + 1]]] : pairs, []));
-  const proxy = conditionedProxy({target: args.target, condition: args.condition ?? 'none',
+  const proxy = conditionedProxy({target: args.target, condition: args.condition ?? 'none', noCamera: args['no-camera'] === 'yes',
     ...(args['delay-ms'] ? {delayMs: Number(args['delay-ms'])} : {}), ...(args.rate ? {bytesPerSecond: Number(args.rate)} : {})});
   proxy.listen(Number(args.port ?? 0), '127.0.0.1', () => process.stdout.write(JSON.stringify({port: proxy.address().port}) + '\n'));
   process.on('SIGTERM', () => { proxy.close(); process.exit(0); });
