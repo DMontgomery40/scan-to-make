@@ -211,7 +211,9 @@ class HomeLayoutTests {
         compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}) } }
         compose.waitUntil(5_000) { fake.paths.any { "/asks/" in it } }
         compose.waitForIdle()
-        compose.onNodeWithText("Can you confirm the size?").assertExists()
+        // The question shows in the status line and in its card; it stays, with its answers.
+        compose.onAllNodesWithText("Can you confirm the size?").onFirst().assertExists()
+        compose.onNodeWithText("Make Your Best Guess").assertExists()
         compose.onAllNodes(hasTestTag("ask-picture")).assertCountEquals(0)
         compose.onAllNodes(hasText("The outlined part is what this question is about.")).assertCountEquals(0)
     }
