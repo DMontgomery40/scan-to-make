@@ -703,7 +703,7 @@ private struct MacProjectSettings: View {
 }
 
 /// The question's picture on the Mac: the card's width at the photo's own aspect ratio, the rest dimmed and the asked-about
-/// part outlined. Click (or Space) opens it in Quick Look with the region marked, where it zooms.
+/// part outlined. A click opens it in Quick Look with the region marked, where it zooms.
 struct MacAskPhoto: View {
     let url: URL
     let region: Project.Region?
@@ -725,7 +725,6 @@ struct MacAskPhoto: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .keyboardShortcut(.space, modifiers: [])
             .help("Open in Quick Look")
             .accessibilityLabel(caption)
             .accessibilityHint("Opens the picture in Quick Look")

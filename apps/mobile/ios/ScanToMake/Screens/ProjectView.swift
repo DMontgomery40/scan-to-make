@@ -531,10 +531,12 @@ struct ProjectView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Your Mac has a question", systemImage: "questionmark.bubble.fill").font(.headline).foregroundStyle(.orange)
             Text(ProjectWords.question(object))
-            if !["file", "choice"].contains(object.openAsk?.type ?? "") {
+            // No picture at all (a described project asked without one): nothing, rather than an empty box whose caption
+            // would name a picture that isn't there.
+            if !["file", "choice"].contains(object.openAsk?.type ?? ""),
+               let path = object.openAsk.flatMap({ $0.photo != nil ? "asks/\($0.id).jpg" : nil }) ?? object.thumbnailPath {
                 let ask = object.openAsk
-                AskPhoto(project: object, path: ask.flatMap { $0.photo != nil ? "asks/\($0.id).jpg" : nil } ?? object.thumbnailPath,
-                         region: ask?.photo != nil ? ask?.region : nil, caption: AskPicture.caption(ask))
+                AskPhoto(project: object, path: path, region: ask?.photo != nil ? ask?.region : nil, caption: AskPicture.caption(ask))
             }
             AskButtons(store: store, project: object, working: $askWorking, problem: $askProblem)
             // The Mac takes a typed answer when it says so (KAN-214 #204, `answers` includes "text").

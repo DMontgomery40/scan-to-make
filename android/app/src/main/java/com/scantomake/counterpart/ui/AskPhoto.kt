@@ -107,13 +107,14 @@ private fun RegionOverlay(region: Project.Region?, modifier: Modifier = Modifier
  *  full screen, where it pinches and double-taps to zoom with the region still marked. */
 @Composable
 fun AskPhoto(project: Project, ask: Project.Ask?) {
-    val name = ask?.photo?.let { "asks/" + it.substringAfterLast('/') } ?: project.posterName()
+    // No picture at all: nothing, rather than an empty box whose caption names a picture that isn't there.
+    val name = ask?.photo?.let { "asks/" + it.substringAfterLast('/') } ?: project.posterName() ?: return
     val region = if (ask?.photo != null) ask.region else null
     val caption = AskPicture.caption(ask)
     var bitmap by remember(project.id, project.mediaVersion, name) { mutableStateOf<ImageBitmap?>(null) }
     var full by remember { mutableStateOf(false) }
     LaunchedEffect(project.id, project.mediaVersion, name) {
-        if (name == null || bitmap != null) return@LaunchedEffect
+        if (bitmap != null) return@LaunchedEffect
         bitmap = withContext(Dispatchers.IO) { try { decodeUpright(Counterpart.instance.companion.download(project, name), 1600) } catch (_: Exception) { null } }
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
