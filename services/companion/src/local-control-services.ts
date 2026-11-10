@@ -325,7 +325,7 @@ export function createControlDispatcher(services: ControlServices) {
             throw error;
           }
         }
-        case 'objects.selectPlate': case 'objects.answerAsk': case 'objects.answerReconstruction': case 'objects.duplicate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.colourMapping': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
+        case 'objects.selectPlate': case 'objects.answerAsk': case 'objects.answerReconstruction': case 'objects.duplicate': case 'objects.locate': case 'objects.list': case 'objects.printers': case 'objects.filaments': case 'objects.colourMapping': case 'objects.selectPrinter': case 'objects.get': case 'objects.passActivity': case 'objects.start': case 'objects.delete': case 'objects.correct': case 'objects.answerCloseup': case 'objects.print': case 'objects.answerPrintConfirmation':
         case 'objects.addStarter': case 'objects.create': case 'objects.addFile':
         case 'objects.estimate': case 'objects.pausePrint': case 'objects.resumePrint': case 'objects.cancelPrint': case 'objects.camera': case 'printers.camera': case 'printers.route': case 'settings.get': case 'settings.set': {
           const objects = services.objects;
@@ -338,6 +338,7 @@ export function createControlDispatcher(services: ControlServices) {
               ...(o.state === 'new' && !o.progress && objects.receiving(o.id) ? {progress: RECEIVING} : {})});
             if (method === 'objects.addStarter') return {object: local(await objects.addStarter(parameters[method].parse(raw).starterId))};
             if (method === 'objects.duplicate') return {object: local(await objects.duplicate(parameters[method].parse(raw).id))};
+            if (method === 'objects.locate') return {object: local(await objects.locate(parameters[method].parse(raw).id))};
             if (method === 'objects.list') return {objects: (await objects.list()).map(local)};
             if (method === 'objects.printers') return objects.printers();
             if (method === 'objects.filaments') return {filaments: await objects.filaments(parameters[method].parse(raw).id)};

@@ -104,6 +104,8 @@ test('chosen live filament sets slicing profile and AMS slot; a changed spool is
   const bundle = await bundles.read(started.print.bundleId);
   assert.deepEqual(bundle.selection, {material:'PLA', useAms:true, amsSlots:[1], autoMatchAms:false});
   assert.deepEqual(runs[0].options.slicer, {loadFilaments:'/profiles/yellow-pla.json', filamentColours:'#FEC600'});
+  // The spool it prints from, as the MCP reported it, stays with the print: the result is drawn in it afterwards (PRD §5.4).
+  assert.deepEqual(started.print.spools, [{colour:'#FEC600', material:'PLA', name:'Sunflower Yellow PLA Basic'}]);
   await approve(service, object.id);
   await service.settled(object.id);
 });

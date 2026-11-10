@@ -136,7 +136,7 @@ test('every pass plans how it prints, with the printer MCP\'s own fdm_design and
     assert.match(rules, /follow its slicing guidance below/);
     // PRD §8.0 item 10: how a slicer orients, supports and checks a slice comes from the MCP, never the app.
     // Every section any pass can get, together: the app's own rules name no slicer detail.
-    const own = [systemRules({kind: 'fit', engine, request: true}), systemRules({kind: 'copy', engine, request: true}), systemRules({kind: 'copy', engine, request: true, designerCopy: true})].join('\n');
+    const own = [systemRules({kind: 'fit', engine, request: true, scan: true}), systemRules({kind: 'copy', engine, request: true}), systemRules({kind: 'copy', engine, request: true, designerCopy: true})].join('\n');
     for (const section of Object.values(RULE_SECTIONS)) assert.ok(own.includes(section), section);
     for (const slicerFact of [/Bambu Studio/, /auto-orient/, /cantilever/, /orient true/, /enable_support/, /slice_stl/, /slicer_result/, /get_printer_filaments/, /get_slice_settings/, /OrcaSlicer|PrusaSlicer|Cura/])
       assert.doesNotMatch(own, slicerFact, `the app's own rules name no slicer detail: ${slicerFact}`);
@@ -283,6 +283,9 @@ test('each pass gets the core and only the sections it needs', async () => {
     ['a new design in Blender', {kind: 'fit', request: true}, [S.newDesign, S.fitSizes, S.colours, S.namedModel]],
     ['a new design in Fusion', {kind: 'fit', engine: 'fusion', request: true}, [S.newDesign, S.fitSizes, S.colours, S.namedModel]],
     ['a new design revision', {kind: 'fit', request: true}, [S.newDesign, S.fitSizes, S.colours, S.namedModel]],
+    // docs/protocols/seats.md: a part made to fit the scanned object says where that object sits.
+    ['a fit around a scanned object', {kind: 'fit', request: true, scan: true}, [S.newDesign, S.fitSizes, S.colours, S.namedModel, S.seats]],
+    ['a scan cleanup never has seats', {kind: 'copy', request: true, scan: true}, [S.captured, S.colours, S.namedModel]],
   ];
   const core = systemRules({kind: 'copy'}).split(`\n\n${S.captured}`)[0];
   for (const [name, shape, present] of cases) {
@@ -301,7 +304,10 @@ test('each pass gets the core and only the sections it needs', async () => {
   assert.equal(rulesOf({pass: await pass()}), systemRules({kind: 'copy'}));
   assert.equal(rulesOf({pass: await pass(), note: 'the cap is wrong', summary: 'Cleaned.', currentModel: true}), systemRules({kind: 'copy', request: true}));
   assert.equal(rulesOf({pass: empty, instructions: 'A hook.'}), systemRules({kind: 'fit', request: true}), 'no scan: a new design');
-  assert.equal(rulesOf({pass: await pass(), kind: 'fit', instructions: 'A cap that fits this bottle.'}), systemRules({kind: 'fit', request: true}), 'a fit around a scanned object is a new design');
+  assert.equal(rulesOf({pass: await pass(), kind: 'fit', instructions: 'A cap that fits this bottle.'}), systemRules({kind: 'fit', request: true, scan: true}), 'a fit around a scanned object is a new design, and says where the object sits');
+  assert.equal(rulesOf({pass: await pass(), kind: 'fit', note: 'Taller.', summary: 'A holder.', currentModel: true, seats: [{rotationDeg: [0, 0, 0], translationMm: [1, 2, 3]}]}),
+    systemRules({kind: 'fit', request: true, scan: true}), 'a change to it restates the seats it is given');
+  assert.equal(rulesOf({pass: await pass(), kind: 'fit', note: 'Taller.', summary: 'A holder.', currentModel: true}), systemRules({kind: 'fit', request: true}), 'a change to a fit with no seats has none to restate');
   assert.equal(rulesOf({pass: await pass(), instructions: '   '}), systemRules({kind: 'copy'}), 'blank words are no request');
 });
 

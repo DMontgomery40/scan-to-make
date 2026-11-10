@@ -50,7 +50,7 @@ export interface ObjectPass {
   /** The most recent public worker messages and tool names, in stream order. */
   activity?: TouchupActivity[];
   /** What started it: a new project, Ask for changes, a late photo, an answered Ask. */
-  trigger?: 'new' | 'changes' | 'late-photos' | 'ask-answer';
+  trigger?: 'new' | 'changes' | 'late-photos' | 'ask-answer' | 'locate';
   /** Stages with real start and end times and this Mac's typical duration for each (PRD §4). */
   stages?: PassStage[];
   /** While it runs: time left from the stages' typical durations. */
@@ -132,6 +132,11 @@ export interface StmObject {
 
     /** What changed, each tagged (PRD §4 Result). */
     changes?: TouchupChange[];
+    /**
+     * A fit's places for the scanned object: each a rigid placement of the scan in this model's frame, as the pass that
+     * made it said (docs/protocols/seats.md). Absent for a model with no scan to fit, or one whose pass didn't say.
+     */
+    seats?: import('./seats.js').Seat[];
     /** The designer's supports choice for this model, sent to the slicer as it is. */
     supports?: import('../touchup/runner.js').TouchupSupports;
     engine?: DesignEngine;
@@ -166,6 +171,11 @@ export interface StmObject {
     /** The print was handed to Bambu Connect: the person finishes it there. */
     sentVia?: 'bambu-connect';
     settings?: PrintSettings;
+    /**
+     * The spools this print uses, as the printer MCP reported them when it was sent (colour `#RRGGBB`, material, name):
+     * one for a one-spool print, one per model filament (`index`) for a multi-part model. The result is drawn in them.
+     */
+    spools?: import('./service.js').PrintSpool[];
     /** The latest report of this print's job (PRD §8.6). */
     live?: PrintLive;
     monitor?: PrintMonitor;

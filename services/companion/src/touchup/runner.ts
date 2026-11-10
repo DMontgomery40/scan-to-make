@@ -1,3 +1,4 @@
+import {parseSeats} from '../objects/seats.js';
 import {spawn as nodeSpawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readdir, readFile, stat} from 'node:fs/promises';
@@ -51,6 +52,8 @@ export interface TouchupResult {
   parts?: string;
   /** The colour (and material, when named) the worker declares for each of `parts`' filaments, in order. */
   partColours?: {name?: string; colour?: string; material?: string}[];
+  /** Where the scanned object sits in the model, as the worker said (docs/protocols/seats.md); unchecked here. */
+  seats?: import('../objects/seats.js').Seat[];
   renders: string[];
   checkpoints: string[];
   stats: {seconds: number; toolCalls: number; costUsd?: number};
@@ -92,7 +95,7 @@ export interface ResultEvent {
   result?: string;
   total_cost_usd?: number;
   session_id?: string;
-  structured_output?: {status?: string; closeup?: string; summary?: string; title?: string; changes?: unknown; ask?: unknown; parts?: unknown};
+  structured_output?: {status?: string; closeup?: string; summary?: string; title?: string; changes?: unknown; ask?: unknown; parts?: unknown; seats?: unknown};
 }
 
 /** The worker's title, what-changed list and Ask, checked and made safe to show. */
@@ -270,6 +273,8 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
 export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass, opts: {
   spawn?: typeof nodeSpawn; timeoutMs?: number; inactivityMs?: number; maxToolCalls?: number; inputStlSha256?: string;
   onProgress?: (progress: TouchupProgress) => void; signal?: AbortSignal;
+  /** A locate pass makes no model: its answer is done without one (the companion refuses one that comes with a model). */
+  locate?: boolean;
 } = {}): Promise<TouchupResult> {
   const started0 = Date.now();
   if (opts.signal?.aborted) return {status: 'failed', reason: 'cancelled', renders: [], checkpoints: [], stats: {seconds: Math.round((Date.now() - started0) / 1000), toolCalls: 0}};
@@ -314,6 +319,8 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   const answer = resultEvent?.structured_output;
   const declared = parts ? partColours(answer, publicText) : undefined;
   if (declared) Object.assign(base, {partColours: declared});
+  const seats = parseSeats(answer?.seats, publicText);
+  if (seats) Object.assign(base, {seats});
   const summary = {...(answer?.summary ? {summary: publicText(answer.summary)} : {}), ...structured(answer, publicText)};
   const f3d = join(pass.outDir, 'touched.f3d'), parameters = join(pass.outDir, 'touched.parameters.json');
   const design = code ? (code.design ? {design: code.design} : {}) : await stat(f3d).then(info => info.isFile(), () => false)
@@ -322,7 +329,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
 
   // A code pass whose selected run couldn't be kept says so, and offers no model without its design source.
   if (collectFailed !== undefined) {
-    const {parts: _parts, partColours: _colours, design: _design, ...kept} = base as typeof base & {parts?: string; partColours?: unknown; design?: unknown};
+    const {parts: _parts, partColours: _colours, design: _design, seats: _seats, ...kept} = base as typeof base & {parts?: string; partColours?: unknown; design?: unknown; seats?: unknown};
     return {...kept, status: 'failed', reason: publicText(`Counterpart couldn't keep this pass's design: ${collectFailed}`)};
   }
   if (ended.error) {
@@ -337,7 +344,8 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
   }
   if (answer.status === 'failed') return {status: 'failed', reason: publicText(answer.summary?.trim() || 'the worker could not finish'), ...withModel, ...base};
   if (answer.status === 'needs_closeup') return {status: 'needs_closeup', closeup: publicText(answer.closeup ?? 'a part of the object'), ...summary, ...withModel, ...base};
-  if (!model) return {status: 'failed', reason: 'no model was saved', ...summary, ...base};
+  if (!model) return opts.locate ? {status: 'done', ...summary, ...base} : {status: 'failed', reason: 'no model was saved', ...summary, ...base};
+  if (opts.locate) return {status: 'done', ...summary, model, ...base};
   // The rules require a checkpoint after every fix: a touch-up of a scan with none saved fixed nothing.
   // A make job (no scan) has nothing to be unchanged.
   if (pass.scanPaths.length > 0 && validCheckpoints.length === 0) return {status: 'unchanged', ...summary, model, ...base};
