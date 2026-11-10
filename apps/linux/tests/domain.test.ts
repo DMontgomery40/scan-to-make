@@ -704,6 +704,8 @@ test("a pass that stopped to ask or stopped short never reads as all ticks", () 
   for (const status of ["capped", "failed", "interrupted"]) assert.deepEqual(marks(status), ["✓", "✕"], status);
   assert.equal(passEnding({ status: "failed" }), undefined, "a running pass has not ended");
   assert.deepEqual(stages.map((_, i) => stageMark({ stages: [stages[0], { id: "working", words: "Designing it" }] }, i)), ["✓", "◌"]);
+});
+
 test("a size question is number fields with the companion's labels, prefilled, with projects present", () => {
   const ask = {
     kind: "sizes",
