@@ -11,7 +11,7 @@
 // copy (so it finds none of this Mac's printer MCPs), its own auth store, and a printer handoff whose MCP command is
 // /usr/bin/false. Prints one JSON line {ready, record, objects} when the phone's pairing record is ready.
 import {spawn} from 'node:child_process';
-import {createServer, request} from 'node:http';
+import {conditionedProxy, CONDITIONS} from './conditions.mjs';
 import {randomBytes} from 'node:crypto';
 import {mkdir, writeFile, access, mkdtemp, rm} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
@@ -63,13 +63,18 @@ const started = await new Promise((done, fail) => {
   process.exit(1);
 });
 
-const proxy = createServer((req, res) => {
-  const upstream = request(`${started}${req.url}`, {method: req.method, headers: {
-    ...req.headers, host, 'x-forwarded-host': host, 'x-forwarded-proto': 'https', 'tailscale-user-login': login,
-  }}, response => { res.writeHead(response.statusCode, response.headers); response.pipe(res); });
-  upstream.on('error', () => { res.writeHead(503); res.end(); });
-  req.pipe(upstream);
-});
+// The proxy adds the Serve headers and can play a bad day (conditions.mjs). It pairs and checks the list as `none`, then
+// takes the run's condition.
+const condition = args.condition ?? 'none';
+if (!Object.hasOwn(CONDITIONS, condition)) {
+  server.kill('SIGTERM');
+  await rm(socketDir, {recursive: true, force: true}).catch(() => {});
+  process.stderr.write(`Unknown condition ${condition}; choose from ${Object.keys(CONDITIONS).join(', ')}.\n`);
+  process.exit(1);
+}
+const proxy = conditionedProxy({target: started, headers: requestHeaders => ({
+  ...requestHeaders, host, 'x-forwarded-host': host, 'x-forwarded-proto': 'https', 'tailscale-user-login': login,
+})});
 const listen = candidate => new Promise(done => {
   const failed = () => done(false);
   proxy.once('error', failed);
@@ -97,7 +102,8 @@ const record = {...await paired.json(), baseUrl: base};
 for (const key of ['certificateSha256', 'publicKeySha256', 'addresses', 'activeUrl']) delete record[key];
 const listed = await fetch(`${base}/v1/objects`, {headers: {authorization: `Bearer ${record.token}`, 'x-scan-device': record.deviceId}});
 const objects = listed.ok ? (await listed.json()).objects.map(object => ({id: object.id, state: object.state, title: object.title ?? null})) : [];
-process.stdout.write(JSON.stringify({ready: true, url: base, proxyPort, server: started, pid: server.pid, record, objects, objectsStatus: listed.status}) + '\n');
+proxy.setCondition(condition);
+process.stdout.write(JSON.stringify({ready: true, url: base, proxyPort, condition, server: started, pid: server.pid, record, objects, objectsStatus: listed.status}) + '\n');
 
 const cleanUp = () => rm(socketDir, {recursive: true, force: true}).catch(() => {});
 const stop = () => { proxy.close(); server.kill('SIGTERM'); setTimeout(() => cleanUp().then(() => process.exit(0)), 3000).unref(); };
