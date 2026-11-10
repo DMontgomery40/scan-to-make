@@ -656,7 +656,7 @@ test("all three shared limit reasons survive project words with projects present
     // The pass's own line is the companion's words too, never the wire status ("capped").
     assert.equal(passHeading(row.expected.passes.at(-1), 0), `Pass 1 · ${reasons[row.name]}`);
     assert.equal(passHeading({}, 1), "Pass 2 · Working", "a running pass");
-    assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
+    assert.equal(words(row.expected), `${reasons[row.name]}. Trying again carries on from where it stopped.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
 });

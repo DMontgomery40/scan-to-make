@@ -91,6 +91,14 @@ const BEST_GUESS_NOTE = "Make your best guess for the parts you couldn't see in 
  * so an open question, a failure and Done are exactly as they were when it ends.
  */
 const SUPERSEDES_A_QUESTION: ReadonlySet<NonNullable<StmObject['passes'][number]['trigger']>> = new Set(['new', 'changes', 'late-photos', 'ask-answer']);
+/**
+ * What follows the reason a pass stopped at a limit, where Try Again is offered. A hint may only say something true
+ * that the button under it does not. Until Nov 10 it read "Try again or review the saved checkpoint.": the first
+ * half is the button, and no client has anywhere to review a checkpoint. What a person wants to know then is whether
+ * the work is lost: when the next request carries on the worker's session (`passResume`), say so; when it would start
+ * over, say nothing and let the reason stand alone. New stops only: a stored failure keeps the words it was given.
+ */
+const stopHint = (carriesOn: boolean) => carriesOn ? ' Trying again carries on from where it stopped.' : '';
 const UNCERTAIN = 'The printer may have started this print. Check the printer before printing again.';
 
 export {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './errors.js';
@@ -3340,13 +3348,13 @@ export class ObjectService {
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
       : current && (result.status === 'done' || result.status === 'unchanged') ? 'ready' : 'failed';
-    const failure = result.status === 'capped'
-      ? `${result.limit ? limitWords(result.limit) : `Stopped at the ${result.reason?.includes('time') ? 'time' : 'step'} limit`}. ${current ? 'Try again or review the saved checkpoint.' : 'Try again.'}`
-      : result.reason ?? 'The touch-up stopped without a model.';
-    const now = Date.now();
     // The worker's own verdict on continuing (runner.ts: only a limit or an exit without a final answer may), carried
     // by the endings that can continue; an answer or a question never does.
     const resumable = result.resumable ?? false;
+    const failure = result.status === 'capped'
+      ? `${result.limit ? limitWords(result.limit) : `Stopped at the ${result.reason?.includes('time') ? 'time' : 'step'} limit`}.${stopHint(resumable && !!result.sessionId)}`
+      : result.reason ?? 'The touch-up stopped without a model.';
+    const now = Date.now();
     const end: PassEnd = interrupted ? {status: 'interrupted', resumable, ...(result.limit ? {limit: result.limit} : {})}
       : result.status === 'capped' || result.status === 'failed' ? {status: result.status, resumable, ...(result.limit ? {limit: result.limit} : {})}
       : {status: result.status};

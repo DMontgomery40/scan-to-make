@@ -156,7 +156,7 @@ class HomeLayoutTests {
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(title))
         // Home names a stopped project twice: its Needs you card (which already says why it stopped) and its tile.
         compose.onAllNodesWithText(title, substring = true).onFirst().performClick()
-        compose.onNodeWithText("Stopped after 10 minutes without worker activity. Try again or review the saved checkpoint.").performScrollTo().assertExists()
+        compose.onNodeWithText("Stopped after 10 minutes without worker activity. Trying again carries on from where it stopped.").performScrollTo().assertExists()
         compose.onNodeWithText("Try Again").performScrollTo().assertIsEnabled()
     }
 
