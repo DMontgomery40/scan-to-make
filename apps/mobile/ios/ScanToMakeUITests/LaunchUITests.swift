@@ -1006,7 +1006,7 @@ final class LayoutParityUITests: XCTestCase {
 
     /// David's Nov 9 bottle project (Mac 30a2a33c), with generated pictures in place of his photos. A 4:3 picture, so a
     /// square crop would show here as a wrong aspect ratio, and 130 scan frames, each logged when the canned Mac serves it.
-    private func launchBottle(noPhoto: Bool = false) throws -> (XCUIApplication, URL) {
+    private func launchBottle(noPhoto: Bool = false, askFileMissing: Bool = false) throws -> (XCUIApplication, URL) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("bottle-capture"), withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
@@ -1016,7 +1016,7 @@ final class LayoutParityUITests: XCTestCase {
                 UIColor.white.setFill(); context.fill(CGRect(x: size.width * 0.45, y: size.height * 0.32, width: size.width * 0.22, height: size.height * 0.3))
             }
         }
-        try picture(CGSize(width: 2048, height: 1536), .brown).write(to: folder.appendingPathComponent("ask-bottle.jpg"))
+        if !askFileMissing { try picture(CGSize(width: 2048, height: 1536), .brown).write(to: folder.appendingPathComponent("ask-bottle.jpg")) }
         let frame = picture(CGSize(width: 240, height: 320), .darkGray)
         for i in 1...130 { try frame.write(to: folder.appendingPathComponent(String(format: "bottle-capture/%04d.heic", i))) }
         let app = XCUIApplication()
@@ -1055,6 +1055,17 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertNotEqual(full.value as? String, "Zoom 100 percent", "pinch zooms in")
         app.buttons["ask-picture-done"].tap()
         XCTAssertTrue(full.waitForNonExistence(timeout: 5))
+    }
+
+    /// Review F2 on #456: a question picture that can't be fetched (the Mac asleep, the file gone) draws nothing, not an
+    /// empty box captioned "The outlined part is what this question is about."; the question and its answers stay.
+    func testAQuestionPictureThatFailsToLoadDrawsNothing() throws {
+        let (app, _) = try launchBottle(askFileMissing: true)
+        let camera = app.buttons["Camera"]
+        XCTAssertTrue(camera.waitForExistence(timeout: 20), "the question's answers are there")
+        let picture = app.descendants(matching: .any)["ask-picture"]
+        XCTAssertTrue(picture.waitForNonExistence(timeout: 10), "no box once the fetch has failed")
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "The outlined part is what this question is about.")).firstMatch.exists)
     }
 
     /// A question that came without a picture shows the project's picture at the same size, and says so.
