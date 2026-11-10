@@ -12,6 +12,13 @@ struct ProjectsRoot: View {
     /// The open project, the column a collapsed split shows and the one sheet that may be up: one value, whose
     /// transitions are unit-tested in CounterpartKit (`ProjectsNavigationTests`). Views say what happened.
     @State private var nav = ProjectsNavigation()
+    /// The device has a hinge (iPhone Duo). Open, its inner display has a rail on the trailing edge where the system
+    /// puts the detail column's toolbar buttons.
+    @State private var hinged = false
+    /// Duo open: Printers and Settings sit in that rail, as they do folded, and not in the sidebar's top bar where
+    /// they crowded the title (David, Nov 10: "with the duo flipped open the settings and profile and print icons
+    /// should go into the side edge"). An iPad has no hinge and no rail: they stay above its sidebar.
+    private var railed: Bool { hinged && width == .regular }
 
     var body: some View {
         split
@@ -57,6 +64,7 @@ struct ProjectsRoot: View {
             app.route = nil
             nav.apply(route)
         }
+        .modifier(HingeReader(hinged: $hinged))
         .onChange(of: nav.column) {
             // The system Back button in the collapsed split returns to Home. Do not resurrect that
             // project when the window expands again (Duo unfold or iPad multitasking).
@@ -65,6 +73,10 @@ struct ProjectsRoot: View {
     }
 
     private func newProject(_ job: NewProjectJob?) { nav.present(.new(job: job?.rawValue)) }
+
+    private var railButtons: some ToolbarContent {
+        PrintersAndSettingsButtons(store: store, openPrinters: { nav.present(.printers) }, openSettings: { nav.present(.settings) })
+    }
 
     /// One split and one detail stack survive every size-class change. Only the leading column's
     /// presentation changes: Home's cards in compact width, grouped rows at regular width.
@@ -78,7 +90,8 @@ struct ProjectsRoot: View {
                 // page's own close button and Back in the collapsed split close it.
                 SidebarList(store: store, selection: Binding(get: { nav.project }, set: { nav.select($0) }),
                             newProject: { newProject(nil) },
-                            addStarter: addStarter, openPrinters: { nav.present(.printers) }, openSettings: { nav.present(.settings) })
+                            addStarter: addStarter, openPrinters: { nav.present(.printers) }, openSettings: { nav.present(.settings) },
+                            showsToolbarButtons: !railed)
             } else {
                 HomeView(store: store, openProject: { value in
                     if let id = Page.printingId(value) { nav.openPrinting(id) }
@@ -95,7 +108,8 @@ struct ProjectsRoot: View {
                                   newProject: newProject, addStarter: addStarter)
                     }
                 }
-                .navigationDestination(for: String.self) { id in page(id, close: { nav.close() }) }
+                .toolbar { if railed { railButtons } }
+                .navigationDestination(for: String.self) { id in page(id, close: { nav.close() }).toolbar { if railed { railButtons } } }
             }
             // A new project gets a new stack, built with the path set beside the selection (a Live Activity or print
             // notification opens Printing on top of its project). With only the root keyed, the iPad dropped that push.
@@ -130,6 +144,29 @@ enum Page {
 
 struct IdentifiedProject: Identifiable { let id: String }
 
+/// Printers (with how many need attention) and Settings: above the sidebar, or in the open Duo's trailing rail.
+struct PrintersAndSettingsButtons: ToolbarContent {
+    let store: ProjectsStore
+    let openPrinters: () -> Void
+    let openSettings: () -> Void
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) { Button(action: openPrinters) { Image(systemName: "printer.fill") }.badge(store.printerProblems).accessibilityLabel(store.printersLabel) }
+        ToolbarItem(placement: .topBarTrailing) { Button(action: openSettings) { Image(systemName: "person.crop.circle") }.accessibilityLabel("Settings") }
+    }
+}
+
+/// Whether this device has a hinge (`DeviceHinge`, iOS 27.1). Before 27.1 nothing is known and nothing changes.
+private struct HingeReader: ViewModifier {
+    @Binding var hinged: Bool
+    func body(content: Content) -> some View {
+        if #available(iOS 27.1, *) {
+            content.onHingeChange { _, context in hinged = context.hinge != nil }
+        } else {
+            content
+        }
+    }
+}
+
 /// The iPad detail with no project selected: what to start with, never an empty "Choose a project".
 struct StartPane: View {
     let hasProjects: Bool
@@ -159,6 +196,8 @@ struct SidebarList: View {
     let addStarter: (StarterProject) async throws -> Void
     let openPrinters: () -> Void
     let openSettings: () -> Void
+    /// False on an open Duo, where the same two buttons are in the trailing rail.
+    var showsToolbarButtons = true
     @State private var query = ""
     @FocusState private var searching: Bool
     @State private var showArchived = false
@@ -249,10 +288,7 @@ struct SidebarList: View {
 
         .background { Button("Search") { searching = true }.keyboardShortcut("f", modifiers: .command).hidden() }
         .refreshable { await store.load() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { Button(action: openPrinters) { Image(systemName: "printer.fill") }.badge(store.printerProblems).accessibilityLabel(store.printersLabel) }
-            ToolbarItem(placement: .topBarTrailing) { Button(action: openSettings) { Image(systemName: "person.crop.circle") }.accessibilityLabel("Settings") }
-        }
+        .toolbar { if showsToolbarButtons { PrintersAndSettingsButtons(store: store, openPrinters: openPrinters, openSettings: openSettings) } }
     }
 
     @ViewBuilder private func section(_ title: String, _ projects: [Project]) -> some View {
