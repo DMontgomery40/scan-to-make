@@ -167,6 +167,11 @@ import CounterpartKit
     #if DEBUG
     /// `-CounterpartScreen <name>` opens one screen directly, as the mockup app's `-screen` does.
     private func debugRoute() {
+        // `-CounterpartFreshDraft YES`: New starts with no words or draft kept from an earlier run (UI tests that type).
+        if UserDefaults.standard.bool(forKey: "CounterpartFreshDraft") {
+            UserDefaults.standard.removeObject(forKey: "CounterpartNewDraft")
+            UserDefaults.standard.removeObject(forKey: "CounterpartNewDraftId")
+        }
         // `-CounterpartOpen counterpart://project/<id>` (or print/, printing/, printers, new) and `-CounterpartSection
         // inputs|activity`: any project's screen, for `scripts/ux_screens.py` with a real companion.
         if let link = UserDefaults.standard.string(forKey: "CounterpartOpen"), let url = URL(string: link), let opened = AppRoute(url: url) {

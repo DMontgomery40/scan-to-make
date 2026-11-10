@@ -154,8 +154,12 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
                     item { Text((if (showArchived) "▾ " else "▸ ") + "Archived · ${archived.size}", color = Palette.secondary, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.clickable { showArchived = !showArchived }.padding(vertical = 6.dp)) }
                     if (showArchived || query.isNotBlank()) items(archived, key = { "arch-" + it.id }) { p ->
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).clickable { open(p.id, false) }.padding(14.dp)) {
-                            Text(state.words(p).title, Modifier.weight(1f)); Text(Format.`when`(p.updatedAtMs.toLong()), color = Palette.secondary, fontSize = 13.sp)
+                        Column {
+                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).clickable { open(p.id, false) }.padding(14.dp)) {
+                                Text(state.words(p).title, Modifier.weight(1f)); Text(Format.`when`(p.updatedAtMs.toLong()), color = Palette.secondary, fontSize = 13.sp)
+                            }
+                            // Archived results say why they matched too (review F5).
+                            SearchReason(reason(p))
                         }
                     }
                 }

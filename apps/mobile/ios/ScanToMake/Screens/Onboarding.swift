@@ -18,6 +18,8 @@ struct WelcomeView: View {
             Color.black.ignoresSafeArea()
             RadialGradient(colors: [Color.filament.opacity(0.30), .clear], center: .init(x: 0.5, y: 0.08), startRadius: 10, endRadius: 360)
                 .ignoresSafeArea()
+            // The scroll ends where Continue's bar begins (review F8, as New): a card is never sliced behind the button.
+            VStack(spacing: 0) {
             GeometryReader { g in
                 ScrollView {
                     VStack(spacing: 0) {
@@ -55,17 +57,11 @@ struct WelcomeView: View {
                     .frame(maxWidth: .infinity, minHeight: g.size.height, alignment: .center)
                 }
                 .scrollBounceBehavior(.basedOnSize)
-                // Nothing legible behind Continue (first look U14): a card that runs under the bar is cut at its edge by
-                // the system's nearly opaque edge, not shown through the button.
                 .scrollEdgeEffectStyle(.hard, for: .bottom)
-                // The content is forced to the full height above, so give the scroll content its own
-                // bottom margin: the last card scrolls clear of Continue in the safeAreaBar (F16).
-                .contentMargins(.bottom, 72, for: .scrollContent)
             }
-            .safeAreaBar(edge: .bottom) {
                 Button(action: next) { Text("Continue").fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 44) }
                     .buttonStyle(.glassProminent).controlSize(.large)
-                    .padding(.horizontal, 20).padding(.bottom, 8)
+                    .padding(.horizontal, 20).padding(.vertical, 8)
                     .frame(maxWidth: 520)
                     .accessibilityIdentifier("welcome-continue")
             }
