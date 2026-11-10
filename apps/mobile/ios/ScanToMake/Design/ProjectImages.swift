@@ -118,7 +118,8 @@ struct StagePicture: View {
     let label: String
     /// The not-available line when the Mac has none: a plate's file came without it, or the Mac couldn't draw it.
     var unavailableLine = "Your Mac couldn’t draw a picture of this."
-    var symbol = "cube"
+    /// The not-available symbol: a neutral one, never the project's phase (a "Ready" seal beside "couldn't" reads as done).
+    var symbol = "cube.transparent"
     var maxPixelSize = 1200
     @State private var load = PictureLoad<UIImage>()
     @State private var attempt = 0
@@ -142,29 +143,38 @@ struct StagePicture: View {
 
     var body: some View {
         let shows = shows
+        let label: String = switch shows {
+        case .shown, .loading(_?): "\(label), as your Mac drew it"
+        case .loading(nil), .waiting: coming
+        case .notAvailable(let line, _): "\(label). \(line)"
+        }
         ZStack {
             StageBackground()
+            // The stage's one accessibility element, the whole stage in every state; what is drawn on it is hidden from
+            // VoiceOver (the label says it), except Try Again.
+            Color.clear.allowsHitTesting(false)
+                .accessibilityElement().accessibilityLabel(label).accessibilityValue(shows.value)
+                .accessibilityAddTraits(.isImage).accessibilityIdentifier("gallery-stage-picture")
             switch shows {
             case .shown(let image), .loading(let image?):
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
                     .overlay(alignment: .topTrailing) {
                         if case .loading = shows { ProgressView().tint(.white.opacity(0.6)).padding(14) }
                     }
-                    .stageElement(label: "\(label), as your Mac drew it", value: shows.value)
+                    .accessibilityHidden(true).allowsHitTesting(false)
             case .loading(nil), .waiting:
                 VStack(spacing: 12) {
                     ProgressView().tint(.white.opacity(0.6))
                     Text(coming).font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
                 }
-                .padding(.horizontal, 24).multilineTextAlignment(.center)
-                .stageElement(label: coming, value: shows.value)
+                .padding(.horizontal, 24).multilineTextAlignment(.center).accessibilityHidden(true).allowsHitTesting(false)
             case .notAvailable(let line, let retry):
                 VStack(spacing: 12) {
                     VStack(spacing: 10) {
                         Image(systemName: symbol).font(.system(size: 40)).foregroundStyle(.white.opacity(0.4))
                         Text(line).font(.footnote).foregroundStyle(.white.opacity(0.7))
                     }
-                    .stageElement(label: "\(label). \(line)", value: shows.value)
+                    .accessibilityHidden(true)
                     if retry {
                         Button("Try Again") { attempt += 1 }.font(.footnote.weight(.semibold)).buttonStyle(.glass)
                             .accessibilityIdentifier("gallery-stage-retry")
@@ -200,13 +210,6 @@ private extension StagePicture.Shows {
     }
 }
 
-private extension View {
-    /// The stage's one accessibility element, in every state.
-    func stageElement(label: String, value: String) -> some View {
-        accessibilityElement(children: .ignore).accessibilityLabel(label).accessibilityValue(value)
-            .accessibilityAddTraits(.isImage).accessibilityIdentifier("gallery-stage-picture")
-    }
-}
 
 /// The printer camera as a refreshing photo (PRD §5.7, §8.6): a new still every `every` seconds while
 /// shown, with when it was taken. Not video, and never called video.

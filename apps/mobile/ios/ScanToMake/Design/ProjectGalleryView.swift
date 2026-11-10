@@ -70,8 +70,7 @@ struct ProjectGalleryView: View {
     /// and if it can't be; that one is coming; or that none can be had.
     private func still(_ entry: ProjectGallery.Entry) -> StagePicture {
         StagePicture(project: project, still: project.still(for: entry), label: entry.label,
-                     unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.",
-                     symbol: words.phase.symbol)
+                     unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.")
     }
 
     /// One plain line under the stage when an entry's model can't be had: its picture stays above it. A picture's own
@@ -128,11 +127,11 @@ struct ProjectGalleryView: View {
             }
         } else if let photo = project.photoPicture {
             // Photos sent, no scan model or result yet: the subject the Mac cut out, as the project's card shows it.
-            StagePicture(project: project, still: .picture(photo), label: "Your photo", symbol: words.phase.symbol)
+            StagePicture(project: project, still: .picture(photo), label: "Your photo")
         } else {
             // Nothing to show yet: coming while the Mac works, else said plainly.
             StagePicture(project: project, still: words.busy ? .waiting : .notAvailable, label: project.title ?? "Your project",
-                         unavailableLine: "Nothing to show yet.", symbol: words.phase.symbol)
+                         unavailableLine: "Nothing to show yet.")
         }
     }
 
