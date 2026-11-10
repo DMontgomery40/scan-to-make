@@ -636,3 +636,16 @@ test("the code design engine row is reachable in Settings and shows the companio
     { message: "Update mcp-3D-printer-server in Settings → Printers to use its code design engine.", working: false });
   assert.deepEqual(codeEngineRow(undefined), { message: "Checking…", working: true });
 });
+
+test("David's Nov 9 bottle: the question's caption is true for any question, and the scan is five frames and the count", async () => {
+  const { askCaption, clampRegion, scanSample, scanWords } = await import("../src/domain");
+  const region = { x: 0.42, y: 0.3, width: 0.28, height: 0.34 };
+  assert.equal(askCaption({ photo: "asks/a.jpg", region }), "The outlined part is what this question is about.");
+  assert.equal(askCaption({ photo: "asks/a.jpg" }), "The picture that goes with this question.");
+  assert.equal(askCaption(undefined), "Your project’s picture. No picture came with this question.");
+  for (const caption of [askCaption({ photo: "a", region }), askCaption(undefined)]) assert.doesNotMatch(caption, /can.t see/i);
+  assert.equal(clampRegion({ x: 1.2, y: 0, width: 0.3, height: 0.3 }), undefined);
+  assert.deepEqual(scanSample(130), [0, 32, 65, 97, 129], "the same frames as the iPhone, Mac and Android");
+  assert.deepEqual(scanSample(3), [0, 1, 2]);
+  assert.equal(scanWords(130), "130 photos");
+});
