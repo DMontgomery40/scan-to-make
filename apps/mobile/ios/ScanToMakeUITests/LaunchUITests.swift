@@ -565,6 +565,31 @@ final class LayoutParityUITests: XCTestCase {
         return app
     }
 
+    /// PRD §5.4 One main action (board U17), the pair seen with real projects on Nov 10: a pass stopped on a project
+    /// that already had a result, and the page showed Try Again, Print Again and a floating Print at once. Try Again
+    /// leads; the earlier result prints from the card, once, under its true name; the bar keeps Ask for changes.
+    func testAStoppedPassWithAnEarlierResultHasOneMainActionWithProjectsPresent() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/capped-projects.json"))
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let selected = rows.filter { ($0["name"] as? String) == "limit-inactivity" }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "limit-stops"]
+        app.launchEnvironment["COUNTERPART_LIMIT_FIXTURES"] = String(data: try JSONSerialization.data(withJSONObject: selected), encoding: .utf8)
+        app.launch()
+        let listed = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "limit-inactivity")).firstMatch
+        XCTAssertTrue(listed.waitForExistence(timeout: 20))
+        listed.tap()
+        XCTAssertTrue(app.buttons["failed-retry"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.buttons["failed-print"].label, "Print the last version")
+        XCTAssertTrue(app.staticTexts["failed-print-note"].exists)
+        XCTAssertFalse(app.buttons["print"].exists, "no second Print in the bar")
+        XCTAssertFalse(app.buttons["Print Again"].exists, "nothing says this version was printed")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
+        XCTAssertTrue(app.descendants(matching: .any)["ask-for-changes"].exists, "the bar keeps Ask for changes")
+    }
+
     func testLimitStopNamesItsLimitOnHomeAndTheProject() throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
@@ -958,6 +983,22 @@ final class LayoutParityUITests: XCTestCase {
         open.tap()
         XCTAssertTrue(app.buttons["Print Another"].waitForExistence(timeout: 10), "the project page, Done, and still printable")
         XCTAssertFalse(app.buttons["open-project"].exists, "Printing is gone from the stack")
+    }
+
+    /// PRD §5.4 One main action: on a finished print's project page It Works leads; printing another is in the bar,
+    /// once, and (drawn from the same decision) not the filled one.
+    func testAFinishedPrintsProjectPageOffersPrintingOnceBesideDidItFitWithProjectsPresent() throws {
+        try XCTSkipIf(regular, "on the iPad the Printing screen sits beside the project page and has the same card")
+        let app = launch(screen: "print-finished")
+        let open = app.buttons["open-project"]
+        XCTAssertTrue(open.waitForExistence(timeout: 20))
+        open.tap()
+        XCTAssertTrue(app.buttons["it-works"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["needs-changes"].exists)
+        let print = app.buttons["print"]
+        XCTAssertTrue(print.exists)
+        XCTAssertEqual(print.label, "Print Another")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
     }
 
     /// Needs Changes on the finished Printing screen starts the change on the project page, as the project's own card does.

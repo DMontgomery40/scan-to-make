@@ -40,6 +40,7 @@ struct ProjectView: View {
     @State private var askWorking = false
     @State private var askProblem: String?
     @State private var askText = ""
+    @Environment(\.horizontalSizeClass) private var widthClass
     /// The size card's fields as they stand (`AskSizesFields` reports them), for the card's other answers.
     @State private var askSizes: AskSizesForm?
     @State private var notice: String?
@@ -599,19 +600,31 @@ struct ProjectView: View {
                     Text(todo).font(.subheadline).foregroundStyle(.secondary)
                 }
             }
+            if let note = words.page.printNote {
+                Text(note).font(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("failed-print-note")
+            }
             GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
+                // On a phone's width two buttons side by side cut the second one's name ("Print the last v…", seen
+                // with a real project): there they stack, each with the card's whole width.
+                let stacked = widthClass == .compact && words.actions.contains(.retry) && words.page.printPlace == .card
+                let row = stacked ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+                row {
+                    // One filled control, the page's main action (`PageActions`): Try Again when a pass stopped, or
+                    // printing again when the print failed. Printing is offered here under its true name, and then
+                    // not in the bar.
                     if words.actions.contains(.retry) {
                         Button { act { try await store.mac.start(object.id) } } label: {
                             Label("Try Again", systemImage: "arrow.clockwise").fontWeight(.semibold).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
                         }
-                        .buttonStyle(.glassProminent)
+                        .mainAction(words.page.main == .retry)
+                        .accessibilityIdentifier("failed-retry")
                     }
-                    if words.actions.contains(.print) || words.actions.contains(.printChecked) {
+                    if words.page.printPlace == .card, let print = words.page.printWords {
                         Button { openPrint(object.id) } label: {
-                            Label("Print Again", systemImage: "printer").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
+                            Label(print, systemImage: "printer").fontWeight(words.page.printIsMain ? .semibold : .regular).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
                         }
-                        .buttonStyle(.glass)
+                        .mainAction(words.page.printIsMain)
+                        .accessibilityIdentifier("failed-print")
                     }
                 }
                 .controlSize(.large).font(.subheadline)
@@ -714,7 +727,9 @@ struct ProjectView: View {
     @ViewBuilder private func bottomBar(_ object: Project, _ words: ProjectWords) -> some View {
         // While the Mac works, a change waits and goes in when this pass finishes.
         let canCorrect = object.canAskForChanges
-        let canPrint = words.actions.contains(.print) || words.actions.contains(.printChecked)
+        // Print is in the bar only where the page's one decision puts it there, and filled only when it leads
+        // (`PageActions`): never beside a card that already offers it.
+        let canPrint = words.page.printInBar
         if canCorrect || canPrint {
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
@@ -751,10 +766,10 @@ struct ProjectView: View {
                         // The page's main action never truncates ("Print Ano…", lead review Nov 10): it keeps its whole
                         // label and the ask field gives way.
                         Button { openPrint(object.id) } label: {
-                            Label(words.phase == .confirmed ? "Print Another" : "Print", systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
+                            Label(words.page.printWords ?? "Print", systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
                                 .fixedSize().padding(.horizontal, 8).frame(height: 36)
                         }
-                        .buttonStyle(.glassProminent)
+                        .mainAction(words.page.printIsMain)
                         .controlSize(.large)
                         .fixedSize()
                         .layoutPriority(1)
@@ -1236,6 +1251,14 @@ struct DidItFitCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+}
+
+extension View {
+    /// The page's one filled control when `main`, a plain glass button otherwise. Views never choose the fill
+    /// themselves: it comes from `PageActions.main`.
+    @ViewBuilder func mainAction(_ main: Bool) -> some View {
+        if main { buttonStyle(.glassProminent) } else { buttonStyle(.glass) }
     }
 }
 

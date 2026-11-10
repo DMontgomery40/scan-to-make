@@ -19,6 +19,7 @@ import {
   didItFitQuestion,
   duration,
   passHeading,
+  pageActions,
   requestedChange,
   stageMark,
   words,
@@ -385,6 +386,7 @@ export function ProjectView({
   >({});
   const queue = changes.queue.filter((q) => q.projectId === p.id);
   const active = p.state === "touching-up" || p.state === "printing";
+  const page = pageActions(p);
   const destination = resolvedPrinter(printers, p.print?.destinationId ?? p.printerDestinationId);
   const fit = didItFitQuestion(p);
 
@@ -556,25 +558,24 @@ export function ProjectView({
                 Start making
               </Action>
             )}
-            {p.state === "failed" && (
-              <Action run={() => mutate("objects.start", { id: p.id })}>
+            {/* One filled control, the page's main action (`pageActions`): Try again when a pass stopped; Print
+                only when it leads. Printing is named for what it would print, and offered once. */}
+            {page.main === "retry" && (
+              <Action className="primary" run={() => mutate("objects.start", { id: p.id })}>
                 Try again
               </Action>
             )}
-            <button
-              className="primary"
-              disabled={
-                !p.current ||
-                active ||
-                !!p.reconstructionReview ||
-                p.ask?.status === "open"
-              }
-              onClick={() => setPrint(true)}
-            >
-              {p.state === "printed" || p.state === "confirmed"
-                ? "Print another…"
-                : "Print…"}
-            </button>
+            {page.printWords && (
+              <button
+                className={page.main === "print" ? "primary" : undefined}
+                title={page.printNote}
+                data-testid="print"
+                disabled={!!p.reconstructionReview || p.ask?.status === "open"}
+                onClick={() => setPrint(true)}
+              >
+                {page.printWords}…
+              </button>
+            )}
           </footer>
         </div>
         <aside className="inspector">

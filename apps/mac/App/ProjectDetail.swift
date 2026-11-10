@@ -383,8 +383,14 @@ struct ProjectDetail: View {
             Text(words.status).font(.subheadline).lineLimit(4).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
+            // One filled control, the page's main action (`PageActions`): Try Again when a pass stopped, printing
+            // again when the print failed. Printing is offered here under its true name, and then not in the bar.
+            if words.page.printPlace == .card, let print = words.page.printWords {
+                Button("\(print)…", action: self.print).mainAction(words.page.printIsMain).controlSize(.large).disabled(!canPrint).fixedSize()
+                    .help(words.page.printNote ?? "")
+            }
             if words.actions.contains(.retry) {
-                Button("Try Again") { Task { await model.perform(.retry, on: object.id) } }.buttonStyle(.glass).controlSize(.large).disabled(working).fixedSize()
+                Button("Try Again") { Task { await model.perform(.retry, on: object.id) } }.mainAction(words.page.main == .retry).controlSize(.large).disabled(working).fixedSize()
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -425,12 +431,11 @@ struct ProjectDetail: View {
                 .padding(.horizontal, 16).frame(height: 44)
                 .glassEffect(targeted ? .regular.tint(Color.filament.opacity(0.25)).interactive() : .regular.interactive(), in: .capsule)
                 .dropDestination(for: URL.self) { urls, _ in drop(urls) } isTargeted: { targeted = $0 && canCorrect }
-                if words.actions.contains(.retry) && object.current == nil {
-                    EmptyView()
-                } else {
-                    Button(action: print) { Label(words.done ? "Print Another…" : object.state == .failed && object.print != nil ? "Print Again…" : "Print…",
-                                                       systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
-                        .buttonStyle(.glassProminent).controlSize(.extraLarge)
+                // Print is in the bar only where the page's one decision puts it, filled only when it leads: never
+                // beside a card that already offers it, and not at all while a change is being made.
+                if words.page.printInBar, let print = words.page.printWords {
+                    Button(action: self.print) { Label("\(print)…", systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
+                        .mainAction(words.page.printIsMain).controlSize(.extraLarge)
                         .disabled(!canPrint)
                         .help(model.printer(for: object) == nil ? model.missingPrinterText : "")
                 }
@@ -841,6 +846,13 @@ struct MacAskPhoto: View {
 /// What the Mac's question card says and offers for a question (train #499 review, F6).
 enum MacAskWords {
     static let update = "Update Counterpart on this Mac to answer this kind of question here."
+}
+
+extension View {
+    /// The page's one filled control when `main`, a plain glass button otherwise (`PageActions.main` decides).
+    @ViewBuilder func mainAction(_ main: Bool) -> some View {
+        if main { buttonStyle(.glassProminent) } else { buttonStyle(.glass) }
+    }
 }
 
 struct MacAskSizes: View {

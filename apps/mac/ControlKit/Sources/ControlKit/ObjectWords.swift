@@ -73,6 +73,9 @@ public struct ObjectWords: Sendable, Equatable {
     /// Printing progress, 0…1, when the printer reports it.
     public let progress: Double?
     public let actions: [ObjectAction]
+    /// The page's one main action and where printing goes (CounterpartKit `PageActions`): the detail view draws its
+    /// one filled control from this and decides nothing itself.
+    public let page: PageActions
     /// The person said it works (`confirmed`, PRD §5.4): it shows under Done with the ✓, and can be printed again.
     public let done: Bool
     /// A print the printer has: printing, or dispatched and still getting ready (`preparing`, with `print.dispatchedAt`
@@ -133,6 +136,7 @@ public struct ObjectWords: Sendable, Equatable {
         // (it would keep the Mac awake and polling for good).
         busy = object.state == .new ? false : words.busy || words.phase.isRunning
         size = words.size
+        page = words.page
         // Done stays printable ("Print Another…") and changeable, as a printed project is.
         // A question of a kind this build doesn't know is shown with the update sentence and no answer at all:
         // any answer offered (a guess, a photo) could consume it wrongly.
