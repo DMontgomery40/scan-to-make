@@ -377,6 +377,8 @@ const NotificationChoicesSchema = z.record(z.string().min(1).max(128), z.boolean
 const NotificationDevicesSchema = z.record(z.string().min(1).max(128), NotificationChoicesSchema);
 const GeneralSettingsSchema = z.strictObject({
   openAtLogin: z.boolean().optional(), showInDock: z.boolean().optional(), keepAwake: z.boolean().optional(),
+  /** "Keep printer software up to date": the companion installs a newer printer MCP by itself while nothing is working. On unless turned off. */
+  autoUpdateMcps: z.boolean().optional(),
 });
 const NotificationsSchema = z.strictObject({
   mac: NotificationChoicesSchema.default({}), devices: NotificationDevicesSchema.default({}),

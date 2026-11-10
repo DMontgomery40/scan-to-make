@@ -1,1 +1,1 @@
-{"settings":{"milestones":"50","notifications":{"mac":{},"devices":{}},"general":{}}}
+{"settings":{"milestones":"50","notifications":{"mac":{},"devices":{}},"general":{"autoUpdateMcps":true}}}

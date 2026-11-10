@@ -227,8 +227,10 @@ public struct CompanionSettings: Decodable, Sendable, Equatable {
         public var openAtLogin: Bool?
         public var showInDock: Bool?
         public var keepAwake: Bool?
-        public init(openAtLogin: Bool? = nil, showInDock: Bool? = nil, keepAwake: Bool? = nil) {
-            self.openAtLogin = openAtLogin; self.showInDock = showInDock; self.keepAwake = keepAwake
+        /// Q9, "Keep printer software up to date": `true` unless the person turned it off; nil from an older companion.
+        public var autoUpdateMcps: Bool?
+        public init(openAtLogin: Bool? = nil, showInDock: Bool? = nil, keepAwake: Bool? = nil, autoUpdateMcps: Bool? = nil) {
+            self.openAtLogin = openAtLogin; self.showInDock = showInDock; self.keepAwake = keepAwake; self.autoUpdateMcps = autoUpdateMcps
         }
     }
     public struct Fusion: Decodable, Sendable, Equatable { public let state: String; public let message: String?; public let version: String? }
