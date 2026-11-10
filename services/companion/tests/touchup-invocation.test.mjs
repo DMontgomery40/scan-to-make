@@ -186,7 +186,41 @@ test('a fit lookup is confirmed before fit-critical geometry', () => {
   assert.match(FIT_RULES, /manufacturer's own published dimensions/);
   assert.match(FIT_RULES, /stop with needs_closeup to confirm/);
   assert.match(FIT_RULES, /caliper photo/);
-  assert.match(FIT_RULES, /Measured dimensions in the request are authoritative/);
+  assert.match(FIT_RULES, /come from measurements/);
+});
+
+// #427, Nov 10: a code fit pass measured the scan 29.8 deep and 150 tall against calipers of 28 and 145, judged the
+// difference unimportant, designed without asking, and chose 1.5 mm a side so the cavity swallowed the inflated scan.
+// The order is fixed for every engine: measurements define the interface, a disagreement stops the pass with the ask
+// before any fit-critical geometry, the stated clearance is applied to the measurements, and a fit check is information.
+test('a fit settles a scan disagreement with the person before any fit-critical geometry, then sizes from the measurements plus a stated clearance', () => {
+  for (const engine of ['blender', 'fusion', 'code']) {
+    const rules = systemRules({kind: 'fit', engine, request: true});
+    const fit = rules.slice(rules.indexOf(RULE_SECTIONS.fitSizes), rules.indexOf('\n\n', rules.indexOf(RULE_SECTIONS.fitSizes)) >>> 0);
+    const step = text => { const at = fit.indexOf(text); assert.ok(at >= 0, `${engine}: ${text}`); return at; };
+    // In this order: measurements define the interface; compare with the scan; ask on a disagreement; size; check.
+    const measured = step('come from measurements');
+    const compare = step('Compare each measured or confirmed size with the scan');
+    const ask = step('stop with needs_closeup before modelling any fit-critical geometry');
+    const size = step('Size the interface from the measured or confirmed sizes plus a clearance you state');
+    assert.ok(measured < compare && compare < ask && ask < size, `${engine}: the steps are in order`);
+    assert.match(fit, /2 mm or 2%/);
+    assert.match(fit, /however little you judge the difference to matter/, `${engine}: the worker's own judgement is no reason to skip the ask`);
+    assert.match(fit, /names both sets of numbers/, `${engine}: the question gives the measurement and the scan reading`);
+    assert.match(fit, /already answered/, `${engine}: an answered question isn't asked again`);
+    assert.match(fit, /never choose the clearance to make room for the scan/i, `${engine}: the clearance isn't sized to swallow the scan`);
+    assert.match(fit, /clearance per side in your summary/, `${engine}: the clearance is said`);
+    assert.match(fit, /manufacturer's own published dimensions/, `${engine}: the lookup stays`);
+    assert.doesNotMatch(fit, /still win over the scan/, `${engine}: no line reads as permission to skip the ask`);
+    if (engine === 'code') {
+      const check = step('cad_check_fit');
+      assert.ok(size < check, 'the fit check comes after the size is settled');
+      assert.match(fit, /as information/);
+      assert.match(fit, /with any crop/);
+      assert.match(fit, /never to choose a size/);
+      assert.match(fit, /never rescale the scan or the part/);
+    } else assert.doesNotMatch(fit, /cad_check_fit/);
+  }
 });
 
 test('photo evidence lists overview pages first and every real filename, including PNG inputs', async () => {
