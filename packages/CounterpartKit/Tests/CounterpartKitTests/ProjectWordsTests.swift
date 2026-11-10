@@ -400,6 +400,8 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"changes","note":"  make it thicker "}"#).requestedChange, "make it thicker")
         XCTAssertNil(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"ask-answer","note":"Answer to \"Q?\": yes"}"#).requestedChange, "an answer is not a change")
         XCTAssertNil(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"new"}"#).requestedChange)
+    }
+
     /// In a list grouped by phase the row shows the Mac's detail, never its section's heading again (David's iPad,
     /// Nov 10: "Needs you · Kroger doesn't publi…" under Needs you, "Ready to print · 68.4 × 34.6 × 149…" under Ready).
     func testARowUnderItsHeadingShowsOnlyWhatDiffers() throws {

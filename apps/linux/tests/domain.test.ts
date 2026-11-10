@@ -731,6 +731,8 @@ test("a size question is number fields with the companion's labels, prefilled, w
   assert.equal(sizeSource("published"), "from the maker");
   assert.equal(sizeSource("scan"), "from your scan");
   assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
+});
+
 test("a row under its phase heading shows the companion's detail, never the heading again, with projects present", () => {
   const asking = { ...project, id: "a", state: "needs-closeup", status: { phase: "needs-you", tint: "orange", text: "Needs you · Can you confirm these sizes?", detail: "Can you confirm these sizes?" } } as Project;
   const ready = { ...project, id: "b", state: "ready", status: { phase: "ready", tint: "accent", text: "Ready to print · 68.4 × 34.6 × 149.2 mm", detail: "68.4 × 34.6 × 149.2 mm" } } as Project;
