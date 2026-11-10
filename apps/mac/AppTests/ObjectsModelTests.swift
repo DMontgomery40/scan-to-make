@@ -332,19 +332,19 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(ProjectGallery(project: seated).entries.map(\.label), ["Your part", "Together", "What you scanned"])
         let unseated = try XCTUnwrap(model.objects.first { $0.id == "older" })
         XCTAssertEqual(ProjectGallery(project: unseated).entries.map(\.label), ["Your part", "What you scanned"])
-        // What the project's stage offers, from the projects the model holds (ProjectDetail renders these).
-        XCTAssertEqual(ProjectDetail.pictureChoices(seated).map(\.label), ["Your part", "Together", "What you scanned"], "the chooser offers each picture")
-        XCTAssertEqual(ProjectDetail.pictureChoices(try XCTUnwrap(model.objects.first { $0.id == "caliper" })).count, 0, "no chooser for one picture")
+        // What the project's stage offers, from the projects the model holds (ProjectDetail renders exactly these).
+        XCTAssertEqual(ProjectStageOffer.pictureChoices(seated).map(\.label), ["Your part", "Together", "What you scanned"], "the chooser offers each picture")
+        XCTAssertEqual(ProjectStageOffer.pictureChoices(try XCTUnwrap(model.objects.first { $0.id == "caliper" })).count, 0, "no chooser for one picture")
         let part = ProjectGallery(project: unseated).first
-        XCTAssertTrue(ProjectDetail.offersSeeItTogether(unseated, showing: part), "See It Together on a part made before seats")
-        XCTAssertFalse(ProjectDetail.offersSeeItTogether(unseated, showing: ProjectGallery(project: unseated).entries.last), "not over the scan")
-        XCTAssertFalse(ProjectDetail.offersSeeItTogether(seated, showing: ProjectGallery(project: seated).first), "not once the seats are known")
+        XCTAssertTrue(ProjectStageOffer.seeItTogether(unseated, showing: part), "See It Together on a part made before seats")
+        XCTAssertFalse(ProjectStageOffer.seeItTogether(unseated, showing: ProjectGallery(project: unseated).entries.last), "not over the scan")
+        XCTAssertFalse(ProjectStageOffer.seeItTogether(seated, showing: ProjectGallery(project: seated).first), "not once the seats are known")
         var handheld = item("handheld", "ready")
         handheld["kind"] = "fit"; handheld["scan"] = "scan.stl"; handheld["current"] = ["model": "current/model.stl", "renders": []]
         await companion.set([holder, older, handheld])
         await model.refresh()
         let stl = try XCTUnwrap(model.objects.first { $0.id == "handheld" })
-        XCTAssertFalse(ProjectDetail.offersSeeItTogether(stl, showing: ProjectGallery(project: stl).first), "a handheld STL scan: USDZ only, for now")
+        XCTAssertFalse(ProjectStageOffer.seeItTogether(stl, showing: ProjectGallery(project: stl).first), "a handheld STL scan: USDZ only, for now")
         await model.locate("older")
         let calls = await companion.calls
         XCTAssertTrue(calls.contains("locate"), "See It Together asks the companion (objects.locate)")

@@ -64,7 +64,7 @@ struct ProjectDetail: View {
                 .overlay(alignment: .top) { pictureChooser.padding(.top, 64).environment(\.colorScheme, stageScheme) }
                 .overlay(alignment: .topLeading) {
                     // A fit made before passes said where the object sits: the Mac can work it out, changing nothing.
-                    if Self.offersSeeItTogether(object, showing: entry) {
+                    if ProjectStageOffer.seeItTogether(object, showing: entry) {
                         Button { Task { await model.locate(object.id) } } label: { Label("See It Together", systemImage: "cube.transparent") }
                             .buttonStyle(.glass).disabled(working).padding(.top, 108).padding(.leading, 24)
                             .environment(\.colorScheme, stageScheme)
@@ -148,17 +148,6 @@ struct ProjectDetail: View {
     // MARK: Stage
 
     private var gallery: ProjectGallery { ProjectGallery(project: object) }
-
-    /// The pictures the chooser over the stage offers: every gallery entry when there is more than one, none for one.
-    static func pictureChoices(_ object: Project) -> [ProjectGallery.Entry] {
-        let entries = ProjectGallery(project: object).entries
-        return entries.count > 1 ? entries : []
-    }
-
-    /// See It Together sits on the stage while the part is shown, for a part the Mac can locate (`canLocate`).
-    static func offersSeeItTogether(_ object: Project, showing entry: ProjectGallery.Entry?) -> Bool {
-        entry?.kind == .part && object.canLocate
-    }
     /// What floats on the stage reads on it: light glass and dark words on the light stage, as the stage is chosen.
     private var stageScheme: ColorScheme { entry.map { StageContrast.lightStage(for: $0.colour) } == true ? .light : .dark }
     private var entry: ProjectGallery.Entry? { gallery.entries.first { $0.id == picture } ?? gallery.first }
@@ -166,7 +155,7 @@ struct ProjectDetail: View {
     /// Which picture (PRD §5.4): a segmented control for the common two or three, a pop-up for a designer's many plates
     /// (HIG macOS: a segmented control to switch views in a toolbar area; a pop-up button for a long list). None for one.
     @ViewBuilder private var pictureChooser: some View {
-        let entries = Self.pictureChoices(object)
+        let entries = ProjectStageOffer.pictureChoices(object)
         let choice = Binding(get: { entry?.id ?? "" }, set: { picture = $0 })
         if entries.count > 4 {
             Picker("Picture", selection: choice) { ForEach(entries) { Text($0.label).tag($0.id) } }
