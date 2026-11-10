@@ -291,7 +291,8 @@ private func project(_ item: [String: Any]) throws -> Project {
         let answer = try XCTUnwrap(form.answer)
         let sent = await model.answerSizes(answer, on: "bottle")
         XCTAssertTrue(sent)
-        XCTAssertEqual(await companion.calls.last, "sizes:size-1=64,size-2=53")
+        let calls = await companion.calls
+        XCTAssertEqual(calls.last, "sizes:size-1=64,size-2=53")
         XCTAssertEqual(ControlClient.sizesParams("bottle", answer)["sizes"],
                        .array([.object(["id": .string("size-1"), "mm": .number(64)]), .object(["id": .string("size-2"), "mm": .number(53)])]))
     }
