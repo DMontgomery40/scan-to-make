@@ -98,7 +98,7 @@ class UxScreensTests(unittest.TestCase):
             self.assertEqual(len(set(urls)), 2, urls)
             for companion in companions:
                 self.assertEqual(companion.info['objectsStatus'], 200)
-                self.assertTrue(re.fullmatch(r'http://127\.0\.0\.1:(9078|90[89]\d)', companion.info['url']), companion.info['url'])
+                self.assertTrue(re.fullmatch(r'http://127\.0\.0\.1:(9078|908\d|909[0-7])', companion.info['url']), companion.info['url'])
                 self.assertEqual(companion.info['record']['baseUrl'], companion.info['url'], 'the pairing record carries the chosen address')
         finally:
             for companion in companions: companion.stop()
@@ -116,8 +116,9 @@ class UxScreensTests(unittest.TestCase):
         self.assertEqual(len(screens), len(set(screens)), 'no two projects write the same image files')
 
     def test_a_hold_that_captures_no_screens_fails(self):
-        """A lane hold whose every screen failed (for example an agent-device session bound to another run's simulator)
-        exits non-zero with the first reason, rather than 0 with nothing captured."""
+        """The real run_devices and capture: every open refused (an agent-device session bound to another run's
+        simulator, Nov 10) means no image, and the hold exits non-zero with that reason. Only the outside world is
+        replaced: the build, simctl and the agent-device CLI."""
         import argparse
         from unittest import mock
         out, work = self.tmp / 'out', self.tmp / 'work'
@@ -126,17 +127,66 @@ class UxScreensTests(unittest.TestCase):
                 'manifest': {'ids': {name: f'{name}-id' for name, _, _ in ux_screens.PROJECTS}, 'copiedAt': 'now'},
                 'processes': [], 'served': []}
         args = argparse.Namespace(screens='home', project=[], redo=False, max_minutes=10)
-        failure = 'home: agent-device open: session ux-screens-iphone is bound to another simulator'
+        refusal = 'session ux-screens-iphone is bound to another simulator'
+
+        def agent_device(device, *command, **_):
+            if command[0] == 'open': raise RuntimeError(f'agent-device open: {refusal}')
+            return {}
         with mock.patch.object(ux_screens, 'build_app', return_value=Path('/nonexistent.app')), \
-             mock.patch.object(ux_screens, 'run_devices', return_value=(1, 0, failure)):
+             mock.patch.object(ux_screens, 'simctl', return_value='10FBF416-0590-4874-86CD-5ABD67A941C0'), \
+             mock.patch.object(ux_screens.Device, 'ad', agent_device):
             with self.assertRaises(SystemExit) as stopped:
                 ux_screens.capture(args, out, work, ['iphone'], held)
         self.assertNotIn(stopped.exception.code, (0, None))
         self.assertIn('captured no screens', str(stopped.exception.code))
-        self.assertIn('bound to another simulator', str(stopped.exception.code))
-        with mock.patch.object(ux_screens, 'build_app', return_value=Path('/nonexistent.app')), \
-             mock.patch.object(ux_screens, 'run_devices', return_value=(0, 2, '')):
-            self.assertEqual(ux_screens.capture(args, out, work, ['iphone'], held), 0)
+        self.assertIn(refusal, str(stopped.exception.code))
+        self.assertEqual(ux_screens.read_jsonl(out / 'done.jsonl'), [], 'a failed screen is not done: the next run retries it')
+
+    def test_a_screens_typo_fails_before_the_companion_and_the_lane(self):
+        source = synthetic_state(self.tmp / 'state')
+        run = self.run_script(self.tmp / 'out', '--work', self.tmp / 'work', '--source', source, '--devices', 'iphone',
+                              '--screens', 'hoem')
+        self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("No screen matches --screens 'hoem'", run.stderr)
+        self.assertIn('home', run.stderr.split('The screens are:')[1], 'the message names the valid screens')
+        self.assertFalse((self.tmp / 'work/companion.log').exists(), 'no companion was started')
+        tickets = [p for p in self.lane_state.rglob('*') if p.is_file()] if self.lane_state.exists() else []
+        self.assertEqual(tickets, [])
+
+    @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('node') and (REPO / 'services/companion/dist/server-cli.js').exists(),
+                         'needs macOS, node and the built companion')
+    def test_a_signal_stops_the_run_waiting_in_the_lane_and_reaps_it(self):
+        """SIGTERM while the capture waits in the lane: the lane child is terminated and waited for, the companion
+        stops, and nothing of the run is left running."""
+        import fcntl
+        import signal as signals
+        import time
+        source = synthetic_state(self.tmp / 'state')
+        slots = [Path(self.env['STM_LANE_SLOT1']), Path(self.env['STM_LANE_SLOT2'])]
+        holders = [open(slot, 'a+') for slot in slots]
+        try:
+            for handle in holders: fcntl.flock(handle, fcntl.LOCK_EX)  # the lane is busy: the capture has to wait
+            outer = subprocess.Popen([sys.executable, str(SCRIPT), str(self.tmp / 'out'), '--work', str(self.tmp / 'work'),
+                                      '--source', str(source), '--devices', 'iphone', '--screens', 'home'],
+                                     env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            queue = self.lane_state / 'queue'
+            deadline = time.time() + 120
+            while time.time() < deadline and not (queue.exists() and any(queue.iterdir())):
+                time.sleep(0.5)
+            tickets = [json.loads(p.read_text()) for p in queue.iterdir()] if queue.exists() else []
+            self.assertTrue(tickets, 'the capture is waiting in the lane')
+            lane_pid = tickets[0]['pid']
+            outer.send_signal(signals.SIGTERM)
+            _, stderr = outer.communicate(timeout=200)
+            self.assertNotEqual(outer.returncode, 0)
+            self.assertIn('Stopped by signal', stderr)
+            with self.assertRaises(ProcessLookupError, msg='the lane child was reaped'):
+                os.kill(lane_pid, 0)
+            info = json.loads((self.tmp / 'work/companion-info.json').read_text())['info']
+            with self.assertRaises(ProcessLookupError, msg='the companion stopped'):
+                os.kill(info['pid'], 0)
+        finally:
+            for handle in holders: handle.close()
 
     def test_every_run_names_its_simulators_and_sessions_uniquely(self):
         run = subprocess.run([sys.executable, '-c', 'import sys; sys.path.insert(0, sys.argv[1]); import ux_screens; print(ux_screens.RUN_ID)',

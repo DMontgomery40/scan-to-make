@@ -547,6 +547,8 @@ def main() -> int:
     fixtures, offline = work / 'fixtures', work / 'fixtures-offline'
     fixture_assets(state, ids, fixtures)
     fixture_assets(state, ids, offline); (offline / 'offline').write_text('')
+    if args.screens and not args.project:  # a typo fails here, before the companion or the lane
+        select(args, out, keys, {'ids': ids, 'record': '', 'offline_record': '', 'fixtures': fixtures, 'offline': offline, 'info': {'objects': []}})
     log('starting the companion on the copy')
     companion = Companion(state, work / 'companion.log')
     try:
@@ -575,9 +577,19 @@ def main() -> int:
             return 0
         # Only the simulator part takes the lane: every hold that boots a simulator takes both slots, in arrival order.
         python = sys.executable
-        code = subprocess.call([python, str(REPO / 'scripts/lane.py'), '--exclusive', '--label', f'ux-screens: {args.devices}',
-                                '--max-minutes', str(args.max_minutes), '--', python, str(Path(__file__).resolve()), *sys.argv[1:]],
-                               env=dict(os.environ, UX_SCREENS_COMPANION=str(handoff)))
+        global LANE_CHILD
+        LANE_CHILD = subprocess.Popen([python, str(REPO / 'scripts/lane.py'), '--exclusive', '--label', f'ux-screens: {args.devices}',
+                                       '--max-minutes', str(args.max_minutes), '--', python, str(Path(__file__).resolve()), *sys.argv[1:]],
+                                      env=dict(os.environ, UX_SCREENS_COMPANION=str(handoff)))
+        try:
+            code = LANE_CHILD.wait()
+        except Stopped:
+            # The handler passed the signal on; wait here, outside it (Popen.wait isn't re-entrant), for the capture to
+            # delete its simulators, so nothing is left booted when this run ends.
+            try: LANE_CHILD.wait(180)
+            except subprocess.TimeoutExpired: LANE_CHILD.kill(); LANE_CHILD.wait()
+            raise
+        LANE_CHILD = None
         if code: raise SystemExit(f'The capture inside the lane failed (exit {code}); see the lines above.')
         return 0
     finally:
@@ -594,7 +606,11 @@ def handoff_context(held: dict, work: Path) -> dict:
 
 def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set]:
     items = screens(ctx['ids'], ctx['record'], ctx['offline_record'], ctx['fixtures'], ctx['offline'])
-    if args.screens: items = [i for i in items if any(s in i['name'] for s in args.screens.split(','))]
+    if args.screens:
+        items = [i for i in items if any(s in i['name'] for s in args.screens.split(','))]
+        if not items:
+            valid = ', '.join(i['name'] for i in screens(ctx['ids'], '', '', Path(), Path()))
+            raise SystemExit(f'No screen matches --screens {args.screens!r}, so there is nothing to capture. The screens are: {valid}.')
     if args.project:
         names = project_names(args.project, ctx['info']['objects'])
         items = [item for pid in args.project for item in project_screens(names[pid], pid, 'by id', 'real', ctx['record'])]
@@ -622,8 +638,20 @@ def capture(args, out: Path, work: Path, keys: list[str], held: dict) -> int:
     return 0
 
 
+LANE_CHILD: subprocess.Popen | None = None
+
+
+class Stopped(SystemExit):
+    """A run stopped by SIGTERM or SIGHUP."""
+
+
 def stop_on_signal(signum, frame):
-    raise SystemExit(f'Stopped by signal {signum}; the simulators and the companion of this run were cleaned up.')
+    """SIGTERM or SIGHUP: pass the signal to the capture running in the lane (lane.py passes it on; the capture deletes its
+    simulators). main waits for it, and the companion stops on the way out."""
+    child = LANE_CHILD
+    if child and child.poll() is None:
+        child.send_signal(signal.SIGTERM)
+    raise Stopped(f'Stopped by signal {signum}; the capture, its simulators and the companion of this run were cleaned up.')
 
 
 if __name__ == '__main__':
