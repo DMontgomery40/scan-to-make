@@ -804,7 +804,8 @@ final class LayoutParityUITests: XCTestCase {
     }
 
     /// Review F4: a fit with words and "I measured" but no measurement: Send takes you to the measurement fields, focuses the
-    /// first, and says there what's missing, instead of seeming to do nothing.
+    /// first, and says there what's missing, instead of seeming to do nothing. X86: on an iPad with a hardware keyboard the
+    /// number pad floats beside the focused field, and it covered the line; the test sets that keyboard itself.
     func testSendOnAFitMissingItsMeasurementGoesToTheFields() {
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
@@ -822,6 +823,12 @@ final class LayoutParityUITests: XCTestCase {
         add(fitShot)
         describe.tap()
         describe.typeText("A wall holder for it")
+        // The keyboard this test means (X86), set here rather than left to whatever ran before: on the iPad, a hardware
+        // keyboard, as on an iPad with its keyboard attached, where the number pad floats beside the focused field. A key
+        // pressed on it puts the simulator in that mode (in the gate an earlier test's ⌘N did it, and this test passed alone
+        // and failed there). The arrow only moves the cursor to where it already is. The iPhone keeps the on-screen
+        // keyboard: no iPhone test presses a hardware key.
+        if regular { describe.typeKey(.rightArrow, modifierFlags: []) }
         let keyboardShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         keyboardShot.name = "new-fit-keyboard-up"; keyboardShot.lifetime = .keepAlways
         add(keyboardShot)
@@ -849,10 +856,37 @@ final class LayoutParityUITests: XCTestCase {
         // left. The line is judged once that has happened, not while the sheet is still moving (the gate's slow iPad).
         let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: longest)
         XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed, "the first measurement is focused")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the number keyboard is up")
-        let onScreen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: missing)
-        XCTAssertEqual(XCTWaiter().wait(for: [onScreen], timeout: 5), .completed,
-                       "on screen, by the fields: line \(missing.frame), field \(longest.frame), keyboard \(app.keyboards.firstMatch.frame), sheet \(sheet.frame)")
+        // Where the number pad is. Docked: the keyboard. On the iPad with a hardware keyboard: the floating pad, found by
+        // its keys, because `app.keyboards` then still reports the docked keyboard parked below the screen.
+        // Each key exists twice then (the floating pad's and the parked keyboard's): take the one on screen.
+        XCTAssertTrue(app.keys["1"].firstMatch.waitForExistence(timeout: 5), "the number pad is up")
+        let screen = app.windows.firstMatch.frame
+        let keys = ["1", "3", "0"].compactMap { name in
+            app.keys.matching(identifier: name).allElementsBoundByIndex.first { screen.intersects($0.frame) }?.frame
+        }
+        XCTAssertEqual(keys.count, 3, "the pad's 1, 3 and 0 are on screen")
+        let pad = regular ? keys.reduce(CGRect.null) { $0.union($1) } : app.keyboards.firstMatch.frame
+        XCTAssertTrue(app.windows.firstMatch.frame.intersects(pad), "the pad \(pad) is on screen")
+        let detail = "line \(missing.frame), field \(longest.frame), pad \(pad), sheet \(sheet.frame)"
+        if regular {
+            // Hit-testing can't judge the line here: with the floating pad up, the line reported not hittable while the
+            // run's recording showed it whole and clear of the pad (iPad Air, Nov 10). The frames can: below the title bar, above its
+            // bottom, and clear of the pad, which sits beside the field it belongs to, not where the field was before
+            // the sheet moved (X86: focused first and scrolled after, the pad stayed put and covered the line).
+            XCTAssertGreaterThanOrEqual(missing.frame.minY, app.navigationBars["New Project"].frame.maxY, "under the title bar: \(detail)")
+            XCTAssertLessThanOrEqual(missing.frame.maxY, sheet.frame.maxY, "inside the sheet: \(detail)")
+            XCTAssertLessThan(min(abs(pad.minY - longest.frame.maxY), abs(longest.frame.minY - pad.maxY)), 40,
+                              "the floating pad sits beside the field: \(detail)")
+        } else {
+            let onScreen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: missing)
+            XCTAssertEqual(XCTWaiter().wait(for: [onScreen], timeout: 5), .completed, "on screen, by the fields: \(detail)")
+        }
+        XCTAssertFalse(missing.frame.intersects(pad), "the pad covers the line: \(detail)")
+        XCTAssertFalse(longest.frame.intersects(pad), "the pad covers the field: \(detail)")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = regular ? "new-fit-measurement-missing-hardware-keyboard" : "new-fit-measurement-missing"
+        shot.lifetime = .keepAlways
+        add(shot)
     }
 
     /// Review F3 (train 2026-11-10e): the Result's printer row is never empty. While the printer list is on its way it says so;

@@ -33,6 +33,10 @@ struct NewObjectView: View {
     @FocusState private var describing: Bool
     /// The first measurement, focused when a fit's Send needs one (review F4).
     @FocusState private var measuring: Bool
+    /// Send on a fit missing its measurement: counts each time it has to take you to the fields (X86).
+    @State private var showMeasurement = 0
+    /// Longest is focused when the scroll that brings it into view has stopped (X86).
+    @State private var focusWhenSettled = false
     /// The scroll's own position, so "the top" is the top of the content below the glass header, not the scroll view's
     /// edge under it (`proxy.scrollTo(_, anchor: .top)` put the question under the header on the iPhone).
     @State private var scrollPosition = ScrollPosition(edge: .top)
@@ -211,10 +215,20 @@ struct NewObjectView: View {
             .onChange(of: describing) { _, now in
                 if now, attached != nil { withAnimation { proxy.scrollTo("describe", anchor: .center) } }
             }
-            // Send on a fit still missing its measurement takes you to the fields that need it (review F4).
-            .onChange(of: measuring) { _, now in
-                // The fields themselves, with the line above them, into the room the keyboard leaves.
-                if now { withAnimation { proxy.scrollTo("fit-sizes", anchor: .center) } }
+            // Send on a fit still missing its measurement takes you to the fields that need it (review F4), and focuses
+            // the first only once they have stopped moving (X86). The size card goes to the top of the sheet, its line
+            // above the fields: the docked keyboard rises from the bottom, and on an iPad with a hardware keyboard the
+            // floating number pad is placed beside the focused field when it appears and stays there. Focused first and
+            // scrolled after, the pad stayed where the field had been and covered the line; with the fields near the top
+            // there is no room for it above them, so it opens below, away from the line.
+            .onChange(of: showMeasurement) {
+                focusWhenSettled = true
+                withAnimation { proxy.scrollTo("fit-dimensions", anchor: .top) }
+                // Already in place, the scroll doesn't move and never settles: focus anyway, a moment later.
+                Task { try? await Task.sleep(for: .seconds(1)); focusMeasurementIfSettling() }
+            }
+            .onScrollPhaseChange { _, phase in
+                if phase == .idle { focusMeasurementIfSettling() }
             }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -308,17 +322,21 @@ struct NewObjectView: View {
                 Text("Your Mac identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.")
                     .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             case .measured:
-                Text("Measure the outside of the real thing. Leave a side blank if you don't know it.")
-                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                // What's missing sits right above the fields: below them, the number keyboard covered it (iPad Air, landscape).
-                if askedForDescription, measurementMissing, let missing {
-                    Text(missing).font(.footnote).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("fit-size-missing")
-                }
-                HStack(spacing: 8) {
-                    measuredField("Longest", text: $measuredLongest, identifier: "fit-size-longest", focus: $measuring)
-                    measuredField("Middle", text: $measuredMiddle, identifier: "fit-size-middle")
-                    measuredField("Shortest", text: $measuredShortest, identifier: "fit-size-shortest")
+                // What's missing sits right above the fields, and Send brings this card to the top of the sheet before
+                // it focuses a field: below them the docked keyboard covers it, and the iPad's floating number pad opens
+                // below a field near the top (X86; iPad Air, landscape).
+                VStack(alignment: .leading, spacing: 10) {
+                    if askedForDescription, measurementMissing, let missing {
+                        Text(missing).font(.footnote).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("fit-size-missing")
+                    }
+                    Text("Measure the outside of the real thing. Leave a side blank if you don't know it.")
+                        .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        measuredField("Longest", text: $measuredLongest, identifier: "fit-size-longest", focus: $measuring)
+                        measuredField("Middle", text: $measuredMiddle, identifier: "fit-size-middle")
+                        measuredField("Shortest", text: $measuredShortest, identifier: "fit-size-shortest")
+                    }
                 }
                 .id("fit-sizes")
             case .scan:
@@ -368,6 +386,12 @@ struct NewObjectView: View {
         case nil: return "Choose what this scan becomes, then add anything your Mac should know."
         }
     }
+    private func focusMeasurementIfSettling() {
+        guard focusWhenSettled else { return }
+        focusWhenSettled = false
+        if measurementMissing { measuring = true }
+    }
+
     /// A fit with words and "I measured", but no valid measurement yet.
     private var measurementMissing: Bool {
         attached != nil && scanUse == .fit && described && dimensionSource == .measured && !measuredValid
@@ -462,7 +486,7 @@ struct NewObjectView: View {
         guard canSend else {
             askedForDescription = true
             // A missing measurement is asked for at its fields, not under the description (review F4).
-            if measurementMissing { describing = false; measuring = true; return }
+            if measurementMissing { describing = false; measuring = false; showMeasurement += 1; return }
             describing = attached == nil || (scanUse == .fit && !described)
             return
         }
