@@ -62,7 +62,7 @@ test('a 3MF project from before gets its picture when the list is read, without 
   await service.list(); await service.picturesDrawn();
   const drawnNow = await service.get(object.id);
   assert.deepEqual(drawn, ['original/abc-first-plate.3mf']);
-  assert.match(drawnNow.picture, /^pictures\/part-[0-9a-f]+\.png$/);
+  assert.match(drawnNow.picture, /^pictures\/part-[0-9a-f]{8}-[0-9a-f]{8}\.png$/);
   assert.equal(drawnNow.pictures.part, drawnNow.picture, "the project's picture is its file's");
   assert.equal(drawnNow.updatedAtMs, stamp, 'a backfilled picture keeps its place in the list');
 });
@@ -121,7 +121,8 @@ test('a photo whose subject cannot be cut out is tried once: no writes and no ev
   const after = await store.get(object.id);
   assert.equal(after.updatedAtMs, stamp, 'never rewritten');
   assert.equal(after.picture, undefined);
-  assert.equal(events.filter(event => event.type === 'project.updated').length, 0, 'no project.updated, so nothing feeds a reload');
+  assert.deepEqual(after.pictureStates, {photo: 'failed'}, 'clients are told none is coming (review B2 on #539)');
+  assert.equal(events.filter(event => event.type === 'project.updated').length, 1, 'that one record, then no project.updated, so nothing feeds a reload');
   // A new photo is new inputs: tried again, once.
   await store.addFile(object.id, 'photos', 'clip.jpg', Buffer.from('jpeg2'));
   await store.update(object.id, o => ({...o, photos: ['clip.jpg', 'room.jpg']}));
@@ -153,4 +154,133 @@ test('a redraw that fails keeps the picture the role had, file and name', async 
   assert.equal(after.pictures.part, first.pictures.part, 'the old picture stays');
   assert.equal(after.picture, first.picture);
   assert.match(await readFile(join(dir, first.pictures.part), 'utf8'), /^png/, 'and its file is still there');
+});
+
+// Review B2 and S3 on #539. A replaced 3MF (a new pass) takes its old picture down at once, before the redraw: every
+// client puts the Mac's picture of a 3MF before its pass's render, so an old one would stand for the new file. The
+// role says `drawing`, then `failed` if the redraw fails, and a later drawing clears it.
+test("a replaced file's old picture is taken down at once; the role says drawing, then failed, then nothing once drawn", async t => {
+  const root = await tempDir('objects-pictures-stale-');
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects'));
+  let mode = 'draw', release;
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
+    drawPicture: async (dir, spec, output) => {
+      if (mode === 'hold') await new Promise(resolve => { release = resolve; });
+      if (mode === 'fail') return false;
+      await writeFile(output, `png ${spec.model}`); return true;
+    }});
+  t.after(() => service.close());
+  const object = await store.create('A box', 'fit');
+  const dir = store.dir(object.id);
+  await mkdir(join(dir, 'current'), {recursive: true});
+  const file = join(dir, 'current', 'model.3mf');
+  await writeFile(file, 'PK v1 3mf');
+  await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.3mf', renders: ['current/renders/1.png']}}));
+  await service.list(); await service.picturesDrawn();
+  const v1 = await service.get(object.id);
+  assert.ok(v1.pictures.part);
+  assert.equal(v1.pictureStates, undefined, 'drawn: no state');
+
+  // v2: same size, same mtime, a new file (a pass writes it anew). Its drawing is held, as behind a busy queue.
+  const {stat, utimes, rename: move} = await import('node:fs/promises');
+  const before = await stat(file);
+  await writeFile(`${file}.new`, 'PK v2 3mf'); await move(`${file}.new`, file); await utimes(file, before.atime, before.mtime);
+  mode = 'hold';
+  await service.list();
+  for (let i = 0; i < 50 && (await store.get(object.id)).pictures?.part; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  const pending = await store.get(object.id);
+  assert.equal(pending.pictures.part, undefined, "v1's picture never stands for v2 while v2's is drawn");
+  assert.equal(pending.picture, undefined);
+  assert.deepEqual(pending.pictureStates, {part: 'drawing'});
+  mode = 'fail'; release?.();
+  await service.picturesDrawn();
+  const failed = await service.get(object.id);
+  assert.equal(failed.pictures.part, undefined, 'a failed redraw never brings the old file\'s picture back');
+  assert.deepEqual(failed.pictureStates, {part: 'failed'}, 'and the clients are told none is coming');
+
+  // v3 draws: the state goes.
+  await writeFile(file, 'PK v3 3mf, longer');
+  mode = 'draw';
+  await service.list(); await service.picturesDrawn();
+  const v3 = await service.get(object.id);
+  assert.ok(v3.pictures.part);
+  assert.notEqual(v3.pictures.part, v1.pictures.part);
+  assert.equal(v3.pictureStates, undefined);
+});
+
+test("a 'drawing' left by a companion that stopped mid-draw is cleared once the picture is there", async t => {
+  const root = await tempDir('objects-pictures-restart-');
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects'));
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
+    drawPicture: async (dir, spec, output) => { await writeFile(output, 'png'); return true; }});
+  t.after(() => service.close());
+  const object = await store.create('A holder', 'fit');
+  const dir = store.dir(object.id);
+  await mkdir(join(dir, 'current'), {recursive: true});
+  await writeFile(join(dir, 'current', 'model.stl'), 'solid x\nendsolid x\n');
+  await store.update(object.id, o => ({...o, state: 'ready', current: {model: 'current/model.stl', renders: []}}));
+  await service.list(); await service.picturesDrawn();
+  await store.update(object.id, o => ({...o, pictureStates: {part: 'drawing'}}));
+  await service.list(); await service.picturesDrawn();
+  assert.equal((await service.get(object.id)).pictureStates, undefined);
+});
+
+// Review S7 on #539: one plate's own picture never stands for the others; the file is drawn whole unless every plate has one.
+test("a designer's file is drawn whole unless every plate has its own picture", () => {
+  const receipt = (thumbs) => ({receipts: [{format: '3mf', sha256: 'a'.repeat(64), name: 'six.3mf',
+    plates: thumbs.map((thumbnail, index) => ({index, name: `Plate ${index + 1}`, objects: [], sliced: false, ...(thumbnail ? {thumbnail} : {})}))}]});
+  const project = files => ({...base, kind: 'published', current: {model: 'original/abc-six.3mf', renders: []}, files});
+  assert.deepEqual(pictureSpecs(project(receipt(['original/p1.png', undefined, 'original/p3.png']))), {part: {model: 'original/abc-six.3mf', zUp: true}});
+  assert.deepEqual(pictureSpecs(project(receipt(['original/p1.png', 'original/p2.png']))), {});
+});
+
+// The same while the project is already queued (right after an install, every project redraws at once): the queued
+// step takes the old picture down before it draws.
+test("a file replaced while its project is already queued never draws with the old file's picture on the record", async t => {
+  const root = await tempDir('objects-pictures-queued-');
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects'));
+  let hold = false, release, seenDuringDraw;
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
+    drawPicture: async (dir, spec, output) => {
+      if (hold) { await new Promise(resolve => { release = resolve; }); hold = false; }
+      if (spec.model?.endsWith('.3mf') && seenDuringDraw === undefined && drawing) seenDuringDraw = (await store.get(box.id)).pictures?.part ?? null;
+      await writeFile(output, `png ${spec.model}`); return true;
+    }});
+  t.after(() => service.close());
+  let drawing = false;
+  // Listed newest first: the other project is queued ahead of the box.
+  const box = await store.create('A box', 'fit');
+  await new Promise(resolve => setTimeout(resolve, 5));
+  const other = await store.create('Another', 'fit');
+  for (const [object, model, body] of [[other, 'current/model.stl', 'solid x\nendsolid x\n'], [box, 'current/model.3mf', 'PK v1']]) {
+    await mkdir(join(store.dir(object.id), 'current'), {recursive: true});
+    await writeFile(join(store.dir(object.id), model), body);
+    await store.update(object.id, o => ({...o, state: 'ready', current: {model, renders: ['current/renders/1.png']}}));
+  }
+  await service.list(); await service.picturesDrawn();
+  const v1 = (await store.get(box.id)).pictures.part;
+  assert.ok(v1);
+  // Another project's drawing holds the queue; the box is queued behind it with v1 still current.
+  await writeFile(join(store.dir(other.id), 'current', 'model.stl'), 'solid y\nendsolid y\n');
+  hold = true;
+  await service.list();
+  for (let i = 0; i < 200 && !release; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(release, "the other project's drawing holds the queue");
+  // While queued, the box's file is replaced: a second list() finds it already pending.
+  await writeFile(join(store.dir(box.id), 'current', 'model.3mf'), 'PK v2, another file');
+  await service.list();
+  drawing = true;
+  release?.();
+  await service.picturesDrawn();
+  assert.equal(seenDuringDraw, null, "v1's picture was off the record before v2 was drawn");
+  const after = await store.get(box.id);
+  assert.ok(after.pictures.part);
+  assert.notEqual(after.pictures.part, v1);
+  assert.equal(after.pictureStates, undefined);
 });

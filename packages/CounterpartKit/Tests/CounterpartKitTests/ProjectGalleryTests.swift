@@ -29,6 +29,14 @@ final class ProjectGalleryTests: XCTestCase {
                 case .own: XCTAssertEqual(want["colour"] as? String, "own", name)
                 case .spool(let hex): XCTAssertEqual(want["colour"] as? String, hex, name)
                 }
+                if let still = want["still"] as? String {
+                    let got: String = switch project.still(for: entry) {
+                    case .picture(let path): path
+                    case .waiting: "waiting"
+                    case .notAvailable: "not available"
+                    }
+                    XCTAssertEqual(got, still, "\(name): \(entry.id)'s stage")
+                }
                 let drawing = want["drawing"] as! [String: Any]
                 switch entry.drawing {
                 case .model(let path): XCTAssertEqual(drawing["model"] as? String, path, name)

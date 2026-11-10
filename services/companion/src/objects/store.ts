@@ -134,6 +134,8 @@ export interface StmObject {
    */
   picture?: string;
   pictures?: import('./pictures.js').ProjectPictureNames;
+  /** Each gallery picture with no current drawing: `drawing` or `failed` (review B2 on #539). */
+  pictureStates?: import('./pictures.js').ProjectPictureStates;
   /**
    * Where `scan` came from when the phone sent an Object Capture session's photos with it: `phone-preview` is the
    * phone's own quick model, kept until this Mac rebuilds from the photos (and kept as the scan, said in words, when

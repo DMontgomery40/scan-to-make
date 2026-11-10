@@ -44,7 +44,8 @@ extension Project {
     var thumbnailPath: String? { picturePath }
 }
 
-/// One of a project's images, downloaded once per project version and decoded at the size shown.
+/// One of a project's images on a card or in a list, downloaded once per project version and decoded at the size shown.
+/// A project's stage never uses it: `StagePicture` is the stage's one still picture.
 struct ProjectImage: View {
     @Environment(AppModel.self) private var app
     let project: Project
@@ -52,27 +53,20 @@ struct ProjectImage: View {
     var maxPixelSize = 600
     var contentMode: ContentMode = .fill
     var placeholderSymbol = "cube"
-    /// On a project's stage, never a bare backdrop (review F4 on #525): while the picture loads, the project's list
-    /// picture if this phone already has it, else a quiet progress mark; if it can't be had, `placeholderSymbol`. Says
-    /// which in its accessibility value ("shown" only once a picture is decoded).
-    var onStage = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var image: UIImage?
     @State private var shownKey: String?
     @State private var failed = false
 
     private var key: String { "\(project.id)#\(Int64(project.mediaVersion))#\(path ?? "")#\(maxPixelSize)" }
-    private var early: UIImage? { onStage && image == nil && !failed ? ImageMemory.shared.anySize(project, project.thumbnailPath) : nil }
 
     var body: some View {
-        let content = ZStack {
+        ZStack {
             StageBackground()
-            if let image = image ?? early {
+            if let image {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
             } else if path == nil || failed {
-                Image(systemName: placeholderSymbol).font(onStage ? .system(size: 44) : .title2).foregroundStyle(.white.opacity(0.35))
-            } else if onStage {
-                ProgressView().tint(.white.opacity(0.5))
+                Image(systemName: placeholderSymbol).font(.title2).foregroundStyle(.white.opacity(0.35))
             }
         }
         .clipped()
@@ -83,27 +77,139 @@ struct ProjectImage: View {
             guard scenePhase == .active else { return }
             image = nil; failed = false
             guard let path else { return }
-            guard let url = try? await app.projects.mac.download(project, path) else { if !Task.isCancelled { failed = true }; return }
-            let size = maxPixelSize
-            // A few at a time: a grid of scan frames decoding two dozen HEICs at once got nothing back (Nov 10).
-            var decoded: UIImage?
-            for _ in 0..<2 where decoded == nil && !Task.isCancelled {
-                // CounterpartKit's lane: three at a time, and a cell that scrolled away leaves the queue (review F4).
-                decoded = await DecodeLane.shared.run { ImageMemory.thumbnail(at: url, maxPixelSize: size) } ?? nil
-            }
+            guard let decoded = await ImageMemory.load(app, project, path, maxPixelSize: maxPixelSize) else { if !Task.isCancelled { failed = true }; return }
             guard !Task.isCancelled else { return }
-            guard let decoded else { failed = true; return }
             ImageMemory.shared.store(decoded, key)
             image = decoded; shownKey = key
         }
-        if onStage {
-            content.accessibilityElement(children: .ignore)
-                .accessibilityValue(image != nil ? "shown" : failed || path == nil ? "not available" : "loading")
-        } else {
-            content.accessibilityHidden(true)
+        .accessibilityHidden(true)
+    }
+}
+
+extension ImageMemory {
+    /// Downloads one of the project's pictures and decodes it at `maxPixelSize`. Nil when it can't be had.
+    static func load(_ app: AppModel, _ project: Project, _ path: String, maxPixelSize size: Int) async -> UIImage? {
+        guard let url = try? await app.projects.mac.download(project, path) else { return nil }
+        // A few at a time: a grid of scan frames decoding two dozen HEICs at once got nothing back (Nov 10).
+        var decoded: UIImage?
+        for _ in 0..<2 where decoded == nil && !Task.isCancelled {
+            // CounterpartKit's lane: three at a time, and a cell that scrolled away leaves the queue (review F4).
+            decoded = await DecodeLane.shared.run { ImageMemory.thumbnail(at: url, maxPixelSize: size) } ?? nil
+        }
+        return decoded
+    }
+}
+
+/// The one view that puts a still picture on a project's stage (review B1/S2 on #539; docs/operations.md "Waiting,
+/// failed and empty are screens too"). Every still goes through it: an entry before its model is drawn, a 3MF's or a
+/// plate's picture, the photo's subject, and a page with nothing yet. It is never a bare backdrop, for as long as the page
+/// is open, with or without a model:
+/// - **shown**: this picture.
+/// - **waiting**: an earlier copy of this same picture (another size) if this phone has one, else a progress mark and one
+///   line saying what is coming. Never a picture of something else.
+/// - **not available**: a symbol and one line saying so, with Try Again where trying again can help (a fetch that failed).
+/// VoiceOver and UI tests read one element, `gallery-stage-picture`, whose value is "shown", "loading" or "not available".
+struct StagePicture: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
+    let project: Project
+    let still: Project.Still
+    /// What it is a picture of: the entry's label ("Model", "Plate 3", "What you scanned").
+    let label: String
+    /// The not-available line when the Mac has none: a plate's file came without it, or the Mac couldn't draw it.
+    var unavailableLine = "Your Mac couldn’t draw a picture of this."
+    /// The not-available symbol: a neutral one, never the project's phase (a "Ready" seal beside "couldn't" reads as done).
+    var symbol = "cube.transparent"
+    var maxPixelSize = 1200
+    @State private var load = PictureLoad<UIImage>()
+    @State private var attempt = 0
+
+    private var path: String? { if case .picture(let path) = still { path } else { nil } }
+    private var key: String { "\(project.id)#\(Int64(project.mediaVersion))#\(path ?? "")#\(maxPixelSize)" }
+
+    fileprivate enum Shows { case shown(UIImage), loading(UIImage?), waiting, notAvailable(String, retry: Bool) }
+    private var shows: Shows {
+        switch still {
+        case .waiting: return .waiting
+        case .notAvailable: return .notAvailable(unavailableLine, retry: false)
+        case .picture(let path):
+            if load.key == key, let image = load.picture { return .shown(image) }
+            if let image = ImageMemory.shared.image(key) { return .shown(image) }
+            if load.key == key, load.failed { return .notAvailable("The picture didn’t come from your Mac.", retry: true) }
+            return .loading(ImageMemory.shared.anySize(project, path))
+        }
+    }
+    private var coming: String { "\(label): coming from your Mac" }
+
+    var body: some View {
+        let shows = shows
+        let label: String = switch shows {
+        case .shown, .loading(_?): "\(label), as your Mac drew it"
+        case .loading(nil), .waiting: coming
+        case .notAvailable(let line, _): "\(label). \(line)"
+        }
+        ZStack {
+            StageBackground()
+            // The stage's one accessibility element, the whole stage in every state; what is drawn on it is hidden from
+            // VoiceOver (the label says it), except Try Again.
+            Color.clear.allowsHitTesting(false)
+                .accessibilityElement().accessibilityLabel(label).accessibilityValue(shows.value)
+                .accessibilityAddTraits(.isImage).accessibilityIdentifier("gallery-stage-picture")
+            switch shows {
+            case .shown(let image), .loading(let image?):
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
+                    .overlay(alignment: .topTrailing) {
+                        if case .loading = shows { ProgressView().tint(.white.opacity(0.6)).padding(14) }
+                    }
+                    .accessibilityHidden(true).allowsHitTesting(false)
+            case .loading(nil), .waiting:
+                VStack(spacing: 12) {
+                    ProgressView().tint(.white.opacity(0.6))
+                    Text(coming).font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
+                }
+                .padding(.horizontal, 24).multilineTextAlignment(.center).accessibilityHidden(true).allowsHitTesting(false)
+            case .notAvailable(let line, let retry):
+                VStack(spacing: 12) {
+                    VStack(spacing: 10) {
+                        Image(systemName: symbol).font(.system(size: 40)).foregroundStyle(.white.opacity(0.4))
+                        Text(line).font(.footnote).foregroundStyle(.white.opacity(0.7))
+                    }
+                    .accessibilityHidden(true)
+                    if retry {
+                        Button("Try Again") { attempt += 1 }.font(.footnote.weight(.semibold)).buttonStyle(.glass)
+                            .accessibilityIdentifier("gallery-stage-retry")
+                    }
+                }
+                .padding(.horizontal, 24).multilineTextAlignment(.center)
+            }
+        }
+        .clipped()
+        // Coming back to the app, or Try Again, fetches a picture that failed again.
+        .task(id: "\(key)#\(attempt)#\(scenePhase)") {
+            guard let path else { return }
+            let key = key
+            if let cached = ImageMemory.shared.image(key) { load.start(key, cached: cached); return }
+            if load.key == key, load.picture != nil { return }
+            guard scenePhase == .active else { return }
+            load.start(key, cached: nil)
+            let decoded = await ImageMemory.load(app, project, path, maxPixelSize: maxPixelSize)
+            guard !Task.isCancelled else { return }
+            if let decoded { ImageMemory.shared.store(decoded, key) }
+            load.decoded(decoded, for: key)
         }
     }
 }
+
+private extension StagePicture.Shows {
+    var value: String {
+        switch self {
+        case .shown: "shown"
+        case .loading, .waiting: "loading"
+        case .notAvailable: "not available"
+        }
+    }
+}
+
 
 /// The printer camera as a refreshing photo (PRD §5.7, §8.6): a new still every `every` seconds while
 /// shown, with when it was taken. Not video, and never called video.
