@@ -615,7 +615,11 @@ public final class CompanionClient: @unchecked Sendable {
         // Older versions of this project are no longer shown. The current version's folder stays: its other
         // files may be downloading at the same time.
         let projectFolder = folder.deletingLastPathComponent()
-        for other in (try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)) ?? [] where other.lastPathComponent != version {
+        // Only older ones: downloads outlive their page now, so a slow download of an earlier version can finish after
+        // a newer version's files have landed, and must not remove them (review of #527, part 2, F2).
+        let mine = Int64(version) ?? 0
+        for other in (try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)) ?? []
+        where (Int64(other.lastPathComponent) ?? Int64.min) < mine {
             try? FileManager.default.removeItem(at: other)
         }
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
