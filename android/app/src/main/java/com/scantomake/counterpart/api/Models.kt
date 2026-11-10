@@ -133,7 +133,15 @@ data class Project(
         val id: String, val question: String, val type: String? = null, val url: String? = null, val options: List<Option>? = null,
         val photo: String? = null, val region: Region? = null, val answers: List<String> = emptyList(), val status: String = "open",
         val askedAtMs: Double? = null,
-    ) { @Serializable data class Option(val id: String, val label: String, val detail: String? = null, val thumbnail: String? = null) }
+        /** closeup, file, choice, region, scale, sizes: what the project is waiting on the person for. */
+        val kind: String? = null,
+        /** `sizes`: the sizes to confirm or correct, prefilled. */
+        val sizes: List<Size>? = null,
+    ) {
+        @Serializable data class Option(val id: String, val label: String, val detail: String? = null, val thumbnail: String? = null)
+        /** One size in millimetres. `id` is opaque; `label` says what to measure; `from` is `scan` or `published`. */
+        @Serializable data class Size(val id: String, val label: String, val mm: Double, val from: String = "scan")
+    }
     @Serializable data class PrintDestination(val id: String, val name: String)
     @Serializable data class PrintEstimate(val seconds: Double? = null, val grams: Double? = null)
     @Serializable data class PrintMonitor(val phase: String, val startedAt: String? = null, val lastReportAt: String? = null,

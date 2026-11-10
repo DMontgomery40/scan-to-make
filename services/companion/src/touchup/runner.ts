@@ -23,7 +23,9 @@ export const TOUCHUP_MAX_TOOL_CALLS = 120;
 const KILL_GRACE_MS = 5000;
 
 export interface TouchupChange {tag: 'added' | 'changed' | 'assumed' | 'estimated'; text: string; toleranceMm?: number}
-export interface TouchupAsk {question: string; photo?: string; region?: {x: number; y: number; width: number; height: number}}
+export interface TouchupAsk {question: string; photo?: string; region?: {x: number; y: number; width: number; height: number};
+  /** Sizes the worker wants confirmed or corrected, each with a label a person can act on and where the number came from. */
+  sizes?: {label: string; mm: number; from: 'scan' | 'published'}[]}
 /** The designer's supports choice, passed to the slicer as it is (slice_stl `enable_support` / `support_type`). */
 export interface TouchupSupports {enabled: boolean; type?: 'tree(auto)' | 'normal(auto)'}
 export interface TouchupResult {
@@ -119,6 +121,15 @@ function structured(answer: ResultEvent['structured_output'], publicText: (text:
       ...(typeof ask.photo === 'string' && /^[A-Za-z0-9._ -]{1,128}$/.test(ask.photo.split('/').at(-1) ?? '') ? {photo: ask.photo.split('/').at(-1)!} : {}),
       ...(region && unit(region.x) && unit(region.y) && unit(region.width) && unit(region.height)
         ? {region: {x: region.x as number, y: region.y as number, width: region.width as number, height: region.height as number}} : {})};
+    // Sizes to confirm: every entry must be whole (a label, a positive number, a known source), or none is kept and
+    // the question stands as words.
+    const sizes = Array.isArray(ask.sizes) ? ask.sizes.map((item: unknown) => {
+      const size = item as Record<string, unknown> | null;
+      const label = typeof size?.label === 'string' ? publicText(size.label).trim().slice(0, 120) : '';
+      return label && typeof size?.mm === 'number' && Number.isFinite(size.mm) && size.mm > 0 && size.mm <= 10_000 && (size.from === 'scan' || size.from === 'published')
+        ? {label, mm: size.mm, from: size.from as 'scan' | 'published'} : undefined;
+    }) : [];
+    if (sizes.length >= 1 && sizes.length <= 6 && sizes.every(Boolean)) out.ask.sizes = sizes as NonNullable<TouchupAsk['sizes']>;
   }
   return out;
 }

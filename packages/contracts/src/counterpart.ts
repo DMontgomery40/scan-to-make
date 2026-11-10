@@ -349,9 +349,21 @@ export const AskSchema = z.strictObject({
   photo: z.string().regex(/^asks\/[0-9a-f-]{36}\.jpg$/).optional(),
   /** The region to highlight on `photo`, as fractions of its width and height (origin top-left). */
   region: z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().min(0).max(1), height: z.number().min(0).max(1) }).optional(),
-  answers: z.array(z.enum(['camera', 'photos', 'best-guess', 'text', 'file', 'choice'])).min(1).max(6),
-  /** PRD §8.11 (PR 7): `file` asks for a published model's file, `choice` lists options. Absent means `closeup`. */
+  answers: z.array(z.enum(['camera', 'photos', 'best-guess', 'text', 'file', 'choice', 'sizes'])).min(1).max(6),
+  /** PRD §8.11 (PR 7): `file` asks for a published model's file, `choice` lists options. Absent means `closeup`.
+   *  Kept for clients from before `kind`; a `sizes` ask leaves it absent, so they show the question and their text box. */
   type: z.enum(['closeup', 'file', 'choice']).optional(),
+  /**
+   * What the project is waiting on the person for: the one enumeration of waits. `closeup`: a photo or words about
+   * a part; `file`: the designer's file; `choice`: one of `options`; `region` / `scale`: the two questions of a
+   * reconstruction review (which part is the object, how big it is), answered through the review's own route;
+   * `sizes`: confirm or correct `sizes`. A client that doesn't know a kind shows the question and says to update.
+   */
+  kind: z.enum(['closeup', 'file', 'choice', 'region', 'scale', 'sizes']).optional(),
+  /** `file`: why the file is wanted when it isn't simply "send it": macOS refused the Downloads folder. */
+  reason: z.enum(['downloads-access']).optional(),
+  /** `sizes`: the sizes to confirm or correct, prefilled, each with where the number came from. One to six. */
+  sizes: z.array(z.strictObject({ ...SizeSchema.shape, from: z.enum(['scan', 'published']) })).min(1).max(6).optional(),
   /** `file`: the model's page (Open in Safari), its name and site, and the file types it takes. */
   url: z.string().url().max(2048).optional(),
   modelName: text(120).optional(),

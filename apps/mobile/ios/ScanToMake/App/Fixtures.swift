@@ -361,6 +361,16 @@ enum Fixtures {
             "photo": "asks/\(bottleAsk).jpg", "region": ["x": 0.42, "y": 0.3, "width": 0.28, "height": 0.34],
             "answers": ["camera", "photos", "best-guess", "text"], "status": "open", "askedAtMs": ago(4)]
         if ProcessInfo.processInfo.environment["COUNTERPART_ASK_NO_PHOTO"] != nil { ask["photo"] = nil; ask["region"] = nil }
+        // The same question as its own kind: the sizes to confirm or correct, as the Mac sends them now. The bottle
+        // is waisted, so there are more than three and none is "width".
+        if ProcessInfo.processInfo.environment["COUNTERPART_ASK_SIZES"] != nil {
+            ask["kind"] = "sizes"; ask["answers"] = ["sizes", "text", "camera"]
+            ask["question"] = "Kroger doesn't publish this bottle's size. Can you confirm or correct what the scan reads?"
+            ask["sizes"] = [["id": "size-1", "label": "width at the widest point", "mm": 64, "from": "scan"],
+                            ["id": "size-2", "label": "width at the waist", "mm": 53.5, "from": "scan"],
+                            ["id": "size-3", "label": "thickness", "mm": 32, "from": "scan"],
+                            ["id": "size-4", "label": "height to the cap tip", "mm": 107, "from": "scan"]]
+        }
         return ["id": ids.plush, "createdAtMs": ago(25), "updatedAtMs": ago(4), "state": "needs-closeup", "kind": "fit",
                 "title": "Wall holder for three", "scan": "scan.usdz", "photos": [], "requestPhotos": [], "messages": [],
                 "instructions": "Make something that holds three of these, on a wall. I don’t care if it’s in front of each other or side to side whatever makes more sense just need three of them in a holder thing that I screwed to drywall\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size.",

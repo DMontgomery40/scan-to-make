@@ -259,12 +259,17 @@ public final class CompanionClient: @unchecked Sendable {
         return try await request("POST", "/v1/objects/\(id)/corrections", json: json, as: One.self).object
     }
     /// Answers the open Ask with explicitly named uploaded photos, a best guess, or words.
-    public func answerAsk(_ id: String, bestGuess: Bool = false, text: String? = nil, photoNames: [String] = []) async throws -> Project {
+    /// `sizes`: a sizes question's numbers (`AskSizesForm.answer`), which may go with words and photos.
+    public func answerAsk(_ id: String, bestGuess: Bool = false, text: String? = nil, photoNames: [String] = [], sizes: [AskSizesForm.Answer] = []) async throws -> Project {
+        try await request("POST", "/v1/objects/\(id)/closeup", json: Self.answerBody(bestGuess: bestGuess, text: text, photoNames: photoNames, sizes: sizes), as: One.self).object
+    }
+    static func answerBody(bestGuess: Bool, text: String?, photoNames: [String], sizes: [AskSizesForm.Answer]) -> [String: Any] {
         var json: [String: Any] = [:]
         if bestGuess { json["bestGuess"] = true }
         if let text { json["text"] = text }
         json["photoNames"] = photoNames
-        return try await request("POST", "/v1/objects/\(id)/closeup", json: json, as: One.self).object
+        if !sizes.isEmpty { json["sizes"] = sizes.map { ["id": $0.id, "mm": $0.mm] as [String: Any] } }
+        return json
     }
     public func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/plate-selection", json: ["fileIndex": fileIndex, "plateIndex": plateIndex], as: One.self).object

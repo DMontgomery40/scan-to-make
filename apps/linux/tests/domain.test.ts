@@ -6,6 +6,11 @@ import {
   passEnding,
   stageMark,
   passHeading,
+  sizeFields,
+  sizesAnswer,
+  sizesUnchanged,
+  sizeSource,
+  KNOWN_ASK_KINDS,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -698,4 +703,31 @@ test("a pass that stopped to ask or stopped short never reads as all ticks", () 
   for (const status of ["capped", "failed", "interrupted"]) assert.deepEqual(marks(status), ["✓", "✕"], status);
   assert.equal(passEnding({ status: "failed" }), undefined, "a running pass has not ended");
   assert.deepEqual(stages.map((_, i) => stageMark({ stages: [stages[0], { id: "working", words: "Designing it" }] }, i)), ["✓", "◌"]);
+test("a size question is number fields with the companion's labels, prefilled, with projects present", () => {
+  const ask = {
+    kind: "sizes",
+    sizes: [
+      { id: "size-1", label: "width at the widest point", mm: 64, from: "scan" },
+      { id: "size-2", label: "width at the waist", mm: 53.5, from: "scan" },
+      { id: "size-3", label: "height to the cap tip", mm: 107, from: "published" },
+    ],
+  };
+  const fields = sizeFields(ask)!;
+  assert.deepEqual(fields.map((f) => [f.label, f.text]), [["width at the widest point", "64"], ["width at the waist", "53.5"], ["height to the cap tip", "107"]]);
+  assert.equal(sizesUnchanged(fields), true);
+  assert.deepEqual(sizesAnswer(fields), [{ id: "size-1", mm: 64 }, { id: "size-2", mm: 53.5 }, { id: "size-3", mm: 107 }]);
+  // A correction with a comma, and a size the person doesn't know left out (never sent as confirmed).
+  const edited = fields.map((f, i) => (i === 0 ? { ...f, text: " 63,2 " } : i === 2 ? { ...f, text: "" } : f));
+  assert.equal(sizesUnchanged(edited), false);
+  assert.deepEqual(sizesAnswer(edited), [{ id: "size-1", mm: 63.2 }, { id: "size-2", mm: 53.5 }]);
+  // Nothing is sent while a field isn't a number, or all are blank.
+  for (const bad of ["about 60", "0", "-4", "10001", "6 3", "1e3"]) assert.equal(sizesAnswer(fields.map((f, i) => (i === 0 ? { ...f, text: bad } : f))), undefined, bad);
+  assert.equal(sizesAnswer(fields.map((f) => ({ ...f, text: " " }))), undefined);
+  // Only a sizes question with sizes is one; every other kind keeps its own card.
+  assert.equal(sizeFields({ kind: "closeup", sizes: ask.sizes }), undefined);
+  assert.equal(sizeFields({ kind: "sizes", sizes: [] }), undefined);
+  assert.equal(sizeFields(undefined), undefined);
+  assert.equal(sizeSource("published"), "from the maker");
+  assert.equal(sizeSource("scan"), "from your scan");
+  assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
 });

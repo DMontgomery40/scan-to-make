@@ -4,6 +4,11 @@ import {
   AFTER_PRINTING,
   activePrint,
   askCaption,
+  KNOWN_ASK_KINDS,
+  sizeFields,
+  sizesAnswer,
+  sizeSource,
+  sizesUnchanged,
   canSelectPlate,
   clampRegion,
   projectThumbnail,
@@ -135,6 +140,9 @@ function AskCard({
   const [selected, setSelected] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [photos, setPhotos] = useState<string[]>([]);
+  // A size question's fields, prefilled once per question; what is sent is `sizesAnswer`'s rule.
+  const [fields, setFields] = useState(() => sizeFields(ask));
+  const sizes = fields && sizesAnswer(fields);
   return (
     <section className="question">
       <div className="eyebrow">Needs you</div>
@@ -200,9 +208,50 @@ function AskCard({
           Use selection
         </Action>
       )}
+      {fields && (
+        <div className="ask-sizes">
+          {fields.map((field, index) => (
+            <label className="field ask-size" key={field.id}>
+              <span>
+                {field.label.charAt(0).toUpperCase() + field.label.slice(1)}
+                <small> {sizeSource(field.from)}</small>
+              </span>
+              <span className="ask-size-input">
+                <input
+                  inputMode="decimal"
+                  aria-label={`${field.label}, millimetres`}
+                  data-testid={`ask-size-${field.id}`}
+                  value={field.text}
+                  onChange={(e) => setFields(fields.map((f, i) => (i === index ? { ...f, text: e.target.value } : f)))}
+                />{" "}
+                mm
+              </span>
+            </label>
+          ))}
+          {!sizes && <p className="hint">Enter each size in millimetres, or leave one empty if you don’t know it.</p>}
+          <Action
+            className="primary"
+            disabled={!sizes}
+            run={() =>
+              mutate("objects.answerCloseup", {
+                id: project.id,
+                bestGuess: false,
+                sizes,
+                ...(text.trim() ? { text: text.trim() } : {}),
+                ...(photos.length ? { photoNames: photos } : {}),
+              })
+            }
+          >
+            {sizesUnchanged(fields) ? "Confirm these sizes" : "Send these sizes"}
+          </Action>
+        </div>
+      )}
+      {ask.kind && !KNOWN_ASK_KINDS.includes(ask.kind) && (
+        <p className="hint">Update Counterpart on this computer to answer this kind of question here.</p>
+      )}
       {ask.answers.includes("text") && (
         <label className="field">
-          Your answer
+          {fields ? "Anything the numbers don’t say" : "Your answer"}
           <textarea
             value={text}
             maxLength={2000}
@@ -219,12 +268,12 @@ function AskCard({
             if (result.errors.length) throw new Error(result.errors.join("\n"));
           }}
         >
-          Add close-up photos…{photos.length ? ` (${photos.length})` : ""}
+          {fields ? "Add a caliper photo…" : "Add close-up photos…"}{photos.length ? ` (${photos.length})` : ""}
         </Action>
       )}
       {(text.trim() || photos.length > 0) && (
         <Action
-          className="primary"
+          className={fields ? undefined : "primary"}
           run={() =>
             mutate("objects.answerCloseup", {
               id: project.id,

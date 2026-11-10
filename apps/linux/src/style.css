@@ -1068,3 +1068,26 @@ hr {
   text-align: center;
   padding: 1px 5px;
 }
+
+/* A size question: one row per size, the label on the left and its number on the right. */
+.ask-sizes {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.ask-size {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ask-size-input input {
+  width: 6.5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.hint {
+  color: var(--muted, #8e8e96);
+  font-size: 0.85em;
+}

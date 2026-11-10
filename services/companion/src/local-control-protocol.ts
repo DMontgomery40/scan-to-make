@@ -77,7 +77,9 @@ export const parameters = {
   'objects.selectPlate': z.strictObject({id: z.uuid(), fileIndex: z.number().int().nonnegative(), plateIndex: z.number().int().nonnegative()}),
   'objects.answerAsk': z.strictObject({id: z.uuid(), askId: z.uuid(), choices: z.array(z.string().min(1).max(64)).min(1).max(32)}),
   'objects.addFile': z.strictObject({id: z.uuid(), kind: z.enum(['photos', 'scan', 'model']), path: z.string().min(2).max(4096), forMessage: z.boolean().optional()}),
-  'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean(), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), text: z.string().trim().min(1).max(2000).optional()}),
+  'objects.answerCloseup': z.strictObject({id: z.uuid(), bestGuess: z.boolean(), photoNames: z.array(z.string().min(1).max(128)).max(100).optional(), text: z.string().trim().min(1).max(2000).optional(),
+    // A sizes question's numbers, for the sizes it listed.
+    sizes: z.array(z.strictObject({id: z.string().min(1).max(64), mm: z.number().positive().max(10_000)})).min(1).max(6).optional()}),
   'objects.answerReconstruction': z.strictObject({id: z.uuid(), reviewId: z.uuid(), answer: ReconstructionAnswerSchema}),
   'objects.print': z.strictObject({id: z.uuid(), expectedPlate: z.string().regex(/^[0-9a-f]{64}:[0-9]+$/).optional(), checked: z.boolean().optional(), filament: z.strictObject({
     slot:z.number().int().min(0).max(255), colour:z.string().regex(/^#[0-9A-F]{6}$/), material:z.string().min(1).max(128),

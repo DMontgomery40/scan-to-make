@@ -224,6 +224,7 @@ actor FixtureObjects: ObjectsCompanion {
     }
     func correct(_ id: String, note: String) async throws -> Project { try change(id, ["state": "touching-up"]) }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try change(id, ["state": "touching-up"]) }
+    func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project { try change(id, ["state": "touching-up"]) }
     func print(_ id: String, checked: Bool) async throws -> Project { try change(id, ["state": "printing"]) }
     func start(_ id: String) async throws -> Project { try change(id, ["state": "touching-up"]) }
     func delete(_ id: String) async throws { items.removeAll { $0["id"] as? String == id } }
