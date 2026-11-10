@@ -13,6 +13,7 @@ import type {
   ReconstructionReview,
   ReconstructionSelection,
   Vec3,
+  Ask,
 } from "./types";
 /** Issue tickets before reads AND mutations. Late reads cannot roll the UI back. */
 export class ReadOrder {
@@ -724,3 +725,51 @@ export function scanSample(count: number, shown = 5): number[] {
 }
 
 export const scanWords = (count: number) => (count === 1 ? "1 photo" : `${count} photos`);
+
+/** The kinds of question this build knows how to answer (contracts `AskSchema.kind`). */
+export const KNOWN_ASK_KINDS = ["closeup", "file", "choice", "region", "scale", "sizes"];
+
+/** One field of a size question: the companion's label and number, and what the field holds now. */
+export interface SizeField {
+  id: string;
+  label: string;
+  from: string;
+  asked: number;
+  text: string;
+}
+
+/** A number as a person types it: no trailing ".0", at most two decimals (CounterpartKit `AskSizesForm.text`). */
+export function sizeText(mm: number): string {
+  return String(Math.round(mm * 100) / 100);
+}
+
+/** The fields of a size question, prefilled; undefined when the question isn't one (CounterpartKit `AskSizesForm`). */
+export function sizeFields(ask: Pick<Ask, "kind" | "sizes"> | undefined): SizeField[] | undefined {
+  if (ask?.kind !== "sizes" || !ask.sizes?.length) return undefined;
+  return ask.sizes.map((size) => ({ id: size.id, label: size.label, from: size.from, asked: size.mm, text: sizeText(size.mm) }));
+}
+
+function millimetres(text: string): number | undefined {
+  const typed = text.trim().replace(",", ".");
+  if (!typed || !/^\d+(\.\d+)?$/.test(typed)) return undefined;
+  const mm = Number(typed);
+  return Number.isFinite(mm) && mm > 0 && mm <= 10_000 ? mm : undefined;
+}
+
+/** What to send: every field that holds a number. Undefined while a filled field isn't a number, or none is filled.
+ *  A field left blank is a size the person doesn't know: it is left out, never sent as confirmed. */
+export function sizesAnswer(fields: SizeField[]): { id: string; mm: number }[] | undefined {
+  const sizes: { id: string; mm: number }[] = [];
+  for (const field of fields) {
+    if (!field.text.trim()) continue;
+    const mm = millimetres(field.text);
+    if (mm === undefined) return undefined;
+    sizes.push({ id: field.id, mm });
+  }
+  return sizes.length ? sizes : undefined;
+}
+
+/** Nothing was changed: the button says Confirm. */
+export const sizesUnchanged = (fields: SizeField[]) => fields.every((field) => millimetres(field.text) === millimetres(sizeText(field.asked)));
+
+export const sizeSource = (from: string) => (from === "published" ? "from the maker" : "from your scan");
