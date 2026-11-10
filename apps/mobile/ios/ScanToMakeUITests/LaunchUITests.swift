@@ -608,6 +608,9 @@ final class LayoutParityUITests: XCTestCase {
         let question = app.staticTexts["scan-use-question"]
         XCTAssertTrue(question.waitForExistence(timeout: 20), app.debugDescription)
         let send = app.buttons["send"], copy = app.buttons["scan-use-copy"], fit = app.buttons["scan-use-fit"], later = app.buttons["scan-use-later"]
+        // The sheet's own scroll: swipes go to it (the screen's middle can be outside the sheet), and only its content is read
+        // (Home stays in the accessibility tree behind the sheet).
+        let sheet = app.scrollViews.containing(.staticText, identifier: "scan-use-question").firstMatch
         // The scan attaches after the sheet opens and the sheet then scrolls (animated): measure once it has settled. The
         // first run of this test measured before that scroll and passed while the screenshot showed the question under the header.
         Thread.sleep(forTimeInterval: 2)
@@ -631,10 +634,8 @@ final class LayoutParityUITests: XCTestCase {
         // Review F7: scrolled to the end, where the most content sits against the bar, nothing of the scrolling content is
         // inside the button's frame at all (the scroll ends where the bar begins), then back to the top for the rest.
         func nothingInsideTheButton(_ state: String) {
-            for _ in 0..<6 { app.swipeUp() }
+            for _ in 0..<6 { sheet.swipeUp() }
             let own = Set(send.descendants(matching: .any).allElementsBoundByIndex.map { NSCoder.string(for: $0.frame) })
-            // Only the sheet's own content: Home stays in the accessibility tree behind the sheet.
-            let sheet = app.scrollViews.containing(.staticText, identifier: "scan-use-question").firstMatch
             let inside = (sheet.staticTexts.allElementsBoundByIndex + sheet.buttons.allElementsBoundByIndex + sheet.textFields.allElementsBoundByIndex).filter {
                 $0.identifier != "send" && !own.contains(NSCoder.string(for: $0.frame)) && $0.frame.intersects(send.frame)
             }
@@ -660,7 +661,7 @@ final class LayoutParityUITests: XCTestCase {
         nothingInsideTheButton("copy chosen")
         fit.tap()
         XCTAssertEqual(send.label, "Continue", "a fit asks for its words first")
-        for _ in 0..<4 where !later.isHittable { app.swipeUp() }
+        for _ in 0..<4 where !later.isHittable { sheet.swipeUp() }
         later.tap()
         XCTAssertEqual(send.label, "Save this scan")
     }
@@ -754,13 +755,15 @@ final class LayoutParityUITests: XCTestCase {
     func testSendOnAFitMissingItsMeasurementGoesToTheFields() {
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
-                               "-CounterpartScreen", "new", "-CounterpartNewScan", "walk-around"]
+                               "-CounterpartScreen", "new", "-CounterpartNewScan", "walk-around", "-CounterpartFreshDraft", "YES"]
         app.launch()
         let fit = app.buttons["scan-use-fit"]
         XCTAssertTrue(fit.waitForExistence(timeout: 20))
+        // Swipes go to the sheet's own scroll, never past its top (a swipe down there would dismiss the sheet).
+        let sheet = app.scrollViews.containing(.staticText, identifier: "scan-use-question").firstMatch
         fit.tap()
         let describe = app.descendants(matching: .any).matching(identifier: "describe").firstMatch
-        for _ in 0..<4 where !describe.isHittable { app.swipeUp() }
+        for _ in 0..<4 where !describe.isHittable { sheet.swipeUp() }
         let fitShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         fitShot.name = "new-fit-chosen"; fitShot.lifetime = .keepAlways
         add(fitShot)
@@ -772,13 +775,13 @@ final class LayoutParityUITests: XCTestCase {
         // Put the keyboard away first, or the next tap only dismisses it.
         app.navigationBars["New Project"].buttons["Done"].tap()
         let measured = app.buttons["I measured"]
-        for _ in 0..<6 where !(measured.exists && measured.isHittable) { app.swipeDown() }
+        for _ in 0..<6 where !(measured.exists && measured.isHittable) { sheet.swipeDown(velocity: .slow) }
         measured.tap()
         let chosen = NSPredicate(format: "isSelected == true")
         if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: measured)], timeout: 3) != .completed { measured.tap() }
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: measured)], timeout: 3) == .completed, "I measured is chosen")
         // Scroll back down so Send is pressed from where a person would be, below the fields.
-        for _ in 0..<3 { app.swipeUp() }
+        for _ in 0..<3 { sheet.swipeUp() }
         let send = app.buttons["send"]
         XCTAssertTrue(send.label.hasPrefix("Send to"), send.label)
         send.tap()
@@ -786,7 +789,9 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(missing.waitForExistence(timeout: 5), "it says what's missing")
         XCTAssertEqual(missing.label, "Enter at least one measurement in millimetres.")
         XCTAssertTrue(missing.isHittable, "on screen, by the fields")
-        let longest = app.descendants(matching: .any)["fit-size-longest"].textFields.firstMatch
+        // The field's identifier is on its column, which SwiftUI gives to the field itself; look in both places.
+        let longest = app.textFields["fit-size-longest"].exists ? app.textFields["fit-size-longest"]
+            : app.descendants(matching: .any)["fit-size-longest"].textFields.firstMatch
         XCTAssertTrue(longest.waitForExistence(timeout: 5))
         XCTAssertEqual(longest.value(forKey: "hasKeyboardFocus") as? Bool, true, "the first measurement is focused")
     }
