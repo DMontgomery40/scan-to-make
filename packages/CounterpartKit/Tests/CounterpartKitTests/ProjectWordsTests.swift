@@ -416,5 +416,11 @@ final class ProjectWordsTests: XCTestCase {
         XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"changes","note":"  make it thicker "}"#).requestedChange, "make it thicker")
         XCTAssertNil(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"ask-answer","note":"Answer to \"Q?\": yes"}"#).requestedChange, "an answer is not a change")
         XCTAssertNil(try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"new"}"#).requestedChange)
+        // Every trigger the Mac writes: a note sent with photos is still the person's change (train #499 review, F5).
+        for (trigger, shown) in [("changes", true), ("late-photos", true), ("ask-answer", false), ("new", false), ("something-later", false)] {
+            let change = try pass(#"{"startedAtMs":1,"endedAtMs":2,"trigger":"\#(trigger)","note":"see the photos"}"#).requestedChange
+            XCTAssertEqual(change, shown ? "see the photos" : nil, trigger)
+        }
+        XCTAssertEqual(try pass(#"{"startedAtMs":1,"endedAtMs":2,"note":"from an older Mac"}"#).requestedChange, "from an older Mac")
     }
 }

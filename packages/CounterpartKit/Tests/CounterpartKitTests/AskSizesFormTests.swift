@@ -52,6 +52,25 @@ final class AskSizesFormTests: XCTestCase {
         XCTAssertNil(form.answer)
     }
 
+    /// Train #499 review, F3: words or a caliper photo sent from the size card dropped the numbers. One answer
+    /// carries everything the card holds.
+    func testAnotherAnswerFromTheCardCarriesTheNumbersAsTheyStand() throws {
+        var form = try XCTUnwrap(AskSizesForm(ask(waisted)))
+        XCTAssertEqual(form.carried, .sizes([.init(id: "size-1", mm: 64), .init(id: "size-2", mm: 53.5), .init(id: "size-3", mm: 107)]), "prefilled")
+        form.fields[0].text = "63"; form.fields[2].text = ""
+        XCTAssertEqual(form.carried, .sizes([.init(id: "size-1", mm: 63), .init(id: "size-2", mm: 53.5)]), "edited, one unknown")
+        form.fields[1].text = "about 53"
+        XCTAssertEqual(form.carried, .invalid, "nothing goes until the field is a number or empty")
+        for index in form.fields.indices { form.fields[index].text = " " }
+        XCTAssertEqual(form.carried, AskSizesForm.Carried.none, "every size unknown: the other answer goes alone")
+    }
+
+    /// The same forms on every client (train #499 review, F8): Swift's `Double` alone took "1e3", ".5" and "5.".
+    func testANumberIsDigitsWithAtMostOneDecimalPart() {
+        for good in ["64", "53.5", " 53,25 ", "0.5", "10000"] { XCTAssertNotNil(AskSizesForm.millimetres(good), good) }
+        for bad in ["1e3", ".5", "5.", "5.5.5", "+5", "-4", "0", "10001", "6 3", "about 60", "", "٥"] { XCTAssertNil(AskSizesForm.millimetres(bad), bad) }
+    }
+
     func testOnlyASizesQuestionWithSizesIsOne() {
         XCTAssertNil(AskSizesForm(ask(kind: "closeup", waisted)))
         XCTAssertNil(AskSizesForm(ask(nil)))

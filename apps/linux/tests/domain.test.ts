@@ -12,6 +12,9 @@ import {
   sizeSource,
   KNOWN_ASK_KINDS,
   rowWords,
+  askAnswerable,
+  sizesCarried,
+  requestedChange,
   AFTER_PRINTING,
   didItFitQuestion,
   projectGroups,
@@ -620,7 +623,7 @@ test("all three shared limit reasons survive project words with projects present
   for (const row of stopped) {
     // The pass's own line is the companion's words too, never the wire status ("capped").
     assert.equal(passHeading(row.expected.passes.at(-1), 0), `Pass 1 · ${reasons[row.name]}`);
-    assert.equal(passHeading({}, 1), "Pass 2 · Working");
+    assert.equal(passHeading({}, 1), "Pass 2 · Working", "a running pass");
     assert.equal(words(row.expected), `${reasons[row.name]}. Try again or review the saved checkpoint.`);
     assert.equal(row.expected.canRetryCleanup, true);
   }
@@ -739,6 +742,38 @@ test("a size question is number fields with the companion's labels, prefilled, w
   assert.equal(sizeSource("published"), "from the maker");
   assert.equal(sizeSource("scan"), "from your scan");
   assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
+  // The same forms on every client (F8): digits with at most one decimal part.
+  const typed = (text: string) => sizesAnswer([{ ...fields[0], text }])?.[0].mm;
+  for (const good of ["64", "53.5", " 53,25 ", "0.5", "10000"]) assert.notEqual(typed(good), undefined, good);
+  for (const bad of ["1e3", ".5", "5.", "5.5.5", "+5", "-4", "0", "10001", "6 3", "about 60", "٥"]) assert.equal(typed(bad), undefined, bad);
+  // Train #499 review, F3: another answer from the card carries the numbers as they stand, or does not go.
+  assert.deepEqual(sizesCarried(fields), sizesAnswer(fields));
+  assert.deepEqual(sizesCarried(edited), [{ id: "size-1", mm: 63.2 }, { id: "size-2", mm: 53.5 }]);
+  assert.equal(sizesCarried(fields.map((f, i) => (i === 1 ? { ...f, text: "about 53" } : f))), "invalid");
+  assert.equal(sizesCarried(fields.map((f) => ({ ...f, text: " " }))), "none");
+  // F6: a kind this build doesn't know offers no answer; no kind is an older companion's question.
+  for (const kind of KNOWN_ASK_KINDS) assert.equal(askAnswerable({ kind }), true, kind);
+  assert.equal(askAnswerable({}), true);
+  assert.equal(askAnswerable({ kind: "colour" }), false);
+});
+
+test("an ended pass from an older companion is worded from its status, never headed Working", () => {
+  // Train #499 review, F7: with no `words` every ended pass on Linux read "Pass n · Working".
+  assert.equal(passHeading({ endedAtMs: 2, status: "done" }, 0), "Pass 1 · Finished");
+  assert.equal(passHeading({ endedAtMs: 2 }, 0), "Pass 1 · Finished");
+  assert.equal(passHeading({ endedAtMs: 2, status: "needs_closeup" }, 1), "Pass 2 · Asked you a question");
+  assert.equal(passHeading({ endedAtMs: 2, status: "interrupted" }, 0), "Pass 1 · Stopped when Counterpart restarted");
+  assert.equal(passHeading({ endedAtMs: 2, status: "needs_file" }, 0), "Pass 1 · Needs File");
+  assert.equal(passHeading({ endedAtMs: 2, status: "failed", words: "Stopped before it finished" }, 0), "Pass 1 · Stopped before it finished");
+  assert.equal(passHeading({ status: "failed" }, 0), "Pass 1 · Working", "not ended yet");
+});
+
+test("Your change is the person's own note, for every trigger the companion writes", () => {
+  // Train #499 review, F5: Linux showed every pass's note, including the text the companion composes for an answer.
+  const shown: [string | undefined, boolean][] = [["changes", true], ["late-photos", true], [undefined, true], ["ask-answer", false], ["new", false], ["something-later", false]];
+  for (const [trigger, yes] of shown) assert.equal(requestedChange({ note: " see the photos ", trigger }), yes ? "see the photos" : undefined, String(trigger));
+  assert.equal(requestedChange({ trigger: "changes" }), undefined);
+  assert.equal(requestedChange({ note: "  ", trigger: "changes" }), undefined);
 });
 
 test("a row under its phase heading shows the companion's detail, never the heading again, with projects present", () => {
