@@ -701,6 +701,20 @@ final class LayoutParityUITests: XCTestCase {
 
     /// First look U10 (Nov 10, iPad): "holder" listed projects with no hint why. A result whose title lacks the word says
     /// where it matched, on iPhone Home and in the iPad sidebar.
+    /// The train's iPad gate, Nov 10: New Project steps aside while a search is typed (it covered the results above the
+    /// keyboard). ⌘N comes from a hidden button then; it must still open New with the search field focused.
+    func testCommandNOpensNewWhileTheSearchFieldHasFocusOnTheIPad() throws {
+        guard regular else { throw XCTSkip("the iPad sidebar's New Project bar; iPhone Home's New floats and stays") }
+        let app = launch()
+        let field = app.textFields["project-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        field.tap()
+        field.typeText("clip")
+        XCTAssertTrue(app.buttons["new-project"].waitForNonExistence(timeout: 5), "New Project steps aside while searching")
+        app.typeKey("n", modifierFlags: .command)
+        XCTAssertTrue(app.navigationBars["New Project"].waitForExistence(timeout: 10), "⌘N opens New with the search field focused")
+    }
+
     func testASearchResultSaysWhereItMatched() {
         let app = launch()
         let field = app.textFields["project-search"]
