@@ -433,6 +433,12 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// A structured question from the Mac (PRD §4 Ask).
     public struct Ask: Codable, Equatable, Sendable {
+        /// The kinds of question this build knows how to answer (contracts `AskSchema.kind`).
+        public static let knownKinds: Set<String> = ["closeup", "file", "choice", "region", "scale", "sizes"]
+        /// False for a kind this build doesn't know: the card shows the question and says to update, and offers no
+        /// answer at all, because any answer it offered could consume the question wrongly. A question with no
+        /// kind is from a Mac older than kinds and is answered the old way.
+        public var answerable: Bool { kind.map(Self.knownKinds.contains) ?? true }
         public var id: String
         public var question: String
         public var type: String?

@@ -8,6 +8,8 @@ import {
   sizesUnchanged,
   sizeSource,
   KNOWN_ASK_KINDS,
+  askAnswerable,
+  sizesCarried,
   passEnding,
   stageMark,
   passHeading,
@@ -727,6 +729,15 @@ test("a size question is number fields with the companion's labels, prefilled, w
   assert.equal(sizeSource("published"), "from the maker");
   assert.equal(sizeSource("scan"), "from your scan");
   assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
+  // Train #499 review, F3: another answer from the card carries the numbers as they stand, or does not go.
+  assert.deepEqual(sizesCarried(fields), sizesAnswer(fields));
+  assert.deepEqual(sizesCarried(edited), [{ id: "size-1", mm: 63.2 }, { id: "size-2", mm: 53.5 }]);
+  assert.equal(sizesCarried(fields.map((f, i) => (i === 1 ? { ...f, text: "about 53" } : f))), "invalid");
+  assert.equal(sizesCarried(fields.map((f) => ({ ...f, text: " " }))), "none");
+  // F6: a kind this build doesn't know offers no answer; no kind is an older companion's question.
+  for (const kind of KNOWN_ASK_KINDS) assert.equal(askAnswerable({ kind }), true, kind);
+  assert.equal(askAnswerable({}), true);
+  assert.equal(askAnswerable({ kind: "colour" }), false);
 });
 
 test("an ended pass from an older companion is worded from its status, never headed Working", () => {

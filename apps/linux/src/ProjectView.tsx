@@ -4,7 +4,8 @@ import {
   AFTER_PRINTING,
   activePrint,
   askCaption,
-  KNOWN_ASK_KINDS,
+  askAnswerable,
+  sizesCarried,
   sizeFields,
   sizesAnswer,
   sizeSource,
@@ -144,6 +145,15 @@ function AskCard({
   // A size question's fields, prefilled once per question; what is sent is `sizesAnswer`'s rule.
   const [fields, setFields] = useState(() => sizeFields(ask));
   const sizes = fields && sizesAnswer(fields);
+  // A kind this build doesn't know: the question and the update sentence, and no answer control at all.
+  if (!askAnswerable(ask))
+    return (
+      <section className="question">
+        <div className="eyebrow">Needs you</div>
+        <h3>{ask.question}</h3>
+        <p className="hint" data-testid="ask-update">Update Counterpart on this computer to answer this kind of question here.</p>
+      </section>
+    );
   return (
     <section className="question">
       <div className="eyebrow">Needs you</div>
@@ -247,9 +257,6 @@ function AskCard({
           </Action>
         </div>
       )}
-      {ask.kind && !KNOWN_ASK_KINDS.includes(ask.kind) && (
-        <p className="hint">Update Counterpart on this computer to answer this kind of question here.</p>
-      )}
       {ask.answers.includes("text") && (
         <label className="field">
           {fields ? "Anything the numbers don’t say" : "Your answer"}
@@ -272,7 +279,9 @@ function AskCard({
           {fields ? "Add a caliper photo…" : "Add close-up photos…"}{photos.length ? ` (${photos.length})` : ""}
         </Action>
       )}
-      {(text.trim() || photos.length > 0) && (
+      {/* On a size card the one send button above carries the numbers, the words and the photos together. This
+          second one is only for a person who cleared every number: then the words or photos go alone. */}
+      {(text.trim() || photos.length > 0) && (!fields || sizesCarried(fields) === "none") && (
         <Action
           className={fields ? undefined : "primary"}
           run={() =>

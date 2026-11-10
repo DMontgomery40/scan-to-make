@@ -128,7 +128,10 @@ public struct ObjectWords: Sendable, Equatable {
         busy = object.state == .new ? false : words.busy || words.phase.isRunning
         size = words.size
         // Done stays printable ("Print Another…") and changeable, as a printed project is.
+        // A question of a kind this build doesn't know is shown with the update sentence and no answer at all:
+        // any answer offered (a guess, a photo) could consume it wrongly.
         actions = done && object.current != nil ? [object.print?.uncertain == true ? .printChecked : .print, .correct]
+            : object.openAsk?.answerable == false ? []
             : words.actions.compactMap(ObjectAction.init)
         capsule = done ? "Done" : stage.label
         group = done ? .done : Self.group(stage)

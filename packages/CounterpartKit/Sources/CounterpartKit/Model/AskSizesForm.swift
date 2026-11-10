@@ -55,6 +55,24 @@ public struct AskSizesForm: Equatable, Sendable {
         return sizes.isEmpty ? nil : sizes
     }
 
+    /// Said under the fields while nothing can be sent, and when another answer is pressed with a field that isn't a number.
+    public static let invalidWords = "Enter each size in millimetres, or leave one empty if you don't know it."
+
+    /// What goes with any other answer sent from the same card (words, a caliper photo): one answer carries
+    /// everything the card holds, so a number typed into a field is never dropped by pressing another button.
+    public enum Carried: Equatable, Sendable {
+        /// The numbers as they stand, edited or prefilled.
+        case sizes([Answer])
+        /// Every field is blank: the person knows none of them, and the other answer goes alone.
+        case none
+        /// A filled field isn't a number: nothing is sent until it is fixed or cleared.
+        case invalid
+    }
+    public var carried: Carried {
+        if let answer { return .sizes(answer) }
+        return fields.allSatisfy { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ? .none : .invalid
+    }
+
     /// Nothing was changed: the button says Confirm. Otherwise it sends corrections.
     public var unchanged: Bool { fields.allSatisfy { Self.millimetres($0.text) == Self.millimetres(Self.text($0.asked)) } }
 

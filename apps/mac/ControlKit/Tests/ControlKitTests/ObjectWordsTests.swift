@@ -24,6 +24,19 @@ private func status(_ phase: String, _ text: String) -> [String: Any] { ["status
 final class ObjectWordsTests: XCTestCase {
     /// A print's words are the companion's, as they are: getting ready shows no percent (the printer's raw progress
     /// is 3% before it prints anything), and a stopped print says only what the printer said.
+    /// Train #499 review, F6: a question of a kind this build doesn't know offers no answer, on the Mac too.
+    func testAQuestionOfAnUnknownKindOffersNoAnswer() {
+        func asking(_ kind: String?) -> Project {
+            var ask: [String: Any] = ["id": "a", "question": "Which colour is the cap?", "answers": ["camera", "photos", "best-guess"], "status": "open"]
+            if let kind { ask["kind"] = kind }
+            return ready(["state": "needs-closeup", "ask": ask])
+        }
+        XCTAssertTrue(asking("closeup").words.actions.contains(.bestGuess))
+        XCTAssertTrue(asking(nil).words.actions.contains(.bestGuess), "a companion older than kinds")
+        XCTAssertEqual(asking("colour").words.actions, [])
+        XCTAssertEqual(asking("colour").words.question, "Which colour is the cap?", "the question is still shown")
+    }
+
     func testAPrintsWordsAreTheCompanionsAsTheyAre() {
         let live: [String: Any] = ["print": ["bundleId": "b", "live": ["source": "counterpart", "state": "printing", "job": ["progress": 3]]]]
         let preparing = ready(["state": "printing"].merging(live) { $1 }.merging(status("preparing", "Getting ready · Heating")) { $1 })

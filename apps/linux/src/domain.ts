@@ -783,6 +783,16 @@ export function sizesAnswer(fields: SizeField[]): { id: string; mm: number }[] |
   return sizes.length ? sizes : undefined;
 }
 
+/** What goes with any other answer sent from the same card (CounterpartKit `AskSizesForm.carried`): the numbers as
+ *  they stand; "none" when every field is blank; "invalid" while a filled field isn't a number. */
+export function sizesCarried(fields: SizeField[]): { id: string; mm: number }[] | "none" | "invalid" {
+  return sizesAnswer(fields) ?? (fields.every((field) => !field.text.trim()) ? "none" : "invalid");
+}
+
+/** False for a kind this build doesn't know: the card shows the question and says to update, and offers no answer
+ *  at all (CounterpartKit `Ask.answerable`). A question with no kind is from a companion older than kinds. */
+export const askAnswerable = (ask: Pick<Ask, "kind">) => !ask.kind || KNOWN_ASK_KINDS.includes(ask.kind);
+
 /** Nothing was changed: the button says Confirm. */
 export const sizesUnchanged = (fields: SizeField[]) => fields.every((field) => millimetres(field.text) === millimetres(sizeText(field.asked)));
 

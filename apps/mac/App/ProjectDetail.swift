@@ -235,7 +235,8 @@ struct ProjectDetail: View {
             Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 4) {
                 Text(words.question ?? words.status).font(.subheadline.weight(.semibold))
-                Text(object.openAsk.flatMap(AskSizesForm.init) != nil ? "Asked on your iPhone too. Confirm the sizes here, or correct any of them."
+                Text(object.openAsk?.answerable == false ? MacAskWords.update
+                     : object.openAsk.flatMap(AskSizesForm.init) != nil ? "Asked on your iPhone too. Confirm the sizes here, or correct any of them."
                      : object.state == .needsCloseup ? "Asked on your iPhone too. Send a close-up from it, or let your Mac make its best guess."
                      : "Asked on your iPhone too.")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(4)
@@ -243,6 +244,8 @@ struct ProjectDetail: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
             // A size is confirmed or measured, never guessed.
+            // And a kind this build doesn't know gets no answer control at all (`Project.Ask.answerable`).
+            // (`ObjectWords.actions` drops them).
             if words.actions.contains(.bestGuess), object.openAsk?.kind != "sizes" { answer("Best Guess", .bestGuess) }
         }
             // A size question: its numbers, prefilled, with Confirm as the one obvious action.
@@ -774,6 +777,11 @@ struct MacAskPhoto: View {
 
 /// A size question's fields on the Mac: one row per size the companion asked about, in its words, prefilled, and one
 /// button. What is sent is `AskSizesForm`'s rule (CounterpartKit), the same as on the phone.
+/// What the Mac's question card says and offers for a question (train #499 review, F6).
+enum MacAskWords {
+    static let update = "Update Counterpart on this Mac to answer this kind of question here."
+}
+
 struct MacAskSizes: View {
     @State var form: AskSizesForm
     let working: Bool
