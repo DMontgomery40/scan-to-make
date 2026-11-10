@@ -157,6 +157,13 @@ extension Project {
         return nil
     }
 
+    /// See it together (PRD §5.4): a part made to fit a scanned object, made before passes said where the object sits;
+    /// the Mac can find it, changing nothing. Only for a USDZ scan, the one frame Together is drawn in today (§6.1).
+    public var canLocate: Bool {
+        kind == "fit" && (scan?.lowercased().hasSuffix(".usdz") ?? false) && current != nil && !preservesPublishedFilaments
+            && (current?.seats ?? []).isEmpty && state != .printing && state != .touchingUp
+    }
+
     /// The page's picture when the gallery has nothing yet (photos sent, no scan model or result): the subject the Mac
     /// cut out of the photo, the same picture the project's card shows.
     public var photoPicture: String? { pictures?["photo"] }

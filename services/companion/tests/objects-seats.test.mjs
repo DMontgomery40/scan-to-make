@@ -176,6 +176,17 @@ test('locate is only for a part made to fit a scanned object', async t => {
   await assert.rejects(f.service.locate(f.object.id), /made to fit a scanned object/, 'no model yet');
 });
 
+// Review of #451, item 4: seats are in the USDZ scan's frame; a handheld STL has its own, so no See it together on it.
+test('locate is refused for a part fitted to a handheld STL scan, and runs no pass', async t => {
+  const f = await setup(t, [{result: {summary: 'Three pockets.'}}]);
+  await f.service.start(f.object.id);
+  await f.service.settled(f.object.id);
+  await f.store.update(f.object.id, o => ({...o, scan: 'scan.stl'}));
+  await assert.rejects(f.service.locate(f.object.id), /only in a scan from the phone \(USDZ\)/);
+  assert.equal(f.inputs.length, 1, 'no worker ran');
+  assert.equal((await f.service.get(f.object.id)).passes.length, 1);
+});
+
 // Review of #451, blocker 1: See it together is the one pass that changes nothing. It gives back the open question,
 // the failure and its Retry, and Marked Done, and it is never "the last pass" for Retry or the session a request resumes.
 async function locatable(t, outcomes, shape) {

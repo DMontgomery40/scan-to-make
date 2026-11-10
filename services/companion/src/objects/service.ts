@@ -1518,6 +1518,8 @@ export class ObjectService {
     const object = await this.get(id);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!canLocate(object)) throw new InvalidStateError('Only a part made to fit a scanned object has a place for it.');
+    // Seats are in the USDZ scan's frame, the one every stage draws (docs/protocols/seats.md); a handheld STL has its own.
+    if (!/\.usdz$/i.test(object.scan ?? '')) throw new InvalidStateError('Your Mac can find where the object sits only in a scan from the phone (USDZ), for now.');
     if (object.current?.seats?.length) throw new InvalidStateError('Your Mac already knows where the object sits in this part.');
     return this.#pass(object, {trigger: 'locate', locate: true});
   }

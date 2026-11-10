@@ -12,6 +12,7 @@ import androidx.compose.foundation.selection.selectable
 
 import com.scantomake.counterpart.api.canLocate
 
+import com.scantomake.counterpart.api.photoPicture
 import com.scantomake.counterpart.api.pictureFor
 
 import com.scantomake.counterpart.api.ProjectGallery

@@ -2,6 +2,8 @@ package com.scantomake.counterpart
 
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectGallery
+import com.scantomake.counterpart.api.canLocate
+import com.scantomake.counterpart.api.photoPicture
 import com.scantomake.counterpart.api.picturePath
 import com.scantomake.counterpart.core.parseObject
 import kotlinx.serialization.json.*
@@ -24,6 +26,7 @@ class ProjectGalleryTests {
             val entries = ProjectGallery.of(project).entries
             assertEquals(name, expected.map { it["id"]!!.jsonPrimitive.content }, entries.map { it.id })
             item["photoPicture"]?.let { assertEquals(name, it.jsonPrimitive.content, project.photoPicture()) }
+            item["canLocate"]?.let { assertEquals(name, it.jsonPrimitive.boolean, project.canLocate) }
             entries.zip(expected).forEach { (entry, want) ->
                 assertEquals(name, want["kind"]!!.jsonPrimitive.content, entry.kind.wire)
                 assertEquals(name, want["label"]!!.jsonPrimitive.content, entry.label)

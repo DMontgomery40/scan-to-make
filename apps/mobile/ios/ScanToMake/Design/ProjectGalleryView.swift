@@ -180,11 +180,3 @@ private struct ScanPhotos: View {
         }
     }
 }
-
-extension Project {
-    /// A part made to fit a scanned object, made before passes said where the object sits: the Mac can find it.
-    var canLocate: Bool {
-        kind == "fit" && scan != nil && current != nil && !preservesPublishedFilaments && (current?.seats ?? []).isEmpty
-            && state != .printing && state != .touchingUp
-    }
-}

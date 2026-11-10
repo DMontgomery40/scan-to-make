@@ -130,7 +130,8 @@ export function filePath(p: Project, path: string): string {
 
 /** A fit part made before passes said where the scanned object sits: the computer can find it. */
 export function canLocate(p: Project): boolean {
-  return p.kind === "fit" && !!p.scan && !!p.current && p.current.model.toLowerCase().endsWith(".stl") && !p.current.seats?.length
+  // Only for a USDZ scan, the one frame Together is drawn in today (PRD §6.1).
+  return p.kind === "fit" && !!p.scan?.toLowerCase().endsWith(".usdz") && !!p.current && p.current.model.toLowerCase().endsWith(".stl") && !p.current.seats?.length
     && p.state !== "printing" && p.state !== "touching-up";
 }
 

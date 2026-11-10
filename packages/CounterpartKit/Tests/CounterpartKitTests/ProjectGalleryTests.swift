@@ -17,6 +17,7 @@ final class ProjectGalleryTests: XCTestCase {
             let gallery = ProjectGallery(project: project)
             XCTAssertEqual(gallery.entries.map(\.id), expected.map { $0["id"] as! String }, name)
             if let photo = item["photoPicture"] as? String { XCTAssertEqual(project.photoPicture, photo, name) }
+            if let locate = item["canLocate"] as? Bool { XCTAssertEqual(project.canLocate, locate, name) }
             for (entry, want) in zip(gallery.entries, expected) {
                 XCTAssertEqual(entry.kind.rawValue, want["kind"] as? String, name)
                 XCTAssertEqual(entry.label, want["label"] as? String, name)

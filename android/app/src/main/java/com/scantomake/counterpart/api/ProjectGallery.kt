@@ -125,7 +125,10 @@ fun Project.pictureFor(entry: ProjectGallery.Entry): String? = when (entry.kind)
     ProjectGallery.Kind.Scan -> pictures["scan"] ?: pictures["photo"]
 }
 
-/** A part made to fit a scanned object, made before passes said where it sits: the computer can find it. */
-val Project.canLocate: Boolean get() = kind == "fit" && scan != null && current != null &&
+/**
+ * A part made to fit a scanned object, made before passes said where it sits: the computer can find it. Only for a USDZ
+ * scan, the one frame Together is drawn in today (PRD §6.1).
+ */
+val Project.canLocate: Boolean get() = kind == "fit" && scan?.lowercase(Locale.ROOT)?.endsWith(".usdz") == true && current != null &&
     current.model.lowercase(Locale.ROOT).endsWith(".stl") && current.seats.isNullOrEmpty() &&
     state != Project.State.Printing && state != Project.State.TouchingUp
