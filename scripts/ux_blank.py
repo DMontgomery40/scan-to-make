@@ -103,7 +103,9 @@ def drawn(image, area: tuple[float, float, float, float], scale: float, exclude:
         xs = [x for x in range(2, w - 2) if pixels[x, y]]
         spans.append((xs[-1] - xs[0]) if len(xs) >= 6 else 0)
     spans.sort(reverse=True)
-    length = sum(1 for v in edges.crop((3, 3, w - 3, h - 3)).get_flattened_data() if hasattr(edges, 'get_flattened_data') else edges.crop((3, 3, w - 3, h - 3)).getdata() if v) / scale  # the crop's own border is no drawing
+    inner = edges.crop((3, 3, w - 3, h - 3))
+    values = inner.get_flattened_data() if hasattr(inner, 'get_flattened_data') else inner.getdata()
+    length = sum(1 for v in values if v) / scale  # the crop's own border is no drawing
     return length, (spans[min(4, len(spans) - 1)] if spans else 0) / scale  # the fifth-widest row, not one stray row
 
 
