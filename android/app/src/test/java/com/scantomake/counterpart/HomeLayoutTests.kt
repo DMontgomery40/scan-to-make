@@ -456,9 +456,11 @@ class HomeLayoutTests {
         home()
         compose.onNodeWithContentDescription("Search").performClick()
         compose.onNodeWithText("Projects, printers, notes").performTextInput("holder")
+        // Home is a LazyColumn: the archived section is below the matching card, so bring its row into view first.
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Old hanger"))
         compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("search-reason")).fetchSemanticsNodes().isNotEmpty() }
         compose.onAllNodes(hasTestTag("search-reason")).assertCountEquals(1)
-        compose.onNodeWithText("Old hanger").assertExists()
+        compose.onNodeWithTag("search-reason").assertTextContains("holder", substring = true)
     }
 
     @Test fun theStartersAreOnTheEmptyHomeToo() {
