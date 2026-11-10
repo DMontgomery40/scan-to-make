@@ -639,9 +639,9 @@ final class LayoutParityUITests: XCTestCase {
                 $0.identifier != "send" && !own.contains(NSCoder.string(for: $0.frame)) && $0.frame.intersects(send.frame)
             }
             XCTAssertTrue(inside.isEmpty, "\(state): \(inside.map { "\($0.identifier) '\($0.label)' \($0.frame)" }) inside the button at \(send.frame)")
-            for _ in 0..<6 { app.swipeDown() }
+            // Back to the top, only as far as needed: a swipe down at the top would dismiss the sheet.
+            for _ in 0..<8 where !(question.isHittable && copy.isHittable) { sheet.swipeDown(velocity: .slow) }
         }
-        nothingInsideTheButton("nothing chosen")
         let describe = app.staticTexts["What do you need?"]
         XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
         for row in [copy, fit, later] {
@@ -649,6 +649,7 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertLessThanOrEqual(row.frame.maxY, send.frame.minY + 1, "\(row.identifier) is clear of the button")
         }
         XCTAssertFalse(send.isEnabled, "nothing chosen: greyed out")
+        nothingInsideTheButton("nothing chosen")
         XCTAssertEqual(send.label, "Choose what this scan becomes")
         copy.tap()
         XCTAssertTrue(send.isEnabled)
@@ -773,7 +774,9 @@ final class LayoutParityUITests: XCTestCase {
         let measured = app.buttons["I measured"]
         for _ in 0..<6 where !(measured.exists && measured.isHittable) { app.swipeDown() }
         measured.tap()
-        XCTAssertTrue(measured.isSelected, "I measured is chosen")
+        let chosen = NSPredicate(format: "isSelected == true")
+        if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: measured)], timeout: 3) != .completed { measured.tap() }
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: measured)], timeout: 3) == .completed, "I measured is chosen")
         // Scroll back down so Send is pressed from where a person would be, below the fields.
         for _ in 0..<3 { app.swipeUp() }
         let send = app.buttons["send"]
