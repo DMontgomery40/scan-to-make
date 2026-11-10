@@ -718,9 +718,16 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(labels.firstMatch.waitForExistence(timeout: 20))
         XCTAssertEqual(labels.count, 6, "one label per plate")
         let last = labels.element(boundBy: 5)
-        if !last.isHittable { labels.firstMatch.swipeLeft() }
-        XCTAssertTrue(last.isHittable, "the row scrolls to the last plate")
+        // A plate off the edge has no hit point: swipe the row on a label that is on screen until the last one is.
+        let window = plates.windows.firstMatch.frame
+        for _ in 0..<5 where !window.contains(last.frame) {
+            guard let shown = (0..<6).map({ labels.element(boundBy: $0) }).first(where: { window.contains($0.frame) }) else { break }
+            shown.swipeLeft()
+        }
+        XCTAssertTrue(window.contains(last.frame), "the row scrolls to the last plate")
         last.tap()
+        let chosen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: last)
+        XCTAssertEqual(XCTWaiter().wait(for: [chosen], timeout: 5), .completed, "the last plate's picture is shown")
     }
 
     func testEveryPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() throws {
