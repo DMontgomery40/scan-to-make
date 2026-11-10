@@ -81,7 +81,7 @@ export function publicObject(object: StmObject): PublicObject {
   // A later printer failure must not inherit Retry from an older worker stop.
   const lastPass = object.passes.at(-1);
   const canRetryCleanup = object.state === 'failed' && (lastPass?.status === 'capped'
-    || (!!lastPass?.sessionId && lastPass.resumable !== false && ['failed', 'interrupted'].includes(lastPass.status ?? '')))
+    || (!!lastPass?.sessionId && lastPass.resumable === true && ['failed', 'interrupted'].includes(lastPass.status ?? '')))
     && !!object.failure && lastPass.activity?.at(-1)?.text === object.failure;
   // Never null: until a title is generated (or backfilled for an older project), the request's first words.
   // The companion's decision (copy, new design or published), so neither app re-derives it.

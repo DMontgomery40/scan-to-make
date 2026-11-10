@@ -60,6 +60,8 @@ export interface TouchupProgress {
   sessionId?: string;
   sessionCwd?: string;
   passDir?: string;
+  /** Live session until its final result event; persisted so later file errors cannot resume completed work. */
+  resumable?: boolean;
   toolCalls: number;
   lastText?: string;
   /** New public events only, in stream order. Never thinking, tool input or tool output. */
@@ -212,7 +214,7 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
     idleTimer = setTimeout(() => atLimit('inactivity', inactivityMs), inactivityMs);
     if (typeof event.session_id === 'string' && event.session_id.trim() && sessionId !== event.session_id) {
       sessionId = event.session_id;
-      opts.onProgress?.({seconds: seconds(), toolCalls, sessionId});
+      opts.onProgress?.({seconds: seconds(), toolCalls, sessionId, resumable: event.type !== 'result'});
     }
     if (event.type === 'system' && (event as {subtype?: string}).subtype === 'init') {
       const init = event as {model?: string; apiKeySource?: string; tools?: string[]; plugins?: {name?: string; source?: string}[]; mcp_servers?: {name?: string; status?: string}[]};
@@ -237,6 +239,7 @@ export async function runClaudeWorker(inv: TouchupInvocation, opts: {
       if (toolCalls > maxToolCalls) atLimit('tool-calls', maxToolCalls);
     } else if (event.type === 'result') {
       resultEvent = event;
+      opts.onProgress?.({seconds: seconds(), toolCalls, resumable: false});
     }
   });
 
@@ -285,7 +288,7 @@ export async function runTouchupWorker(inv: TouchupInvocation, pass: TouchupPass
     try { inspectModelFile(bytes, '3mf'); return partsPath; } catch { return undefined; }
   }, () => undefined) : undefined;
   const base = {renders, checkpoints: validCheckpoints, ...(run.sessionId ? {sessionId: run.sessionId} : {}),
-    resumable: !!run.sessionId && (run.limit !== undefined || (!resultEvent && stopReason !== 'cancelled')),
+    resumable: !!run.sessionId && !resultEvent && stopReason !== 'cancelled',
     ...(run.limit ? {limit: run.limit} : {}), ...(parts ? {parts} : {}), ...(worker ? {worker} : {}), stats: {seconds: seconds(), toolCalls, ...(resultEvent?.total_cost_usd !== undefined ? {costUsd: resultEvent.total_cost_usd} : {})}};
   const withModel = model ? {model} : {};
   const answer = resultEvent?.structured_output;

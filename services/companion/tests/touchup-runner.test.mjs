@@ -30,6 +30,7 @@ test('done', async () => {
   assert.deepEqual(result.renders, [join(pass.outDir, 'front.png')]);
   assert.deepEqual(result.checkpoints, [join(pass.checkpointsDir, '01.stl')]);
   assert.ok(progress.some(p => p.lastText === 'Restored the texture on the underside.'));
+  assert.equal(progress.at(-1).resumable, false, 'the final answer clears live recovery before later file steps');
 });
 
 test('a request in several colours keeps the printer MCP\'s multi-part 3MF beside the merged mesh', async () => {
@@ -248,7 +249,7 @@ for (const kind of ['inactivity', 'absolute', 'tool-calls']) {
     assert.equal(result.resumable, true);
     assert.deepEqual(result.checkpoints, [good]);
     assert.equal(result.model, good);
-    assert.ok(progress.some(p => p.sessionId === 'saved-session'));
+    assert.ok(progress.some(p => p.sessionId === 'saved-session' && p.resumable === true));
   });
 }
 

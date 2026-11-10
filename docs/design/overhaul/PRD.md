@@ -1526,3 +1526,5 @@ Every unmerged branch and dirty worktree was preserved on 2026-11-04 as a pushed
 | `archive/2026-11-04/github/KAN-201-newest-codex` | "Update Codex" | provider maintenance (§7.5) |
 | `archive/2026-11-04/github/KAN-198-mac-judge-tool` | Mac judge tool | |
 | `archive/2026-11-04/github/KAN-209-caliper` | caliper work | starters (§5.11) |
+
+Resume admission is explicit (`resumable: true`), never inferred from a failed/interrupted status or a saved session ID. The final worker result clears the live flag before post-worker file checks. A thrown pass step disables resume; shutdown can retain it only while the saved session was still live. Restart recovery preserves only that explicit live flag.

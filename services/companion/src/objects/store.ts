@@ -254,7 +254,7 @@ export class ObjectStore {
         const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
         await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined, printConfirmation: undefined,
           passes: o.state !== 'touching-up' ? o.passes : o.passes.map((pass, index) => index !== o.passes.length - 1 || pass.endedAtMs !== undefined ? pass : {
-            ...pass, endedAtMs: atMs, status: 'interrupted',
+            ...pass, endedAtMs: atMs, status: 'interrupted', resumable: pass.resumable === true && !!pass.sessionId,
             activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200),
           }),
         }));
