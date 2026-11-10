@@ -538,11 +538,20 @@ struct ProjectView: View {
                 let ask = object.openAsk
                 AskPhoto(project: object, path: path, region: ask?.photo != nil ? ask?.region : nil, caption: AskPicture.caption(ask))
             }
+            // A size question: its numbers, prefilled, with Confirm as the one obvious action. Words and a caliper
+            // photo stay below for whatever the numbers don't say.
+            if let ask = object.openAsk, let form = AskSizesForm(ask) {
+                AskSizesFields(form: form, working: askWorking) { sizes in answerWithSizes(object, sizes) }
+                    .id(ask.id)
+            } else if let kind = object.openAsk?.kind, !ProjectView.knownAskKinds.contains(kind) {
+                Text("Update Counterpart on this \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone") to answer this kind of question here.")
+                    .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("ask-update")
+            }
             AskButtons(store: store, project: object, working: $askWorking, problem: $askProblem)
             // The Mac takes a typed answer when it says so (KAN-214 #204, `answers` includes "text").
             if object.openAsk?.answers.contains("text") == true {
                 HStack(spacing: 8) {
-                    TextField("Or answer in words…", text: $askText, axis: .vertical)
+                    TextField(object.openAsk?.kind == "sizes" ? "Anything the numbers don't say…" : "Or answer in words…", text: $askText, axis: .vertical)
                         .lineLimit(1...4).padding(10).glassEffect(.regular, in: .rect(cornerRadius: 16))
                         .accessibilityIdentifier("ask-text")
                     Button { answerInWords(object) } label: { Image(systemName: "arrow.up").fontWeight(.semibold).frame(width: 36, height: 36) }
@@ -555,6 +564,26 @@ struct ProjectView: View {
         }
         .padding(16)
         .glassEffect(.regular.tint(.orange.opacity(0.15)), in: .rect(cornerRadius: 24))
+    }
+
+    /// The kinds of question this build knows how to answer (contracts `AskSchema.kind`).
+    static let knownAskKinds: Set<String> = ["closeup", "file", "choice", "region", "scale", "sizes"]
+
+    /// A size question's numbers, with whatever is typed in the words box beside them.
+    private func answerWithSizes(_ object: Project, _ sizes: [AskSizesForm.Answer]) {
+        guard !sizes.isEmpty, !askWorking else { return }
+        let text = askText.trimmingCharacters(in: .whitespacesAndNewlines)
+        askWorking = true; askProblem = nil
+        Task {
+            defer { askWorking = false }
+            do {
+                let ticket = store.startRequest()
+                store.replace(try await store.mac.client.answerAsk(object.id, text: text.isEmpty ? nil : String(text.prefix(2000)), sizes: sizes), ticket: ticket)
+                askText = ""
+            }
+            catch let failure as CompanionError { askProblem = failure.message }
+            catch { askProblem = CompanionError.unreachable.message }
+        }
     }
 
     private func answerInWords(_ object: Project) {
@@ -1113,5 +1142,49 @@ struct DidItFitCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+}
+
+/// A size question's fields (PRD §5.4): one row per size the Mac asked about, in its words, prefilled with its
+/// number, and one button. The rules for what is sent are `AskSizesForm`'s (CounterpartKit).
+struct AskSizesFields: View {
+    @State var form: AskSizesForm
+    let working: Bool
+    let send: ([AskSizesForm.Answer]) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach($form.fields) { $field in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(field.label.prefix(1).uppercased() + field.label.dropFirst()).font(.subheadline.weight(.medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(AskSizesForm.source(field.from)).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 4) {
+                        TextField("", text: $field.text)
+                            .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                            .font(.title3.monospacedDigit().weight(.semibold))
+                            .frame(width: 84)
+                            .accessibilityLabel("\(field.label), millimetres")
+                            .accessibilityIdentifier("ask-size-\(field.id)")
+                        Text("mm").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 14))
+                }
+            }
+            Button { if let answer = form.answer { send(answer) } } label: {
+                Label(form.unchanged ? "Confirm These Sizes" : "Send These Sizes", systemImage: "checkmark")
+                    .fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 30)
+            }
+            .buttonStyle(.glassProminent).controlSize(.large)
+            .disabled(working || form.answer == nil)
+            .accessibilityIdentifier("ask-sizes-confirm")
+            if form.answer == nil {
+                Text("Enter each size in millimetres, or leave one empty if you don't know it.").font(.footnote).foregroundStyle(.secondary)
+            }
+        }
     }
 }
