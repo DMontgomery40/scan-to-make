@@ -11,7 +11,7 @@ The one list of open work. [`handoff.md`](handoff.md) is the one-screen summary 
 
 Owners: **Lead** = the lead session (Claude Fable 5.2, Mac, thread "Take Over Scan-to-Make Delivery"). **SM** = the state-machines session (Claude Fable 5.2, thread "Find Implicit State Machines"), which builds and hands PRs to the lead. **D:** a delegate of the lead, named by its T3 thread title. **David** = only he can do it.
 
-Last reconciled: 2026-11-10 07:50Z, main `046b1946`, by the lead.
+Last reconciled: 2026-11-10 08:00Z, main `7eb88332`, by the lead.
 
 ## The goal (what David cares about most)
 
@@ -27,7 +27,7 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 
 - **A print is running**: "Wall holder for three" (`30a2a33c`), started from Counterpart 06:49Z, about 2 h 10 m, 410 layers, ends about 09:05Z. Printing beats gating: one simulator or build at a time under `~/.stm-ios.lock`, and the lead checks the print's reports at every wake and owns any failure.
 - **One simulator lane, and who is on it** (David, Nov 10: "it seems like every delegate is just waiting ... is everyone waiting on someone and it's gridlocked forever?"). It was a queue, not a deadlock, but two delegates had ended their turns "waiting for the lane" with nothing to wake them. The rule: nobody ends a turn waiting; a hold is queued as a background `lockf` command so its exit wakes its owner, holds are 10 minutes at most except a gate's test job, and the lead keeps this order: I1's test job, I9's test job, then captures (SM's Fit brief build, I5, I3). About two hours of simulator work is queued; X5 (two simulators for the gate) is what shortens it.
-- **Installed**: Mac, iPhone and iPad all on **202611100531** from main `8ee2a829`. MCP copies bambu-printer-mcp 1.1.77, mcp-3d-printer-server 1.2.58. Android and Linux (agents-136) on Nov 5 builds.
+- **Installed**: Mac, iPhone and iPad all on **202611100531** from main `8ee2a829`. **Main is ahead of every device**: `7eb88332` has the first Nov 10 train (#443). Installing restarts the companion that is watching the print, and an install needs an idle app, so Mac, iPhone and iPad install after the print ends (about 09:05Z), with the second train too if it is on main by then. MCP copies bambu-printer-mcp 1.1.77, mcp-3d-printer-server 1.2.58. Android and Linux (agents-136) on Nov 5 builds.
 
 ## Waiting on David
 
@@ -45,14 +45,13 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 
 | ID | What | Owner | Where | Next |
 |---|---|---|---|---|
-| I1 | **Train 2026-11-10**: MCP update journal (#440), one way a pass ends (#441), navigation as one value (#442), the look-at-it rule in operations.md | Lead | PR #443, head `b1f08ea5`. Review done (`~/scan-to-make-work/train-2026-11-10/review-443.md`), fixes merged. | Companion rerun green; the iPhone/iPad rerun took the lock about 07:30Z → `branch_check` → merge → install Mac, iPhone, iPad. |
 | I2 | **The question's photo is unreadable; "What you sent" is a wall of 77 photos** (David, Nov 9) | D: "The question card's photo must be readable…" | PR #449 `5951dcc5`, on the second train (I9). Real-data before and after in `~/scan-to-make-work/ask-photo-2026-11-10/shots/`; the lead looked at the iPhone and iPad after-shots: the bottle is outlined and readable, the scan is one strip of five with "Your scan · 130 photos" | Lands with I9. Leftovers are X25–X28. |
 | I3 | **Nothing looks at finished screens**: `scripts/ux_screens.sh` (every screen, real project data, iPhone, iPad, Duo, Mac if it can be rendered off screen) and a first whole-app list of what is plainly wrong | D: "Look at the real app…" | No PR yet; no screens captured yet (T3's agent-device wrapper refused calls outside `device_open`, so `scripts/ux_screens.py` drives its own simulators); output `~/scan-to-make-work/ux-audit-2026-11-10/` | Captures in 10-minute holds on the lock, after the trains' test jobs → tool PR + `first-look.md`. Then the lead runs the council scoring (R1) and turns every finding into rows here. Mac screens are X29. |
 | I5 | **The project's picture**: a gallery over a list (not three fixed views); the scan stays viewable; the result wears its filament colour; a Together view with the object in every seat (fit passes record seats; a seats-only action for older projects); **a project's picture everywhere is the object alone on the stage, never a raw photo with the room in it** (David, Nov 10; replaces the Nov 9 "photo first" rule; mockups `docs/design/overhaul/screens/phone-home.jpg`, `mac-main.jpg` are the reference) | D: "The project's picture…" | PR #451 open; simulator captures still owed | Captures in short holds on the lock → the train after I9. |
 | I6 | "Is the Mac answering?" as one value, with the Android port (M8) | SM | PR #444 `7f055345`, on the second train (I9) | Lands with I9. |
 | I7 | Duo open: Printers and Settings in the edge rail (David, Nov 10 UTC) | SM | PR #445 `9202bde8`, on the second train (I9) | Lands with I9; four answers in the body (W8). |
 | I8 | The companion sends the words for how each pass ended; fixtures' wrong spellings fixed (M2 slice 1) | SM | PR #452 (draft, `c301181f`), stacked on #441 | Open as not-ready; real-data captures once I3's tool lands. |
-| I9 | **Second train of Nov 10**: #449 (I2), #444 (I6), #445 (I7), stacked on I1 | Lead | PR #456 `train/2026-11-10b`, head `26328cfd`. Two PRD §6.1 conflicts resolved by keeping every row. Muse review running (`review-456.md`); gate running from `~/fleet/stm-lane-b` (`gate-train-b-26328cfd.log`), its iPhone/iPad job queues on the lock | Review fixes → gate green → merge after I1 → install Mac, iPhone, iPad. |
+| I9 | **Second train of Nov 10**: #449 (I2), #444 (I6), #445 (I7) | Lead | PR #456 `train/2026-11-10b`, main merged in (`4b547494`). Review done, no blockers, eight findings (`~/scan-to-make-work/train-2026-11-10/review-456.md`): F2, F3, F4, F6, F7, F8a (a failed picture shows an empty captioned box; the last question's photo can linger; decode queue keeps cancelled work; Android EXIF mirrors; Android grid decode size; a test that cannot fail) with #449's delegate, F1 and F5 (a refresh failure not feeding `MacLink`; Settings says "can't reach" when pairing is the problem) with SM (`b2e57483`, checks running). First gate attempt: companion green, Android failed on agents-171 with Maven 429 (X5), stopped before the simulator job | Both fix SHAs → re-merge → gate (Android through agents-173) → merge → install with the first train. |
 
 ## Queued: owned, not started
 
@@ -101,6 +100,9 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 | X28 | A size question outlines the whole bottle; it would read better with the three dimensions shown than with a box. Belongs with the kinds of asks (Q3) | #449's report |
 | X29 | The Mac app has no screenshots in #449 or in the screenshot tool: its only capture mode opens a window on David's screen. Needs an off-screen render or a capture of windows already open | #449 and I3 reports |
 | X30 | #449 was not captured on Android (no emulator on the Mac) or Linux (no dev server started); unit tests only on both | #449's report |
+| X31 | The Mac and Linux tests for the question's picture and the scan strip check the model only; neither renders the card, so both stay green if the view is unwired | #456 review F8b |
+| X32 | `MacAskPhoto.open()`'s Quick Look cache key leaves out the region: a region change without a new `updatedAtMs` would preview a stale marked file (no case constructed) | #456 review, unverified list |
+| X33 | operations.md says the gate's Linux jobs "never" go to agents-173 and gives no reason, while agents-171 has failed the Android job on Maven 429 five times and agents-173 has run it each time. Find the reason or lift the rule | Lead, Nov 10 |
 | X17 | Older T3 worktrees in the MCP repos that are not this session's: mcp-3D `feat-bambu-parity-pauses`, `feat-tool-annotations`; bambu `feat-control-route-pr`, `research-control-refusal` | Lead, Nov 10 |
 
 ## Carried from before Nov 9 (still open)
@@ -164,4 +166,4 @@ David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everythin
 
 ## Done since Nov 9 (proof in each PR)
 
-#429 docs · #430 worker rules per pass, recognise and regularise · #434 closed bottom after support removal · #437 the Nov 9 train (#436 pass limits and resume, #431–#433 home and print UX, #435 relay default, #411 and #412 Live Activity identity and milestone alerts) · #438 handoff · #439 one engine, stage 1 · MCP PRs opened and green: bambu #136, #137; mcp-3D #92, #93; #91's Node 18 failure fixed · Mac disk 50 → 200 GiB free · slicing restored on David's Mac (crash record moved aside, X15).
+#429 docs · #430 worker rules per pass, recognise and regularise · #434 closed bottom after support removal · #437 the Nov 9 train (#436 pass limits and resume, #431–#433 home and print UX, #435 relay default, #411 and #412 Live Activity identity and milestone alerts) · #438 handoff · #439 one engine, stage 1 · MCP PRs opened and green: bambu #136, #137; mcp-3D #92, #93; #91's Node 18 failure fixed · Mac disk 50 → 200 GiB free · slicing restored on David's Mac (crash record moved aside, X15). · #443 the first Nov 10 train, main `7eb88332` (#440 a restart mid-update is undone at the next start; #441 one `endPass` for every ending; #442 phone and iPad navigation as one value; the look-at-it rule in operations.md; `branch_check --lands-first`): companion, CounterpartKit and the iPhone and iPad UI suite green at `b1f08ea5` (`regate-train-b1f08ea5.log`), then main's docs-only commits and the `branch_check` change merged in and `ci-local` rerun; **not yet installed**
