@@ -134,7 +134,13 @@ public struct PinnedTransport: HTTPTransport {
             try? FileManager.default.removeItem(at: file)
             throw TransportError("too-large")
         }
-        return (HTTPReply(status: status, body: Data(), headers: headers), file)
+        // URLSession owns the file it hands back and may remove it once the session is invalidated (the `defer` above
+        // runs as this returns). The caller is promised a file that is its own to move or delete, so it is moved to one
+        // of ours before the session goes (review of #527, part 2, F1).
+        let kept = FileManager.default.temporaryDirectory.appending(path: "download-\(UUID().uuidString)")
+        do { try FileManager.default.moveItem(at: file, to: kept) }
+        catch { try? FileManager.default.removeItem(at: file); throw TransportError("network") }
+        return (HTTPReply(status: status, body: Data(), headers: headers), kept)
     }
 
     public func lines(_ request: URLRequest, trust: TrustPolicy, lineLimit: Int,

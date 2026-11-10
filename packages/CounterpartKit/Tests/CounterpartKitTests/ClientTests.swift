@@ -730,6 +730,26 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(located.calls.last?.request.url?.path, "/v1/objects/\(p.id)/locate")
     }
 
+    /// Review of #527, part 2, F2: downloads outlive their page, so a slow download for an earlier version of a project
+    /// can finish after a newer version's files have landed. It tidies older folders only, never the newer one.
+    func testALateDownloadForAnOlderVersionLeavesTheNewerVersionsFiles() async throws {
+        func project(_ ended: Int) throws -> Project {
+            try JSONDecoder().decode(Project.self, from: Data(#"{"id":"0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a12","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[{"startedAtMs":1,"endedAtMs":\#(ended),"status":"done"}],"current":{"model":"current/model.stl","renders":["current/renders/1_overview.png"]}}"#.utf8))
+        }
+        let older = try project(1000), newer = try project(2000)
+        XCTAssertLessThan(older.mediaVersion, newer.mediaVersion)
+        let c = try client(FakeTransport { _, _ in HTTPReply(status: 200, body: Data("png".utf8)) })
+        let kept = try await c.download(newer, "renders/1_overview.png")
+        defer { try? FileManager.default.removeItem(at: kept.deletingLastPathComponent().deletingLastPathComponent()) }
+        let late = try await c.download(older, "renders/1_overview.png")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path), "the newer version's file is still there")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: late.path))
+        // The tidying itself still happens: the next download for the newer version removes the older folder.
+        _ = try await c.download(newer, "pictures/part-0123456789abcdef.png")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: late.path), "an older version's files go when a newer one lands")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
+    }
+
     func testDesignedMultiColour3MFExportDoesNotMasqueradeAsSTL() async throws {
         let p = try JSONDecoder().decode(Project.self, from: Data(#"{"id":"0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[],"current":{"model":"current/model.3mf","renders":[]}}"#.utf8))
         let bytes = Data("designed 3MF bytes".utf8)
