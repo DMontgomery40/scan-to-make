@@ -48,15 +48,42 @@ import CounterpartKit
         let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: transport)
         let mac = MacConnection(client: CompanionClient(pairing: pairing, transport: transport))
         let pictures = ActivityPictures(store: PrintActivityThumbnails(folder: folder))
-        let project = Project(id: UUID().uuidString.lowercased(), createdAtMs: 1, updatedAtMs: 2,
-                              state: .printing, photos: ["bottle.jpg"])
+        // A print's picture is the project's own: the object alone, as the Mac drew it (PRD §5.1), never a photo.
+        var project = Project(id: UUID().uuidString.lowercased(), createdAtMs: 1, updatedAtMs: 2, state: .printing,
+                              photos: ["bottle.jpg"], current: Project.Result(model: "current/model.stl", renders: []))
+        project.picture = "pictures/part-0123456789abcdef.png"
         let returned = expectation(description: "reconcile can apply progress without LAN artwork")
         let refresh = Task { await pictures.refresh([project], mac: mac); returned.fulfill() }
-        await transport.waitForDownload()
-        await fulfillment(of: [returned], timeout: 0.5)
-        XCTAssertEqual(PrintActivityThumbnails(folder: folder).artwork(for: project.id), .mark)
+        let asked = await transport.waitForDownload()
+        XCTAssertTrue(asked, "the Live Activity asks the Mac for the project's picture")
+        let requested = await transport.requested
+        XCTAssertEqual(requested.count, 1)
+        XCTAssertTrue(requested.first?.hasSuffix("/pictures/part-0123456789abcdef.png") == true, "the Mac's picture, not \(requested)")
+        let back = await waited([returned], "the refresh returns while the Mac has not answered")
+        XCTAssertEqual(PrintActivityThumbnails(folder: folder).artwork(for: project.id), .mark, "the mark until the picture arrives")
         await transport.finish()
-        await refresh.value
+        if back { await refresh.value }
+    }
+
+    /// A print whose project has only photos and nothing the Mac drew or rendered (in practice it can't print yet: a
+    /// print has a model, so a render or the Mac's picture). Decided, not discovered: the Live Activity shows the
+    /// Counterpart mark and asks the Mac for nothing; never the photo with its room (David, Nov 10).
+    func testAPrintWithOnlyPhotosShowsTheMarkAndFetchesNothing() async {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let transport = WaitingPictureMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: transport)
+        let mac = MacConnection(client: CompanionClient(pairing: pairing, transport: transport))
+        let pictures = ActivityPictures(store: PrintActivityThumbnails(folder: folder))
+        let project = Project(id: UUID().uuidString.lowercased(), createdAtMs: 1, updatedAtMs: 2, state: .printing,
+                              photos: ["bottle.jpg"], capture: ["0001.heic"])
+        XCTAssertNil(project.thumbnailPath)
+        await pictures.refresh([project], mac: mac)
+        let asked = await transport.waitForDownload(within: 0.3)
+        XCTAssertFalse(asked, "nothing to fetch: never the photo")
+        let requested = await transport.requested
+        XCTAssertEqual(requested, [])
+        XCTAssertEqual(PrintActivityThumbnails(folder: folder).artwork(for: project.id), .mark)
     }
 
     func testAnEstimateShowsOnlyForItsOwnSettings() throws {
@@ -271,23 +298,28 @@ import CounterpartKit
         let mac = ResyncMac()
         let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
         let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
-        let following = Task { await store.follow() }
-        await mac.waitForRefresh()
+        let stopped = expectation(description: "following stops once cancelled")
+        let following = Task { await store.follow(); stopped.fulfill() }
+        let refreshing = await mac.waitForRefresh()
+        XCTAssertTrue(refreshing, "the failed poll asks for the projects again")
         XCTAssertNil(store.reachable, "a retry signal is not a successful response from the Mac")
         following.cancel()
         await mac.finishRefresh()
-        await following.value
+        _ = await waited([stopped], "following stops once cancelled")
     }
 
     func testOlderMissingReplyCannotReplaceANewerProjectOrItsErrorState() async throws {
         let mac = DelayedMissingProjectMac()
         let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
         let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
-        let pending = Task { await store.reload("21fe17ec-1ee1-4a60-b24d-c0a8f74879b1") }
-        await mac.waitForRequest()
+        let answered = expectation(description: "the older reload answers")
+        let pending = Task { let failure = await store.reload("21fe17ec-1ee1-4a60-b24d-c0a8f74879b1"); answered.fulfill(); return failure }
+        let asked = await mac.waitForRequest()
+        XCTAssertTrue(asked, "the reload asks the Mac")
         let project = Project(id: "21fe17ec-1ee1-4a60-b24d-c0a8f74879b1", createdAtMs: 1, updatedAtMs: 2, state: .ready)
         store.replace(project, ticket: store.startRequest())
         await mac.finish()
+        guard await waited([answered], "the older reload answers") else { return }
         let failure = await pending.value
         XCTAssertEqual(failure, .cancelled, "an obsolete absence must not appear as a current fetch failure")
         XCTAssertEqual(store.project(project.id), project)
@@ -343,20 +375,16 @@ import CounterpartKit
 /// An unreachable event feed whose resulting project refresh has not answered yet.
 private actor ResyncMac: HTTPTransport {
     private var refresh: CheckedContinuation<HTTPReply, Error>?
-    private var waiting: CheckedContinuation<Void, Never>?
-    func waitForRefresh() async {
-        if refresh != nil { return }
-        await withCheckedContinuation { waiting = $0 }
+    /// True once the refresh is asked for; false after `seconds`.
+    func waitForRefresh(within seconds: Double = patience) async -> Bool {
+        await until(seconds) { await self.refresh != nil }
     }
     func finishRefresh() {
         refresh?.resume(throwing: TransportError("cancelled")); refresh = nil
     }
     func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
         guard request.url?.path == "/v1/objects" else { throw TransportError("network") }
-        return try await withCheckedThrowingContinuation {
-            refresh = $0
-            waiting?.resume(); waiting = nil
-        }
+        return try await withCheckedThrowingContinuation { refresh = $0 }
     }
 }
 
@@ -391,16 +419,12 @@ private final class SettingsMac: HTTPTransport, @unchecked Sendable {
 /// Holds the actual HTTP 404 until a newer project response has reached the store.
 private actor DelayedMissingProjectMac: HTTPTransport {
     private var reply: CheckedContinuation<HTTPReply, Never>?
-    private var requested: CheckedContinuation<Void, Never>?
-    func waitForRequest() async {
-        if reply != nil { return }
-        await withCheckedContinuation { requested = $0 }
+    /// True once the reload is asked for; false after `seconds`.
+    func waitForRequest(within seconds: Double = patience) async -> Bool {
+        await until(seconds) { await self.reply != nil }
     }
     func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
-        await withCheckedContinuation {
-            reply = $0
-            requested?.resume(); requested = nil
-        }
+        await withCheckedContinuation { reply = $0 }
     }
     func finish() {
         reply?.resume(returning: HTTPReply(status: 404, body: Data(#"{"error":{"code":"not-found","message":"Object not found"}}"#.utf8)))
@@ -435,17 +459,38 @@ private actor CopyCatalogMac: HTTPTransport {
 
 private actor WaitingPictureMac: HTTPTransport {
     private var download: CheckedContinuation<HTTPReply, Error>?
-    private var waiting: CheckedContinuation<Void, Never>?
-    func waitForDownload() async {
-        if download != nil { return }
-        await withCheckedContinuation { waiting = $0 }
+    private(set) var requested: [String] = []
+    /// True once a download is asked for; false after `seconds`.
+    func waitForDownload(within seconds: Double = patience) async -> Bool {
+        await until(seconds) { await self.download != nil }
     }
     func finish() { download?.resume(throwing: TransportError("network")); download = nil }
     func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
-        try await withCheckedThrowingContinuation {
-            download = $0; waiting?.resume(); waiting = nil
-        }
+        requested.append(request.url?.path ?? "")
+        return try await withCheckedThrowingContinuation { download = $0 }
     }
+}
+
+/// Every wait in this file ends (Nov 10: one waited 41 minutes on a download that never started and held the lane):
+/// a wrong assumption fails in seconds.
+private let patience: Double = 5
+
+/// Checks `condition` every 10 ms until it holds or `seconds` pass; whether it held.
+private func until(_ seconds: Double, _ condition: @Sendable () async -> Bool) async -> Bool {
+    let end = ContinuousClock.now.advanced(by: .milliseconds(Int(seconds * 1000)))
+    while await !condition() {
+        if ContinuousClock.now >= end { return false }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return true
+}
+
+/// Waits at most `patience` for the expectations, failing the test (not hanging it) when they don't come.
+@MainActor private func waited(_ expectations: [XCTestExpectation], _ what: String,
+                               file: StaticString = #filePath, line: UInt = #line) async -> Bool {
+    let result = await XCTWaiter().fulfillment(of: expectations, timeout: patience)
+    if result != .completed { XCTFail("\(what): not within \(Int(patience)) s (\(result.rawValue))", file: file, line: line) }
+    return result == .completed
 }
 
 /// A Mac that answers every request with one refusal.
