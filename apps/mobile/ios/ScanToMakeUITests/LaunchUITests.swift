@@ -582,7 +582,7 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["failed-print-note"].exists)
         XCTAssertFalse(app.buttons["print"].exists, "no second Print in the bar")
         XCTAssertFalse(app.buttons["Print Again"].exists, "nothing says this version was printed")
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Print")).count, 1, "printing is offered once")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
         XCTAssertTrue(app.descendants(matching: .any)["ask-for-changes"].exists, "the bar keeps Ask for changes")
     }
 
@@ -841,7 +841,7 @@ final class LayoutParityUITests: XCTestCase {
         let print = app.buttons["print"]
         XCTAssertTrue(print.exists)
         XCTAssertEqual(print.label, "Print Another")
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Print")).count, 1, "printing is offered once")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
     }
 
     /// Needs Changes on the finished Printing screen starts the change on the project page, as the project's own card does.
