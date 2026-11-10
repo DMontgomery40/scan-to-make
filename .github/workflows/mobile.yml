@@ -107,11 +107,13 @@ jobs:
           manifests=("${{ runner.temp }}/app-tests/Build/Products/"*.xctestrun)
           test "${#manifests[@]}" = 1
           python3 scripts/camera_safe_tests.py "${manifests[0]}"
+          # A test that hangs fails in minutes instead of holding the lane: on Nov 10 one waited 41 minutes on its first case.
           xcodebuild test-without-building -xctestrun "${manifests[0]}" \
-            -destination "platform=iOS Simulator,id=$SIM" -parallel-testing-enabled NO -collect-test-diagnostics never
+            -destination "platform=iOS Simulator,id=$SIM" -parallel-testing-enabled NO -collect-test-diagnostics never \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 300
           # Regular width: the starters, the New button and search on the iPad layout (PRD §6.1).
           xcodebuild test-without-building -xctestrun "${manifests[0]}" \
-            -destination "platform=iOS Simulator,id=$IPAD" -parallel-testing-enabled NO -collect-test-diagnostics never \
+            -destination "platform=iOS Simulator,id=$IPAD" -parallel-testing-enabled NO -collect-test-diagnostics never -test-timeouts-enabled YES -default-test-execution-time-allowance 120 -maximum-test-execution-time-allowance 300 \
             -only-testing:ScanToMakeUITests/LayoutParityUITests \
             -only-testing:ScanToMakeUITests/ProjectScreensUITests/testSearchExplainsHiddenProjectsAndShowAllRestoresThem
       - name: Unsigned iPhoneOS Release build has no React Native in it
