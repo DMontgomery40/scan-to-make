@@ -894,3 +894,12 @@ test("a project's printer saved under its other MCP's id is still that printer (
   assert.equal(resolvedPrinter(printers, undefined), undefined);
 });
 
+test("a project's printer saved under one of the catalog's aliases is that printer, as the Mac resolves it (S4)", () => {
+  const printers = [{ id: "winner", name: "Printer", aliases: ["old-duplicate", "previous-mcp"] }, { id: "other", name: "Printer" }];
+  assert.equal(resolvedPrinter(printers, "old-duplicate")?.id, "winner");
+  assert.equal(resolvedPrinter(printers, "previous-mcp")?.id, "winner");
+  assert.equal(resolvedPrinter(printers, "other")?.id, "other");
+  assert.equal(resolvedPrinter(printers, "unknown"), undefined);
+  assert.equal(resolvedPrinter(printers, "Printer"), undefined, "a matching display name is not identity evidence");
+});
+

@@ -702,6 +702,21 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(catalog.resolved("mcp-1a2b")?.id, "current", "listed under its other MCP's id: still on the Mac")
         XCTAssertEqual(catalog.resolved(nil)?.id, "current", "no id: the default printer")
         XCTAssertNil(catalog.resolved("gone"), "really gone")
+        // S4: a project saved under one of the catalog's aliases for a printer finds it, as the Mac does (PrinterSetupTests);
+        // a catalog from an older Mac, without the field, still decodes and resolves as before.
+        let aliased = try JSONDecoder().decode(PrinterCatalog.self, from: Data("""
+        {"defaultDestinationId":"winner","destinations":[
+          {"id":"winner","name":"Printer","backend":"test","source":"mcp-profile","aliases":["old-duplicate","previous-mcp"]},
+          {"id":"other","name":"Printer","backend":"test","source":"mcp-profile"}
+        ]}
+        """.utf8))
+        XCTAssertEqual(aliased.resolved("old-duplicate")?.id, "winner")
+        XCTAssertEqual(aliased.resolved("previous-mcp")?.id, "winner")
+        XCTAssertEqual(aliased.resolved("other")?.id, "other")
+        XCTAssertNil(aliased.destination("other")?.aliases)
+        XCTAssertNil(aliased.resolved("unknown"))
+        XCTAssertNil(aliased.resolved("Printer"), "a matching display name is not identity evidence")
+        XCTAssertNil(older.aliases)
     }
 
     func testPrinterConnectionReadsTheMCPsOwnWordsAndChangesGoThroughTheMac() async throws {

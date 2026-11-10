@@ -940,10 +940,10 @@ export function pageActions(p: Project, sending = false): PageActions {
 }
 
 /**
- * The printer a saved id stands for now: itself, or the printer it became under its other MCP's id (review F2), as the
- * print sheet and iOS resolve it.
+ * The printer a saved id stands for now: itself, or the printer it became under its other MCP's id (review F2), or one of
+ * the catalog's `aliases` for it (S4), as the print sheet, iOS and the Mac resolve it.
  */
-export function resolvedPrinter<P extends { id: string; mcps?: { destinationId: string }[] }>(printers: P[], id: string | undefined) {
+export function resolvedPrinter<P extends { id: string; mcps?: { destinationId: string }[]; aliases?: string[] }>(printers: P[], id: string | undefined) {
   if (!id) return undefined;
-  return printers.find((x) => x.id === id) ?? printers.find((x) => x.mcps?.some((m) => m.destinationId === id));
+  return printers.find((x) => x.id === id) ?? printers.find((x) => x.mcps?.some((m) => m.destinationId === id) || x.aliases?.includes(id));
 }

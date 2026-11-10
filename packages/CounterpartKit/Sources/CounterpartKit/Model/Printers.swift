@@ -22,6 +22,9 @@ public struct PrinterDestination: Codable, Identifiable, Equatable, Hashable, Se
     public var mcpId: String?
     /// The same printer reached through both MCPs, the one in use first (`PUT …/printers/<id>/mcp`). Absent on older Macs.
     public var mcps: [McpChoice]?
+    /// Other catalog ids that now stand for this same printer (a duplicate profile, an earlier MCP's id), as the Mac
+    /// resolves them. Absent on older Macs.
+    public var aliases: [String]?
 
     /// One MCP that reaches this printer, and the printer's id through it.
     public struct McpChoice: Codable, Equatable, Hashable, Sendable {
@@ -147,10 +150,10 @@ public struct PrinterCatalog: Codable, Equatable, Sendable {
         destinations.first { $0.id == (id ?? defaultDestinationId) }
     }
     /// The listed printer an id stands for now: itself, or the printer it became after a Printer MCP change
-    /// (its id through the other MCP, in `mcps`).
+    /// (its id through the other MCP, in `mcps`), or one of the catalog's `aliases` for it (S4: as the Mac resolves them).
     public func listed(_ id: String) -> String? {
         if destinations.contains(where: { $0.id == id }) { return id }
-        return destinations.first { $0.mcps?.contains { $0.destinationId == id } == true }?.id
+        return destinations.first { $0.mcps?.contains { $0.destinationId == id } == true || $0.aliases?.contains(id) == true }?.id
     }
     /// The printer a saved id stands for now, as the print sheet resolves it: itself, or the printer it became under its
     /// other MCP's id (review F2: matched exactly, the Result row said a listed printer "isn't on your Mac anymore").

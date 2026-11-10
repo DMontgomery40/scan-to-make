@@ -441,6 +441,14 @@ class HomeLayoutTests {
         assertTrue(catalog.resolved("mcp-1a2b")?.id == "current")
         assertTrue(catalog.resolved(null)?.id == "current")
         assertTrue(catalog.resolved("gone") == null)
+        // S4: an id the catalog lists among a printer's aliases is that printer, as the Mac resolves it (PrinterSetupTests).
+        val aliased = PrinterCatalog(listOf(PrinterDestination(id = "winner", name = "Printer", backend = "test", aliases = listOf("old-duplicate", "previous-mcp")),
+            PrinterDestination(id = "other", name = "Printer", backend = "test")), "winner")
+        assertTrue(aliased.resolved("old-duplicate")?.id == "winner")
+        assertTrue(aliased.resolved("previous-mcp")?.id == "winner")
+        assertTrue(aliased.resolved("other")?.id == "other")
+        assertTrue(aliased.resolved("unknown") == null)
+        assertTrue(aliased.resolved("Printer") == null)
         state.catalog.value = catalog
         assertTrue(state.printerName(project("a", "Clip", "ready").copy(printerDestinationId = "mcp-1a2b")) == "P1S")
     }
