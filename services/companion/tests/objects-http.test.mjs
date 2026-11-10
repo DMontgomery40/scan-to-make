@@ -65,6 +65,21 @@ test('an unsent scan draft can change from copy to fit before it starts', async 
   assert.equal(changed.json.object.kind, 'fit');
   assert.equal(changed.json.object.instructions, 'A pegboard holder for this bottle.');
   assert.equal((await call('PATCH', `/v1/objects/${id}`, {kind: 'published'})).status, 400);
+  // How the size is settled travels as fields beside the words, on create and on a draft, and never inside them.
+  const fit = {sizeSource: 'measured', measured: [{id: 'longest', label: 'longest', mm: 107}]};
+  const fitted = await call('PATCH', `/v1/objects/${id}`, {fit});
+  assert.equal(fitted.status, 200);
+  assert.deepEqual(fitted.json.object.fit, fit);
+  assert.equal(fitted.json.object.instructions, 'A pegboard holder for this bottle.');
+  assert.equal((await call('PATCH', `/v1/objects/${id}`, {fit: {sizeSource: 'measured'}})).status, 400);
+  assert.equal((await call('PATCH', `/v1/objects/${id}`, {fit: null})).json.object.fit, undefined, 'null clears it');
+  await call('PATCH', `/v1/objects/${id}`, {fit});
+  assert.equal((await call('PATCH', `/v1/objects/${id}`, {kind: 'copy'})).json.object.fit, undefined, 'a draft that becomes a copy keeps no fit choice');
+  const made = await call('POST', '/v1/objects', {instructions: 'A clip for this.', kind: 'fit', fit: {sizeSource: 'scan'}});
+  assert.equal(made.status, 201);
+  assert.deepEqual(made.json.object.fit, {sizeSource: 'scan'});
+  assert.equal((await call('POST', '/v1/objects', {instructions: 'A clip.', kind: 'fit', fit: {sizeSource: 'nope'}})).status, 400);
+  assert.equal((await call('POST', '/v1/objects', {kind: 'copy', fit: {sizeSource: 'scan'}})).json.object.fit, undefined, 'only a fit with words has one');
   assert.equal((await call('PATCH', `/v1/objects/${id}`, {})).status, 400);
 });
 

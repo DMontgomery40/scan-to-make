@@ -1127,4 +1127,33 @@ final class NotificationActionsTests: XCTestCase {
         XCTAssertEqual(A.Command.bestGuess("p").cloudCommands[0].type, "answerAsk")
         XCTAssertEqual(A.Command.bestGuess("p").cloudCommands[0].payload, ["bestGuess": .bool(true)])
     }
+
+    /// New sends how a fit's size is settled as fields; the request is only what the person typed (the shared
+    /// `fit-fields.json`, which the companion, Android and this package all read).
+    func testAFitsSizeChoiceIsSentAsFieldsNeverInsideTheRequest() throws {
+        struct Rows: Decodable { var typed: String; var cases: [Row] }
+        struct Row: Decodable { var name: String; var create: JSONValue }
+        let rows = try JSONDecoder().decode(Rows.self, from: fixture("fit-fields.json"))
+        let fits: [String: ProjectFit?] = [
+            "lookup": ProjectFit(sizeSource: .lookup),
+            "measured": ProjectFit(sizeSource: .measured, measured: [.init(id: "longest", label: "longest side", mm: 107), .init(id: "middle", label: "middle side", mm: 63.5)]),
+            "scan": ProjectFit(sizeSource: .scan),
+        ]
+        XCTAssertEqual(rows.cases.map(\.name).sorted(), fits.keys.sorted())
+        for row in rows.cases {
+            let body = CompanionClient.createBody("  \(rows.typed)\n", kind: "fit", url: nil, fit: fits[row.name] ?? nil)
+            let sent = try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: body))
+            XCTAssertEqual(sent, row.create, row.name)
+            XCTAssertEqual(body["instructions"] as? String, rows.typed, "the words as typed, nothing appended")
+        }
+        // A copy, a request with no words, or "I measured" with no size sends no fit; a draft always says, so a
+        // draft that stops being a fit clears it.
+        XCTAssertNil(CompanionClient.createBody("Copy this.", kind: "copy", url: nil, fit: ProjectFit(sizeSource: .scan))["fit"])
+        XCTAssertNil(CompanionClient.createBody(" ", kind: "fit", url: nil, fit: ProjectFit(sizeSource: .scan))["fit"])
+        XCTAssertNil(ProjectFit(sizeSource: .measured))
+        XCTAssertEqual(ProjectFit(sizeSource: .lookup, measured: [.init(id: "a", label: "a", mm: 1)])?.measured, [])
+        XCTAssertTrue(CompanionClient.draftBody("Copy this.", kind: "copy", fit: ProjectFit(sizeSource: .scan))["fit"] is NSNull)
+        XCTAssertTrue(CompanionClient.draftBody("A clip.", kind: "fit", fit: nil)["fit"] is NSNull)
+        XCTAssertEqual((CompanionClient.draftBody("A clip.", kind: "fit", fit: ProjectFit(sizeSource: .scan))["fit"] as? [String: Any])?["sizeSource"] as? String, "scan")
+    }
 }
