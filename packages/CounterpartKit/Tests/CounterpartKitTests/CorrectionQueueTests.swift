@@ -65,6 +65,15 @@ final class CorrectionQueueTests: XCTestCase {
         XCTAssertNotEqual(changed, first, "changed words are a new note")
         attempts.settled("mount")
         XCTAssertNotEqual(attempts.id(for: "Thicker walls, 3 mm", in: "mount"), changed, "the same words after a send that worked")
+        // A note is its words and its attachments (train #499 review, F8): the same words with other photos are a
+        // new note, or the Mac would treat them as a repeat and the photos would never attach.
+        var withPhotos = NoteAttempts()
+        let one = withPhotos.id(for: "See the photos I added.", photos: ["a.jpg"], in: "mount")
+        XCTAssertEqual(withPhotos.id(for: "See the photos I added.", photos: ["a.jpg"], in: "mount"), one, "the same note again")
+        let two = withPhotos.id(for: "See the photos I added.", photos: ["a.jpg", "b.jpg"], in: "mount")
+        XCTAssertNotEqual(two, one, "a photo added")
+        XCTAssertNotEqual(withPhotos.id(for: "See the photos I added.", photos: ["b.jpg"], in: "mount"), two, "another photo")
+        XCTAssertNotEqual(withPhotos.id(for: "See the photos I added.", in: "mount"), one, "no photos")
         XCTAssertNotNil(first.range(of: "^[A-Za-z0-9-]{8,64}$", options: .regularExpression), "the Mac accepts this id")
 
         // The step was still running, so the note waits: the saved copy keeps the id the first try used.

@@ -274,7 +274,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 }
                 PrimaryButton("Send Changes", Modifier.fillMaxWidth(), enabled = note.isNotBlank() && working == null, icon = CIcons.Send) {
                     run("correct") {
-                        val attempt = NoteAttempt.of(noteAttempt, note.trim()).also { noteAttempt = it }
+                        val attempt = NoteAttempt.of(noteAttempt, note.trim(), messagePhotos.value.map { it.path }).also { noteAttempt = it }
                         val names = Media.sendPhotos(app.uploader, id, messagePhotos.value, forMessage = true)
                         state.show(app.companion.correct(id, note.trim(), names.ifEmpty { null }, attempt.id))
                         noteAttempt = null; note = ""; messagePhotos.value = emptyList()

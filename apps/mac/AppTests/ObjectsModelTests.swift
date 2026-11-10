@@ -543,6 +543,28 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertNotEqual(later[3], ids[0])
     }
 
+    /// Train #499 review, F8: the id was made from the words alone, before "See the photos I added." stood in for
+    /// none, so two photo-only notes shared an id and the second one's photos would never attach.
+    func testTwoPhotoOnlyNotesAreTwoNotes() async throws {
+        let suite = "counterpart-note-photos-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let companion = FakeObjects()
+        await companion.set([item("hook", "ready")])
+        await companion.setCapabilities(.init(messagePhotos: true, messageIds: true))
+        let model = ObjectsModel(companion: companion, defaults: defaults)
+        await model.refresh()
+        // Neither reply arrives, so neither attempt is settled.
+        await companion.failNextCorrections([ControlClientError.unavailable, ControlClientError.unavailable, ControlClientError.unavailable])
+        _ = await model.perform(.correct, on: "hook", photos: [URL(fileURLWithPath: "/tmp/side.jpg")])
+        _ = await model.perform(.correct, on: "hook", photos: [URL(fileURLWithPath: "/tmp/side.jpg")])
+        _ = await model.perform(.correct, on: "hook", photos: [URL(fileURLWithPath: "/tmp/underside.jpg")])
+        let ids = await companion.messageIds
+        XCTAssertEqual(ids.count, 3)
+        XCTAssertEqual(ids[0], ids[1], "the same photo again is the same note")
+        XCTAssertNotEqual(ids[1], ids[2], "another photo is another note")
+    }
+
     func testACompanionFromBeforeNoteIdsIsSentWhatItAlwaysWas() async throws {
         let suite = "counterpart-note-old-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
