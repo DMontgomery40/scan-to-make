@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {withPassEnded, type PassStatus} from './pass-end.js';
 import type {TouchupActivity, TouchupChange, WorkerLimit} from '../touchup/runner.js';
 import type {PassStage} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
@@ -34,7 +35,8 @@ export interface ObjectPass {
   startedAtMs: number;
   endedAtMs?: number;
   note?: string;
-  status?: string;
+  /** How it ended (`PassEnd`); absent while it runs. Closed only by `endPass`. */
+  status?: PassStatus;
   summary?: string;
   seconds?: number;
   costUsd?: number;
@@ -152,6 +154,8 @@ export interface StmObject {
   /** The printer MCP's original question. Only an explicit answer to this ID can approve it. */
   printConfirmation?: ObjectPrintConfirmation;
   failure?: string;
+  /** The pass (its `startedAtMs`) whose ending is `failure`. Dropped by `update` when anything else changes the failure. */
+  failedPass?: number;
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
   print?: {plate?: import('./plates.js').PlateIdentity; bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[];
     /** PRD §8.5: one uuid per print, from Print. */
@@ -223,7 +227,12 @@ export class ObjectStore {
   update(id: string, change: (object: StmObject) => StmObject): Promise<StmObject> {
     const previous = this.#queues.get(id) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
-      const updated = {...change(await this.get(id)), id, updatedAtMs: Date.now()};
+      const before = await this.get(id);
+      const updated = {...change(before), id, updatedAtMs: Date.now()};
+      // A failure belongs to the pass that set it only until something else sets one: a change that carries
+      // `failedPass` over while the project stops being failed, or fails for another reason, loses it.
+      if (updated.failedPass !== undefined && updated.failedPass === before.failedPass && (updated.state !== 'failed' || updated.failure !== before.failure)) delete updated.failedPass;
+      if (updated.failedPass !== undefined && updated.state !== 'failed') delete updated.failedPass;
       await this.#write(updated);
       return updated;
     });
@@ -255,12 +264,14 @@ export class ObjectStore {
       if (object.state === 'printing' && (options.keepPrinting || object.print?.monitor?.phase === 'starting' || object.print?.monitor?.phase === 'watching')) continue;
       if (object.state === 'touching-up' || object.state === 'printing') {
         const atMs = Date.now(), failure = 'interrupted when your Mac restarted the app';
-        await this.update(object.id, o => ({...o, state: 'failed', failure, progress: undefined, printConfirmation: undefined,
-          passes: o.state !== 'touching-up' ? o.passes : o.passes.map((pass, index) => index !== o.passes.length - 1 || pass.endedAtMs !== undefined ? pass : {
-            ...pass, endedAtMs: atMs, status: 'interrupted', resumable: pass.resumable === true && !!pass.sessionId,
-            activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200),
-          }),
-        }));
+        await this.update(object.id, o => {
+          const open = o.state === 'touching-up' ? o.passes.at(-1) : undefined;
+          if (!open || open.endedAtMs !== undefined) return {...o, state: 'failed', failure, progress: undefined, printConfirmation: undefined};
+          // Only a pass whose worker had a live session when the app stopped may continue it.
+          return {...o, state: 'failed', failure, failedPass: open.startedAtMs, progress: undefined, printConfirmation: undefined,
+            passes: withPassEnded(o.passes, open.startedAtMs, {status: 'interrupted', resumable: open.resumable === true}, atMs,
+              pass => ({activity: [...(pass.activity ?? []), {atMs, kind: 'message' as const, text: failure}].slice(-200)}))};
+        });
       }
     }
   }
