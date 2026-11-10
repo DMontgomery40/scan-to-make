@@ -565,6 +565,17 @@ final class LayoutParityUITests: XCTestCase {
         return app
     }
 
+    /// Scrolls the project page until `element` is on screen, dragging from the page's lower edge. `app.swipeUp()` drags
+    /// through the app's middle, which on the iPad in landscape is the scan stage: the drag turns the model and the page
+    /// stays put. The lower edge is below the stage and below the tab picker, so the drag never changes the tab either.
+    private func scrollProjectPage(_ app: XCUIApplication, until element: XCUIElement) {
+        let page = app.scrollViews.containing(NSPredicate(format: "label == %@", "Activity")).firstMatch
+        for _ in 0..<6 where !element.isHittable {
+            page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
+                .press(forDuration: 0.05, thenDragTo: page.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        }
+    }
+
     /// PRD §5.4 One main action (board U17), the pair seen with real projects on Nov 10: a pass stopped on a project
     /// that already had a result, and the page showed Try Again, Print Again and a floating Print at once. Try Again
     /// leads; the earlier result prints from the card, once, under its true name; the bar keeps Ask for changes.
@@ -830,12 +841,18 @@ final class LayoutParityUITests: XCTestCase {
         let missing = app.staticTexts["fit-size-missing"]
         XCTAssertTrue(missing.waitForExistence(timeout: 5), "it says what's missing")
         XCTAssertEqual(missing.label, "Enter at least one measurement in millimetres.")
-        XCTAssertTrue(missing.isHittable, "on screen, by the fields")
         // The field's identifier is on its column, which SwiftUI gives to the field itself; look in both places.
         let longest = app.textFields["fit-size-longest"].exists ? app.textFields["fit-size-longest"]
             : app.descendants(matching: .any)["fit-size-longest"].textFields.firstMatch
         XCTAssertTrue(longest.waitForExistence(timeout: 5))
-        XCTAssertEqual(longest.value(forKey: "hasKeyboardFocus") as? Bool, true, "the first measurement is focused")
+        // Send's work ends with Longest focused and the keyboard up; the sheet shrinks and scrolls the fields into the room
+        // left. The line is judged once that has happened, not while the sheet is still moving (the gate's slow iPad).
+        let focused = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: longest)
+        XCTAssertEqual(XCTWaiter().wait(for: [focused], timeout: 5), .completed, "the first measurement is focused")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "the number keyboard is up")
+        let onScreen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: missing)
+        XCTAssertEqual(XCTWaiter().wait(for: [onScreen], timeout: 5), .completed,
+                       "on screen, by the fields: line \(missing.frame), field \(longest.frame), keyboard \(app.keyboards.firstMatch.frame), sheet \(sheet.frame)")
     }
 
     /// Review F3 (train 2026-11-10e): the Result's printer row is never empty. While the printer list is on its way it says so;
@@ -843,17 +860,19 @@ final class LayoutParityUITests: XCTestCase {
     func testAResultPrinterRowSaysItIsWaitingOrThatTheMacWontSay() {
         let waiting = launch(set: "printers-slow", screen: "ready")
         let loading = waiting.staticTexts["result-printers-loading"]
-        for _ in 0..<6 where !(loading.exists && loading.isHittable) { waiting.swipeUp() }
         XCTAssertTrue(loading.waitForExistence(timeout: 20), waiting.debugDescription)
+        scrollProjectPage(waiting, until: loading)
+        XCTAssertTrue(loading.isHittable, "on screen: \(loading.frame)")
         XCTAssertEqual(loading.label, "Asking your Mac about its printers…")
 
         let refused = launch(set: "printers-refused", screen: "ready")
         let problem = refused.staticTexts["result-printers-problem"]
-        for _ in 0..<6 where !(problem.exists && problem.isHittable) { refused.swipeUp() }
         XCTAssertTrue(problem.waitForExistence(timeout: 20), refused.debugDescription)
-        XCTAssertEqual(problem.label, "Couldn't read the printers configured on your Mac.")
         let retry = refused.buttons["result-printers-retry"]
-        XCTAssertTrue(retry.isHittable, "the way to try again")
+        scrollProjectPage(refused, until: retry)
+        XCTAssertEqual(problem.label, "Couldn't read the printers configured on your Mac.")
+        XCTAssertTrue(problem.isHittable, "on screen: \(problem.frame)")
+        XCTAssertTrue(retry.isHittable, "the way to try again: \(retry.frame)")
         retry.tap()
         XCTAssertTrue(problem.waitForExistence(timeout: 10), "still says so after another refusal")
     }
@@ -863,8 +882,8 @@ final class LayoutParityUITests: XCTestCase {
     func testAResultWhosePrinterIsGoneSaysSoAndChoosesOneForThisProject() {
         let app = launch(set: "stale-printer", screen: "ready")
         let words = app.staticTexts["result-no-printer"]
-        for _ in 0..<6 where !(words.exists && words.isHittable) { app.swipeUp() }
         XCTAssertTrue(words.waitForExistence(timeout: 20), app.debugDescription)
+        scrollProjectPage(app, until: words)
         XCTAssertEqual(words.label, "The printer chosen for this project isn’t on your Mac anymore.")
         let choose = app.buttons["result-choose-printer"]
         XCTAssertEqual(choose.label, "Choose a Printer")
@@ -873,8 +892,8 @@ final class LayoutParityUITests: XCTestCase {
 
         let empty = launch(set: "no-printers", screen: "ready")
         let none = empty.staticTexts["result-no-printer"]
-        for _ in 0..<6 where !(none.exists && none.isHittable) { empty.swipeUp() }
         XCTAssertTrue(none.waitForExistence(timeout: 20))
+        scrollProjectPage(empty, until: none)
         XCTAssertEqual(none.label, "No printer set up yet.")
         XCTAssertEqual(empty.buttons["result-choose-printer"].label, "Add a Printer")
     }
