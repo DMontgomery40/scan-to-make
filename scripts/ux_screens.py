@@ -244,13 +244,14 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
         [['press', 'id="project-search"'], ['type', 'holder']], pages=2)
     add('new', 'New', 'nothing chosen', 'real', real + ['-CounterpartScreen', 'new'], pages=3)
     add('new-scan', 'New, after a scan', 'scan attached, no use chosen', 'real (scan faked)', real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', 'walk-around'], pages=2)
-    for use in ('copy', 'fit', 'later'):
+    rows = {'copy': 'Copy this object', 'fit': 'Make something that fits this', 'later': 'Just save this scan'}
+    for use, row in rows.items():
         add(f'new-scan-{use}', f'New, after a scan: {use}', f'"{use}" chosen', 'real (scan faked)',
-            real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', 'walk-around'], [['press', f'id="scan-use-{use}"']], pages=2)
+            real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', 'walk-around'], [['find', row, 'click']], pages=2)
     for label in ('Measured', 'Scan'):
         add(f'new-scan-fit-{label.lower()}', f'New, after a scan: fit, size from {label.lower()}', f'fit, "{label}" size', 'real (scan faked)',
             real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', 'walk-around'],
-            [['press', 'id="scan-use-fit"'], ['press', f'label="{label}"']], pages=2)
+            [['find', rows['fit'], 'click'], ['find', label, 'click']], pages=2)
     for name, _, state in PROJECTS:
         data = 'real (state synthesised)' if name in ('wall-holder-question', 'stove-gap-limit') else 'real'
         link = f'counterpart://project/{ids[name]}'
@@ -324,6 +325,7 @@ class Device:
             try:
                 if action[0] == 'type': self.ad('type', action[1])
                 elif action[0] == 'home': self.ad('home')
+                elif action[0] == 'find': self.ad(*action)
                 else: self.ad(action[0], action[1], '--settle')
                 time.sleep(1.5)
             except Exception as failure:  # the screen is still captured, with what happened
