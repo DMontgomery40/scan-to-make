@@ -1726,52 +1726,70 @@ test('Q9: an npm install that fails before anything changed is quiet, and said o
   assert.match(f.events[0].data.log, /npm ERR! network/);
 });
 
-test('Q9: a checkout and an ssh route are never moved or updated by themselves, and their rows say why; npx pins are', async t => {
-  const checkout = await updater(t, {profile: bambu('node', ['dist/index.js'], {cwd: `${HOME}/src/bambu-printer-mcp`}), files: {
-    [`${HOME}/src/bambu-printer-mcp/package.json`]: pkgJson('1.1.40'), [`${HOME}/src/bambu-printer-mcp/.git/HEAD`]: 'ref', [`${HOME}/src/bambu-printer-mcp/dist/index.js`]: '', '/usr/bin/node': ''},
-    verify: async () => assert.fail('nothing to check')});
-  assert.deepEqual(checkout.updates.autoTargets(), []);
-  assert.deepEqual(await checkout.updates.autoUpdate(checkout.mcpId, '1.1.50'), {state: 'skipped'});
-  // An ssh route (here the Nov 6 forced command, running a copy under Counterpart's folder): never changed by itself either.
-  const forced = `exec '/node' '${APP}/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist/index.js'`;
-  const ssh = await updater(t, {profile: bambu('/usr/bin/ssh', ['-T', '-i', `${HOME}/.ssh/printer_ed25519`, 'ada@127.0.0.1']), files: {
-    [`${HOME}/.ssh/authorized_keys`]: `from="127.0.0.1",restrict,command="${forced}" ssh-ed25519 AAAAstopgap printer@mac\n`,
-    [`${HOME}/.ssh/printer_ed25519.pub`]: 'ssh-ed25519 AAAAstopgap printer@mac\n',
-    [`${APP}/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46'),
-    [`${APP}/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/dist/index.js`]: ''}, verify: async () => assert.fail('nothing to check')});
-  assert.deepEqual(ssh.updates.autoTargets(), []);
-  assert.deepEqual(await ssh.updates.autoUpdate(ssh.mcpId, '1.1.50'), {state: 'skipped'});
-  const npxSsh = await updater(t, {profile: bambu('/usr/bin/ssh', ['127.0.0.1', 'npx', '-y', 'bambu-printer-mcp@1.1.45']), verify: async () => assert.fail('nothing to check')});
-  assert.deepEqual(npxSsh.updates.autoTargets(), []);
-  for (const f of [checkout, ssh, npxSsh]) {
-    assert.ok(!f.commands.some(line => line.includes(' install ') || line.includes(' pull')), 'nothing ran');
-    assert.deepEqual(f.moves, [], 'no file moved');
-    assert.equal(f.overrides.saved('p1s'), undefined, 'no printer moved');
-    assert.deepEqual(f.events, [], 'nothing said');
-  }
-  // Their rows in Settings → Printers say why, in the companion's words, on every layout (each client shows `words` as is).
+test('Q9: Counterpart\'s own copy is kept current wherever it runs, ssh included; a copy the person manages, one on another computer, or one it can\'t tell is never touched, and its row says why', async t => {
+  const ada = 'ssh-ed25519 AAAAstopgap printer@mac\n', key = `${HOME}/.ssh/printer_ed25519`;
+  const viaSsh = bambu('/usr/bin/ssh', ['-T', '-i', key, 'ada@127.0.0.1']);
+  const forcedTo = command => ({[`${HOME}/.ssh/authorized_keys`]: `from="127.0.0.1",restrict,command="${command}" ${ada}`, [`${key}.pub`]: ada});
+  const appCopy = `${APP}/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp`;
+  const globalCopy = '/opt/homebrew/lib/node_modules/bambu-printer-mcp';
+  const checkoutDir = `${HOME}/src/bambu-printer-mcp`;
+  const cases = {
+    // The Nov 6 forced command on this Mac, running a copy Counterpart installed: updated in place, route unchanged.
+    'Counterpart’s copy through ssh': {profile: viaSsh, files: {...forcedTo(`exec '/node' '${appCopy}/dist/index.js'`),
+      [`${appCopy}/package.json`]: pkgJson('1.1.46'), [`${appCopy}/dist/index.js`]: ''}},
+    // The person's global install reached through ssh: moving it would change how the printer is reached.
+    'a global install through ssh': {profile: viaSsh, files: {...forcedTo(`exec '/node' '${globalCopy}/dist/index.js'`),
+      [`${globalCopy}/package.json`]: pkgJson('1.1.44'), [`${globalCopy}/dist/index.js`]: ''},
+      words: /Runs through ssh from an install you manage, so Counterpart doesn't update it by itself\.$/},
+    'a global install on another computer': {profile: bambu('/usr/bin/ssh', ['ada@printer.local', 'bambu-printer-mcp']),
+      words: /Runs on another computer \(printer\.local\), so Counterpart doesn't update it by itself\.$/},
+    'a checkout on another computer': {profile: bambu('/usr/bin/ssh', ['ada@printer.local', 'cd src/bambu-printer-mcp && node dist/index.js']),
+      words: /Runs on another computer \(printer\.local\), so Counterpart doesn't update it by itself\.$/},
+    'a checkout on this Mac': {profile: bambu('/usr/bin/node', ['dist/index.js'], {cwd: checkoutDir}), files: {[`${checkoutDir}/package.json`]: pkgJson('1.1.40'),
+      [`${checkoutDir}/.git/HEAD`]: 'ref', [`${checkoutDir}/dist/index.js`]: '', '/usr/bin/node': ''},
+      words: /\(1\.1\.40\)\. Runs from a folder you manage, so Counterpart doesn't update it by itself\.$/},
+    'npx inside ssh': {profile: bambu('/usr/bin/ssh', ['127.0.0.1', 'npx', '-y', 'bambu-printer-mcp@1.1.45']),
+      words: /Runs through an ssh command that starts it with npx, which Counterpart can't change, so it doesn't update it by itself\.$/},
+    'an install Counterpart can’t tell': {profile: bambu('/opt/tools/printer-wrapper.sh'), files: {'/opt/tools/printer-wrapper.sh': ''},
+      words: /Counterpart can't tell how this was installed, so it doesn't update it by itself\.$/},
+  };
   const {PrinterSetup} = await import('../dist/printing/setup.js');
-  const listed = async (env, config) => {
-    const setup = new PrinterSetup({env, configs: () => [{id: 'p1s', config}], list: () => [],
+  const row = async (profile, files = {}) => {
+    const setup = new PrinterSetup({env: mac(files), configs: () => [{id: 'p1s', config: profile}], list: () => [],
       catalog: () => ({canonical: () => 'p1s', destinations: [{id: 'p1s', name: 'Bambu Lab P1S'}]})});
     return (await setup.mcps()).packages.find(item => item.package === 'bambu-printer-mcp').uses[0].words;
   };
-  assert.match(await listed(mac({[`${HOME}/src/bambu-printer-mcp/package.json`]: pkgJson('1.1.40'), [`${HOME}/src/bambu-printer-mcp/.git/HEAD`]: 'ref',
-    [`${HOME}/src/bambu-printer-mcp/dist/index.js`]: '', '/usr/bin/node': ''}), bambu('/usr/bin/node', ['dist/index.js'], {cwd: `${HOME}/src/bambu-printer-mcp`})),
-  / \(1\.1\.40\)\. Runs from a folder you manage, so Counterpart doesn't update it by itself\.$/);
-  assert.match(await listed(mac({[`${HOME}/.ssh/authorized_keys`]: `from="127.0.0.1",restrict,command="${forced}" ssh-ed25519 AAAAstopgap printer@mac\n`,
-    [`${HOME}/.ssh/printer_ed25519.pub`]: 'ssh-ed25519 AAAAstopgap printer@mac\n',
-    [`${APP}/printers/bambu-1.1.46/lib/node_modules/bambu-printer-mcp/package.json`]: pkgJson('1.1.46')}),
-  bambu('/usr/bin/ssh', ['-T', '-i', `${HOME}/.ssh/printer_ed25519`, 'ada@127.0.0.1'])), /Runs through an ssh command you manage, so Counterpart doesn't update it by itself\.$/);
-  // A global install's row has no such sentence: it is kept current (by moving its printers to Counterpart's copy).
-  assert.doesNotMatch(await listed(mac({'/opt/homebrew/lib/node_modules/bambu-printer-mcp/package.json': pkgJson('1.1.44'), '/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js': ''},
-    {'/opt/homebrew/bin/bambu-printer-mcp': '/opt/homebrew/lib/node_modules/bambu-printer-mcp/dist/index.js'}), bambu('/opt/homebrew/bin/bambu-printer-mcp')), /by itself/);
+  for (const [name, {profile, files = {}, words}] of Object.entries(cases)) {
+    const checked = [];
+    const f = await updater(t, {profile, files, verify: async config => { checked.push(config.process.args); }});
+    if (!words) {
+      assert.equal(f.updates.autoTargets().length, 1, name);
+      assert.deepEqual(await f.updates.autoUpdate(f.mcpId, '1.1.50'), {state: 'done', fromVersion: '1.1.46', toVersion: '1.1.50'}, name);
+      assert.ok(f.commands.some(line => line.includes(`--prefix ${APP}/printers/bambu-1.1.46/.counterpart-update-`)), `${name}: installed into Counterpart's copy`);
+      assert.deepEqual(checked, [[`${appCopy}/dist/index.js`]], `${name}: the new copy answered counterpart/1 first`);
+      assert.equal(f.overrides.saved('p1s'), undefined, `${name}: the printer is still reached the same way`);
+      assert.ok(f.restarts.every(config => config.process.command === '/usr/bin/ssh'), `${name}: restarted through its ssh command`);
+      assert.equal(f.events.at(-1).reason, 'Updated automatically from 1.1.46. Your printers use 1.1.50 now.');
+      assert.doesNotMatch(await row(profile, files), /by itself/, `${name}: its row has no reason`);
+      continue;
+    }
+    assert.deepEqual(f.updates.autoTargets(), [], name);
+    assert.deepEqual(await f.updates.autoUpdate(f.mcpId, '1.1.50'), {state: 'skipped'}, name);
+    assert.ok(!f.commands.some(line => line.includes(' install ') || line.includes(' pull')), `${name}: nothing ran`);
+    assert.deepEqual(f.moves, [], `${name}: no file moved`);
+    assert.equal(f.overrides.saved('p1s'), undefined, `${name}: no printer moved`);
+    assert.deepEqual(f.events, [], `${name}: nothing said`);
+    assert.deepEqual(checked, [], name);
+    assert.match(await row(profile, files), words, `${name}: its row says why`);
+  }
+  // A global install started directly has no such sentence: it is kept current (its printers move to Counterpart's copy).
+  assert.doesNotMatch(await row(bambu('/opt/homebrew/bin/node', [`${globalCopy}/dist/index.js`]), {[`${globalCopy}/package.json`]: pkgJson('1.1.44'), [`${globalCopy}/dist/index.js`]: ''}), /by itself/);
   // An npx profile Counterpart pins itself is its own: updated, and the pinned version is what is checked.
-  const checked = [];
-  const npx = await updater(t, {profile: bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']), verify: async config => { checked.push(config.process); }});
+  const pinned = [];
+  const npx = await updater(t, {profile: bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']), verify: async config => { pinned.push(config.process); }});
   assert.equal(npx.updates.autoTargets().length, 1);
   assert.equal((await npx.updates.autoUpdate(npx.mcpId, '1.1.50')).state, 'done');
-  assert.deepEqual(checked, [{command: '/usr/local/bin/npx', args: ['-y', 'bambu-printer-mcp@1.1.50']}]);
+  assert.deepEqual(pinned, [{command: '/usr/local/bin/npx', args: ['-y', 'bambu-printer-mcp@1.1.50']}]);
   // A pin whose check fails is put back to the version it was.
   const failing = await updater(t, {profile: bambu('/usr/local/bin/npx', ['-y', 'bambu-printer-mcp@1.1.46']), verify: async () => "didn't answer Counterpart's contract (counterpart/1)."});
   assert.equal((await failing.updates.autoUpdate(failing.mcpId, '1.1.50')).state, 'reverted');

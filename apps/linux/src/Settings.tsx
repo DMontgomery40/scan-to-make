@@ -1,4 +1,4 @@
-import { addressField, autoUpdatePatch, autoUpdateSwitch, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls, codeEngineRow, type CodeEngineView } from "./domain";
+import { addressField, AUTO_UPDATE_LABEL, AUTO_UPDATE_WORDS, autoUpdatePatch, autoUpdateSwitch, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls, codeEngineRow, type CodeEngineView } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -723,16 +723,9 @@ function Printers({
                 )
               }
             />
-            <span>Keep printer software up to date</span>
+            <span>{AUTO_UPDATE_LABEL}</span>
           </label>
-          <p className="muted">
-            Counterpart installs a newer version of Counterpart’s own copies by
-            itself while nothing is printing or working, checks that it starts,
-            and tells you afterwards. If it doesn’t start, the previous version
-            is put back. A printer on another install of yours is moved to
-            Counterpart’s copy, and that install isn’t changed. One run from a
-            folder you manage, or through ssh, changes only with Update.
-          </p>
+          <p className="muted">{AUTO_UPDATE_WORDS}</p>
         </>
       )}
       {packages.map((pkg) => (

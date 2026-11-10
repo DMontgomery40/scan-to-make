@@ -29,6 +29,8 @@ import {
   addressField,
   canSelectPlate,
   printNeedsCheck,
+  AUTO_UPDATE_LABEL,
+  AUTO_UPDATE_WORDS,
   autoUpdatePatch,
   autoUpdateSwitch,
 } from "../src/domain.ts";
@@ -645,8 +647,16 @@ test("Keep printer software up to date is reachable in Settings → Printers and
   const settings = readFileSync(new URL("../src/Settings.tsx", import.meta.url), "utf8");
   const printers = settings.slice(settings.indexOf("function Printers("));
   const tools = printers.slice(printers.indexOf("<h3>Printer tools</h3>"));
-  assert.ok(tools.indexOf("Keep printer software up to date") > 0, "under Printer tools");
-  assert.ok(tools.indexOf("Keep printer software up to date") < tools.indexOf("{packages.map("), "above the MCPs and their Update buttons");
+  assert.ok(tools.indexOf("{AUTO_UPDATE_LABEL}") > 0, "under Printer tools");
+  assert.ok(tools.indexOf("{AUTO_UPDATE_LABEL}") < tools.indexOf("{packages.map("), "above the MCPs and their Update buttons");
+  assert.ok(tools.indexOf("{AUTO_UPDATE_WORDS}") > 0, "with its one sentence");
+  // One set of words on every layout: the Swift apps' (CounterpartKit) and Android's copies are these, exactly.
+  assert.equal(AUTO_UPDATE_LABEL, "Keep printer software up to date");
+  assert.equal(AUTO_UPDATE_WORDS, "Counterpart updates its printer software by itself when nothing is printing or being designed, and tells you afterwards.");
+  const swift = readFileSync(new URL("../../../packages/CounterpartKit/Sources/CounterpartKit/Settings/SettingsSchema.swift", import.meta.url), "utf8");
+  const kotlin = readFileSync(new URL("../../../android/app/src/main/java/com/scantomake/counterpart/ui/PrinterSettings.kt", import.meta.url), "utf8");
+  assert.ok(swift.includes(`label: "${AUTO_UPDATE_LABEL}"`) && swift.includes(`footer: "${AUTO_UPDATE_WORDS}"`), "iPhone, iPad and Mac");
+  assert.ok(kotlin.includes(`AUTO_UPDATE_MCPS_LABEL = "${AUTO_UPDATE_LABEL}"`) && kotlin.includes(`AUTO_UPDATE_MCPS_WORDS = "${AUTO_UPDATE_WORDS}"`), "Android");
   assert.match(printers, /call<\{ settings: CompanionSettings \}>\("settings\.get"\)/);
   assert.match(printers, /call<\{ settings: CompanionSettings \}>\("settings\.set", autoUpdatePatch\(e\.target\.checked\)\)/);
   // On for a companion that says nothing else; off only when turned off; hidden for a companion without the setting.

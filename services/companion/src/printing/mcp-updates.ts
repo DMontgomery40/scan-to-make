@@ -624,8 +624,9 @@ export class McpUpdater {
    * - Counterpart's own copies (`<appPrinters>/…`, with or without a printer on them) and the npx pins it saves: updated.
    * - A global npm install (`move`): never changed, since another MCP client may run it. Its printers are moved to
    *   Counterpart's own copy at the newest version, as Move does, and are kept current there afterwards.
-   * - Never a git checkout (a working tree the person manages) or anything reached through a wrapper (`via`: ssh,
-   *   possibly another machine). The copies listing says so on their rows (`autoUpdateReason`).
+   * - Counterpart's own copy reached through an ssh command on this Mac is updated in place like any other.
+   * - Never a copy the person manages (a git checkout, a global install reached through ssh), one on another computer,
+   *   or one Counterpart can't tell (`autoUpdateKind`). The copies listing says why on their rows (`autoUpdateReason`).
    */
   autoTargets(): AutoUpdateTarget[] {
     const out: AutoUpdateTarget[] = [], seen = new Set<string>();

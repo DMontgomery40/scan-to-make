@@ -129,9 +129,9 @@ fun PrinterSettingsControls(printer: PrinterDestination, state: AppState) {
 }
 
 
-/** Q9: the same words as Linux (`apps/linux/src/Settings.tsx`), iPhone, iPad and the Mac (CounterpartKit `SettingsSchema`). */
+/** Q9: the same words as iPhone, iPad and the Mac (CounterpartKit `SettingsSchema.autoUpdateMcps`) and Linux (`domain.ts`); Linux's `domain.test.ts` fails if they differ. */
 const val AUTO_UPDATE_MCPS_LABEL = "Keep printer software up to date"
-const val AUTO_UPDATE_MCPS_WORDS = "Counterpart installs a newer version of Counterpart’s own copies by itself while nothing is printing or working, checks that it starts, and tells you afterwards. If it doesn’t start, the previous version is put back. A printer on another install of yours is moved to Counterpart’s copy, and that install isn’t changed. One run from a folder you manage, or through ssh, changes only with Update."
+const val AUTO_UPDATE_MCPS_WORDS = "Counterpart updates its printer software by itself when nothing is printing or being designed, and tells you afterwards."
 
 /**
  * Q9, `general.autoUpdateMcps`: one switch for all the computer's printer software, under Printers' printer software,

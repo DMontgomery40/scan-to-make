@@ -954,7 +954,7 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertEqual(toggle.label, "Keep printer software up to date")
         XCTAssertEqual(toggle.value as? String, "1", "on, as the companion sends it")
         XCTAssertTrue(words.isHittable)
-        XCTAssertTrue(words.label.hasPrefix("Counterpart installs a newer version of Counterpart’s own copies by itself"), words.label)
+        XCTAssertEqual(words.label, "Counterpart updates its printer software by itself when nothing is printing or being designed, and tells you afterwards.", "one sentence")
         XCTAssertLessThan(toggle.frame.minY, app.staticTexts["Counterpart’s copy 1.2.45"].frame.minY, "above the MCP copies it updates")
         if let folder = ProcessInfo.processInfo.environment["STM_SHOTS"], !folder.isEmpty {
             try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)

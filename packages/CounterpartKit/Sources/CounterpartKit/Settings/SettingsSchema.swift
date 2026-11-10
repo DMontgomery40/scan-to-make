@@ -51,11 +51,12 @@ public enum SettingsSchema {
 
     /// `general.autoUpdateMcps` (Q9): on unless the person turned it off. It sits beside the printer MCPs and their Update
     /// buttons on every layout (Linux: Settings → Printers → Printer tools), not in General, and only when the companion
-    /// sends the key: an older one has no automatic updates. The words are Linux's (`apps/linux/src/Settings.tsx`).
+    /// sends the key: an older one has no automatic updates. The same words are in Linux's `domain.ts` (`AUTO_UPDATE_LABEL`,
+    /// `AUTO_UPDATE_WORDS`) and Android's `PrinterSettings.kt`; Linux's `domain.test.ts` fails if any copy differs.
     public static let autoUpdateMcps = (
         key: "autoUpdateMcps",
         label: "Keep printer software up to date",
-        footer: "Counterpart installs a newer version of Counterpart’s own copies by itself while nothing is printing or working, checks that it starts, and tells you afterwards. If it doesn’t start, the previous version is put back. A printer on another install of yours is moved to Counterpart’s copy, and that install isn’t changed. One run from a folder you manage, or through ssh, changes only with Update."
+        footer: "Counterpart updates its printer software by itself when nothing is printing or being designed, and tells you afterwards."
     )
 
     /// `ai.choice.kind`, and which of them a phone can choose (the others need a key in the Mac's Keychain).

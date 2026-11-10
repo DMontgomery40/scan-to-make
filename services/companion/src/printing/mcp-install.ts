@@ -13,7 +13,8 @@ export type McpInstall =
   | {type: 'global'; pkg: string; prefix: string; node?: string; entry?: string}
   | {type: 'app'; pkg: string; prefix: string; node?: string; entry?: string}
   | {type: 'checkout'; pkg: string; dir: string; node?: string}
-  | {type: 'unresolved'; pkg: string; found: string};
+  /** `remote`: the other computer an ssh command reaches, when that is why it can't be told (or updated) from here. */
+  | {type: 'unresolved'; pkg: string; found: string; remote?: string};
 /**
  * A wrapped install (`ssh … 127.0.0.1` running one of the above) says how it was reached, and the directory and
  * variables its command line sets (so a fresh copy can start the same way).
@@ -45,21 +46,31 @@ export function hostEnvironment(dataRoot: string): InstallEnvironment {
 }
 
 /**
- * What an automatic update does with an install: `update` it in place (Counterpart's own copy, an npx pin it saves),
- * `move` its printers to Counterpart's own copy (a global npm install, never changed), or nothing (a checkout, a
- * wrapped command, an install it can't tell). Decided by install type, never by which MCP it is.
+ * What an automatic update does with an install (Q9; the lead, Nov 10: "A copy that Counterpart itself installed and
+ * manages stays current wherever it runs, including one reached through an ssh command ... What is never touched by
+ * itself is a copy the person manages"). Decided by install type, never by which MCP it is:
+ * - `update` in place: Counterpart's own copy (`<appPrinters>/…`), however it is reached (directly or through an ssh
+ *   command on this Mac), and an npx pin Counterpart saves (not one inside an ssh command, which it can't change);
+ * - `move` its printers to Counterpart's own copy: a global npm install started directly (the install is never changed);
+ * - nothing: a git checkout, a global install reached through ssh (moving it would change how the printer is reached),
+ *   a copy on another computer, an install Counterpart can't tell. Each says why on its row (`autoUpdateReason`).
  */
 export function autoUpdateKind(install: ResolvedMcpInstall): 'update' | 'move' | undefined {
+  if (install.type === 'app') return 'update';
   if (install.via) return undefined;
-  if (install.type === 'app' || install.type === 'npx') return 'update';
+  if (install.type === 'npx') return 'update';
   if (install.type === 'global') return 'move';
   return undefined;
 }
 /** Why a printer's MCP is never updated by itself, in the person's words; shown on its row in Settings → Printers. */
 export function autoUpdateReason(install: ResolvedMcpInstall): string | undefined {
-  if (install.via) return `Runs through an ${install.via.kind} command you manage, so Counterpart doesn't update it by itself.`;
+  if (autoUpdateKind(install)) return undefined;
+  if (install.type === 'unresolved') return install.remote
+    ? `Runs on another computer (${install.remote}), so Counterpart doesn't update it by itself.`
+    : "Counterpart can't tell how this was installed, so it doesn't update it by itself.";
   if (install.type === 'checkout') return "Runs from a folder you manage, so Counterpart doesn't update it by itself.";
-  return undefined;
+  if (install.type === 'npx') return "Runs through an ssh command that starts it with npx, which Counterpart can't change, so it doesn't update it by itself.";
+  return "Runs through ssh from an install you manage, so Counterpart doesn't update it by itself.";
 }
 /** The npm package for a backend. */
 export function packageName(backend: PrinterHandoffConfig['backend']): string { return backend; }
@@ -247,7 +258,7 @@ export function resolveMcpInstall(config: PrinterHandoffConfig, env: InstallEnvi
   const {host, user: hostUser} = sshHost(ssh.destination);
   const user = hostUser ?? ssh.user ?? env.user;
   const local = ['127.0.0.1', '::1', 'localhost'].includes(host.toLowerCase());
-  if (!local) return {type: 'unresolved', pkg, found: `${pkg} on ${host} over ssh. Counterpart can only update a copy on this Mac`};
+  if (!local) return {type: 'unresolved', pkg, found: `${pkg} on ${host} over ssh. Counterpart can only update a copy on this Mac`, remote: host};
   const identity = ssh.identity?.replace(/^~(?=\/)/, env.home);
   const publicKey = identity ? env.readFile(`${identity}.pub`) : undefined;
   // OpenSSH runs a key's forced command whatever command the client sends, so it is checked first.
