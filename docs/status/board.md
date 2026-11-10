@@ -1,0 +1,167 @@
+# Board: everything open on Counterpart
+
+The one list of open work. [`handoff.md`](handoff.md) is the one-screen summary and points here; this file holds every item.
+
+**Rules for whoever leads** (David, Nov 9: "it's kind of shocking to see the lack of discipline and tracking and crack-sealing so things don't fall through cracks ... not to mention the ideas that pop up along the way"):
+- Anything David says that is a defect, a wish or an idea gets a row here in the same turn it is said, in his words, before any work starts on it.
+- Anything a delegate, a review or another session reports as "not done", "follow-up", "unverified" or "noted" gets a row in the same turn the report is read. A report is not finished being read until its leftovers are here.
+- A row leaves only as **done** (with the PR and what proved it), or **dropped** (with who said so). Nothing is deleted quietly.
+- Every row has an owner. "Lead" is an owner; "nobody" is not: an unowned row is listed under "No owner yet" and the lead clears that section before ending a working session.
+- Update this file in the same PR as the change that moves a row, and at every merge.
+
+Owners: **Lead** = the lead session (Claude Fable 5.2, Mac, thread "Take Over Scan-to-Make Delivery"). **SM** = the state-machines session (Claude Fable 5.2, thread "Find Implicit State Machines"), which builds and hands PRs to the lead. **D:** a delegate of the lead, named by its T3 thread title. **David** = only he can do it.
+
+Last reconciled: 2026-11-10 07:50Z, main `046b1946`, by the lead.
+
+## The goal (what David cares about most)
+
+David, Nov 10: "honestly that's all i've cared about for 8.5 hours and everything in the interim is just necessary noise and clutter that must be dealt with, all i want to do is get through all this, and get to our own custom kernel." Until this turn it sat at the bottom of this file as an idea for later. It is the top row now.
+
+| ID | What | Owner | Where | Next |
+|---|---|---|---|---|
+| K1 | **Counterpart's own geometry kernel**, written from scratch for exactly what this app makes (parts that fit a scanned thing, parameter edits, scan cleanup), with no OpenCascade, no Blender, no Fusion and no 1.4 GB Python environment: small enough to ship inside the MCPs' npm packages and install with nothing. It replaces what sits behind the `cad/1` tools (`cad_run`, `cad_check_fit`) that landed in the MCP PRs on Nov 9–10, so the app does not change when the engine underneath does. The other engines it retires: the Blender bridge, the Fusion bridge and its 93 third-party tools (stage 2, Q4), then build123d itself | Lead; built by a kernel lab on the Linux machines so it never waits for the Mac's build lane | Kernel lab round 1 running since Nov 10 07:33Z on agents-136 (`~/kernel-lab`, its own local git repository; T3 thread "Kernel lab, round 1" in the agents-136 environment; Opus 5.5 xhigh, six-hour budget). From scratch in TypeScript with no geometry libraries, judged by a ten-case benchmark built from David's real parts (bottle holder, +1 mm edit, holder for three, box and separate lid, extruded profile, thin plate, clamp, embossed text, work on a scan, slicer acceptance) against build123d 0.13.0 | First lab report: representation chosen by measurement, the benchmark table, what it cannot do yet. Then loop: each round takes the worst benchmark row |
+| K2 | The seam the kernel slots into: the `cad/1` contract in both MCPs (bambu-printer-mcp #136, mcp-3D-printer-server #92) and the app using it (#439, on main). Waits on W1 to reach David's devices | Lead | Green, unpublished | W1 |
+| K3 | Everything between here and the kernel being David's daily engine: W1 (publish), Q4 (Blender and Fusion leave the app), X6 (the engine edits a designer's 3MF), and the benchmark reaching parity on fit parts | Lead | See those rows | In that order |
+
+## Right now
+
+- **A print is running**: "Wall holder for three" (`30a2a33c`), started from Counterpart 06:49Z, about 2 h 10 m, 410 layers, ends about 09:05Z. Printing beats gating: one simulator or build at a time under `~/.stm-ios.lock`, and the lead checks the print's reports at every wake and owns any failure.
+- **One simulator lane, and who is on it** (David, Nov 10: "it seems like every delegate is just waiting ... is everyone waiting on someone and it's gridlocked forever?"). It was a queue, not a deadlock, but two delegates had ended their turns "waiting for the lane" with nothing to wake them. The rule: nobody ends a turn waiting; a hold is queued as a background `lockf` command so its exit wakes its owner, holds are 10 minutes at most except a gate's test job, and the lead keeps this order: I1's test job, I9's test job, then captures (SM's Fit brief build, I5, I3). About two hours of simulator work is queued; X5 (two simulators for the gate) is what shortens it.
+- **Installed**: Mac, iPhone and iPad all on **202611100531** from main `8ee2a829`. MCP copies bambu-printer-mcp 1.1.77, mcp-3d-printer-server 1.2.58. Android and Linux (agents-136) on Nov 5 builds.
+
+## Waiting on David
+
+| ID | What | Detail |
+|---|---|---|
+| W1 | Say "publish them" | Ten MCP pull requests, all green, merge in this order (each already claims its version). bambu-printer-mcp: #132 (1.1.80) → #129 (1.1.81) → #131 (1.1.82) → #136 (1.1.83, code engine) → #137 (1.1.84, slicer hang). mcp-3D-printer-server: #91 → #87 → #90 → #92 (code engine) → #93 (slicer hang), 1.2.61–1.2.65. Then Update both MCPs in Settings → Printers and press Set Up on the Design engine row. Unblocks Q1–Q4. |
+| W2 | His word on layout exceptions | PRD §6.1 states these as fact; AGENTS.md wants his quote: Mac and Linux have no offline-Mac banner or Mac download link; Mac and Linux have no Printing screen (the Mac inspector asks "Did it fit?"); Linux posts no notifications; Android has no iCloud route; Live Activity relay, identity and milestone rows for Android and Linux; fold continuity on Mac, Android and Linux "existing single selection" (unverified). |
+| W3 | Delete the staging folders | `/Volumes/Spillover/stm-cleanup-2026-11-09/` (about 62 GB) and `/Volumes/Spillover/stm-scratch/` (delegates' scratch, about 45 GB). A hook blocks recursive deletes for agents on the Mac. |
+| W4 | Overrule or keep four lead decisions | (a) a tapped notification never replaces a New or Print sheet that is up; (b) with several devices, a progress milestone alerts on the Live Activity only when every device has one, and a missed alert on one device is not re-sent as a notification; (c) scan regularisation is allowed when labelled `assumed`; (d) the boundary check's three low-confidence flags on #439 were recorded as reviewed. |
+| W5 | Fast tiers for delegates that block a landing | Opus 5.5 fast mode, GPT-6.1 Sol priority tier. Costs more; asked Nov 10, no answer. |
+| W6 | Archive the stale agent memory | `~/.claude/projects/-Users-davidmontgomery-fleet-scan-to-make/memory/` (16 files, Oct 30–Nov 1; React Native, KAN branches). Not loaded by this session. |
+| W8 | Four buttons in one rail group on the open Duo with a project open (Printers, Settings, Share, More) | SM's judgement call on #445; before/after in `~/scan-to-make-work/state-machines-2026-11-09/duo-rail/`. |
+
+## In flight
+
+| ID | What | Owner | Where | Next |
+|---|---|---|---|---|
+| I1 | **Train 2026-11-10**: MCP update journal (#440), one way a pass ends (#441), navigation as one value (#442), the look-at-it rule in operations.md | Lead | PR #443, head `b1f08ea5`. Review done (`~/scan-to-make-work/train-2026-11-10/review-443.md`), fixes merged. | Companion rerun green; the iPhone/iPad rerun took the lock about 07:30Z → `branch_check` → merge → install Mac, iPhone, iPad. |
+| I2 | **The question's photo is unreadable; "What you sent" is a wall of 77 photos** (David, Nov 9) | D: "The question card's photo must be readable…" | PR #449 `5951dcc5`, on the second train (I9). Real-data before and after in `~/scan-to-make-work/ask-photo-2026-11-10/shots/`; the lead looked at the iPhone and iPad after-shots: the bottle is outlined and readable, the scan is one strip of five with "Your scan · 130 photos" | Lands with I9. Leftovers are X25–X28. |
+| I3 | **Nothing looks at finished screens**: `scripts/ux_screens.sh` (every screen, real project data, iPhone, iPad, Duo, Mac if it can be rendered off screen) and a first whole-app list of what is plainly wrong | D: "Look at the real app…" | No PR yet; no screens captured yet (T3's agent-device wrapper refused calls outside `device_open`, so `scripts/ux_screens.py` drives its own simulators); output `~/scan-to-make-work/ux-audit-2026-11-10/` | Captures in 10-minute holds on the lock, after the trains' test jobs → tool PR + `first-look.md`. Then the lead runs the council scoring (R1) and turns every finding into rows here. Mac screens are X29. |
+| I5 | **The project's picture**: a gallery over a list (not three fixed views); the scan stays viewable; the result wears its filament colour; a Together view with the object in every seat (fit passes record seats; a seats-only action for older projects); **a project's picture everywhere is the object alone on the stage, never a raw photo with the room in it** (David, Nov 10; replaces the Nov 9 "photo first" rule; mockups `docs/design/overhaul/screens/phone-home.jpg`, `mac-main.jpg` are the reference) | D: "The project's picture…" | PR #451 open; simulator captures still owed | Captures in short holds on the lock → the train after I9. |
+| I6 | "Is the Mac answering?" as one value, with the Android port (M8) | SM | PR #444 `7f055345`, on the second train (I9) | Lands with I9. |
+| I7 | Duo open: Printers and Settings in the edge rail (David, Nov 10 UTC) | SM | PR #445 `9202bde8`, on the second train (I9) | Lands with I9; four answers in the body (W8). |
+| I8 | The companion sends the words for how each pass ended; fixtures' wrong spellings fixed (M2 slice 1) | SM | PR #452 (draft, `c301181f`), stacked on #441 | Open as not-ready; real-data captures once I3's tool lands. |
+| I9 | **Second train of Nov 10**: #449 (I2), #444 (I6), #445 (I7), stacked on I1 | Lead | PR #456 `train/2026-11-10b`, head `26328cfd`. Two PRD §6.1 conflicts resolved by keeping every row. Muse review running (`review-456.md`); gate running from `~/fleet/stm-lane-b` (`gate-train-b-26328cfd.log`), its iPhone/iPad job queues on the lock | Review fixes → gate green → merge after I1 → install Mac, iPhone, iPad. |
+
+## Queued: owned, not started
+
+| ID | What | Owner | Waits on |
+|---|---|---|---|
+| Q1 | #413 generic setup form, then #410 MCP Update rows, as one train (triage: `~/scan-to-make-work/branch-triage-2026-11-09/triage.md`) | Lead | W1 |
+| Q2 | Print attempt and plates as one design: the #404 rework on the MCPs' `printOutcome`, a stalled slice during Print reads "not sent", "printed elsewhere" (M1 + rest of M2) | SM | W1 for the wire half; the in-memory half can start |
+| Q3 | Kinds of "Needs you" (M4), design agreed Nov 10. **A1**: the fit choice travels as fields; the "Fit brief" block leaves both clients and everything shown, including projects that already carry it (next train). **A2**: a question says its kind; a size question shows labelled number fields prefilled from the scan or the published size, plus a text box and Camera (after I2's PR). **B**: the fit rules as a `fit_sizes` prompt in both MCPs (needs W1's kind of publish). **C**: delete the companion's copy of the rules once B is installed | SM | A1 now; A2 after I2; B, C after W1 |
+| Q4 | One engine, stage 2: Blender and Fusion setup, repair, lock and launch leave the app; engine names come from the MCP | Lead | W1, David accepting the code engine on his device, and X6 |
+| Q5 | Phone draft send (M7): a send from the project page never enters `store.sending`, so Home says "Draft saved" and a reopened page can send twice (by reading) | SM | One check on David's phone with his next scan |
+| Q6 | A new TestFlight build and Mac beta from main (the public builds are from Nov 6 and predate the scan fix) | Lead | I1, I2, I5 landed and looked at |
+| Q7 | Refresh Android and Linux installs (Nov 5 builds) | Lead | After Q6 |
+| Q8 | A gate-run check that the real iPad view survives a resize (needs a driver other than XCTest's `open(URL)`), and whether a link opens a second iPad window in the shipped app (Info.plist allows multiple scenes). Starting point: the stash "F5 attempt…" on SM's #442 worktree | SM | After Q3 |
+| Q9 | **Auto-update for the printer MCPs, on by default** (David, Nov 10: "there should be an 'auto update' toggle and ours should default to on"). One setting, shown the same on every layout. The companion checks npm on a schedule and installs a newer MCP only while nothing is printing, slicing, designing or being set up; it uses the journaled install from #440, keeps the previous copy, and puts it back by itself if the new MCP does not start or does not answer the `counterpart/1` contract; it tells the person what changed afterwards, and never interrupts them to ask. Off means today's behaviour (the Update button). An update already downloads only the MCP's own package (about 1–2 MB; unchanged dependencies come from npm's cache), which is as close to "just the diff" as npm offers: there is no patch-level download | Lead (to a delegate) | I1 (needs #440 on main) |
+| P1 | **Parts, slice 1, as David set it on Nov 10.** Counterpart is not a slicer and does not find or split pieces itself: the separate objects in a model are what the slicer already reports through the printer MCP. They stay hidden until the person separates them ("don't show the separated objects ... unless the user separates them. duh"). After that each object is a part with its own print record, and Print offers which parts to print. On a **reprint**, the parts ticked are the ones whose model differs from what last printed (a change that alters other parts ticks them too, because they differ); on a first print, everything. Ask for changes can name one part. Old projects are unchanged until someone separates. All five layouts. Dropped from the proposal as overengineering: the worker pass that names the pieces and the companion's "pieces add up exactly" geometry check | Lead (to a delegate) | I5 (parts feed the gallery). Needs from both MCPs: the object list for a model that is not a designer's 3MF, a stable identity per object so "differs from what last printed" is the MCP's answer and not app geometry, and printing a chosen subset; check what `list_3mf_plate_objects` and `skip_objects` already give (bambu-printer-mcp has them; mcp-3D-printer-server does not: X18) before adding anything |
+| P2 | Parts, later slices: print any set of parts together (needs `counterpart_make_3mf {layout: "separate"}` in both MCPs); scan a second part into a project; split one scan that holds two things; plates in the parts list (with Q2) | Lead | P1; Q2; I5 |
+
+## No owner yet (the lead clears this section each session)
+
+| ID | What | Source |
+|---|---|---|
+| X3 | #439 leftovers: the iOS Set Up fixture is not stateful; "latest final run" ties on `completed_at`; a companion stopped mid-pass does not collect that attempt's runs | `~/scan-to-make-work/train-2026-11-10/review-439.md` F5, F7, F3 |
+| X4 | A designer's 3MF sent with no words still runs a pass and gets the scan-cleanup sentence | #430 report |
+| X5 | The gate: split the 22-minute iPhone and iPad job onto two simulators; give the Android job a warm Gradle cache (Maven rate-limited four cold runs; agents-173 ran them instead); `clients.yml`'s Android step assumes a Linux host | Lead, Nov 10; #437 review note 7 |
+| X6 | The code engine cannot write an edited 3MF project, so designer-3MF copies stay on Blender. Needed before Q4 can remove Blender | #439 report |
+| X7 | Code engine unverified on real Linux (confinement written, never run), Windows, Docker, network-mounted data volumes | #136, #92 reports |
+| X8 | OrcaSlicer 2.4.0-dev on this Mac crashes on every slice; a real-home Orca slice may also hang on its own crash record; the `bambu-native` helper was not checked for the same dialog hang | #137 report |
+| X9 | About 15 MB of Live Activity screenshots landed in `docs/design/screenshots/live-activity/` as review evidence; move them to the evidence folder | #437 review; the lead said it would and has not |
+| X10 | agents-136: two release scratch clones under `~/scan-to-make-work/` hold 81 commits on no remote and small uncommitted edits; archive-tag, then remove | agents-136 cleanup report |
+| X11 | PRD §0's status table still says "checked at `4baf0cd8`, Nov 4" and carries Nov 5 install rows | Lead, Nov 9 |
+| X12 | Smaller implicit state machines from the audit (`~/scan-to-make-work/state-machines-2026-11-09/state-machines.html`): four separate "can Print" rules in the print sheet (L); Mac Add Printer: changing the form does not stop a key approval (M); Mac detail pane's three flags (S); capture stop and reconstruction cancel as three Bools (M); nearby pairing code minted with no holder when the session expires during Allow (S); Android first run skips the notification-permission screen after a fresh pair (S, by reading); Android "ARCore couldn't start" set and never shown (S, by reading); Linux shell `running && !connected` means both starting and lost (S); `scan-processing.ts` has no caller in the companion: delete it with the pairing fixture's use | SM audit |
+| X13 | Live Activity and milestone alerts are unproven on a locked real phone during a real print (tonight's print is the first chance: the Mac build has them, relay on by default) | #437 reports |
+| X14 | The touch-up rules' "recognise and regularise" have never run in the installed app on a real scan | #430 |
+| X15 | The Bambu Studio crash record the lead moved aside on Nov 10 is in `/Volumes/Spillover/stm-cleanup-2026-11-09/bambu-studio-crash-state/`; until #137 is published, a new Studio crash can bring the slice hang back | Lead, Nov 10 |
+| X16 | agents-173's only Android emulator image was deleted in cleanup; the next emulator test recreates it | agents-173 cleanup report |
+| X18 | mcp-3D-printer-server's main has no `counterpart_make_3mf` and no `list_3mf_plate_objects`, so a multi-colour design cannot be made through it today, and parts slice P2 needs them ported | Parts proposal, Nov 10 |
+| X19 | Unverified in the Nov 10 train, as SM reported: #440's restart-mid-update was never reproduced on the real Mac (tests use a fake disk) and the per-journal catch in `recover()` has no test; #442's print sheet through a fold was not looked at on the Duo (unit test only) | SM, Nov 10 |
+| X20 | Unverified in the next train: #445's last merge commit was not rebuilt and it has not been seen on a real Duo; #444 was not looked at on a device and its Android port has unit tests only, no emulator run | SM, Nov 10 |
+| X21 | Two projects in David's list are both titled "Your scan": a scan sent with no words gets no name of its own | Lead, from David's Nov 10 screenshot |
+| X22 | No part of a multi-part design has been sliced or printed on its own yet | Parts proposal, Nov 10 |
+| X23 | SM's cleanup owed when its PRs are past review: worktrees under `~/.t3/worktrees/scan-to-make/` (mcp-update-journal, projects-navigation, pass-end, mac-link, duo-rail, pass-words) and derived data in `/private/tmp` (`stm-nav-dd`, `stm-link-dd`, `stm-rail-dd`, `stm-words-mac-dd`) | SM, Nov 10 (owner: SM) |
+| X24 | Old MCP copies are still in David's app folder: `printers/bambu-1.1.45/` (80 MB) and `printers/bambu-1.1.46/` (295 MB) beside the live `bambu/` and `generic/`; find what left them and whether Update should clear them (Q9 will make more) | Lead, Nov 10 |
+| X25 | A scan's frames are fetched as full HEIC files, about 3 MB each, for a thumbnail: the strip costs 15 MB and the full set is slow to fill. Needs a thumbnail route in the companion | #449's report, Nov 10 |
+| X26 | Android 8 cannot decode HEIC, so the scan strip shows placeholders there | #449's report |
+| X27 | Linux: unverified whether WebKitGTK decodes the iPhone's HEIC frames (else "Preview unavailable" tiles); the zoomed picture cannot scroll to its top-left; no screenshot or UI test of either | #449's report |
+| X28 | A size question outlines the whole bottle; it would read better with the three dimensions shown than with a box. Belongs with the kinds of asks (Q3) | #449's report |
+| X29 | The Mac app has no screenshots in #449 or in the screenshot tool: its only capture mode opens a window on David's screen. Needs an off-screen render or a capture of windows already open | #449 and I3 reports |
+| X30 | #449 was not captured on Android (no emulator on the Mac) or Linux (no dev server started); unit tests only on both | #449's report |
+| X17 | Older T3 worktrees in the MCP repos that are not this session's: mcp-3D `feat-bambu-parity-pauses`, `feat-tool-annotations`; bambu `feat-control-route-pr`, `research-control-refusal` | Lead, Nov 10 |
+
+## Carried from before Nov 9 (still open)
+
+| ID | What | Owner |
+|---|---|---|
+| C1 | A large print from Counterpart is unproven; rig plate 5 (Lifting Parts) is David's to start | David starts; Lead watches |
+| C2 | A send refused before anything was sent must read "not started" | SM, with Q2 |
+| C3 | Move title, designer and licence into `list_3mf_plates` in both MCPs, publish, install, then delete `inspectModelFile`'s 3MF parsing (PRD §8.0 item 9); port bambu 1.1.69's M624 skip-object mask exemption to mcp-3D | No owner yet |
+| C4 | The FULU drain change (pause, resume, stop) was checked only against mocked hosts: check on the P1S the next time David pauses, resumes or stops from Counterpart | Lead |
+| C5 | OctoPrint follow-ups: one printer typed two ways lists once; Bonjour TXT `path`; layer progress, Cancelobject, Spoolman, thumbnails | No owner yet |
+| C6 | Studio-audit leftovers: external-spool mapping needs a camera-checked print; AMS Lite trays 24–27; plate-filament edge cases (bambu-printer-mcp#121, mcp-3D#81) | No owner yet |
+| C7 | The rest of the PRD's not-accepted list (§0) | Lead, after X11 |
+
+## What David said, Nov 9–10, and where it went
+
+| When (local) | His words, shortened | Row |
+|---|---|---|
+| Nov 9 | "clean up all these branches … clean up space on the mac" | Done: nine remote branches → three (all waiting on W1); 50 → 200 GiB free |
+| Nov 9 | "I was presumably NEVER using the app with all fixes included … squash all the changes together … then run the review" | Done: the train (operations.md); two trains landed |
+| Nov 9 | build123d: "we should include it, and the MCP … put a note in docs and the read me … that they can take it out" | Done in #136/#92 (unpublished: W1) |
+| Nov 9 | "replace blender as well … get down to one core thing" | Stage 1 done (#439); Q4, X6 |
+| Nov 9 (about 4 pm MST) | "what if these new models are good enough to literally just write it from scratch with nothing ? Or just build our own optimized perfect library?" | **K1**, the goal |
+| Nov 9 | "This all seems weirdly slow" | X5; Mac capped at about three heavy delegates; W5 |
+| Nov 9 | Use the wait tool; message other sessions; correct them as they go | Done: operations.md; in use |
+| Nov 9 11:13 pm | "the area it's highlighting is almost impossible to see" | I2 |
+| Nov 9 11:19 pm | "highly unnecessary to show every single one of these … images" | I2 |
+| Nov 9 11:19 pm | "is there no reviewing thing that actually looks at what was just made" | I3, R1; rule in operations.md (on I1) |
+| Nov 9 11:35 pm | "i am no longer allowed to see the scanned object, anywhere, ever … it just stays tan and weird forever" | I5 |
+| Nov 9 | Duo open: Printers and Settings in the side edge rail | I7 |
+| Nov 9 | "forget about the unicorn project" | Dropped: no unicorn projects in fixtures, captures or the open list; the "reconnect Fusion for 176821af" item is dropped with it |
+| Nov 9 | "don't hardcode it to three views … we just wanted a new lid" | I5 (gallery over a list), I4 (parts) |
+| Nov 9 | Together view: "a perfect idea … it's generally painfully obvious where the object should be" | I5 |
+| Nov 9 | "how are you keeping track of this?? what is just getting forgotten" | This file |
+| Nov 9 11:58 pm | Projects grid of raw photos: "this option, of the photograph including everything in it is by far the worst ... it certainly doesn't match our mockups ... don't use it as gospel at this point" | I5 (the object alone on the stage, everywhere) |
+| Nov 9 11:58 pm | "i dunno how to update ui acceptance" | R2 |
+| Nov 10 | Reprint: "obviously ... not everything needs to be ticked ... or if one part fundamentally changes the other parts, obviously they all need new things. this is one of those things that is very very easy to massively overthink and overengineer" | P1 |
+| Nov 10 | Separate pieces: "that is literally what a slicer does? and we're not a slicer? ... we do what steve jobs would do if he was creating a frontend for an mcp server that can print from like 5 slicers ... don't show the separated objects (which again, the slicer does, so we therefore have them) unless the user separates them" | P1; a standing test for every design here: is this the slicer's job? then it is the MCP's, and the app shows the result |
+| Nov 10 | "counterpart is the glittery friendly frontend ... the backend is the mcps ... half of what this app does if not more, is really an update to the mcps ... DOES THE APP STORE IN IOS TAKE KINDLY TO 4X DAILY UPDATES???" | AGENTS.md "The app staples onto the MCPs" (his words added); every brief states which half is the MCPs'; watch rows Q4 (engine names still in app code), P1 (parts are the MCPs' objects), Q2 (print truth from the MCPs' field) |
+| Nov 10 | "like many (most?) apps in todays world, there should be an 'auto update' toggle and ours should default to on. would be cool if we could just pull the diff" | Q9 |
+| Nov 10 | "i really hope it's on the todo list everything we talked about around 4pm mst regarding the whole potential replacement or partial replacement of other mcps and the separate kernel build specifically for this app's needs ... i sure hope that's highlighted on your list" | It was not highlighted (it was idea L1). Now K1–K3 at the top, and started |
+| Nov 10 | "it seems like every delegate is just waiting but if every delegate is waiting is everyone waiting on someone and it's gridlocked forever?" | Right now (the lane rule), X5 |
+| (seen by the lead in his screenshots) | A "Fit brief:" block he never wrote is shown as his request | Q3 |
+| (seen by the lead) | A size question offers Camera, Photos, Best guess | Q3 |
+
+## Reviews owed
+
+| ID | What | When |
+|---|---|---|
+| R1 | Council scoring of real-data screenshots (four questions; nine or more from each reviewer) for every train that changes what a person sees | From the first train after I3 lands; I2 and I5 carry their own before/after sets meanwhile |
+| R2 | **A reference for every screen.** The 48 mockups in `docs/design/overhaul/screens/` showed the app David wants and nothing compares the real app with them. After I3's first run: put each real-data screenshot beside its mockup; sort every difference into a decision made since (update the mockup), a regression (a row here, fix the app), or a mockup that was wrong (the 64-point question thumbnail is in `phone-ask.jpg` too); keep an index of screen → reference → date confirmed. R1 then scores against the reference, not only the four questions | Lead (delegate after I3) |
+
+## Ideas for later (not committed work)
+
+| ID | Idea | From |
+|---|---|---|
+| L2 | The Together view shows the clearance per seat ("0.8 mm clear") from the code engine's fit check | Lead, Nov 10; David: "note that for later" |
+| L4 | Parts: scanning a part into an existing project and the Mac telling two things in one scan apart are in the proposal as later slices | Parts proposal |
+| L6 | The design worker's rules ship inside the companion (so inside the Mac app). The MCPs already serve prompts (`fdm_design`, `fdm_slicing`, `cad_design`); anything in those rules that has to be tuned as printers, slicers or the engine change belongs in an MCP prompt, so it can change without an app release | Lead, Nov 10 |
+| L3 | Jira instead of this file: the lead's Atlassian connector is not authorised in this kind of session; a markdown board in the repo is readable by every agent on every machine | David, Nov 10 |
+
+## Done since Nov 9 (proof in each PR)
+
+#429 docs · #430 worker rules per pass, recognise and regularise · #434 closed bottom after support removal · #437 the Nov 9 train (#436 pass limits and resume, #431–#433 home and print UX, #435 relay default, #411 and #412 Live Activity identity and milestone alerts) · #438 handoff · #439 one engine, stage 1 · MCP PRs opened and green: bambu #136, #137; mcp-3D #92, #93; #91's Node 18 failure fixed · Mac disk 50 → 200 GiB free · slicing restored on David's Mac (crash record moved aside, X15).
