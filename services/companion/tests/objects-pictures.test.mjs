@@ -237,3 +237,50 @@ test("a designer's file is drawn whole unless every plate has its own picture", 
   assert.deepEqual(pictureSpecs(project(receipt(['original/p1.png', undefined, 'original/p3.png']))), {part: {model: 'original/abc-six.3mf', zUp: true}});
   assert.deepEqual(pictureSpecs(project(receipt(['original/p1.png', 'original/p2.png']))), {});
 });
+
+// The same while the project is already queued (right after an install, every project redraws at once): the queued
+// step takes the old picture down before it draws.
+test("a file replaced while its project is already queued never draws with the old file's picture on the record", async t => {
+  const root = await tempDir('objects-pictures-queued-');
+  t.after(() => rm(root, {recursive: true, force: true, maxRetries: 10, retryDelay: 20}));
+  const store = new ObjectStore(join(root, 'objects'));
+  let hold = false, release, seenDuringDraw;
+  const service = new ObjectService({store, runTouchup: async () => { throw new Error('unused'); }, stlInfo: async () => undefined, claudePath: '/unused',
+    handoff: {backend: 'bambu-printer-mcp', process: {command: '/usr/bin/true'}},
+    drawPicture: async (dir, spec, output) => {
+      if (hold) { await new Promise(resolve => { release = resolve; }); hold = false; }
+      if (spec.model?.endsWith('.3mf') && seenDuringDraw === undefined && drawing) seenDuringDraw = (await store.get(box.id)).pictures?.part ?? null;
+      await writeFile(output, `png ${spec.model}`); return true;
+    }});
+  t.after(() => service.close());
+  let drawing = false;
+  // Listed newest first: the other project is queued ahead of the box.
+  const box = await store.create('A box', 'fit');
+  await new Promise(resolve => setTimeout(resolve, 5));
+  const other = await store.create('Another', 'fit');
+  for (const [object, model, body] of [[other, 'current/model.stl', 'solid x\nendsolid x\n'], [box, 'current/model.3mf', 'PK v1']]) {
+    await mkdir(join(store.dir(object.id), 'current'), {recursive: true});
+    await writeFile(join(store.dir(object.id), model), body);
+    await store.update(object.id, o => ({...o, state: 'ready', current: {model, renders: ['current/renders/1.png']}}));
+  }
+  await service.list(); await service.picturesDrawn();
+  const v1 = (await store.get(box.id)).pictures.part;
+  assert.ok(v1);
+  // Another project's drawing holds the queue; the box is queued behind it with v1 still current.
+  await writeFile(join(store.dir(other.id), 'current', 'model.stl'), 'solid y\nendsolid y\n');
+  hold = true;
+  await service.list();
+  for (let i = 0; i < 200 && !release; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(release, "the other project's drawing holds the queue");
+  // While queued, the box's file is replaced: a second list() finds it already pending.
+  await writeFile(join(store.dir(box.id), 'current', 'model.3mf'), 'PK v2, another file');
+  await service.list();
+  drawing = true;
+  release?.();
+  await service.picturesDrawn();
+  assert.equal(seenDuringDraw, null, "v1's picture was off the record before v2 was drawn");
+  const after = await store.get(box.id);
+  assert.ok(after.pictures.part);
+  assert.notEqual(after.pictures.part, v1);
+  assert.equal(after.pictureStates, undefined);
+});

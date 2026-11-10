@@ -172,6 +172,8 @@ export class ProjectPictures {
     this.#queue = this.#queue.then(async () => {
       try {
         await takenDown;
+        // Again here: a project already queued when its file changed skipped the early take-down.
+        await this.#takeDownStale(await this.#read(object.id).catch(() => object), dir).catch(() => undefined);
         const fresh = await this.#read(object.id).catch(() => object);
         const {specs, wanted} = await this.#wanted(fresh, dir);
         const have = fresh.pictures ?? {}, haveStates = fresh.pictureStates ?? {};
