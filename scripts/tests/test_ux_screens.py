@@ -126,7 +126,7 @@ class UxScreensTests(unittest.TestCase):
         held = {'info': {'record': {'baseUrl': 'http://127.0.0.1:9080'}, 'objects': [], 'url': 'http://127.0.0.1:9080'},
                 'manifest': {'ids': {name: f'{name}-id' for name, _, _ in ux_screens.PROJECTS}, 'copiedAt': 'now'},
                 'processes': [], 'served': []}
-        args = argparse.Namespace(screens='home', project=[], redo=False, max_minutes=10)
+        args = argparse.Namespace(screens='home', project=[], redo=False, max_minutes=10, fresh_simulator=True)
         refusal = 'session ux-screens-iphone is bound to another simulator'
 
         def agent_device(device, *command, **_):

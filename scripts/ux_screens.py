@@ -758,11 +758,11 @@ def capture(args, out: Path, work: Path, keys: list[str], held: dict) -> int:
     app = build_app(work)
     built = time.time()
     left, captured, why = run_devices(keys, items, app, out, record, done, STARTED + args.max_minutes * 60 - 90,
-                                      fresh_simulator=args.fresh_simulator)
+                                      fresh_simulator=getattr(args, 'fresh_simulator', False))
     minutes = (time.time() - STARTED) / 60
     load = sampler.stop()
     run = {'run': RUN_ID, 'source': ctx['info'].get('source'), 'condition': ctx['info'].get('condition'), 'devices': keys,
-           'freshSimulator': args.fresh_simulator, 'images': captured, 'screens': len(items) - left,
+           'freshSimulator': getattr(args, 'fresh_simulator', False), 'images': captured, 'screens': len(items) - left,
            'buildSeconds': round(built - STARTED), 'captureSeconds': round(time.time() - built), **load}
     with open(out / 'runs.jsonl', 'a') as file: file.write(json.dumps(run) + '\n')
     log(f'load average during the hold: {load["loadBefore"]:.0f} before, mean {load["loadMean"]:.0f}, max {load["loadMax"]:.0f}; '
