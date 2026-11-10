@@ -10,15 +10,18 @@ extension Project {
 
 /// One id for each note a person writes, kept across every try at sending it. The Mac records a note once per id,
 /// so a send whose reply was lost and is pressed again does not become a second message and a second design pass
-/// (Nov 10, "Guitar pick"). Changed words are a new note; so are the same words after a send that worked.
+/// (Nov 10, "Guitar pick"). A note is its words and its attachments: changed words are a new note, so are the same
+/// words with other photos (the Mac ignores a repeat's photos, so they would never attach), and so are the same
+/// words after a send that worked.
 public struct NoteAttempts: Equatable, Sendable {
     private var last: [String: Message] = [:]
-    private struct Message: Equatable, Sendable { var text: String; var id: String }
+    private struct Message: Equatable, Sendable { var text: String; var photos: [String]; var id: String }
     public init() {}
-    public mutating func id(for text: String, in project: String) -> String {
-        if let message = last[project], message.text == text { return message.id }
+    /// `photos` is whatever names this note's attachments on this client (uploaded names, or local file paths).
+    public mutating func id(for text: String, photos: [String] = [], in project: String) -> String {
+        if let message = last[project], message.text == text, message.photos == photos { return message.id }
         let id = UUID().uuidString
-        last[project] = Message(text: text, id: id)
+        last[project] = Message(text: text, photos: photos, id: id)
         return id
     }
     /// The Mac has it, or the queue now holds it under that id.

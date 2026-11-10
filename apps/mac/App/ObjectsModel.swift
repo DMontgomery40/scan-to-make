@@ -776,10 +776,11 @@ struct SocketObjects: ObjectsCompanion {
             case .correct:
                 let text = note.trimmingCharacters(in:.whitespacesAndNewlines)
                 // One id for this note across every try, so the companion never records it twice.
-                messageId = capabilities?.messageIds == true ? attempts.id(for: text, in: id) : nil
                 let held = objects.first(where: { $0.id == id })?.pendingFollowup == text
+                let names = capabilities?.messagePhotos == true && !held ? objects.first(where: { $0.id == id }).map { corrections.availablePhotos($0) ?? [] } : nil
+                // The id is the note's words and its attachments: two photo-only notes are two notes.
+                messageId = capabilities?.messageIds == true ? attempts.id(for: text, photos: photos.map(\.path) + (names ?? []), in: id) : nil
                 if let messageId {
-                    let names = capabilities?.messagePhotos == true && !held ? objects.first(where: { $0.id == id }).map { corrections.availablePhotos($0) ?? [] } : nil
                     updated = try await companion.correct(id, note: text.isEmpty ? "See the photos I added." : text,
                         photos: photos.map(\.path), photoNames: names, messageId: messageId)
                 } else

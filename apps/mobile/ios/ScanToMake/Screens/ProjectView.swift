@@ -784,7 +784,8 @@ struct ProjectView: View {
         guard !text.isEmpty else { return }
         writing = false
         // One id for this note across every try, so the Mac never records it twice.
-        let messageId = attempts.id(for: text, in: object.id)
+        let photoNames = store.corrections.availablePhotos(object)
+        let messageId = attempts.id(for: text, photos: photoNames ?? [], in: object.id)
         if object.changesWait {
             // The Mac takes changes between passes; this one is sent the moment the pass ends.
             store.queue(note: text, for: object.id, messageId: messageId)
@@ -794,7 +795,7 @@ struct ProjectView: View {
         }
         act {
             do {
-                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object), messageId: messageId)
+                let next = try await store.mac.correct(object.id, text, photoNames: photoNames, messageId: messageId)
                 store.corrections.sent(text, for: object.id)
                 attempts.settled(object.id)
                 note = ""; section = .activity
