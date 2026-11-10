@@ -74,6 +74,7 @@ def main():
     ap.add_argument('--active-hours', type=float, default=6.0, help='older branches are reported as stale, not blockers')
     ap.add_argument('--no-fetch', action='store_true')
     ap.add_argument('--boundary-reviewed', metavar='WHY', help='merge although the boundary check flagged or could not check the diff; printed in the gate output')
+    ap.add_argument('--lands-first', metavar='WHY', help='this branch lands before the active branches it conflicts with, and their owners know they rebase on it; printed in the gate output')
     a = ap.parse_args()
     if not a.no_fetch:
         subprocess.run(['git', 'fetch', '-q', '--prune', 'origin'], check=True)
@@ -122,8 +123,11 @@ def main():
             tree, conflicts = merge(a.main, first)
             if conflicts: continue  # that branch can't land as-is anyway; reported on its own line
             clashes |= set(merge(commit_of(tree, git('rev-parse', a.main).stdout.strip()), second)[1])
-        if clashes:
-            problems.append(f'conflicts with {other} in {", ".join(sorted(clashes))}: agree the order; the later one rebases on the earlier.')
+        if clashes and a.lands_first:
+            warnings.append(f'conflicts with {other} in {", ".join(sorted(clashes))}: this branch lands first ({a.lands_first}); {other} rebases on it.')
+        elif clashes:
+            problems.append(f'conflicts with {other} in {", ".join(sorted(clashes))}: agree the order; the later one rebases on the earlier '
+                            '(the one that lands first passes --lands-first "<who agreed, and that the other rebases>").')
         else:
             warnings.append(f'shares {", ".join(shared)} with {other} (merges cleanly): re-test whichever lands second.')
     # PRD §8.0: printer/slicer/firmware/Blender/Fusion knowledge belongs in the MCPs, not app code.

@@ -42,6 +42,7 @@ import {createCaptureConverter} from '../capture-converter.js';
 import {ProjectPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
+import {passResume, withPassEnded, type PassEnd} from './pass-end.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
 import {defaultReconstructRunner, RECONSTRUCTION_FAILED, ReconstructionReviewNeeded, type Reconstruct, type ReconstructInputs, type ScanToStl} from './reconstruct.js';
 import {captureCameraDigest, validateCaptureCamera} from './capture-camera.js';
@@ -2563,8 +2564,9 @@ export class ObjectService {
         ? [...new Set([fromCurrent && isMultipart(object) ? object.current!.model : designer, designer])].map(path => join(dir, path))
         : fromCurrent ? [join(dir, currentMesh!)] : scanName ? [join(dir, 'scan', scanName)] : [];
       const previous = object.passes.at(-1);
-      const resume = previous?.sessionId && previous.dir && previous.resumable === true && worker?.browser !== false
-        ? {sessionId: previous.sessionId, passDir: previous.dir, ...(previous.sessionCwd ? {sessionCwd: previous.sessionCwd} : {}),
+      const continued = worker?.browser !== false ? passResume(previous) : undefined;
+      const resume = continued
+        ? {...continued,
           ...(opts.photos?.length ? {photos: photos.filter(path => opts.photos!.includes(basename(path)))} : {})} : undefined;
       const input: TouchupInput = {worker, ...(resume && !opts.locate ? {resume} : {}), root: join(dir, 'passes'), objectId: 'pass', scan, photos, currentModel: fromCurrent && !designer, handoff: this.#handoff(), claudePath: this.#deps.claudePath,
         ...(opts.locate ? {locate: true, ...(object.current?.summary ? {summary: object.current.summary} : {})} : {}),
@@ -2606,9 +2608,8 @@ export class ObjectService {
   /** Keeps the designer's file as published (original and current), credits the designer, or asks for the file. */
   async #finishPublished(id: string, startedAtMs: number, result: PublishedResult): Promise<StmObject> {
     const store = this.#deps.store, dir = store.dir(id), now = Date.now();
-    const endPass = (o: StmObject, status: string, summary?: string) => o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs
-      ? {...p, ...(_estimate ? {estimate: _estimate} : {})}
-      : {...p, endedAtMs: now, status, resumable: false, stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), ...(summary ? {summary: this.#publicText(summary)} : {})});
+    const endPass = (o: StmObject, status: 'done' | 'needs_file' | 'failed', summary?: string) =>
+      withPassEnded(o.passes, startedAtMs, status === 'failed' ? {status, resumable: false} : {status}, now, summary ? {summary: this.#publicText(summary)} : {});
     const credit = result.model ? {url: result.model.url, site: result.model.site, title: result.model.title, ...(result.model.designer ? {designer: result.model.designer} : {}),
       ...(result.model.licence ? {licence: result.model.licence} : {})} : undefined;
     // A starter whose files reached ~/Downloads while the pass ran is ready, whatever the worker concluded (Nov 6,
@@ -2769,8 +2770,7 @@ export class ObjectService {
       ...(object.credit?.url ? {url: object.credit.url} : {}), ...(object.credit?.title ? {modelName: object.credit.title} : {}), ...(object.credit?.site ? {site: object.credit.site} : {}),
       accepts: starter ? ['3mf' as const] : ['3mf' as const, 'stl' as const], answers: ['file' as const], status: 'open' as const, askedAtMs: now};
     const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined, failure: undefined, question: undefined, ask,
-      ...(startedAtMs === undefined ? {} : {passes: o.passes.map(p => p.startedAtMs !== startedAtMs ? p : {...p, endedAtMs: now, status: 'needs_file', resumable: false,
-        stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item)})})}));
+      ...(startedAtMs === undefined ? {} : {passes: withPassEnded(o.passes, startedAtMs, {status: 'needs_file'}, now)})}));
     await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, data: {askId: ask.id}, detail: {question: ask.question}});
     return this.#changed(updated);
   }
@@ -2914,8 +2914,7 @@ export class ObjectService {
       publishedSelection: {fileIndex: 0, plateIndex: firstPlate?.index ?? 0, sliced: firstPlate?.sliced ?? false},
       ...(!o.title && (first.title || info.model?.title) ? {title: first.title ?? info.model!.title} : {}), ...(credit.url ? {credit: credit as NonNullable<StmObject['credit']>} : {}),
       ...(ask ? {ask} : o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
-      passes: info.startedAtMs === undefined ? o.passes : o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== info.startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})}
-        : {...p, endedAtMs: now, status: 'done', resumable: false, stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), ...(summary ? {summary} : {})})}));
+      passes: info.startedAtMs === undefined ? o.passes : withPassEnded(o.passes, info.startedAtMs, {status: 'done'}, now, summary ? {summary} : {})}));
     // A starter that is ready keeps the kit it accepted, once per computer: Try Again and a second tap never download it.
     const starter = object.starterId ? this.#starter(object.starterId) : undefined;
     // Only a whole kit (#kit) is recorded as one: a worker's or the person's partial or wrong set is kept as files, never replayed.
@@ -3145,10 +3144,8 @@ export class ObjectService {
     const updated = await store.update(id, o => ({...o, state: 'needs-closeup', progress: undefined,
       failure: undefined, ask, reconstructionReview: review,
       question: {closeup: needed.review.kind === 'region' ? 'which part is the object' : 'how big the object is'},
-      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})}
-        : {...p, endedAtMs: now, status: 'needs_closeup', resumable: false,
-          stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
-          activity: this.#activity(p.activity, [{atMs: now, kind: 'message', text: question}])})}));
+      passes: withPassEnded(o.passes, startedAtMs, {status: 'needs_closeup'}, now,
+        pass => ({activity: this.#activity(pass.activity, [{atMs: now, kind: 'message', text: question}])}))}));
     await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, data: {askId: ask.id}, detail: {question}});
     return this.#changed(updated);
   }
@@ -3252,6 +3249,12 @@ export class ObjectService {
       ? `${result.limit ? limitWords(result.limit) : `Stopped at the ${result.reason?.includes('time') ? 'time' : 'step'} limit`}. ${current ? 'Try again or review the saved checkpoint.' : 'Try again.'}`
       : result.reason ?? 'The touch-up stopped without a model.';
     const now = Date.now();
+    // The worker's own verdict on continuing (runner.ts: only a limit or an exit without a final answer may), carried
+    // by the endings that can continue; an answer or a question never does.
+    const resumable = result.resumable ?? false;
+    const end: PassEnd = interrupted ? {status: 'interrupted', resumable, ...(result.limit ? {limit: result.limit} : {})}
+      : result.status === 'capped' || result.status === 'failed' ? {status: result.status, resumable, ...(result.limit ? {limit: result.limit} : {})}
+      : {status: result.status};
     // A changed model hasn't been shown to work yet: its first print asks "Did it fit?" again. A pass that
     // changed nothing leaves the outcome alone, and a Done project stays Done.
     const changed = !!current && result.status !== 'unchanged';
@@ -3262,16 +3265,15 @@ export class ObjectService {
       ...(o.kind ? {} : {kind}),
       ...(ask ? {ask} : {}),
       ...(state === 'needs-closeup' ? {question: {closeup: result.closeup ?? result.ask?.question ?? 'a part of the object'}} : {}),
-      ...(state === 'failed' ? {failure} : {}),
-      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: interrupted ? 'interrupted' : result.status,
-        stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
+      ...(state === 'failed' ? {failure, failedPass: startedAtMs} : {}),
+      passes: withPassEnded(o.passes, startedAtMs, end, now, p => ({
         ...(result.engine ? {engine: result.engine} : {}), ...(result.note ? {engineNote: this.#publicText(result.note)} : {}),
         ...(state === 'failed' || seatNote ? {activity: this.#activity(p.activity, [...(seatNote ? [{atMs: Date.now(), kind: 'message' as const, text: seatNote}] : []),
           ...(state === 'failed' ? [{atMs: Date.now(), kind: 'message' as const, text: failure}] : [])])} : {}),
         ...(result.summary ? {summary: result.summary} : {}), seconds: result.stats.seconds, toolCalls: result.stats.toolCalls,
-        ...(result.sessionId ? {sessionId: result.sessionId} : {}), ...(result.sessionCwd ? {sessionCwd: result.sessionCwd} : {}), resumable: result.resumable ?? false, checkpoints: result.checkpoints,
-        ...(result.limit ? {limit: result.limit} : {}), ...(result.resume ? {resume: result.resume} : {}),
-        ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir})}));
+        ...(result.sessionId ? {sessionId: result.sessionId} : {}), ...(result.sessionCwd ? {sessionCwd: result.sessionCwd} : {}), checkpoints: result.checkpoints,
+        ...(result.resume ? {resume: result.resume} : {}),
+        ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir}))}));
     const saving = updated.passes.find(p => p.startedAtMs === startedAtMs)?.stages?.find(item => item.id === 'saving');
     if (saving?.endedAtMs !== undefined) void this.#deps.passTimings?.record(kind, result.engine ?? 'blender', 'saving', (saving.endedAtMs - saving.startedAtMs) / 1000).catch(() => undefined);
     const size = sizeText(updated.current?.sizeMm);
@@ -3320,13 +3322,12 @@ export class ObjectService {
     const summary = seats ? (result?.summary ? this.#publicText(result.summary) : undefined) : reason;
     const updated = await store.update(id, o => ({...o, state: o.state === 'touching-up' ? before : o.state, progress: undefined,
       ...(seats && o.current ? {current: {...o.current, seats}} : {}),
-      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now,
-        status: seats ? 'done' : this.#closed ? 'interrupted' : 'failed', resumable: false,
-        stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
+      // Closed through endPass like every pass; a locate pass never continues its session.
+      passes: withPassEnded(o.passes, startedAtMs, seats ? {status: 'done'} : {status: this.#closed ? 'interrupted' : 'failed', resumable: false}, now, p => ({
         ...(result?.engine ? {engine: result.engine} : {}), ...(summary ? {summary} : {}),
         ...(reason ? {activity: this.#activity(p.activity, [{atMs: now, kind: 'message', text: reason}])} : {}),
         ...(result ? {seconds: result.stats.seconds, toolCalls: result.stats.toolCalls, ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {})} : {}),
-        ...(result?.passDir ? {dir: result.passDir} : {})})}));
+        ...(result?.passDir ? {dir: result.passDir} : {})}))}));
     await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['current', 'passes']}});
     return this.#changed(updated);
   }
@@ -3353,11 +3354,12 @@ export class ObjectService {
     const message = this.#closed ? 'Interrupted when your computer stopped Counterpart.' : this.#publicText(error instanceof Error ? error.message : String(error));
     console.error(`pass failed: project ${id}, pass ${new Date(startedAtMs).toISOString()}: ${message.replace(/\s+/g, ' ').slice(0, 600)}`);
     const now = Date.now();
-    const updated = await this.#deps.store.update(id, o => ({...o, state: 'failed', failure: message, progress: undefined,
-      passes: o.passes.map(({estimate: _estimate, ...p}) => p.startedAtMs !== startedAtMs ? {...p, ...(_estimate ? {estimate: _estimate} : {})} : {...p, endedAtMs: now, status: this.#closed ? 'interrupted' : 'failed',
-        resumable: this.#closed && p.resumable === true && !!p.sessionId,
-        stages: p.stages?.map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item),
-        activity: this.#activity(p.activity, [{atMs: now, kind: 'message', text: message}])})}));
+    // A pass that ends by throwing never continues its session (it may have thrown after a finished answer), unless
+    // the app itself was stopping and the worker still had a live one.
+    const closed = this.#closed;
+    const updated = await this.#deps.store.update(id, o => ({...o, state: 'failed', failure: message, failedPass: startedAtMs, progress: undefined,
+      passes: withPassEnded(o.passes, startedAtMs, p => closed ? {status: 'interrupted', resumable: p.resumable === true} : {status: 'failed', resumable: false}, now,
+        p => ({activity: this.#activity(p.activity, [{atMs: now, kind: 'message', text: message}])}))}));
     await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: message}});
     return this.#changed(updated);
   }
