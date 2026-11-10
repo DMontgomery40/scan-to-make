@@ -1,0 +1,75 @@
+{
+  "comment": "A fit's request: what the person typed, and how its exact size is settled, as fields (contracts FitSchema). `create` is the body New sends; `legacy` is a project saved when clients appended the choice to the request as text; `shown` is what every client displays as the request.",
+  "typed": "A wall clip that holds this bottle upright.",
+  "cases": [
+    {
+      "name": "lookup",
+      "create": {
+        "instructions": "A wall clip that holds this bottle upright.",
+        "kind": "fit",
+        "fit": {
+          "sizeSource": "lookup"
+        }
+      },
+      "legacy": "A wall clip that holds this bottle upright.\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size.",
+      "legacyFit": {
+        "sizeSource": "lookup"
+      },
+      "worker": "A wall clip that holds this bottle upright.\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: identify the exact product and variant from the scan and photos, look up the manufacturer's published dimensions, and ask me to confirm the product and size before designing anything that depends on them. If you cannot identify it exactly, ask for caliper measurements or a photo with calipers instead of silently using the scan's size."
+    },
+    {
+      "name": "measured",
+      "create": {
+        "instructions": "A wall clip that holds this bottle upright.",
+        "kind": "fit",
+        "fit": {
+          "sizeSource": "measured",
+          "measured": [
+            {
+              "id": "longest",
+              "label": "longest side",
+              "mm": 107
+            },
+            {
+              "id": "middle",
+              "label": "middle side",
+              "mm": 63.5
+            }
+          ]
+        }
+      },
+      "legacy": "A wall clip that holds this bottle upright.\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions I measured on the real object: longest 107 mm, middle 63.5 mm. Treat these as the exact overall size. If the scan differs by more than 2 mm or 2%, ask before designing anything fit-critical.",
+      "legacyFit": {
+        "sizeSource": "measured",
+        "measured": [
+          {
+            "id": "longest",
+            "label": "longest",
+            "mm": 107
+          },
+          {
+            "id": "middle",
+            "label": "middle",
+            "mm": 63.5
+          }
+        ]
+      },
+      "worker": "A wall clip that holds this bottle upright.\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions I measured on the real object: longest side 107 mm, middle side 63.5 mm. Treat these as the exact overall size. If the scan differs by more than 2 mm or 2%, ask before designing anything fit-critical."
+    },
+    {
+      "name": "scan",
+      "create": {
+        "instructions": "A wall clip that holds this bottle upright.",
+        "kind": "fit",
+        "fit": {
+          "sizeSource": "scan"
+        }
+      },
+      "legacy": "A wall clip that holds this bottle upright.\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: use the scan's measured size, say the clearance you allowed, and mark every fit-critical size as estimated.",
+      "legacyFit": {
+        "sizeSource": "scan"
+      },
+      "worker": "A wall clip that holds this bottle upright.\n\nFit brief:\n- The scanned object is the thing the printed part must fit, hold, mount or adapt to. Do not print a copy of the scanned object itself.\n- Dimensions: use the scan's measured size, say the clearance you allowed, and mark every fit-critical size as estimated."
+    }
+  ]
+}

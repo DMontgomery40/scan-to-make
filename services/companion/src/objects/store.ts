@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import type {Fit} from '@scan-to-make/contracts/counterpart';
 import type {TouchupActivity, TouchupChange, WorkerLimit} from '../touchup/runner.js';
 import type {PassStage} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
@@ -65,7 +66,10 @@ export interface StmObject {
   id: string;
   createdAtMs: number;
   updatedAtMs: number;
+  /** What the person typed. A project saved before `fit` was a field may still end with the "Fit brief:" block a client appended (`fitRequest`). */
   instructions?: string;
+  /** How a fit's exact size is settled, as New sent it (contracts `FitSchema`). */
+  fit?: Fit;
   preferences?: ProjectPreferences;
   /** A configured destination id; process settings and credentials stay in the companion. */
   printerDestinationId?: string;
@@ -193,10 +197,10 @@ export class ObjectStore {
     return join(this.#root, id);
   }
 
-  async create(instructions?: string, kind?: 'fit' | 'copy' | 'published'): Promise<StmObject> {
+  async create(instructions?: string, kind?: 'fit' | 'copy' | 'published', fit?: Fit): Promise<StmObject> {
     const now = Date.now();
     const object: StmObject = {id: randomUUID(), createdAtMs: now, updatedAtMs: now, state: 'new', photos: [], requestPhotos: [], pendingPhotos: [], messages: [], passes: [],
-      ...(instructions?.trim() ? {instructions: instructions.trim()} : {}), ...(kind ? {kind} : {})};
+      ...(instructions?.trim() ? {instructions: instructions.trim()} : {}), ...(kind ? {kind} : {}), ...(fit ? {fit} : {})};
     await mkdir(this.dir(object.id), {recursive: true});
     await this.#write(object);
     return object;

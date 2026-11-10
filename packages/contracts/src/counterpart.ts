@@ -324,6 +324,24 @@ export const ChangeSchema = z.strictObject({
 });
 export type Change = z.infer<typeof ChangeSchema>;
 
+/**
+ * One size of a real object, in millimetres. `id` is opaque (nothing may switch on it); `label` says what was
+ * measured in words a person can act on ("longest side", "width at the waist").
+ */
+export const SizeSchema = z.strictObject({ id: text(64).min(1), label: text(120).min(1), mm: z.number().positive().max(10_000) });
+export type Size = z.infer<typeof SizeSchema>;
+/**
+ * How a fit gets its exact size, chosen in New: the maker's published size confirmed by the person (`lookup`), the
+ * person's own measurements (`measured`), or the scan (`scan`). Sent as fields beside `instructions`, which holds
+ * only what the person typed; the companion composes the worker's brief from this.
+ */
+export const FitSchema = z.strictObject({
+  sizeSource: z.enum(['lookup', 'measured', 'scan']),
+  measured: z.array(SizeSchema).min(1).max(6).optional(),
+}).refine(fit => fit.sizeSource !== 'measured' || !!fit.measured?.length, { message: 'measured sizes are required when the person measured' })
+  .refine(fit => fit.sizeSource === 'measured' || fit.measured === undefined, { message: 'measured sizes go with the measured source only' });
+export type Fit = z.infer<typeof FitSchema>;
+
 export const AskSchema = z.strictObject({
   id: uuid,
   question: text(300),

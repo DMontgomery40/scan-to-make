@@ -9,7 +9,8 @@ import {basename, join, isAbsolute, sep} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
 import {InvalidAnswerError, InvalidCaptureCameraError, InvalidCaptureManifestError, InvalidStateError, passKind, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
-import {CompanionSettingsPatchSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
+import {CompanionSettingsPatchSchema, FitSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
+import {fitRequest} from './fit.js';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
@@ -76,7 +77,11 @@ export function projectSettingsView(object: StmObject) {
   return {status: projectStatus(object), archived: !!object.archived, ...(object.printerDestinationId ? {printerDestinationId: object.printerDestinationId} : {}), ...object.preferences};
 }
 
-export function publicObject(object: StmObject): PublicObject {
+export function publicObject(stored: StmObject): PublicObject {
+  // What the person typed, and the fit choice as fields: never the brief a client once appended to the request.
+  const {typed, fit} = fitRequest(stored);
+  const {instructions: _instructions, fit: _fit, ...rest} = stored;
+  const object: StmObject = {...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {})};
   const failure = currentFailureText(object.failure);
   // Carry this worker stop's retry decision to every client, without exposing its local recovery fields.
   // A later printer failure must not inherit Retry from an older worker stop.
@@ -262,8 +267,10 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           if (method === 'GET') { await authorize(READ); return send(response, 200, {objects: (await service.list()).map(publicObject)}); }
           if (method === 'POST') {
             await authorize(WRITE);
-            const input = await json<{instructions?: unknown; kind?: unknown; url?: unknown; starterId?: unknown}>(request);
+            const input = await json<{instructions?: unknown; kind?: unknown; url?: unknown; starterId?: unknown; fit?: unknown}>(request);
             const {instructions, kind, url: link, starterId} = input;
+            const fit = input.fit === undefined ? undefined : FitSchema.safeParse(input.fit);
+            if (fit && !fit.success) throw new HttpFailure(400, 'invalid-request');
             if (starterId !== undefined) {
               if (typeof starterId !== 'string' || Object.keys(input).length !== 1) throw new HttpFailure(400, 'invalid-request');
               return send(response, 201, {object: publicObject(await service.addStarter(starterId))});
@@ -271,19 +278,23 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpFailure(400, 'invalid-request');
             if (kind !== undefined && kind !== 'fit' && kind !== 'copy' && kind !== 'published') throw new HttpFailure(400, 'invalid-request');
             if (link !== undefined && (typeof link !== 'string' || link.length > 2048)) throw new HttpFailure(400, 'invalid-request');
-            return send(response, 201, {object: publicObject(await service.create(instructions, kind, link))});
+            return send(response, 201, {object: publicObject(await service.create(instructions, kind, link, fit?.data))});
           }
           throw new HttpFailure(405, 'method-not-allowed');
         }
         if (!action) {
           if (method === 'PATCH') {
             await authorize(WRITE);
-            const {instructions, kind} = await json<{instructions?: unknown; kind?: unknown}>(request);
+            const {instructions, kind, fit: sent} = await json<{instructions?: unknown; kind?: unknown; fit?: unknown}>(request);
             if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpFailure(400, 'invalid-request');
             if (kind !== undefined && kind !== 'fit' && kind !== 'copy') throw new HttpFailure(400, 'invalid-request');
-            if (instructions === undefined && kind === undefined) throw new HttpFailure(400, 'invalid-request');
+            // `fit: null` clears the choice (the draft became a copy).
+            const fit = sent === undefined || sent === null ? undefined : FitSchema.safeParse(sent);
+            if (fit && !fit.success) throw new HttpFailure(400, 'invalid-request');
+            if (instructions === undefined && kind === undefined && sent === undefined) throw new HttpFailure(400, 'invalid-request');
             return send(response, 200, {object: publicObject(await service.updateDraft(id, {
-              ...(instructions !== undefined ? {instructions} : {}), ...(kind !== undefined ? {kind} : {})}))});
+              ...(instructions !== undefined ? {instructions} : {}), ...(kind !== undefined ? {kind} : {}),
+              ...(sent === null ? {fit: null} : fit ? {fit: fit.data} : {})}))});
           }
           if (method === 'DELETE') {
             await authorize(WRITE);
