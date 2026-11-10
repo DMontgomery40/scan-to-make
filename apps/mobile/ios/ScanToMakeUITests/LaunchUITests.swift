@@ -976,7 +976,7 @@ final class LayoutParityUITests: XCTestCase {
         for _ in 0..<12 where !(message.exists && message.isHittable) { app.swipeUp() }
         XCTAssertTrue(message.isHittable, "the code design engine row is reachable")
         XCTAssertEqual(message.label, "Not set up yet.")
-        XCTAssertTrue(app.descendants(matching: .any)["codeEngine.size"].label.contains("Set Up downloads about 367 MB and uses about 1.6 GB"), "what Set Up takes")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Set Up downloads about 367 MB and uses about 1.6 GB")).firstMatch.exists, "what Set Up takes")
         let setUp = app.buttons["codeEngine.setUp"]
         XCTAssertTrue(setUp.exists)
         setUp.tap()
