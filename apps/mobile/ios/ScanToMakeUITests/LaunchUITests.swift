@@ -721,14 +721,12 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(print.waitForExistence(timeout: 20), app.debugDescription)
         func nothingReachesTheBar(_ state: String) {
             // The bar is what's shown of the ask field and Print (Print gives way while typing).
-            let parts = [print, ask, app.buttons["attach-photos"]].filter(\.exists)
-            let bar = parts.map(\.frame).reduce(CGRect.null) { $0.union($1) }
-            let own = Set((parts + parts.flatMap { $0.descendants(matching: .any).allElementsBoundByIndex }).map { NSCoder.string(for: $0.frame) })
-            let into = (app.staticTexts.allElementsBoundByIndex + app.buttons.allElementsBoundByIndex).filter { element in
-                let frame = element.frame
-                return !own.contains(NSCoder.string(for: frame)) && frame.height > 0 && frame.intersects(bar.insetBy(dx: 0, dy: -8))
-            }
-            XCTAssertTrue(into.isEmpty, "\(state): \(into.map { "'\($0.label)' \($0.frame)" }) reach into the bar \(bar)")
+            let bar = [print, ask].filter(\.exists).map(\.frame).reduce(CGRect.null) { $0.union($1) }
+            // The page's scroll ends where the bar begins, so nothing it draws (it clips) can sit under or around the bar.
+            // Accessibility frames are unclipped, so the scroll view's own frame is what proves it; an overlay bar fails here.
+            let page = app.scrollViews.containing(NSPredicate(format: "label == %@", "Activity")).firstMatch
+            XCTAssertTrue(page.exists, "\(state): the page's scroll view")
+            XCTAssertLessThanOrEqual(page.frame.maxY, bar.minY, "\(state): the page \(page.frame) ends above the bar \(bar)")
         }
         for tab in ["Result", "What you sent", "Activity"] {
             let button = app.buttons[tab]
