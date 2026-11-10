@@ -577,7 +577,9 @@ export class ObjectService {
       if (!source.current) throw new InvalidStateError('There is no model to duplicate yet.');
       if (source.state === 'touching-up') throw new InvalidStateError('Wait until the current step finishes.');
       const kind = passKind(source);
-      const duplicate = await this.#deps.store.create(source.instructions, kind);
+      // The copy keeps how the size is settled, or a change asked of it would be designed without the measured sizes.
+      const request = fitRequest(source);
+      const duplicate = await this.#deps.store.create(request.typed, kind, request.fit);
       try {
         const current = source.current;
         // A copy keeps the scan it copies, or with nothing scanned its request would read as a new design.

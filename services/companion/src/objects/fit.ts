@@ -53,8 +53,11 @@ export function splitFitBrief(instructions: string | undefined): {typed?: string
 type Request = Pick<StmObject, 'instructions' | 'fit'>;
 /** What the person typed, and how the size is settled, whichever way the project stored them. */
 export function fitRequest(object: Request): {typed?: string; fit?: Fit} {
-  if (object.fit) return {...(object.instructions?.trim() ? {typed: object.instructions.trim()} : {}), fit: object.fit};
-  return splitFitBrief(object.instructions);
+  const saved = splitFitBrief(object.instructions);
+  // The field wins. A request that still carries a client's old block beside it (a fit-only change to a draft saved
+  // before the field) is read without the block, or the worker would get the brief twice.
+  if (object.fit) return {...(saved.typed ? {typed: saved.typed} : {}), fit: object.fit};
+  return saved;
 }
 /** The request as the worker reads it: the person's words, then the brief. */
 export function workerRequest(object: Request): string | undefined {
