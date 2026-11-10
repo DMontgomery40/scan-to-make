@@ -90,8 +90,10 @@ provider login, live Fusion setup, or native phone acceptance.
 
 `cad` is the printer MCP's code design engine (PRD §8.9), as the companion reads it from the MCP's own `cad_status`
 on the printer MCP it runs (after any Update or Move override): `{state, message, server?, seconds?, result?, canSetUp}`.
-The words are the companion's, from `cad_status`'s `ready` and `configured`; only a finished or failed Set Up shows the
-MCP's own `message` or error, as `result`. `GET /v1/settings` carries only the last answer and never starts the
+The words are the companion's, from `cad_status`'s `ready` and `configured`, plus a `size` line from its `storage`
+(expected download and installed size before Set Up, the measured size after). A finished Set Up shows the MCP's own
+`message`; a refused one its `message` and `suggestion`, with the structured refusal passed through as `result.refusal`
+(never branched on). `GET /v1/settings` carries only the last answer and never starts the
 printer MCP; the row reads fresh with `cad.status` (control socket) or `GET /v1/settings/cad` (READ), which ask
 `cad_status` again when the last answer is older than 30 s and announce a change with `settings.changed`
 (`keys: ["cad"]`). Set Up (`cad.setup`, or `POST /v1/settings/cad/setup` from a phone) starts `cad_setup {install: true}` in the

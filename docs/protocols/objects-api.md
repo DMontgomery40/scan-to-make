@@ -279,7 +279,7 @@ Then the companion restarts every session on that install (each waits for any pr
 | `files` | `{original: [path], current: path, receipts?: [receipt]}`: the designer's files exactly as published (`original/…`), and the file that prints. Paths are relative to the project's folder (`directory` on the Mac). | PR 7 |
 | `current.changes` | `[{tag: "added"\|"changed"\|"assumed"\|"estimated", text, toleranceMm?}]`: the what-changed list | PR 4 |
 | `current.engine` | `code` (the printer MCP's code design engine, PRD §8.9), `blender` or `fusion` | PR 4; `code` Nov 10 |
-| `current.design` | `{f3d, parameters}` paths (relative) when the engine was Fusion; `{script, parameters, inputs?, step?}` (relative, under `current/design/`) when it was the code engine. A change starts from it | PR 4; code Nov 10 |
+| `current.design` | `{f3d, parameters}` paths (relative) when the engine was Fusion; `{script, parameters, inputs?, step?, result?}` (relative, under `current/design/`; `result` is the selected run's cad/1 receipt with its validation) when it was the code engine. A change starts from it | PR 4; code Nov 10 |
 | `passes[].limit` | Optional `{kind, value}` when the worker stopped at a limit: `inactivity` or `absolute` with milliseconds, `tool-calls` with calls. Pass `status` is `capped`; project stays `failed`, with `canRetryCleanup`, and `failure` / `status.text` name the actual limit. A saved checkpoint is reviewable, not a completed model. | Nov 9 |
 | `passes[].toolCalls` | Number of tool calls observed by this attempt. Earlier passes may omit it. | Nov 9 |
 | `passes[].trigger` | `new`, `changes`, `late-photos` or `ask-answer` | PR 4 |
@@ -353,7 +353,7 @@ The phone offers pasted-link creation, file and plate Asks, source credit and no
 | `GET /v1/settings` | READ | | `{settings: {milestones}}` |
 | `PATCH /v1/settings` | SETTINGS | `{milestones: "off"\|"50"\|"25-50-75"\|"every-10"}` | `{settings}` |
 | `GET /v1/settings/cad` | READ | | `{cad}`: the code design engine's row, read fresh from the printer MCP's `cad_status` (at most 30 s old). `GET /v1/settings` carries only the last answer |
-| `POST /v1/settings/cad/setup` | WRITE (`projects:write`) | `{}` | `{settings}`. Starts the printer MCP's `cad_setup {install: true}` on the computer and returns at once; `settings.cad` is `{state: "checking"\|"unavailable"\|"not-set-up"\|"setting-up"\|"ready", message, server?, seconds?, result?: {ok, message}, canSetUp}`, re-read while it is `setting-up` (and announced with `settings.changed`, `keys: ["cad"]`). 409 `conflict` with the reason while a code pass runs, or when the printer MCP has no code engine (PRD §8.9) |
+| `POST /v1/settings/cad/setup` | WRITE (`projects:write`) | `{}` | `{settings}`. Starts the printer MCP's `cad_setup {install: true}` on the computer and returns at once; `settings.cad` is `{state: "checking"\|"unavailable"\|"not-set-up"\|"setting-up"\|"ready", message, server?, seconds?, size?, result?: {ok, message, suggestion?, refusal?}, canSetUp}` (`size`: what Set Up takes, then what it uses, from the MCP's `storage`; `refusal`: a refused Set Up's structured result, passed through), re-read while it is `setting-up` (and announced with `settings.changed`, `keys: ["cad"]`). 409 `conflict` with the reason while a code pass runs, or when the printer MCP has no code engine (PRD §8.9) |
 
 `milestones` (default `"50"`) chooses which `print.milestone` events the companion emits; it is read at each report, so a change applies to prints already running. The per-event notification switches stay on each device.
 
