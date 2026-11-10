@@ -115,12 +115,14 @@ struct ProjectGalleryView: View {
             case .model(let path):
                 ModelStage(url: path == "model.stl" ? modelURL : scanURL, tint: tint(entry.colour),
                            lightStage: StageContrast.lightStage(for: entry.colour), measured: { drawn(entry, $0) },
-                           placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) })
+                           placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
+                           drawn: { undrawable.remove(entry.id) })
                     .id(entry.id)
             case .assembly(_, _, let seats):
                 // Both models or neither: a part with no scan at its seats would not be Together.
                 ModelStage(url: togetherScanURL == nil ? nil : modelURL, tint: tint(entry.colour), lightStage: StageContrast.lightStage(for: entry.colour),
-                           object: togetherScanURL, seats: seats.map(\.matrix), measured: { drawn(entry, $0) }, placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) })
+                           object: togetherScanURL, seats: seats.map(\.matrix), measured: { drawn(entry, $0) }, placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
+                           drawn: { undrawable.remove(entry.id) })
                     .id(entry.id)
             case .picture:
                 still(entry)
