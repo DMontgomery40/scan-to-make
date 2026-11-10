@@ -1,6 +1,6 @@
 import {starterModelId, starterProject as bundledStarter, type StarterProject} from '../starters/catalog.js';
 import {acknowledgePlate, plateNeedsPrinterCheck, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
-import {copyFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
+import {copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
@@ -908,7 +908,7 @@ export class ObjectService {
     } catch { /* a failed call leaves it unknown; the next list or estimate asks again */ }
   }
   async get(id: string): Promise<StmObject> {
-    let object = await this.#deps.store.get(id);
+    let object = await this.#scanFiles(await this.#deps.store.get(id));
     if (object.state === 'touching-up') object = await this.#freshEstimate(object);
     if (!object.print) return object;
     // A watched print reads its monitor's last report instead of asking the printer again.
@@ -3456,6 +3456,24 @@ export class ObjectService {
 
   #handoff(): PrinterHandoffConfig { return this.#deps.runningHandoff?.() ?? this.#deps.handoff; }
   #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#handoff().process.env}); }
+
+  /**
+   * The scan files a client may fetch, with their sizes (`scanFiles`, PRD §5.4): the scan, and the phone's own model
+   * kept beside a Mac rebuild. Read from disk as the project is read, and written to it only when they change.
+   */
+  async #scanFiles(object: StmObject): Promise<StmObject> {
+    const dir = join(this.dir(object.id), 'scan');
+    const names = [...new Set([object.scan, 'phone-preview.usdz'])].filter((name): name is string => !!name && /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name));
+    const files: {name: string; bytes: number}[] = [];
+    for (const name of names) {
+      // Only a regular file in the project: a link out of it is never offered (and never exported).
+      const info = await lstat(join(dir, name)).catch(() => undefined);
+      if (info?.isFile()) files.push({name, bytes: info.size});
+    }
+    const value = files.length ? files : undefined;
+    if (JSON.stringify(value) === JSON.stringify(object.scanFiles)) return object;
+    return this.#deps.store.update(object.id, o => ({...o, scanFiles: value}), {keepUpdatedAt: true}).catch(() => ({...object, scanFiles: value}));
+  }
 
   #changed(object: StmObject): StmObject {
     this.#deps.onChange?.(object);

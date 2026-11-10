@@ -686,6 +686,21 @@ final class CompanionClientTests: XCTestCase {
         catch let error as CompanionError { XCTAssertEqual(error.message, "This printer is printing. Change its connection when the print finishes.") }
     }
 
+    /// Nov 10: a 192 MB scan was refused (413) and the phone's stage stayed blank with nothing said. A refusal says what
+    /// it is, and a fetched file lands whole at its cached place.
+    func testAFileTooLargeForThePhoneSaysSoAndAFetchedOneLandsWhole() async throws {
+        let p = Project(id: "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", createdAtMs: 1, updatedAtMs: 2, state: .ready, scan: "scan.usdz")
+        let refused = try client(FakeTransport { _, _ in json(413, ["error": ["code": "file-too-large", "message": "file-too-large"]]) })
+        do { _ = try await refused.download(p, "scan/scan.usdz"); XCTFail("refused") }
+        catch let error as CompanionError { XCTAssertEqual(error.code, "file-too-large") }
+        let bytes = Data(repeating: 7, count: 300_000)
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) }
+        let file = try await client(fake).download(p, "scan/phone-preview.usdz")
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+        XCTAssertTrue(file.lastPathComponent.hasSuffix("scan_phone-preview.usdz"))
+        XCTAssertEqual(fake.calls.last?.request.url?.path, "/v1/objects/\(p.id)/scan/phone-preview.usdz")
+    }
+
     func testDownloadsAreCachedPerVersion() async throws {
         let data = try fixture("objects.json")
         struct List: Decodable { var objects: [Project] }

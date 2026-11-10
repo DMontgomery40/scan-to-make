@@ -114,6 +114,14 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     public var picture: String?
     /// Each gallery picture the Mac drew, for layouts that show pictures: `part`, `scan`, `together`, `photo`.
     public var pictures: [String: String]?
+    /// The scan files the Mac offers, with their sizes (`scanFiles`): the scan, and the phone's own model kept beside a
+    /// Mac rebuild (`phone-preview.usdz`). `scanModel(together:limit:)` picks what a stage fetches.
+    public var scanFiles: [ScanFile]?
+    public struct ScanFile: Codable, Equatable, Sendable {
+        public var name: String
+        public var bytes: Double
+        public init(name: String, bytes: Double) { self.name = name; self.bytes = bytes }
+    }
     /// Published model attribution and files from the companion, retained for shared search.
     public var credit: JSONValue?
     public var files: JSONValue?
@@ -143,7 +151,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, scanFiles, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -163,6 +171,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         pendingPhotos = optional([String].self, .pendingPhotos)
         completion = optional(Completion.self, .completion)
         credit = optional(JSONValue.self, .credit)
+        scanFiles = optional([ScanFile].self, .scanFiles)
         files = optional(JSONValue.self, .files)
         plates = optional([ProjectPlate].self, .plates)
         publishedSelection = optional(PublishedSelection.self, .publishedSelection)

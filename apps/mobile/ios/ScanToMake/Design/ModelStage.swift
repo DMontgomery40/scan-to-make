@@ -26,6 +26,8 @@ struct ModelStage: View {
     var seats: [[Double]] = []
     /// The size of what is drawn, in millimetres (width, depth, height), once it is loaded: the size chip's numbers.
     var measured: (([Double]) -> Void)? = nil
+    /// What the stage shows until the model is drawn, and if it can't be: the Mac's picture of it, never an empty stage.
+    var placeholder: AnyView? = nil
 
     @State private var holder = PivotHolder()
     @State private var turn: CGSize = .zero
@@ -48,6 +50,8 @@ struct ModelStage: View {
                 realityView
             } else if let poster {
                 Image(decorative: poster, scale: 1).resizable().scaledToFit()
+            } else if let placeholder {
+                placeholder
             } else if failed {
                 Text("This model couldn't be shown.").font(.footnote).foregroundStyle(.secondary)
             } else if url != nil { ProgressView() }

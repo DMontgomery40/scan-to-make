@@ -84,6 +84,25 @@ enum Fixtures {
                 "photos": ["photo1.jpg", "photo2.jpg"], "messages": [], "passes": [["startedAtMs": now - 60_000, "trigger": "new"]],
                 "picture": "pictures/photo-1.png", "pictures": ["photo": "pictures/photo-1.png"]]]
         }
+        // `-CounterpartFixtureSet scan-stage` (Nov 10, every "What you scanned" on David's phone blank): with projects
+        // present, a copy whose scan the Mac lists but can't send (the canned Mac has no file: 404), and a copy whose only
+        // scan is a 192 MB rebuild (e9b21ab1's size), too large for a phone. Each stage keeps the Mac's picture and says why.
+        if set == "scan-stage" {
+            let ms = now.timeIntervalSince1970 * 1000
+            func copy(_ id: String, _ title: String, _ files: [[String: Any]], ago: Double) -> [String: Any] {
+                ["id": id, "createdAtMs": ms - ago - 60_000, "updatedAtMs": ms - ago, "state": "ready", "kind": "copy", "title": title,
+                 "scan": "scan.usdz", "photos": [], "capture": ["0001.heic"], "messages": [],
+                 "passes": [["startedAtMs": ms - ago - 50_000, "endedAtMs": ms - ago, "status": "done", "trigger": "new"]],
+                 "current": ["model": "current/model.stl", "renders": ["current/renders/potato.png"], "sizeMm": [68, 35, 150]],
+                 "picture": "pictures/scan-0123456789abcdef.png", "pictures": ["scan": "pictures/scan-0123456789abcdef.png", "part": "pictures/part-0123456789abcdef.png"],
+                 "scanFiles": files]
+            }
+            return [copy(ids.mic, "Bottle copy", [["name": "scan.usdz", "bytes": 16_581_653]], ago: 60_000),
+                    copy(ids.potato, "DAD sign copy", [["name": "scan.usdz", "bytes": 191_981_699]], ago: 120_000),
+                    ["id": ids.v1, "createdAtMs": ms - 9_000_000, "updatedAtMs": ms - 8_000_000, "state": "confirmed", "title": "Mic mount v1", "kind": "fit",
+                     "photos": [], "passes": [["startedAtMs": ms - 8_900_000, "endedAtMs": ms - 8_000_000, "status": "done"]],
+                     "current": ["model": "current/model.stl", "renders": ["current/renders/mic.png"], "sizeMm": [48, 50, 54]]]]
+        }
         // A copy of a designer's 3MF whose printer MCP says it prints with its own settings, saved at Fine/Strong
         // (Nov 5, caliper card 1f1c5515): the sheet must start at Standard and say it prints the designer's settings.
         if set == "designer" {
@@ -408,6 +427,7 @@ enum Fixtures {
         if path.hasSuffix("/" + bottlePicture) { return "bottle-picture.png" }
         if let range = path.range(of: #"/capture/[0-9]{4}\.heic$"#, options: .regularExpression) { return "bottle-capture/" + path[range].dropFirst("/capture/".count) }
         if path.hasSuffix("/model.stl") { return "mic.stl" }
+        if path.hasSuffix("/pictures/scan-0123456789abcdef.png") || path.hasSuffix("/pictures/part-0123456789abcdef.png") { return "thumb-potato.png" }
         if path.hasSuffix("/camera.jpg") { return "bed.jpg" }
         if path.contains("/renders/mic.png") { return "thumb-mic.png" }
         if path.contains("/renders/potato.png") || path.contains("/asks/") || path.hasSuffix("/capture/potato.jpg") { return "thumb-potato.png" }
@@ -433,6 +453,9 @@ struct FixtureTransport: HTTPTransport {
         if FileManager.default.fileExists(atPath: folder.appending(path: "offline").path) { throw TransportError("network") }
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
+        // `-CounterpartSlowScan <seconds>`: a scan file takes that long to come (a busy Mac over Wi-Fi), for pictures.
+        let slow = UserDefaults.standard.double(forKey: "CounterpartSlowScan")
+        if path.contains("/scan/"), slow > 0 { try await Task.sleep(for: .seconds(slow)) }
         func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
