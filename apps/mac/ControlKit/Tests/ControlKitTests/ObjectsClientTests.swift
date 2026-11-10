@@ -335,17 +335,19 @@ final class ObjectsClientTests: XCTestCase {
         XCTAssertEqual(plain.blenderModelURL?.path, current.appendingPathComponent("model.stl").path, "an STL model opens itself")
     }
 
-    func testTheThumbnailIsTheRealObjectBeforeAnyRender() throws {
+    /// David, Nov 10: "of ALL THE OPTIONS ... the photograph including everything in it is by far the worst". The picture is
+    /// the object alone as the Mac drew it, else the design's render; never a photo or a scan frame.
+    func testThePictureIsTheObjectAloneNeverAPhotoOfTheRoom() throws {
         var object = ready
         object["photos"] = ["bottle.jpg"]
         object["capture"] = ["0001.heic"]
         object["current"] = ["model": "current/model.stl", "renders": ["current/renders/overview.png"]]
         var decoded = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: object))
-        XCTAssertEqual(decoded.thumbnailURL?.path, folder + "/photos/bottle.jpg")
-        decoded.photos = []
-        XCTAssertEqual(decoded.thumbnailURL?.path, folder + "/capture/0001.heic")
-        decoded.capture = nil
-        XCTAssertEqual(decoded.thumbnailURL?.path, folder + "/current/renders/overview.png")
+        XCTAssertEqual(decoded.thumbnailURL?.path, folder + "/current/renders/overview.png", "until the Mac draws it: the render")
+        decoded.picture = "pictures/part-0123456789abcdef.png"
+        XCTAssertEqual(decoded.thumbnailURL?.path, folder + "/pictures/part-0123456789abcdef.png")
+        decoded.picture = nil; decoded.current = nil
+        XCTAssertNil(decoded.thumbnailURL, "the placeholder, never the room")
     }
 
     func testFilesResolveInsideTheObjectFolderOnly() throws {

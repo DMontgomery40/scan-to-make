@@ -21,6 +21,8 @@ protocol ObjectsCompanion: Sendable {
     func correct(_ id: String, note: String) async throws -> Project
     func correct(_ id: String, note: String, photoNames: [String]) async throws -> Project
     func correct(_ id: String, note: String, photos: [String], photoNames: [String]) async throws -> Project
+    /// The same sends carrying the note's own id, for a companion with `messageIds`.
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]?, messageId: String) async throws -> Project
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project
     func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project
     func print(_ id: String, checked: Bool) async throws -> Project
@@ -49,6 +51,12 @@ protocol ObjectsCompanion: Sendable {
     func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project
     func duplicate(_ id: String) async throws -> Project
     func fusionAvailable() async -> Bool
+    /// Where the scanned object sits in a fit part made before passes said (`objects.locate`, docs/protocols/seats.md).
+    func locate(_ id: String) async throws -> Project
+}
+
+extension ObjectsCompanion {
+    func locate(_ id: String) async throws -> Project { throw ControlClientError.unavailable }
 }
 
 extension ObjectsCompanion {
@@ -61,6 +69,10 @@ extension ObjectsCompanion {
 
     func correct(_ id: String, note: String, photos: [String], photoNames: [String]) async throws -> Project { try await correct(id, note: note, photos: photos) }
     func correct(_ id: String, note: String, photoNames: [String]) async throws -> Project { try await correct(id, note: note) }
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]?, messageId: String) async throws -> Project {
+        if let photoNames { return try await correct(id, note: note, photos: photos, photoNames: photoNames) }
+        return try await correct(id, note: note, photos: photos)
+    }
     func filaments(_ id: String) async throws -> [PrinterFilament] { throw ControlClientError.unavailable }
     func colourMapping(_ id: String) async throws -> ColourMapping { throw ControlClientError.unavailable }
     func print(_ id: String, checked: Bool, filament: PrinterFilament) async throws -> Project { throw ControlClientError.unavailable }
@@ -123,6 +135,7 @@ struct SocketObjects: ObjectsCompanion {
         try await ControlClient(socketPath:path).createPublished(url:url, instructions:instructions)
     }
     func duplicate(_ id: String) async throws -> Project { try await ControlClient(socketPath: path).duplicateObject(id) }
+    func locate(_ id: String) async throws -> Project { try await ControlClient(socketPath: path).locateObject(id) }
     func fusionAvailable() async -> Bool {
         guard let state = try? await ControlClient(socketPath: path).companionSettings().fusion?.state else { return false }
         return ["connected", "not-running"].contains(state)
@@ -137,6 +150,9 @@ struct SocketObjects: ObjectsCompanion {
         try await ControlClient(socketPath: path, timeout: 30).correctObject(id, note: note, photoNames: photoNames)
     }
     func correct(_ id: String, note: String) async throws -> Project { try await ControlClient(socketPath:path, timeout:30).correctObject(id, note:note) }
+    func correct(_ id: String, note: String, photos: [String], photoNames: [String]?, messageId: String) async throws -> Project {
+        try await ControlClient(socketPath: path, timeout: 30).correctObject(id, note: note, photos: photos, photoNames: photoNames, messageId: messageId)
+    }
     func answerCloseup(_ id: String, bestGuess: Bool) async throws -> Project { try await ControlClient(socketPath:path).answerCloseup(id, bestGuess:bestGuess) }
     func answerSizes(_ id: String, sizes: [AskSizesForm.Answer]) async throws -> Project { try await ControlClient(socketPath:path).answerSizes(id, sizes: sizes) }
     func print(_ id: String, checked: Bool) async throws -> Project { try await ControlClient(socketPath:path).printObject(id, checked:checked) }
@@ -286,6 +302,12 @@ struct SocketObjects: ObjectsCompanion {
         }
         let starters = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? StarterProject.all : []
         return (shown, objects.count - shown.reduce(0) { $0 + $1.objects.count }, starters)
+    }
+
+    /// Why a search found a project whose title doesn't say (first look U10): read from the same values `groups(matching:)`
+    /// searches, so every result that needs a reason has one.
+    func searchReason(_ object: Project, query: String) -> SearchSnippet? {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : object.searchSnippet(query, additional: [printer(for: object)?.name ?? ""])
     }
 
     /// The phone people know, for the footer: the most recently seen paired device, one row per name.
@@ -580,6 +602,12 @@ struct SocketObjects: ObjectsCompanion {
         if patch["status"] == .string("works"), let pending { corrections.sent(pending, for: id) }
     }
 
+    /// "See it together": the Mac works out where the scanned object sits in the existing part, changing nothing.
+    func locate(_ id: String) async {
+        guard !working.contains(id) else { return }
+        _ = await change(id, { try await self.companion.locate(id) })
+    }
+
     func duplicate(_ id: String) async throws {
         guard capabilities?.projectPreferences == true, !working.contains(id) else { throw ControlClientError.unavailable }
         operations.insert(id)
@@ -664,17 +692,19 @@ struct SocketObjects: ObjectsCompanion {
         return await queueChanges(id, note: note, photos: photos)
     }
 
-    private func queueChanges(_ id: String, note: String, photos: [URL]) async -> Bool {
+    private func queueChanges(_ id: String, note: String, photos: [URL], messageId: String? = nil) async -> Bool {
         do {
             var uploaded: [String] = []
             for photo in photos { uploaded.append(try await companion.addPhotoFile(id, path: photo.path, forMessage: true)) }
             let available = photos.isEmpty ? objects.first(where: { $0.id == id }).flatMap { corrections.availablePhotos($0) } : uploaded
-            corrections.add(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "See the photos I added." : note, for: id, photos: available)
+            corrections.add(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "See the photos I added." : note, for: id, photos: available, messageId: messageId)
+            attempts.settled(id)
             if let project = objects.first(where: { $0.id == id }) { sendQueuedNote(project) }
             return true
         } catch { problem = Problem(id: id, text: Self.sentence(for: error)); return false }
     }
 
+    private var attempts = NoteAttempts()
     private func sendQueuedNote(_ project: Project) {
         guard let note = corrections.due(project), !correcting.contains(project.id), !working.contains(project.id), project.pendingFollowup == nil else { return }
         correcting.insert(project.id)
@@ -682,7 +712,10 @@ struct SocketObjects: ObjectsCompanion {
             defer { correcting.remove(project.id) }
             do {
                 let updated: Project
-                if capabilities?.messagePhotos == true, let photos = corrections.messages[project.id]?.first?.photos {
+                let photos = capabilities?.messagePhotos == true ? corrections.messages[project.id]?.first?.photos : nil
+                if capabilities?.messageIds == true, let messageId = corrections.dueId(project.id) {
+                    updated = try await companion.correct(project.id, note: note, photos: [], photoNames: photos, messageId: messageId)
+                } else if let photos {
                     updated = try await companion.correct(project.id, note: note, photoNames: photos)
                 } else { updated = try await companion.correct(project.id, note: note) }
                 corrections.sent(note, for: project.id)
@@ -734,6 +767,7 @@ struct SocketObjects: ObjectsCompanion {
         operations.insert(id)
         defer { operations.remove(id) }
         if problem?.id == id { problem = nil }
+        var messageId: String?
         do {
             let updated: Project
             switch action {
@@ -741,6 +775,14 @@ struct SocketObjects: ObjectsCompanion {
             case .printChecked: updated = try await companion.print(id, checked:true)
             case .correct:
                 let text = note.trimmingCharacters(in:.whitespacesAndNewlines)
+                // One id for this note across every try, so the companion never records it twice.
+                messageId = capabilities?.messageIds == true ? attempts.id(for: text, in: id) : nil
+                let held = objects.first(where: { $0.id == id })?.pendingFollowup == text
+                if let messageId {
+                    let names = capabilities?.messagePhotos == true && !held ? objects.first(where: { $0.id == id }).map { corrections.availablePhotos($0) ?? [] } : nil
+                    updated = try await companion.correct(id, note: text.isEmpty ? "See the photos I added." : text,
+                        photos: photos.map(\.path), photoNames: names, messageId: messageId)
+                } else
                 // A held-message retry lets the companion retain its recorded evidence. Pending photos may belong to a later message.
                 if capabilities?.messagePhotos == true, let project = objects.first(where: { $0.id == id }), project.pendingFollowup != text {
                     updated = try await companion.correct(id, note: text.isEmpty ? "See the photos I added." : text,
@@ -752,12 +794,12 @@ struct SocketObjects: ObjectsCompanion {
             case .bestGuess: updated = try await companion.answerCloseup(id, bestGuess:true)
             case .retry: updated = try await companion.start(id)
             }
-            if action == .correct { corrections.sent(note.trimmingCharacters(in: .whitespacesAndNewlines), for: id) }
+            if action == .correct { corrections.sent(note.trimmingCharacters(in: .whitespacesAndNewlines), for: id); attempts.settled(id) }
             applyReply(updated)
             wake()
             return true
         } catch let failure as ControlRemoteError where action == .correct && failure.code == "conflict" && failure.message == "Wait until the current step finishes." {
-            return await queueChanges(id, note: note, photos: photos)
+            return await queueChanges(id, note: note, photos: photos, messageId: messageId)
         } catch {
             problem = Problem(id:id, text:Self.sentence(for:error))
             // A refusal usually means the object moved on (another device, or a finished step): show where it is now.

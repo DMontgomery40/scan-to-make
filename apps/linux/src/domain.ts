@@ -1,3 +1,4 @@
+import { filePath, picturePath } from "./gallery";
 import type {
   Estimate,
   Field,
@@ -52,11 +53,10 @@ export function startersShown(view: { search: string; filter: string }) {
   return view.search.trim() === "" && view.filter === "all";
 }
 
-/** The project's picture: the real thing first (a photo or scan frame), else its render or designer thumbnail. */
+/** The project's picture: the object alone on the stage, never a photo of the room (David, Nov 10; `gallery.ts`). */
 export function projectThumbnail(p: Project): string | undefined {
-  if (p.photos[0]) return `photos/${p.photos[0]}`;
-  if (p.capture?.[0]) return `capture/${p.capture[0]}`;
-  return p.current?.renders[0] ?? p.credit?.thumbnail;
+  const path = picturePath(p);
+  return path ? filePath(p, path) : undefined;
 }
 
 /** What Needs Changes puts before the person's words, as on the iPhone, iPad, Android and Mac (PRD §5.4). */
@@ -120,6 +120,38 @@ export function printerSummary(printers: Printer[], projects: Project[]) {
 }
 
 export function searchProject(p: Project, query: string) {
+  return searchValues(p)
+    .join(" ")
+    .toLocaleLowerCase()
+    .includes(query.trim().toLocaleLowerCase());
+}
+
+/**
+ * Why a search found a project whose title doesn't say (first look U10, Nov 10): the first searched value holding the
+ * query, cut to a short line around it, with the match's place in that line. Undefined when the title has it.
+ */
+export function searchSnippet(p: Project, query: string) {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle || p.title?.toLocaleLowerCase().includes(needle)) return undefined;
+  for (const value of searchValues(p).slice(1)) {
+    const line = value.split(/\s+/).filter(Boolean).join(" ");
+    const at = line.toLocaleLowerCase().indexOf(needle);
+    if (at < 0) continue;
+    let start = Math.max(0, at - 30);
+    let end = Math.min(line.length, at + needle.length + 70);
+    if (start > 0) { const space = line.indexOf(" ", start); if (space >= 0 && space < at) start = space + 1; }
+    if (end < line.length) { const space = line.lastIndexOf(" ", end); if (space > at + needle.length) end = space; }
+    const lead = start > 0 ? "…" : "";
+    return {
+      text: lead + line.slice(start, end) + (end < line.length ? "…" : ""),
+      match: [lead.length + at - start, lead.length + at - start + needle.length] as const,
+    };
+  }
+  return undefined;
+}
+
+/** Every value a search reads, the title first. */
+function searchValues(p: Project) {
   return [
     p.title,
     p.instructions,
@@ -133,11 +165,7 @@ export function searchProject(p: Project, query: string) {
     ...p.passes.flatMap((x) => [x.note, x.summary]),
     ...(p.current?.changes ?? []).map((x) => x.text),
     ...(p.plates ?? []).map((x) => x.name),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLocaleLowerCase()
-    .includes(query.trim().toLocaleLowerCase());
+  ].filter((x): x is string => !!x);
 }
 export function parseLayers(text: string, total?: number) {
   if (!text.trim()) return [];

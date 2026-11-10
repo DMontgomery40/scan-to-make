@@ -699,6 +699,16 @@ final class CompanionClientTests: XCTestCase {
         do { _ = try await c.download(p, "plate.jpg"); XCTFail("there's no plate photo to fetch") } catch {}
         XCTAssertEqual(fake.calls.count, 1)
         do { _ = try await c.download(p, "../../etc/passwd"); XCTFail() } catch {}
+        // The project's pictures the Mac drew (PRD §5.1): only `pictures/<name>.png`.
+        let picture = try await c.download(p, "pictures/part-0123456789abcdef.png")
+        XCTAssertTrue(picture.lastPathComponent.hasSuffix("pictures_part-0123456789abcdef.png"))
+        XCTAssertEqual(fake.calls.last?.request.url?.path, "/v1/objects/\(p.id)/pictures/part-0123456789abcdef.png")
+        do { _ = try await c.download(p, "pictures/../object.json"); XCTFail() } catch {}
+        // See it together reaches the Mac: `POST …/locate` with the write scope Duplicate uses.
+        let located = FakeTransport { _, _ in HTTPReply(status: 200, body: try JSONSerialization.data(withJSONObject: ["object": ["id": p.id, "createdAtMs": 1, "updatedAtMs": 2, "state": "touching-up", "photos": [], "passes": []]])) }
+        _ = try await client(located).locate(p.id)
+        XCTAssertEqual(located.calls.last?.request.httpMethod, "POST")
+        XCTAssertEqual(located.calls.last?.request.url?.path, "/v1/objects/\(p.id)/locate")
     }
 
     func testDesignedMultiColour3MFExportDoesNotMasqueradeAsSTL() async throws {
@@ -1111,6 +1121,11 @@ final class NotificationActionsTests: XCTestCase {
         XCTAssertEqual(calls[2].2["note"] as? String, "After printing: 2 mm wider")
         XCTAssertEqual(calls[5].2["bestGuess"] as? Bool, true)
         XCTAssertEqual(calls[6].2["note"] as? String, "Thicker walls")
+        XCTAssertNil(calls[6].2["messageId"])
+        // A note sent from the project carries its own id, so the Mac records it once.
+        _ = try await client.correct(id, "Thicker walls", messageId: "6F1C0E0A-3B0E-4B55-9B0C-1D3E5A7C9E11")
+        let sent = try XCTUnwrap(fake.calls.last?.request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(sent["messageId"] as? String, "6F1C0E0A-3B0E-4B55-9B0C-1D3E5A7C9E11")
     }
 
     /// Away from home the same buttons go as `CounterpartCommand` records the Mac already runs (PRD §9.3).

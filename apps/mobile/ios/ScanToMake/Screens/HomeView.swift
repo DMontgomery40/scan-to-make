@@ -15,6 +15,10 @@ struct HomeView: View {
     @FocusState private var searching: Bool
     @State private var showArchived = false
 
+    /// Why a search found this project, when its title doesn't say (U10).
+    private func reason(_ project: Project) -> SearchSnippet? {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : project.searchSnippet(query, additional: [store.printerName(project) ?? ""])
+    }
     private var searched: [Project] {
         store.projects.filter { $0.matchesSearch(query, additional: [store.printerName($0) ?? ""]) }
     }
@@ -62,13 +66,14 @@ struct HomeView: View {
                                     else { NowWorkingCard(store: store, project: project) }
                                 }
                                 .buttonStyle(.plain)
+                                .searchReason(reason(project))
                             }
                         }
                         }
                     }
                     if !needsYou.isEmpty {
                         HomeSection("Needs you") {
-                            ForEach(needsYou) { project in NeedsYouCard(store: store, project: project) { openProject(project.id) } }
+                            ForEach(needsYou) { project in NeedsYouCard(store: store, project: project) { openProject(project.id) }.searchReason(reason(project)) }
                         }
                     }
                     if !grid.isEmpty { HomeSection("All projects") { projectGrid(grid) } }
@@ -80,7 +85,7 @@ struct HomeView: View {
                         }
                         .accessibilityIdentifier("show-archived")
                         if showArchived || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            VStack(spacing: 8) { ForEach(archived) { ArchivedRow(store: store, project: $0) { openProject($0.id) } } }
+                            VStack(spacing: 8) { ForEach(archived) { project in ArchivedRow(store: store, project: project) { openProject($0.id) }.searchReason(reason(project)) } }
                         }
                     }
                     if query.isEmpty { starters }
@@ -140,6 +145,7 @@ struct HomeView: View {
                 Button { openProject(project.id) } label: { ProjectCard(store: store, project: project) }
                     .buttonStyle(.plain)
                     .contextMenu { DeleteProjectButton(store: store, project: project) }
+                    .searchReason(reason(project))
             }
         }
     }

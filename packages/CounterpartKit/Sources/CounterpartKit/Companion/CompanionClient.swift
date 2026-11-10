@@ -75,7 +75,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/objects(?:/printers)?") || is_(one) || is_(one + "/passes/(0|[1-9][0-9]{0,15})/activity") { return "projects:read" }
             if is_("/healthz") { return "generation:health" }
             if is_("/v1/events") || is_("/v1/settings") || is_("/v1/settings/cad") || is_("/v1/devices") { return "projects:read" }
-            if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
+            if is_(one + "/(model\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)") { return "projects:read" }
             if is_(one + "/(filaments|colour-mapping|camera\\.jpg)") || is_("/v1/objects/printers/[^/]+/camera\\.jpg") { return "printer-handoff:use" }
             if is_("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route") { return "printer-handoff:use" }
         case "PATCH":
@@ -91,7 +91,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/objects/printers/[A-Za-z0-9_-]+/(route|mcp)") { return "projects:write" }
         case "POST":
             if is_("/v1/blender/(check|update)") { return "projects:write" }
-            if is_("/v1/objects") || is_(one + "/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-manifest|capture-depth)") { return "captures:import" }
+            if is_("/v1/objects") || is_(one + "/(start|duplicate|locate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-manifest|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
             if is_("/v1/settings/(ai/test|fusion/setup|cad/setup)") { return "projects:write" }
@@ -253,9 +253,11 @@ public final class CompanionClient: @unchecked Sendable {
         try await request("POST", "/v1/objects/\(id)/capture-manifest", json: manifest, as: One.self).object
     }
     /// Ask for changes: a new pass with your text. Upload new photos first.
-    public func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> Project {
+    /// `messageId` is this note's own id (`NoteAttempts`, `CorrectionQueue.Message.id`): the Mac records it once.
+    public func correct(_ id: String, _ note: String, photoNames: [String]? = nil, messageId: String? = nil) async throws -> Project {
         var json: [String: Any] = ["note": note]
         if let photoNames { json["photoNames"] = photoNames }
+        if let messageId { json["messageId"] = messageId }
         return try await request("POST", "/v1/objects/\(id)/corrections", json: json, as: One.self).object
     }
     /// Answers the open Ask with explicitly named uploaded photos, a best guess, or words.
@@ -316,6 +318,11 @@ public final class CompanionClient: @unchecked Sendable {
     }
     public func duplicate(_ id: String) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/duplicate", json: [:], as: One.self).object
+    }
+    /// Asks the Mac where the scanned object sits in a fit part made before passes said (docs/protocols/seats.md):
+    /// a short pass that changes no geometry. `POST /v1/objects/<id>/locate`.
+    public func locate(_ id: String) async throws -> Project {
+        try await request("POST", "/v1/objects/\(id)/locate", json: [:], as: One.self).object
     }
     public func delete(_ id: String) async throws { _ = try await request("DELETE", "/v1/objects/\(id)", as: Deleted.self) }
     public func passActivity(_ id: String, index: Int) async throws -> [Project.Activity] {
@@ -555,7 +562,7 @@ public final class CompanionClient: @unchecked Sendable {
 
     /// Downloads one project file into the cache, once per project version, and returns where it is.
     public func download(_ project: Project, _ name: String) async throws -> URL {
-        let allowed = Pattern(#"original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}"#)
+        let allowed = Pattern(#"original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png"#)
         guard Pattern(Self.uuid).matches(project.id), allowed.matches(name), !name.contains("..") else { throw CompanionError.transport("invalid-request") }
         let version = String(Int64(project.mediaVersion))
         let folder = cache.appending(path: project.id, directoryHint: .isDirectory).appending(path: version, directoryHint: .isDirectory)

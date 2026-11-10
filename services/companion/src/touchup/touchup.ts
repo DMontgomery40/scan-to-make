@@ -49,6 +49,10 @@ export interface TouchupInput {
   design?: DesignSource;
   /** Stage changes: getting the engine ready, then the worker. */
   onStage?: (stage: 'preparing' | 'working', engine: DesignEngine) => void;
+  /** The current model's seats, for a change to restate (docs/protocols/seats.md). */
+  seats?: unknown[];
+  /** Only locate the scanned object in the finished part: `scan` is [the part's STL, the scan]; nothing is modelled. */
+  locate?: boolean;
 }
 
 /** Which engine ran, and why it isn't Fusion (or the code engine) when that was wanted. */
@@ -357,7 +361,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
     await (deps.resetScene ?? resetBlenderScene)(client, input.signal);
   }
   const pass = await (deps.prepare ?? prepareTouchupPass)({root: input.root, objectId: input.objectId, scan: input.scan, photos: input.photos,
-    requirePhotos: !(input.instructions?.trim() || input.note?.trim())});
+    requirePhotos: !input.locate && !(input.instructions?.trim() || input.note?.trim())});
   // A designer copy whose last edit already lost the designer's settings (one made before they were checked,
   // like the Nov 4 caliper card) starts again from the designer's own file rather than building on it.
   if (input.designerCopy && pass.scanPaths.length > 1
@@ -394,6 +398,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
   const inv = buildTouchupInvocation({...(input.resume ? {resumeSessionId: input.resume.sessionId} : {}), pass, printer: input.handoff.process, claudePath: input.claudePath, currentModel, engine: choice.engine, documentId: choice.documentId, handoff: input.handoff,
     ...(input.kind ? {kind: input.kind} : {}),
     ...(input.designerCopy ? {designerCopy: true} : {}),
+    ...(input.seats?.length ? {seats: input.seats} : {}), ...(input.locate ? {locate: true} : {}),
     ...((choice.engine === 'fusion' && input.design && !isCodeDesign(input.design)) || (code && design) ? {design: design!} : {}), ...(guidance ? {guidance} : {}),
     ...(code && frame ? {scanFrame: frame} : {}),
     ...(input.instructions !== undefined ? {instructions: input.instructions} : {}),
@@ -415,7 +420,7 @@ async function touchUpLocked(input: TouchupInput, deps: TouchupDeps, choice: Eng
     inv.args[inv.args.length - 1] += ` The modeling engine is prepared for this pass; use its current MCP binding. You already have the original request and photos in this session.${input.note ? ` New request: ${input.note}` : ''}${input.resume.photos?.length ? ` New photos for this request: ${input.resume.photos.map(path => pass.photoPaths[input.photos.indexOf(path)]).filter(Boolean).join(', ')}.` : ''}`;
   }
   const runOptions = {
-    ...(inputStlSha256 ? {inputStlSha256} : {}),
+    ...(inputStlSha256 && !input.locate ? {inputStlSha256} : {}), ...(input.locate ? {locate: true} : {}),
     onProgress: (progress: TouchupProgress) => input.onProgress?.({...progress, passDir: pass.dir, sessionCwd: inv.cwd}),
     ...(input.signal ? {signal: input.signal} : {}),
   };

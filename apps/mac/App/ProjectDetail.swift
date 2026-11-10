@@ -23,6 +23,9 @@ struct ProjectDetail: View {
     @State private var dropProblem: String?
     @State private var targeted = false
     @State private var stopping = false
+    /// The gallery entry shown (PRD §5.4 Pictures); nil is the first.
+    @State private var picture: String?
+    @State private var measured: [String: [Double]] = [:]
 
     private var words: ObjectWords { object.words }
 
@@ -48,13 +51,26 @@ struct ProjectDetail: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             stage
-                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24) }
+                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24).environment(\.colorScheme, stageScheme) }
                 .overlay(alignment: .topTrailing) {
-                    if let size = words.size {
+                    if let entry, let size = entry.sizeText(measured[entry.id]) {
                         Text(size).font(.callout.monospacedDigit().weight(.semibold))
                             .padding(.horizontal, 12).padding(.vertical, 7).glassEffect(.regular, in: .capsule)
                             .padding(.top, 64).padding(.trailing, 24)
-                            .accessibilityLabel("Size \(size)")
+                            .environment(\.colorScheme, stageScheme)
+                            .accessibilityLabel("\(entry.measures) size \(size)")
+                    }
+                }
+                .overlay(alignment: .top) { pictureChooser.padding(.top, 64).environment(\.colorScheme, stageScheme) }
+                .overlay(alignment: .topLeading) {
+                    // A fit made before passes said where the object sits: the Mac can work it out, changing nothing.
+                    if entry?.kind == .part, object.kind == "fit", object.scan != nil, object.current != nil, !object.preservesPublishedFilaments,
+                       (object.current?.seats ?? []).isEmpty, object.state != .printing, object.state != .touchingUp {
+                        Button { Task { await model.locate(object.id) } } label: { Label("See It Together", systemImage: "cube.transparent") }
+                            .buttonStyle(.glass).disabled(working).padding(.top, 108).padding(.leading, 24)
+                            .environment(\.colorScheme, stageScheme)
+                            .help("Your Mac works out where the scanned object sits in this part, without changing it")
+                            .accessibilityIdentifier("project-locate")
                     }
                 }
                 .ignoresSafeArea(edges: .top)
@@ -132,29 +148,72 @@ struct ProjectDetail: View {
 
     // MARK: Stage
 
+    private var gallery: ProjectGallery { ProjectGallery(project: object) }
+    /// What floats on the stage reads on it: light glass and dark words on the light stage, as the stage is chosen.
+    private var stageScheme: ColorScheme { entry.map { StageContrast.lightStage(for: $0.colour) } == true ? .light : .dark }
+    private var entry: ProjectGallery.Entry? { gallery.entries.first { $0.id == picture } ?? gallery.first }
+
+    /// Which picture (PRD §5.4): a segmented control for the common two or three, a pop-up for a designer's many plates
+    /// (HIG macOS: a segmented control to switch views in a toolbar area; a pop-up button for a long list). None for one.
+    @ViewBuilder private var pictureChooser: some View {
+        let entries = gallery.entries
+        let choice = Binding(get: { entry?.id ?? "" }, set: { picture = $0 })
+        if entries.count > 4 {
+            Picker("Picture", selection: choice) { ForEach(entries) { Text($0.label).tag($0.id) } }
+                .labelsHidden().pickerStyle(.menu).fixedSize()
+                .padding(4).glassEffect(.regular, in: .capsule)
+                .accessibilityIdentifier("project-pictures")
+        } else if entries.count > 1 {
+            Picker("Picture", selection: choice) { ForEach(entries) { Text($0.label).tag($0.id) } }
+                .labelsHidden().pickerStyle(.segmented).fixedSize()
+                .padding(4).glassEffect(.regular, in: .capsule)
+                .accessibilityIdentifier("project-pictures")
+        }
+    }
+
     @ViewBuilder private var stage: some View {
-        if !object.preservesPublishedFilaments, let url = object.modelURL ?? object.scanURL.flatMap({ $0.pathExtension.lowercased() == "usdz" ? $0 : nil }) {
-            ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
-                       accessibilityText: "\(words.title)\(words.size.map { ", \($0)" } ?? ""). Drag to turn it, scroll to zoom.",
-                       poster: Self.poster(object))
-        } else {
-            ZStack {
-                StageBackground()
-                if let still = object.thumbnailURL {
-                    FileImage(url: still, version: object.updatedAtMs, contentMode: .fit).padding(80)
-                } else if words.busy {
-                    ProgressView().controlSize(.large)
-                } else {
-                    Image(systemName: "cube").font(.system(size: 54, weight: .ultraLight)).foregroundStyle(.white.opacity(0.35))
-                }
+        if let entry {
+            switch entry.drawing {
+            case .model(let path):
+                if let url = path == "model.stl" ? (object.modelURL.flatMap { $0.pathExtension.lowercased() == "stl" ? $0 : nil } ?? object.blenderModelURL) : object.projectFile(path) {
+                    ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
+                               lightStage: StageContrast.lightStage(for: entry.colour),
+                               accessibilityText: "\(entry.label). Drag to turn it, scroll to zoom.",
+                               poster: entry.kind == .part ? (object.pictures?["part"].flatMap(object.projectFile) ?? Self.poster(object)) : object.pictures?["scan"].flatMap(object.projectFile), tint: Self.colour(entry.colour),
+                               measured: { measured[entry.id] = $0 })
+                    .id(entry.id)
+                } else { still(nil) }
+            case .assembly(_, let scan, let seats):
+                if let url = object.blenderModelURL, let scanURL = object.projectFile(scan) {
+                    ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
+                               lightStage: StageContrast.lightStage(for: entry.colour),
+                               accessibilityText: "\(words.title) with what you scanned in place. Drag to turn it, scroll to zoom.",
+                               tint: Self.colour(entry.colour), object: scanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 })
+                    .id(entry.id)
+                } else { still(nil) }
+            case .picture(let path):
+                still(object.projectFile(path))
             }
-            .environment(\.colorScheme, .dark)
-            .overlay(alignment: .bottom) {
-                if object.preservesPublishedFilaments {
-                    Text("Plate preview · 3D unavailable").font(.caption).padding(8).glassEffect(.regular, in: .capsule).padding(16)
-                }
+        } else { still(nil) }
+    }
+
+    private func still(_ url: URL?) -> some View {
+        ZStack {
+            StageBackground()
+            if let url {
+                FileImage(url: url, version: object.updatedAtMs, contentMode: .fit).padding(80)
+            } else if words.busy {
+                ProgressView().controlSize(.large)
+            } else {
+                Image(systemName: "cube").font(.system(size: 54, weight: .ultraLight)).foregroundStyle(.white.opacity(0.35))
             }
         }
+        .environment(\.colorScheme, .dark)
+    }
+
+    static func colour(_ colour: ProjectGallery.Colour) -> NSColor? {
+        guard case .spool(let hex) = colour, let value = Int(hex.dropFirst().prefix(6), radix: 16) else { return nil }
+        return NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
     }
 
     /// The companion's overview render of the current model, the stage's still.

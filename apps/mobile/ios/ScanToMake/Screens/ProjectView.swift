@@ -21,6 +21,7 @@ struct ProjectView: View {
     var openPrinting: (String) -> Void = { _ in }
     @State private var section = ProjectSection.result
     @State private var note = ""
+    @State private var attempts = NoteAttempts()
     @State private var showingSettings = false
     @State private var choosingModelFiles = false
     @State private var renaming = false
@@ -34,7 +35,6 @@ struct ProjectView: View {
     @State private var modelURL: URL?
     @State private var arURL: URL?
     @State private var scanURL: URL?
-    @State private var scanSize: String?
     @State private var captureWarning: String?
     @State private var askWorking = false
     @State private var askProblem: String?
@@ -42,6 +42,8 @@ struct ProjectView: View {
     /// The size card's fields as they stand (`AskSizesFields` reports them), for the card's other answers.
     @State private var askSizes: AskSizesForm?
     @State private var notice: String?
+    /// The ask field's width, so its placeholder fits whole.
+    @State private var fieldWidth: CGFloat = 0
     /// The printer's own question, shown as a sheet once when it arrives and again from Review.
     @State private var confirming: IdentifiedProject?
     @FocusState private var writing: Bool
@@ -366,67 +368,26 @@ struct ProjectView: View {
                 }
             }
         } message: { Text("Its model, photos and activity are removed from your Mac.") }
-        .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")") {
+        .task(id: "\(object.id)#\(object.mediaVersion)#\(object.current?.model ?? "")#\(object.spoolColour ?? "")") {
             modelURL = nil; arURL = nil
             guard object.current != nil, let url = try? await store.mac.download(object, "model.stl") else { return }
             modelURL = url
-            if !object.preservesPublishedFilaments { arURL = await ARModel.usdz(fromSTL: url) }
+            if !object.preservesPublishedFilaments { arURL = await ARModel.usdz(fromSTL: url, tint: object.spoolColour) }
         }
     }
 
     // MARK: Hero
 
+    /// The project's pictures (PRD §5.4): what will print, the two together, what was scanned (`ProjectGalleryView`).
     @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords) -> some View {
-        Group {
-            if object.preservesPublishedFilaments {
-                ProjectImage(project: object, path: object.thumbnailPath, maxPixelSize: 1200, contentMode: .fit)
-            } else if object.current != nil {
-                ModelStage(url: modelURL, twoTone: false)
-            } else if let scanURL {
-                ModelStage(url: scanURL, twoTone: false)
-            } else if let path = object.thumbnailPath {
-                ProjectImage(project: object, path: path, maxPixelSize: 1200)
-            } else {
-                ZStack {
-                    StageBackground()
-                    Image(systemName: words.phase.symbol).font(.system(size: 44)).foregroundStyle(words.phase.color.opacity(0.7))
-                        .symbolEffect(.pulse, isActive: words.busy)
-                }
-            }
-        }
         // Shorter when a card has to be answered, so its buttons sit above the bottom bar.
-        .frame(height: words.phase == .failed || words.actions.contains(.itWorks) ? 300 : 380)
-        .clipped()
-        .overlay(alignment: .bottom) {
-            GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
-                    // The Mac's model, else your own scan (Object Capture writes it at true size).
-                    if let arURL = arURL ?? (object.current == nil ? scanURL : nil) {
-                        Button { ARModel.show(arURL) } label: { Label("AR", systemImage: "arkit") }.buttonStyle(.glass)
-                            .accessibilityHint("Places the model at true size in your room")
-                    }
-                    if object.preservesPublishedFilaments {
-                        Text("Plate preview · 3D and AR unavailable").font(.caption).padding(8).glassEffect(.regular, in: .capsule)
-                    }
-                    Spacer()
-                    if let size = words.size ?? (object.current == nil ? scanSize : nil) {
-                        Text(size).font(.caption.monospacedDigit().weight(.semibold))
-                            .padding(.horizontal, 12).padding(.vertical, 8).glassEffect(.regular, in: .capsule)
-                            .accessibilityLabel("Size \(size)")
-                    }
-                }
-                .labelStyle(.titleAndIcon).font(.caption.weight(.semibold))
-            }
-            .padding(14)
-        }
+        ProjectGalleryView(store: store, project: object, words: words,
+                           height: words.phase == .failed || words.actions.contains(.itWorks) ? 300 : 380,
+                           modelURL: modelURL, arURL: arURL, localScan: scanURL, working: working,
+                           locate: { act { try await store.mac.client.locate(object.id) } })
         .task(id: "\(object.id)#\(object.scan ?? "")") {
-            scanURL = object.current == nil && object.scan != nil ? store.mac.localScan(object.id) : nil
-            // Object Capture writes the scan at true size, so its bounds are the object's size until the Mac measures it.
-            scanSize = nil
-            if let scanURL, let entity = try? await Entity(contentsOf: scanURL) {
-                let e = entity.visualBounds(relativeTo: nil).extents
-                scanSize = Format.size([Double(e.x), Double(e.z), Double(e.y)].map { $0 * 1000 })
-            }
+            // The scan while it's only on this phone, for Share until the Mac has it.
+            scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
         }
         .ignoresSafeArea(edges: .top)
     }
@@ -748,8 +709,11 @@ struct ProjectView: View {
                 HStack(spacing: 10) {
                     if canCorrect {
                         HStack {
-                            TextField(store.corrections.pending(object.id) != nil ? "Will send when this step finishes" : "Ask for changes…", text: $note, axis: .vertical)
+                            // A narrow field (beside Print Another) gets a placeholder that fits whole, never cut words.
+                            TextField(fieldPlaceholder(pending: store.corrections.pending(object.id) != nil), text: $note, axis: .vertical)
                                 .lineLimit(1...4)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { fieldWidth = $0 }
+                                .accessibilityLabel("Ask for changes")
                                 .focused($writing)
                                 .submitLabel(.send)
                                 .onSubmit { sendNote(object) }
@@ -773,11 +737,16 @@ struct ProjectView: View {
                         .glassEffect(.regular.interactive(), in: .capsule)
                     }
                     if canPrint && !writing {
+                        // The page's main action never truncates ("Print Ano…", lead review Nov 10): it keeps its whole
+                        // label and the ask field gives way.
                         Button { openPrint(object.id) } label: {
-                            Label(words.phase == .confirmed ? "Print Another" : "Print", systemImage: "printer.fill").fontWeight(.semibold).padding(.horizontal, 8).frame(height: 36)
+                            Label(words.phase == .confirmed ? "Print Another" : "Print", systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
+                                .fixedSize().padding(.horizontal, 8).frame(height: 36)
                         }
                         .buttonStyle(.glassProminent)
                         .controlSize(.large)
+                        .fixedSize()
+                        .layoutPriority(1)
                         .keyboardShortcut("p", modifiers: .command)
                         .accessibilityIdentifier("print")
                     }
@@ -786,6 +755,15 @@ struct ProjectView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 4)
         }
+    }
+
+    /// The longest placeholder that fits the field whole, in the reader's text size: the full sentence, a shorter one, or
+    /// none (the field and its camera, with its accessibility label).
+    private func fieldPlaceholder(pending: Bool) -> String {
+        let choices = pending ? ["Will send when this step finishes", "Sends after this step", "Waiting…"] : ["Ask for changes…", "Changes…"]
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        guard fieldWidth > 0 else { return choices[0] }
+        return choices.first { ($0 as NSString).size(withAttributes: [.font: font]).width <= fieldWidth - 4 } ?? ""
     }
 
     /// Photos for the next change: the Mac keeps them with the project and uses them in its next pass.
@@ -805,20 +783,25 @@ struct ProjectView: View {
         let text = note.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         writing = false
+        // One id for this note across every try, so the Mac never records it twice.
+        let messageId = attempts.id(for: text, in: object.id)
         if object.changesWait {
             // The Mac takes changes between passes; this one is sent the moment the pass ends.
-            store.queue(note: text, for: object.id)
+            store.queue(note: text, for: object.id, messageId: messageId)
+            attempts.settled(object.id)
             note = ""
             return
         }
         act {
             do {
-                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object))
+                let next = try await store.mac.correct(object.id, text, photoNames: store.corrections.availablePhotos(object), messageId: messageId)
                 store.corrections.sent(text, for: object.id)
+                attempts.settled(object.id)
                 note = ""; section = .activity
                 return next
             } catch let failure as CompanionError where CorrectionQueue.waits(failure) {
-                store.queue(note: text, for: object.id)
+                store.queue(note: text, for: object.id, messageId: messageId)
+                attempts.settled(object.id)
                 note = ""
                 return nil
             }
@@ -828,10 +811,12 @@ struct ProjectView: View {
 
 // MARK: Sections
 
-/// What changed, and the print's time, filament and printer.
+/// What changed, and the print's time, filament and printer. No card says nothing (first look U9): before slicing
+/// there are no numbers, so the printer's row says when they come; with no printer, it says so and offers one.
 struct ResultSection: View {
     let store: ProjectsStore
     let project: Project
+    @Environment(AppModel.self) private var app
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -855,15 +840,53 @@ struct ResultSection: View {
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             if project.current != nil {
-                HStack(spacing: 12) {
-                    InfoTile(title: "Print time", value: Format.duration(project.print?.estimate?.seconds) ?? "—", symbol: "clock")
-                    InfoTile(title: "Filament", value: Format.grams(project.print?.estimate?.grams) ?? "—", symbol: "scalemass")
-                    InfoTile(title: "Printer", value: store.printerName(project) ?? "—", symbol: "printer")
-                }
-                if project.print?.estimate == nil {
-                    Text("Time and filament come from slicing on your Mac when you print.").font(.caption).foregroundStyle(.secondary)
+                let time = Format.duration(project.print?.estimate?.seconds), grams = Format.grams(project.print?.estimate?.grams)
+                let printer = store.printerName(project)
+                if time != nil || grams != nil {
+                    HStack(spacing: 12) {
+                        if let time { InfoTile(title: "Print time", value: time, symbol: "clock") }
+                        if let grams { InfoTile(title: "Filament", value: grams, symbol: "scalemass") }
+                        if let printer { InfoTile(title: "Printer", value: printer, symbol: "printer") }
+                    }
+                    if printer == nil { noPrinter }
+                } else if let printer {
+                    printerRow(printer)
+                } else {
+                    noPrinter
                 }
             }
+        }
+    }
+
+    /// Before it's sliced: the printer it goes to, and when the numbers come. One row, nothing empty.
+    private func printerRow(_ name: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.headline)
+                Text("Print time and filament show here once it’s sliced for printing.")
+                    .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(Color.card, in: .rect(cornerRadius: 20))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("result-printer")
+    }
+
+    /// No printer to print on: say so, with the way to choose one. Nothing while the Mac's printers are still loading.
+    @ViewBuilder private var noPrinter: some View {
+        if store.catalog != nil {
+            HStack(spacing: 12) {
+                Image(systemName: "printer").font(.title3).foregroundStyle(.secondary).frame(width: 28)
+                Text("No printer chosen yet.").font(.headline)
+                Spacer(minLength: 8)
+                Button("Choose a Printer") { app.route = .printers }.buttonStyle(.glass)
+                    .accessibilityIdentifier("result-choose-printer")
+            }
+            .padding(14)
+            .background(Color.card, in: .rect(cornerRadius: 20))
         }
     }
 }
@@ -1061,10 +1084,14 @@ enum StepState: Equatable {
 /// Quick Look AR for the model at true size: the STL (millimetres, Z up) converted to USDZ (metres, Y up).
 enum ARModel {
     /// The STL as USDZ for AR Quick Look, written once beside it. RealityKit writes the same mesh the stage shows.
-    @MainActor static func usdz(fromSTL url: URL) async -> URL? {
-        let target = url.deletingPathExtension().appendingPathExtension("usdz")
+    /// AR wears what the stage wears: the spool it prints in, or the neutral material before one is chosen.
+    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil) async -> URL? {
+        let target = url.deletingPathExtension().appendingPathExtension("\(hex.map { $0.dropFirst() + "." } ?? "")usdz")
         if FileManager.default.fileExists(atPath: target.path) { return target }
-        guard let entity = await ModelStage.load(url, tint: UIColor(Color.filament), twoTone: false) else { return nil }
+        let tint = hex.flatMap { Int($0.dropFirst().prefix(6), radix: 16) }.map {
+            UIColor(red: CGFloat(($0 >> 16) & 255) / 255, green: CGFloat(($0 >> 8) & 255) / 255, blue: CGFloat($0 & 255) / 255, alpha: 1)
+        }
+        guard let entity = await ModelStage.load(url, tint: tint, twoTone: false) else { return nil }
         do { try await entity.write(to: target); return target } catch { return nil }
     }
 

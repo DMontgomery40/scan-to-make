@@ -54,7 +54,7 @@ typealias MacError = CompanionError
         return try await client.updateDraft(id, instructions: instructions, kind: kind, fit: fit)
     }
     func start(_ id: String, captureManifest: [String: Any]? = nil) async throws -> StmObject { try await client.start(id, captureManifest: captureManifest) }
-    func correct(_ id: String, _ note: String, photoNames: [String]? = nil) async throws -> StmObject { try await client.correct(id, note, photoNames: photoNames) }
+    func correct(_ id: String, _ note: String, photoNames: [String]? = nil, messageId: String? = nil) async throws -> StmObject { try await client.correct(id, note, photoNames: photoNames, messageId: messageId) }
     func closeup(_ id: String, bestGuess: Bool, photoNames: [String] = []) async throws -> StmObject { try await client.answerAsk(id, bestGuess: bestGuess, photoNames: photoNames) }
     func answerPrintConfirmation(_ id: String, response: PrintConfirmationResponse) async throws -> StmObject {
         try await client.answerPrintConfirmation(id, response: response)
@@ -215,6 +215,19 @@ typealias MacError = CompanionError
             $0["status"] as? String == "ready" && ($0["origin"] as? [String: Any])?["projectId"] as? String == id
         }
         return draft?["stitchingIncomplete"] as? Bool == true ? NativeCaptureCoordinator.stitchingWarning : nil
+    }
+
+    /// A picture of a finished scan still on this phone, for New's question about it: one of the capture's own frames,
+    /// a third of the way round. Nil when the run kept none.
+    func scanPicture(_ id: String) -> URL? {
+        let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
+        guard let run = drafts.first(where: {
+            $0["status"] as? String == "ready" && ($0["origin"] as? [String: Any])?["projectId"] as? String == id
+        })?["runID"] as? String,
+              UUID(uuidString: run) != nil, run == run.lowercased() else { return nil }
+        let images = URL.documentsDirectory.appending(path: "NativeCaptures/\(run)/Images", directoryHint: .isDirectory)
+        let names = Self.imageNames(in: images)
+        return names.isEmpty ? nil : images.appending(path: names[names.count / 3])
     }
 
     /// The walk-around scan's model while it's still on this phone: the project page shows it until the Mac

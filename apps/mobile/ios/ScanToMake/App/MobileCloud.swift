@@ -19,15 +19,20 @@ import Observation
         ? "Connect to your Mac to check your saved notification choices."
         : "iCloud isn't available in this build, so alerts arrive only while Counterpart is open on your home network."
 
+    /// The rule is `CloudBuild.configured` (CounterpartKit), tested against the shipped Info.plist: only the Simulator
+    /// and the fixtures are unconfigured, so the developer line below never reaches a TestFlight or App Store build.
     static var configured: Bool {
         #if targetEnvironment(simulator)
-        return false
+        let simulator = true
         #else
+        let simulator = false
+        #endif
+        var fixtures = false
         #if DEBUG
-        if Fixtures.folder != nil { return false }
+        fixtures = Fixtures.folder != nil
         #endif
-        return Bundle.main.object(forInfoDictionaryKey: "CounterpartCloudEnabled") as? Bool == true
-        #endif
+        return CloudBuild.configured(simulator: simulator, fixtures: fixtures,
+                                     infoValue: Bundle.main.object(forInfoDictionaryKey: CloudBuild.infoKey))
     }
 
     func refresh() async {

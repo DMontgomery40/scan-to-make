@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { gallery, lightStage } from "../src/gallery";
 import {
   codeEngineRow,
   passEnding,
@@ -28,6 +29,7 @@ import {
   guardPlate,
   parseLayers,
   searchProject,
+  searchSnippet,
   projectThumbnail,
   words,
   startersShown,
@@ -69,11 +71,37 @@ const project = {
   plates: [{ id: "a:1", selected: true }],
   directory: "/private/needle",
 } as unknown as Project;
-test("a project thumbnail is the real object before any render", () => {
-  const rendered = { ...project, current: { model: "m.stl", renders: ["renders/overview.png"] } } as unknown as Project;
-  assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "photos/bottle.jpg");
-  assert.equal(projectThumbnail({ ...rendered, capture: ["0001.heic"] }), "capture/0001.heic");
-  assert.equal(projectThumbnail(rendered), "renders/overview.png");
+// David, Nov 10: "of ALL THE OPTIONS ... the photograph including everything in it is by far the worst".
+test("a project's picture is the object alone on the stage, never a photo of the room", () => {
+  const rendered = { ...project, plates: undefined, current: { model: "current/model.stl", renders: ["current/renders/overview.png"] } } as unknown as Project;
+  assert.equal(projectThumbnail({ ...rendered, photos: ["bottle.jpg"], capture: ["0001.heic"] }), "current/renders/overview.png", "until the computer draws it: the render");
+  assert.equal(projectThumbnail({ ...rendered, picture: "pictures/part-1.png" }), "pictures/part-1.png");
+  assert.equal(projectThumbnail({ ...project, plates: undefined, photos: ["bottle.jpg"], capture: ["0001.heic"] } as unknown as Project), undefined, "the placeholder, never the room");
+});
+
+// PRD §5.4 Pictures: the same entries as CounterpartKit and Android, from the shared cases.
+test("every client derives the same pictures from the shared gallery cases", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-gallery.json", import.meta.url), "utf8"));
+  assert.ok(doc.cases.length >= 8);
+  for (const item of doc.cases) {
+    const entries = gallery(item.project as Project);
+    assert.deepEqual(entries.map((e) => e.id), item.entries.map((e: { id: string }) => e.id), item.name);
+    entries.forEach((entry, index) => {
+      const want = item.entries[index];
+      assert.equal(entry.kind, want.kind, item.name);
+      assert.equal(entry.label, want.label, item.name);
+      assert.equal(entry.measures, want.measures, item.name);
+      assert.equal(entry.colour, want.colour, item.name);
+      assert.deepEqual(entry.sizeMm, want.sizeMm, item.name);
+      assert.deepEqual(entry.photos ?? [], want.photos ?? [], item.name);
+      const drawing = "assembly" in entry.drawing
+        ? { assembly: { part: entry.drawing.assembly.part, object: entry.drawing.assembly.object, seats: entry.drawing.assembly.seats.length } }
+        : entry.drawing;
+      assert.deepEqual(drawing, want.drawing, item.name);
+    });
+  }
+  const many = doc.cases.find((c: { name: string }) => c.name.includes("six plates"));
+  assert.equal(gallery(many.project).length, 6, "a designer's six plates: six labelled entries");
 });
 
 test("a finished print asks Did it fit? until it's answered, as the other clients do", () => {
@@ -695,6 +723,39 @@ test("David's Nov 9 bottle: the question's caption is true for any question, and
   assert.deepEqual(scanSample(130), [0, 32, 65, 97, 129], "the same frames as the iPhone, Mac and Android");
   assert.deepEqual(scanSample(3), [0, 1, 2]);
   assert.equal(scanWords(130), "130 photos");
+});
+
+test("a search result whose title lacks the words says where it matched (first look U10)", () => {
+  const hanger = {
+    ...project,
+    title: "AirPods Max desk hanger",
+    messages: [
+      {
+        id: "m",
+        text: "okay the main holder is actually terrible cause the ridge of teh rails holds it too high and it wobbles when I take the headphones off",
+        atMs: 2,
+        photos: [],
+      },
+    ],
+  };
+  assert.equal(searchProject(hanger, "holder"), true);
+  const snippet = searchSnippet(hanger, "holder");
+  assert.ok(snippet);
+  assert.match(snippet.text, /main holder is actually terrible/);
+  assert.ok(snippet.text.length < 120, snippet.text);
+  assert.equal(snippet.text.slice(...snippet.match).toLowerCase(), "holder");
+  assert.equal(searchSnippet(hanger, "desk"), undefined, "the title says it");
+  assert.equal(searchSnippet(hanger, "  "), undefined);
+});
+
+// A part stays readable on its stage: the same rule as CounterpartKit StageContrast.
+test("black and a dark blue grey move to the light stage; white, yellow and the neutral stay dark", () => {
+  assert.equal(lightStage("#000000"), true);
+  assert.equal(lightStage("#5B6579"), true);
+  assert.equal(lightStage("#FFFFFF"), false);
+  assert.equal(lightStage("#FEC600"), false);
+  assert.equal(lightStage("neutral"), false);
+  assert.equal(lightStage("own"), false);
 });
 
 test("a pass that stopped to ask or stopped short never reads as all ticks", () => {
