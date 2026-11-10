@@ -188,6 +188,46 @@ class UxScreensTests(unittest.TestCase):
         finally:
             for handle in holders: handle.close()
 
+    def test_the_companion_is_rebuilt_whenever_its_source_differs_from_the_build(self):
+        """Nov 10: a companion dist built from an older commit was captured as the train's build. Reuse is keyed on the
+        source content (committed, uncommitted and untracked); any change rebuilds. Only npm is replaced."""
+        repo = self.tmp / 'repo'
+        src = repo / 'services/companion/src'
+        src.mkdir(parents=True)
+        for folder in ('services/project', 'services/printer-handoff', 'packages/contracts'):
+            (repo / folder).mkdir(parents=True)
+            (repo / folder / 'index.ts').write_text('export {};\n')
+        (src / 'fit.ts').write_text('export const brief = true;\n')
+        (repo / '.gitignore').write_text('dist/\nnode_modules/\n')
+        git = lambda *a: subprocess.run(['git', '-C', str(repo), *a], check=True, capture_output=True)
+        git('init', '-q'); git('add', '.'); git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'one')
+        builds = []
+
+        def npm(command, **_):
+            builds.append(command[-1] if command[1] == 'run' else 'ci')
+            if command[-1].endswith('services/companion') and command[1] == 'run':
+                (repo / 'services/companion/dist').mkdir(exist_ok=True)
+                (repo / 'services/companion/dist/server-cli.js').write_text('built')
+            return subprocess.CompletedProcess(command, 0, '', '')
+        def built_now():
+            before = len(builds)
+            ux_screens.ensure_companion(repo, run=npm)
+            return len(builds) > before
+        self.assertTrue(built_now(), 'no stamp yet: build')
+        self.assertFalse(built_now(), 'same source: reuse')
+        (src / 'fit.ts').write_text('export const brief = false;\n')
+        self.assertTrue(built_now(), 'an uncommitted change rebuilds')
+        self.assertFalse(built_now())
+        git('commit', '-qam', 'two')
+        self.assertFalse(built_now(), 'committing the same content keeps the build')
+        (src / 'new.ts').write_text('export {};\n')
+        self.assertTrue(built_now(), 'an untracked source file rebuilds')
+        (src / 'new.ts').unlink()
+        git('checkout', '-q', 'HEAD~1')
+        self.assertTrue(built_now(), 'another commit rebuilds')
+        self.assertIn(ux_screens.describe_source(repo).split()[0], subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'],
+                      capture_output=True, text=True).stdout)
+
     def test_every_run_names_its_simulators_and_sessions_uniquely(self):
         run = subprocess.run([sys.executable, '-c', 'import sys; sys.path.insert(0, sys.argv[1]); import ux_screens; print(ux_screens.RUN_ID)',
                               str(REPO / 'scripts')], capture_output=True, text=True, check=True)

@@ -40,6 +40,7 @@ import hashlib
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -401,9 +402,48 @@ def simctl(*args: str, check: bool = True) -> str:
     return subprocess.run(['xcrun', 'simctl', *args], capture_output=True, text=True, check=check).stdout.strip()
 
 
-def source_fingerprint() -> str:
-    git = lambda *a: subprocess.run(['git', '-C', str(REPO), *a], capture_output=True, text=True).stdout
-    return hashlib.sha256((git('rev-parse', 'HEAD:apps/mobile', 'HEAD:packages/CounterpartKit') + git('diff', 'HEAD', '--', 'apps/mobile', 'packages/CounterpartKit')).encode()).hexdigest()
+APP_SOURCES = ['apps/mobile', 'packages/CounterpartKit']
+# What the capture companion is built from: `npm run build` in services/companion builds project and printer-handoff too.
+COMPANION_SOURCES = ['services/companion', 'services/project', 'services/printer-handoff', 'packages/contracts']
+
+
+def source_state(paths: list[str], repo: Path = REPO) -> str:
+    """The content of these source folders as they are on disk (committed or not, untracked files included, ignored
+    build output not), as the git tree a commit of them would have. A build is reused only while this is unchanged."""
+    with tempfile.TemporaryDirectory() as scratch:
+        env = dict(os.environ, GIT_INDEX_FILE=str(Path(scratch) / 'index'))
+        git = lambda *a: subprocess.run(['git', '-C', str(repo), *a], env=env, capture_output=True, text=True, check=True).stdout.strip()
+        git('read-tree', 'HEAD')
+        git('add', '-A', '--', *paths)
+        tree = git('write-tree')
+        return git('rev-parse', *[f'{tree}:{p}' for p in paths]).replace('\n', ' ')
+
+
+def describe_source(repo: Path = REPO) -> str:
+    """The commit this run's app and companion are built from, said plainly, with any uncommitted changes."""
+    git = lambda *a: subprocess.run(['git', '-C', str(repo), *a], capture_output=True, text=True).stdout.strip()
+    dirty = git('status', '--porcelain', '--', *APP_SOURCES, *COMPANION_SOURCES)
+    branch = git('rev-parse', '--abbrev-ref', 'HEAD')
+    return f'{git("rev-parse", "--short", "HEAD")} ({branch})' + (' with uncommitted changes' if dirty else '')
+
+
+def ensure_companion(repo: Path = REPO, run=subprocess.run) -> None:
+    """Builds the capture companion from this checkout unless its dist was built from exactly this source. Nov 10: a dist
+    built from an older commit was captured as the train's build and showed a fixed bug (the Fit brief) as still there."""
+    dist = repo / 'services/companion/dist'
+    stamp, want = dist / '.ux-screens-source', source_state(COMPANION_SOURCES, repo)
+    if (dist / 'server-cli.js').exists() and stamp.exists() and stamp.read_text() == want:
+        log('reusing the companion built from this source')
+        return
+    log(f'building the companion from {describe_source(repo)}')
+    for folder in ('packages/contracts', 'services/project', 'services/printer-handoff', 'services/companion'):
+        if not (repo / folder / 'node_modules').exists():
+            run(['npm', 'ci', '--prefix', str(repo / folder), '--ignore-scripts', '--no-audit', '--no-fund'], check=True, capture_output=True)
+    for folder in ('packages/contracts', 'services/companion'):
+        built = run(['npm', 'run', 'build', '--prefix', str(repo / folder)], capture_output=True, text=True)
+        if built.returncode: raise SystemExit(f'The companion did not build from {folder}: {(built.stdout + built.stderr)[-600:]}')
+    dist.mkdir(parents=True, exist_ok=True)
+    stamp.write_text(want)
 
 
 def find_app(derived: Path) -> Path | None:
@@ -415,7 +455,7 @@ def find_app(derived: Path) -> Path | None:
 
 def build_app(work: Path) -> Path:
     derived = work / 'build'
-    stamp, fingerprint = derived / 'ux-screens-source', source_fingerprint()
+    stamp, fingerprint = derived / 'ux-screens-source', source_state(APP_SOURCES)
     if (app := find_app(derived)) and stamp.exists() and stamp.read_text() == fingerprint:
         log('reusing the app built from this source')
         return app
@@ -493,8 +533,8 @@ def write_index(out: Path, info: dict, manifest: dict, minutes: float, processes
     failures = {(f['device'], f['name']): f['why'] for f in read_jsonl(out / 'failures.jsonl') if (f['device'], f['name']) not in captured}
     failures = [(d, n, w) for (d, n), w in failures.items()]
     lines = ['# Counterpart screens', '',
-             f'Made by `scripts/ux_screens.py` on {dt.datetime.now():%Y-%m-%d %H:%M} from commit '
-             f'`{subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()}`'
+             f'Made by `scripts/ux_screens.py` on {dt.datetime.now():%Y-%m-%d %H:%M}; this run\'s app and companion were built from '
+             f'`{info.get("source", describe_source())}`'
              f' (this run held the lane {minutes:.0f} min; earlier runs\' images are kept).', '',
              '**Data.** *real*: a copy of this Mac\'s projects (copied ' + manifest['copiedAt'] + '), served by the real companion '
              f'(`server-cli.js`) to the real app client over {info.get("url", "a simulator test address")}. The pairing exchange was made by the script, not the pairing UI. '
@@ -509,11 +549,11 @@ def write_index(out: Path, info: dict, manifest: dict, minutes: float, processes
         lines += [f'| {d} | {n} | {w[:300].replace("|", "/").replace(chr(10), " ")} |' for d, n, w in failures]
         lines += ['']
     for device in dict.fromkeys(r['device'] for r in results):
-        lines += [f'## {DEVICES[device][0]} (`{device}`)', '', '| Image | Screen | State | Data | Note |', '|---|---|---|---|---|']
+        lines += [f'## {DEVICES[device][0]} (`{device}`)', '', '| Image | Screen | State | Data | Built from | Note |', '|---|---|---|---|---|---|']
         for r in (r for r in results if r['device'] == device):
             rel = Path(r['image']).relative_to(out)
             note = '; '.join(x for x in [r['note'], f'page {r["page"]}' if r['page'] > 1 else '', f'action failed: {r["error"][:120]}' if r['error'] else ''] if x)
-            lines.append(f'| [{rel}]({rel}) | {r["screen"]} | {r["state"]} | {r["data"]} | {note.replace("|", "/")} |')
+            lines.append(f'| [{rel}]({rel}) | {r["screen"]} | {r["state"]} | {r["data"]} | {r.get("source") or "unrecorded (before Nov 10 08:00)"} | {note.replace("|", "/")} |')
         lines.append('')
     (out / 'index.md').write_text('\n'.join(lines))
 
@@ -550,6 +590,9 @@ def main() -> int:
     if args.screens and not args.project:  # a typo fails here, before the companion or the lane
         select(args, out, keys, {'ids': ids, 'record': '', 'offline_record': '', 'fixtures': fixtures, 'offline': offline, 'info': {'objects': []}})
     log('starting the companion on the copy')
+    source = describe_source()
+    log(f'source: {source}')
+    ensure_companion()
     companion = Companion(state, work / 'companion.log')
     try:
         info = companion.info
@@ -569,6 +612,7 @@ def main() -> int:
         if args.project and (unknown := [p for p in args.project if p not in served]):
             raise SystemExit(f'These projects are not in the copy: {unknown}.')
         handoff = work / 'companion-info.json'
+        info['source'] = source
         handoff.write_text(json.dumps({'info': info, 'manifest': manifest, 'processes': processes, 'served': sorted(served)}))
         items, done = select(args, out, keys, handoff_context(json.loads(handoff.read_text()), work))
         if all((k, i['name']) in done for k in keys for i in items):
@@ -624,6 +668,7 @@ def capture(args, out: Path, work: Path, keys: list[str], held: dict) -> int:
     ctx = handoff_context(held, work)
     items, done = select(args, out, keys, ctx)
     def record(kind: str, row: dict) -> None:
+        row = {**row, 'source': ctx['info'].get('source', '')}  # which build each image came from, as runs accumulate
         with open(out / f'{kind}.jsonl', 'a') as file: file.write(json.dumps(row) + '\n')
     # Screens stop starting a minute and a half before --max-minutes, leaving time to delete the simulator.
     log('holding the lane')
