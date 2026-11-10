@@ -871,3 +871,61 @@ export function stageMark(pass: Pick<Pass, "endedAtMs" | "status" | "stages">, i
   if (ending === "stopped") return "✕";
   return stage?.endedAtMs ? "✓" : "◌";
 }
+
+/** What a project's page leads with and what else it offers, as one decision: the port of CounterpartKit
+ *  `PageActions` (PRD §5.4 One main action). One filled control, `main`; an action appears once; Print is in the bar
+ *  only where `printPlace` is "bar", filled only when it is `main`, and in the failed card under its true name
+ *  otherwise. Held to the shared table `main-actions.json`. */
+export interface PageActions {
+  main?: "scan" | "finishSending" | "confirmSizes" | "openCamera" | "chooseFile" | "review" | "print" | "openPrinting" | "itWorks" | "retry";
+  others: string[];
+  printWords?: string;
+  printPlace?: "bar" | "card";
+  printNote?: string;
+}
+const PRINT_NOTES: Record<string, string> = {
+  "Print the last version": "Your last version is still here.",
+  "Print Again": "The same file is sent to the printer again.",
+};
+export function pageActions(p: Project, sending = false): PageActions {
+  const made = p.current ? [p.print?.uncertain ? "printChecked" : "print", "correct"] : [];
+  const printing = (main: PageActions["main"], others: string[], printWords: string, printPlace: "bar" | "card"): PageActions => {
+    if (!p.current) return { main: main === "print" ? undefined : main, others: others.filter((a) => a !== "print" && a !== "printChecked") };
+    return { main, others, printWords, printPlace, ...(PRINT_NOTES[printWords] ? { printNote: PRINT_NOTES[printWords] } : {}) };
+  };
+  const correct = made.filter((a) => a === "correct");
+  // Marked Works: Done, whatever state it was marked in.
+  if (p.state === "confirmed" || p.status?.phase === "confirmed") return printing("print", p.current ? ["correct"] : [], "Print Another", "bar");
+  switch (p.state) {
+    case "new": {
+      if (sending) return { others: [] };
+      if (p.scan || p.capture?.length || p.photos.length) return { main: "finishSending", others: [] };
+      return { main: "scan", others: p.instructions?.trim() ? ["attachPhotos", "makeIt"] : ["attachPhotos"] };
+    }
+    // No Print while a change is being made: the version shown is the one they asked to change.
+    case "touching-up": return { others: [] };
+    case "needs-closeup": {
+      const ask = p.ask;
+      if (ask && !askAnswerable(ask)) return { others: [] };
+      if (sizeFields(ask)) return { main: "confirmSizes", others: ["openCamera"] };
+      if (ask?.type === "file") return { main: "chooseFile", others: [] };
+      if (ask?.type === "choice") return { others: [] };
+      return { main: "openCamera", others: ["attachPhotos", "bestGuess"] };
+    }
+    case "ready": return printing("print", correct, "Print", "bar");
+    case "printing": return { main: p.printConfirmation ? "review" : "openPrinting", others: [] };
+    case "printed": {
+      if (didItFitQuestion(p)) return printing("itWorks", ["needsChanges", ...made], "Print Another", "bar");
+      return printing("print", correct, p.print?.monitor?.endState === "done" ? "Print Another" : "Print", "bar");
+    }
+    case "sent": return printing("print", correct, "Print", "bar");
+    case "failed": {
+      // A pass stopped: with an earlier result, that result still prints, from the card, under its true name.
+      if (!p.current) return { main: "retry", others: ["correct"] };
+      if (p.canRetryCleanup) return printing("retry", made, "Print the last version", "card");
+      // The print failed and the model is fine: the same file goes again; refused before send is not "again".
+      return printing("print", correct, p.print?.dispatchedAt ? "Print Again" : "Print", "card");
+    }
+    default: return { others: [] };
+  }
+}

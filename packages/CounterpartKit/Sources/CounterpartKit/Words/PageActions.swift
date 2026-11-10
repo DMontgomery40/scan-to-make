@@ -27,6 +27,9 @@ public struct PageActions: Equatable, Sendable {
     /// was sent to the printer before) or "Print the last version" (a later pass stopped; this is the one before it).
     public let printWords: String?
     public let printPlace: PrintPlace?
+    /// Said beside a card's print button, so the person knows what would be printed: the version before the pass
+    /// that stopped, or the same file that was sent before.
+    public let printNote: String?
 
     /// Print is offered in the bottom bar, filled or not.
     public var printInBar: Bool { printPlace == .bar }
@@ -95,5 +98,10 @@ public struct PageActions: Equatable, Sendable {
             }
         }
         (main, others, printWords, printPlace) = decided
+        switch decided.2 {
+        case "Print the last version": printNote = "Your last version is still here."
+        case "Print Again": printNote = "The same file is sent to the printer again."
+        default: printNote = nil
+        }
     }
 }

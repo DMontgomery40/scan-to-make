@@ -161,6 +161,8 @@ export interface Project {
   outcome?: string;
   progress?: string;
   failure?: string;
+  /** The stopped pass can be started again from where it left off. */
+  canRetryCleanup?: boolean;
   pendingFollowup?: string;
   photos: string[];
   capture?: string[];
@@ -210,6 +212,8 @@ export interface Project {
   printConfirmation?: RawQuestion;
   print?: {
     uncertain?: boolean;
+    /** Set once the file was sent to the printer. */
+    dispatchedAt?: string;
     destinationId?: string;
     destination?: { id: string; name: string };
     settings?: PrintOptions;

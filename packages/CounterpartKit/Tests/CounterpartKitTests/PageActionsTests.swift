@@ -4,7 +4,7 @@ import XCTest
 /// PRD §5.4 One main action (board U17). The table is `Fixtures/main-actions.json`, read by the Android and Linux
 /// suites too: the same decision on every layout.
 final class PageActionsTests: XCTestCase {
-    private struct Row { let number: Int; let name: String; let sending: Bool; let project: Project; let main: String?; let others: [String]; let printWords: String?; let printPlace: String? }
+    private struct Row { let number: Int; let name: String; let sending: Bool; let project: Project; let main: String?; let others: [String]; let printWords: String?; let printPlace: String?; let printNote: String? }
 
     private func rows() throws -> [Row] {
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/main-actions.json")
@@ -14,7 +14,7 @@ final class PageActionsTests: XCTestCase {
             let project = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: try XCTUnwrap(row["project"])))
             return Row(number: row["row"] as? Int ?? 0, name: row["name"] as? String ?? "", sending: row["sending"] as? Bool ?? false, project: project,
                        main: expected["main"] as? String, others: expected["others"] as? [String] ?? [],
-                       printWords: expected["printWords"] as? String, printPlace: expected["printPlace"] as? String)
+                       printWords: expected["printWords"] as? String, printPlace: expected["printPlace"] as? String, printNote: expected["printNote"] as? String)
         }
     }
 
@@ -27,6 +27,7 @@ final class PageActionsTests: XCTestCase {
             XCTAssertEqual(page.others.map { "\($0)" }, row.others, "\(row.name): others")
             XCTAssertEqual(page.printWords, row.printWords, "\(row.name): what printing is called")
             XCTAssertEqual(page.printPlace?.rawValue, row.printPlace, "\(row.name): where printing goes")
+            XCTAssertEqual(page.printNote, row.printNote, "\(row.name): what would be printed")
         }
     }
 

@@ -18,7 +18,8 @@
      "attachPhotos"
     ],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -40,7 +41,8 @@
      "makeIt"
     ],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -60,7 +62,8 @@
     "main": "finishSending",
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -81,7 +84,8 @@
     "main": null,
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -103,7 +107,8 @@
     "main": null,
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -134,7 +139,8 @@
     "main": null,
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -166,7 +172,8 @@
      "bestGuess"
     ],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -206,7 +213,8 @@
      "openCamera"
     ],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -235,7 +243,8 @@
     "main": "chooseFile",
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -272,7 +281,8 @@
     "main": null,
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -301,7 +311,8 @@
     "main": null,
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -336,7 +347,8 @@
     "main": "review",
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -360,7 +372,8 @@
      "correct"
     ],
     "printWords": "Print",
-    "printPlace": "bar"
+    "printPlace": "bar",
+    "printNote": null
    }
   },
   {
@@ -396,7 +409,8 @@
     "main": "openPrinting",
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -433,7 +447,8 @@
      "correct"
     ],
     "printWords": "Print Another",
-    "printPlace": "bar"
+    "printPlace": "bar",
+    "printNote": null
    }
   },
   {
@@ -461,7 +476,8 @@
      "correct"
     ],
     "printWords": "Print",
-    "printPlace": "bar"
+    "printPlace": "bar",
+    "printNote": null
    }
   },
   {
@@ -489,7 +505,8 @@
      "correct"
     ],
     "printWords": "Print",
-    "printPlace": "bar"
+    "printPlace": "bar",
+    "printNote": null
    }
   },
   {
@@ -516,7 +533,8 @@
      "correct"
     ],
     "printWords": "Print Another",
-    "printPlace": "bar"
+    "printPlace": "bar",
+    "printNote": null
    }
   },
   {
@@ -544,7 +562,8 @@
      "correct"
     ],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   },
   {
@@ -582,7 +601,8 @@
      "correct"
     ],
     "printWords": "Print the last version",
-    "printPlace": "card"
+    "printPlace": "card",
+    "printNote": "Your last version is still here."
    }
   },
   {
@@ -611,7 +631,8 @@
      "correct"
     ],
     "printWords": "Print Again",
-    "printPlace": "card"
+    "printPlace": "card",
+    "printNote": "The same file is sent to the printer again."
    }
   },
   {
@@ -636,7 +657,8 @@
      "correct"
     ],
     "printWords": "Print",
-    "printPlace": "card"
+    "printPlace": "card",
+    "printNote": null
    }
   },
   {
@@ -654,7 +676,8 @@
     "main": null,
     "others": [],
     "printWords": null,
-    "printPlace": null
+    "printPlace": null,
+    "printNote": null
    }
   }
  ]

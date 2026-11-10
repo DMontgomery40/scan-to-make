@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { canLocate, gallery, lightStage, photoPicture } from "../src/gallery";
 import {
+  pageActions,
   codeEngineRow,
   passEnding,
   stageMark,
@@ -847,4 +848,21 @@ test("a row under its phase heading shows the companion's detail, never the head
   assert.equal(rowWords(ready), "68.4 × 34.6 × 149.2 mm");
   assert.equal(rowWords(failed), "The printer stopped.", "no detail: the line as it is");
   for (const p of [asking, ready]) assert.doesNotMatch(rowWords(p), /^(Needs you|Ready to print)/);
+});
+
+test("every project state has its one main action, as on every layout (main-actions.json)", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/main-actions.json", import.meta.url), "utf8"));
+  const numbers: number[] = doc.rows.map((row: { row: number }) => row.row);
+  assert.deepEqual([...new Set(numbers)].sort((a, b) => a - b), Array.from({ length: 16 }, (_, i) => i + 1));
+  for (const row of doc.rows) {
+    const page = pageActions({ title: "", ...row.project } as Project, row.sending === true);
+    assert.equal(page.main ?? null, row.expected.main, `${row.name}: main`);
+    assert.deepEqual(page.others, row.expected.others, `${row.name}: others`);
+    assert.equal(page.printWords ?? null, row.expected.printWords, `${row.name}: what printing is called`);
+    assert.equal(page.printPlace ?? null, row.expected.printPlace, `${row.name}: where printing goes`);
+    assert.equal(page.printNote ?? null, row.expected.printNote, `${row.name}: what would be printed`);
+    // The rule: an action once, and Print never both the lead and listed.
+    assert.equal(new Set(page.others).size, page.others.length, row.name);
+    assert.equal(page.main === "print" && page.others.some((a) => a.startsWith("print")), false, row.name);
+  }
 });
