@@ -21,8 +21,8 @@ case "$out/" in "$repo/"*) echo 'RELEASE_DIR must be outside the source checkout
 mkdir -p "$out"
 printf '{"commit":"%s","build":"%s","device":"%s","builtAt":"%s","override":"%s"}\n' \
   "$head" "$build" "$device" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${STM_TRUNK_OVERRIDE:-}" > "$out/source.json"
-# One iOS job at a time on the Mac (scripts/README.md).
-/usr/bin/lockf -k "$HOME/.stm-ios.lock" xcodebuild -project "$repo/apps/mobile/ios/ScanToMake.xcodeproj" \
+# One build-lane slot on the Mac while xcodebuild runs (scripts/README.md, "The Mac's build lane").
+python3 "$repo/scripts/lane.py" --label "install-iphone: build $build from ${head:0:12}" -- xcodebuild -project "$repo/apps/mobile/ios/ScanToMake.xcodeproj" \
   -scheme ScanToMake -configuration Release -destination 'generic/platform=iOS' \
   -derivedDataPath "$out/DerivedData" CURRENT_PROJECT_VERSION="$build" CODE_SIGN_STYLE=Automatic \
   DEVELOPMENT_TEAM=X7F5F9LR24 -allowProvisioningUpdates build > "$out/build.log" 2>&1 ||
