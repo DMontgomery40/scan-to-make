@@ -216,6 +216,10 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(another.frame.width, 150, "Print Another is not cut off")
         if ask.exists { XCTAssertLessThanOrEqual(ask.frame.maxX, another.frame.minX + 1, "the field never runs under the button") }
         XCTAssertLessThanOrEqual(another.frame.maxX, app.windows.firstMatch.frame.maxX, "the button is on screen")
+        // And the narrowed field's placeholder fits whole: a shorter phrase beside Print Another on the phone, never "Ask for cha…".
+        if UIDevice.current.userInterfaceIdiom == .phone, ask.exists {
+            XCTAssertNotEqual(ask.placeholderValue, "Ask for changes…", "beside Print Another the phone's field takes the shorter placeholder")
+        }
         XCTAssertTrue(app.staticTexts["Done"].exists, "the Done capsule")
         XCTAssertFalse(app.buttons["it-works"].exists, "answered: the card goes")
         app.navigationBars.buttons.firstMatch.tap()

@@ -39,6 +39,8 @@ struct ProjectView: View {
     @State private var askProblem: String?
     @State private var askText = ""
     @State private var notice: String?
+    /// The ask field's width, so its placeholder fits whole.
+    @State private var fieldWidth: CGFloat = 0
     /// The printer's own question, shown as a sheet once when it arrives and again from Review.
     @State private var confirming: IdentifiedProject?
     @FocusState private var writing: Bool
@@ -661,8 +663,11 @@ struct ProjectView: View {
                 HStack(spacing: 10) {
                     if canCorrect {
                         HStack {
-                            TextField(store.corrections.pending(object.id) != nil ? "Will send when this step finishes" : "Ask for changes…", text: $note, axis: .vertical)
+                            // A narrow field (beside Print Another) gets a placeholder that fits whole, never cut words.
+                            TextField(fieldPlaceholder(pending: store.corrections.pending(object.id) != nil), text: $note, axis: .vertical)
                                 .lineLimit(1...4)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { fieldWidth = $0 }
+                                .accessibilityLabel("Ask for changes")
                                 .focused($writing)
                                 .submitLabel(.send)
                                 .onSubmit { sendNote(object) }
@@ -704,6 +709,15 @@ struct ProjectView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 4)
         }
+    }
+
+    /// The longest placeholder that fits the field whole, in the reader's text size: the full sentence, a shorter one, or
+    /// none (the field and its camera, with its accessibility label).
+    private func fieldPlaceholder(pending: Bool) -> String {
+        let choices = pending ? ["Will send when this step finishes", "Sends after this step", "Waiting…"] : ["Ask for changes…", "Changes…"]
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        guard fieldWidth > 0 else { return choices[0] }
+        return choices.first { ($0 as NSString).size(withAttributes: [.font: font]).width <= fieldWidth - 4 } ?? ""
     }
 
     /// Photos for the next change: the Mac keeps them with the project and uses them in its next pass.
