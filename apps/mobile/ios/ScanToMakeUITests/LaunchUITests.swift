@@ -702,6 +702,31 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertEqual(send.label, "Save this scan")
     }
 
+    /// Board X80, from #513's phone captures: the floating bar sat over the "Did it fit?" card's buttons until the page was
+    /// scrolled. The stage takes the height the page has left, so both answers are whole, inside the page and above the
+    /// bar, as it opens, on every iPhone (the gate's and the smallest) and on the iPad.
+    func testDidItFitsAnswersAreWholeAboveTheBarWithoutScrolling() {
+        let app = launch(screen: "printed")
+        let works = app.buttons["it-works"], changes = app.buttons["needs-changes"]
+        XCTAssertTrue(works.waitForExistence(timeout: 20), app.debugDescription)
+        let ask = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 5), "the bar's Ask for changes")
+        let page = app.scrollViews.containing(NSPredicate(format: "label == %@", "Activity")).firstMatch
+        // The stage settles once the page has measured itself: give it a moment, without scrolling.
+        let settled = Date().addingTimeInterval(3)
+        while Date() < settled, changes.frame.maxY > ask.frame.minY { RunLoop.current.run(until: Date().addingTimeInterval(0.2)) }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "did-it-fit-with-the-bar"; shot.lifetime = .keepAlways
+        add(shot)
+        for answer in [works, changes] {
+            XCTAssertTrue(answer.isHittable, "\(answer.label) can be pressed: \(answer.frame)")
+            XCTAssertLessThanOrEqual(answer.frame.maxY, ask.frame.minY, "\(answer.label) \(answer.frame) is above the bar \(ask.frame)")
+            if page.exists {
+                XCTAssertLessThanOrEqual(answer.frame.maxY, page.frame.maxY + 1, "\(answer.label) \(answer.frame) is whole in the page \(page.frame)")
+            }
+        }
+    }
+
     /// First look U9 (Nov 10, iPad): a ready scan's Result showed two "—" cards for print time and filament and a third
     /// that said only "Bambu printer". Before slicing, one row names the printer and says when the numbers come.
     /// Review F7: what this proves is the app's half: the row shows the name the printer list gives (the fixture Mac's

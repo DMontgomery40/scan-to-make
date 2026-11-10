@@ -52,6 +52,8 @@ struct ProjectView: View {
     @State private var fieldWidth: CGFloat = 0
     /// The printer's own question, shown as a sheet once when it arrives and again from Review.
     @State private var confirming: IdentifiedProject?
+    /// What the page measured, for sizing the stage when a card has to be answered (board X80).
+    @State private var answerRoom = AnswerRoom()
     @FocusState private var writing: Bool
     private var object: Project? { store.project(id) }
 
@@ -190,12 +192,13 @@ struct ProjectView: View {
 
     @ViewBuilder private func page(_ object: Project) -> some View {
         let words = store.words(object)
+        let fit = answerFit(words)
         // The page's content ends where the bottom bar begins (lead, Nov 10, as New and first run): Activity's lines never
         // read through or around "Ask for changes…" and Print, on any tab, with the keyboard up too.
         VStack(spacing: 0) {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                hero(object, words)
+                hero(object, words, stage: fit.stage)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         // The status is one tap away: the capsule opens the same choices as ••• → Status.
@@ -223,9 +226,7 @@ struct ProjectView: View {
                             .font(.subheadline)
                         if let licence = credit["licence"]?.string { Text(licence).font(.caption).foregroundStyle(.secondary) }
                     }
-                    if let request = object.instructions, !request.isEmpty, request != words.title {
-                        Text(request).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
+                    if !fit.cardFirst { requestText(object, words) }
                 }
                 .padding(.horizontal, 20)
 
@@ -288,6 +289,12 @@ struct ProjectView: View {
                     }.font(.subheadline).padding(.horizontal, 20)
                 }
                 stateCard(object, words).padding(.horizontal, 16)
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.pageSpace)).maxY.rounded() } action: { bottom in
+                        // Where the card ends below the stage, in the order the card sits now under the title.
+                        let now = answerFit(store.words(object))
+                        answerRoom.belowStage = bottom - now.stage + (now.cardFirst ? answerRoom.request : 0)
+                    }
+                if fit.cardFirst { requestText(object, words).padding(.horizontal, 20) }
 
                 Picker("Section", selection: $section) {
                     ForEach(ProjectSection.allCases, id: \.self) { Text($0.rawValue) }
@@ -304,12 +311,17 @@ struct ProjectView: View {
                 }
                 .padding(.horizontal, 16)
             }
+            .coordinateSpace(.named(Self.pageSpace))
             // The bar is below the scroll now, not over it: only a little room after the last line.
             .padding(.bottom, 24)
             .frame(maxWidth: 820)
             .frame(maxWidth: .infinity)
         }
         .background(Color.black)
+        // The page's height between the bars, where the content's top sits at rest.
+        .onScrollGeometryChange(for: CGFloat.self) { ($0.containerSize.height - $0.contentInsets.top - $0.contentInsets.bottom).rounded() } action: { _, height in
+            answerRoom.viewport = height
+        }
         .scrollEdgeEffectStyle(.soft, for: .all)
         .scrollDismissesKeyboard(.interactively)
         .navigationBarTitleDisplayMode(.inline)
@@ -400,14 +412,52 @@ struct ProjectView: View {
         }
     }
 
+    // MARK: Answering a card
+
+    /// The request under the title: what the person asked for, in their own words.
+    @ViewBuilder private func requestText(_ object: Project, _ words: ProjectWords) -> some View {
+        if let request = object.instructions, !request.isEmpty, request != words.title {
+            Text(request).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { answerRoom.request = $0 + 6 }
+        }
+    }
+
+    static let pageSpace = "project-page"
+    static let fullStage: CGFloat = 380
+    /// The stage never gets shorter than this, so the model stays a picture of the part.
+    static let stageFloor: CGFloat = 160
+    /// Air between the card's last line and the bottom bar.
+    static let answerMargin: CGFloat = 12
+
+    /// Board X80: when a card has to be answered (a failed pass, Did it fit?), the page opens with the whole card,
+    /// buttons included, above the bottom bar. The stage takes what the page has left: the page's height between the
+    /// bars, less everything from the stage's bottom to the card's bottom, never less than `stageFloor`. If even that
+    /// can't fit the card, the card goes above the request text (the question comes before a repeat of the person's own
+    /// words). At large text sizes the card may still be lower than the bar: the page scrolls to it.
+    struct AnswerRoom: Equatable {
+        /// The scroll view's height inside its insets.
+        var viewport: CGFloat = 0
+        /// From the stage's bottom to the card's bottom, with the request text above the card.
+        var belowStage: CGFloat?
+        /// The request text's height with its spacing; 0 without one.
+        var request: CGFloat = 0
+    }
+
+    private func answerFit(_ words: ProjectWords) -> (stage: CGFloat, cardFirst: Bool) {
+        guard words.phase == .failed || words.actions.contains(.itWorks) else { return (Self.fullStage, false) }
+        guard let below = answerRoom.belowStage, answerRoom.viewport > 0 else { return (300, false) }
+        let room = answerRoom.viewport - Self.answerMargin - below
+        if room >= Self.stageFloor || answerRoom.request == 0 { return (min(Self.fullStage, max(Self.stageFloor, room)), false) }
+        return (min(Self.fullStage, max(Self.stageFloor, room + answerRoom.request)), true)
+    }
+
     // MARK: Hero
 
     /// The project's pictures (PRD §5.4): what will print, the two together, what was scanned (`ProjectGalleryView`).
-    @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords) -> some View {
-        // Shorter when a card has to be answered, so its buttons sit above the bottom bar.
+    @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords, stage: CGFloat) -> some View {
         VStack(spacing: 8) {
             ProjectGalleryView(store: store, project: object, words: words,
-                               height: words.phase == .failed || words.actions.contains(.itWorks) ? 300 : 380,
+                               height: stage,
                                modelURL: modelURL, arURL: nil, localScan: scanURL, working: working,
                                locate: { act { try await store.mac.client.locate(object.id) } })
             .task(id: "\(object.id)#\(object.scan ?? "")") {
