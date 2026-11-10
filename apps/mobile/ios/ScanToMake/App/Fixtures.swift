@@ -317,7 +317,7 @@ enum Fixtures {
                      ["id": "developer", "label": "Local network, Developer Mode", "available": false, "reason": "Turn on LAN Only and Developer Mode on the printer first."]]]
     }
 
-    static var catalog: [String: Any] { set == "no-printers" ? ["defaultDestinationId": "current", "destinations": [[String: Any]]()] : [
+    static var catalog: [String: Any] { Fixtures.set == "no-printers" ? ["defaultDestinationId": "current", "destinations": [[String: Any]]()] : [
         "defaultDestinationId": "current",
         "destinations": [
             ["id": "current", "name": "P1S", "backend": p1sBackend, "model": "Bambu Lab P1S", "source": "current", "state": "ready",
