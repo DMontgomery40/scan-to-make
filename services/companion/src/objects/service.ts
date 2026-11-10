@@ -41,13 +41,13 @@ import {carriedSeats, scanBoundsFromObj, seatsProblem, stlBounds, stlFileBounds,
 import {createCaptureConverter} from '../capture-converter.js';
 import {ProjectPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
-import {ObjectNotFoundError, ObjectStore, type ObjectPrintConfirmation, type StmObject} from './store.js';
+import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
 import {answeredSizes, askKind, InvalidSizesError, sizesNote} from './asks.js';
 /** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
 export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
 import {AskSchema, type Fit} from '@scan-to-make/contracts/counterpart';
-import {passResume, withPassEnded, type PassEnd} from './pass-end.js';
+import {lastDesignPass, passResume, withPassEnded, type PassEnd} from './pass-end.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
 import {defaultReconstructRunner, RECONSTRUCTION_FAILED, ReconstructionReviewNeeded, type Reconstruct, type ReconstructInputs, type ScanToStl} from './reconstruct.js';
 import {captureCameraDigest, validateCaptureCamera} from './capture-camera.js';
@@ -312,6 +312,20 @@ const spool = (tray: FilamentChoice, index?: number): PrintSpool | undefined => 
   const colour = /^#?([0-9A-Fa-f]{6})/.exec(tray.colour.trim());
   return colour ? {...(index !== undefined ? {index} : {}), colour: `#${colour[1]!.toUpperCase()}`, ...(tray.material ? {material: tray.material} : {}), ...(tray.name ? {name: tray.name} : {})} : undefined;
 };
+/** The project as a locate pass finds it (docs/protocols/seats.md): everything it would otherwise disturb. */
+function locateSnapshot(o: StmObject): LocateSnapshot {
+  return {state: o.state, ...(o.question ? {question: o.question} : {}), ...(o.failure !== undefined ? {failure: o.failure} : {}),
+    ...(o.failedPass !== undefined ? {failedPass: o.failedPass} : {}), ...(o.pendingFollowup !== undefined ? {pendingFollowup: o.pendingFollowup} : {}),
+    ...(o.pendingMessageId !== undefined ? {pendingMessageId: o.pendingMessageId} : {}), ...(o.completion ? {completion: o.completion} : {})};
+}
+
+/** The project given back as the locate pass started at `startedAtMs` found it; an older record without a snapshot keeps `state`. */
+function restoreLocateFrom(o: StmObject, startedAtMs: number, state: StmObject['state']): StmObject {
+  const before = o.passes.find(pass => pass.startedAtMs === startedAtMs)?.before;
+  if (before) return restoreLocate(o, before);
+  return {...o, state: o.state === 'touching-up' ? state : o.state};
+}
+
 /** A part made to fit a scanned object, with a model: the only kind whose model has places for that object. */
 export const canLocate = (object: StmObject): boolean => passKind(object) === 'fit' && !!object.scan && !!object.current;
 
@@ -1502,6 +1516,7 @@ export class ObjectService {
     const object = await this.get(id);
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if (!canLocate(object)) throw new InvalidStateError('Only a part made to fit a scanned object has a place for it.');
+    if (object.current?.seats?.length) throw new InvalidStateError('Your Mac already knows where the object sits in this part.');
     return this.#pass(object, {trigger: 'locate', locate: true});
   }
   async #correct(id: string, note: string, photos: string[], photoNames?: string[], messageId?: string): Promise<StmObject> {
@@ -1593,7 +1608,7 @@ export class ObjectService {
     }
     if (!photos.length && !answer.bestGuess && !answer.text?.trim() && !sizes) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
     if (photos.some(name => !object.photos.includes(name))) throw new InvalidStateError('That photo is not in this project.');
-    const asked = object.passes.at(-1)?.note;
+    const asked = lastDesignPass(object.passes)?.note;
     const said = answer.text?.trim() ? `Answer to "${object.ask?.question ?? object.question?.closeup ?? 'your question'}": ${answer.text.trim()}` : undefined;
     const parts = [asked, sizes ? sizesNote(sizes) : undefined, said, answer.bestGuess && !asked?.includes(BEST_GUESS_NOTE) ? BEST_GUESS_NOTE : undefined].filter(Boolean);
     // The person's numbers become the project's measured sizes, so every later pass designs to them too.
@@ -2512,9 +2527,11 @@ export class ObjectService {
     let typical = await this.#typical(kind, engine);
     const first: PassStage = {id: plan[0]!, words: passWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
     const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined, pendingMessageId: undefined,
-      ...(o.completion ? {completion: {...o.completion, undone: true}} : {}),
+      // A locate pass changes nothing: Marked Done stays marked, and what it clears for the run comes back at its end.
+      ...(o.completion && !opts.locate ? {completion: {...o.completion, undone: true}} : {}),
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
       passes: [...o.passes, {startedAtMs, resumable: false, ...(opts.messageId ? {messageId: opts.messageId, photos: opts.photos ?? []} : {}), trigger: opts.trigger ?? 'new', stages: [first], estimate: passEstimate([first], plan, typical, startedAtMs),
+        ...(opts.locate ? {before: locateSnapshot(o)} : {}),
         ...(opts.note ? {note: opts.note} : {})}]}));
     this.#changed(running);
     await this.#emit({id: randomUUID(), type: 'pass.started', projectId: object.id, data: {stage: first.words, estimateSec: passEstimate([first], plan, typical, startedAtMs).remainingSec}});
@@ -2540,7 +2557,8 @@ export class ObjectService {
           }
           return;
         }
-        if (previous && previous.endedAtMs === undefined) void this.#deps.passTimings?.record(kind, engine, previous.id, (now - previous.startedAtMs) / 1000).catch(() => undefined);
+        // A locate pass's time says nothing about how long a design takes: it never feeds the estimates.
+        if (previous && previous.endedAtMs === undefined && !opts.locate) void this.#deps.passTimings?.record(kind, engine, previous.id, (now - previous.startedAtMs) / 1000).catch(() => undefined);
         const next: PassStage = {id, words: passWords(id, engine, kind), startedAtMs: now, typicalSec: typical[id]};
         const stages = [...(latest?.stages ?? []).map(item => item.endedAtMs === undefined ? {...item, endedAtMs: now} : item), next];
         const estimate = passEstimate(stages, plan, typical, now);
@@ -2592,7 +2610,7 @@ export class ObjectService {
         : designer
         ? [...new Set([fromCurrent && isMultipart(object) ? object.current!.model : designer, designer])].map(path => join(dir, path))
         : fromCurrent ? [join(dir, currentMesh!)] : scanName ? [join(dir, 'scan', scanName)] : [];
-      const previous = object.passes.at(-1);
+      const previous = lastDesignPass(object.passes);
       const continued = worker?.browser !== false ? passResume(previous) : undefined;
       const resume = continued
         ? {...continued,
@@ -3360,7 +3378,7 @@ export class ObjectService {
     }
     const result = 'error' in outcome ? undefined : outcome;
     const summary = seats ? (result?.summary ? this.#publicText(result.summary) : undefined) : reason;
-    const updated = await store.update(id, o => ({...o, state: o.state === 'touching-up' ? before : o.state, progress: undefined,
+    const updated = await store.update(id, o => ({...restoreLocateFrom(o, startedAtMs, before), progress: undefined,
       ...(seats && o.current ? {current: {...o.current, seats}} : {}),
       // Closed through endPass like every pass; a locate pass never continues its session.
       passes: withPassEnded(o.passes, startedAtMs, seats ? {status: 'done'} : {status: this.#closed ? 'interrupted' : 'failed', resumable: false}, now, p => ({
