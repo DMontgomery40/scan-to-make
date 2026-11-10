@@ -152,15 +152,17 @@ struct ProjectDetail: View {
     /// (HIG macOS: a segmented control to switch views in a toolbar area; a pop-up button for a long list). None for one.
     @ViewBuilder private var pictureChooser: some View {
         let entries = gallery.entries
-        if entries.count > 1 {
-            Picker("Picture", selection: Binding(get: { entry?.id ?? "" }, set: { picture = $0 })) {
-                ForEach(entries) { Text($0.label).tag($0.id) }
-            }
-            .labelsHidden()
-            .pickerStyle(entries.count <= 4 ? AnyPickerStyle(.segmented) : AnyPickerStyle(.menu))
-            .fixedSize()
-            .padding(4).glassEffect(.regular, in: .capsule)
-            .accessibilityIdentifier("project-pictures")
+        let choice = Binding(get: { entry?.id ?? "" }, set: { picture = $0 })
+        if entries.count > 4 {
+            Picker("Picture", selection: choice) { ForEach(entries) { Text($0.label).tag($0.id) } }
+                .labelsHidden().pickerStyle(.menu).fixedSize()
+                .padding(4).glassEffect(.regular, in: .capsule)
+                .accessibilityIdentifier("project-pictures")
+        } else if entries.count > 1 {
+            Picker("Picture", selection: choice) { ForEach(entries) { Text($0.label).tag($0.id) } }
+                .labelsHidden().pickerStyle(.segmented).fixedSize()
+                .padding(4).glassEffect(.regular, in: .capsule)
+                .accessibilityIdentifier("project-pictures")
         }
     }
 
