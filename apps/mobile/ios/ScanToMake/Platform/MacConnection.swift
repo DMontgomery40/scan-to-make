@@ -221,7 +221,9 @@ typealias MacError = CompanionError
     /// has a result of its own. The Mac doesn't serve the scan back.
     func localScan(_ id: String) -> URL? {
         #if DEBUG
-        if let folder = Fixtures.folder { return folder.appending(path: "scanB.usdz") }
+        // The made-up sets' phone holds a scan (scanB.usdz). Not the photo-only set, whose phone sent photos and
+        // nothing else, nor the real projects, whose files are the Mac's.
+        if let folder = Fixtures.folder, !["photo-only", "real"].contains(Fixtures.set) { return folder.appending(path: "scanB.usdz") }
         #endif
         let drafts = (try? NativeCaptureCoordinator.shared.drafts()) ?? []
         guard let run = drafts.first(where: {
