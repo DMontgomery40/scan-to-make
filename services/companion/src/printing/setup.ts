@@ -7,7 +7,7 @@ import {z} from 'zod';
 import {PrinterMcpClient, toolResultJson, type PrinterBackend, type PrinterHandoffConfig} from '@scan-to-make/printer-handoff';
 import {appInstall, appMcpId, autoUpdateReason, installedVersion, mcpIdFor, resolveMcpInstall, type InstallEnvironment, type ResolvedMcpInstall} from './mcp-install.js';
 import type {McpUpdate} from './mcp-updates.js';
-import {unnamedPrinterName, type PrinterCatalog} from '../objects/printers.js';
+import {UNNAMED_PRINTER, type PrinterCatalog} from '../objects/printers.js';
 import {envOf, field, kindFor, modelForSerial, names, readMcpSetup, readSetupCache, setupOptions, writeSetupCache, type McpSetup, type SetupKind, type SetupOptions} from './mcp-setup.js';
 import type {PrintGate} from './print-gate.js';
 import {newerVersion} from './directory.js';
@@ -530,13 +530,13 @@ export class PrinterSetup {
 
   /**
    * A found printer's name in Add printer, before the person names it: the model in its MCP's own words (its setup
-   * choice's label, else the model as the MCP gave it), else where it is; "via <MCP>" when another MCP is the usual one.
+   * choice's label, else the model as the MCP gave it), else "Your printer" (never its address); "via <MCP>" when another MCP is the usual one.
    * No brand is composed and no casing applied (review F1 follow-up).
    */
   #nameFor(options: SetupOptions, printerType: string, model?: string, host?: string, backend?: PrinterBackend): string {
     const type = options.types.find(item => item.printerType === printerType);
     const modelLabel = model ? (backend ? options.models[backend] : undefined)?.find(choice => choice.value === model)?.label ?? model : undefined;
-    const base = modelLabel ?? unnamedPrinterName(host);
+    const base = modelLabel ?? UNNAMED_PRINTER;
     const via = backend && type && type.backends.length > 1 && type.backends[0] !== backend ? ` via ${this.#label(backend)}` : '';
     return (base + via).slice(0, 120);
   }
@@ -808,7 +808,7 @@ export class PrinterSetup {
       // Its .env gains only what its MCP needs and lacks, and only the model; nothing there is changed.
       const model = await this.#completeEnv(read.found.dir, read.found.package, input.model, join(read.found.dir, 'dist', 'index.js'));
       // No name typed: the generic one, which the printer list replaces with what the MCP reports (`PrinterDirectory.list`).
-      profile = {id, name: unnamedPrinterName(read.host), backend: read.found.package,
+      profile = {id, name: UNNAMED_PRINTER, backend: read.found.package,
         process: {command: this.#node, args: [join(read.found.dir, 'dist', 'index.js')], cwd: read.found.dir}, owned: false,
         ...((model ?? read.model) && /^[a-z0-9]{1,16}$/.test(model ?? read.model!) ? {model: model ?? read.model!} : {})};
     } else {
@@ -818,7 +818,7 @@ export class PrinterSetup {
       const {kind, setup} = await this.#kindForForm(input, {budgetMs: ADD_SETUP_BUDGET_MS});
       const env = envFor(input, kind, setup.slicer);
       await writeFile(join(created, '.env'), envFile(env), {mode: 0o600, flag: 'wx'});
-      profile = {id, name: input.name ?? unnamedPrinterName(input.host), backend: input.backend,
+      profile = {id, name: input.name ?? UNNAMED_PRINTER, backend: input.backend,
         process: {command: this.#node, args: [entry], cwd: created}, owned: true, ...(input.model ? {model: input.model} : {})};
     }
     try { await changeProfiles(this.#profilesPath, state => { state.profiles.push(profile); }); }

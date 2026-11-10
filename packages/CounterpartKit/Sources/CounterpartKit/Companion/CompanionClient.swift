@@ -117,6 +117,22 @@ public final class CompanionClient: @unchecked Sendable {
     /// One request: pinned, size-limited, and refused afterwards if the pairing changed while it ran.
     public func send(_ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json",
                      limit: Int = CompanionClient.jsonLimit, timeout: TimeInterval = 90, ifNoneMatch: String? = nil) async throws -> HTTPReply {
+        try await exchange(method, path, body: body, contentType: contentType, limit: limit, timeout: timeout, ifNoneMatch: ifNoneMatch) {
+            try await self.transport.send($0, trust: $1, limit: limit, resourceTimeout: $2)
+        }
+    }
+
+    /// A project file fetched to disk as it arrives (`HTTPTransport.download`): never held in memory whole. The link may
+    /// be slow (a busy Mac over Wi-Fi), so the transfer has half an hour; a link that stops sending for 90 s still fails.
+    func fetchFile(_ path: String, limit: Int) async throws -> (reply: HTTPReply, file: URL?) {
+        try await exchange("GET", path, limit: limit, timeout: 90, resourceTimeout: 1800) {
+            try await self.transport.download($0, trust: $1, limit: limit, resourceTimeout: $2)
+        }
+    }
+
+    private func exchange<T>(_ method: String, _ path: String, body: Data? = nil, contentType: String = "application/json",
+                             limit: Int, timeout: TimeInterval, ifNoneMatch: String? = nil, resourceTimeout fixed: TimeInterval? = nil,
+                             perform: (URLRequest, TrustPolicy, TimeInterval) async throws -> T) async throws -> T {
         guard let scope = Self.scope(method, path.components(separatedBy: "?")[0]) else { throw CompanionError.transport("invalid-request") }
         var attempt = try record(scope)
         // A GET that can't reach the Mac checks its other addresses once, moving to whichever answers.
@@ -136,9 +152,8 @@ public final class CompanionClient: @unchecked Sendable {
                 // Metadata deadlines bound the whole reply, including a peer trickling bytes. Commands and
                 // file transfers keep their budgets; event long polls pass their own 40-second timeout.
                 let metadata = method == "GET" && limit <= Self.jsonLimit
-                let resourceTimeout = metadata ? timeout + 5 : (body?.count ?? 0) > Self.photoLimit ? 600 : max(180, timeout + 10)
-                let reply = try await transport.send(request, trust: .record(attempt), limit: limit,
-                                                     resourceTimeout: resourceTimeout)
+                let resourceTimeout = fixed ?? (metadata ? timeout + 5 : (body?.count ?? 0) > Self.photoLimit ? 600 : max(180, timeout + 10))
+                let reply = try await perform(request, .record(attempt), resourceTimeout)
                 let latest = try? pairing.store.read()
                 guard attempt.isSamePairing(as: latest ?? nil) else { throw CompanionError.transport("pairing-changed") }
                 return reply
@@ -587,10 +602,15 @@ public final class CompanionClient: @unchecked Sendable {
         let encoded = resource.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? resource
         // The Ask's picture is served by its id; the field gives `asks/<id>.<ext>`.
         let path = "/v1/objects/\(project.id)/\(encoded)"
-        let reply = try await send("GET", path, limit: Self.scanLimit)
-        guard reply.status == 200, !reply.body.isEmpty else {
+        let (reply, fetched) = try await fetchFile(path, limit: Self.scanLimit)
+        guard reply.status == 200, let fetched else {
             throw reply.status == 404 ? CompanionError(code: "not-found", message: "This is no longer on your Mac.")
+                : reply.status == 413 ? CompanionError(code: "file-too-large", message: "This file is too large for this phone.")
                 : CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
+        }
+        defer { try? FileManager.default.removeItem(at: fetched) }
+        guard ((try? FileManager.default.attributesOfItem(atPath: fetched.path)[.size] as? Int) ?? 0) > 0 else {
+            throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
         }
         // Older versions of this project are no longer shown. The current version's folder stays: its other
         // files may be downloading at the same time.
@@ -599,8 +619,13 @@ public final class CompanionClient: @unchecked Sendable {
             try? FileManager.default.removeItem(at: other)
         }
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        do { try reply.body.write(to: target, options: .atomic) }
-        catch { throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.") }
+        // Moved into place whole, so a reader never sees half a file; another download of it may have won the race.
+        if FileManager.default.fileExists(atPath: target.path) { return target }
+        do { try FileManager.default.moveItem(at: fetched, to: target) }
+        catch {
+            if FileManager.default.fileExists(atPath: target.path) { return target }
+            throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
+        }
         return target
     }
 }

@@ -1,6 +1,6 @@
 import {starterModelId, starterProject as bundledStarter, type StarterProject} from '../starters/catalog.js';
 import {acknowledgePlate, plateNeedsPrinterCheck, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
-import {copyFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
+import {copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
 import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
@@ -82,6 +82,15 @@ async function askPicture(source: string, target: string): Promise<void> {
 /** How many of an object's photos go to one touch-up pass. More only costs time. */
 export const PHOTOS_PER_PASS = 24;
 const BEST_GUESS_NOTE = "Make your best guess for the parts you couldn't see in the photos, and carry on.";
+/**
+ * The starts of a pass that take an open question's place, by the pass's trigger:
+ * - `new`: the first pass, and Try Again (a retry runs the request again from the start);
+ * - `changes`, `late-photos`: a change sent instead of an answer, with or without photos;
+ * - `ask-answer`: the answer itself (which has already closed the question it answers).
+ * Not `locate` ("See it together"): it works out where the scanned object sits, changes no result and asks nothing,
+ * so an open question, a failure and Done are exactly as they were when it ends.
+ */
+const SUPERSEDES_A_QUESTION: ReadonlySet<NonNullable<StmObject['passes'][number]['trigger']>> = new Set(['new', 'changes', 'late-photos', 'ask-answer']);
 const UNCERTAIN = 'The printer may have started this print. Check the printer before printing again.';
 
 export {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './errors.js';
@@ -908,7 +917,7 @@ export class ObjectService {
     } catch { /* a failed call leaves it unknown; the next list or estimate asks again */ }
   }
   async get(id: string): Promise<StmObject> {
-    let object = await this.#deps.store.get(id);
+    let object = await this.#scanFiles(await this.#deps.store.get(id));
     if (object.state === 'touching-up') object = await this.#freshEstimate(object);
     if (!object.print) return object;
     // A watched print reads its monitor's last report instead of asking the printer again.
@@ -2551,10 +2560,12 @@ export class ObjectService {
     let engine: DesignEngine = 'blender';
     let typical = await this.#typical(kind, engine);
     const first: PassStage = {id: plan[0]!, words: passWords(plan[0]!, engine, kind), startedAtMs, typicalSec: typical[plan[0]!]};
-    // A question is open until it is answered or the pass that asked it is superseded: once another pass starts,
-    // nobody can answer the old one, and a project that then finishes must not keep it "open".
+    // A question is open until it is answered or a pass takes its place. Which starts take its place is by what
+    // started the pass (`SUPERSEDES_A_QUESTION`): after one of those nobody can answer the old question, and a
+    // project that then finishes must not keep it "open". A locate takes nothing's place and leaves it as it was.
+    const supersedes = SUPERSEDES_A_QUESTION.has(opts.trigger ?? 'new');
     const running = await store.update(object.id, o => ({...o, state: 'touching-up', question: undefined, failure: undefined, pendingFollowup: undefined, pendingMessageId: undefined,
-      ...(o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
+      ...(supersedes && o.ask?.status === 'open' ? {ask: {...o.ask, status: 'answered' as const}} : {}),
       // A locate pass changes nothing: Marked Done stays marked, and what it clears for the run comes back at its end.
       ...(o.completion && !opts.locate ? {completion: {...o.completion, undone: true}} : {}),
       ...(build ? {progress: 'Building the model from your photos.'} : {progress: undefined}),
@@ -3465,6 +3476,24 @@ export class ObjectService {
 
   #handoff(): PrinterHandoffConfig { return this.#deps.runningHandoff?.() ?? this.#deps.handoff; }
   #publicText(text: string): string { return publicTouchupText(text, {...process.env, ...this.#handoff().process.env}); }
+
+  /**
+   * The scan files a client may fetch, with their sizes (`scanFiles`, PRD §5.4): the scan, and the phone's own model
+   * kept beside a Mac rebuild. Read from disk as the project is read, and written to it only when they change.
+   */
+  async #scanFiles(object: StmObject): Promise<StmObject> {
+    const dir = join(this.dir(object.id), 'scan');
+    const names = [...new Set([object.scan, 'phone-preview.usdz'])].filter((name): name is string => !!name && /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name));
+    const files: {name: string; bytes: number}[] = [];
+    for (const name of names) {
+      // Only a regular file in the project: a link out of it is never offered (and never exported).
+      const info = await lstat(join(dir, name)).catch(() => undefined);
+      if (info?.isFile()) files.push({name, bytes: info.size});
+    }
+    const value = files.length ? files : undefined;
+    if (JSON.stringify(value) === JSON.stringify(object.scanFiles)) return object;
+    return this.#deps.store.update(object.id, o => ({...o, scanFiles: value}), {keepUpdatedAt: true}).catch(() => ({...object, scanFiles: value}));
+  }
 
   #changed(object: StmObject): StmObject {
     this.#deps.onChange?.(object);

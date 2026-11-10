@@ -88,7 +88,7 @@ test('current destination inherits metadata without rewriting its working SSH co
   const f = await fixture(t);
   const catalog = await loadPrinterCatalog(f.current, f.options([]));
   assert.equal(catalog.defaultDestinationId, 'current');
-  assert.deepEqual(catalog.destinations, [{id: 'current', name: 'Printer at 192.0.2.1', backend: 'bambu-printer-mcp', model: 'p1s', address: '192.0.2.1', source: 'current', origin: 'printer-handoff'}]);
+  assert.deepEqual(catalog.destinations, [{id: 'current', name: 'Your printer', backend: 'bambu-printer-mcp', model: 'p1s', address: '192.0.2.1', source: 'current', origin: 'printer-handoff'}]);
   assert.deepEqual(catalog.resolve('current'), f.current);
   const retained = catalog.resolve('current');
   retained.process.env.MCP_TRANSPORT = 'changed';
@@ -298,8 +298,8 @@ test('one printer is one destination: keyed by Bambu serial, else host and port,
   }});
   const catalog = await loadPrinterCatalog(f.current, f.options([claude, cursor]));
   assert.deepEqual(catalog.destinations.map(d => [d.name, d.backend, d.origin]), [
-    // Nobody named it: where it is until its MCP says what it is (no brand composed from the config's model).
-    ['Printer at 192.0.2.1', 'bambu-printer-mcp', 'printer-handoff'],
+    // Nobody named it: "Your printer" until its MCP says what it is (no address, no brand from the config's model).
+    ['Your printer', 'bambu-printer-mcp', 'printer-handoff'],
     ['Voron', 'mcp-3d-printer-server', 'claude-code'],
     ['Octo on same host', 'mcp-3d-printer-server', 'claude-code'],
     ['A1', 'bambu-printer-mcp', 'cursor'],
@@ -452,7 +452,7 @@ test('Add printer: found MCP folders and the printers each MCP finds; Check; Add
   assert.equal((await stat(join(folder, '.env'))).mode & 0o777, 0o600);
   assert.equal((await stat(folder)).mode & 0o777, 0o700);
   const added = catalog.destinations.find(item => item.id === octo.id);
-  assert.deepEqual([added.name, added.backend, added.address, added.origin, added.folder], ['Printer at octopi.local', 'mcp-3d-printer-server', 'octopi.local', 'counterpart', folder]);
+  assert.deepEqual([added.name, added.backend, added.address, added.origin, added.folder], ['Printer 2', 'mcp-3d-printer-server', 'octopi.local', 'counterpart', folder]);
   assert.deepEqual(catalog.resolve(octo.id).process, {command: '/usr/local/bin/node', args: [join(env.appPrinters, 'generic/lib/node_modules/mcp-3d-printer-server/dist/index.js')], cwd: folder});
   assert.ok(!(await readFile(profilesPath, 'utf8')).includes('octo-key'), 'the list keeps no settings');
   // Bambu through bambu-printer-mcp needs that MCP on this Mac first.

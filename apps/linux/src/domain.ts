@@ -938,3 +938,12 @@ export function pageActions(p: Project, sending = false): PageActions {
     default: return { others: [] };
   }
 }
+
+/**
+ * The printer a saved id stands for now: itself, or the printer it became under its other MCP's id (review F2), as the
+ * print sheet and iOS resolve it.
+ */
+export function resolvedPrinter<P extends { id: string; mcps?: { destinationId: string }[] }>(printers: P[], id: string | undefined) {
+  if (!id) return undefined;
+  return printers.find((x) => x.id === id) ?? printers.find((x) => x.mcps?.some((m) => m.destinationId === id));
+}

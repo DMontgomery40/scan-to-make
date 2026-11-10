@@ -321,6 +321,11 @@ data class PrinterDestination(
 @Serializable
 data class PrinterCatalog(val destinations: List<PrinterDestination> = emptyList(), val defaultDestinationId: String = "") {
     fun destination(id: String?): PrinterDestination? = destinations.firstOrNull { it.id == (id ?: defaultDestinationId) }
+    /** The printer a saved id stands for now: itself, or the printer it became under its other MCP's id (review F2), as on iOS. */
+    fun resolved(id: String?): PrinterDestination? {
+        val key = id ?: defaultDestinationId
+        return destinations.firstOrNull { it.id == key } ?: destinations.firstOrNull { d -> d.mcps?.any { it.destinationId == key } == true }
+    }
 }
 
 /** A spool the printer reports (`GET /v1/objects/<id>/filaments`). */

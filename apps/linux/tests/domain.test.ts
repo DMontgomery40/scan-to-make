@@ -31,6 +31,7 @@ import {
   parseLayers,
   searchProject,
   searchSnippet,
+  resolvedPrinter,
   projectThumbnail,
   words,
   startersShown,
@@ -880,3 +881,12 @@ test("search reasons survive a project without a title, and never cut an emoji i
   assert.equal(cut.text.slice(...cut.match), "holder");
   assert.doesNotMatch(cut.text, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/, "no half of a surrogate pair");
 });
+
+test("a project's printer saved under its other MCP's id is still that printer (review F2)", () => {
+  const printers = [{ id: "current", name: "P1S", mcps: [{ backend: "bambu-printer-mcp", destinationId: "current" }, { backend: "mcp-3d-printer-server", destinationId: "mcp-1a2b" }] }];
+  assert.equal(resolvedPrinter(printers, "mcp-1a2b")?.name, "P1S");
+  assert.equal(resolvedPrinter(printers, "current")?.name, "P1S");
+  assert.equal(resolvedPrinter(printers, "gone"), undefined);
+  assert.equal(resolvedPrinter(printers, undefined), undefined);
+});
+

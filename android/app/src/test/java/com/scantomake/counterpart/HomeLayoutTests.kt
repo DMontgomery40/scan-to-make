@@ -434,6 +434,17 @@ class HomeLayoutTests {
         compose.onAllNodes(hasTestTag("search-reason")).assertCountEquals(1)
     }
 
+    /** Review F2: a project's printer saved under its other MCP's id is still that printer, as iOS and the print sheet resolve it. */
+    @Test fun aPrinterSavedUnderItsOtherMcpsIdIsStillThatPrinter() {
+        val catalog = PrinterCatalog(listOf(PrinterDestination(id = "current", name = "P1S", backend = "bambu-printer-mcp",
+            mcps = listOf(PrinterDestination.McpChoice("bambu-printer-mcp", "current"), PrinterDestination.McpChoice("mcp-3d-printer-server", "mcp-1a2b")))), "current")
+        assertTrue(catalog.resolved("mcp-1a2b")?.id == "current")
+        assertTrue(catalog.resolved(null)?.id == "current")
+        assertTrue(catalog.resolved("gone") == null)
+        state.catalog.value = catalog
+        assertTrue(state.printerName(project("a", "Clip", "ready").copy(printerDestinationId = "mcp-1a2b")) == "P1S")
+    }
+
     /** Review F5: a project without a title still explains its match; a cut never splits an emoji; archived results explain too. */
     @Test fun searchReasonsSurviveNoTitleEmojiAndArchive() {
         val untitled = project("u", "x", "ready").copy(title = null, instructions = "A hook for the stroller handle")

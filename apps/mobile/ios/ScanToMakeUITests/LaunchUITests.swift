@@ -695,7 +695,7 @@ final class LayoutParityUITests: XCTestCase {
     /// that said only "Bambu printer". Before slicing, one row names the printer and says when the numbers come.
     /// Review F7: what this proves is the app's half: the row shows the name the printer list gives (the fixture Mac's
     /// "P1S"), and no time or filament tile exists before slicing. How that name is made is the companion's, tested in
-    /// `printer-directory.test.mjs` (the MCP's display name, exactly; "Printer at <address>" when it can't be asked).
+    /// `printer-directory.test.mjs` (the MCP's display name, exactly; "Your printer" when it can't be asked, never an address).
     func testAResultBeforeSlicingShowsTheListedPrinterNameAndNoTimeOrFilamentTiles() {
         let app = launch(screen: "printed")
         let row = app.descendants(matching: .any)["result-printer"]
@@ -763,6 +763,9 @@ final class LayoutParityUITests: XCTestCase {
         func nothingReachesTheBar(_ state: String) {
             // The bar is what's shown of the ask field and Print (Print gives way while typing).
             let bar = [print, ask].filter(\.exists).map(\.frame).reduce(CGRect.null) { $0.union($1) }
+            // The bar must be there: with neither part on screen the check below would pass on nothing (review).
+            XCTAssertTrue(ask.exists, "\(state): the bar's ask field is on screen")
+            XCTAssertFalse(bar.isNull, "\(state): the bar is on screen")
             // The page's scroll ends where the bar begins, so nothing it draws (it clips) can sit under or around the bar.
             // Accessibility frames are unclipped, so the scroll view's own frame is what proves it; an overlay bar fails here.
             let page = app.scrollViews.containing(NSPredicate(format: "label == %@", "Activity")).firstMatch
@@ -833,6 +836,26 @@ final class LayoutParityUITests: XCTestCase {
             : app.descendants(matching: .any)["fit-size-longest"].textFields.firstMatch
         XCTAssertTrue(longest.waitForExistence(timeout: 5))
         XCTAssertEqual(longest.value(forKey: "hasKeyboardFocus") as? Bool, true, "the first measurement is focused")
+    }
+
+    /// Review F3 (train 2026-11-10e): the Result's printer row is never empty. While the printer list is on its way it says so;
+    /// if the Mac won't give it, it says that with Try Again; with no printers at all, "No printer set up yet." (test above).
+    func testAResultPrinterRowSaysItIsWaitingOrThatTheMacWontSay() {
+        let waiting = launch(set: "printers-slow", screen: "ready")
+        let loading = waiting.staticTexts["result-printers-loading"]
+        for _ in 0..<6 where !(loading.exists && loading.isHittable) { waiting.swipeUp() }
+        XCTAssertTrue(loading.waitForExistence(timeout: 20), waiting.debugDescription)
+        XCTAssertEqual(loading.label, "Asking your Mac about its printers…")
+
+        let refused = launch(set: "printers-refused", screen: "ready")
+        let problem = refused.staticTexts["result-printers-problem"]
+        for _ in 0..<6 where !(problem.exists && problem.isHittable) { refused.swipeUp() }
+        XCTAssertTrue(problem.waitForExistence(timeout: 20), refused.debugDescription)
+        XCTAssertEqual(problem.label, "Couldn't read the printers configured on your Mac.")
+        let retry = refused.buttons["result-printers-retry"]
+        XCTAssertTrue(retry.isHittable, "the way to try again")
+        retry.tap()
+        XCTAssertTrue(problem.waitForExistence(timeout: 10), "still says so after another refusal")
     }
 
     /// Review F3: a project whose chosen printer is no longer on the Mac says so (not "No printer chosen yet."), and Choose
@@ -1446,6 +1469,33 @@ final class LayoutParityUITests: XCTestCase {
         let picture = app.descendants(matching: .any)["ask-picture"]
         XCTAssertTrue(picture.waitForNonExistence(timeout: 10), "no box once the fetch has failed")
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "The outlined part is what this question is about.")).firstMatch.exists)
+    }
+
+    /// Nov 10: every "What you scanned" on David's phone was blank. With projects present: a scan the Mac lists but can't
+    /// send leaves the Mac's picture on the stage and one line with Try Again; a scan too large for a phone keeps its
+    /// picture and says so. Never an empty stage.
+    func testAScanThatCantBeHadKeepsTheMacsPictureAndSaysWhyWithProjectsPresent() {
+        if regular { XCUIDevice.shared.orientation = .landscapeLeft }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = launch(set: "scan-stage")
+        let card = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Bottle copy")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 20), "projects are present")
+        app.terminate()
+        for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "The 3D view isn’t here yet."),
+                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "This scan is too detailed to show in 3D on a phone. Open it on your Mac to see it from every side.")] {
+            let page = XCUIApplication()
+            page.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
+                                    "-CounterpartOpen", "counterpart://project/\(id)"]
+            page.launch()
+            let picture = page.images["gallery-stage-picture"]
+            XCTAssertTrue(picture.waitForExistence(timeout: 20), "What you scanned shows the Mac's picture, not an empty stage")
+            XCTAssertGreaterThan(picture.frame.height, 150, "the picture fills the stage: \(picture.frame)")
+            let said = page.staticTexts[line]
+            XCTAssertTrue(said.waitForExistence(timeout: 15), "one plain line says why: \(line)")
+            if id.hasSuffix("01") { XCTAssertTrue(page.buttons["gallery-model-retry"].exists, "and how to try again") }
+            else { XCTAssertFalse(page.buttons["gallery-model-retry"].exists, "too large: trying again won't change it") }
+            page.terminate()
+        }
     }
 
     /// A question that came without a picture shows the project's picture at the same size, and says so.

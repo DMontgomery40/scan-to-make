@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { artifact, call, importFiles, openLink, openProject } from "./bridge";
 import {
+  resolvedPrinter,
   AFTER_PRINTING,
   activePrint,
   askCaption,
@@ -386,9 +387,7 @@ export function ProjectView({
   const queue = changes.queue.filter((q) => q.projectId === p.id);
   const active = p.state === "touching-up" || p.state === "printing";
   const page = pageActions(p);
-  const destination = printers.find(
-    (x) => x.id === (p.print?.destinationId ?? p.printerDestinationId),
-  );
+  const destination = resolvedPrinter(printers, p.print?.destinationId ?? p.printerDestinationId);
   const fit = didItFitQuestion(p);
 
   return (
