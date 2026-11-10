@@ -177,9 +177,13 @@ def prepare(source: Path, data: Path) -> dict:
         raise SystemExit(f'The copy needs exactly one project whose id starts {PROJECTS[0][1]} in {objects}; there are no projects at {source}.')
     ids = {}
     for name, prefix, _ in PROJECTS:
-        if not prefix.startswith('synth:'): ids[name] = resolve_id(objects, prefix)
-    ids['wall-holder-question'] = synth_question(objects, ids['wall-holder'])
-    ids['stove-gap-limit'] = synth_limit(objects, resolve_id(objects, '2f0a0229'))
+        if prefix.startswith('synth:'): continue
+        # A named project the person has since deleted is skipped, not an error (Nov 10: the bike-oil scan was gone).
+        if any(p.name.startswith(prefix) for p in objects.iterdir()): ids[name] = resolve_id(objects, prefix)
+        else: log(f'{name} ({prefix}) is no longer in the projects; its screens are skipped')
+    if 'wall-holder' in ids: ids['wall-holder-question'] = synth_question(objects, ids['wall-holder'])
+    if any(p.name.startswith('2f0a0229') for p in objects.iterdir()):
+        ids['stove-gap-limit'] = synth_limit(objects, resolve_id(objects, '2f0a0229'))
     rewrite_paths(state, source)
     leftover = [str(p) for p in state.rglob('*.json') if any(w in p.read_bytes() for w in EXCLUDE_WORDS)]
     if leftover or any((objects / x).exists() for x in EXCLUDE): raise SystemExit(f'excluded projects remain in the copy: {leftover[:5]}')
@@ -268,7 +272,7 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
         add(f'new-scan-fit-{label.lower()}', f'New, after a scan: fit, size from {label.lower()}', f'fit, "{label}" size', 'real (scan faked)',
             real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', 'walk-around'],
             [['find', rows['fit'], 'click'], ['find', label, 'click']], pages=2)
-    for name, _, state in PROJECTS:
+    for name, _, state in [p for p in PROJECTS if p[0] in ids]:
         data = 'real (state synthesised)' if name in ('wall-holder-question', 'stove-gap-limit') else 'real'
         for item in project_screens(name, ids[name], state, data, record): item['order'] = len(out); out.append(item)
     add('print-wall-holder', 'Print sheet', 'wall-holder, stub printer MCP', 'real (printer stub)', real + ['-CounterpartOpen', f'counterpart://print/{ids["wall-holder"]}'], pages=3)
@@ -669,6 +673,7 @@ def main() -> int:
                         help='the Mac on a bad day: ' + '; '.join(f'{k}: {v}' for k, v in CONDITIONS.items()) + '. One condition per output folder')
     parser.add_argument('--fresh-simulator', action='store_true',
                         help='create and delete a simulator for this run (the behaviour before Nov 10) instead of the kept stm-ux-* one')
+    parser.add_argument('--pages', type=int, help='at most this many scrolled pages per screen')
     parser.add_argument('--redo', action='store_true', help='capture the selected screens again (with --devices/--screens)')
     args = parser.parse_args()
     out, work = args.out.resolve(), (args.work or args.out.resolve().parent / 'ux-screens-work').resolve()
@@ -701,7 +706,7 @@ def main() -> int:
     try:
         info = companion.info
         served = {o['id'] for o in info['objects']}
-        missing = [name for name, _, _ in PROJECTS if ids[name] not in served]
+        missing = [name for name, _, _ in PROJECTS if name in ids and ids[name] not in served]
         if info.get('objectsStatus') != 200 or missing:
             raise SystemExit(f'The companion does not serve every project the screens need (missing {missing}, status {info.get("objectsStatus")}).')
         time.sleep(6)  # the companion reads its printer MCPs 5 s after start: check what it started
@@ -769,6 +774,8 @@ def select(args, out: Path, keys: list[str], ctx: dict) -> tuple[list[dict], set
         items = [item for pid in wanted for item in project_screens(names[pid], pid, 'by id', 'real', ctx['record'])]
         if args.screens:  # with --project, --screens picks tabs: result, sent, activity
             items = [i for i in items if any(i['name'].endswith('-' + w.lstrip('=')) for w in args.screens.split(','))]
+    if getattr(args, 'pages', None):  # --pages N: at most N scrolled pages per screen (the stage is on the first)
+        items = [{**i, 'pages': min(i['pages'], args.pages)} for i in items]
     done = {(d['device'], d['name']) for d in read_jsonl(out / 'done.jsonl')}
     if args.redo: done -= {(k, i['name']) for k in keys for i in items}
     return items, done
