@@ -56,7 +56,7 @@ export interface ObjectPass {
   /** The most recent public worker messages and tool names, in stream order. */
   activity?: TouchupActivity[];
   /** What started it: a new project, Ask for changes, a late photo, an answered Ask. */
-  trigger?: 'new' | 'changes' | 'late-photos' | 'ask-answer';
+  trigger?: 'new' | 'changes' | 'late-photos' | 'ask-answer' | 'locate';
   /** Stages with real start and end times and this Mac's typical duration for each (PRD §4). */
   stages?: PassStage[];
   /** While it runs: time left from the stages' typical durations. */
@@ -109,6 +109,12 @@ export interface StmObject {
   /** File name under scan/. */
   scan?: string;
   /**
+   * The project's picture (PRD §5.1): the object alone on the stage, drawn by the companion (`pictures/…png`), and
+   * each of its gallery pictures for clients that show pictures (`part`, `scan`, `together`, `photo`).
+   */
+  picture?: string;
+  pictures?: import('./pictures.js').ProjectPictureNames;
+  /**
    * Where `scan` came from when the phone sent an Object Capture session's photos with it: `phone-preview` is the
    * phone's own quick model, kept until this Mac rebuilds from the photos (and kept as the scan, said in words, when
    * it can't); `mac` is that rebuild, with the phone's preview kept as scan/phone-preview.usdz.
@@ -141,6 +147,11 @@ export interface StmObject {
 
     /** What changed, each tagged (PRD §4 Result). */
     changes?: TouchupChange[];
+    /**
+     * A fit's places for the scanned object: each a rigid placement of the scan in this model's frame, as the pass that
+     * made it said (docs/protocols/seats.md). Absent for a model with no scan to fit, or one whose pass didn't say.
+     */
+    seats?: import('./seats.js').Seat[];
     /** The designer's supports choice for this model, sent to the slicer as it is. */
     supports?: import('../touchup/runner.js').TouchupSupports;
     engine?: DesignEngine;
@@ -177,6 +188,11 @@ export interface StmObject {
     /** The print was handed to Bambu Connect: the person finishes it there. */
     sentVia?: 'bambu-connect';
     settings?: PrintSettings;
+    /**
+     * The spools this print uses, as the printer MCP reported them when it was sent (colour `#RRGGBB`, material, name):
+     * one for a one-spool print, one per model filament (`index`) for a multi-part model. The result is drawn in them.
+     */
+    spools?: import('./service.js').PrintSpool[];
     /** The latest report of this print's job (PRD §8.6). */
     live?: PrintLive;
     monitor?: PrintMonitor;
@@ -231,11 +247,12 @@ export class ObjectStore {
     return objects.sort((a, b) => b.createdAtMs - a.createdAtMs);
   }
 
-  update(id: string, change: (object: StmObject) => StmObject): Promise<StmObject> {
+  /** `keepUpdatedAt`: a change that isn't the project's news (its picture redrawn) keeps its place in recency order. */
+  update(id: string, change: (object: StmObject) => StmObject, options: {keepUpdatedAt?: boolean} = {}): Promise<StmObject> {
     const previous = this.#queues.get(id) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
       const before = await this.get(id);
-      const updated = {...change(before), id, updatedAtMs: Date.now()};
+      const updated = {...change(before), id, updatedAtMs: options.keepUpdatedAt ? before.updatedAtMs : Date.now()};
       // A failure belongs to the pass that set it only until something else sets one: a change that carries
       // `failedPass` over while the project stops being failed, or fails for another reason, loses it.
       if (updated.failedPass !== undefined && updated.failedPass === before.failedPass && (updated.state !== 'failed' || updated.failure !== before.failure)) delete updated.failedPass;

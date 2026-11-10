@@ -68,6 +68,7 @@ export const parameters = {
   'objects.settings.get': z.strictObject({id: z.uuid()}),
   'objects.settings.set': ProjectSettingsPatchSchema.safeExtend({id: z.uuid()}).refine(value => Object.keys(value).some(key => key !== 'id')),
   'objects.duplicate': z.strictObject({id: z.uuid()}),
+  'objects.locate': z.strictObject({id: z.uuid()}),
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),
   'objects.delete': z.strictObject({id: z.uuid()}),

@@ -84,7 +84,7 @@ class CompanionClient(
                     if (m("/v1/objects(?:/printers)?") || m(one) || m("$one/passes/(0|[1-9][0-9]{0,15})/activity")) return "projects:read"
                     if (m("/healthz")) return "generation:health"
                     if (m("/v1/events") || m("/v1/settings") || m("/v1/settings/cad") || m("/v1/devices")) return "projects:read"
-                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
+                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
                     if (m("$one/(filaments|colour-mapping|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                 }
@@ -100,7 +100,7 @@ class CompanionClient(
                 "PUT" -> if (m("$one/scan")) return "captures:import"
                 "POST" -> {
                     if (m("/v1/blender/(check|update)")) return "projects:write"
-                    if (m("/v1/objects") || m("$one/(start|duplicate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
+                    if (m("/v1/objects") || m("$one/(start|duplicate|locate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
                     if (m("$one/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)")) return "printer-handoff:use"
                     if (m("/v1/devices/live-activity-tokens")) return "projects:write"
                     if (m("/v1/settings/(ai/test|fusion/setup|cad/setup)")) return "projects:write"
@@ -271,6 +271,8 @@ class CompanionClient(
     suspend fun setArchived(id: String, archived: Boolean) = changeProjectSettings(id, jsonOf("archived" to archived))
     suspend fun rename(id: String, title: String) = changeProjectSettings(id, jsonOf("title" to title))
     suspend fun duplicate(id: String) = one(request("POST", "/v1/objects/$id/duplicate", JsonObject(emptyMap())))
+    /** Where the scanned object sits in a fit part made before passes said: a short pass that changes no geometry (docs/protocols/seats.md). */
+    suspend fun locate(id: String) = one(request("POST", "/v1/objects/$id/locate", JsonObject(emptyMap())))
 
     /**
      * capture-camera v1 for the frames already uploaded (`POST …/capture-camera`, ≤ 4 MiB). Sent as raw
@@ -369,7 +371,7 @@ class CompanionClient(
 
     // MARK: Files
 
-    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}""")
+    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png""")
 
     /** Downloads one project file into the cache, once per project version, and returns where it is. */
     suspend fun download(project: Project, name: String): File {

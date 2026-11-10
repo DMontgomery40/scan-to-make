@@ -211,6 +211,15 @@ final class ProjectScreensUITests: XCTestCase {
         XCTAssertTrue(app.buttons["needs-changes"].exists)
         works.tap()
         XCTAssertTrue(app.buttons["Print Another"].waitForExistence(timeout: 10), "Done keeps Print, as Print Another")
+        // The main action keeps its whole label beside the ask field ("Print Ano…", lead review Nov 10): the field gives way.
+        let another = app.buttons["Print Another"], ask = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertGreaterThanOrEqual(another.frame.width, 150, "Print Another is not cut off")
+        if ask.exists { XCTAssertLessThanOrEqual(ask.frame.maxX, another.frame.minX + 1, "the field never runs under the button") }
+        XCTAssertLessThanOrEqual(another.frame.maxX, app.windows.firstMatch.frame.maxX, "the button is on screen")
+        // And the narrowed field's placeholder fits whole: a shorter phrase beside Print Another on the phone, never "Ask for cha…".
+        if UIDevice.current.userInterfaceIdiom == .phone, ask.exists {
+            XCTAssertNotEqual(ask.placeholderValue, "Ask for changes…", "beside Print Another the phone's field takes the shorter placeholder")
+        }
         XCTAssertTrue(app.staticTexts["Done"].exists, "the Done capsule")
         XCTAssertFalse(app.buttons["it-works"].exists, "answered: the card goes")
         app.navigationBars.buttons.firstMatch.tap()
@@ -705,6 +714,45 @@ final class LayoutParityUITests: XCTestCase {
     /// David, Nov 6, on his six-plate rig: "i can't select which plate to print in the app i can see them but i can't click
     /// on them". Plate 1's start couldn't be confirmed; on the iPhone and the iPad every plate stays choosable on the
     /// project and inside Print, and only plate 1 asks for the printer check again.
+    /// PRD §5.4 Pictures (David, Nov 9: "i am no longer allowed to see the scanned object, anywhere, ever"; Nov 10: "now
+    /// you're beyond the hardcoded three things"). The project page shows each thing that will print and what was scanned,
+    /// chosen with labels under the stage; a designer's six plates are six labels in a row that scrolls.
+    func testTheProjectGalleryShowsEachThingAndTheProjectPictureIsTheObject() throws {
+        let app = launch(screen: "printed")
+        let result = app.buttons["gallery-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 20), "the thing that will print is the first picture")
+        let scan = app.buttons["gallery-scan-0"]
+        XCTAssertTrue(scan.exists, "what was scanned stays reachable once there is a result")
+        XCTAssertTrue(result.isSelected)
+        scan.tap()
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: scan)
+        XCTAssertEqual(XCTWaiter().wait(for: [selected], timeout: 5), .completed)
+        app.terminate()
+
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let rig = try String(contentsOf: root.appendingPathComponent("packages/contracts/fixtures/six-plate-unconfirmed.json"), encoding: .utf8)
+        let plates = XCUIApplication()
+        plates.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "plates-unconfirmed",
+                                  "-CounterpartScreen", "ready"]
+        plates.launchEnvironment["COUNTERPART_RIG_FIXTURE"] = rig
+        plates.launch()
+        let labels = plates.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "gallery-plate-"))
+        XCTAssertTrue(labels.firstMatch.waitForExistence(timeout: 20))
+        XCTAssertEqual(labels.count, 6, "one label per plate")
+        let last = labels.element(boundBy: 5)
+        // A plate off the edge has no hit point: swipe the row on a label that is on screen until the last one is.
+        let window = plates.windows.firstMatch.frame
+        for _ in 0..<5 where !window.contains(last.frame) {
+            guard let shown = (0..<6).map({ labels.element(boundBy: $0) }).first(where: { window.contains($0.frame) }) else { break }
+            shown.swipeLeft()
+        }
+        XCTAssertTrue(window.contains(last.frame), "the row scrolls to the last plate")
+        last.tap()
+        let chosen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isSelected == true"), object: last)
+        XCTAssertEqual(XCTWaiter().wait(for: [chosen], timeout: 5), .completed, "the last plate's picture is shown")
+    }
+
     func testEveryPlateStaysChoosableAfterAnUnconfirmedStartOnTheProjectAndInPrint() throws {
         // The shared fixture the companion's own tests check (packages/contracts/fixtures/six-plate-unconfirmed.json).
         var root = URL(fileURLWithPath: #filePath)

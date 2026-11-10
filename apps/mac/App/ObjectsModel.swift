@@ -51,6 +51,12 @@ protocol ObjectsCompanion: Sendable {
     func setProjectSettings(_ id: String, _ patch: [String: JSONValue]) async throws -> Project
     func duplicate(_ id: String) async throws -> Project
     func fusionAvailable() async -> Bool
+    /// Where the scanned object sits in a fit part made before passes said (`objects.locate`, docs/protocols/seats.md).
+    func locate(_ id: String) async throws -> Project
+}
+
+extension ObjectsCompanion {
+    func locate(_ id: String) async throws -> Project { throw ControlClientError.unavailable }
 }
 
 extension ObjectsCompanion {
@@ -129,6 +135,7 @@ struct SocketObjects: ObjectsCompanion {
         try await ControlClient(socketPath:path).createPublished(url:url, instructions:instructions)
     }
     func duplicate(_ id: String) async throws -> Project { try await ControlClient(socketPath: path).duplicateObject(id) }
+    func locate(_ id: String) async throws -> Project { try await ControlClient(socketPath: path).locateObject(id) }
     func fusionAvailable() async -> Bool {
         guard let state = try? await ControlClient(socketPath: path).companionSettings().fusion?.state else { return false }
         return ["connected", "not-running"].contains(state)
@@ -587,6 +594,12 @@ struct SocketObjects: ObjectsCompanion {
             throw CompanionError(code: "settings-failed", message: problem?.text ?? "Couldn't save Project Settings.")
         }
         if patch["status"] == .string("works"), let pending { corrections.sent(pending, for: id) }
+    }
+
+    /// "See it together": the Mac works out where the scanned object sits in the existing part, changing nothing.
+    func locate(_ id: String) async {
+        guard !working.contains(id) else { return }
+        _ = await change(id, { try await self.companion.locate(id) })
     }
 
     func duplicate(_ id: String) async throws {

@@ -1,6 +1,7 @@
 import Foundation
 import RealityKit
 import CoreVideo
+import AppKit
 import HandheldKit
 
 // Rebuilds a model with Apple's PhotogrammetrySession on the Mac, where detail levels above the iPhone's
@@ -44,9 +45,35 @@ let usage = """
 usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw] [--feature normal|high] [--honor-box]
        mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>] [--remove-support]
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
+       mac-reconstruct picture <output.png> [--model <file> [--z-up] [--tint RRGGBB]] [--object <scan.usdz> --seat m00,…,m33 …] [--photo <file>] [--pixels N]
 
 """
 var args = Array(CommandLine.arguments.dropFirst())
+// mac-reconstruct picture <output.png> [--model <file> [--z-up] [--tint RRGGBB]] [--object <scan.usdz> --seat m00,…,m33 …]
+//                         [--photo <file>] [--pixels N]
+//     A project's picture (PRD §5.1): the object alone on the apps' stage. A project STL (--z-up) in its spool's colour
+//     (--tint) or the neutral material; a scan in its own textures; a part with the scan at each seat (row-major 4×4 in
+//     the part's millimetre frame, docs/protocols/seats.md); or, with no model, a photo's subject cut out by Vision.
+if args.first == "picture" {
+    var spec = PictureSpec()
+    var rest = Array(args.dropFirst())
+    func value(_ flag: String) -> String? {
+        guard let i = rest.firstIndex(of: flag), i + 1 < rest.count else { return nil }
+        let found = rest[i + 1]; rest.removeSubrange(i...(i + 1)); return found
+    }
+    if let model = value("--model") { spec.model = URL(fileURLWithPath: model) }
+    if let object = value("--object") { spec.object = URL(fileURLWithPath: object) }
+    if let photo = value("--photo") { spec.photo = URL(fileURLWithPath: photo) }
+    if let pixels = value("--pixels").flatMap(Int.init), (64...2048).contains(pixels) { spec.pixels = pixels }
+    if let hex = value("--tint"), let rgb = Int(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")).prefix(6), radix: 16) {
+        spec.tint = NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
+    }
+    while let seat = value("--seat") { spec.seats.append(seat.split(separator: ",").compactMap { Double($0) }) }
+    spec.zUp = rest.contains("--z-up"); rest.removeAll { $0 == "--z-up" }
+    guard rest.count == 1 else { FileHandle.standardError.write(Data(usage.utf8)); exit(2) }
+    do { try renderPicture(spec, to: URL(fileURLWithPath: rest[0])); emit(["done": rest[0]]); exit(0) }
+    catch { fail("\(error)") }
+}
 if args.first == "stl" {
     var render: String?
     if let i = args.firstIndex(of: "--render"), i + 1 < args.count { render = args[i + 1]; args.removeSubrange(i...(i + 1)) }

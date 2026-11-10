@@ -87,6 +87,11 @@ private actor FakeObjects: ObjectsCompanion {
         await beforeDuplicateReply?()
         return try decode(copied)
     }
+    func locate(_ id: String) async throws -> Project {
+        if let actionError { throw actionError }
+        calls.append("locate")
+        return try change(id, "touching-up", [:])
+    }
     func failList(with error: Error?) { listError = error }
     func failActions(with error: Error?) { actionError = error }
 
@@ -310,6 +315,32 @@ private func project(_ item: [String: Any]) throws -> Project {
     /// paths (mcp-3d-printer-server 1.2.50's `counterpart_setup_fields`), and only a changed slicer is sent (Codex review on #346).
     /// Settings → AI → Design engine (PRD §8.9, §6.1): the code design engine's row reads the companion and Set Up asks
     /// it to set the engine up, with projects present.
+    /// PRD §5.4 Pictures on the Mac, with projects present: a fit with its seats shows the part, Together and what was
+    /// scanned, chosen over the stage (ProjectDetail's segmented control); one without seats offers See It Together.
+    func testTheProjectPicturesAndSeeItTogetherAreReachableWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        var holder = item("holder", "printed")
+        holder["kind"] = "fit"; holder["scan"] = "scan.usdz"
+        holder["current"] = ["model": "current/model.stl", "renders": [], "sizeMm": [213, 43, 82],
+                             "seats": [["name": "left", "rotationDeg": [0, 0, 0], "translationMm": [-71, -26, 2]]]]
+        var older = item("older", "ready")
+        older["kind"] = "fit"; older["scan"] = "scan.usdz"; older["current"] = ["model": "current/model.stl", "renders": []]
+        await companion.set([holder, older, item("caliper", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let seated = try XCTUnwrap(model.objects.first { $0.id == "holder" })
+        XCTAssertEqual(ProjectGallery(project: seated).entries.map(\.label), ["Your part", "Together", "What you scanned"])
+        let unseated = try XCTUnwrap(model.objects.first { $0.id == "older" })
+        XCTAssertEqual(ProjectGallery(project: unseated).entries.map(\.label), ["Your part", "What you scanned"])
+        await model.locate("older")
+        let calls = await companion.calls
+        XCTAssertTrue(calls.contains("locate"), "See It Together asks the companion (objects.locate)")
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("App/ProjectDetail.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains(".overlay(alignment: .top) { pictureChooser.padding(.top, 64) }"), "the chooser is on the project's stage")
+        XCTAssertTrue(source.contains("model.locate(object.id)"), "See It Together is wired to the model")
+    }
+
     func testTheDesignEngineRowReadsTheCodeEngineAndSetsItUpWithProjectsPresent() async throws {
         let companion = FakeObjects()
         await companion.set([item("caliper", "ready"), item("holder", "ready")])
