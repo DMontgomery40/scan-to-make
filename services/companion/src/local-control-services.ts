@@ -318,7 +318,7 @@ export function createControlDispatcher(services: ControlServices) {
             if (method === 'objects.settings.get') return {settings: projectSettingsView(await objects.get(parameters[method].parse(raw).id))};
             const {id, ...patch} = parameters[method].parse(raw);
             const updated = await objects.setProjectSettings(id, patch);
-            return {settings: projectSettingsView(updated), object: {...publicObject(updated), directory: objects.dir(updated.id)}};
+            return {settings: projectSettingsView(updated), object: {...publicObject(objects.named(updated)), directory: objects.dir(updated.id)}};
           } catch (error) {
             if (error instanceof ObjectNotFoundError) throw new ControlFailure('not-found');
             if (error instanceof InvalidStateError) throw new ControlFailure('conflict', error.message);
@@ -334,7 +334,7 @@ export function createControlDispatcher(services: ControlServices) {
             // The Mac app is on this Mac: it gets each object's folder to read the renders and model from.
             // A new project whose first files are arriving from the phone says so (`progress`), so the Mac shows it as
             // sending; one with no files and nothing arriving is a draft still on the phone.
-            const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(o), directory: objects.dir(o.id),
+            const local = (o: Awaited<ReturnType<typeof objects.get>>) => ({...publicObject(objects.named(o)), directory: objects.dir(o.id),
               ...(o.state === 'new' && !o.progress && objects.receiving(o.id) ? {progress: RECEIVING} : {})});
             if (method === 'objects.addStarter') return {object: local(await objects.addStarter(parameters[method].parse(raw).starterId))};
             if (method === 'objects.duplicate') return {object: local(await objects.duplicate(parameters[method].parse(raw).id))};

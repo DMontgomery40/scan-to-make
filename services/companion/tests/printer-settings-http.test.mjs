@@ -185,6 +185,14 @@ test('paired clients can read every MCP copy, including hidden profiles, without
 test('no printer name a read-only client can read carries a host, port or serial from a profile', async t => {
   const f = await fixture(t);
   const secrets = ['192.0.2.1', '01P00A123456789'];
+  // Projects sliced or printed by an older build keep the name it stored with the print: "Printer at <address>".
+  const legacy = async destinationId => {
+    const {id} = await f.store.create('a bracket');
+    await f.store.update(id, o => ({...o, state: 'printed', print: {bundleId: 'b-' + destinationId, destination: {id: destinationId, name: 'Printer at 192.0.2.1'}}}));
+    return id;
+  };
+  const listed = f.catalog.destinations[0];
+  const kept = await legacy(listed.id), gone = await legacy('profile:removed-since');
   const names = [];
   const collect = (value, key) => {
     if (Array.isArray(value)) { for (const item of value) collect(item, key); return; }
@@ -201,6 +209,11 @@ test('no printer name a read-only client can read carries a host, port or serial
   assert.ok(names.length > 0);
   for (const name of names) for (const secret of secrets) assert.equal(name.includes(secret), false, name);
   assert.ok(f.catalog.destinations.every(destination => !/^Printer at /.test(destination.name)));
+  const shown = (await f.call('/v1/objects', 'GET', undefined, f.readOnly)).body.objects;
+  assert.equal(shown.find(o => o.id === kept).print.destination.name, listed.name, 'a printer still listed reads as the catalog names it');
+  assert.equal(shown.find(o => o.id === gone).print.destination.name, 'Your printer', 'one no longer listed reads as an unnamed printer');
+  assert.equal((await f.objects.get(kept)).print.destination.name, listed.name);
+  assert.equal((await f.store.get(kept)).print.destination.name, 'Printer at 192.0.2.1', 'what was stored is not rewritten');
 });
 
 // Add printer… on the phone (PRD §6.1): the Mac's own printers.* methods behind HTTP, with the shared answers the

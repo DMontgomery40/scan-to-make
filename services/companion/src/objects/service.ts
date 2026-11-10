@@ -53,7 +53,7 @@ import {defaultReconstructRunner, RECONSTRUCTION_FAILED, ReconstructionReviewNee
 import {captureCameraDigest, validateCaptureCamera} from './capture-camera.js';
 import {clearReconstructionInputs, publicReview, reconstructionInputs, reconstructionPaths, saveReviewPreview, writeCaptureCamera, writeMeasurement, writeObjectRegion} from './reconstruction.js';
 import {ReconstructionAnswerSchema, type ReconstructionAnswer} from '@scan-to-make/contracts/reconstruction';
-import type {PrinterCatalog} from './printers.js';
+import {isGeneratedName, UNNAMED_PRINTER, type PrinterCatalog} from './printers.js';
 import type {PrinterDirectory, PublicDestination} from '../printing/directory.js';
 
 /** How early before its deadline the relay's own expiry may report an unanswered question as cancelled. */
@@ -920,6 +920,34 @@ export class ObjectService {
     } catch { /* a failed call leaves it unknown; the next list or estimate asks again */ }
   }
   async get(id: string): Promise<StmObject> {
+    return this.named(await this.#read(id));
+  }
+
+  /**
+   * A project as every reader sees it: its print's printer is named as the catalog names it now (U9: "An address is never
+   * part of a printer's name"). An older build stored "Printer at <address>" in the print's snapshot; that snapshot stays
+   * as it was on disk and is only read this way.
+   */
+  named(object: StmObject): StmObject {
+    const destination = object.print?.destination;
+    // A snapshot from before names were stored has none to correct.
+    if (typeof destination?.name !== 'string') return object;
+    const name = this.#printerName(destination.id, destination.name);
+    return name === destination.name ? object : {...object, print: {...object.print!, destination: {...destination, name}}};
+  }
+
+  /**
+   * A printer name kept from an earlier print (a snapshot, an event's words): a person's own name stays; one the companion
+   * made reads as that printer's listed name now (its MCP's model, when nobody named it), else "Your printer".
+   */
+  #printerName(destinationId: string | undefined, name: string): string {
+    if (!isGeneratedName(name)) return name;
+    const id = destinationId === undefined ? undefined : this.#deps.printerCatalog?.canonical(destinationId) ?? destinationId;
+    const listed = id === undefined ? undefined : this.printers().destinations.find(item => item.id === id)?.name;
+    return listed && !listed.startsWith('Printer at ') ? listed : UNNAMED_PRINTER;
+  }
+
+  async #read(id: string): Promise<StmObject> {
     let object = await this.#scanFiles(await this.#deps.store.get(id));
     if (object.state === 'touching-up') object = await this.#freshEstimate(object);
     if (!object.print) return object;
@@ -1948,7 +1976,7 @@ export class ObjectService {
     // One monitor per print, not per project: the last print's may still be sending its final frame.
     if (!print?.printId || !print.dispatchedAt || !print.monitor || print.monitor.phase === 'ended' || this.#monitors.has(print.printId) || this.#closed) return;
     const id = object.id, printId = print.printId, destinationId = print.destinationId ?? print.destination?.id ?? 'current';
-    const printerName = print.destination?.name ?? 'Your printer';
+    const printerName = this.#printerName(destinationId, print.destination?.name ?? UNNAMED_PRINTER);
     const target: MonitorTarget = {projectId: id, printId, destinationId, printerName, dispatchedAtMs: Date.parse(print.dispatchedAt),
       ...(print.taskId ? {taskId: print.taskId} : {}), ...(print.jobName ? {jobName: print.jobName} : {}), ...(print.fileBase ? {fileBase: print.fileBase} : {}),
       ...(print.estimate ? {estimate: print.estimate} : {})};
@@ -2040,6 +2068,7 @@ export class ObjectService {
   }
 
   async #emit(draft: EventDraft): Promise<void> {
+    if (draft.printerName) draft = {...draft, printerName: this.#printerName(draft.destinationId, draft.printerName)};
     if (draft.projectId && draft.type.startsWith('print.') &&
         !['print.confirm', 'print.paused', 'print.failed', 'print.not-started', 'print.unreachable', 'print.sent'].includes(draft.type)) {
       const object = await this.#deps.store.get(draft.projectId).catch(() => undefined);
