@@ -518,8 +518,9 @@ struct DeleteProjectButton: View {
         Button("Delete Project", systemImage: "trash", role: .destructive) {
             Task {
                 do { try await store.mac.delete(project.id); store.remove(project.id) }
-                catch let failure as CompanionError { store.error = failure.isUnreachable || failure.needsPairing ? failure : nil }
-                catch { store.error = .unreachable }
+                // A refused delete says nothing about the connection and must not clear a banner that is showing.
+                catch let failure as CompanionError { store.requestFailed(failure) }
+                catch { store.requestFailed(.unreachable) }
             }
         }
     }
