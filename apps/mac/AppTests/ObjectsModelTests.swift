@@ -39,6 +39,13 @@ private actor FakeObjects: ObjectsCompanion {
     private(set) var settingsPatches: [String: [String: JSONValue]] = [:]
     private var capabilities: ControlStatus.Capabilities?
     func setCapabilities(_ capabilities: ControlStatus.Capabilities) { self.capabilities = capabilities }
+    private(set) var codeEngineCalls: [String] = []
+    func codeEngine(_ action: CodeEngineStatus.Action) async throws -> CodeEngineStatus? {
+        codeEngineCalls.append("cad." + action.rawValue)
+        return action == .setup
+            ? CodeEngineStatus(state: "setting-up", message: "Setting up… 0 s so far.", server: "bambu-printer-mcp", seconds: 0, canSetUp: false)
+            : CodeEngineStatus(state: "not-set-up", message: "Not set up yet.", server: "bambu-printer-mcp", canSetUp: true)
+    }
     func status() async throws -> ControlStatus {
         guard let capabilities else { throw ControlClientError.unavailable }
         return ControlStatus(companionVersion: "test", pairedDeviceCount: 1, capabilities: capabilities)
@@ -238,6 +245,25 @@ private func project(_ item: [String: Any]) throws -> Project {
 
     /// Add printer…'s Slicer section stays reachable with projects present: the chosen MCP's own slicer choice and
     /// paths (mcp-3d-printer-server 1.2.50's `counterpart_setup_fields`), and only a changed slicer is sent (Codex review on #346).
+    /// Settings → AI → Design engine (PRD §8.9, §6.1): the code design engine's row reads the companion and Set Up asks
+    /// it to set the engine up, with projects present.
+    func testTheDesignEngineRowReadsTheCodeEngineAndSetsItUpWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("caliper", "ready"), item("holder", "ready")])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        XCTAssertFalse(model.objects.isEmpty, "projects are present")
+        let row = try await model.codeEngine(.status)
+        XCTAssertEqual(row?.state, "not-set-up")
+        XCTAssertEqual(row?.message, "Not set up yet.")
+        XCTAssertEqual(row?.canSetUp, true, "Set Up is offered")
+        let setUp = try await model.codeEngine(.setup)
+        XCTAssertEqual(setUp?.isWorking, true)
+        XCTAssertEqual(setUp?.canSetUp, false, "no second Set Up while it runs")
+        let calls = await companion.codeEngineCalls
+        XCTAssertEqual(calls, ["cad.status", "cad.setup"])
+    }
+
     func testAddPrinterSlicerControlsComeFromTheChosenMCPWithProjectsPresent() async throws {
         let companion = FakeObjects()
         await companion.set([item("caliper", "ready")])

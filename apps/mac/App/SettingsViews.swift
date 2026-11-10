@@ -39,7 +39,7 @@ struct SettingsView: View {
             Tab("General", systemImage:"gearshape", value:.general) { GeneralSettings() }
             Tab("Phones and iPads", systemImage:"iphone", value:.devices) { DevicesSettings(mac:mac) }
             Tab("Printers", systemImage:"printer", value:.printers) { PrintersSettings(objects:objects) }
-            Tab("AI", systemImage:"sparkles", value:.ai) { AISettings(model:cleanup) }
+            Tab("AI", systemImage:"sparkles", value:.ai) { AISettings(model:cleanup, objects:objects) }
             Tab("Advanced", systemImage:"wrench.and.screwdriver", value:.advanced) { AdvancedSettings(mac:mac) }
         }
         .frame(width:620)
@@ -602,6 +602,8 @@ private struct MCPRow: View {
 
 struct AISettings: View {
     @ObservedObject var model: ModelAccessModel
+    /// The companion's projects model, which also reads and sets up the code design engine.
+    let objects: ObjectsModel
     @State private var other = false
     @State private var fusion = FusionState.checking
     @State private var fusionProblem: String?
@@ -639,10 +641,7 @@ struct AISettings: View {
                 Text("Choose the AI for your model jobs. New scan cleanup, designs and corrections use this choice. Jobs already running keep their provider.").font(.caption).foregroundStyle(.secondary)
             }
             // PRD §8.9: the printer MCP's code design engine, first, because it designs and cleans up when it's set up.
-            CodeEngineSettingsSection { action in
-                let socket = ModelAccessModel.socketPath(for: Installation(bundle: .main))
-                return try await ControlClient(socketPath: socket).codeEngine(action)
-            }
+            CodeEngineSettingsSection { [objects] action in try await objects.codeEngine(action) }
             BlenderAddonSettingsSection { action in
                 let socket = ModelAccessModel.socketPath(for: Installation(bundle: .main))
                 return try await ControlClient(socketPath: socket).blenderAddon(action)
