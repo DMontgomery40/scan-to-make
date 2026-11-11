@@ -7,6 +7,23 @@ import CounterpartKit
 
 /// App-level checks that need the app target: links, routes and the pairing screen's starting state.
 @MainActor final class AppTests: XCTestCase {
+    func testDemandQueuedWhileInactiveStartsWhenTheSceneActivates() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".usdz")
+        try Data([1]).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let downloaded = expectation(description: "queued scan starts after activation")
+        var calls = 0
+        let models = ModelFiles { _, _ in calls += 1; downloaded.fulfill(); return file }
+        let project = Project(id: "queued-scan", createdAtMs: 0, updatedAtMs: 1, state: .ready, scan: "scan.usdz")
+        models.setActive(false)
+        models.want(project, "scan/scan.usdz")
+        XCTAssertEqual(calls, 0)
+        models.setActive(true)
+        guard await waited([downloaded], "unstarted scan demand is recovered") else { return }
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(models.file(project, "scan/scan.usdz"), file)
+    }
+
     func testAPairingLinkIsTakenOnceEvenWhenAColdStartDeliversItTwice() {
         let app = AppModel(store: MemoryStore())
         let link = URL(string: "scantomake://pair?v=2&c=\(String(repeating: "A", count: 32))&e=9999999999999&k=\(String(repeating: "ab", count: 32))&a=https%3A%2F%2F192.168.1.2%3A9077")!

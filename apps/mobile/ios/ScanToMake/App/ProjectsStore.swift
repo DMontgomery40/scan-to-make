@@ -637,10 +637,10 @@ struct MCPUpdateProgress: Equatable {
         running = [:]; generations = [:]; contexts = [:]; demands = [:]; fetches = [:]
     }
 
-    /// Foreground/unlock and a recovered Mac link retry known failed demand.
+    /// Foreground/unlock and a recovered Mac link start unstarted demand and retry known failures.
     func recover() {
         guard active else { return }
-        for (project, path) in Array(demands.values) where fetch(project, path) == .failed { want(project, path) }
+        for (project, path) in Array(demands.values) where fetch(project, path) == nil || fetch(project, path) == .failed { want(project, path) }
     }
 
     /// Try Again: a download that failed starts over.

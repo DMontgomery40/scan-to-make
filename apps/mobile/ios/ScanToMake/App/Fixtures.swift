@@ -453,6 +453,7 @@ enum Fixtures {
         if path.hasSuffix("/" + bottlePicture) { return "bottle-picture.png" }
         if let range = path.range(of: #"/capture/[0-9]{4}\.heic$"#, options: .regularExpression) { return "bottle-capture/" + path[range].dropFirst("/capture/".count) }
         if path.hasSuffix("/model.stl") { return "mic.stl" }
+        if Fixtures.set == "ar-stage", path.contains("/scan/") { return "scan.usdz" }
         if path.hasSuffix("/pictures/scan-0123456789abcdef.png") || path.hasSuffix("/pictures/part-0123456789abcdef.png") { return "thumb-potato.png" }
         if path.hasSuffix("/camera.jpg") { return "bed.jpg" }
         if path.contains("/renders/mic.png") { return "thumb-mic.png" }

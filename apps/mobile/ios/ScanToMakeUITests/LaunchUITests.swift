@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import ModelIO
 
 /// The app opens same-account discovery with an explicit code fallback when no Mac is paired.
 final class LaunchUITests: XCTestCase {
@@ -1329,6 +1330,22 @@ final class LayoutParityUITests: XCTestCase {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let layer = folder.appendingPathComponent("scan.usda")
+        try """
+        #usda 1.0
+        (
+            defaultPrim = "Scan"
+            metersPerUnit = 1
+            upAxis = "Y"
+        )
+        def Mesh "Scan" {
+            int[] faceVertexCounts = [3]
+            int[] faceVertexIndices = [0, 1, 2]
+            point3f[] points = [(0, 0, 0), (0.1, 0, 0), (0, 0.1, 0)]
+            uniform token subdivisionScheme = "none"
+        }
+        """.write(to: layer, atomically: true, encoding: .utf8)
+        MDLUtility.convert(toUSDZ: layer, writeTo: folder.appendingPathComponent("scan.usdz"))
         let app = XCUIApplication()
         app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed"]
         app.launch()
@@ -1343,6 +1360,7 @@ final class LayoutParityUITests: XCTestCase {
         for id in ids {
             app.buttons[id].tap()
             RunLoop.current.run(until: Date().addingTimeInterval(1))
+            if id == "gallery-scan" { XCTAssertTrue(ar.waitForExistence(timeout: 10), "the scan demand starts too, even when the gallery opens before scene activation") }
             XCTAssertLessThanOrEqual(app.buttons.matching(identifier: "gallery-ar").count, 1, "one AR control on \(id)")
             XCTAssertLessThanOrEqual(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "in your space")).count, 0)
             if id == "gallery-together" || id.hasPrefix("gallery-plate-") { XCTAssertFalse(ar.exists, "no AR on \(id)") }
