@@ -126,6 +126,9 @@ struct StagePicture: View {
     var modelMissing: (line: String, retry: () -> Void)? = nil
     /// Whether this picture's fetch failed, for the gallery's line under the stage.
     var failedChanged: (Bool) -> Void = { _ in }
+    /// The height the stage's own controls take at its bottom (AR, the size chip). The waiting and not-available words lay
+    /// out above it, never under a chip: a "Did it fit?" card leaves the stage as short as 160 points (lead, Nov 10, X80).
+    var controlsInset: CGFloat = 0
     @State private var load = PictureLoad<UIImage>()
     @State private var attempt = 0
 
@@ -168,24 +171,24 @@ struct StagePicture: View {
                     }
                     .accessibilityHidden(true).allowsHitTesting(false)
             case .loading(nil), .waiting:
-                VStack(spacing: 12) {
-                    ProgressView().tint(.white.opacity(0.6))
-                    Text(coming).font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
+                // Above the chips; side by side when the stage is too short to stack them.
+                ViewThatFits(in: .vertical) {
+                    VStack(spacing: 12) { ProgressView().tint(.white.opacity(0.6)); comingText }
+                    HStack(spacing: 10) { ProgressView().tint(.white.opacity(0.6)); comingText }
                 }
-                .padding(.horizontal, 24).multilineTextAlignment(.center).accessibilityHidden(true).allowsHitTesting(false)
+                .padding(.horizontal, 24).padding(.top, 12).padding(.bottom, controlsInset + 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .multilineTextAlignment(.center).accessibilityHidden(true).allowsHitTesting(false)
             case .notAvailable(let line, let retry):
-                VStack(spacing: 12) {
-                    VStack(spacing: 10) {
-                        Image(systemName: symbol).font(.system(size: 40)).foregroundStyle(.white.opacity(0.4))
-                        Text(line).font(.footnote).foregroundStyle(.white.opacity(0.7))
-                    }
-                    .accessibilityHidden(true)
-                    if retry {
-                        Button("Try Again") { attempt += 1; modelMissing?.retry() }.font(.footnote.weight(.semibold)).buttonStyle(.glass)
-                            .accessibilityIdentifier("gallery-stage-retry")
-                    }
+                // Above the chips: the symbol shrinks, then goes, before anything would touch them; the line stays whole.
+                ViewThatFits(in: .vertical) {
+                    unavailable(line, retry: retry, symbolSize: 40)
+                    unavailable(line, retry: retry, symbolSize: 24)
+                    unavailable(line, retry: retry, symbolSize: nil)
                 }
-                .padding(.horizontal, 24).multilineTextAlignment(.center)
+                .padding(.horizontal, 24).padding(.top, 12).padding(.bottom, controlsInset + 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .multilineTextAlignment(.center)
             }
         }
         .clipped()
@@ -202,6 +205,26 @@ struct StagePicture: View {
             guard !Task.isCancelled else { return }
             if let decoded { ImageMemory.shared.store(decoded, key) }
             load.decoded(decoded, for: key)
+        }
+    }
+}
+
+private extension StagePicture {
+    var comingText: some View {
+        Text(coming).font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.7)).fixedSize(horizontal: false, vertical: true)
+    }
+
+    func unavailable(_ line: String, retry: Bool, symbolSize: CGFloat?) -> some View {
+        VStack(spacing: symbolSize == nil ? 8 : 10) {
+            VStack(spacing: 8) {
+                if let symbolSize { Image(systemName: symbol).font(.system(size: symbolSize)).foregroundStyle(.white.opacity(0.4)) }
+                Text(line).font(.footnote).foregroundStyle(.white.opacity(0.7)).fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityHidden(true)
+            if retry {
+                Button("Try Again") { attempt += 1; modelMissing?.retry() }.font(.footnote.weight(.semibold)).buttonStyle(.glass)
+                    .accessibilityIdentifier("gallery-stage-retry")
+            }
         }
     }
 }

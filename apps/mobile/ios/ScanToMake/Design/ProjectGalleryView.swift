@@ -78,7 +78,7 @@ struct ProjectGalleryView: View {
         }
         return StagePicture(project: project, still: project.still(for: entry), label: entry.label,
                             unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.",
-                            modelMissing: missing,
+                            modelMissing: missing, controlsInset: Self.controlsHeight,
                             failedChanged: { failed in if failed { pictureFailed.insert(entry.id) } else { pictureFailed.remove(entry.id) } })
     }
 
@@ -170,6 +170,10 @@ struct ProjectGalleryView: View {
 
     // MARK: Controls on the stage: AR, the scan's photos, Together, and the size of what is shown
 
+    /// What the row of controls takes at the stage's bottom: its padding and one glass button or chip. The stage's words lay
+    /// out above it (`StagePicture.controlsInset`).
+    static let controlsHeight: CGFloat = 14 + 44
+
     @ViewBuilder private var controls: some View {
         if let entry {
             let light = StageContrast.lightStage(for: entry.colour)
@@ -177,7 +181,7 @@ struct ProjectGalleryView: View {
                 HStack(spacing: 10) {
                     if let ar = arTarget(entry) {
                         Button { ARModel.show(ar) } label: { Label("AR", systemImage: "arkit") }.stageButton(light: light)
-                            .accessibilityHint("Places it at true size in your room")
+                            .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
                     }
                     if entry.kind == .scan, !entry.photos.isEmpty {
                         Button { showingPhotos = true } label: { Label(entry.photos.count == 1 ? "1 photo" : "\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
@@ -192,7 +196,7 @@ struct ProjectGalleryView: View {
                     if let size = entry.sizeText(measured[entry.id]) {
                         Text(size).font(.caption.monospacedDigit().weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
                             .padding(.horizontal, 12).padding(.vertical, 8).stageChip(light: light)
-                            .accessibilityLabel("\(entry.measures) size \(size)")
+                            .accessibilityLabel("\(entry.measures) size \(size)").accessibilityIdentifier("gallery-size")
                     }
                 }
                 .labelStyle(.titleAndIcon).font(.caption.weight(.semibold))

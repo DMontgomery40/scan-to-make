@@ -727,6 +727,43 @@ final class LayoutParityUITests: XCTestCase {
         }
     }
 
+    /// Lead, Nov 10, on X80's short stage: with "Did it fit?" to answer the stage can be 160 to 210 points tall, and its
+    /// Try Again sat under the size chip. The stage's words lay out above its chips (the symbol shrinks or goes first), so
+    /// Try Again never touches the size chip or AR, while the picture can't be had and while it is coming; on every iPhone.
+    func testTheShortStagesWordsAndTryAgainNeverSitUnderItsChips() {
+        for (state, extra) in [("not available", [String]()), ("loading", ["-CounterpartSlowPictures", "60"])] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "all",
+                                   "-CounterpartScreen", "printed"] + extra
+            app.launch()
+            XCTAssertTrue(app.buttons["it-works"].waitForExistence(timeout: 20), "the Did it fit? card is on the page")
+            let picture = app.images["gallery-stage-picture"]
+            XCTAssertTrue(picture.waitForExistence(timeout: 10))
+            XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", state), object: picture)], timeout: 15), .completed,
+                           "\(state): \(String(describing: picture.value))")
+            RunLoop.current.run(until: Date().addingTimeInterval(2))  // the stage settles to the page's height
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "short-stage-\(state)"; shot.lifetime = .keepAlways; add(shot)
+            let stage = picture.frame
+            XCTAssertGreaterThanOrEqual(stage.height, 150, "the stage \(stage)")
+            let chips = [app.descendants(matching: .any)["gallery-size"], app.buttons["gallery-ar"]].filter(\.exists)
+            XCTAssertFalse(chips.isEmpty, "the size chip is on the stage")
+            for chip in chips {
+                // The words lay out above the stage's controls band; the chips must sit inside that band.
+                XCTAssertGreaterThanOrEqual(chip.frame.minY, stage.maxY - 58 - 1, "\(chip.identifier) \(chip.frame) is in the controls band of \(stage)")
+            }
+            if state == "not available" {
+                let retry = app.buttons["gallery-stage-retry"]
+                XCTAssertTrue(retry.exists, "Try Again where trying again can help")
+                XCTAssertTrue(retry.isHittable, "Try Again can be pressed: \(retry.frame)")
+                for chip in chips {
+                    XCTAssertFalse(retry.frame.intersects(chip.frame), "Try Again \(retry.frame) clear of \(chip.identifier) \(chip.frame)")
+                    XCTAssertLessThanOrEqual(retry.frame.maxY, chip.frame.minY, "Try Again sits above \(chip.identifier)")
+                }
+            }
+            app.terminate()
+        }
+    }
+
     /// First look U9 (Nov 10, iPad): a ready scan's Result showed two "—" cards for print time and filament and a third
     /// that said only "Bambu printer". Before slicing, one row names the printer and says when the numbers come.
     /// Review F7: what this proves is the app's half: the row shows the name the printer list gives (the fixture Mac's
