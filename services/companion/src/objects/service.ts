@@ -169,6 +169,8 @@ function photoName(path: string, taken: string[]): string {
   while (used.has(name.toLowerCase())) name = `${stem}-${n++}${extension}`;
   return name;
 }
+/** Making something from a scan whose phone hasn't finished sending it (its preview came, its photos are still to come). */
+const SCAN_STILL_ARRIVING = 'This scan is still arriving from the phone that recorded it. Finish sending it from that phone, then make something from it.';
 const CAPTURE_PENDING = 'The capture is still missing camera or depth files, or its completed file list. Resume sending it from the phone that recorded it.';
 /** The design's Linux gate: an iPhone's Object Capture scan is rebuilt only by a Mac (PhotogrammetrySession). */
 export const SCANS_NEED_A_MAC = 'Scans from iPhone are rebuilt on a Mac. Pair this iPhone with a Mac to use Scan it.';
@@ -709,6 +711,9 @@ export class ObjectService {
         : 'This project has no scan to make something from.');
       // A rebuild from the photos writes the scan again: copying it halfway would copy half a scan.
       if (source.state === 'touching-up' && source.progress) throw new InvalidStateError('Your Mac is still building this scan. Wait until it has finished.');
+      // A walk-around whose phone sent its preview but never finished sending its photos: copied now, it would be designed
+      // from the preview, and the Mac's rebuild from every photo would never run.
+      if (source.captureDeclared) throw new InvalidStateError(SCAN_STILL_ARRIVING);
       const words = request.instructions?.trim();
       if (request.kind === 'fit' && !words) throw new InvalidStateError('Say what it should hold, mount or adapt to.');
       const title = projectTitle(source);
@@ -740,6 +745,10 @@ export class ObjectService {
           throw error;
         }
         if (!source.scan) throw new InvalidStateError(`“${projectTitle(source)}” no longer has a scan to bring over.`);
+        if (source.captureDeclared) throw new InvalidStateError(SCAN_STILL_ARRIVING);
+        // Photos sent with a message not yet asked are that message's: they never become the new project's evidence.
+        const pending = new Set(source.pendingPhotos ?? []);
+        const photos = source.photos.filter(name => !pending.has(name));
         const target = this.dir(id), origin = this.dir(from.id);
         // Copies, never links: an APFS clone shares no file, so deleting either project leaves the other whole.
         const copy = async (folder: string, names?: readonly string[]) => {
@@ -755,10 +764,10 @@ export class ObjectService {
           }
         };
         await copy('scan');
-        await copy('photos', source.photos);
+        await copy('photos', photos);
         // The capture's photos, depth and camera file: a scan still on the phone's preview is rebuilt from them here.
         await copy('capture');
-        await this.#deps.store.update(id, o => ({...o, state: 'new', progress: undefined, failure: undefined, scan: source.scan, photos: [...source.photos],
+        await this.#deps.store.update(id, o => ({...o, state: 'new', progress: undefined, failure: undefined, scan: source.scan, photos,
           ...(source.scanSource ? {scanSource: source.scanSource} : {}), ...(source.capture?.length ? {capture: [...source.capture]} : {}),
           ...(source.captureDepth?.length ? {captureDepth: [...source.captureDepth]} : {}),
           ...(source.captureCompletion ? {captureCompletion: source.captureCompletion} : {}), ...(source.captureCamera ? {captureCamera: source.captureCamera} : {}),
@@ -1591,8 +1600,9 @@ export class ObjectService {
     // Photos only show what something looks like; without a scan, the description says what to make.
     if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && !object.credit?.url && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
-    // A touch-up works from photos; a model with neither photos nor a request has nothing to go on.
-    if (object.scan && !object.photos.length && !object.capture?.length && !object.instructions?.trim() && (object.state === 'new' || object.state === 'failed'))
+    // A touch-up works from photos; a model with neither photos nor a request has nothing to go on. A scan brought over
+    // from another project with no words is a copy of it: kept as it is, like a copy's scan sent on its own.
+    if (object.scan && !object.scanFrom && !object.photos.length && !object.capture?.length && !object.instructions?.trim() && (object.state === 'new' || object.state === 'failed'))
       throw new InvalidStateError("Add photos of it, or describe what you'd like changed.");
     if (object.state === 'touching-up') return object;
     if (object.kind === 'published' && object.current && ['ready', 'needs-closeup'].includes(object.state)) return object;
