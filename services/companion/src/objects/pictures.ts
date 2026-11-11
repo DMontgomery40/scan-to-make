@@ -106,8 +106,8 @@ export function leadPicture(names: ProjectPictureNames | undefined, object?: Pic
   return names?.part ?? names?.scan ?? names?.photo;
 }
 
-/** How the pictures are drawn (`mac-reconstruct picture`): raised when the drawing changes, so every picture is redrawn. 2: the light stage; 3: pale parts keep their shading. */
-const PICTURE_VERSION = 3;
+/** How the pictures are drawn (`mac-reconstruct picture`): raised when the drawing changes, so every picture is redrawn. 2: the light stage; 3: pale parts keep their shading; 4: shape-aware framing and contact shadows. */
+const PICTURE_VERSION = 4;
 
 /**
  * The picture's file name, `pictures/<role>-<files>-<drawing>.png`: changes whenever what it draws changes (a file, a
