@@ -2193,7 +2193,7 @@ final class OnDeviceLibraryUITests: XCTestCase {
         if back.exists && back.isHittable { back.tap() }
         else { app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Potato")).firstMatch.tap() }
         // This project's own card or row ("Mic mount", never "Mic mount v1").
-        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
         for _ in 0..<6 where !row.isHittable { app.swipeUp() }
         row.tap()
