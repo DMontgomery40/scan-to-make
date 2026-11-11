@@ -215,9 +215,6 @@ struct NewObjectView: View {
                     if let captureWarning {
                         Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange)
                     }
-                    if let problem {
-                        Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red)
-                    }
                 }
                 .padding(20)
                 .frame(maxWidth: 640)
@@ -258,6 +255,12 @@ struct NewObjectView: View {
             // The scroll's bottom edge meets the bar with the system's hard edge, so a row cut there reads as cut, not
             // as floating behind the button.
             .scrollEdgeEffectStyle(.hard, for: .bottom)
+                // A Send that didn't go says so where it was pressed, not below the fold of the sheet.
+                if let problem, working == nil {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red)
+                        .frame(maxWidth: 600, alignment: .leading).padding(.horizontal, 20).padding(.top, 8)
+                        .accessibilityIdentifier("new-problem")
+                }
                 Button { Task { await make() } } label: {
                     Group {
                         if let sendSymbol { Label(sendLabel, systemImage: sendSymbol) } else { Text(sendLabel) }

@@ -610,7 +610,11 @@ final class LayoutParityUITests: XCTestCase {
         if app.buttons["Done"].exists { app.buttons["Done"].tap() }
         let send = app.buttons["send"]
         XCTAssertTrue(send.isEnabled)
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: send)], timeout: 5)
+        sleep(1) // the bar settles where the keyboard was
         send.tap()
+        let problem = app.staticTexts["new-problem"]
+        XCTAssertFalse(problem.waitForExistence(timeout: 3), "Send failed: \(problem.exists ? problem.label : "")")
 
         // The new project opens: a fit, made from the same scan, saying where it came from.
         XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "A belt case for it"), object: title)], timeout: 15) == .completed,
