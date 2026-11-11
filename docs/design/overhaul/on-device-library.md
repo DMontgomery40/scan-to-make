@@ -33,11 +33,11 @@ Three files at a time. "Metered": iOS `NWPath.isExpensive` (cellular, a personal
 
 **The person chooses.** Settings → *Keep on this iPhone* (iPad, phone):
 
-| Choice | Keeps | Ceiling | David's 19 projects (Nov 10, read from his project folders) |
+| Choice | Keeps | Ceiling | David's 20 projects (the screenshot tool's copy, Nov 10) |
 |---|---|---|---|
-| Pictures only | every picture | 200 MB | 8.5 MB |
-| Pictures and 3D models (default) | and the models | 500 MB | 63.2 MB if every model were kept; the fill keeps opened and recent ones |
-| Everything, scans included | and the scans the phone may fetch | 2 GB | 88.7 MB |
+| Pictures only | every picture | 200 MB | 10.2 MB |
+| Pictures and 3D models (default) | and the models | 500 MB | 65.7 MB if every model were kept; the fill keeps opened and recent ones |
+| Everything, scans included | and the scans the phone may fetch | 2 GB | 98.1 MB |
 
 A line says how much space it uses, with Clear. Past the ceiling, scans go first, then models, then pictures, each from the project opened longest ago. Choosing a smaller option lets go of what it no longer keeps at once.
 
@@ -65,7 +65,7 @@ The lead decides from this section.
 2. The stage's own pictures (`pictures.part`, `.scan`, `.together`) and plate pictures would need new asset fields or a child record per picture. That is a schema change, deployed to Production before any build uses it.
 3. A model as an asset: up to 12 MB per project on David's set, uploaded at every new version.
 
-**Cost in the person's iCloud storage.** Private-database records and assets count against the person's own iCloud quota (`CKDatabase.Scope.private`; a full quota fails the save with `CKError.quotaExceeded`). The thumbnail is about 50–150 KB per project: 1–3 MB for David's 19. Stage pictures at their full size add about 8.5 MB. Models add about 55 MB, and every new version is uploaded again (CloudKit deletes orphaned assets later). On a free 5 GB plan, models are not a fair thing to take without asking.
+**Cost in the person's iCloud storage.** Private-database records and assets count against the person's own iCloud quota (`CKDatabase.Scope.private`; a full quota fails the save with `CKError.quotaExceeded`). The thumbnail is about 50–150 KB per project: 1–3 MB for David's 20. Stage pictures at their full size add about 10 MB. Models add about 55 MB, and every new version is uploaded again (CloudKit deletes orphaned assets later). On a free 5 GB plan, models are not a fair thing to take without asking.
 
 **Android and Linux.** No iCloud. Linux needs nothing (above). Android has only the Mac and its own library; an Android-reachable equivalent would be a server we run, which this project does not have, or the person's own Google Drive, a second sync system to keep correct. Neither is worth it for pictures the phone already keeps.
 
