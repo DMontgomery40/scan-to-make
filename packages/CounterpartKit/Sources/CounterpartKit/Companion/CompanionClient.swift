@@ -38,6 +38,9 @@ public final class CompanionClient: @unchecked Sendable {
     public let pairing: PairingClient
     private let transport: HTTPTransport
     public let cache: URL
+    /// What this phone keeps of the paired Mac's projects (`OnDeviceLibrary`): files of the kinds the person keeps are
+    /// read from and written to it; anything else uses `cache` as before. Inactive (no Mac set) until the app says which.
+    public let library: OnDeviceLibrary
     /// `X-Scan-Device-Model`: the hardware identifier ("iPhone18,2"), shown in the Mac's device list.
     public let deviceModel: String?
     /// `X-Scan-Device-Name`: the phone's own name, percent-encoded UTF-8; absent when iOS gives only "iPhone".
@@ -56,8 +59,9 @@ public final class CompanionClient: @unchecked Sendable {
     static let uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
 
     public init(pairing: PairingClient, transport: HTTPTransport = PinnedTransport(), deviceModel: String? = DeviceModel.identifier, deviceName: String? = nil,
-                cache: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "Objects", directoryHint: .isDirectory)) {
-        self.pairing = pairing; self.transport = transport; self.cache = cache
+                cache: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appending(path: "Objects", directoryHint: .isDirectory),
+                library: OnDeviceLibrary = OnDeviceLibrary(base: OnDeviceLibrary.defaultBase)) {
+        self.pairing = pairing; self.transport = transport; self.cache = cache; self.library = library
         self.deviceModel = deviceModel.flatMap { Pattern("[A-Za-z0-9,._ -]{1,64}").matches($0) ? $0 : nil }
         // Percent-encoded as JavaScript's encodeURIComponent does, so "David’s iPhone" survives the header.
         self.deviceName = deviceName.flatMap { $0.count <= 80 ? Self.encodeURIComponent($0) : nil }
@@ -626,6 +630,12 @@ public final class CompanionClient: @unchecked Sendable {
         return try await MediaTrace.$context.withValue(context) { try await downloadFile(project, name) }
     }
 
+    /// The newest copy of this file the phone has, of any version: what a screen draws at once, before (and whether or
+    /// not) the Mac answers. No network, no Keychain.
+    public func stored(_ project: Project, _ name: String) -> URL? {
+        library.latest(project: project.id, name: name)?.url
+    }
+
     private func downloadFile(_ project: Project, _ name: String) async throws -> URL {
         let allowed = Pattern(#"original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png"#)
         guard Pattern(Self.uuid).matches(project.id), allowed.matches(name), !name.contains("..") else { throw CompanionError.transport("invalid-request") }
@@ -647,16 +657,32 @@ public final class CompanionClient: @unchecked Sendable {
            case .array(let originals)? = project.files?.object?["original"], originals.indices.contains(index), let path = originals[index].string {
             filename += "_" + URL(fileURLWithPath: path).lastPathComponent
         }
+        // The library first: its copy of this version is the file, with no network and no Keychain read.
+        let mediaVersion = Int64(project.mediaVersion)
+        let kept = library.isActive && OnDeviceLibrary.Keep.chosen.keeps(OnDeviceLibrary.Kind.of(name))
+        if kept {
+            if let hit = library.file(project: project.id, name: name, version: mediaVersion, file: filename) {
+                MediaTrace.record("file.hit", ["bytes": String((try? FileManager.default.attributesOfItem(atPath: hit.path)[.size] as? Int) ?? 0), "store": "library"])
+                return hit
+            }
+            if library.isTooLarge(project: project.id, name: name, version: mediaVersion) {
+                MediaTrace.record("file.refused", ["status": "413", "store": "library"])
+                throw CompanionError(code: "file-too-large", message: "This file is too large for this phone.")
+            }
+        }
         let target = folder.appending(path: filename)
         let cachedBytes = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
         MediaTrace.record(cachedBytes > 0 ? "file.hit" : "file.miss", ["bytes": String(cachedBytes)])
-        if cachedBytes > 0 { return target }
+        if cachedBytes > 0, !kept { return target }
         let encoded = resource.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? resource
         // The Ask's picture is served by its id; the field gives `asks/<id>.<ext>`.
         let path = "/v1/objects/\(project.id)/\(encoded)"
         let (reply, fetched) = try await fetchFile(path, limit: Self.scanLimit)
         guard reply.status == 200, let fetched else {
             MediaTrace.record("file.refused", ["status": String(reply.status)])
+            if reply.status == 413, Self.refusalCode(reply.body) == "file-too-large", kept {
+                library.markTooLarge(project: project.id, name: name, version: mediaVersion)
+            }
             // Too large only when the Mac says so in its own words (`file-too-large`, the companion's limit for a phone); any
             // other refusal is a refusal, never "too large" (board X100: a refused part was called "too detailed").
             throw reply.status == 404 ? CompanionError(code: "not-found", message: "This is no longer on your Mac.")
@@ -666,6 +692,17 @@ public final class CompanionClient: @unchecked Sendable {
         defer { try? FileManager.default.removeItem(at: fetched) }
         guard ((try? FileManager.default.attributesOfItem(atPath: fetched.path)[.size] as? Int) ?? 0) > 0 else {
             throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
+        }
+        if kept {
+            // Whole, then into the library; the older copy of this one file goes only now (the rest of the project stays).
+            do {
+                let stored = try library.commit(fetched, project: project.id, name: name, version: mediaVersion, file: filename)
+                MediaTrace.record("file.committed", ["bytes": String((try? FileManager.default.attributesOfItem(atPath: stored.path)[.size] as? Int) ?? 0), "store": "library"])
+                return stored
+            } catch {
+                MediaTrace.record("file.write-error", ["code": String((error as NSError).code), "store": "library"])
+                throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
+            }
         }
         // Older versions of this project are no longer shown. The current version's folder stays: its other
         // files may be downloading at the same time.

@@ -1,0 +1,272 @@
+import Foundation
+import XCTest
+@testable import CounterpartKit
+
+/// The phone's own library of what it has shown (docs/design/overhaul/on-device-library.md). David, Nov 11: "Never seen app
+/// in my life, since 2009 or so, struggle showing images it just had, 10 minutes later, because of a dependency on some Mac
+/// mini". The bug: pictures lived in Caches keyed by version and were fetched only when a page asked, so a page with the Mac
+/// away showed a symbol. These cover the library's index, replacement after arrival, eviction order, clearing, and the
+/// link rules.
+final class OnDeviceLibraryTests: XCTestCase {
+    private var base: URL!
+
+    override func setUp() {
+        base = FileManager.default.temporaryDirectory.appending(path: "library-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        UserDefaults.standard.removeObject(forKey: OnDeviceLibrary.Keep.defaultsKey)
+    }
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: base)
+        UserDefaults.standard.removeObject(forKey: OnDeviceLibrary.Keep.defaultsKey)
+    }
+
+    private func arrived(_ text: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appending(path: "arrived-\(UUID().uuidString)")
+        try Data(text.utf8).write(to: url)
+        return url
+    }
+
+    private func sized(_ bytes: Int) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appending(path: "arrived-\(UUID().uuidString)")
+        try Data(count: bytes).write(to: url)
+        return url
+    }
+
+    private static let id = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+    private func project(_ id: String = OnDeviceLibraryTests.id, ended: Int, extra: String = "") -> Project {
+        try! JSONDecoder().decode(Project.self, from: Data(#"{"id":"\#(id)","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[{"startedAtMs":1,"endedAtMs":\#(ended),"status":"done"}],"current":{"model":"current/model.stl","renders":[]},"picture":"pictures/part-0123456789abcdef.png","pictures":{"part":"pictures/part-0123456789abcdef.png"}\#(extra)}"#.utf8))
+    }
+
+    private func client(_ fake: FakeTransport, library: OnDeviceLibrary) throws -> CompanionClient {
+        let store = PairingStore(store: MemoryStore(), defaults: UserDefaults(suiteName: "lib-\(UUID().uuidString)")!)
+        try store.save(v2Record(), notify: false)
+        let cache = FileManager.default.temporaryDirectory.appending(path: "counterpart-tests-\(UUID().uuidString)")
+        return CompanionClient(pairing: PairingClient(store: store, transport: fake), transport: fake, deviceModel: "iPhone18,2", cache: cache, library: library)
+    }
+
+    // MARK: The index
+
+    func testTheIndexSurvivesARelaunchAndDropsFilesThatAreGone() throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "https://mac:9077")
+        let picture = try library.commit(try arrived("png"), project: Self.id, name: "pictures/a.png", version: 10, file: "pictures_a.png")
+        let model = try library.commit(try arrived("stl"), project: Self.id, name: "model.stl", version: 10, file: "model.stl")
+        library.opened(Self.id, at: Date(timeIntervalSince1970: 5))
+        XCTAssertTrue(picture.path.hasPrefix(base.path), "Application Support's library, not Caches")
+
+        // A relaunch: a new library object reads the same index.
+        let again = OnDeviceLibrary(base: base)
+        again.use(mac: "https://mac:9077")
+        XCTAssertEqual(again.file(project: Self.id, name: "pictures/a.png", version: 10), picture)
+        XCTAssertEqual(again.latest(project: Self.id, name: "model.stl")?.version, 10)
+        XCTAssertEqual(again.lastOpened(Self.id), Date(timeIntervalSince1970: 5))
+        XCTAssertEqual(again.usage, 6)
+        XCTAssertNil(again.file(project: Self.id, name: "pictures/a.png", version: 11), "another version is not this one")
+
+        // A file removed outside the library leaves no entry behind.
+        try FileManager.default.removeItem(at: model)
+        let third = OnDeviceLibrary(base: base)
+        third.use(mac: "https://mac:9077")
+        XCTAssertNil(third.latest(project: Self.id, name: "model.stl"))
+        XCTAssertEqual(third.entries.count, 1)
+    }
+
+    func testTheLibraryIsExcludedFromBackup() throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "https://mac:9077")
+        try library.commit(try arrived("png"), project: Self.id, name: "pictures/a.png", version: 1, file: "a.png")
+        XCTAssertEqual(try base.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+    }
+
+    // MARK: Replacement after arrival
+
+    /// The bug, through the client: the Mac answers once; then it is away and the list says a newer version. The page
+    /// draws the copy it has at once (`stored`), and the newer one replaces it only when it has fully arrived.
+    func testANewerVersionReplacesTheOldOnlyAfterItHasFullyArrived() async throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "https://mac:9077")
+        var away = false
+        let fake = FakeTransport { _, _ in
+            if away { throw TransportError("network") }
+            return HTTPReply(status: 200, body: Data("first".utf8))
+        }
+        let c = try client(fake, library: library)
+        let v1 = project(ended: 1000), v2 = project(ended: 2000)
+        let first = try await c.download(v1, "pictures/part-0123456789abcdef.png")
+        XCTAssertTrue(first.path.hasPrefix(base.path))
+
+        // A relaunch with the Mac away: the same version is a library hit, with no request at all.
+        away = true
+        let calls = fake.calls.count
+        let again = try await c.download(v1, "pictures/part-0123456789abcdef.png")
+        XCTAssertEqual(again, first)
+        XCTAssertEqual(fake.calls.count, calls, "a kept file never asks the Mac")
+
+        // A newer version listed while the Mac is away: the old copy is what the screen draws, and it stays.
+        do { _ = try await c.download(v2, "pictures/part-0123456789abcdef.png"); XCTFail("the Mac is away") } catch {}
+        XCTAssertEqual(c.stored(v2, "pictures/part-0123456789abcdef.png"), first)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path), "a failed fetch never removes the copy on screen")
+
+        // The Mac answers: the new one lands whole, then the old file goes.
+        away = false
+        fake.answer = { _, _ in HTTPReply(status: 200, body: Data("second".utf8)) }
+        let second = try await c.download(v2, "pictures/part-0123456789abcdef.png")
+        XCTAssertNotEqual(second, first)
+        XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "second")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertEqual(c.stored(v2, "pictures/part-0123456789abcdef.png"), second)
+    }
+
+    func testReplacingOneFileLeavesTheProjectsOtherFiles() throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        let model = try library.commit(try arrived("stl"), project: Self.id, name: "model.stl", version: 1, file: "model.stl")
+        _ = try library.commit(try arrived("a"), project: Self.id, name: "pictures/a.png", version: 1, file: "a.png")
+        _ = try library.commit(try arrived("b"), project: Self.id, name: "pictures/a.png", version: 2, file: "a.png")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: model.path), "a newer picture never takes the model with it")
+        // A slow download of an older version that finishes late leaves the newer one in place.
+        let kept = try library.commit(try arrived("old"), project: Self.id, name: "pictures/a.png", version: 1, file: "a.png")
+        XCTAssertEqual(library.latest(project: Self.id, name: "pictures/a.png")?.version, 2)
+        XCTAssertEqual(try String(contentsOf: kept, encoding: .utf8), "b")
+    }
+
+    func testAFileTheMacRefusesAsTooLargeIsNeverAskedForAgain() async throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        let fake = FakeTransport { _, _ in json(413, ["error": ["code": "file-too-large", "message": "too large"]]) }
+        let c = try client(fake, library: library)
+        let p = project(ended: 1000)
+        do { _ = try await c.download(p, "model.stl"); XCTFail() } catch let error as CompanionError { XCTAssertEqual(error.code, "file-too-large") }
+        let calls = fake.calls.count
+        do { _ = try await c.download(p, "model.stl"); XCTFail() } catch let error as CompanionError { XCTAssertEqual(error.code, "file-too-large") }
+        XCTAssertEqual(fake.calls.count, calls, "remembered, not asked again")
+        XCTAssertTrue(OnDeviceLibrary(base: base).then { $0.use(mac: "m") }.isTooLarge(project: p.id, name: "model.stl", version: Int64(p.mediaVersion)), "across launches")
+    }
+
+    func testKindsThePersonDoesNotKeepUseTheCacheNotTheLibrary() async throws {
+        OnDeviceLibrary.Keep.chosen = .pictures
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        let c = try client(FakeTransport { _, _ in HTTPReply(status: 200, body: Data("stl".utf8)) }, library: library)
+        let model = try await c.download(project(ended: 1), "model.stl")
+        XCTAssertFalse(model.path.hasPrefix(base.path), "pictures only: a model is fetched for the page but not kept")
+        let picture = try await c.download(project(ended: 1), "pictures/part-0123456789abcdef.png")
+        XCTAssertTrue(picture.path.hasPrefix(base.path))
+    }
+
+    // MARK: Eviction
+
+    func testEvictionTakesScansThenModelsOfTheOldestOpenedProjectsAndPicturesLast() throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        let old = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a01", recent = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a02"
+        library.opened(old, at: Date(timeIntervalSince1970: 1))
+        library.opened(recent, at: Date(timeIntervalSince1970: 100))
+        for id in [old, recent] {
+            try library.commit(try sized(100), project: id, name: "pictures/p.png", version: 1, file: "p.png")
+            try library.commit(try sized(1_000), project: id, name: "model.stl", version: 1, file: "model.stl")
+        }
+        try library.commit(try sized(5_000), project: recent, name: "scan/scan.usdz", version: 1, file: "scan.usdz")
+        XCTAssertEqual(library.usage, 7_200)
+
+        // Everything kept, ceiling 1,000: the scan, then the old project's model, then the recent project's model.
+        let gone = library.evict(keep: .everything, ceiling: 1_000)
+        XCTAssertEqual(gone.map { "\($0.kind.rawValue):\($0.project == old ? "old" : "recent")" },
+                       ["scan:recent", "model:old", "model:recent"])
+        XCTAssertEqual(library.usage, 200)
+        XCTAssertNotNil(library.latest(project: old, name: "pictures/p.png"), "pictures stay")
+
+        // Pictures go last, oldest-opened first.
+        let more = library.evict(keep: .everything, ceiling: 150)
+        XCTAssertEqual(more.map(\.project), [old])
+        XCTAssertNotNil(library.latest(project: recent, name: "pictures/p.png"))
+    }
+
+    func testChoosingPicturesOnlyLetsModelsAndScansGo() throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        try library.commit(try sized(10), project: Self.id, name: "pictures/p.png", version: 1, file: "p.png")
+        try library.commit(try sized(10), project: Self.id, name: "model.stl", version: 1, file: "model.stl")
+        library.evict(keep: .pictures)
+        XCTAssertNil(library.latest(project: Self.id, name: "model.stl"))
+        XCTAssertNotNil(library.latest(project: Self.id, name: "pictures/p.png"))
+    }
+
+    // MARK: Clearing
+
+    func testADeletedProjectsFilesGoWhenTheListNoLongerHasIt() throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        let other = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a03"
+        let gone = try library.commit(try arrived("a"), project: other, name: "pictures/p.png", version: 1, file: "p.png")
+        try library.commit(try arrived("b"), project: Self.id, name: "pictures/p.png", version: 1, file: "p.png")
+        library.prune(keeping: [Self.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: gone.path))
+        XCTAssertNil(library.latest(project: other, name: "pictures/p.png"))
+        XCTAssertNotNil(library.latest(project: Self.id, name: "pictures/p.png"))
+    }
+
+    func testUnpairingOrPairingAnotherMacClearsTheLibrary() throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "mac-a")
+        let a = try library.commit(try arrived("a"), project: Self.id, name: "pictures/p.png", version: 1, file: "p.png")
+        library.use(mac: "mac-a")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: a.path), "the same Mac again keeps its files")
+        library.use(mac: "mac-b")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: a.path), "another Mac: the old Mac's files go")
+        XCTAssertNil(library.latest(project: Self.id, name: "pictures/p.png"))
+        try library.commit(try arrived("b"), project: Self.id, name: "pictures/p.png", version: 1, file: "p.png")
+        library.unpair()
+        XCTAssertFalse(library.isActive)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: base.path))
+        XCTAssertNil(library.latest(project: Self.id, name: "pictures/p.png"))
+    }
+
+    func testClearEmptiesThisMacsLibraryAndKeepsWorking() throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        try library.commit(try arrived("a"), project: Self.id, name: "pictures/p.png", version: 1, file: "p.png")
+        library.clear()
+        XCTAssertEqual(library.usage, 0)
+        XCTAssertNoThrow(try library.commit(try arrived("a"), project: Self.id, name: "pictures/p.png", version: 1, file: "p.png"))
+    }
+
+    // MARK: What the fill fetches, and on which link
+
+    func testTheFillWantsEveryProjectsPictureAndModelsForOpenedAndRecentProjects() {
+        let projects = (1...5).map { project("0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a0\($0)", ended: $0 * 1000) }
+        let wants = LibraryPlan.wants(projects, opened: [projects[0].id], keep: .models)
+        let pictures = wants.filter { $0.kind == .picture }
+        XCTAssertEqual(Set(pictures.map(\.project.id)), Set(projects.map(\.id)), "every project's picture")
+        XCTAssertEqual(pictures.count, 5, "the card's and the stage's picture are one file here, fetched once")
+        let models = Set(wants.filter { $0.kind == .model }.map(\.project.id))
+        XCTAssertEqual(models, [projects[0].id, projects[2].id, projects[3].id, projects[4].id], "the opened one and the three most recent")
+        XCTAssertEqual(wants.first?.kind, .picture, "pictures first")
+        XCTAssertTrue(LibraryPlan.wants(projects, opened: [], keep: .pictures).allSatisfy { $0.kind == .picture })
+    }
+
+    func testTheLinkRules() {
+        let p = project(ended: 1)
+        let picture = LibraryPlan.Want(project: p, name: "pictures/a.png", kind: .picture, bytes: nil)
+        let model = LibraryPlan.Want(project: p, name: "model.stl", kind: .model, bytes: nil)
+        let smallScan = LibraryPlan.Want(project: p, name: "scan/phone-preview.usdz", kind: .scan, bytes: 4_000_000)
+        let bigScan = LibraryPlan.Want(project: p, name: "scan/scan.usdz", kind: .scan, bytes: 192_000_000)
+        // Wi-Fi or a cable: everything the person keeps.
+        for want in [picture, model, smallScan, bigScan] {
+            XCTAssertTrue(LibraryPlan.fetches(want, keep: .everything, expensive: false, constrained: false), want.name)
+        }
+        // Cellular (expensive) or Low Data Mode (constrained): pictures, and only what is known to be small.
+        for (expensive, constrained) in [(true, false), (false, true), (true, true)] {
+            XCTAssertTrue(LibraryPlan.fetches(picture, keep: .everything, expensive: expensive, constrained: constrained))
+            XCTAssertFalse(LibraryPlan.fetches(model, keep: .everything, expensive: expensive, constrained: constrained), "a model's size is unknown")
+            XCTAssertTrue(LibraryPlan.fetches(smallScan, keep: .everything, expensive: expensive, constrained: constrained))
+            XCTAssertFalse(LibraryPlan.fetches(bigScan, keep: .everything, expensive: expensive, constrained: constrained))
+        }
+        // Never a kind the person chose not to keep.
+        XCTAssertFalse(LibraryPlan.fetches(model, keep: .pictures, expensive: false, constrained: false))
+        XCTAssertFalse(LibraryPlan.fetches(smallScan, keep: .models, expensive: false, constrained: false))
+    }
+}
+
+private extension OnDeviceLibrary {
+    func then(_ body: (OnDeviceLibrary) -> Void) -> OnDeviceLibrary { body(self); return self }
+}
