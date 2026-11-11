@@ -11,12 +11,19 @@ import CounterpartKit
 struct NewObjectView: View {
     let store: ProjectsStore
     var job: NewProjectJob? = nil
+    /// "Make something else from this scan" on a project's page (design §3.3): New opens already holding that project's
+    /// scan, which the Mac has. Nothing is scanned or sent from this phone; the Mac copies the scan into the new project.
+    var reusing: Project? = nil
     /// The project was created: the sheet closes and its page opens.
     let started: (Project) -> Void
     @AppStorage("CounterpartNewDraft") private var instructions = ""
     /// The draft project this sheet made, kept so closing New and coming back finishes the same one.
     @AppStorage("CounterpartNewDraftId") private var draftId = ""
     @State private var photos: [ChosenPhoto] = []
+    /// A scan chosen under "Use a scan you already have" (design §3.3).
+    @State private var picked: Project?
+    /// The words for a project made from a kept scan: never the saved draft's, which stays for its own scan.
+    @State private var reuseWords = ""
     @State private var working: String?
     @State private var problem: String?
     @State private var askedForDescription = false
@@ -61,8 +68,14 @@ struct NewObjectView: View {
         }
     }
 
-    private var publishedLink: URL? { PublishedModelLink.find(in: instructions) }
-    private var described: Bool { !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// The kept scan this sheet holds: the page's, or one picked here.
+    private var seed: Project? { picked ?? reusing }
+    /// A scan is attached: one taken for this draft, or one the Mac already has.
+    private var holdsScan: Bool { attached != nil || seed != nil }
+    /// What the person is typing: a kept scan's own words, else the draft's.
+    private var text: Binding<String> { seed != nil ? $reuseWords : $instructions }
+    private var publishedLink: URL? { seed != nil ? nil : PublishedModelLink.find(in: instructions) }
+    private var described: Bool { !text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     /// Measurements you typed, by the edge you named: blank sides are simply unknown.
     private var measuredValues: [(edge: String, mm: Double)] {
         [("longest", measuredLongest), ("middle", measuredMiddle), ("shortest", measuredShortest)].compactMap { edge, text in
@@ -78,8 +91,10 @@ struct NewObjectView: View {
     /// The Mac's own rule for starting, in its words: photos show what something looks like, so without a
     /// scan the description says what to make. A scan always goes with its own photos.
     private var missing: String? {
-        if attached != nil {
-            guard let scanUse else { return "Choose whether to copy it, make something that fits it, or save the scan." }
+        if holdsScan {
+            guard let scanUse, seed == nil || scanUse != .later else {
+                return seed != nil ? "Choose whether to copy it or make something that fits it." : "Choose whether to copy it, make something that fits it, or save the scan."
+            }
             if scanUse == .fit {
                 if !described { return "Say what it should hold, mount or adapt to." }
                 if dimensionSource == .measured && !measuredValid { return "Enter at least one measurement in millimetres." }
@@ -94,7 +109,7 @@ struct NewObjectView: View {
     /// do until a use is chosen, then names that use's action: an instruction never looks like the action (U5).
     private var sendLabel: String {
         if working == "make" { return scanUse == .later ? "Saving…" : "Sending…" }
-        if attached != nil {
+        if holdsScan {
             switch scanUse {
             case .copy: return "Copy this object"
             // A fit needs words first: Continue takes you to them, then Send.
@@ -106,7 +121,7 @@ struct NewObjectView: View {
         return "Send to \(store.macName ?? "your Mac")"
     }
     private var sendSymbol: String? {
-        guard attached != nil else { return "arrow.up" }
+        guard holdsScan else { return "arrow.up" }
         switch scanUse {
         case .copy: return "doc.on.doc"
         case .fit: return described ? "arrow.up" : nil
@@ -115,7 +130,7 @@ struct NewObjectView: View {
         }
     }
     /// Greyed out after a scan until its use is chosen.
-    private var awaitingUse: Bool { attached != nil && scanUse == nil }
+    private var awaitingUse: Bool { holdsScan && (scanUse == nil || (seed != nil && scanUse == .later)) }
 
     /// A job card's choice, kept as the starting answer but still changeable after the scan.
     private func useJobDefault() {
@@ -123,12 +138,12 @@ struct NewObjectView: View {
     }
 
     /// What the person typed: the request, sent and shown as written.
-    private var typedInstructions: String { instructions.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var typedInstructions: String { text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     /// For a fit made from a scan: how its exact size is settled, sent as fields beside the request. The Mac turns
     /// them into its worker's brief; nothing is appended to the person's words.
     private var fitChoice: ProjectFit? {
-        guard attached != nil, scanUse == .fit, !typedInstructions.isEmpty else { return nil }
+        guard holdsScan, scanUse == .fit, !typedInstructions.isEmpty else { return nil }
         let source = ProjectFit.SizeSource(rawValue: dimensionSource.rawValue) ?? .lookup
         return ProjectFit(sizeSource: source, measured: measuredValues.map { .init(id: $0.edge, label: "\($0.edge) side", mm: $0.mm) })
     }
@@ -143,10 +158,11 @@ struct NewObjectView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     // After a scan the sheet opens on its question, first and whole (U5): nothing half-hidden above it.
-                    if attached != nil { scanUseSection }
+                    if holdsScan { scanUseSection }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("What do you need?").font(.headline)
-                        TextField(job == .copy ? "Copy this. Close up the bottom." : "A hook for my stroller handle…", text: $instructions, axis: .vertical)
+                        TextField(seed != nil ? (scanUse == .copy ? "Copy this. Close up the bottom." : "A belt case for it…")
+                                  : job == .copy ? "Copy this. Close up the bottom." : "A hook for my stroller handle…", text: text, axis: .vertical)
                             .lineLimit(3...6)
                             .focused($describing)
                             .padding(14)
@@ -161,6 +177,8 @@ struct NewObjectView: View {
                         Label(publishedLink.host ?? "Published model", systemImage: "link").font(.headline)
                         Text("Your Mac will get the designer’s file and keep its credit.").font(.footnote).foregroundStyle(.secondary)
                     }
+                    // A kept scan is the whole of what's shown: the Mac has it, its photos and its checked sizes.
+                    if seed == nil {
                     Text("Show it").font(.headline)
                     // One way to scan: walking round it and the scan rig are the same capture (David, Nov 9).
                     ScanTile(enabled: store.canScan && working == nil, canScan: store.canScan,
@@ -179,6 +197,8 @@ struct NewObjectView: View {
                                    enabled: working == nil && !photosLocked && photos.count < Self.photoLimit) { Task { await addPhotos(camera: true) } }
                         SourceTile(symbol: "photo.on.rectangle.angled", title: "From Photos", detail: photos.count < Self.photoLimit ? "Pick what you have." : "24 photos is the most.", tint: .green,
                                    enabled: working == nil && !photosLocked && photos.count < Self.photoLimit) { Task { await addPhotos(camera: false) } }
+                    }
+                    if attached == nil { existingScans }
                     }
 
                     // The scan itself sits beside its question (above); Added is what else you attach.
@@ -212,8 +232,11 @@ struct NewObjectView: View {
                 withAnimation { scrollPosition.scrollTo(edge: .top) }
             }
             // Continue on a fit takes you to the words it still needs.
+            .onChange(of: picked) { _, now in
+                if now != nil { withAnimation { scrollPosition.scrollTo(edge: .top) } }
+            }
             .onChange(of: describing) { _, now in
-                if now, attached != nil { withAnimation { proxy.scrollTo("describe", anchor: .center) } }
+                if now, holdsScan { withAnimation { proxy.scrollTo("describe", anchor: .center) } }
             }
             // Send on a fit still missing its measurement takes you to the fields that need it (review F4), and focuses
             // the first only once they have stopped moving (X86). The size card goes to the top of the sheet, its line
@@ -263,6 +286,8 @@ struct NewObjectView: View {
             }
         }
         .task {
+            // A scan the Mac already has: no draft, no scan on this phone (design §3.3).
+            if reusing != nil { store.refreshStoppedScans(); return }
             // A draft from an earlier sheet keeps its project and its finished scan.
             useJobDefault()
             _ = try? await savedDraft()
@@ -275,6 +300,41 @@ struct NewObjectView: View {
         }
     }
 
+    // MARK: A scan you already have
+
+    /// New → "Use a scan you already have" (design §3.3): the scans the Mac keeps on other projects, by their pictures
+    /// and names. Choosing one attaches it as if it had just been taken; no scan, no upload.
+    @ViewBuilder private var existingScans: some View {
+        let scans = ScanLineage.scans(in: store.projects)
+        if !scans.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(ScanLineage.useExisting).font(.headline).accessibilityAddTraits(.isHeader)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(scans) { project in
+                            Button { picked = project; scanUse = nil; describing = false } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    ProjectImage(project: project, path: project.pictures?["scan"] ?? project.picture, maxPixelSize: 300, placeholderSymbol: "cube.transparent")
+                                        .frame(width: 128, height: 96).clipShape(.rect(cornerRadius: 16))
+                                    Text(ProjectWords.title(project)).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(2)
+                                    Text(ScanLineage.scannedLine(project)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                .frame(width: 128, alignment: .topLeading)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(working != nil)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityHint("Makes something new from this scan, without scanning again")
+                            .accessibilityIdentifier("existing-scan-\(project.id)")
+                        }
+                    }
+                }
+                .accessibilityIdentifier("use-existing-scan")
+            }
+        }
+    }
+
     // MARK: After a scan
 
     /// The question a finished scan always gets: a scan is just as often the thing a holder must fit
@@ -283,21 +343,47 @@ struct NewObjectView: View {
         VStack(alignment: .leading, spacing: 10) {
             // The thing being decided about, next to the question (lead, Nov 10): small, so all three answers still fit.
             HStack(spacing: 12) {
-                ScanThumb(picture: scanPicture, symbol: attached == .inHand ? "hand.raised.fingers.spread" : "cube.transparent")
-                    .accessibilityLabel(attached == .inHand ? "Your scan in hand" : "Your scan")
-                    .accessibilityIdentifier("scan-use-scan")
-                Text("What should this scan become?").font(.headline)
-                    .accessibilityAddTraits(.isHeader).accessibilityIdentifier("scan-use-question")
+                if let seed {
+                    ProjectImage(project: seed, path: seed.pictures?["scan"] ?? seed.picture, maxPixelSize: 168, placeholderSymbol: "cube.transparent")
+                        .frame(width: 56, height: 56).clipShape(.rect(cornerRadius: 14))
+                        .accessibilityLabel("The scan from \(ProjectWords.title(seed))")
+                        .accessibilityIdentifier("scan-use-scan")
+                } else {
+                    ScanThumb(picture: scanPicture, symbol: attached == .inHand ? "hand.raised.fingers.spread" : "cube.transparent")
+                        .accessibilityLabel(attached == .inHand ? "Your scan in hand" : "Your scan")
+                        .accessibilityIdentifier("scan-use-scan")
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("What should this scan become?").font(.headline)
+                        .accessibilityAddTraits(.isHeader).accessibilityIdentifier("scan-use-question")
+                    if let seed {
+                        // Which scan, by its project's name: the one already on the Mac, nothing to scan again.
+                        Text("\(ProjectWords.title(seed)) · \(ScanLineage.scannedLine(seed))").font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(2).accessibilityIdentifier("scan-use-source")
+                    }
+                }
+                Spacer(minLength: 0)
+                if picked != nil {
+                    Button("Remove") { picked = nil; scanUse = nil }.font(.subheadline)
+                        .disabled(working != nil).accessibilityIdentifier("scan-use-remove")
+                }
             }
-            ScanUseRow(symbol: "doc.on.doc", title: "Copy this object",
+            ScanUseRow(symbol: "doc.on.doc", title: ScanLineage.copyChoice,
                        detail: "Clean up the scan and print the same thing.",
                        selected: scanUse == .copy, identifier: "scan-use-copy") { scanUse = .copy }
-            ScanUseRow(symbol: "ruler", title: "Make something that fits this",
+            ScanUseRow(symbol: "ruler", title: ScanLineage.fitChoice,
                        detail: "A holder, mount, case or adapter. The scan is what it must fit, not the print.",
                        selected: scanUse == .fit, identifier: "scan-use-fit") { scanUse = .fit }
-            ScanUseRow(symbol: "tray.and.arrow.down", title: "Just save this scan",
-                       detail: "Keep its shape with this project and decide later.",
-                       selected: scanUse == .later, identifier: "scan-use-later") { scanUse = .later }
+            // A kept scan is already saved, on its own project.
+            if seed == nil {
+                ScanUseRow(symbol: "tray.and.arrow.down", title: "Just save this scan",
+                           detail: "Keep its shape with this project and decide later.",
+                           selected: scanUse == .later, identifier: "scan-use-later") { scanUse = .later }
+            }
+            if seed != nil {
+                Text("Your Mac copies this scan, its photos and its checked sizes into a new project. The project it came from stays as it is.")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             if scanUse == .fit { fitDimensions }
             if scanUse == .later {
                 Text("No pass starts and nothing is printed. The scan stays with this draft, so you can choose here later.")
@@ -343,12 +429,15 @@ struct NewObjectView: View {
                 Text("Uses the scan's size as an estimate. Best for loose holders; your Mac says the clearance it allowed.")
                     .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Button { Task { await addPhotos(camera: true) } } label: {
-                Label("Add a caliper photo", systemImage: "camera").frame(maxWidth: .infinity).frame(height: 32)
+            // A kept scan's project starts on the Mac with what it has; a caliper photo goes in its conversation after.
+            if seed == nil {
+                Button { Task { await addPhotos(camera: true) } } label: {
+                    Label("Add a caliper photo", systemImage: "camera").frame(maxWidth: .infinity).frame(height: 32)
+                }
+                .buttonStyle(.glass)
+                .disabled(working != nil || photosLocked || photos.count >= Self.photoLimit)
+                .accessibilityIdentifier("fit-caliper-photo")
             }
-            .buttonStyle(.glass)
-            .disabled(working != nil || photosLocked || photos.count >= Self.photoLimit)
-            .accessibilityIdentifier("fit-caliper-photo")
         }
         .padding(14)
         .glassEffect(.regular, in: .rect(cornerRadius: 20))
@@ -378,7 +467,7 @@ struct NewObjectView: View {
 
     /// What the line under "What do you need?" says: once there's a scan, what's true for the use chosen (review F8).
     private var hint: String {
-        guard attached != nil else { return Self.hint }
+        guard holdsScan else { return Self.hint }
         switch scanUse {
         case .fit: return "Say what it should hold, mount or adapt to."
         case .copy: return "Optional: anything to change from the scan, like “close up the bottom”."
@@ -394,7 +483,7 @@ struct NewObjectView: View {
 
     /// A fit with words and "I measured", but no valid measurement yet.
     private var measurementMissing: Bool {
-        attached != nil && scanUse == .fit && described && dimensionSource == .measured && !measuredValid
+        holdsScan && scanUse == .fit && described && dimensionSource == .measured && !measuredValid
     }
 
     /// Chosen photos stay put while something is running.
@@ -487,10 +576,25 @@ struct NewObjectView: View {
             askedForDescription = true
             // A missing measurement is asked for at its fields, not under the description (review F4).
             if measurementMissing { describing = false; measuring = false; showMeasurement += 1; return }
-            describing = attached == nil || (scanUse == .fit && !described)
+            describing = !holdsScan || (scanUse == .fit && !described)
             return
         }
         describing = false
+        if let seed, let scanUse, scanUse != .later {
+            await run("make") {
+                let ticket = store.startRequest()
+                let made: Project
+                do { made = try await store.mac.client.makeFromScan(seed.id, kind: scanUse.rawValue, instructions: typedInstructions, fit: fitChoice) }
+                catch let failure as CompanionError where failure.code == "not-found" || failure.code == "method-not-allowed" {
+                    // A Mac from before this route: the action stays offered, and says how to get it.
+                    throw CompanionError(code: "needs-update", message: "Update Counterpart on your Mac to make something else from a scan you already have.")
+                }
+                store.replace(made, ticket: ticket)
+                reuseWords = ""
+                started(made)
+            }
+            return
+        }
         await run("make") {
             // Saving a scan starts nothing: the draft and its scan stay here for the next open of New.
             if attached != nil && scanUse == .later {

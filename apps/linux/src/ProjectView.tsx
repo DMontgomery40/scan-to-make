@@ -22,6 +22,9 @@ import {
   requestedChange,
   stageMark,
   words,
+  MAKE_FROM_SCAN,
+  canMakeFromScan,
+  scanLineage,
 } from "./domain";
 import { Picture, Stage } from "./Stage";
 import { Question } from "./Question";
@@ -99,6 +102,34 @@ function LazyPicture({ id, path, alt }: { id: string; path: string; alt: string 
     return () => observer.disconnect();
   }, [seen]);
   return <div ref={ref} className="lazy-picture">{seen ? <Picture id={id} path={path} alt={alt} /> : null}</div>;
+}
+/**
+ * Under What you scanned (design §3.3): Make something else from this scan, on any project the companion has a scan
+ * for, whatever its kind; where this one's scan came from; and what else was made from it. Names open their projects.
+ */
+function ScanLineageRow({ project, projects, onOpen, onMake }: {
+  project: Project; projects: Project[]; onOpen?: (id: string) => void; onMake?: (p: Project) => void;
+}) {
+  const lineage = scanLineage(project, projects);
+  if (!canMakeFromScan(project) && !lineage.fromLine && !lineage.madeLine) return null;
+  return (
+    <div className="scan-lineage">
+      {canMakeFromScan(project) && onMake && (
+        <button className="primary-outline" onClick={() => onMake(project)}>{MAKE_FROM_SCAN}</button>
+      )}
+      {lineage.fromLine && (lineage.from?.exists && onOpen
+        ? <button className="link" onClick={() => onOpen(lineage.from!.id)}>{lineage.fromLine}</button>
+        : <p className="muted">{lineage.fromLine}</p>)}
+      {lineage.madeLine && (
+        <p className="muted">
+          {lineage.made.length === 1 && onOpen
+            ? <button className="link" onClick={() => onOpen(lineage.made[0]!.id)}>{lineage.madeLine}</button>
+            : <>{lineage.madeLine}{onOpen && lineage.made.map((link) => (
+                <button key={link.id} className="link" onClick={() => onOpen(link.id)}> “{link.title}”</button>))}</>}
+        </p>
+      )}
+    </div>
+  );
 }
 /** A scan as one thing (David, Nov 9: "highly unnecessary to show every single one of these"): five frames round the
  * orbit and the count; Show all opens every frame, each fetched as it scrolls into view. */
@@ -359,7 +390,15 @@ export function ProjectView({
   onBack,
   changes,
   capabilities,
+  projects = [],
+  onOpenProject,
+  onMakeFromScan,
 }: {
+  /** Every project, for where this one's scan came from and what else was made from it (design §3.3). */
+  projects?: Project[];
+  onOpenProject?: (id: string) => void;
+  /** New, holding this project's scan: "Make something else from this scan". */
+  onMakeFromScan?: (p: Project) => void;
   /** The companion's capabilities (`status.get`): what it keeps decides what the page offers. */
   capabilities?: Record<string, unknown>;
   project: Project;
@@ -423,6 +462,7 @@ export function ProjectView({
       <div className="project-layout">
         <div className="project-main">
           <Stage project={p} locate={() => void mutate("objects.locate", { id: p.id })} />
+          <ScanLineageRow project={p} projects={projects} onOpen={onOpenProject} onMake={onMakeFromScan} />
           {fit && (
             // After the print (Nov 8 walkthrough F1, PRD §5.4): the same question and answers as the other clients.
             <section className="question" aria-label={fit}>

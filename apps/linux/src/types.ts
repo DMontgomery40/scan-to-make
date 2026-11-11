@@ -182,6 +182,8 @@ export interface Project {
     seats?: { name?: string; translationMm: number[]; rotationDeg: number[] }[];
   };
   scan?: string;
+  /** The project whose scan this one was made from, with its title then ("Make something else from this scan"). */
+  scanFrom?: { id: string; title: string };
   /** The project's picture (PRD §5.1): the object alone on the stage, drawn by the computer. */
   picture?: string;
   pictures?: { part?: string; scan?: string; together?: string; photo?: string };

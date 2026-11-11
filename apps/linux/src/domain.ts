@@ -956,3 +956,42 @@ export function resolvedPrinter<P extends { id: string; mcps?: { destinationId: 
   if (!id) return undefined;
   return printers.find((x) => x.id === id) ?? printers.find((x) => x.mcps?.some((m) => m.destinationId === id) || x.aliases?.includes(id));
 }
+
+/**
+ * "Make something else from this scan" (things-and-versions design §3.3), ported word for word from CounterpartKit's
+ * `ScanLineage`: which projects offer it, where a project's scan came from, and what else was made from it.
+ */
+export const MAKE_FROM_SCAN = "Make something else from this scan";
+export const USE_EXISTING_SCAN = "Use a scan you already have";
+export const FIT_CHOICE = "Make something that fits this";
+export const COPY_CHOICE = "Copy this object";
+/** The companion has this project's scan, whatever the project's kind. */
+export function canMakeFromScan(p: Pick<Project, "scan">) {
+  return !!p.scan;
+}
+export interface LineageLink { id: string; title: string; exists: boolean }
+export function scanLineage(p: Project, projects: Project[]) {
+  const live = p.scanFrom ? projects.find((x) => x.id === p.scanFrom!.id) : undefined;
+  const from: LineageLink | undefined = p.scanFrom
+    ? { id: p.scanFrom.id, title: live?.title ?? p.scanFrom.title, exists: !!live }
+    : undefined;
+  const made: LineageLink[] = projects
+    .filter((x) => x.scanFrom?.id === p.id && x.id !== p.id)
+    .sort((a, b) => b.createdAtMs - a.createdAtMs)
+    .map((x) => ({ id: x.id, title: x.title, exists: true }));
+  const fromLine = from
+    ? from.exists ? `Uses the scan from “${from.title}”` : `Uses the scan from “${from.title}”, since deleted`
+    : undefined;
+  const madeLine = made.length === 0 ? undefined
+    : made.length === 1 ? `Also made from this scan: “${made[0]!.title}”`
+    : `Also made from this scan: ${made.length} projects`;
+  return { from, made, fromLine, madeLine };
+}
+/** The scans New offers, newest first. */
+export function scansToReuse(projects: Project[]) {
+  return projects.filter(canMakeFromScan).sort((a, b) => b.createdAtMs - a.createdAtMs);
+}
+/** "scanned Nov 4", under a scan's project name in New. */
+export function scannedLine(p: Pick<Project, "createdAtMs">, timeZone?: string) {
+  return `scanned ${new Date(p.createdAtMs).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(timeZone ? { timeZone } : {}) })}`;
+}

@@ -376,6 +376,19 @@ public final class CompanionClient: @unchecked Sendable {
         let reply = try await send("PATCH", "/v1/objects/\(id)/settings", body: try JSONEncoder().encode(patch)).checked(path: "/v1/objects/\(id)/settings")
         return try JSONDecoder().decode(One.self, from: reply.body).object
     }
+    /// Make something else from this project's scan (design §3.3): a new project of `kind` (`fit` or `copy`) with the
+    /// person's words, seeded on the Mac with a copy of this one's scan, photos and checked sizes. Nothing is sent from
+    /// this phone. `POST /v1/objects/<id>/make-from-scan`.
+    public func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit? = nil) async throws -> Project {
+        try await request("POST", "/v1/objects/\(id)/make-from-scan", json: Self.makeFromScanBody(kind: kind, instructions: instructions, fit: fit), as: One.self).object
+    }
+    static func makeFromScanBody(kind: String, instructions: String, fit: ProjectFit?) -> [String: Any] {
+        let text = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        var json: [String: Any] = ["kind": kind == "fit" ? "fit" : "copy"]
+        if !text.isEmpty { json["instructions"] = text }
+        if let fit, kind == "fit", !text.isEmpty { json["fit"] = fit.json }
+        return json
+    }
     public func duplicate(_ id: String) async throws -> Project {
         try await request("POST", "/v1/objects/\(id)/duplicate", json: [:], as: One.self).object
     }
