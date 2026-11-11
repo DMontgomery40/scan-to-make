@@ -1049,6 +1049,11 @@ test("a wait or a start that never hears back says so, and any other word stops 
   assert.equal(mcpPhase({ update: { state: "started" } }), "started");
   assert.equal(mcpPhase({ type: "mcp.update.done" }), undefined);
   assert.equal(mcpPhase({ update: { state: "current" } }), undefined);
+  // Download (printers.installMcp) answers in the same shape, and Settings passes its phase like Update and Move.
+  assert.equal(mcpPhase({ update: { state: "started", found: "Installing bambu-printer-mcp…" } } as { update: { state: string } }), "started");
+  const settings = readFileSync(new URL("../src/Settings.tsx", import.meta.url), "utf8");
+  const download = settings.slice(settings.indexOf('"printers.installMcp"'));
+  assert.match(download.slice(0, download.indexOf("await refresh()")), /mcpPhase\(r\)/, "Download starts the wait clock");
   const expired: string[] = [];
   const clock = mcpWaitClock((id) => expired.push(id), { waiting: 30, started: 60 });
   clock.note(reply.update.mcpId, "waiting");

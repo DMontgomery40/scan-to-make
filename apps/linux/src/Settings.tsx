@@ -773,9 +773,13 @@ function Printers({
                 const r = await call<{
                   update?: { state: string; found?: string };
                 }>("printers.installMcp", { package: pkg.package });
+                // A download that waits or starts gets the same clock as Update and Move: one that never hears
+                // back says so instead of "started" forever (PRD §8.10).
                 setNotice(
-                    pkg.appMcpId,
+                  pkg.appMcpId,
                   r.update?.found ?? r.update?.state ?? "Already installed.",
+                  false,
+                  mcpPhase(r),
                 );
                 await refresh();
               }}
