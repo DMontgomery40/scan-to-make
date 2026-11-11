@@ -59,13 +59,8 @@ struct NewObjectView: View {
     /// How a fit gets its exact size: a maker's published size you confirm, your own measurements, or the scan.
     enum DimensionSource: String, CaseIterable, Hashable {
         case lookup, measured, scan
-        var label: String {
-            switch self {
-            case .lookup: "Look up"
-            case .measured: "I measured"
-            case .scan: "Use scan"
-            }
-        }
+        /// The same words on every layout (CounterpartKit's `ProjectFit.SizeSource.label`).
+        var label: String { ProjectFit.SizeSource(rawValue: rawValue)?.label ?? rawValue }
     }
 
     /// The kept scan this sheet holds: the page's, or one picked here.
@@ -201,8 +196,17 @@ struct NewObjectView: View {
                     if attached == nil { existingScans }
                     }
 
+                    // A kept scan's project is made on the Mac from that scan alone (it copies the scan, its photos and
+                    // sizes, and starts at once), so the draft's photos aren't shown as going with it: they stay with
+                    // the draft, back when the scan is removed (review of #570).
+                    if seed != nil, !photos.isEmpty {
+                        Text(photos.count == 1 ? "The photo you added won't be sent with this scan. Remove the scan to return to it, or add it to the new project's conversation."
+                             : "The \(photos.count) photos you added won't be sent with this scan. Remove the scan to return to them, or add them to the new project's conversation.")
+                            .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("draft-photos-kept")
+                    }
                     // The scan itself sits beside its question (above); Added is what else you attach.
-                    if !photos.isEmpty {
+                    if seed == nil, !photos.isEmpty {
                         Text("Added").font(.headline)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
@@ -232,6 +236,9 @@ struct NewObjectView: View {
             .onChange(of: picked) { _, now in
                 if now != nil { withAnimation { scrollPosition.scrollTo(edge: .top) } }
             }
+            // A kept scan is the very thing a fit made from it must fit: its size starts from the scan (review of #570).
+            // A scan taken for this draft starts on Look up, as before.
+            .onChange(of: seed?.id, initial: true) { _, now in dimensionSource = now != nil ? .scan : .lookup }
             .onChange(of: describing) { _, now in
                 if now, holdsScan { withAnimation { proxy.scrollTo("describe", anchor: .center) } }
             }
@@ -284,6 +291,7 @@ struct NewObjectView: View {
             }
             .interactiveDismissDisabled(working != nil)
             .dropDestination(for: Data.self) { items, _ in
+                guard seed == nil else { return false }
                 Task { await addDropped(items) }
                 return !items.isEmpty
             }
@@ -518,6 +526,8 @@ struct NewObjectView: View {
     }
 
     private func addDropped(_ items: [Data]) async {
+        // Nothing is attached to a kept scan's project from here (see Added).
+        guard seed == nil else { return }
         for data in items.prefix(max(0, Self.photoLimit - photos.count)) {
             let ext = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "png" : "jpg"
             if let image = UIImage(data: data), let chosen = MacConnection.keep(PickedPhoto(data: ext == "png" ? data : (image.jpegData(compressionQuality: 0.9) ?? data), ext: ext)) {

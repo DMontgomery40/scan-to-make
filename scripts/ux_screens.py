@@ -309,6 +309,10 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
     return out
 
 
+# The iPhone Duo's two panels in points (agent-device help foldable): which one a capture draws says the pose.
+PANEL_POINTS = {'closed': (466, 678), 'open': (669, 951)}
+
+
 def slug(text: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')[:40].strip('-') or 'untitled'
 
@@ -378,6 +382,16 @@ class Device:
         self.session = f'ux-screens-{key}-{RUN_ID}'
         self.captured = 0
         self.cli = agent_device()
+
+    def panel_points(self) -> tuple[int, int] | None:
+        """The size in points of the panel a capture draws (a screenshot at density 1), to tell a Duo's pose."""
+        import struct, tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'pose.png'
+            try: self.ad('screenshot', str(path), '--pixel-density', '1')
+            except Exception: return None
+            head = path.read_bytes()[:24] if path.exists() else b''
+            return struct.unpack('>II', head[16:24]) if head[12:16] == b'IHDR' else None
 
     def ad(self, *args: str, timeout: int = 90) -> dict:
         cmd = [*self.cli, *args, '--udid', self.udid, '--session', self.session, '--json']
@@ -603,7 +617,16 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
                 except Exception as failure: record('failures', {'device': key, 'name': ' '.join(setting), 'why': str(failure)})
             if pose:  # a Duo's fold, or an iPad's orientation, set once with the app open
                 try: device.ad('open', BUNDLE, '--relaunch', timeout=120); device.ad('orientation' if pose.startswith('landscape') else 'fold', pose, timeout=120)
-                except Exception as failure: record('failures', {'device': key, 'name': f'fold {pose}', 'why': str(failure)})
+                except Exception as failure:
+                    # agent-device sends the fold, then reads the hinge back; when that read returns no sample (Nov 11, on
+                    # this Mac) it fails with fold-pose-dispatched-unverified although the pose was sent. Its help says to
+                    # check from a capture: the lit panel's points, 466 x 678 closed and 669 x 951 open.
+                    why = str(failure)
+                    if 'fold-pose-dispatched-unverified' in why and pose in PANEL_POINTS:
+                        size = device.panel_points()
+                        if size == PANEL_POINTS[pose]: why = ''
+                        else: why = f'fold {pose} sent, but the capture is {size} points, not {PANEL_POINTS[pose]}: {why}'
+                    if why: record('failures', {'device': key, 'name': f'fold {pose}', 'why': why})
             for item in todo:
                 if time.time() > deadline: break
                 left -= 1

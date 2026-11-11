@@ -25,6 +25,8 @@ struct NewProjectPane: View {
     @State private var scanUse: String?
     /// The files from the last drop or open that New Project can't use, named (`ObjectsModel.refusal`).
     @State private var refusal: String?
+    /// A fit's exact size, as the iPhone's seeded sheet asks it: starts on "Use scan", the thing it must fit.
+    @State private var fitChoice = FitChoice()
 
     init(model: ObjectsModel, draft: NewProjectDraft, close: @escaping () -> Void) {
         self.model = model
@@ -75,7 +77,7 @@ struct NewProjectPane: View {
                         Button("Cancel", action: close).controlSize(.extraLarge).keyboardShortcut(.cancelAction)
                         Button { start() } label: { Text(sendLabel).padding(.horizontal, 6) }
                             .buttonStyle(.glassProminent).controlSize(.extraLarge).keyboardShortcut(.defaultAction)
-                            .disabled(!available || starting || (seed == nil ? empty : scanUse == nil || (scanUse == "fit" && wordless)))
+                            .disabled(!available || starting || (seed == nil ? empty : scanUse == nil || (scanUse == "fit" && (wordless || fitChoice.missing != nil))))
                     }
                     // Or start from a starter: New Project is where a Mac with projects goes to start something
                     // (PRD §5.11). Adding one opens it, which closes this pane.
@@ -89,6 +91,8 @@ struct NewProjectPane: View {
             .defaultScrollAnchor(.center, for: .alignment)
         }
         .environment(\.colorScheme, .dark)
+        // Another scan is another thing to fit: its size starts from the scan again.
+        .onChange(of: seed?.id) { fitChoice = FitChoice() }
         .navigationTitle("New Project")
         .navigationSubtitle("Your Mac starts as soon as you create it")
         // A file opened with Counterpart while New Project is open joins it, as dropping it on the drop zone does. On
@@ -135,8 +139,46 @@ struct NewProjectPane: View {
             }
             Text("Your Mac copies this scan, its photos and its checked sizes into a new project. The project it came from stays as it is.")
                 .font(.callout).foregroundStyle(.secondary)
+            if scanUse == "fit" { exactSize }
         }
         .padding(20).glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+
+    /// How a fit made from this scan gets its exact size: the iPhone's choice, in its words.
+    @ViewBuilder private var exactSize: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Exact size").font(.headline)
+            Picker("Exact size", selection: $fitChoice.source) {
+                ForEach(ProjectFit.SizeSource.allCases, id: \.self) { source in Text(source.label).tag(source) }
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(width: 380)
+            .accessibilityIdentifier("fit-dimension-source")
+            Text(fitChoice.source.detail()).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if fitChoice.source == .measured {
+                HStack(spacing: 10) {
+                    side("Longest", $fitChoice.longest)
+                    side("Middle", $fitChoice.middle)
+                    side("Shortest", $fitChoice.shortest)
+                }
+                if let missing = fitChoice.missing {
+                    Text(missing).font(.callout).foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func side(_ label: String, _ text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                TextField("0", text: text).textFieldStyle(.plain).multilineTextAlignment(.trailing)
+                Text("mm").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(9).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+        }
+        .frame(width: 120)
+        .accessibilityIdentifier("fit-size-\(label.lowercased())")
     }
 
     /// "Use a scan you already have": the scans this Mac keeps on other projects, by picture and name.
@@ -222,7 +264,7 @@ struct NewProjectPane: View {
         problem = nil
         Task {
             if let seed, let scanUse {
-                problem = await model.makeFromScan(seed.id, kind: scanUse, instructions: request)
+                problem = await model.makeFromScan(seed.id, kind: scanUse, instructions: request, fit: fitChoice.fit)
             } else if let link {
                 problem = await model.startProject(instructions: ModelLink.words(in: request, without: link), files: files, kind: "published",
                                                    url: link.absoluteString)

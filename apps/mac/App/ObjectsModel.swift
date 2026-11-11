@@ -55,12 +55,12 @@ protocol ObjectsCompanion: Sendable {
     /// Where the scanned object sits in a fit part made before passes said (`objects.locate`, docs/protocols/seats.md).
     func locate(_ id: String) async throws -> Project
     /// Make something else from this scan (`objects.makeFromScan`, design §3.3).
-    func makeFromScan(_ id: String, kind: String, instructions: String) async throws -> Project
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit?) async throws -> Project
 }
 
 extension ObjectsCompanion {
     func locate(_ id: String) async throws -> Project { throw ControlClientError.unavailable }
-    func makeFromScan(_ id: String, kind: String, instructions: String) async throws -> Project { throw ControlClientError.unavailable }
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit?) async throws -> Project { throw ControlClientError.unavailable }
 }
 
 extension ObjectsCompanion {
@@ -140,8 +140,8 @@ struct SocketObjects: ObjectsCompanion {
     }
     func duplicate(_ id: String) async throws -> Project { try await ControlClient(socketPath: path).duplicateObject(id) }
     func locate(_ id: String) async throws -> Project { try await ControlClient(socketPath: path).locateObject(id) }
-    func makeFromScan(_ id: String, kind: String, instructions: String) async throws -> Project {
-        try await ControlClient(socketPath: path).makeFromScanObject(id, kind: kind, instructions: instructions)
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit?) async throws -> Project {
+        try await ControlClient(socketPath: path).makeFromScanObject(id, kind: kind, instructions: instructions, fit: fit)
     }
     func fusionAvailable() async -> Bool {
         guard let state = try? await ControlClient(socketPath: path).companionSettings().fusion?.state else { return false }
@@ -675,10 +675,11 @@ struct SocketObjects: ObjectsCompanion {
     @Published var makingFromScan: Project?
 
     /// Make something else from this scan (design §3.3): the new project appears at once, selected, saying its scan is
-    /// being brought over. Returns the problem in words, or nil.
-    func makeFromScan(_ id: String, kind: String, instructions: String) async -> String? {
+    /// being brought over. A fit sends how its exact size is settled (`fit`), as the iPhone does. Returns the problem in
+    /// words, or nil.
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit? = nil) async -> String? {
         do {
-            let made = try await companion.makeFromScan(id, kind: kind, instructions: instructions)
+            let made = try await companion.makeFromScan(id, kind: kind, instructions: instructions, fit: kind == "fit" ? fit : nil)
             readApplied = startRead()
             objects.removeAll { $0.id == made.id }
             objects.insert(made, at: 0)

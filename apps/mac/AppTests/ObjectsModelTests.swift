@@ -9,6 +9,8 @@ private actor FakeObjects: ObjectsCompanion {
     var listError: Error?
     var actionError: Error?
     private(set) var calls: [String] = []
+    /// Each makeFromScan's `fit`, in order.
+    private(set) var madeFits: [ProjectFit?] = []
     private(set) var correctionPhotoNames: [[String]?] = []
     private(set) var messageUploadFlags: [Bool] = []
     private var beforeDuplicateReply: (@Sendable () async -> Void)?
@@ -88,8 +90,9 @@ private actor FakeObjects: ObjectsCompanion {
         await beforeDuplicateReply?()
         return try decode(copied)
     }
-    func makeFromScan(_ id: String, kind: String, instructions: String) async throws -> Project {
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit?) async throws -> Project {
         if let actionError { throw actionError }
+        madeFits.append(fit)
         let source = items.first { $0["id"] as? String == id }!
         let made: [String: Any] = ["id": "made", "createdAtMs": 9_000_000, "updatedAtMs": 9_000_000, "state": "touching-up", "kind": kind,
                                    "title": instructions, "instructions": instructions, "photos": [], "passes": [],
@@ -541,11 +544,14 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(ScanLineage.scans(in: model.objects).map(\.id), ["source"], "New's Use a scan you already have")
 
         model.makingFromScan = source
-        let problem = await model.makeFromScan("source", kind: "fit", instructions: "A belt case for it")
+        // New Project's seeded pane holds a FitChoice: it starts on "Use scan", since the scan is what the part must fit.
+        let problem = await model.makeFromScan("source", kind: "fit", instructions: "A belt case for it", fit: FitChoice().fit)
         XCTAssertNil(problem)
         XCTAssertEqual(model.selection, "made")
         let calls = await companion.calls
         XCTAssertTrue(calls.contains("makeFromScan fit"))
+        let fits = await companion.madeFits
+        XCTAssertEqual(fits, [ProjectFit(sizeSource: .scan)], "the Mac's fit carries its size source, as the iPhone's does")
         let made = try XCTUnwrap(model.selected)
         XCTAssertEqual(ScanLineage(made, in: model.objects).fromLine, "Uses the scan from “Leatherman Wave+ replica”")
         XCTAssertTrue(model.objects.contains { $0.id == "source" }, "the source stays")

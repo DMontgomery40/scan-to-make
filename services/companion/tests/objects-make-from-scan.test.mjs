@@ -173,3 +173,75 @@ test('the Mac app makes one through the control socket, and a source deleted bef
   const failed = await until(() => store.get(gone.id), o => o.state === 'failed' && !o.progress, 'the refusal');
   assert.equal(failed.failure, '“Old Leatherman” has been deleted, so its scan can’t be brought over. Scan the object again.');
 });
+
+test('the Mac and Linux make a fit through the control socket with how its size is settled, as the iPhone does', async t => {
+  const {service, store, inputs} = await fixture(t);
+  const source = await leatherman(service, store);
+  const dispatch = createControlDispatcher({objects: service});
+  // The Mac's and Linux's seeded New Project send "Use scan" unless the person chooses otherwise.
+  const byScan = await dispatch('objects.makeFromScan', {id: source.id, kind: 'fit', instructions: 'A belt case for it', fit: {sizeSource: 'scan'}});
+  assert.deepEqual(byScan.object.fit, {sizeSource: 'scan'});
+  await until(() => store.get(byScan.object.id), o => o.state === 'ready', 'the fit by the scan');
+  assert.deepEqual((await store.get(byScan.object.id)).fit, {sizeSource: 'scan'});
+  const measured = {sizeSource: 'measured', measured: [{id: 'longest', label: 'longest side', mm: 115.5}]};
+  const byHand = await dispatch('objects.makeFromScan', {id: source.id, kind: 'fit', instructions: 'A sheath', fit: measured});
+  assert.deepEqual(byHand.object.fit, measured);
+  await until(() => store.get(byHand.object.id), o => o.state === 'ready', 'the measured fit');
+  assert.match(JSON.stringify(inputs.at(-1)), /115\.5/, 'the pass is told the measured size');
+  await assert.rejects(dispatch('objects.makeFromScan', {id: source.id, kind: 'fit', instructions: 'A sheath', fit: {sizeSource: 'measured'}}));
+});
+
+test('a message\'s unsent photos stay with the source: the new project gets only its evidence', async t => {
+  const {call, service, store} = await fixture(t);
+  const source = await leatherman(service, store);
+  // Uploaded for a change not yet asked: the source's next pass would not use it, and neither may the new project.
+  await service.addPhoto(source.id, 'for-a-message.jpg', Buffer.from('unrelated'), true);
+  assert.deepEqual((await store.get(source.id)).pendingPhotos, ['for-a-message.jpg']);
+  const created = (await call('POST', `/v1/objects/${source.id}/make-from-scan`, {kind: 'fit', instructions: 'A belt case for it', fit: {sizeSource: 'scan'}})).json.object;
+  const ready = await until(() => store.get(created.id), o => o.state === 'ready', 'the new project');
+  assert.deepEqual(ready.photos, ['side.jpg']);
+  assert.deepEqual(await readdir(join(store.dir(created.id), 'photos')), ['side.jpg']);
+  assert.deepEqual((await store.get(source.id)).pendingPhotos, ['for-a-message.jpg'], 'the source keeps it for its message');
+});
+
+test('a scan whose phone sent its preview but not yet every photo is refused until it has all arrived', async t => {
+  const {call, service, store} = await fixture(t);
+  const project = await service.create();
+  const dir = store.dir(project.id);
+  await mkdir(join(dir, 'scan'), {recursive: true}); await mkdir(join(dir, 'capture'), {recursive: true});
+  await writeFile(join(dir, 'scan', 'scan.usdz'), 'the phone preview');
+  await writeFile(join(dir, 'capture', '0001.heic'), 'frame 1');
+  // The phone declared its walk-around and uploaded its preview, then went away before /start.
+  await store.update(project.id, o => ({...o, scan: 'scan.usdz', scanSource: 'phone-preview', capture: ['0001.heic'],
+    captureDeclared: {source: 'object-capture', images: ['0001.heic', '0002.heic']}}));
+  const refused = await call('POST', `/v1/objects/${project.id}/make-from-scan`, {kind: 'copy'});
+  assert.equal(refused.status, 409);
+  assert.equal(refused.json.error.message, 'This scan is still arriving from the phone that recorded it. Finish sending it from that phone, then make something from it.');
+  assert.equal((await service.list()).length, 1, 'no project is made by a refusal');
+
+  // Try Again on a project already made from it (before this check) refuses the same way rather than designing from the preview.
+  const orphan = await store.create(undefined, 'copy');
+  await store.update(orphan.id, o => ({...o, state: 'failed', scanFrom: {id: project.id, title: 'Scan'}}));
+  await service.start(orphan.id);
+  const failed = await until(() => store.get(orphan.id), o => o.state === 'failed' && !o.progress, 'the refusal on Try Again');
+  assert.match(failed.failure, /still arriving from the phone/);
+  assert.equal(failed.scan, undefined);
+});
+
+test('Copy this object with no words keeps an imported scan with no photos as the model', async t => {
+  const {call, service, store, inputs} = await fixture(t);
+  // A project made from an imported STL and a description: no photos and no capture frames.
+  const source = await service.create('Print this bracket as it is.', 'copy');
+  await mkdir(join(store.dir(source.id), 'scan'), {recursive: true});
+  await writeFile(join(store.dir(source.id), 'scan', 'scan.stl'), STL);
+  await store.update(source.id, o => ({...o, scan: 'scan.stl'}));
+  await service.start(source.id); await service.settled(source.id);
+  const passesBefore = inputs.length;
+  const made = await call('POST', `/v1/objects/${source.id}/make-from-scan`, {kind: 'copy'});
+  assert.equal(made.status, 201);
+  const ready = await until(() => store.get(made.json.object.id), o => o.state !== 'touching-up', 'the copy');
+  assert.equal(ready.state, 'ready', ready.failure);
+  assert.equal(ready.instructions, undefined, 'the source\'s words are not carried over');
+  assert.ok(ready.current?.model, 'the scan is the model');
+  assert.equal(inputs.length, passesBefore, 'kept as it is, never touched up');
+});

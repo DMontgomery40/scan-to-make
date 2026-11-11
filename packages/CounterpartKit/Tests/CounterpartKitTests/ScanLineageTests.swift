@@ -2,48 +2,55 @@ import XCTest
 @testable import CounterpartKit
 
 /// "Make something else from this scan" (design §3.3): which projects offer it, and what both pages say about where a
-/// scan came from. The Android (`ScanLineageTest`) and Linux (`domain.test.ts`) ports check the same lines.
+/// scan came from. The cases are `Fixtures/scan-lineage.json`, read by the Android suite too: the same lines everywhere.
 final class ScanLineageTests: XCTestCase {
-    private let leatherman = project(["id": "src", "title": "Leatherman Wave+ replica", "kind": "copy", "state": "ready", "scan": "scan.usdz", "createdAtMs": 1_000])
-    private func made(_ id: String, _ title: String, at ms: Double) -> Project {
-        project(["id": id, "title": title, "kind": "fit", "state": "ready", "scan": "scan.usdz", "createdAtMs": ms, "scanFrom": ["id": "src", "title": "Leatherman Wave+ replica"]])
+    private struct Cases { let document: [String: Any]; let projects: [String: Project] }
+    private func cases() throws -> Cases {
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("scan-lineage.json")) as? [String: Any])
+        let raw = try XCTUnwrap(document["projects"] as? [String: [String: Any]])
+        return Cases(document: document, projects: try raw.mapValues { try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: $0)) })
+    }
+    private func pick(_ keys: Any?, _ projects: [String: Project]) throws -> [Project] {
+        try (keys as? [String] ?? []).map { try XCTUnwrap(projects[$0], "no project \($0) in the fixture") }
     }
 
-    func testEveryProjectTheMacHasAScanForOffersItWhateverItsKind() {
-        XCTAssertTrue(leatherman.canMakeFromScan, "a copy's scan can become a fit: the Leatherman")
-        XCTAssertTrue(project(["state": "ready", "kind": "fit", "scan": "scan.usdz"]).canMakeFromScan)
-        XCTAssertFalse(project(["state": "new", "capture": ["0001.heic"]]).canMakeFromScan, "a scan still on its way isn't one the Mac has")
-        XCTAssertFalse(project(["state": "ready", "kind": "fit", "instructions": "A hook"]).canMakeFromScan)
-        XCTAssertEqual(ScanLineage.action, "Make something else from this scan")
-        XCTAssertEqual(ScanLineage.fitChoice, "Make something that fits this")
-        XCTAssertEqual(ScanLineage.copyChoice, "Copy this object")
+    func testTheWordsAreTheSameEverywhere() throws {
+        let words = try XCTUnwrap(try cases().document["words"] as? [String: String])
+        XCTAssertEqual(ScanLineage.action, words["action"])
+        XCTAssertEqual(ScanLineage.fitChoice, words["fitChoice"])
+        XCTAssertEqual(ScanLineage.copyChoice, words["copyChoice"])
+        XCTAssertEqual(ScanLineage.useExisting, words["useExisting"])
     }
 
-    func testBothPagesSayWhereTheScanCameFrom() {
-        let belt = made("belt", "Belt case", at: 2_000), clip = made("clip", "Pocket clip", at: 3_000)
-        let all = [leatherman, belt, clip]
-        XCTAssertEqual(ScanLineage(belt, in: all).fromLine, "Uses the scan from “Leatherman Wave+ replica”")
-        XCTAssertEqual(ScanLineage(belt, in: all).from?.exists, true)
-        XCTAssertNil(ScanLineage(leatherman, in: all).fromLine)
-        XCTAssertEqual(ScanLineage(leatherman, in: [leatherman, belt]).madeLine, "Also made from this scan: “Belt case”")
-        XCTAssertEqual(ScanLineage(leatherman, in: all).madeLine, "Also made from this scan: 2 projects")
-        XCTAssertEqual(ScanLineage(leatherman, in: all).made.map(\.id), ["clip", "belt"], "newest first")
-        XCTAssertNil(ScanLineage(belt, in: all).madeLine)
+    func testEveryProjectTheMacHasAScanForOffersItWhateverItsKind() throws {
+        let c = try cases()
+        let rows = try XCTUnwrap(c.document["canMakeFromScan"] as? [[String: Any]])
+        XCTAssertFalse(rows.isEmpty)
+        for row in rows {
+            let project = try XCTUnwrap(c.projects[row["project"] as? String ?? ""])
+            XCTAssertEqual(project.canMakeFromScan, row["expected"] as? Bool, row["why"] as? String ?? "")
+        }
     }
 
-    func testARenamedSourceReadsByItsNameNowAndADeletedOneSaysSo() {
-        var renamed = leatherman; renamed.title = "Leatherman Wave+"
-        let belt = made("belt", "Belt case", at: 2_000)
-        XCTAssertEqual(ScanLineage(belt, in: [renamed, belt]).fromLine, "Uses the scan from “Leatherman Wave+”")
-        let gone = ScanLineage(belt, in: [belt])
-        XCTAssertEqual(gone.fromLine, "Uses the scan from “Leatherman Wave+ replica”, since deleted")
-        XCTAssertEqual(gone.from?.exists, false, "nothing to open")
+    func testBothPagesSayWhereTheScanCameFromAndWhatElseWasMade() throws {
+        let c = try cases()
+        let rows = try XCTUnwrap(c.document["lineage"] as? [[String: Any]])
+        XCTAssertFalse(rows.isEmpty)
+        for row in rows {
+            let name = row["name"] as? String ?? ""
+            let project = try XCTUnwrap(c.projects[row["project"] as? String ?? ""], name)
+            let lineage = ScanLineage(project, in: try pick(row["among"], c.projects))
+            XCTAssertEqual(lineage.fromLine, row["fromLine"] as? String, name)
+            XCTAssertEqual(lineage.from?.exists, row["fromExists"] as? Bool, name)
+            XCTAssertEqual(lineage.madeLine, row["madeLine"] as? String, name)
+            XCTAssertEqual(lineage.made.map(\.id), row["made"] as? [String] ?? [], name)
+        }
     }
 
-    func testNewOffersEveryScanTheMacHasNewestFirst() {
-        let belt = made("belt", "Belt case", at: 2_000)
-        let words = project(["id": "w", "state": "ready", "instructions": "A hook", "createdAtMs": 5_000])
-        XCTAssertEqual(ScanLineage.scans(in: [leatherman, words, belt]).map(\.id), ["belt", "src"])
+    func testNewOffersEveryScanTheMacHasNewestFirst() throws {
+        let c = try cases()
+        let scans = try XCTUnwrap(c.document["scans"] as? [String: Any])
+        XCTAssertEqual(ScanLineage.scans(in: try pick(scans["among"], c.projects)).map(\.id), scans["expected"] as? [String])
         let line = ScanLineage.scannedLine(project(["state": "ready", "scan": "scan.usdz", "createdAtMs": 1_762_243_200_000]),
                                            locale: Locale(identifier: "en_US"), timeZone: TimeZone(identifier: "America/Denver")!)
         XCTAssertEqual(line, "scanned Nov 4")

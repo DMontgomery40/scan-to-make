@@ -604,6 +604,11 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertFalse(app.buttons["send"].isEnabled, "it asks what the scan becomes before anything else")
         XCTAssertEqual(app.buttons["scan-use-fit"].label.components(separatedBy: ",").first, "Make something that fits this")
         app.buttons["scan-use-fit"].tap()
+        // The kept scan is what the new part must fit: its exact size starts from the scan, not a lookup (review of #570).
+        let sizeSource = app.segmentedControls["fit-dimension-source"]
+        XCTAssertTrue(sizeSource.waitForExistence(timeout: 5))
+        XCTAssertTrue(sizeSource.buttons["Use scan"].isSelected, "a fit from a kept scan starts on Use scan")
+        XCTAssertFalse(sizeSource.buttons["Look up"].isSelected)
         let describe = app.descendants(matching: .any).matching(identifier: "describe").firstMatch
         XCTAssertTrue(describe.waitForExistence(timeout: 5))
         describe.tap()
@@ -651,8 +656,16 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["scan-use-question"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["scan-use-copy"].exists && app.buttons["scan-use-fit"].exists)
         XCTAssertFalse(app.buttons["scan-object"].exists)
+        app.buttons["scan-use-fit"].tap()
+        let sizeSource = app.segmentedControls["fit-dimension-source"]
+        XCTAssertTrue(sizeSource.buttons["Use scan"].isSelected, "choosing an existing scan also defaults to its size")
+        sizeSource.buttons["Look up"].tap()
         app.buttons["scan-use-remove"].tap()
         XCTAssertFalse(app.staticTexts["scan-use-question"].exists, "Remove goes back to New as it was")
+        for _ in 0..<4 where !offered.isHittable { sheet.swipeUp() }
+        offered.tap()
+        app.buttons["scan-use-fit"].tap()
+        XCTAssertTrue(sizeSource.buttons["Use scan"].isSelected, "another selection starts from that scan again")
     }
 
     /// PRD §5.4 One main action (board U17), the pair seen with real projects on Nov 10: a pass stopped on a project
@@ -756,7 +769,7 @@ final class LayoutParityUITests: XCTestCase {
             }
             XCTAssertTrue(inside.isEmpty, "\(state): \(inside.map { "\($0.identifier) '\($0.label)' \($0.frame)" }) inside the button at \(send.frame)")
             // Back to the top, only as far as needed: a swipe down at the top would dismiss the sheet.
-            for _ in 0..<8 where !(question.isHittable && copy.isHittable) { sheet.swipeDown(velocity: .slow) }
+            for _ in 0..<8 where !(question.shown(in: sheet) && copy.shown(in: sheet)) { sheet.swipeDown(velocity: .slow) }
         }
         let describe = app.staticTexts["What do you need?"]
         XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
@@ -1075,7 +1088,10 @@ final class LayoutParityUITests: XCTestCase {
         // Put the keyboard away first, or the next tap only dismisses it.
         app.navigationBars["New Project"].buttons["Done"].tap()
         let measured = app.buttons["I measured"]
-        for _ in 0..<6 where !(measured.exists && measured.isHittable) { sheet.swipeDown(velocity: .slow) }
+        // Below the navigation bar, not just hittable: XCTest counts a control under the translucent bar as hittable, and
+        // in the gate (Nov 11) both taps on I measured landed on the bar, with the picker scrolled up under it.
+        let bar = app.navigationBars["New Project"]
+        for _ in 0..<6 where !(measured.exists && measured.isHittable && measured.frame.minY >= bar.frame.maxY) { sheet.swipeDown(velocity: .slow) }
         measured.tap()
         let chosen = NSPredicate(format: "isSelected == true")
         if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: measured)], timeout: 3) != .completed { measured.tap() }
@@ -2033,4 +2049,15 @@ final class LayoutParityUITests: XCTestCase {
         app.buttons["Done"].tap()
     }
 
+}
+
+extension XCUIElement {
+    /// Whether the element's middle is inside `container`, read from frames alone. `isHittable` on a row scrolled out of an
+    /// iPad sheet can throw "Activation point invalid and no suggested hit points" instead of answering false (the gate,
+    /// Nov 11, in a loop that scrolls back to the top), so a scroll loop asks this and leaves `isHittable` to the asserts.
+    func shown(in container: XCUIElement) -> Bool {
+        guard exists else { return false }
+        let own = frame
+        return !own.isEmpty && container.frame.contains(CGPoint(x: own.midX, y: own.midY))
+    }
 }
