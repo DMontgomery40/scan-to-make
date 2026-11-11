@@ -154,7 +154,8 @@ struct CounterpartCommands: Commands {
             Button("New Project…") { newProject?() }
                 .keyboardShortcut("n")
                 .disabled(newProject == nil)
-            // H2 (Nov 11): the system file chooser for the files New Project takes. Always on, even with no window open.
+            // H2 (Nov 11): the system file chooser for the files New Project takes. Not tied to the window's focus, as
+            // New Project… is; with no window open, whether the menu has it is unchecked (review of #582, finding 4).
             Button("Open…") { OpenedFiles.choose() }
                 .keyboardShortcut("o")
             Button("Add a Phone…") { NSApp.activate(); openWindow(id:"pairing") }
@@ -222,7 +223,8 @@ struct CounterpartCommands: Commands {
     }
 
     /// H1 (Nov 11): Finder's Open With, a double-click with Counterpart chosen, a drop on the Dock icon and `open -a`
-    /// all land here. The window takes the files into New Project as a drop on it does; anything else is ignored.
+    /// all land here. The window comes forward and takes the files into New Project as a drop on it does, naming any
+    /// it can't use.
     func application(_ application: NSApplication, open urls: [URL]) {
         if OpenedFiles.shared.receive(urls.filter(\.isFileURL)) { AppRouter.shared.open(.main) }
     }

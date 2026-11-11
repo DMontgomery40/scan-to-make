@@ -19,6 +19,8 @@ struct MainWindow: View {
     @State private var newProject: NewProjectDraft?
     @State private var printing: Project?
     @State private var editorError: String?
+    /// An opened file New Project can't use, named (`ObjectsModel.refusal`).
+    @State private var openRefusal: String?
     /// "Opened in Blender", for a moment.
     @State private var editorNote: String?
 
@@ -50,12 +52,7 @@ struct MainWindow: View {
             startNewProject(draft)
             return true
         }
-        // A file opened with Counterpart, or from File ▸ Open…: the same as dropping it on the window. With New Project
-        // already open, the pane takes it as a drop on its drop zone.
-        .onReceive(opened.$waiting) { waiting in
-            guard !waiting.isEmpty, newProject == nil, let draft = NewProjectDraft.from(opened.take()) else { return }
-            startNewProject(draft)
-        }
+        .modifier(OpenedFilesHandler(opened: opened, composing: newProject != nil, refusal: $openRefusal) { startNewProject($0) })
         .onChange(of: model.selection) { _, selection in if selection != nil { newProject = nil } }
         .onChange(of: newProject) { _, draft in model.composing = draft != nil }
         .onAppear {
@@ -479,6 +476,27 @@ enum ModelEditor {
         guard let copy = try? editorCopy(source) else { return "The model couldn’t be copied for the other app." }
         workspace.open([copy], withApplicationAt: application, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
         return nil
+    }
+}
+
+/// A file opened with Counterpart, or from File ▸ Open…: the same as dropping it on the window. With New Project
+/// already open, the pane takes it as a drop on its drop zone. Files it can't use are named: in the drop zone beside
+/// the ones it took, or alone in an alert.
+private struct OpenedFilesHandler: ViewModifier {
+    @ObservedObject var opened: OpenedFiles
+    let composing: Bool
+    @Binding var refusal: String?
+    let start: (NewProjectDraft) -> Void
+    func body(content: Content) -> some View {
+        content
+            .onReceive(opened.$waiting) { waiting in
+                guard !waiting.isEmpty, !composing else { return }
+                let urls = opened.take()
+                if let draft = NewProjectDraft.from(urls) { start(draft) } else { refusal = ObjectsModel.refusal(for: urls) }
+            }
+            .alert("Couldn’t Open That File", isPresented: Binding(get: { refusal != nil }, set: { if !$0 { refusal = nil } })) {
+                Button("OK", role: .cancel) { refusal = nil }
+            } message: { Text(refusal ?? "") }
     }
 }
 

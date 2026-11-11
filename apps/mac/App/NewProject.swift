@@ -19,11 +19,14 @@ struct NewProjectPane: View {
     @State private var targeted = false
     @State private var starting = false
     @State private var problem: String?
+    /// The files from the last drop or open that New Project can't use, named (`ObjectsModel.refusal`).
+    @State private var refusal: String?
 
     init(model: ObjectsModel, draft: NewProjectDraft, close: @escaping () -> Void) {
         self.model = model
         self.close = close
         _files = State(initialValue: draft.files)
+        _refusal = State(initialValue: ObjectsModel.refusal(for: draft.refused))
         _kind = State(initialValue: ObjectsModel.draftKind(for: draft.files))
     }
 
@@ -92,6 +95,7 @@ struct NewProjectPane: View {
                 .buttonStyle(.glass).controlSize(.large)
                 .accessibilityLabel("Choose Files")
                 .accessibilityHint("Photos, STL, 3MF or USDZ files")
+                .accessibilityIdentifier(Self.chooseFilesIdentifier)
             Text("or just describe it below").font(.callout).foregroundStyle(.secondary)
             if !files.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -100,8 +104,13 @@ struct NewProjectPane: View {
                 }
                 .padding(.top, 6)
             }
+            if let refusal {
+                Label(refusal, systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    .accessibilityIdentifier("new-project-refused-files")
+            }
         }
-        .frame(maxWidth: .infinity).frame(height: 300)
+        .frame(maxWidth: .infinity).frame(minHeight: 300)
         .glassEffect(.regular.tint(Color.filament.opacity(targeted ? 0.22 : 0.10)), in: .rect(cornerRadius: 28))
         .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(Color.filament, style: .init(lineWidth: 2, dash: [8, 6])) }
         .dropDestination(for: URL.self) { urls, _ in add(urls) } isTargeted: { targeted = $0 }
@@ -109,7 +118,11 @@ struct NewProjectPane: View {
         .onReceive(opened.$waiting) { waiting in if !waiting.isEmpty { add(opened.take()) } }
     }
 
+    /// The Choose Files… button, for a UI test to find (the pane can't be rendered in `ObjectsModelTests`).
+    static let chooseFilesIdentifier = "new-project-choose-files"
+
     @discardableResult private func add(_ urls: [URL]) -> Bool {
+        refusal = ObjectsModel.refusal(for: urls)
         let usable = ObjectsModel.usable(urls, besides: files)
         files += usable
         if ObjectsModel.draftKind(for: usable) == "copy" { kind = "copy" }

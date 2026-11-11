@@ -575,6 +575,31 @@ struct SocketObjects: ObjectsCompanion {
         return kept
     }
 
+    /// The files in `urls` New Project can't use, once each.
+    nonisolated static func unusable(_ urls: [URL]) -> [URL] {
+        var refused: [URL] = []
+        for url in urls where fileKind(url) == nil && !refused.contains(url) { refused.append(url) }
+        return refused
+    }
+
+    /// What New Project takes, in words, from the one list: "photos (JPG, JPEG, HEIC, HEIF or PNG) or models (STL, 3MF or USDZ)".
+    nonisolated static var acceptedWords: String {
+        func either(_ items: [String]) -> String {
+            let upper = items.map { $0.uppercased() }
+            return upper.count < 2 ? upper.joined() : upper.dropLast().joined(separator: ", ") + " or " + upper.last!
+        }
+        return "photos (\(either(photoExtensions))) or models (\(either(modelExtensions)))"
+    }
+
+    /// The sentence for files New Project can't use, named, and what it takes; nil when there are none. One sentence for
+    /// a drop on the drop zone, a drop on the window and a file opened with Counterpart.
+    nonisolated static func refusal(for urls: [URL]) -> String? {
+        let names = unusable(urls).map { "“\($0.lastPathComponent)”" }
+        guard !names.isEmpty else { return nil }
+        let list = names.count < 3 ? names.joined(separator: " and ") : names.dropLast().joined(separator: ", ") + " and " + names.last!
+        return "\(list) can’t start a project, so \(names.count == 1 ? "it wasn’t" : "they weren’t") added. New Project takes \(acceptedWords)."
+    }
+
     /// The project New Project starts as for these files: a model to copy makes it `copy`, anything else `fit`.
     nonisolated static func draftKind(for files: [URL]) -> String { files.contains { fileKind($0) == "scan" } ? "copy" : "fit" }
 
@@ -975,27 +1000,30 @@ enum StageStillState: Equatable {
     }
 }
 
-/// New Project's draft: the files it starts with.
+/// New Project's draft: the files it starts with, and the ones it couldn't take (named in the drop zone).
 struct NewProjectDraft: Identifiable, Equatable {
     let id = UUID()
     var files: [URL] = []
-    /// Only the files New Project can use; nil when none are, so a drop or an open of anything else does nothing, as before.
+    var refused: [URL] = []
+    /// What a drop on the window or an open makes: the files New Project can use, and the others to name. Nil when
+    /// none can be used: the window shows `ObjectsModel.refusal` instead.
     static func from(_ urls: [URL]) -> NewProjectDraft? {
         let files = ObjectsModel.usable(urls)
-        return files.isEmpty ? nil : NewProjectDraft(files: files)
+        return files.isEmpty ? nil : NewProjectDraft(files: files, refused: ObjectsModel.unusable(urls))
     }
 }
 
 /// Files opened with Counterpart (Finder Open With, a double-click, the Dock icon, `open -a`) and File ▸ Open…, held
-/// until the window takes them into New Project exactly as a drop on it does (H1, H2, Nov 11).
+/// as they came until the window takes them into New Project exactly as a drop on it does (H1, H2, Nov 11). Files it
+/// can't use are kept too, so the window comes forward and names them (review of #582: never refuse in silence).
 @MainActor final class OpenedFiles: ObservableObject {
     static let shared = OpenedFiles()
     @Published private(set) var waiting: [URL] = []
-    /// Keeps the files New Project can use; true when there was one.
+    /// Keeps the opened files, once each; true when there was one.
     @discardableResult func receive(_ urls: [URL]) -> Bool {
-        let usable = ObjectsModel.usable(urls, besides: waiting)
-        waiting += usable
-        return !usable.isEmpty
+        var added = false
+        for url in urls where url.isFileURL && !waiting.contains(url) { waiting.append(url); added = true }
+        return added
     }
     func take() -> [URL] { defer { waiting = [] }; return waiting }
 }

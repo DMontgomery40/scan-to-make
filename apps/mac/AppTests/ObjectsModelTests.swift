@@ -1103,9 +1103,8 @@ private func project(_ item: [String: Any]) throws -> Project {
                 declared += try XCTUnwrap(UTType(identifier), identifier).tags[.filenameExtension] ?? []
             }
         }
-        XCTAssertEqual(Set(declared.map { $0.lowercased() }).intersection(ObjectsModel.photoExtensions + ObjectsModel.modelExtensions),
-                       Set(ObjectsModel.modelExtensions), "the plist's models are New Project's models")
-        XCTAssertTrue(Set(declared).isDisjoint(with: ObjectsModel.photoExtensions))
+        XCTAssertEqual(Set(declared.map { $0.lowercased() }), Set(ObjectsModel.modelExtensions),
+                       "the plist declares New Project's models and nothing else (no photos, no OBJ)")
         for ext in ObjectsModel.photoExtensions + ObjectsModel.modelExtensions {
             let url = URL(fileURLWithPath: "/a/b.\(ext.uppercased())")
             XCTAssertNotNil(ObjectsModel.fileKind(url), ext)
@@ -1145,17 +1144,33 @@ private func project(_ item: [String: Any]) throws -> Project {
         }
     }
 
-    /// An opened file New Project can't use is refused as a drop of it is: nothing waits, no New Project opens.
-    func testAnOpenedFileNewProjectCantUseIsRefused() {
+    /// Review of #582: a file New Project can't use, opened or dropped, is named with what New Project takes (from the one
+    /// list), never refused in silence. A mixed set keeps the usable files and names the rest.
+    func testAFileNewProjectCantUseIsNamedNotIgnored() throws {
+        let words = ObjectsModel.acceptedWords
+        XCTAssertEqual(words, "photos (JPG, JPEG, HEIC, HEIF or PNG) or models (STL, 3MF or USDZ)")
+        for ext in ObjectsModel.photoExtensions + ObjectsModel.modelExtensions { XCTAssertTrue(words.contains(ext.uppercased()), ext) }
+
         let inbox = OpenedFiles()
-        for name in ["notes.pdf", "part.obj", "plate.gcode", "folder"] {
-            let file = URL(fileURLWithPath: "/tmp/\(name)")
-            XCTAssertNil(NewProjectDraft.from([file]), name)
-            XCTAssertFalse(inbox.receive([file]), name)
-        }
-        XCTAssertTrue(inbox.waiting.isEmpty)
-        XCTAssertTrue(inbox.receive([URL(fileURLWithPath: "/tmp/a.pdf"), URL(fileURLWithPath: "/tmp/a.stl")]))
-        XCTAssertEqual(inbox.waiting.map(\.lastPathComponent), ["a.stl"], "only what it can use, from a mixed open")
+        let gcode = URL(fileURLWithPath: "/tmp/plate.gcode")
+        XCTAssertTrue(inbox.receive([gcode]), "an open of anything brings the window forward")
+        let alone = inbox.take()
+        XCTAssertNil(NewProjectDraft.from(alone), "nothing to start New Project with")
+        XCTAssertEqual(ObjectsModel.refusal(for: alone),
+                       "“plate.gcode” can’t start a project, so it wasn’t added. New Project takes \(words).")
+
+        let mixed = [URL(fileURLWithPath: "/tmp/notes.pdf"), URL(fileURLWithPath: "/tmp/holder.3mf"), URL(fileURLWithPath: "/tmp/part.obj"),
+                     URL(fileURLWithPath: "/tmp/folder")]
+        XCTAssertTrue(inbox.receive(mixed + mixed))
+        let draft = try XCTUnwrap(NewProjectDraft.from(inbox.take()))
+        XCTAssertEqual(draft.files.map(\.lastPathComponent), ["holder.3mf"], "the usable file still goes in")
+        XCTAssertEqual(draft.refused.map(\.lastPathComponent), ["notes.pdf", "part.obj", "folder"], "once each")
+        XCTAssertEqual(ObjectsModel.refusal(for: draft.refused),
+                       "“notes.pdf”, “part.obj” and “folder” can’t start a project, so they weren’t added. New Project takes \(words).")
+        XCTAssertEqual(ObjectsModel.refusal(for: mixed), ObjectsModel.refusal(for: draft.refused),
+                       "a drop of the same files on the drop zone says the same")
+        XCTAssertNil(ObjectsModel.refusal(for: [URL(fileURLWithPath: "/tmp/a.STL"), URL(fileURLWithPath: "/tmp/b.heic")]), "nothing to say")
+        XCTAssertFalse(inbox.receive([URL(string: "https://example.com/a.stl")!]), "only files")
     }
 
     func testErrorSentencesNeverDumpTheError() {
