@@ -552,12 +552,13 @@ def kept_simulator(base: str, kind: str, runtime: str) -> str:
     return simctl('create', KEPT_PREFIX + base, kind, runtime)
 
 
-def fresh_app(udid: str, app: Path, keep_data: bool = False) -> None:
+def fresh_app(udid: str, app: Path, keep_data: str | None = None) -> None:
     """This run's app on a kept simulator, with nothing left from the last run: its data, defaults and keychain.
-    keep_data (--keep-app-data) installs over the last run's app and keeps its data, as an App Store update does: the
-    phone's library and saved project list from a normal run are there for an --condition away run."""
+    keep_data 'keep' (--keep-app-data) installs over the last run's app and keeps its data, as an App Store update does:
+    the phone's library and saved project list from the run before are there for an --condition away run. 'start'
+    (--keep-app-data start) begins such a pair from a fresh install."""
     simctl('terminate', udid, BUNDLE, check=False)
-    if keep_data:
+    if keep_data == 'keep':
         simctl('install', udid, str(app))
         return
     simctl('uninstall', udid, BUNDLE, check=False)
@@ -566,7 +567,7 @@ def fresh_app(udid: str, app: Path, keep_data: bool = False) -> None:
 
 
 def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record, done: set, deadline: float,
-                fresh_simulator: bool = False, keep_data: bool = False) -> tuple[int, int, str]:
+                fresh_simulator: bool = False, keep_data: str | None = None) -> tuple[int, int, str]:
     """Captures what isn't done yet, until the deadline; returns the screens left, the images taken and the first failure.
     Each kind of device uses its kept simulator, shut down at the end; --fresh-simulator creates and deletes one instead."""
     created: dict[str, str] = {}
@@ -589,7 +590,7 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
                     udid = kept[base] = kept_simulator(base + ('-kept' if keep_data else ''), kind, runtime)
                 simctl('boot', udid, check=False)  # already booted is fine
                 simctl('bootstatus', udid, '-b')
-                fresh_app(udid, app, keep_data=keep_data and not fresh_simulator)
+                fresh_app(udid, app, keep_data=None if fresh_simulator else keep_data)
             udid = created.get(base) or kept[base]
             device = Device(key, udid, out / key, record)
             devices.append(device)
@@ -680,10 +681,10 @@ def main() -> int:
                         help='the Mac on a bad day: ' + '; '.join(f'{k}: {v}' for k, v in CONDITIONS.items()) + '. One condition per output folder')
     parser.add_argument('--fresh-simulator', action='store_true',
                         help='create and delete a simulator for this run (the behaviour before Nov 10) instead of the kept stm-ux-* one')
-    parser.add_argument('--keep-app-data', action='store_true',
+    parser.add_argument('--keep-app-data', nargs='?', const='keep', choices=['keep', 'start'],
                         help="keep the app's data from the last --keep-app-data run (its on-device library and saved project list), "
-                             "on a kept simulator of its own (stm-ux-<kind>-kept): run once with --keep-app-data, then again with "
-                             "--condition away --keep-app-data to see what the phone shows from what it kept")
+                             "on a kept simulator of its own (stm-ux-<kind>-kept): run once with --keep-app-data start (a fresh install there), "
+                             "then again with --condition away --keep-app-data to see what the phone shows from what it kept")
     parser.add_argument('--pages', type=int, help='at most this many scrolled pages per screen')
     parser.add_argument('--redo', action='store_true', help='capture the selected screens again (with --devices/--screens)')
     args = parser.parse_args()
