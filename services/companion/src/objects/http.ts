@@ -40,7 +40,32 @@ class HttpFailure extends Error {
  * scan can be tens of megabytes and is never read into memory whole (Nov 10: the phone's "What you scanned" stayed
  * blank). Over the limit it is refused before a byte is read.
  */
-async function exportFile(response: ServerResponse, directory: string, relative: string, headers: Record<string, string>): Promise<void> {
+/**
+ * A strong validator for a project file: the SHA-256 of its bytes, so a phone that already has them is answered 304 and
+ * fetches nothing (issue #720: a completed pass changes a project's version, not its unchanged model or photos, and every
+ * file came again). Hashing is remembered per file identity (device, inode, size, change time), so a file is read for its
+ * hash once, not on every request. A rewritten file with the same bytes keeps its tag.
+ */
+const fileTags = new Map<string, string>();
+async function fileTag(file: Awaited<ReturnType<typeof open>>, stat: {dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number}): Promise<string> {
+  const identity = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  const known = fileTags.get(identity);
+  if (known) return known;
+  const hash = createHash('sha256');
+  for await (const chunk of file.createReadStream({start: 0, autoClose: false})) hash.update(chunk as Buffer);
+  const tag = `"${hash.digest('base64url')}"`;
+  if (fileTags.size > 4096) fileTags.clear();
+  fileTags.set(identity, tag);
+  return tag;
+}
+export function bytesTag(bytes: Uint8Array): string { return `"${createHash('sha256').update(bytes).digest('base64url')}"`; }
+/** `If-None-Match` holds this tag (a list, or `*`); a weak form of it matches too (RFC 9110 §13.1.2). */
+export function tagMatches(match: string | undefined, tag: string): boolean {
+  if (!match) return false;
+  return match.split(',').map(value => value.trim().replace(/^W\//, '')).some(value => value === '*' || value === tag);
+}
+
+async function exportFile(response: ServerResponse, directory: string, relative: string, headers: Record<string, string>, match?: string): Promise<void> {
   if (isAbsolute(relative) || relative.split('/').some(part => !part || part === '.' || part === '..')) throw new HttpFailure(404, 'not-found');
   let file: Awaited<ReturnType<typeof open>>;
   let size: number;
@@ -49,14 +74,24 @@ async function exportFile(response: ServerResponse, directory: string, relative:
     if (!path.startsWith(root + sep)) throw new HttpFailure(404, 'not-found');
     file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) { if (error instanceof HttpFailure) throw error; throw new HttpFailure(404, 'not-found'); }
+  let tag: string;
   try {
     const stat = await file.stat();
     if (!stat.isFile()) throw new HttpFailure(404, 'not-found');
     if (stat.size > MAX_SCAN) throw new HttpFailure(413, 'file-too-large');
     size = stat.size;
+    tag = await fileTag(file, stat);
   } catch (error) { await file.close(); if (error instanceof HttpFailure) throw error; throw new HttpFailure(404, 'not-found'); }
-  response.statusCode = 200;
   for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
+  response.setHeader('etag', tag);
+  if (tagMatches(match, tag)) {
+    // The phone has these bytes: nothing is sent.
+    await file.close();
+    response.statusCode = 304;
+    response.end();
+    return;
+  }
+  response.statusCode = 200;
   response.setHeader('content-length', String(size));
   // The stream closes the file when it ends or the phone goes away; a phone that leaves mid-way is not an error here.
   await pipeline(file.createReadStream(), response).catch(() => undefined);
@@ -363,7 +398,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           const extension = path.split('.').at(-1)?.toLowerCase();
           const type = extension === 'stl' ? 'model/stl' : extension === '3mf' ? 'model/3mf' : extension === 'usdz' ? 'model/vnd.usdz+zip' : undefined;
           if (!type) throw new HttpFailure(404, 'not-found');
-          await exportFile(response, service.dir(id), path, {'content-type': type, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff'});
+          await exportFile(response, service.dir(id), path, {'content-type': type, 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff'}, header('if-none-match'));
           return;
         }
         if (action.startsWith('photos/') || action.startsWith('capture/') || action.startsWith('scan/')) {
@@ -383,7 +418,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           const object = await service.get(id);
           // A scan file is one the project lists (its scan, and the phone's own model kept beside a Mac rebuild).
           if (!type || !(kind === 'scan' ? object.scanFiles?.some(file => file.name === name) : object[kind]?.includes(name))) throw new HttpFailure(404, 'not-found');
-          await exportFile(response, service.dir(id), `${kind}/${name}`, {'content-type': type, 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store'});
+          await exportFile(response, service.dir(id), `${kind}/${name}`, {'content-type': type, 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store'}, header('if-none-match'));
           return;
         }
         if (action.startsWith('pictures/')) {
@@ -393,11 +428,13 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           // Only the project's own current pictures (PRD §5.1), never another file under it.
           if (!Object.values(object.pictures ?? {}).includes(action)) throw new HttpFailure(404, 'not-found');
           const bytes = await readFile(join(service.dir(id), action)).catch(() => { throw new HttpFailure(404, 'not-found'); });
-          response.statusCode = 200;
+          const tag = bytesTag(bytes);
+          response.statusCode = tagMatches(header('if-none-match'), tag) ? 304 : 200;
+          response.setHeader('etag', tag);
           response.setHeader('content-type', 'image/png');
           response.setHeader('cache-control', 'private, max-age=86400');
           response.setHeader('x-content-type-options', 'nosniff');
-          response.end(bytes);
+          response.end(response.statusCode === 304 ? undefined : bytes);
           return;
         }
         if (action.startsWith('asks/')) {
@@ -407,12 +444,14 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           // The Ask's own picture only, never another file under the project.
           if (!object.ask?.photo || object.ask.photo !== action) throw new HttpFailure(404, 'not-found');
           const bytes = await readFile(join(service.dir(id), action)).catch(() => { throw new HttpFailure(404, 'not-found'); });
-          response.statusCode = 200;
+          const tag = bytesTag(bytes);
+          response.statusCode = tagMatches(header('if-none-match'), tag) ? 304 : 200;
+          response.setHeader('etag', tag);
           // JPEG, except on a host without sips, where a PNG render is passed on as it is.
           response.setHeader('content-type', bytes[0] === 0x89 && bytes[1] === 0x50 ? 'image/png' : 'image/jpeg');
           response.setHeader('cache-control', 'private, no-store');
           response.setHeader('x-content-type-options', 'nosniff');
-          response.end(bytes);
+          response.end(response.statusCode === 304 ? undefined : bytes);
           return;
         }
         if (action.startsWith('prints/')) {
@@ -420,11 +459,13 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           await authorize(READ);
           await service.get(id);
           const bytes = await readFile(join(service.dir(id), action)).catch(() => { throw new HttpFailure(404, 'not-found'); });
-          response.statusCode = 200;
+          const tag = bytesTag(bytes);
+          response.statusCode = tagMatches(header('if-none-match'), tag) ? 304 : 200;
+          response.setHeader('etag', tag);
           response.setHeader('content-type', 'image/jpeg');
           response.setHeader('cache-control', 'private, max-age=86400');
           response.setHeader('x-content-type-options', 'nosniff');
-          response.end(bytes);
+          response.end(response.statusCode === 304 ? undefined : bytes);
           return;
         }
         if (action === 'camera.jpg') {
@@ -465,7 +506,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           const relative = action === 'model.stl' ? object.current?.model
             : [...(object.current?.renders ?? []), ...(object.files?.receipts?.flatMap(file => file.plates.flatMap(plate => plate.thumbnail ? [plate.thumbnail] : [])) ?? [])].find(render => basename(render) === decodeURIComponent(action.slice('renders/'.length)));
           if (!relative) throw new HttpFailure(404, 'not-found');
-          await exportFile(response, service.dir(id), relative, {'content-type': action === 'model.stl' ? (relative?.endsWith('.3mf') ? 'model/3mf' : 'model/stl') : 'image/png'});
+          await exportFile(response, service.dir(id), relative, {'content-type': action === 'model.stl' ? (relative?.endsWith('.3mf') ? 'model/3mf' : 'model/stl') : 'image/png'}, header('if-none-match'));
           return;
         }
         if (method !== (action === 'scan' ? 'PUT' : 'POST')) throw new HttpFailure(405, 'method-not-allowed');

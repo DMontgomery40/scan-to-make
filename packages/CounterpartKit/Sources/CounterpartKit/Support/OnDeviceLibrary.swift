@@ -80,13 +80,16 @@ public final class OnDeviceLibrary: @unchecked Sendable {
         public var bytes: Int64
         public var kind: Kind
         public var storedAt: Date
+        /// The Mac's validator for these bytes (its `ETag`, a hash of the file), when it sent one: a newer project version
+        /// asks the Mac with it and, if the bytes are the same, keeps this file instead of fetching it again.
+        public var etag: String?
     }
 
     struct Index: Codable, Equatable {
         var entries: [String: Entry] = [:]
         /// When each project's page was last opened on this phone.
         var opened: [String: Date] = [:]
-        /// Files the Mac refused as too large for a phone, by `project#name#version`: never asked for again.
+        /// Files the Mac refused as too large for a phone, by `project#name#version#variant`: never asked for again.
         var tooLarge: Set<String> = []
     }
 
@@ -151,10 +154,12 @@ public final class OnDeviceLibrary: @unchecked Sendable {
 
     // MARK: Reading (no network, no Keychain)
 
-    /// This version of the file, when the library has it.
+    /// This version of the file, when the library has it. A Mac picture (`pictures/…`) is named by what it draws, so the
+    /// library's copy of that name is the file at any project version.
     public func file(project: String, name: String, version: Int64, file: String? = nil) -> URL? {
         lock.withLock {
-            guard let mac, let entry = index.entries[Self.key(project, name)], entry.version == version,
+            guard let mac, let entry = index.entries[Self.key(project, name)],
+                  entry.version == version || Self.namedByContent(name),
                   file == nil || entry.variant == file else { return nil }
             let url = folder(mac).appending(path: project, directoryHint: .isDirectory).appending(path: entry.file)
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
@@ -175,16 +180,49 @@ public final class OnDeviceLibrary: @unchecked Sendable {
     public var usage: Int64 { lock.withLock { index.entries.values.reduce(0) { $0 + $1.bytes } } }
     public func lastOpened(_ project: String) -> Date? { lock.withLock { index.opened[project] } }
 
-    public func isTooLarge(project: String, name: String, version: Int64) -> Bool {
-        lock.withLock { index.tooLarge.contains("\(Self.key(project, name))#\(version)") }
+    /// Refused as too large: this version of this file, this variant (another original of the same project version is
+    /// its own file; review of #556, Cursor P2.1). `file` nil: any variant.
+    public func isTooLarge(project: String, name: String, version: Int64, file: String? = nil) -> Bool {
+        lock.withLock {
+            let prefix = "\(Self.key(project, name))#\(version)"
+            if let file { return index.tooLarge.contains("\(prefix)#\(file)") || index.tooLarge.contains(prefix) }
+            return index.tooLarge.contains(prefix) || index.tooLarge.contains { $0.hasPrefix(prefix + "#") }
+        }
     }
+
+    /// The copy the library has of this file at an older version, with the Mac's validator, to ask the Mac whether it
+    /// changed (`If-None-Match`). Only the same variant: another original is another file.
+    public func validator(project: String, name: String, file: String) -> String? {
+        lock.withLock {
+            guard mac != nil, let entry = index.entries[Self.key(project, name)], entry.variant == file else { return nil }
+            return entry.etag
+        }
+    }
+
+    /// The Mac said the bytes are unchanged (304): the kept file is this version's too. Its name on disk stays, so what
+    /// was drawn from it (mesh, still) is reused as it is.
+    @discardableResult
+    public func revalidated(project: String, name: String, version: Int64, file: String) -> URL? {
+        lock.withLock {
+            let key = Self.key(project, name)
+            guard let mac, var entry = index.entries[key], entry.variant == file else { return nil }
+            let url = folder(mac).appending(path: project, directoryHint: .isDirectory).appending(path: entry.file)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            if version > entry.version { entry.version = version; index.entries[key] = entry; save(folder(mac)) }
+            return url
+        }
+    }
+
+    /// A Mac picture's name changes whenever what it draws changes (`pictures/<role>-<files>-<drawing>.png`, the
+    /// companion's `pictureName`), so one name is one picture.
+    public static func namedByContent(_ name: String) -> Bool { name.hasPrefix("pictures/") }
 
     // MARK: Writing
 
     /// Moves a fully arrived file into the library and returns where it is. The older version of the same file is removed
     /// only now, after the new one is in place; other files of the project (another version's model, a picture) stay.
     @discardableResult
-    public func commit(_ arrived: URL, project: String, name: String, version: Int64, file: String) throws -> URL {
+    public func commit(_ arrived: URL, project: String, name: String, version: Int64, file: String, etag: String? = nil) throws -> URL {
         try lock.withLock {
             guard let mac else { throw CocoaError(.fileNoSuchFile) }
             let root = folder(mac)
@@ -206,15 +244,15 @@ public final class OnDeviceLibrary: @unchecked Sendable {
                 try? FileManager.default.removeItem(at: projectFolder.appending(path: previous.file))
             }
             index.entries[key] = Entry(project: project, name: name, version: version, file: target.lastPathComponent, variant: file, bytes: bytes,
-                                       kind: Kind.of(name), storedAt: Date())
+                                       kind: Kind.of(name), storedAt: Date(), etag: etag)
             save(root)
             return target
         }
     }
 
-    public func markTooLarge(project: String, name: String, version: Int64) {
+    public func markTooLarge(project: String, name: String, version: Int64, file: String) {
         lock.withLock {
-            index.tooLarge.insert("\(Self.key(project, name))#\(version)")
+            index.tooLarge.insert("\(Self.key(project, name))#\(version)#\(file)")
             if let mac { save(folder(mac)) }
         }
     }
@@ -360,10 +398,10 @@ public enum LibraryPlan {
             var names: [String] = []
             if let picture = project.picturePath { names.append(picture) }
             names += (project.pictures ?? [:]).keys.sorted().compactMap { project.pictures?[$0] }
-            if opened.contains(project.id) {
-                names += (project.plates ?? []).compactMap(\.thumbnail)
-                if let ask = project.openAsk, ask.photo != nil { names.append("asks/\(ask.id).jpg") }
-            }
+            // Every plate's picture, opened or not: a designer's file has no Mac picture, so its plate is the stage (the
+            // away proof of #556: two pages said "not available" for plates the phone had never been asked to keep).
+            names += (project.plates ?? []).compactMap(\.thumbnail)
+            if opened.contains(project.id), let ask = project.openAsk, ask.photo != nil { names.append("asks/\(ask.id).jpg") }
             var seen = Set<String>()
             for name in names where !name.isEmpty && seen.insert(name).inserted {
                 pictures.append(Want(project: project, name: name, kind: .picture, bytes: nil))

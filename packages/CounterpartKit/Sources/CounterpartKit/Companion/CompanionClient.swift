@@ -151,8 +151,8 @@ public final class CompanionClient: @unchecked Sendable {
 
     /// A project file fetched to disk as it arrives (`HTTPTransport.download`): never held in memory whole. The link may
     /// be slow (a busy Mac over Wi-Fi), so the transfer has half an hour; a link that stops sending for 90 s still fails.
-    func fetchFile(_ path: String, limit: Int) async throws -> (reply: HTTPReply, file: URL?) {
-        try await exchange("GET", path, limit: limit, timeout: 90, resourceTimeout: 1800, discard: { value in
+    func fetchFile(_ path: String, limit: Int, ifNoneMatch: String? = nil) async throws -> (reply: HTTPReply, file: URL?) {
+        try await exchange("GET", path, limit: limit, timeout: 90, ifNoneMatch: ifNoneMatch, resourceTimeout: 1800, discard: { value in
             if let file = value.file { try? FileManager.default.removeItem(at: file) }
         }) {
             let result = try await self.transport.download($0, trust: $1, limit: limit, resourceTimeout: $2)
@@ -678,22 +678,58 @@ public final class CompanionClient: @unchecked Sendable {
             return hit
         }
         // A refusal for size is remembered for any file, kept or not, so it is never asked for again.
-        if library.isActive, library.isTooLarge(project: project.id, name: name, version: mediaVersion) {
+        if library.isActive, library.isTooLarge(project: project.id, name: name, version: mediaVersion, file: filename) {
             MediaTrace.record("file.refused", ["status": "413", "store": "library"])
             throw CompanionError(code: "file-too-large", message: "This file is too large for this phone.")
         }
         let target = folder.appending(path: filename)
         let cachedBytes = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
         MediaTrace.record(cachedBytes > 0 ? "file.hit" : "file.miss", ["bytes": String(cachedBytes)])
-        if cachedBytes > 0, !kept { return target }
+        if cachedBytes > 0 {
+            guard kept else { return target }
+            // Fetched before this kind was kept (an earlier choice, or the app before the library): it goes into the
+            // library as it is, never over the network again (review of #556, Cursor P2.2).
+            let copy = FileManager.default.temporaryDirectory.appending(path: "promote-\(UUID().uuidString)")
+            if (try? FileManager.default.copyItem(at: target, to: copy)) != nil,
+               let stored = try? library.commit(copy, project: project.id, name: name, version: mediaVersion, file: filename, etag: Self.validator(of: target)) {
+                MediaTrace.record("file.committed", ["bytes": String(cachedBytes), "store": "library", "from": "cache"])
+                return stored
+            }
+            try? FileManager.default.removeItem(at: copy)
+            return target
+        }
+        // An older version's copy and the Mac's validator for it: the Mac answers 304 when the bytes are the same, and
+        // the copy is this version's too. A completed pass changes the project's version, not its unchanged files
+        // (audit row 3: every pass fetched every model and photo again).
+        var older: URL?
+        let validator: String?
+        if kept { validator = library.validator(project: project.id, name: name, file: filename) }
+        else {
+            older = Self.olderCopy(of: filename, in: folder)
+            validator = older.flatMap(Self.validator(of:))
+        }
         let encoded = resource.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? resource
         // The Ask's picture is served by its id; the field gives `asks/<id>.<ext>`.
         let path = "/v1/objects/\(project.id)/\(encoded)"
-        let (reply, fetched) = try await fetchFile(path, limit: Self.scanLimit)
+        var (reply, fetched) = try await fetchFile(path, limit: Self.scanLimit, ifNoneMatch: validator)
+        if reply.status == 304 {
+            if kept, let same = library.revalidated(project: project.id, name: name, version: mediaVersion, file: filename) {
+                MediaTrace.record("file.unchanged", ["store": "library"])
+                return same
+            }
+            if !kept, let older, (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil,
+               (try? FileManager.default.moveItem(at: older, to: target)) != nil || FileManager.default.fileExists(atPath: target.path) {
+                if let validator { Self.setValidator(validator, of: target) }
+                MediaTrace.record("file.unchanged")
+                return target
+            }
+            // The copy went meanwhile (Clear, eviction): the file itself.
+            (reply, fetched) = try await fetchFile(path, limit: Self.scanLimit)
+        }
         guard reply.status == 200, let fetched else {
             MediaTrace.record("file.refused", ["status": String(reply.status)])
             if reply.status == 413, Self.refusalCode(reply.body) == "file-too-large", library.isActive {
-                library.markTooLarge(project: project.id, name: name, version: mediaVersion)
+                library.markTooLarge(project: project.id, name: name, version: mediaVersion, file: filename)
             }
             // Too large only when the Mac says so in its own words (`file-too-large`, the companion's limit for a phone); any
             // other refusal is a refusal, never "too large" (board X100: a refused part was called "too detailed").
@@ -701,6 +737,7 @@ public final class CompanionClient: @unchecked Sendable {
                 : reply.status == 413 && Self.refusalCode(reply.body) == "file-too-large" ? CompanionError(code: "file-too-large", message: "This file is too large for this phone.")
                 : CompanionError(code: "http-\(reply.status)", message: "Your Mac couldn't send this file. Try again.")
         }
+        let etag = reply.header("ETag")
         defer { try? FileManager.default.removeItem(at: fetched) }
         guard ((try? FileManager.default.attributesOfItem(atPath: fetched.path)[.size] as? Int) ?? 0) > 0 else {
             throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
@@ -708,7 +745,7 @@ public final class CompanionClient: @unchecked Sendable {
         if kept {
             // Whole, then into the library; the older copy of this one file goes only now (the rest of the project stays).
             do {
-                let stored = try library.commit(fetched, project: project.id, name: name, version: mediaVersion, file: filename)
+                let stored = try library.commit(fetched, project: project.id, name: name, version: mediaVersion, file: filename, etag: etag)
                 MediaTrace.record("file.committed", ["bytes": String((try? FileManager.default.attributesOfItem(atPath: stored.path)[.size] as? Int) ?? 0), "store": "library"])
                 return stored
             } catch {
@@ -730,7 +767,7 @@ public final class CompanionClient: @unchecked Sendable {
         catch { MediaTrace.record("file.write-error", ["code": String((error as NSError).code)]); throw error }
         // Moved into place whole, so a reader never sees half a file; another download of it may have won the race.
         if FileManager.default.fileExists(atPath: target.path) { return target }
-        do { try FileManager.default.moveItem(at: fetched, to: target) }
+        do { try FileManager.default.moveItem(at: fetched, to: target); if let etag { Self.setValidator(etag, of: target) } }
         catch {
             if FileManager.default.fileExists(atPath: target.path) { return target }
             MediaTrace.record("file.write-error", ["code": String((error as NSError).code)])
@@ -738,6 +775,29 @@ public final class CompanionClient: @unchecked Sendable {
         }
         MediaTrace.record("file.committed", ["bytes": String((try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0)])
         return target
+    }
+
+    // MARK: Validators beside cached files (files the library doesn't keep)
+
+    /// The Mac's `ETag` for a cached file, kept beside it (`<file>.etag`).
+    static func validator(of file: URL) -> String? {
+        (try? String(contentsOf: file.appendingPathExtension("etag"), encoding: .utf8)).flatMap { $0.isEmpty ? nil : $0 }
+    }
+    static func setValidator(_ etag: String, of file: URL) {
+        try? Data(etag.utf8).write(to: file.appendingPathExtension("etag"), options: .atomic)
+    }
+    /// The newest older version's copy of `filename` beside `folder` (the project's other version folders), if it has a
+    /// validator to ask the Mac with.
+    static func olderCopy(of filename: String, in folder: URL) -> URL? {
+        let mine = Int64(folder.lastPathComponent) ?? Int64.max
+        let versions = ((try? FileManager.default.contentsOfDirectory(at: folder.deletingLastPathComponent(), includingPropertiesForKeys: nil)) ?? [])
+            .compactMap { url in Int64(url.lastPathComponent).map { (url, $0) } }
+            .filter { $0.1 < mine }.sorted { $0.1 > $1.1 }
+        for (url, _) in versions {
+            let copy = url.appending(path: filename)
+            if FileManager.default.fileExists(atPath: copy.path), validator(of: copy) != nil { return copy }
+        }
+        return nil
     }
 }
 
