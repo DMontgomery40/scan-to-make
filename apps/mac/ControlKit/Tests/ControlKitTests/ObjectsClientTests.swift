@@ -4,6 +4,8 @@ import struct CounterpartKit.Project
 import struct CounterpartKit.PrintConfirmationResponse
 @testable import ControlKit
 import struct CounterpartKit.CodeEngineStatus
+import struct CounterpartKit.FitChoice
+import struct CounterpartKit.ProjectFit
 
 private let id = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
 private let folder = "/Users/someone/Library/Application Support/Scan to Make/capture/objects/\(id)"
@@ -91,6 +93,36 @@ final class ObjectsClientTests: XCTestCase {
         }
         _ = try await ControlClient(socketPath: printer.path).printObject(id, checked: false, settings: .init(), overrideDefaults: true)
         withExtendedLifetime((duplicate, printer)) {}
+    }
+
+    /// Review of #570 (P1): the Mac's "Make something that fits this" sent no `fit`, so its size source was lost. New's
+    /// choice starts on "Use scan" and reaches the socket as the iPhone's body has it; "I measured" carries its sides.
+    func testMakeFromScanCarriesTheFitsSizeSourceToTheControlSocket() async throws {
+        /// One socket per request (the fixture answers one connection): the parameters the companion received.
+        func sent(_ kind: String, _ words: String, _ fit: ProjectFit?) async throws -> [String: Any] {
+            var params: [String: Any] = [:]
+            let socket = try UnixFixture { request in
+                XCTAssertEqual(request["method"] as? String, "objects.makeFromScan")
+                params = request["params"] as! [String: Any]
+                return [try objectReply(request)]
+            }
+            _ = try await ControlClient(socketPath: socket.path).makeFromScanObject(id, kind: kind, instructions: words, fit: fit)
+            withExtendedLifetime(socket) {}
+            return params
+        }
+        let byScan = try await sent("fit", " A belt case for it ", FitChoice().fit)
+        XCTAssertEqual(byScan["instructions"] as? String, "A belt case for it")
+        XCTAssertEqual(byScan["fit"] as? [String: String], ["sizeSource": "scan"], "the scan is what it must fit")
+        var measured = FitChoice(); measured.source = .measured; measured.longest = "115,5"
+        let byHand = try await sent("fit", "A sheath", measured.fit)
+        let sides = (byHand["fit"] as? [String: Any])?["measured"] as? [[String: Any]]
+        XCTAssertEqual((byHand["fit"] as? [String: Any])?["sizeSource"] as? String, "measured")
+        XCTAssertEqual(sides?.first?["id"] as? String, "longest")
+        XCTAssertEqual(sides?.first?["mm"] as? Double, 115.5)
+        let copy = try await sent("copy", "", FitChoice().fit)
+        XCTAssertEqual(copy["kind"] as? String, "copy")
+        XCTAssertNil(copy["fit"], "a copy has no fit")
+        XCTAssertNil(copy["instructions"])
     }
 
     func testFilamentChoiceRoundTripsToThePrintRequest() async throws {
