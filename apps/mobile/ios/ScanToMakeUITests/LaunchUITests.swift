@@ -950,6 +950,49 @@ final class LayoutParityUITests: XCTestCase {
         }
     }
 
+    /// Review of #527 part 4, S5: at the largest text sizes even the shortest stage leaves "Did it fit?" under the bar, so
+    /// the page opens scrolled to it: both answers whole above the bar, without the person scrolling.
+    func testAtLargeTextThePageOpensScrolledToDidItFit() {
+        let app = launch(largeText: true, screen: "printed")
+        let works = app.buttons["it-works"], changes = app.buttons["needs-changes"]
+        XCTAssertTrue(works.waitForExistence(timeout: 20), app.debugDescription)
+        let ask = app.descendants(matching: .any)["ask-for-changes"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 5))
+        let settled = Date().addingTimeInterval(4)
+        while Date() < settled, changes.frame.maxY > ask.frame.minY || !changes.isHittable { RunLoop.current.run(until: Date().addingTimeInterval(0.2)) }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "did-it-fit-large-text"; shot.lifetime = .keepAlways; add(shot)
+        for answer in [works, changes] {
+            XCTAssertTrue(answer.isHittable, "\(answer.label) can be pressed: \(answer.frame)")
+            XCTAssertLessThanOrEqual(answer.frame.maxY, ask.frame.minY + 1, "\(answer.label) \(answer.frame) is above the bar \(ask.frame)")
+        }
+    }
+
+    /// Review S5: how real pictures read on the short stage, for choosing `ProjectView.recognisable`. Runs only with
+    /// `TEST_RUNNER_STM_REAL_PICTURES=<folder of the Mac's own part pictures>`; the gate has none and skips it.
+    func testRealPicturesOnTheShortStage() throws {
+        guard let source = ProcessInfo.processInfo.environment["STM_REAL_PICTURES"] else { throw XCTSkip("no real pictures given") }
+        let pictures = try FileManager.default.contentsOfDirectory(atPath: source).filter { $0.hasSuffix(".png") }.sorted()
+        for name in pictures {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            try FileManager.default.copyItem(atPath: source + "/" + name, toPath: folder.appendingPathComponent("thumb-potato.png").path)
+            for height in [160, 200, 240, 280] {
+                let app = XCUIApplication()
+                app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all", "-CounterpartScreen", "printed",
+                                       "-CounterpartStageHeight", "\(height)"]
+                app.launch()
+                XCTAssertTrue(app.buttons["it-works"].waitForExistence(timeout: 20))
+                let picture = app.images["gallery-stage-picture"]
+                _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "shown"), object: picture)], timeout: 10)
+                RunLoop.current.run(until: Date().addingTimeInterval(1))
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = "real-\(name.replacingOccurrences(of: ".png", with: ""))-\(height)"; shot.lifetime = .keepAlways; add(shot)
+                app.terminate()
+            }
+        }
+    }
+
     /// First look U9 (Nov 10, iPad): a ready scan's Result showed two "—" cards for print time and filament and a third
     /// that said only "Bambu printer". Before slicing, one row names the printer and says when the numbers come.
     /// Review F7: what this proves is the app's half: the row shows the name the printer list gives (the fixture Mac's
