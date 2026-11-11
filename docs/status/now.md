@@ -37,6 +37,12 @@ The lead's live list. It is updated every time the lead is woken, for any reason
 | Optional: did any bending arm on the second plate stay bent or whiten | Decides how far the strain limit rises for parts that must keep gripping |
 | Optional: count the notches on the tight ring from the first plate | He said three; the design says one |
 
+## Blocked
+
+| What | On what | Since |
+|---|---|---|
+| Printing the published bag clip, and every other real use of the app by the lead (X118) | The Codex computer-use MCP will not start a session (`bootstrapTimedOut` for every app, seven tries, also after its helper was restarted). It is hosted by the ChatGPT app on the Mac. Nothing is printing; the bed is clear | 05:45Z |
+
 ## Rules for this page
 
 - Every delegate started gets a row in "Running" in the same turn, with its budget's end time.
