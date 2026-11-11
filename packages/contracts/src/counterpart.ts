@@ -452,3 +452,10 @@ export const LiveActivityTokensSchema = z.strictObject({
   activities: z.array(z.strictObject({ printId: uuid, deviceId: uuid, token: apnsToken, updatedAt: iso })).max(1024),
 });
 export type LiveActivityTokens = z.infer<typeof LiveActivityTokensSchema>;
+
+// A read-only snapshot: deleting or changing the source never changes the new project's context.
+export const InheritedHistorySchema = z.object({
+  from: z.object({id: z.string(), title: z.string()}),
+  items: z.array(z.object({at: z.number().finite(), who: z.enum(['you', 'app']), text: z.string()})),
+});
+export type InheritedHistory = z.infer<typeof InheritedHistorySchema>;

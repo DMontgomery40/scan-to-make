@@ -329,7 +329,7 @@ struct ProjectView: View {
                 Group {
                     switch section {
                     case .result: ResultSection(store: store, project: object)
-                    case .inputs: InputsSection(project: object, queued: store.corrections.messages[object.id] ?? [], queueFailed: store.corrections.failures[object.id] != nil)
+                    case .inputs: InputsSection(project: object, projects: store.projects, openProject: openProject, queued: store.corrections.messages[object.id] ?? [], queueFailed: store.corrections.failures[object.id] != nil)
                     case .activity: ActivitySection(store: store, project: object)
                     }
                 }
@@ -1137,13 +1137,26 @@ struct ChangeRow: View {
 /// Your request, the photos you added, your scan as one strip, and your follow-ups.
 struct InputsSection: View {
     let project: Project
+    var projects: [Project] = []
+    var openProject: (String) -> Void = { _ in }
     var queued: [CorrectionQueue.Message] = []
     var queueFailed = false
     @State private var viewing: String?
 
     var body: some View {
-        let conversation = ProjectConversation(project: project, queued: queued, queueFailed: queueFailed)
+        let conversation = ProjectConversation(project: project, projects: projects, queued: queued, queueFailed: queueFailed)
         LazyVStack(alignment: .leading, spacing: 16) {
+            if let line = conversation.inheritedLine, let from = conversation.inheritedFrom {
+                if from.exists {
+                    Button(line) { openProject(from.id) }.buttonStyle(.plain).font(.subheadline).foregroundStyle(.secondary)
+                } else {
+                    Text(line).font(.subheadline).foregroundStyle(.secondary)
+                }
+                ForEach(conversation.inheritedEntries) { entry in
+                    ConversationBubble(entry: entry) { EmptyView() }.opacity(0.72)
+                }
+                Divider()
+            }
             ForEach(conversation.entries) { entry in
                 ConversationBubble(entry: entry) {
                     pictures(entry.photos)

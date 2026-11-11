@@ -21,8 +21,25 @@ public struct ProjectConversation: Equatable, Sendable {
     }
     public var entries: [Entry]
     public var otherPhotos: [String]
+    public var inheritedEntries: [Entry]
+    public var inheritedFrom: ScanLineage.Link?
+    public var inheritedLine: String? {
+        guard let from = inheritedFrom else { return nil }
+        return "From “\(from.title)”" + (from.exists ? "" : ", since deleted")
+    }
 
-    public init(project: Project, queued: [CorrectionQueue.Message] = [], queueFailed: Bool = false) {
+    public init(project: Project, projects: [Project] = [], queued: [CorrectionQueue.Message] = [], queueFailed: Bool = false) {
+        inheritedFrom = project.inherited.map { history in
+            let live = projects.first { $0.id == history.from.id }
+            return ScanLineage.Link(id: history.from.id, title: live.map { ProjectWords.title($0) } ?? history.from.title, exists: live != nil)
+        }
+        var inheritedPrevious: Double?
+        inheritedEntries = (project.inherited?.items ?? []).enumerated().map { index, item in
+            let showsTime = inheritedPrevious.map { item.at - $0 > 3_600_000 } ?? true
+            inheritedPrevious = item.at
+            return Entry(id: "inherited-\(index)", role: item.who == "you" ? .person : .counterpart,
+                  text: item.text, atMs: item.at, photos: [], showsTime: showsTime)
+        }
         var rows: [Entry] = []
         let initialPhotos = (project.requestPhotos ?? []).map { "photos/\($0)" }
         let scan = ScanPhotos(project)

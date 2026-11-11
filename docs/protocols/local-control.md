@@ -93,6 +93,7 @@ Destination `capabilities.materialChoice` (PR 5) says the same per printer; what
 | `objects.addFile` | `{id, kind: "photos"\|"scan"\|"model", path, forMessage?: boolean}` | `{object, photoName?}` | PR 1 |
 | `objects.answerAsk` | `{id, askId, choices: [optionId]}` | `{object}`; chooses the published file/plate | PR 7 |
 | `objects.start` | `{id}` | `{object}` | |
+| `objects.makeFromScan` | `{id, kind: "fit"\|"copy", instructions?, fit?}` | `{object}` with `scanFrom` and read-only `inherited` history snapshot; same semantics as `POST …/make-from-scan` (objects-api.md) | |
 | `objects.correct` | `{id, note: string 1–4000, photoNames?: string[] ≤ 100, photos?: [path] ≤ 24, messageId?: string}` (`messageId` with `capabilities.messageIds`: a note is recorded once per id, objects-api.md) | `{object}`: a new pass (`photos` PR 1) | |
 | `objects.answerCloseup` | `{id, bestGuess: boolean, text?: string ≤ 2000, photoNames?: string[] ≤ 100}` (omitted names select none; an empty answer is refused) | `{object}`: a new pass (`text` PR 4) | |
 | `objects.delete` | `{id}` | `{deleted: true}` | |

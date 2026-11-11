@@ -44,6 +44,7 @@ import {ProjectPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
+import {inheritHistory} from './inherited.js';
 import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesNote, withCheckedSizes} from './asks.js';
 /** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
 export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
@@ -719,7 +720,7 @@ export class ObjectService {
       const title = projectTitle(source);
       const created = await this.#deps.store.create(words, request.kind, request.kind === 'fit' ? request.fit : undefined);
       // Busy while the files come: nothing can start, change or delete it halfway, and a restart says it was interrupted.
-      const seeded = await this.#deps.store.update(created.id, o => ({...o, state: 'touching-up', progress: bringingScan(title), scanFrom: {id: sourceId, title}}));
+      const seeded = await this.#deps.store.update(created.id, o => ({...o, state: 'touching-up', progress: bringingScan(title), scanFrom: {id: sourceId, title}, inherited: inheritHistory(source, title)}));
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: seeded.id, data: {keys: ['created']}});
       void this.#gate(seeded.id, () => this.#bringScan(seeded.id)).catch(() => undefined);
       return this.#changed(seeded);

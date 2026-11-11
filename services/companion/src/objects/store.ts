@@ -135,6 +135,7 @@ export interface StmObject {
    * on, and every client decodes projects ignoring fields it doesn't know.
    */
   scanFrom?: {id: string; title: string};
+  inherited?: import('@scan-to-make/contracts/counterpart').InheritedHistory;
   /**
    * The project's picture (PRD §5.1): the object alone on the stage, drawn by the companion (`pictures/…png`), and
    * each of its gallery pictures for clients that show pictures (`part`, `scan`, `together`, `photo`).

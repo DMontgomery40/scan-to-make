@@ -110,7 +110,14 @@ the source's photos (never photos waiting in `pendingPhotos` for a message not y
 camera file) and its checked sizes into the new folder, and starts its pass. A `copy` with no words keeps the scan as
 the model, as a copy's scan sent on its own does, even when the source has no photos. Nothing is shared, so either project can be deleted without breaking the other. The source is unchanged. The
 new project carries `scanFrom: {id, title}` (the source and its title then) on `object.json` and in every read: a plain
-new field, which an older companion keeps and passes on and every client ignores. Clients derive "also made from this
+new field, which an older companion keeps and passes on and every client ignores.
+It also carries `inherited: {from: {id, title}, items: [{at, who: "you"|"app", text}]}`
+(`InheritedHistorySchema`): a snapshot of the source request, sent messages and ended pass summaries,
+ordered by millisecond time. Pending messages and unfinished summaries are excluded. Any inherited
+context already on the source precedes its own conversation. This is read-only context; the worker's
+brief includes it before the new request, and deleting the source leaves the snapshot intact.
+Apple clients show it before this project's request under “From …”, linking to the source when present,
+or adding “since deleted”. Android and Linux UI follow on a separate branch. Clients derive "also made from this
 scan" by listing projects whose `scanFrom.id` is this one. Refused with 409 and a sentence when the source has no scan
 or is still building it, its phone declared a walk-around that hasn't finished arriving (`captureDeclared`), or a fit
 has no words. If the copy fails, or a restart interrupts it, the new project is

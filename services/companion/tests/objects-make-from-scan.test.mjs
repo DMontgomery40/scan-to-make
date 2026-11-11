@@ -245,3 +245,31 @@ test('Copy this object with no words keeps an imported scan with no photos as th
   assert.ok(ready.current?.model, 'the scan is the model');
   assert.equal(inputs.length, passesBefore, 'kept as it is, never touched up');
 });
+
+test('a new project carries the source conversation as a durable snapshot and its worker reads every sent answer', async t => {
+  const {service, store, inputs} = await fixture(t);
+  const source = await leatherman(service, store);
+  await store.update(source.id, o => ({...o, instructions: 'A mount for my phone.', createdAtMs: 10,
+    messages: [{id: 'answer', text: 'The case is a JETech clear case.', atMs: 30, photos: []},
+      {id: 'pending', text: 'Not sent yet.', atMs: 50, photos: []}], pendingMessageId: 'pending', pendingFollowup: 'Not sent yet.',
+    passes: [{startedAtMs: 11, endedAtMs: 20, status: 'needs_closeup', summary: 'Which case is on the phone?'},
+      {startedAtMs: 31, endedAtMs: 40, status: 'done', messageId: 'answer', note: 'The case is a JETech clear case.', summary: 'Made a holder for that case.'},
+      {startedAtMs: 51, summary: 'A work in progress.'}]}));
+  const before = await store.get(source.id);
+  const made = await service.makeFromScan(source.id, {kind: 'fit', instructions: 'Add a swivel.'});
+  const ready = await until(() => store.get(made.id), o => o.state === 'ready', 'the inherited project');
+  const expected = {from: {id: source.id, title: source.title}, items: [
+    {at: 10, who: 'you', text: 'A mount for my phone.'},
+    {at: 20, who: 'app', text: 'Which case is on the phone?'},
+    {at: 30, who: 'you', text: 'The case is a JETech clear case.'},
+    {at: 40, who: 'app', text: 'Made a holder for that case.'}]};
+  assert.deepEqual(ready.inherited, expected);
+  const brief = inputs.at(-1).instructions;
+  let previous = -1;
+  for (const item of expected.items) { const at = brief.indexOf(item.text); assert.ok(at > previous, brief); previous = at; }
+  assert.match(brief, /project this came from/);
+  assert.doesNotMatch(brief, /Not sent yet|work in progress/);
+  assert.deepEqual(await store.get(source.id), before);
+  await service.delete(source.id);
+  assert.deepEqual((await store.get(made.id)).inherited, expected);
+});

@@ -241,6 +241,8 @@ The lead looked at the images for U3–U5 himself. Each row lands on every layou
 | X139 | **"Just fucking add open with , with it"** (David, Nov 11 17:34Z) | Lead | **Done**: #587 merged 17:36Z (Mac gate `exit 0`, `branch_check` SAFE), in the install running now. #582 is carried by it: close it. X124 (the same on iPhone, iPad and Android) is still open |
 | X17 | Older T3 worktrees in the MCP repos that are not this session's: mcp-3D `feat-bambu-parity-pauses`, `feat-tool-annotations`; bambu `feat-control-route-pr`, `research-control-refusal` | Lead, Nov 10 |
 
+| History follow-up | David, Nov 11: “when you do a revision or addition to an existing thing all that projects history and context need to go with it”. Milestone 1 snapshots the source conversation; milestone 2 adds sealed designs and print attempts, restoring earlier designs from disk. | Implementation lane A: `feat/fork-carries-history`, then `feat/versions-slice-1`. Lead gates and merges. Android/Linux presentation follows in `feat/inherited-history-android-linux` and `feat/versions-android-linux`; new fields are ignored until then. |
+
 ## Carried from before Nov 9 (checked against the code and both MCP repos on Nov 10)
 
 | ID | What | Owner |
