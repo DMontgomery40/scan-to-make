@@ -1575,6 +1575,11 @@ final class LayoutParityUITests: XCTestCase {
         let last = labels.element(boundBy: 5)
         // A plate off the edge has no hit point: swipe the row on a label that is on screen until the last one is.
         let window = plates.windows.firstMatch.frame
+        // This project's answer card (the print didn't finish) sits below six plates, so the page opens scrolled to it
+        // (ProjectView: the page opens on its main action): scroll back up to the pictures first.
+        for _ in 0..<4 where !(0..<6).contains(where: { window.contains(labels.element(boundBy: $0).frame) }) {
+            plates.scrollViews.firstMatch.swipeDown()
+        }
         for _ in 0..<5 where !window.contains(last.frame) {
             guard let shown = (0..<6).map({ labels.element(boundBy: $0) }).first(where: { window.contains($0.frame) }) else { break }
             shown.swipeLeft()
