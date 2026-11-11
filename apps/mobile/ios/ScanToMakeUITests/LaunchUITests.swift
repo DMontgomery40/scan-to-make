@@ -1350,7 +1350,7 @@ final class LayoutParityUITests: XCTestCase {
         result.tap()
         XCTAssertTrue(ar.waitForExistence(timeout: 30), "the part's model came, so its AR chip is there")
         ar.tap()
-        // Preparing, then AR Quick Look over the page (the chip is covered); never "failed", never nothing.
+        // A device opens Quick Look; a simulator without a previewer must keep a visible retry.
         #if targetEnvironment(simulator)
         // This simulator's Quick Look reports canPreview == false for a valid USDZ (also checked by ARModelTests).
         // Exercise the real tap anyway: it must open or visibly offer retry, never silently return to ready.
@@ -1361,7 +1361,7 @@ final class LayoutParityUITests: XCTestCase {
         let opened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !ar.exists || !ar.isHittable }, object: nil)
         #endif
         XCTAssertEqual(XCTWaiter().wait(for: [opened], timeout: 40), .completed, "AR opens or explains its failure: \(String(describing: ar.value))")
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "part-ar-quick-look"; shot.lifetime = .keepAlways; add(shot)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "part-ar-result"; shot.lifetime = .keepAlways; add(shot)
         #if !targetEnvironment(simulator)
         XCTAssertNotEqual(ar.exists ? ar.value as? String : nil, "failed")
         #endif
