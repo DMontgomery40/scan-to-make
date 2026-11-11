@@ -78,23 +78,23 @@ struct ProjectDetail: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             stage
-                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24).environment(\.colorScheme, stageScheme) }
+                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24).environment(\.colorScheme, .dark) }
                 .overlay(alignment: .topTrailing) {
                     if let entry, let size = entry.sizeText(measured[entry.id]) {
                         Text(size).font(.callout.monospacedDigit().weight(.semibold))
                             .padding(.horizontal, 12).padding(.vertical, 7).glassEffect(.regular, in: .capsule)
                             .padding(.top, 64).padding(.trailing, 24)
-                            .environment(\.colorScheme, stageScheme)
+                            .environment(\.colorScheme, .dark)
                             .accessibilityLabel("\(entry.measures) size \(size)")
                     }
                 }
-                .overlay(alignment: .top) { pictureChooser.padding(.top, 64).environment(\.colorScheme, stageScheme) }
+                .overlay(alignment: .top) { pictureChooser.padding(.top, 64).environment(\.colorScheme, .dark) }
                 .overlay(alignment: .topLeading) {
                     // A fit made before passes said where the object sits: the Mac can work it out, changing nothing.
                     if ProjectStageOffer.seeItTogether(object, showing: entry) {
                         Button { Task { await model.locate(object.id) } } label: { Label("See It Together", systemImage: "cube.transparent") }
                             .buttonStyle(.glass).disabled(blocked).padding(.top, 108).padding(.leading, 24)
-                            .environment(\.colorScheme, stageScheme)
+                            .environment(\.colorScheme, .dark)
                             .help("Your Mac works out where the scanned object sits in this part, without changing it")
                             .accessibilityIdentifier("project-locate")
                     }
@@ -182,8 +182,6 @@ struct ProjectDetail: View {
     // MARK: Stage
 
     private var gallery: ProjectGallery { ProjectGallery(project: object) }
-    /// What floats on the stage reads on it: light glass and dark words on the light stage, as the stage is chosen.
-    private var stageScheme: ColorScheme { entry.map { StageContrast.lightStage(for: $0.colour) } == true ? .light : .dark }
     private var entry: ProjectGallery.Entry? { gallery.entries.first { $0.id == picture } ?? gallery.first }
 
     /// Which picture (PRD §5.4): a segmented control for the common two or three, a pop-up for a designer's many plates
@@ -210,7 +208,6 @@ struct ProjectDetail: View {
             case .model(let path):
                 if let url = path == "model.stl" ? (object.modelURL.flatMap { $0.pathExtension.lowercased() == "stl" ? $0 : nil } ?? object.blenderModelURL) : object.projectFile(path) {
                     ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
-                               lightStage: StageContrast.lightStage(for: entry.colour),
                                accessibilityText: "\(entry.label). Drag to turn it, scroll to zoom.",
                                poster: entry.kind == .part ? (object.pictures?["part"].flatMap(object.projectFile) ?? Self.poster(object)) : object.pictures?["scan"].flatMap(object.projectFile), tint: Self.colour(entry.colour),
                                measured: { measured[entry.id] = $0 })
@@ -219,7 +216,6 @@ struct ProjectDetail: View {
             case .assembly(_, let scan, let seats):
                 if let url = object.blenderModelURL, let scanURL = object.projectFile(scan) {
                     ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
-                               lightStage: StageContrast.lightStage(for: entry.colour),
                                accessibilityText: "\(words.title) with what you scanned in place. Drag to turn it, scroll to zoom.",
                                tint: Self.colour(entry.colour), object: scanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 })
                     .id(entry.id)
@@ -246,8 +242,10 @@ struct ProjectDetail: View {
                           unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "This Mac couldn’t draw a picture of this.")
     }
 
+    /// The stage's material colour for a spool: floored so a dark filament reads on the dark stage
+    /// (CounterpartKit `StageMaterial`); swatches and names elsewhere keep the spool's real colour.
     static func colour(_ colour: ProjectGallery.Colour) -> NSColor? {
-        guard case .spool(let hex) = colour, let value = Int(hex.dropFirst().prefix(6), radix: 16) else { return nil }
+        guard let hex = StageMaterial.drawnHex(for: colour), let value = Int(hex.dropFirst().prefix(6), radix: 16) else { return nil }
         return NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
     }
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { artifact } from "./bridge";
 import type { Project } from "./types";
-import { canLocate, filePath, gallery, lightStage, photoPicture, still, sizeText, type Still } from "./gallery";
+import { canLocate, filePath, gallery, drawnColour, photoPicture, still, sizeText, type Still } from "./gallery";
 export function Picture({
   id,
   path,
@@ -334,14 +334,13 @@ export function Stage({ project, locate }: { project: Project; locate?: () => vo
       setBytes(undefined);
     };
   }, [mode, turnable, project.id, model]);
-  const tint = entry && entry.colour.startsWith("#") ? entry.colour : undefined;
+  // The stage's material colour: floored so a dark spool reads on the dark stage; swatches keep the real colour.
+  const tint = entry && entry.colour.startsWith("#") ? drawnColour(entry.colour) : undefined;
   return (
     <section className="stage" aria-label="Project pictures">
       {mode === "3d" && turnable ? (
         bytes ? (
-          <div className={tint && lightStage(tint) ? "light-stage" : undefined}>
-            <ModelStage bytes={bytes} tint={tint} />
-          </div>
+          <ModelStage bytes={bytes} tint={tint} />
         ) : (
           <p>{error || "Opening model…"}</p>
         )

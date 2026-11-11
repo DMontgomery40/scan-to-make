@@ -1,5 +1,18 @@
 {
  "about": "ProjectGallery (PRD §5.4 Pictures): the pictures at the top of a project page, derived from its data. CounterpartKit ProjectGallery.swift, Android ProjectGallery.kt and Linux gallery.ts each read every case. drawing.assembly.seats is the seat count; colour is neutral, own, or the spool's #RRGGBB. photoPicture, when present, is the page's picture while the gallery is empty (photos sent, no model yet): the subject the computer cut out of the first photo. canLocate, when present, is whether See it together is offered (a fit with a USDZ scan, a result and no seats). still, when present on an entry, is what the stage shows while no model is drawn (docs/operations.md, \"Waiting, failed and empty are screens too\"): the entry's own picture (a project path), \"waiting\" (none yet and one is coming: the computer is drawing it or will), or \"not available\" (none is coming: pictureStates says its drawing failed, or a designer's plate came without its picture). A picture of something else never stands in.",
+ "stage": {
+  "about": "The stage is the dark stage (#22242B) for every colour, on every layout (David, Nov 11: no entering light mode). drawnColours is the colour the stage's material draws a spool in: its hue at a minimum brightness of 0.20 (the Mac's still pictures' floor), so a black part is charcoal, never a silhouette; neutral draws the stage's neutral material and own keeps the model's own colours. The spool's real colour (colour, above) is unchanged for swatches and names.",
+  "drawnColours": {
+   "#000000": "#333435",
+   "#1F2A44": "#28344E",
+   "#22242B": "#31333B",
+   "#5B6579": "#5B6579",
+   "#FEC600": "#FEC600",
+   "#FFFFFF": "#FFFFFF",
+   "neutral": "neutral",
+   "own": "own"
+  }
+ },
  "cases": [
   {
    "name": "a fit with a scan, its seats and a black spool: the part, together, what you scanned",
