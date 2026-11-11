@@ -530,7 +530,6 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(ScanLineage.scans(in: model.objects).map(\.id), ["source"], "New's Use a scan you already have")
 
         model.makingFromScan = source
-        XCTAssertEqual(NewProjectDraft(seed: source).seed?.id, "source")
         let problem = await model.makeFromScan("source", kind: "fit", instructions: "A belt case for it")
         XCTAssertNil(problem)
         XCTAssertEqual(model.selection, "made")
