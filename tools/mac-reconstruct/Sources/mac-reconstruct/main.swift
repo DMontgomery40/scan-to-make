@@ -45,12 +45,12 @@ let usage = """
 usage: mac-reconstruct <images-folder> <output.usdz> [reduced|medium|full|raw] [--feature normal|high] [--honor-box]
        mac-reconstruct stl <model.usdz> <output.stl> [--render <overview.png>] [--remove-support]
        mac-reconstruct samples <images-folder> <output.usdz> [reduced|medium|full|raw] [--masks <dir> | --no-masks] [--save-masks <dir> [--masks-only]]
-       mac-reconstruct picture <output.png> [--model <file> [--z-up] [--tint RRGGBB]] [--object <scan.usdz> --seat m00,…,m33 …] [--photo <file>] [--pixels N]
+       mac-reconstruct picture <output.png> [--model <file> [--z-up] [--tint RRGGBB]] [--object <scan.usdz> --seat m00,…,m33 …] [--photo <file>] [--pixels N] [--stage dark|light]
 
 """
 var args = Array(CommandLine.arguments.dropFirst())
 // mac-reconstruct picture <output.png> [--model <file> [--z-up] [--tint RRGGBB]] [--object <scan.usdz> --seat m00,…,m33 …]
-//                         [--photo <file>] [--pixels N]
+//                         [--photo <file>] [--pixels N] [--stage dark|light]
 //     A project's picture (PRD §5.1): the object alone on the apps' stage. A project STL (--z-up) in its spool's colour
 //     (--tint) or the neutral material; a scan in its own textures; a part with the scan at each seat (row-major 4×4 in
 //     the part's millimetre frame, docs/protocols/seats.md); or, with no model, a photo's subject cut out by Vision.
@@ -67,6 +67,13 @@ if args.first == "picture" {
     if let pixels = value("--pixels").flatMap(Int.init), (64...2048).contains(pixels) { spec.pixels = pixels }
     if let hex = value("--tint"), let rgb = Int(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")).prefix(6), radix: 16) {
         spec.tint = NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
+    }
+    if let stageName = value("--stage") {
+        switch stageName {
+        case "light": spec.lightStage = true
+        case "dark": spec.lightStage = false
+        default: FileHandle.standardError.write(Data(usage.utf8)); exit(2)
+        }
     }
     while let seat = value("--seat") { spec.seats.append(seat.split(separator: ",").compactMap { Double($0) }) }
     spec.zUp = rest.contains("--z-up"); rest.removeAll { $0 == "--z-up" }
