@@ -1088,7 +1088,10 @@ final class LayoutParityUITests: XCTestCase {
         // Put the keyboard away first, or the next tap only dismisses it.
         app.navigationBars["New Project"].buttons["Done"].tap()
         let measured = app.buttons["I measured"]
-        for _ in 0..<6 where !(measured.exists && measured.isHittable) { sheet.swipeDown(velocity: .slow) }
+        // Below the navigation bar, not just hittable: XCTest counts a control under the translucent bar as hittable, and
+        // in the gate (Nov 11) both taps on I measured landed on the bar, with the picker scrolled up under it.
+        let bar = app.navigationBars["New Project"]
+        for _ in 0..<6 where !(measured.exists && measured.isHittable && measured.frame.minY >= bar.frame.maxY) { sheet.swipeDown(velocity: .slow) }
         measured.tap()
         let chosen = NSPredicate(format: "isSelected == true")
         if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: measured)], timeout: 3) != .completed { measured.tap() }
