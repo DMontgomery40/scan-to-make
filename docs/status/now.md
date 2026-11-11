@@ -2,17 +2,18 @@
 
 The lead's live list. It is updated every time the lead is woken, for any reason, and before the lead ends a turn. [`board.md`](board.md) holds every item and its history; this page holds only what is in motion or owed next, so nothing waits unseen. If a line here is more than an hour old, it is stale: check the thing itself.
 
-**Last checked: 2026-11-11 04:35Z** (lead: thread "Take Over Project Recovery Lead").
+**Last checked: 2026-11-11 04:55Z** (lead: thread "Take Over Project Recovery Lead").
 
 ## Running
 
 | What | Who (model) | Started | Budget ends | Last seen doing | If it finishes: next |
 |---|---|---|---|---|---|
-| Bad-link check on the fifth train (#527): every project page, iPhone then iPad, slow / refusing / away | Lead, `scripts/ux_gate.py`, output `~/scan-to-make-work/gate-train-g/` | 04:10Z | about 05:30Z (six lane holds) | 04:30Z: iPhone slow done, iPhone refusing in its hold | exit 0 → `branch_check --merge` → merge #527. Any blank frame → fix first |
-| "Make something else from this scan" on every layout (X115) | D: Opus 5.5 high, branch `feat/make-from-scan` | 04:22Z | 06:22Z; milestone 05:22Z (companion route + iPhone/iPad action pushed) | just started | review (Muse) → on top of #527 → this is the build David's devices get |
-| AR for designed parts, one AR control (X116) | D: Opus 5.5 high, branch `fix/ar-parts` | 04:33Z | 05:48Z | just started | review → same build as the line above |
-| Proven compliant mechanisms study, with a car phone holder held by flexure (X112) | D: Gemini 4 Carbon | 03:10Z | extended to about 04:45Z | 04:30Z: metrology results and figures written; no study file yet | kernel lab round 6 builds the clip, the pliers and the holder |
-| Third test plate "Kernel test plate" (`58fd46d9`) | David's P1S | sent 02:02Z | about 04:35Z | 04:30Z: layer 195 of 310, no problem | bed needs clearing; next on the bed is the published torture test (X111) |
+| Bad-link check on the fifth train (#527): every project page, iPhone then iPad, slow / refusing / away | Lead, `scripts/ux_gate.py`, output `~/scan-to-make-work/gate-train-g/` | 04:10Z | about 05:30Z (six lane holds) | 04:44Z: iPhone slow and refusing done, iPhone away in its hold; iPad's three to come | exit 0 → `branch_check --merge` → merge #527. Any blank frame → fix first |
+| "Make something else from this scan" on every layout (X115) | D: Opus 5.5 high, branch `feat/make-from-scan` | 04:22Z | 06:22Z; milestone 05:22Z (companion route + iPhone/iPad action pushed) | 04:44Z: pushed the action on iPhone, iPad and Linux (`786f0f46`); Mac and Android to come | review (Muse) → on top of #527 → this is the build David's devices get |
+| AR for designed parts, one AR control (X116) | D: Opus 5.5 high, branch `fix/ar-parts` | 04:33Z | 05:48Z | 04:50Z: code pushed (`72ae41e1`, one AR control, PRD); its iPhone and iPad tests are queued in the lane | review → same build as the line above |
+| The Mac's picture framing (X105) | D: Gemini 4 Carbon, branch `feat/picture-framing` | 04:38Z | 05:53Z | 04:44Z: nothing pushed yet | review → next build |
+| Kernel lab round 6: real limits, new flexure primitives, the three compliant builds (bag clip, locking pliers, car phone cradle with no clamp) | D: GPT-6.1 Sol xhigh, agents-136, `~/kernel-lab` | 04:52Z | 07:52Z; milestones 05:37Z (limits), 06:32Z (clip sliced), 07:32Z (all three) | just started | three 3MFs in `prints/2026-11-11-compliant/` → into his app with a picture and plain words → print on a clear bed |
+| Physics lab round 5: material cards, a flexure's bite, preload, slip and creep, the three builds' numbers checked, the strength swing, printed-screw checks | D: Opus 5.5 xhigh, agents-173, `~/physics-lab` | 04:52Z | 07:52Z; milestones 06:02Z, 06:42Z | just started | its numbers beside the study's for the three builds; handoffs to the kernel lab |
 
 ## Finished, waiting on the lead (nobody is working on these)
 
@@ -23,8 +24,8 @@ The lead's live list. It is updated every time the lead is woken, for any reason
 | Versions ledger and migration (X114, design slice 1) | Design done: `~/scan-to-make-work/things-and-versions-2026-11-11/DESIGN.md` | Start a delegate when #527 is on main (same files) |
 | #527's leftovers (review parts 3 to 5) | Listed on the board (X115) | Next train: Home's question buttons and Printing's Did it fit while the Mac is away; the queued change visible and discardable; the stage jumping as content loads; one-main-action gaps; the number pad's 1 s fallback |
 | Size card records guesses as measured (X103); look up a named product first (X108) | Not started | Delegate after the versions slice starts; owner of the card is the state-machines session |
-| MCP prompts: flexing, toughness, lookups, printed screws, fit-by-function (X113) | Not started | After the compliant study lands: one release in both MCP repos |
-| Kernel lab round 6; physics lab round 5 | No round running | Start when the compliant study lands: published limits and his readings (X111), physics handoffs, the three builds |
+| MCP prompts: flexing, toughness, lookups, printed screws, fit-by-function (X113) | Not started; the compliant study landed 04:50Z (`docs/research/compliant-mechanisms-proven.md` in the kernel repo, `4df39d7`) | Next free delegate slot: one release in both MCP repos (Muse Wonder Full drafts the prompt text; Sol reviews) |
+| Third test plate (J, K, L, T) | Printed; pieces in David's hands | His readings: T and L now, K if he likes, J's keys in tonight then day 1 and day 7 |
 | Three failures on the smallest iPhone (a finished scan's Send, a search result's reason, a stopped scan on Home) | Not diagnosed; the gate does not run that device | Check against main in a lane hold after the bad-link check |
 | Handoff page | Last rewritten 22:05Z Nov 10 | Rewrite when #527 merges |
 
