@@ -39,6 +39,7 @@ David, 2026-11-04: "agents are CONSTANTLY blurring the boundary and adding backe
 David, 2026-11-05, after the starters went missing on the Mac and iPad: "how do make sure thing like that don't happen again?"
 
 - A user-facing feature lands on every layout in the same PR: iPhone (compact), iPad/regular width, Mac, Android and Linux. If a layout can't have it, PRD §6.1 names the exception with David's quote.
+- A layout that is behind or failing does not hold the others' release (David, Nov 11: "why are we letting failed android or Linux or iPad builds or small bugs block a full [train] of working shit"): the feature is still built for every layout, and the one that fails gets a board row and its own branch (`docs/operations.md`, "What holds a train").
 - Its reachability test runs with projects present on each client: `LayoutParityUITests` (the mobile gate runs it on an iPhone and an iPad), Mac `ObjectsModelTests`, Android `HomeLayoutTests`, Linux `domain.test.ts`. Update the §6.1 table in the same PR.
 
 ## Read bambu-printer-mcp before you build
