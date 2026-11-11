@@ -40,7 +40,8 @@ class LibraryFill(private val app: Counterpart, private val scope: CoroutineScop
      *  here: a refused or unreadable credential is not a person forgetting the computer (board X96). */
     fun paired(status: PairingStatus?) {
         val library = library ?: return
-        if (status?.state == PairingStatus.State.Paired) status.baseUrl?.let(library::use)
+        // The computer by its pin (the saved list's key), also while its credential is expired (#720).
+        if (status != null && status.state != PairingStatus.State.Disconnected) (status.pin?.let { "pin:$it" } ?: status.baseUrl)?.let(library::use)
         usage.value = library.usage
     }
 

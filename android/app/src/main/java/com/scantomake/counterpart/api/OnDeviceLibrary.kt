@@ -39,7 +39,9 @@ class OnDeviceLibrary(val base: File) {
     }
 
     @Serializable data class Entry(val project: String, val name: String, val version: Long, val file: String, val variant: String,
-                                   val bytes: Long, val kind: Kind, val storedAtMs: Long)
+                                   val bytes: Long, val kind: Kind, val storedAtMs: Long,
+                                   /** The computer's validator for these bytes (its ETag): a newer version asks with it and keeps this file on 304. */
+                                   val etag: String? = null)
     @Serializable data class Index(val entries: Map<String, Entry> = emptyMap(), val opened: Map<String, Long> = emptyMap(),
                                    val tooLarge: Set<String> = emptySet())
 
@@ -74,7 +76,8 @@ class OnDeviceLibrary(val base: File) {
     fun file(project: String, name: String, version: Long, variant: String? = null): File? = synchronized(lock) {
         val root = mac?.let(::folder) ?: return@synchronized null
         val entry = index.entries[key(project, name)] ?: return@synchronized null
-        if (entry.version != version || (variant != null && entry.variant != variant)) return@synchronized null
+        // A computer picture (`pictures/…`) is named by what it draws: one name is one picture at any version (#720).
+        if ((entry.version != version && !namedByContent(name)) || (variant != null && entry.variant != variant)) return@synchronized null
         File(File(root, project), entry.file).takeIf { it.exists() }
     }
 
@@ -88,10 +91,30 @@ class OnDeviceLibrary(val base: File) {
     val entries: List<Entry> get() = synchronized(lock) { index.entries.values.toList() }
     val usage: Long get() = synchronized(lock) { index.entries.values.sumOf { it.bytes } }
     fun lastOpened(project: String): Long? = synchronized(lock) { index.opened[project] }
-    fun isTooLarge(project: String, name: String, version: Long) = synchronized(lock) { "${key(project, name)}#$version" in index.tooLarge }
+    /** Too large: this version of this file, this variant (another original is its own file). `variant` null: any. */
+    fun isTooLarge(project: String, name: String, version: Long, variant: String? = null) = synchronized(lock) {
+        val prefix = "${key(project, name)}#$version"
+        if (variant != null) "$prefix#$variant" in index.tooLarge || prefix in index.tooLarge
+        else prefix in index.tooLarge || index.tooLarge.any { it.startsWith("$prefix#") }
+    }
+
+    /** The kept copy's validator, to ask the computer whether the file changed. Only the same variant. */
+    fun validator(project: String, name: String, variant: String): String? = synchronized(lock) {
+        index.entries[key(project, name)]?.takeIf { mac != null && it.variant == variant }?.etag
+    }
+
+    /** The computer said 304: the kept file (same name on disk) is this version's too. */
+    fun revalidated(project: String, name: String, version: Long, variant: String): File? = synchronized(lock) {
+        val root = mac?.let(::folder) ?: return@synchronized null
+        val k = key(project, name)
+        val entry = index.entries[k]?.takeIf { it.variant == variant } ?: return@synchronized null
+        val file = File(File(root, project), entry.file).takeIf { it.exists() } ?: return@synchronized null
+        if (version > entry.version) { index = index.copy(entries = index.entries + (k to entry.copy(version = version))); save(root) }
+        file
+    }
 
     /** Writes a fully arrived file into place; that one file's older version goes only now. */
-    fun commit(bytes: ByteArray, project: String, name: String, version: Long, variant: String): File = synchronized(lock) {
+    fun commit(bytes: ByteArray, project: String, name: String, version: Long, variant: String, etag: String? = null): File = synchronized(lock) {
         val root = mac?.let(::folder) ?: throw IllegalStateException("no computer")
         val k = key(project, name)
         index.entries[k]?.let { current ->
@@ -103,13 +126,13 @@ class OnDeviceLibrary(val base: File) {
         temp.writeBytes(bytes)
         if (!temp.renameTo(target)) { temp.delete(); throw IllegalStateException("rename") }
         index.entries[k]?.takeIf { it.file != target.name }?.let { File(projectFolder, it.file).delete() }
-        index = index.copy(entries = index.entries + (k to Entry(project, name, version, target.name, variant, target.length(), Kind.of(name), System.currentTimeMillis())))
+        index = index.copy(entries = index.entries + (k to Entry(project, name, version, target.name, variant, target.length(), Kind.of(name), System.currentTimeMillis(), etag)))
         save(root)
         target
     }
 
-    fun markTooLarge(project: String, name: String, version: Long) = synchronized(lock) {
-        index = index.copy(tooLarge = index.tooLarge + "${key(project, name)}#$version")
+    fun markTooLarge(project: String, name: String, version: Long, variant: String) = synchronized(lock) {
+        index = index.copy(tooLarge = index.tooLarge + "${key(project, name)}#$version#$variant")
         mac?.let { save(folder(it)) }
     }
 
@@ -144,6 +167,11 @@ class OnDeviceLibrary(val base: File) {
         removed
     }
 
+    companion object {
+        /** A computer picture's name changes whenever what it draws changes (the companion's `pictureName`). */
+        fun namedByContent(name: String) = name.startsWith("pictures/")
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
     private fun read(root: File): Index = runCatching { json.decodeFromString(Index.serializer(), File(root, "index.json").readText()) }.getOrNull()
         ?.let { i -> i.copy(entries = i.entries.filterValues { File(File(root, it.project), it.file).exists() }) } ?: Index()
@@ -174,10 +202,9 @@ object LibraryPlan {
             val names = linkedSetOf<String>()
             p.picturePath()?.let(names::add)
             p.pictures.toSortedMap().values.forEach { names.add(it) }
-            if (p.id in opened) {
-                p.plates.orEmpty().mapNotNull { it.thumbnail }.forEach { names.add(it) }
-                p.openAsk?.takeIf { it.photo != null }?.let { names.add("asks/${it.id}.jpg") }
-            }
+            // Every plate's picture, opened or not: a designer's plate is its stage (#556's away proof).
+            p.plates.orEmpty().mapNotNull { it.thumbnail }.forEach { names.add(it) }
+            if (p.id in opened) p.openAsk?.takeIf { it.photo != null }?.let { names.add("asks/${it.id}.jpg") }
             names.filter { it.isNotEmpty() }.forEach { pictures += Want(p, it, OnDeviceLibrary.Kind.Picture, null) }
             if (p.current != null && (p.id in opened || p.id in recent)) models += Want(p, "model.stl", OnDeviceLibrary.Kind.Model, null)
             if (p.id in opened) ProjectGallery.scanModels(p).firstOrNull()?.let { path ->

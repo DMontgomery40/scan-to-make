@@ -403,13 +403,24 @@ class CompanionClient(
         val kept = active?.takeIf { it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
         kept?.file(project.id, name, project.mediaVersion, filename)?.let { return it }
         // A refusal for size is remembered for any file, kept or not, so it is never asked for again.
-        if (active?.isTooLarge(project.id, name, project.mediaVersion) == true) throw CompanionException("file-too-large", "This file is too large for this phone.")
+        if (active?.isTooLarge(project.id, name, project.mediaVersion, filename) == true) throw CompanionException("file-too-large", "This file is too large for this phone.")
         val target = File(folder, filename)
-        if (kept == null && target.exists()) return target
+        if (target.exists()) {
+            if (kept == null) return target
+            // Fetched before this kind was kept: into the library as it is, never over the network again.
+            runCatching { return kept.commit(target.readBytes(), project.id, name, project.mediaVersion, filename) }
+            return target
+        }
         val path = "/v1/objects/${project.id}/${encodePath(resource)}"
-        val reply = send("GET", path, limit = SCAN_LIMIT)
+        // The kept copy's validator: an unchanged file is answered 304 and never sent twice (#720).
+        val validator = kept?.validator(project.id, name, filename)
+        var reply = send("GET", path, limit = SCAN_LIMIT, ifNoneMatch = validator)
+        if (reply.status == 304) {
+            kept?.revalidated(project.id, name, project.mediaVersion, filename)?.let { return it }
+            reply = send("GET", path, limit = SCAN_LIMIT)
+        }
         if (reply.status == 413 && active != null && reply.body.decodeToString().contains("file-too-large")) {
-            active.markTooLarge(project.id, name, project.mediaVersion)
+            active.markTooLarge(project.id, name, project.mediaVersion, filename)
             throw CompanionException("file-too-large", "This file is too large for this phone.")
         }
         if (reply.status != 200 || reply.body.isEmpty()) {
@@ -418,7 +429,7 @@ class CompanionClient(
         }
         if (kept != null) {
             // Whole, then into the library; that one file's older copy goes only now.
-            return try { kept.commit(reply.body, project.id, name, project.mediaVersion, filename) } catch (_: Exception) {
+            return try { kept.commit(reply.body, project.id, name, project.mediaVersion, filename, reply.header("ETag")) } catch (_: Exception) {
                 throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
             }
         }

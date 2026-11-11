@@ -77,7 +77,9 @@ class AppState(private val app: Counterpart) {
     private val knownLock = Any()
     // Kept on this phone only (noBackupFilesDir is never in Auto Backup), keyed by who the computer is (its pin).
     private val knownFile get() = java.io.File(app.noBackupFilesDir, "known-projects.json")
-    private val knownMac: String? get() = status.value?.takeIf { it.state == PairingStatus.State.Paired }?.let { it.pin?.let { pin -> "pin:$pin" } ?: it.baseUrl }
+    /** Who the computer is (its pin, else its address), also while its credential is expired: the same computer's saved list
+     *  stays until Forget or another computer (audit row 6, X115). */
+    private val knownMac: String? get() = status.value?.takeIf { it.state != PairingStatus.State.Disconnected }?.let { it.pin?.let { pin -> "pin:$pin" } ?: it.baseUrl }
 
     private var following: Job? = null
     private var foreground = false
@@ -122,7 +124,12 @@ class AppState(private val app: Counterpart) {
         val next = change(known?.takeIf { it.mac == mac } ?: KnownProjects(mac), now)
         known = next; heard.value = next.heard
         // The newest copy wins: each write takes what is current when it runs, one at a time.
-        scope.launch(Dispatchers.IO) { synchronized(knownLock) { known?.let { latest -> runCatching { knownFile.writeText(latest.encode()) } } } }
+        // Written whole beside it, then renamed over it, so a reader never sees half a list (review of #556, Cursor P2.3).
+        scope.launch(Dispatchers.IO) { synchronized(knownLock) { known?.let { latest -> runCatching {
+            val temp = java.io.File(knownFile.parentFile, knownFile.name + ".part")
+            temp.writeText(latest.encode())
+            if (!temp.renameTo(knownFile)) temp.delete()
+        } } } }
     }
     fun printerName(p: Project): String? = p.print?.destination?.name ?: catalog.value?.resolved(p.printerDestinationId)?.name
     /** The page's words, with what this computer can keep (review S1: an older one without `projectSettings` asks nothing after a print). */
@@ -192,7 +199,8 @@ class AppState(private val app: Counterpart) {
         known = null; heard.value = emptyMap()
         // A pairing reset shows nothing from before it; a copy for no pairing or another computer goes.
         val owner = runCatching { knownFile.readText() }.getOrNull()?.let { text -> KnownProjects.decode(text, knownMac ?: "") }
-        if (owner == null) runCatching { knownFile.delete() }
+        // Only a pairing that was read says so: no status (an unreadable store) is not Forget.
+        if (owner == null && status.value != null) runCatching { knownFile.delete() }
     }
 
     /** Projects whose page or Printing screen is showing, counted (a push then a pop never loses one). */

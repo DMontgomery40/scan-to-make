@@ -28,7 +28,7 @@ class OnDeviceLibraryTests {
         lib.opened("p", 5)
         val again = library()
         assertEquals(file, again.file("p", "pictures/a.png", 10, "a.png"))
-        assertNull(again.file("p", "pictures/a.png", 11))
+        assertEquals("a computer picture's name is its content (#720)", file, again.file("p", "pictures/a.png", 11))
         assertEquals(5L, again.lastOpened("p"))
         assertEquals(3L, again.usage)
     }
@@ -82,5 +82,22 @@ class OnDeviceLibraryTests {
         assertFalse(LibraryPlan.fetches(model, Keep.Models, metered = true))
         assertTrue(LibraryPlan.fetches(model, Keep.Models, metered = false))
         assertFalse(LibraryPlan.fetches(model, Keep.Pictures, metered = false))
+    }
+
+    /** #720: an unchanged model is answered 304 after a newer version; the kept file (same path) is that version's. */
+    @Test fun aRevalidatedModelKeepsItsFileAndTakesTheNewVersion() {
+        val lib = library()
+        val model = lib.commit("stl".toByteArray(), "p", "model.stl", 1, "model.stl", "\"m1\"")
+        assertEquals("\"m1\"", lib.validator("p", "model.stl", "model.stl"))
+        assertNull(lib.validator("p", "model.stl", "model-other.3mf"))
+        assertEquals(model, lib.revalidated("p", "model.stl", 2, "model.stl"))
+        assertEquals(model, lib.file("p", "model.stl", 2, "model.stl"))
+    }
+
+    @Test fun tooLargeIsPerVariant() {
+        val lib = library()
+        lib.markTooLarge("p", "model.stl", 7, "model-a.3mf")
+        assertTrue(lib.isTooLarge("p", "model.stl", 7, "model-a.3mf"))
+        assertFalse(lib.isTooLarge("p", "model.stl", 7, "model-b.3mf"))
     }
 }
