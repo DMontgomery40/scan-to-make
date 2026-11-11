@@ -293,51 +293,59 @@ func threeMFNode(_ model: ThreeMF, tint: NSColor?, lightStage: Bool = false, lim
     return holder
 }
 
-/// Splits a single uncoloured STL/OBJ mesh into disconnected solid components when modest in size so multi-part STLs
-/// (`53a48b5e`) get per-body studio value separation and occlusion-aware framing.
+/// Splits single-material non-inlay meshes containing multiple disconnected solids (`53a48b5e`, `874333ab` box + lid)
+/// so each solid gets studio value separation, amphitheater ordering, and isolated inset framing.
 private func splitConnectedComponentsIfHelpful(_ holder: SCNNode, baseRGB: SIMD3<Float>) {
     var geomNodes: [SCNNode] = []
     holder.enumerateHierarchy { node, _ in
         if node.geometry != nil { geomNodes.append(node) }
     }
-    guard geomNodes.count == 1, let targetNode = geomNodes.first, let geom = targetNode.geometry else { return }
-    let localTris = readGeometryTriangles(geom, transform: matrix_identity_float4x4)
-    guard localTris.count >= 4, localTris.count <= 60_000 else { return }
-    let groups = connectedTriangleGroups(localTris)
-    guard groups.count >= 2 && groups.count <= 64 else { return }
+    guard geomNodes.count <= 3 else { return }
+    var stepCounter = 0
+    for targetNode in geomNodes {
+        guard let geom = targetNode.geometry, geom.elements.count == 1,
+              !(targetNode.name ?? "").contains(undersideInlayMarker) else { continue }
+        let localTris = readGeometryTriangles(geom, transform: matrix_identity_float4x4)
+        guard localTris.count >= 4, localTris.count <= 50_000 else { continue }
+        let groups = connectedTriangleGroups(localTris)
+        guard groups.count >= 2 && groups.count <= 32 else { stepCounter += 1; continue }
 
-    let parent = targetNode.parent ?? holder
-    let baseTransform = targetNode.simdTransform
-    targetNode.removeFromParentNode()
-    for (idx, triIndices) in groups.enumerated() {
-        var posFloats = [Float]()
-        var normFloats = [Float]()
-        posFloats.reserveCapacity(triIndices.count * 9)
-        normFloats.reserveCapacity(triIndices.count * 9)
-        for ti in triIndices {
-            let tri = localTris[ti]
-            let cross = simd_cross(tri.b - tri.a, tri.c - tri.a)
-            let len2 = simd_length_squared(cross)
-            let face = len2 > 1e-20 ? cross * (1.0 / sqrt(len2)) : SIMD3<Float>(0, 0, 1)
-            for p in [tri.a, tri.b, tri.c] {
-                posFloats.append(p.x); posFloats.append(p.y); posFloats.append(p.z)
-                normFloats.append(face.x); normFloats.append(face.y); normFloats.append(face.z)
+        let parent = targetNode.parent ?? holder
+        let baseTransform = targetNode.simdTransform
+        let origName = targetNode.name
+        targetNode.removeFromParentNode()
+        for triIndices in groups {
+            var posFloats = [Float]()
+            var normFloats = [Float]()
+            posFloats.reserveCapacity(triIndices.count * 9)
+            normFloats.reserveCapacity(triIndices.count * 9)
+            for ti in triIndices {
+                let tri = localTris[ti]
+                let cross = simd_cross(tri.b - tri.a, tri.c - tri.a)
+                let len2 = simd_length_squared(cross)
+                let face = len2 > 1e-20 ? cross * (1.0 / sqrt(len2)) : SIMD3<Float>(0, 0, 1)
+                for p in [tri.a, tri.b, tri.c] {
+                    posFloats.append(p.x); posFloats.append(p.y); posFloats.append(p.z)
+                    normFloats.append(face.x); normFloats.append(face.y); normFloats.append(face.z)
+                }
             }
+            let vCount = posFloats.count / 3
+            guard vCount >= 3 else { continue }
+            let indices = [UInt32](0..<UInt32(vCount))
+            let vSource = SCNGeometrySource(data: posFloats.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .vertex,
+                                            vectorCount: vCount, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: 12)
+            let nSource = SCNGeometrySource(data: normFloats.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .normal,
+                                            vectorCount: vCount, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: 12)
+            let element = SCNGeometryElement(data: indices.withUnsafeBufferPointer { Data(buffer: $0) }, primitiveType: .triangles,
+                                             primitiveCount: vCount / 3, bytesPerIndex: 4)
+            let subGeom = SCNGeometry(sources: [vSource, nSource], elements: [element])
+            subGeom.materials = [makePlasticMaterial(rgb: steppedRGB(baseRGB, index: stepCounter))]
+            stepCounter += 1
+            let subNode = SCNNode(geometry: subGeom)
+            subNode.name = origName
+            subNode.simdTransform = baseTransform
+            parent.addChildNode(subNode)
         }
-        let vCount = posFloats.count / 3
-        guard vCount >= 3 else { continue }
-        let indices = [UInt32](0..<UInt32(vCount))
-        let vSource = SCNGeometrySource(data: posFloats.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .vertex,
-                                        vectorCount: vCount, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: 12)
-        let nSource = SCNGeometrySource(data: normFloats.withUnsafeBufferPointer { Data(buffer: $0) }, semantic: .normal,
-                                        vectorCount: vCount, usesFloatComponents: true, componentsPerVector: 3, bytesPerComponent: 4, dataOffset: 0, dataStride: 12)
-        let element = SCNGeometryElement(data: indices.withUnsafeBufferPointer { Data(buffer: $0) }, primitiveType: .triangles,
-                                         primitiveCount: vCount / 3, bytesPerIndex: 4)
-        let subGeom = SCNGeometry(sources: [vSource, nSource], elements: [element])
-        subGeom.materials = [makePlasticMaterial(rgb: steppedRGB(baseRGB, index: idx))]
-        let subNode = SCNNode(geometry: subGeom)
-        subNode.simdTransform = baseTransform
-        parent.addChildNode(subNode)
     }
 }
 
@@ -345,6 +353,7 @@ private func splitConnectedComponentsIfHelpful(_ holder: SCNNode, baseRGB: SIMD3
 private func loadNode(_ url: URL, zUp: Bool, tint: NSColor?, own: Bool, lightStage: Bool) throws -> SCNNode {
     if url.pathExtension.lowercased() == "3mf" {
         let node = try threeMFNode(url, tint: tint, lightStage: lightStage)
+        splitConnectedComponentsIfHelpful(node, baseRGB: plasticRGB(tint, lightStage: lightStage))
         if zUp {
             node.simdTransform = simd_float4x4(simd_quatf(angle: -.pi / 2, axis: SIMD3<Float>(1, 0, 0)))
         }
@@ -571,17 +580,26 @@ private func extractSceneBodies(from root: SCNNode) -> [SceneBody] {
     }
     visit(root, parentWorld: matrix_identity_float4x4, inheritedSeat: false)
 
-    // For single-node scans/meshes up to 80k triangles, split disconnected sub-components in memory so stray scan crumbs
-    // can be excluded from framing without altering the node's textured geometry.
-    if rawBodies.count == 1, rawBodies[0].triangles.count <= 80_000 {
-        let single = rawBodies[0]
-        let groups = connectedTriangleGroups(single.triangles)
-        if groups.count >= 2 {
-            rawBodies = groups.compactMap { idxs in
-                makeBody(node: single.node, triangles: idxs.map { single.triangles[$0] },
-                         isHeroSeat: single.isHeroSeat, isUndersideInlay: single.isUndersideInlay)
+    // Split disconnected sub-solids up to 40k triangles per mesh (e.g. a box + separate lid exported as one <object>, or stray scan crumbs)
+    // in memory for view selection, amphitheater ordering, and inset framing without mutating textured geometry.
+    if rawBodies.count <= 4 {
+        var expanded: [SceneBody] = []
+        for body in rawBodies {
+            if !body.isUndersideInlay && body.triangles.count <= 40_000 {
+                let groups = connectedTriangleGroups(body.triangles)
+                if groups.count >= 2 && groups.count <= 32 {
+                    for idxs in groups {
+                        if let sub = makeBody(node: body.node, triangles: idxs.map { body.triangles[$0] },
+                                              isHeroSeat: body.isHeroSeat, isUndersideInlay: false) {
+                            expanded.append(sub)
+                        }
+                    }
+                    continue
+                }
             }
+            expanded.append(body)
         }
+        rawBodies = expanded
     }
 
     guard rawBodies.count >= 2 else { return rawBodies }
@@ -798,6 +816,8 @@ private func scoreCandidateView(_ viewDir: SIMD3<Double>, samples: [SampledTri],
     var normalSum = SIMD3<Double>.zero
     var reliefSum = 0.0
     var reliefPairs = 0
+    var zVisMax = -Double.infinity
+    var zVisSum = 0.0
     var heroHits = 0.0
     var seenBodies = Set<Int>()
     for iy in 0..<gridN {
@@ -805,15 +825,18 @@ private func scoreCandidateView(_ viewDir: SIMD3<Double>, samples: [SampledTri],
             let idx = iy * gridN + ix
             guard bodyBuf[idx] >= 0 else { continue }
             occupied += 1
+            let z = zBuf[idx]
+            if z > zVisMax { zVisMax = z }
+            zVisSum += z
             normalSum += nBuf[idx]
             heroHits += heroBuf[idx]
             seenBodies.insert(bodyBuf[idx])
             if ix + 1 < gridN && bodyBuf[idx + 1] >= 0 && bodyBuf[idx + 1] == bodyBuf[idx] {
-                reliefSum += min(abs(zBuf[idx] - zBuf[idx + 1]) / spanZ, 0.30)
+                reliefSum += min(abs(z - zBuf[idx + 1]) / spanZ, 0.30)
                 reliefPairs += 1
             }
             if iy + 1 < gridN && bodyBuf[idx + gridN] >= 0 && bodyBuf[idx + gridN] == bodyBuf[idx] {
-                reliefSum += min(abs(zBuf[idx] - zBuf[idx + gridN]) / spanZ, 0.30)
+                reliefSum += min(abs(z - zBuf[idx + gridN]) / spanZ, 0.30)
                 reliefPairs += 1
             }
         }
@@ -822,6 +845,7 @@ private func scoreCandidateView(_ viewDir: SIMD3<Double>, samples: [SampledTri],
     let occ = Double(occupied)
     let normalDiversity = 1.0 - min(1.0, simd_length(normalSum / occ))
     let reliefScore = reliefPairs > 0 ? reliefSum / Double(reliefPairs) : 0
+    let recessDepth = zVisMax.isFinite ? max(0.0, (zVisMax - zVisSum / occ) / spanZ) : 0
     let fillCoverage = occ / Double(cellCount)
     let heroScore = heroHits / occ
     let visibleBodiesRatio = bodies.count > 1 ? Double(seenBodies.count) / Double(bodies.count) : 1.0
@@ -852,10 +876,11 @@ private func scoreCandidateView(_ viewDir: SIMD3<Double>, samples: [SampledTri],
     let studioTieBreak = 0.012 * (0.75 * viewDir.z + 0.45 * viewDir.x)
 
     return 1.35 * normalDiversity +
-           2.40 * reliefScore +
+           2.20 * reliefScore +
+           1.45 * recessDepth +
            0.55 * fillCoverage +
            1.80 * visibleBodiesRatio +
-           0.95 * amphitheater +
+           1.05 * amphitheater +
            2.20 * heroScore +
            studioTieBreak
 }
@@ -1101,7 +1126,7 @@ private func fitPerspectiveCamera(
     bodies: [SceneBody],
     viewDir: SIMD3<Double>,
     fovDegrees: Double = 24.0,
-    targetFill: Double = 0.812
+    targetFill: Double = 0.808
 ) -> CameraPlacement? {
     let basis = lookBasis(fromTargetToEye: viewDir)
     let pts = collectFramingVertices(from: bodies, basis: basis)
@@ -1235,7 +1260,7 @@ private func makeStudioLightRig(
     key.shadowRadius = 2.5
     key.shadowSampleCount = 16
     key.shadowBias = 1.5
-    key.shadowColor = NSColor(srgbRed: 0, green: 0, blue: 0, alpha: lightStage ? 0.46 : 0.56)
+    key.shadowColor = NSColor(srgbRed: 0, green: 0, blue: 0, alpha: lightStage ? 0.36 : 0.42)
     key.automaticallyAdjustsShadowProjection = false
     key.orthographicScale = CGFloat(rad * 1.25)
     key.zNear = CGFloat(rad * 0.4)
@@ -1280,12 +1305,12 @@ private func makeContactShadowNode(for bodies: [SceneBody], lightStage: Bool) ->
     let rawSpanY = max(hi.y - lo.y, 1e-4)
     let rawSpanZ = max(hi.z - lo.z, 1e-4)
     let horizMax = max(rawSpanX, rawSpanZ)
-    let pad = horizMax * 0.12
+    let pad = horizMax * 0.10
     let minX = lo.x - pad, maxX = hi.x + pad
     let minZ = lo.z - pad, maxZ = hi.z + pad
     let spanX = maxX - minX, spanZ = maxZ - minZ
     let floorY = lo.y
-    let heightCutoff = max(rawSpanY * 0.55, horizMax * 0.16)
+    let heightCutoff = max(min(rawSpanY * 0.28, horizMax * 0.14), horizMax * 0.04)
 
     let texN = 128
     var density = [Float](repeating: 0, count: texN * texN)
@@ -1341,17 +1366,24 @@ private func makeContactShadowNode(for bodies: [SceneBody], lightStage: Bool) ->
                     let w1 = ((cz - az) * (px - cx) + (ax - cx) * (pz - cz)) * invDenom
                     let w2 = 1.0 - w0 - w1
                     if w0 >= -tol && w1 >= -tol && w2 >= -tol {
+                        let cw0 = max(0, w0), cw1 = max(0, w1), cw2 = max(0, w2)
+                        let wSum = max(cw0 + cw1 + cw2, 1e-6)
+                        let interpY = (cw0 * t.a.y + cw1 * t.b.y + cw2 * t.c.y) / wSum - floorY
+                        guard interpY < heightCutoff else { continue }
+                        let localNorm = max(0, 1.0 - interpY / heightCutoff)
+                        let localWeight = localNorm * localNorm
                         let idx = iz * texN + ix
-                        if weight > density[idx] { density[idx] = weight }
+                        if localWeight > density[idx] { density[idx] = localWeight }
                     }
                 }
             }
         }
     }
 
-    // Separable 5-pass [1, 2, 1]/4 tent blur for a smooth contact penumbra with zero banding.
+    // Separable [1, 2, 1]/4 tent blur for a smooth contact penumbra (tighter on dark stage so grounding reads against #14161B).
     var scratch = [Float](repeating: 0, count: texN * texN)
-    for _ in 0..<5 {
+    let blurPasses = lightStage ? 5 : 3
+    for _ in 0..<blurPasses {
         for z in 0..<texN {
             let row = z * texN
             for x in 0..<texN {
@@ -1370,7 +1402,7 @@ private func makeContactShadowNode(for bodies: [SceneBody], lightStage: Bool) ->
     }
 
     // Taper outer 6 texels smoothly to 0 so the plane boundary is completely invisible.
-    let peakAlpha: Float = lightStage ? 0.30 : 0.56
+    let peakAlpha: Float = lightStage ? 0.30 : 0.84
     var rgba = [UInt8](repeating: 0, count: texN * texN * 4)
     for z in 0..<texN {
         let dzBorder = min(Float(z), Float(texN - 1 - z)) / 6.0
@@ -1493,7 +1525,7 @@ public func renderPicture(_ spec: PictureSpec, to output: URL) throws {
         }
 
         let mainViewDir = chooseShapeView(for: mainBodies)
-        guard let mainPlacement = fitPerspectiveCamera(bodies: mainBodies, viewDir: mainViewDir, fovDegrees: 24.0, targetFill: 0.812) else {
+        guard let mainPlacement = fitPerspectiveCamera(bodies: mainBodies, viewDir: mainViewDir, fovDegrees: 24.0, targetFill: 0.808) else {
             throw HandheldError.io("\(model.lastPathComponent) has nothing to draw")
         }
 
@@ -1548,11 +1580,23 @@ public func renderPicture(_ spec: PictureSpec, to output: URL) throws {
             case .undersideInlay:
                 mainShadow?.removeFromParentNode()
                 mainRig?.removeFromParentNode()
-                let underDir = simd_normalize(SIMD3<Double>(0.18, -0.90, 0.40))
-                if let unPlacement = fitPerspectiveCamera(bodies: allBodies, viewDir: underDir, fovDegrees: 24.0, targetFill: 0.80) {
+                let inlays = allBodies.filter(\.isUndersideInlay)
+                var iLo = SIMD3<Float>(repeating: .infinity), iHi = SIMD3<Float>(repeating: -.infinity)
+                for b in inlays { iLo = simd_min(iLo, b.lo); iHi = simd_max(iHi, b.hi) }
+                let focusBodies = allBodies.filter { b in
+                    if b.isUndersideInlay { return true }
+                    return b.lo.x <= iHi.x + 1.0 && b.hi.x >= iLo.x - 1.0 &&
+                           b.lo.z <= iHi.z + 1.0 && b.hi.z >= iLo.z - 1.0
+                }
+                let focusNodes = Set(focusBodies.map { ObjectIdentifier($0.node) })
+                for b in allBodies where !focusNodes.contains(ObjectIdentifier(b.node)) {
+                    b.node.isHidden = true
+                }
+                let underDir = simd_normalize(SIMD3<Double>(0.04, -0.96, 0.28))
+                if let unPlacement = fitPerspectiveCamera(bodies: focusBodies.isEmpty ? allBodies : focusBodies, viewDir: underDir, fovDegrees: 22.0, targetFill: 0.82) {
                     let unRig = own ? nil : makeStudioLightRig(for: unPlacement, lightStage: useLightStage, darkPart: darkPart, brightPart: brightPart)
                     if let unRig { scene.rootNode.addChildNode(unRig) }
-                    applyCamera(unPlacement, fovDegrees: 24.0, to: camera)
+                    applyCamera(unPlacement, fovDegrees: 22.0, to: camera)
                     let insetPx = max(128, Int((Double(size) * 0.28).rounded()))
                     let unSnap = renderer.snapshot(atTime: 0, with: CGSize(width: insetPx, height: insetPx), antialiasingMode: .multisampling4X)
                     if let unCG = unSnap.cgImage(forProposedRect: nil, context: nil, hints: nil) {
