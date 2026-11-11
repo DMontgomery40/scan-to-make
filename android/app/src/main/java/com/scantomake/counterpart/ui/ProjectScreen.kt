@@ -242,9 +242,20 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 Text(line, Modifier.fillMaxWidth().testTag("scan-from").clickable(enabled = lineage.from?.exists == true, role = Role.Button) { lineage.from?.let { open(it.id) } },
                     color = if (lineage.from?.exists == true) Palette.filament else Palette.secondary, fontSize = 14.sp)
             }
+            // One project made from it opens at a tap; several are a list to choose from, newest first (as on the
+            // iPhone and the Mac), never just the newest.
             lineage.madeLine?.let { line ->
-                Text(line, Modifier.fillMaxWidth().testTag("scan-made").clickable(role = Role.Button) { lineage.made.firstOrNull()?.let { open(it.id) } },
-                    color = Palette.filament, fontSize = 14.sp)
+                var choosing by remember { mutableStateOf(false) }
+                Box {
+                    Text(line, Modifier.fillMaxWidth().testTag("scan-made").clickable(role = Role.Button) {
+                        lineage.made.singleOrNull()?.let { open(it.id) } ?: run { choosing = true }
+                    }, color = Palette.filament, fontSize = 14.sp)
+                    DropdownMenu(choosing, { choosing = false }) {
+                        lineage.made.forEach { made ->
+                            DropdownMenuItem({ Text(made.title) }, modifier = Modifier.testTag("scan-made-${made.id}"), onClick = { choosing = false; open(made.id) })
+                        }
+                    }
+                }
             }
             Text(words.status, fontSize = 17.sp)
             if (away) Row(Modifier.fillMaxWidth().testTag("project-away"), verticalAlignment = Alignment.CenterVertically) {
