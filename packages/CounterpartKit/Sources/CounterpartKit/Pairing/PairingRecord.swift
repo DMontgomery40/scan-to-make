@@ -169,18 +169,20 @@ public struct PairingStatus: Equatable, Sendable {
     public var deviceId: String?
     public var expiresAtMs: Double?
     public var fixture: Bool
+    /// The Mac's pin (its public key or certificate hash; not a secret): who the Mac is, wherever it answers from.
+    public var pin: String?
 
     public static let disconnected = PairingStatus(state: .disconnected, baseUrl: nil, activeUrl: nil, deviceId: nil, expiresAtMs: nil, fixture: false)
 
-    public init(state: State, baseUrl: String?, activeUrl: String?, deviceId: String?, expiresAtMs: Double?, fixture: Bool) {
+    public init(state: State, baseUrl: String?, activeUrl: String?, deviceId: String?, expiresAtMs: Double?, fixture: Bool, pin: String? = nil) {
         self.state = state; self.baseUrl = baseUrl; self.activeUrl = activeUrl
-        self.deviceId = deviceId; self.expiresAtMs = expiresAtMs; self.fixture = fixture
+        self.deviceId = deviceId; self.expiresAtMs = expiresAtMs; self.fixture = fixture; self.pin = pin
     }
 
     public init(_ record: PairingRecord?, now: Date = Date()) {
         guard let record else { self = .disconnected; return }
         self.init(state: record.isExpired(now: now) ? .expired : .paired, baseUrl: record.baseUrl, activeUrl: record.activeUrl,
-                  deviceId: record.deviceId, expiresAtMs: record.expiresAtMs, fixture: record.isFixture)
+                  deviceId: record.deviceId, expiresAtMs: record.expiresAtMs, fixture: record.isFixture, pin: record.pin)
     }
 
     /// The host the phone talks to now, for "Address in use".

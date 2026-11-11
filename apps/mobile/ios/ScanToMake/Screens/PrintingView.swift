@@ -22,7 +22,11 @@ struct PrintingView: View {
     @State private var confirming: IdentifiedProject?
 
     private var project: Project? { store.project(id) }
-    private var printer: PrinterDestination? { store.catalog?.destination(project?.print?.destinationId ?? project?.printerDestinationId) }
+    /// By id or alias (review S6): a print dispatched under an alias still gets its Pause and Stop.
+    private var printer: PrinterDestination? { store.catalog?.resolved(project?.print?.destinationId ?? project?.printerDestinationId) }
+    /// What this screen shows is the phone's last copy (X100): it says so once, nothing counts on, and nothing is pressable.
+    private var away: Bool { store.away }
+    private var asOf: String { store.heardAt(id).map { KnownProjects.when($0) } ?? "earlier" }
     private var printerName: String { project?.print?.destination?.name ?? printer?.name ?? "Your printer" }
     private var live: PrintLive? { project?.print?.live }
     private var printEnded: Bool {
@@ -35,6 +39,10 @@ struct PrintingView: View {
         ScrollView {
             if let project {
                 VStack(alignment: .leading, spacing: 18) {
+                    if away {
+                        Label(store.awayLine(id), systemImage: "wifi.exclamationmark").font(.subheadline).foregroundStyle(.secondary)
+                            .padding(.horizontal, 20).accessibilityIdentifier("printing-away")
+                    }
                     camera
                     summary(project)
                     // The note is part of the page, under what it's about; nothing but glass controls sits in the bar
@@ -161,7 +169,7 @@ struct PrintingView: View {
                 Circle().trim(from: 0, to: fraction).stroke(Color.okGreen, style: .init(lineWidth: 10, lineCap: .round)).rotationEffect(.degrees(-90))
                 VStack(spacing: 0) {
                     Text(printing ? Format.percent(job?.progress) ?? "–" : "–").font(.title.bold().monospacedDigit())
-                    Text(stateWord).font(.caption).foregroundStyle(.secondary)
+                    Text(away ? asOf : stateWord).font(.caption).foregroundStyle(.secondary)
                 }
             }
             .frame(width: 118, height: 118)
@@ -195,14 +203,16 @@ struct PrintingView: View {
     /// "38 min left · done 12:51 PM"
     private var timeLeft: String? {
         guard !printEnded, let remaining = live?.job?.remainingSec, let words = Format.duration(remaining) else { return nil }
+        // The last value the phone had, with its time: never a countdown from a copy.
+        if away { return "\(words) left \(asOf)" }
         let end = live?.endsAtDate ?? Date().addingTimeInterval(remaining)
         return "\(words) left · done \(end.formatted(date: .omitted, time: .shortened))"
     }
 
     private func tiles(_ project: Project) -> some View {
         HStack(spacing: 12) {
-            InfoTile(title: "Nozzle", value: Format.temperature(live?.temps?.nozzle?.actual) ?? "–", symbol: "flame")
-            InfoTile(title: "Bed", value: Format.temperature(live?.temps?.bed?.actual) ?? "–", symbol: "square.fill")
+            InfoTile(title: away ? "Nozzle \(asOf)" : "Nozzle", value: Format.temperature(live?.temps?.nozzle?.actual) ?? "–", symbol: "flame")
+            InfoTile(title: away ? "Bed \(asOf)" : "Bed", value: Format.temperature(live?.temps?.bed?.actual) ?? "–", symbol: "square.fill")
         }
     }
 
@@ -246,14 +256,14 @@ struct PrintingView: View {
                     }
                 }
                 .controlSize(.large).fontWeight(.semibold)
-                .disabled(working || live == nil)
+                .disabled(working || live == nil || away)
             }
             .padding(.horizontal, 16)
         }
     }
 
     private func act(_ action: CompanionClient.PrintControl) {
-        guard !working, !printEnded else { return }
+        guard !working, !printEnded, !away else { return }
         working = true; problem = nil
         Task {
             defer { working = false }

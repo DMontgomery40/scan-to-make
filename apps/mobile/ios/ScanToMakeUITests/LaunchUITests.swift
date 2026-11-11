@@ -744,7 +744,7 @@ final class LayoutParityUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(2))  // the stage settles to the page's height
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "short-stage-\(state)"; shot.lifetime = .keepAlways; add(shot)
             let stage = picture.frame
-            XCTAssertGreaterThanOrEqual(stage.height, 150, "the stage \(stage)")
+            XCTAssertGreaterThanOrEqual(stage.height, 159, "the stage keeps its 160-point floor: \(stage)")
             let chips = [app.descendants(matching: .any)["gallery-size"], app.buttons["gallery-ar"]].filter(\.exists)
             XCTAssertFalse(chips.isEmpty, "the size chip is on the stage")
             for chip in chips {
@@ -764,6 +764,77 @@ final class LayoutParityUITests: XCTestCase {
                     XCTAssertFalse(retry.frame.intersects(chip.frame), "Try Again \(retry.frame) clear of \(chip.identifier) \(chip.frame)")
                     XCTAssertLessThanOrEqual(retry.frame.maxY, chip.frame.minY, "Try Again sits above \(chip.identifier)")
                 }
+            }
+            app.terminate()
+        }
+    }
+
+    /// Review of #527 part 4, B1: with the Mac away, nothing a person can tap fails after the tap, and nothing kept from
+    /// before is shown as live: on the project page (each state's lead actions), Printing and Home. The canned Mac answers
+    /// the list once and then stops (`away-after-list`, the screenshot tool's `away`).
+    func testWithTheMacAwayNothingFailsAfterATapOnTheProjectPagePrintingAndHome() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        try Data().write(to: folder.appendingPathComponent("away-after-list"))
+        func open(_ id: String) -> XCUIApplication {
+            let app = XCUIApplication()
+            app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all", "-CounterpartOpen", "counterpart://project/\(id)"]
+            app.launch()
+            return app
+        }
+        let failed = NSPredicate(format: "label CONTAINS %@", "then try again")
+        let macActions = ["It Works", "Needs Changes", "Print", "Send to your Mac", "Scan", "Make Your Best Guess", "Send Answer", "Review", "Don’t Print"]
+        func checkNothingFails(_ app: XCUIApplication, _ page: String) {
+            XCTAssertEqual(app.alerts.count, 0, "\(page): no error alert")
+            XCTAssertFalse(app.staticTexts.matching(failed).firstMatch.exists, "\(page): no failure line after a tap")
+        }
+        // printed (Did it fit?), failed (Try Again), working, a question, printing.
+        for id in ["6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a07", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
+                   "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03"] {
+            let app = open(id)
+            let away = app.descendants(matching: .any)["project-away"]
+            XCTAssertTrue(away.waitForExistence(timeout: 20), "\(id): the one line: \(app.debugDescription)")
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Your Mac isn’t answering, so anything that needs it waits.")).firstMatch.exists)
+            for button in app.buttons.allElementsBoundByIndex where button.exists && macActions.contains(where: { button.label.hasPrefix($0) }) {
+                XCTAssertFalse(button.isEnabled, "\(id): \(button.label) waits for the Mac")
+                button.tap()
+                checkNothingFails(app, "\(id) after \(button.label)")
+                XCTAssertTrue(away.exists)
+            }
+            for lead in ["it-works", "needs-changes", "failed-retry", "failed-print", "print", "draft.send", "attach-photos", "status-menu"] {
+                let button = app.buttons[lead]
+                guard button.exists else { continue }
+                XCTAssertFalse(button.isEnabled, "\(id): \(lead) waits for the Mac")
+                button.tap()
+                checkNothingFails(app, "\(id) after \(lead)")
+            }
+            if id.hasSuffix("03") {
+                // Printing, from the restored project: the same line, its numbers "as of", and Pause and Stop waiting.
+                let watch = app.buttons.matching(NSPredicate(format: "label == %@", "Watch the Print")).firstMatch
+                XCTAssertTrue(watch.waitForExistence(timeout: 5) && watch.isEnabled, "Printing still opens")
+                watch.tap()
+                XCTAssertTrue(app.descendants(matching: .any)["printing-away"].waitForExistence(timeout: 10), app.debugDescription)
+                for label in ["Pause", "Resume", "Stop"] {
+                    let control = app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch
+                    guard control.exists else { continue }
+                    XCTAssertFalse(control.isEnabled, "\(label) is not offered as if it would work")
+                    control.tap()
+                }
+                XCTAssertFalse(app.buttons["Stop Print"].exists, "no Stop confirmation for a printer that can't be reached")
+                checkNothingFails(app, "Printing")
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "away-printing"; shot.lifetime = .keepAlways; add(shot)
+                // Home: once, plainly, that the Mac isn't answering and when the list is from.
+                for _ in 0..<3 where !app.descendants(matching: .any)["connection-line"].exists {
+                    let back = app.navigationBars.buttons.firstMatch
+                    if back.exists { back.tap() } else { break }
+                }
+                let line = app.descendants(matching: .any)["connection-line"]
+                XCTAssertTrue(line.waitForExistence(timeout: 10), app.debugDescription)
+                XCTAssertTrue(line.label.hasPrefix("Your Mac isn’t answering") && line.label.contains("This is what your phone had at"), line.label)
+                app.buttons["connection-try-again"].tap()
+                checkNothingFails(app, "Home after Try Again")
+                let home = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); home.name = "away-home"; home.lifetime = .keepAlways; add(home)
             }
             app.terminate()
         }
@@ -1076,7 +1147,7 @@ final class LayoutParityUITests: XCTestCase {
         mic.tap()
         let away = app.descendants(matching: .any)["project-away"]
         XCTAssertTrue(away.waitForExistence(timeout: 20), "one line says the Mac isn't answering: \(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Your Mac isn’t answering, so Print and Send wait. This is what your phone had at")).firstMatch.exists,
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Your Mac isn’t answering, so anything that needs it waits. This is what your phone had at")).firstMatch.exists,
                       "and when what is shown was true")
         XCTAssertFalse(app.staticTexts["Couldn't load project"].exists, "the page is not replaced")
         let title = app.buttons["project-title"]

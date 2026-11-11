@@ -57,7 +57,7 @@ struct ProjectView: View {
     @FocusState private var writing: Bool
     private var object: Project? { store.project(id) }
     /// The Mac isn't answering: the page shows what this phone already had and says so, and Print and Send wait (X100).
-    private var away: Bool { store.reachable == false }
+    private var away: Bool { store.away }
 
     var body: some View {
         Group {
@@ -105,7 +105,7 @@ struct ProjectView: View {
         // Photos dropped from Files or Safari join the project; the Mac uses them in its next pass (PRD §6).
         .dropDestination(for: Data.self) { items, _ in
             // One action at a time: a drop while something runs is refused, not quietly lost.
-            guard let object, !working else { return false }
+            guard let object, !working, !away else { return false }
             let forMessage = object.current != nil || object.changesWait || object.openAsk != nil
             Task { await addDropped(items, to: object.id, forMessage: forMessage) }
             return !items.isEmpty
@@ -142,7 +142,7 @@ struct ProjectView: View {
     /// Resume a send cut short (after relaunch too), even when the model or some photos already reached the
     /// Mac. Only a send you asked for: a draft whose scan is attached but never sent waits for Send.
     private func resumeSavedCapture() async {
-        guard !resumed, let object, object.state == .new, !store.sending.contains(object.id), MacConnection.sendRequested(object.id) else { return }
+        guard !resumed, !away, let object, object.state == .new, !store.sending.contains(object.id), MacConnection.sendRequested(object.id) else { return }
         resumed = true
         let saved = HandheldCapture.finished(object.id) ? true : await store.mac.finishedScan(object.id) != nil
         if saved { act { try await finishSending(object) } }
@@ -165,7 +165,8 @@ struct ProjectView: View {
     }
 
     private func act(_ body: @escaping () async throws -> Project?) {
-        guard !working else { return }
+        // Nothing that needs the Mac runs while it isn't answering (X100): its control is disabled and the page says why.
+        guard !working, !away else { return }
         working = true; problem = nil
         Task {
             // A scan started, stopped or sent here changes what this phone still holds for the project.
@@ -212,7 +213,8 @@ struct ProjectView: View {
                             Menu { statusChoices(object, words, inline: true) } label: {
                                 HStack(spacing: 4) { StatusCapsule(phase: words.phase); Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary) }
                             }
-                            .accessibilityIdentifier("status-menu")
+                            .disabled(away)
+                        .accessibilityIdentifier("status-menu")
                             .accessibilityLabel("Status, \(words.phase.label)")
                             .accessibilityHint("Changes the project's status")
                         } else {
@@ -248,14 +250,14 @@ struct ProjectView: View {
                 if object.kind == "published" {
                     Button("Add Model Files", systemImage: "doc.badge.plus") { choosingModelFiles = true }
                         .buttonStyle(.glass).padding(.horizontal, 20)
-                        .disabled(working || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
+                        .disabled(working || away || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
                 }
                 if object.current == nil, let captureWarning {
                     Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
                 }
                 if away {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Label(KnownProjects.awayLine(heard: store.heard[object.id]), systemImage: "wifi.exclamationmark")
+                        Label(store.awayLine(object.id), systemImage: "wifi.exclamationmark")
                             .font(.subheadline).foregroundStyle(.secondary)
                         Spacer(minLength: 0)
                         Button("Try Again") { Task { await reload() } }.font(.subheadline.weight(.semibold)).disabled(loading)
@@ -305,7 +307,10 @@ struct ProjectView: View {
                             .disabled(working)
                     }.font(.subheadline).padding(.horizontal, 20)
                 }
+                // Every card's actions need the Mac (Try Again, Did it fit?, an answer, Send, Scan): they wait while it
+                // isn't answering. A print's card handles its own, so Watch the Print still opens (X100).
                 stateCard(object, words).padding(.horizontal, 16)
+                    .disabled(away && !(words.phase == .preparing || words.phase == .printing || object.printConfirmation != nil))
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.pageSpace)).maxY.rounded() } action: { bottom in
                         // Where the card ends below the stage, in the order the card sits now under the title.
                         let now = answerFit(store.words(object))
@@ -356,19 +361,19 @@ struct ProjectView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     if store.macCapabilities.contains("projectPreferences") {
-                        Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
+                        Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true }.disabled(away)
                     }
                     if store.projectRename {
-                        Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }
+                        Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }.disabled(away)
                     }
                     if store.projectSettings {
-                        statusChoices(object, words)
+                        statusChoices(object, words).disabled(away)
                         Divider()
                     }
                     if let modelURL { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
                     if let arURL { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
-                    Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                    Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }.disabled(away)
                 } label: { Image(systemName: "ellipsis") }
                 .accessibilityLabel("More")
             }
@@ -475,7 +480,7 @@ struct ProjectView: View {
         VStack(spacing: 8) {
             ProjectGalleryView(store: store, project: object, words: words,
                                height: stage,
-                               modelURL: modelURL, arURL: nil, localScan: scanURL, working: working,
+                               modelURL: modelURL, arURL: nil, localScan: scanURL, working: working || away,
                                locate: { act { try await store.mac.client.locate(object.id) } })
             .task(id: "\(object.id)#\(object.scan ?? "")") {
                 // The scan while it's only on this phone, for Share until the Mac has it.
@@ -543,6 +548,7 @@ struct ProjectView: View {
 
     /// Says so on the Mac, then starts the change in Ask for changes.
     private func needsChanges(_ object: Project) {
+        guard !away else { return }
         act { try await store.mac.client.setStatus(object.id, .needsChanges) }
         if !note.hasPrefix(Self.afterPrinting) { note = Self.afterPrinting + note }
         writing = true
@@ -862,7 +868,7 @@ struct ProjectView: View {
                                 Button("Take Photo", systemImage: "camera") { attach(object, camera: true) }
                                 Button("Choose Photos", systemImage: "photo.on.rectangle") { attach(object, camera: false) }
                             } label: { Image(systemName: "camera.fill").foregroundStyle(.secondary) }
-                            .disabled(working)
+                            .disabled(working || away)
                             .accessibilityLabel("Add photos")
                             .accessibilityIdentifier("attach-photos")
                             // Dictation is the keyboard's own; nothing here that doesn't do something.
@@ -926,6 +932,14 @@ struct ProjectView: View {
         // One id for this note across every try, so the Mac never records it twice.
         let photoNames = store.corrections.availablePhotos(object)
         let messageId = attempts.id(for: text, photos: photoNames ?? [], in: object.id)
+        if away {
+            // The change is kept on this phone and sent, once, when the Mac answers (the same queue as a busy pass).
+            store.queue(note: text, for: object.id, messageId: messageId)
+            attempts.settled(object.id)
+            note = ""
+            notice = "Your change is saved on this phone. It goes to your Mac when it answers."
+            return
+        }
         if object.changesWait {
             // The Mac takes changes between passes; this one is sent the moment the pass ends.
             store.queue(note: text, for: object.id, messageId: messageId)
@@ -1028,7 +1042,7 @@ struct ResultSection: View {
                     .font(.headline).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("result-no-printer")
                 Spacer(minLength: 8)
-                Button(none ? "Add a Printer" : "Choose a Printer") { app.route = none ? .printers : .print(project.id) }
+                Button(none ? "Add a Printer" : "Choose a Printer") { app.route = none ? .printers : .print(project.id) }.disabled(store.away)
                     .buttonStyle(.glass)
                     .accessibilityIdentifier("result-choose-printer")
             }

@@ -14,7 +14,8 @@ struct PrintStatusCard: View {
         let words = store.words(project)
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: words.phase.symbol).foregroundStyle(words.phase.color).symbolEffect(.pulse, isActive: words.busy)
+                // While the Mac isn't answering nothing here is live (X100): no pulse, and the bar is the last value.
+                Image(systemName: words.phase.symbol).foregroundStyle(words.phase.color).symbolEffect(.pulse, isActive: words.busy && !store.away)
                 Text(words.line).font(.headline)
                 Spacer()
             }
@@ -27,15 +28,15 @@ struct PrintStatusCard: View {
                     Button(role: .destructive) { answer(confirmation, .cancel, [:]) } label: { Text(project.print?.live?.state == "paused" ? "Cancel Resume" : "Don't Print").frame(maxWidth: .infinity).frame(height: 36) }
                         .buttonStyle(.glass)
                 }
-                .disabled(working)
+                .disabled(working || store.away)
             } else if ProjectWords.watchable(project, phase: words.phase) {
                 // Getting ready on the printer (layer 0): the camera and Stop are already there, without a percent.
                 if words.phase == .printing, let progress = project.print?.live?.job?.progress { ProgressView(value: progress, total: 100).tint(.okGreen) }
-                else { ProgressView().progressViewStyle(.linear).tint(words.phase.color) }
+                else if !store.away { ProgressView().progressViewStyle(.linear).tint(words.phase.color) }
                 Button(action: openPrinting) { Label("Watch the Print", systemImage: "camera").frame(maxWidth: .infinity).frame(height: 36) }
                     .buttonStyle(.glass)
             } else {
-                ProgressView().progressViewStyle(.linear).tint(words.phase.color)
+                if !store.away { ProgressView().progressViewStyle(.linear).tint(words.phase.color) }
                 if let event = project.print?.events?.last { Text(event.message).font(.footnote).foregroundStyle(.secondary) }
             }
             if let problem { Text(problem).font(.footnote).foregroundStyle(.red) }

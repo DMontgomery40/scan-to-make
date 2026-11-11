@@ -16,6 +16,8 @@ enum Fixtures {
     static var set: String { UserDefaults.standard.string(forKey: "CounterpartFixtureSet") ?? "all" }
     /// The mic mount's printer: the print sheet's selection, and what `-CounterpartScreen print-noams` starts on.
     nonisolated(unsafe) static var printer = "current"
+    /// The `away-after-list` switch has let its one list through.
+    nonisolated(unsafe) static var listedOnce = false
     /// `supported` or `unsupported`: the mic mount is waiting on its printer's own question.
     nonisolated(unsafe) static var confirmation: String?
     /// `-CounterpartScreen confirm-mac-answers`: the Mac answers any printer question.
@@ -477,12 +479,25 @@ struct FixtureTransport: HTTPTransport {
         if FileManager.default.fileExists(atPath: folder.appending(path: "offline").path) { throw TransportError("network") }
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
+        // An `away-after-list` file (X100, the screenshot tool's `away`): the list answers once, then the Mac stops
+        // answering. /healthz still answers, so the Mac's capabilities are known. Each other request fails after a beat,
+        // so a page opened at launch reads its project after the list has landed. Deleting the file brings the Mac back.
+        if FileManager.default.fileExists(atPath: folder.appending(path: "away-after-list").path), path != "/healthz" {
+            let list = method == "GET" && path == "/v1/objects"
+            if !(list && !Fixtures.listedOnce) {
+                try await Task.sleep(for: .seconds(1.5))
+                if FileManager.default.fileExists(atPath: folder.appending(path: "away-after-list").path) { throw TransportError("network") }
+            }
+            if list { Fixtures.listedOnce = true }
+        }
         // `-CounterpartSlowScan <seconds>`: a scan file takes that long to come (a busy Mac over Wi-Fi), for pictures.
         let slow = UserDefaults.standard.double(forKey: "CounterpartSlowScan")
         if path.contains("/scan/"), slow > 0 { try await Task.sleep(for: .seconds(slow)) }
         // `-CounterpartSlowPictures <seconds>`: the Mac's pictures take that long too (review F4 on #525).
         let slowPictures = UserDefaults.standard.double(forKey: "CounterpartSlowPictures")
-        if path.contains("/pictures/"), slowPictures > 0 { try await Task.sleep(for: .seconds(slowPictures)) }
+        // Renders too (a stage's still can be either): the stage stays "loading" for as long as a test looks, then the
+        // picture comes (gate at 412ede2f: a render path skipped the wait and the stage was already "not available").
+        if path.contains("/pictures/") || path.contains("/renders/"), slowPictures > 0 { try await Task.sleep(for: .seconds(slowPictures)) }
         func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }

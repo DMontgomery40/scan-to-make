@@ -178,6 +178,16 @@ import CounterpartKit
         XCTAssertTrue(large)
         let asked = await counter.value
         XCTAssertEqual(asked, 1)
+        // Review of #527 part 4, S3: through the client the phone's own limit arrives as `payload-too-large`
+        // (CompanionError.transport); that too is a size refusal, asked once.
+        let streamed = Counter()
+        let over = ModelFiles { _, _ in _ = await streamed.next(); throw CompanionError(code: "payload-too-large", message: "That file is too large to send.") }
+        over.pauses = [Duration.zero, Duration.zero]
+        over.want(project, "scan/scan.usdz")
+        let overLarge = await until(patience) { await MainActor.run { over.fetch(project, "scan/scan.usdz") == .tooLarge } }
+        XCTAssertTrue(overLarge, "payload-too-large is too large: \(String(describing: over.fetch(project, "scan/scan.usdz")))")
+        let overAsked = await streamed.value
+        XCTAssertEqual(overAsked, 1, "not streamed three times")
     }
 
     /// Review F4 on #525: while the stage's picture loads it shows the project's list picture when this phone has it.
