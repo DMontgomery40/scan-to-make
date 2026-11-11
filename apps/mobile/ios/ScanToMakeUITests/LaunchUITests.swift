@@ -1390,7 +1390,9 @@ final class LayoutParityUITests: XCTestCase {
             if id == "gallery-together" || id.hasPrefix("gallery-plate-") { XCTAssertFalse(ar.exists, "no AR on \(id)") }
         }
         result.tap()
-        XCTAssertTrue(ar.waitForExistence(timeout: 30), "the part's model came, so its AR chip is there")
+        XCTAssertTrue(ar.waitForExistence(timeout: 30), "the part's AR chip is there")
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 30), .completed, "the part's model came, so AR opens: \(String(describing: ar.value))")
         ar.tap()
         // A device opens Quick Look; a simulator without a previewer must keep a visible retry.
         #if targetEnvironment(simulator)
@@ -1407,6 +1409,65 @@ final class LayoutParityUITests: XCTestCase {
         #if !targetEnvironment(simulator)
         XCTAssertNotEqual(ar.exists ? ar.value as? String : nil, "failed")
         #endif
+    }
+
+    /// #606, David, Nov 11: "you can't rotate the thing and zoom in on the 3d thing anymore". On the iPhone and the iPad a
+    /// drag on the part's stage opens it in 3D (`model-stage` reads "live" once RealityKit has drawn it), with the
+    /// off-screen still drawn or not: #539 let 3D start only after that still had rendered, so a phone whose still failed
+    /// kept a picture that never turned.
+    func testADragOnTheStageTurnsThePartInThreeD() throws { try checkDragTurnsThePart(posterFails: false) }
+    func testADragOnTheStageTurnsThePartInThreeDWhenItsStillFails() throws { try checkDragTurnsThePart(posterFails: true) }
+
+    private func checkDragTurnsThePart(posterFails: Bool) throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        // The stage stays live 30 s after a touch here (3 s for a person), so the test reads it after XCUITest's drag returns.
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed",
+                               "-CounterpartStageIdle", "30"] + (posterFails ? ["-CounterpartFailPoster", "YES"] : [])
+        app.launch()
+        let result = app.buttons["gallery-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 20))
+        result.tap()
+        let stage = app.descendants(matching: .any)["model-stage"]
+        XCTAssertTrue(stage.waitForExistence(timeout: 30), "the part's stage is a model stage once its model came")
+        // The model is here and checked (its still drawn or not): the stage shows its still and a drag can turn it.
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value IN %@", ["still", "failed"]), object: stage)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 40), .completed, "the model loaded: \(String(describing: stage.value))")
+        XCTAssertEqual(stage.value as? String, "still", "a model that loaded is never called failed because its off-screen still failed")
+        let area = stage.frame
+        XCTAssertGreaterThan(area.height, 100, "\(area)")
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        let from = origin.withOffset(CGVector(dx: area.midX - area.width * 0.2, dy: area.midY - area.height * 0.1))
+        let to = origin.withOffset(CGVector(dx: area.midX + area.width * 0.2, dy: area.midY))
+        from.press(forDuration: 0.05, thenDragTo: to)
+        let live = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "live"), object: stage)
+        XCTAssertEqual(XCTWaiter().wait(for: [live], timeout: 40), .completed, "a drag opens the model in 3D: \(String(describing: stage.value))")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = posterFails ? "stage-live-still-failed" : "stage-live"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    /// #606: on a slow link the part's AR chip is there while its model comes, saying so, and becomes AR once it is here.
+    func testThePartsARChipSaysItIsComingWhileTheModelDownloads() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed",
+                               "-CounterpartSlowModel", "12"]
+        app.launch()
+        XCTAssertTrue(app.buttons["gallery-result"].waitForExistence(timeout: 20))
+        app.buttons["gallery-result"].tap()
+        let ar = app.buttons["gallery-ar"]
+        XCTAssertTrue(ar.waitForExistence(timeout: 8), "the AR chip is there while the model comes")
+        XCTAssertEqual(ar.value as? String, "loading")
+        XCTAssertFalse(ar.isEnabled, "nothing to open yet")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "ar-chip-loading"; shot.lifetime = .keepAlways; add(shot)
+        let arrived = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "ready"), object: ar)
+        XCTAssertEqual(XCTWaiter().wait(for: [arrived], timeout: 40), .completed, "AR once the model is here: \(String(describing: ar.value))")
     }
 
     static func boxSTL() -> Data {

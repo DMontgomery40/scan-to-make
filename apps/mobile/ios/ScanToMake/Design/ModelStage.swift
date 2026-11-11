@@ -44,12 +44,19 @@ struct ModelStage: View {
     @State private var failed = false
     @State private var posterIdentity: String?
     @State private var retryGeneration = 0
+    /// A validated model for this identity is loaded (a cache hit for the live view).
+    @State private var meshReady = false
+    /// The live view has drawn a frame with the model in it.
+    @State private var liveDrawn = false
 
     private var identity: String { "\(url?.absoluteString ?? "empty")#\(tint?.description ?? "default")#\(twoTone)#\(yaw)#\(pitch)#\(fit)#\(object?.absoluteString ?? "")#\(seats.count)" }
 
     var body: some View {
         ZStack {
             if let backdrop { backdrop } else { StageBackground() }
+            Color.clear.allowsHitTesting(false)
+                .accessibilityElement().accessibilityLabel(url == nil ? "No model yet" : "3D model. Drag to turn it, pinch to zoom.")
+                .accessibilityValue(stageState).accessibilityIdentifier("model-stage")
             if live && poster != nil && scenePhase == .active && interactive {
                 realityView
             } else if let poster {
@@ -82,7 +89,7 @@ struct ModelStage: View {
             }, isEnabled: interactive)
         .task(id: "\(identity)#\(scenePhase)#\(retryGeneration)") {
             guard scenePhase == .active else { return }
-            live = false; failed = false
+            live = false; failed = false; meshReady = false; liveDrawn = false
             if posterIdentity != identity { poster = nil }
             turn = .zero; settled = .zero; zoom = 1; settledZoom = 1
             guard let url, scenePhase == .active else { return }
@@ -92,9 +99,14 @@ struct ModelStage: View {
                 let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
                 guard !Task.isCancelled, scenePhase == .active else { return }
                 guard let entity = loaded else { failed = true; undrawable?(); return }
+                meshReady = true
                 let e = entity.visualBounds(relativeTo: nil).extents
                 measured?([Double(e.x), Double(e.z), Double(e.y)].map { ($0 * 10_000).rounded() / 10 })
-                let image = await ModelPoster.image(key: identity, model: entity, yaw: yaw, pitch: pitch, fit: fit)
+                var image = await ModelPoster.image(key: identity, model: entity, yaw: yaw, pitch: pitch, fit: fit)
+                #if DEBUG
+                // `-CounterpartFailPoster YES` (UI tests, #606): the off-screen still fails, as it can on a phone.
+                if UserDefaults.standard.bool(forKey: "CounterpartFailPoster") { image = nil }
+                #endif
                 guard !Task.isCancelled, scenePhase == .active else { return }
                 if let image { poster = image; posterIdentity = identity; drawn?() }
                 failed = image == nil
@@ -104,13 +116,22 @@ struct ModelStage: View {
         }
         .task(id: lastTouch) {
             guard live else { return }
-            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            do { try await Task.sleep(for: .seconds(Self.idle)) } catch { return }
             live = false
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; Self.cache.removeAll(); ModelPoster.deferPending() } }
         .onDisappear { live = false; holder.pivot = nil }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(url == nil ? "No model yet" : "3D model. Drag to turn it, pinch to zoom.")
+    }
+
+    /// Seconds after the last touch before the stage goes back to its still.
+    private static var idle: Double {
+        #if DEBUG
+        // `-CounterpartStageIdle <seconds>` (UI tests): long enough for a test to read the live state after its drag.
+        let seconds = UserDefaults.standard.double(forKey: "CounterpartStageIdle")
+        if seconds > 0 { return seconds }
+        #endif
+        return 3
     }
 
     private func touch() {
@@ -130,13 +151,28 @@ struct ModelStage: View {
                 holder.pivot?.orientation = orientation
                 holder.pivot?.scale = SIMD3(repeating: zoom)
                 content.add(scene.root)
+                // The first frame with the model in it: until then the stage keeps its still.
+                holder.firstFrame = content.subscribe(to: SceneEvents.Update.self) { _ in
+                    holder.firstFrame?.cancel(); holder.firstFrame = nil
+                    Task { @MainActor in liveDrawn = true }
+                }
             }
         } update: { _ in
             holder.pivot?.orientation = orientation
             holder.pivot?.scale = SIMD3(repeating: zoom)
         }
         .id(identity)
-        .onDisappear { holder.pivot = nil }
+        .onDisappear { holder.pivot = nil; holder.firstFrame?.cancel(); holder.firstFrame = nil; liveDrawn = false }
+    }
+
+    /// The stage's state for VoiceOver and UI tests (`model-stage`): loading, still, opening (3D asked for, not drawn yet),
+    /// live (3D drawn), failed.
+    private var stageState: String {
+        if url == nil { return "empty" }
+        if failed { return "failed" }
+        if live && liveDrawn { return "live" }
+        if live { return "opening" }
+        return meshReady ? "still" : "loading"
     }
 
     private var orientation: simd_quatf {
@@ -251,7 +287,10 @@ extension View {
 }
 
 /// Keeps the pivot between RealityView's make and update closures.
-private final class PivotHolder { var pivot: Entity? }
+private final class PivotHolder {
+    var pivot: Entity?
+    var firstFrame: EventSubscription?
+}
 
 /// STL triangles from binary or ASCII data.
 enum STLMesh {
