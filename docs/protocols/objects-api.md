@@ -101,6 +101,19 @@ its request, credit and defaults. It keeps legacy last-print settings when no sa
 no active job, Ask, pending message, print history or outcome. Missing source files remove only the partial copy.
 A working pass must finish before duplication.
 
+`POST /v1/objects/<id>/make-from-scan` (WRITE, the scope New uses to create projects; local `objects.makeFromScan`;
+capability `makeFromScan`) takes `{kind: "fit" | "copy", instructions?, fit?}` and returns `201 {object}`: a new
+project of that kind with the person's words, seeded from the source's scan ("Make something else from this scan",
+things-and-versions design §3.3). It answers at once with the new project `touching-up` and `progress` "Bringing over
+the scan from “<title>”."; the companion then copies (an APFS clone where it can) `scan/` (with `phone-preview.usdz`),
+the source's photos, `capture/` (frames, depth, camera file) and its checked sizes into the new folder, and starts its
+pass. Nothing is shared, so either project can be deleted without breaking the other. The source is unchanged. The
+new project carries `scanFrom: {id, title}` (the source and its title then) on `object.json` and in every read: a plain
+new field, which an older companion keeps and passes on and every client ignores. Clients derive "also made from this
+scan" by listing projects whose `scanFrom.id` is this one. Refused with 409 and a sentence when the source has no scan
+or is still building it, or a fit has no words. If the copy fails, or a restart interrupts it, the new project is
+`failed` with a sentence naming the source; `start` (Try Again) copies again.
+
 Read-authorized exports include `GET /v1/objects/<id>/scan/<name>` for the recorded original scan and
 `GET /v1/objects/<id>/original/<index>` for a recorded `files.original` STL, 3MF or USDZ. Original/photo/scan
 exports require a regular file canonically inside the project, reject external symlinks and cap downloads at
