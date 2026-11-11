@@ -85,7 +85,7 @@ export function buildPublishedInvocation(input: PublishedInput): TouchupInvocati
   const mcpConfigPath = join(pass.dir, 'mcp.json');
   writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2), {mode: 0o600});
   const args = [
-    '-p', '--model', 'claude-opus-5-5', '--effort', 'high',
+    '-p', '--model', 'claude-fable-5-2', '--effort', 'high',
     '--mcp-config', mcpConfigPath, '--strict-mcp-config',
     ...(input.chrome ? ['--chrome'] : []),
     '--tools', 'Read,Glob,WebSearch,WebFetch',
