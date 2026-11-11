@@ -203,6 +203,19 @@ final class OnDeviceLibraryTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: kept, encoding: .utf8), "stl")
     }
 
+    /// The paired Mac's file downloads share one session (one TLS connection, reused), per pin and address; another Mac,
+    /// a pairing attempt and nearby pairing never share it (#720).
+    func testTheMacsFilesShareOneSessionPerPin() {
+        let record = v2Record()
+        let a = SessionPool.shared.session(for: .record(record), resourceTimeout: 1800)
+        XCTAssertNotNil(a)
+        XCTAssertTrue(a === SessionPool.shared.session(for: .record(record), resourceTimeout: 1800), "the same Mac: the same session")
+        var other = record.fields; other["publicKeySha256"] = .string(String(repeating: "cd", count: 32))
+        let another = PairingRecord(fields: other)
+        XCTAssertFalse(a === SessionPool.shared.session(for: .record(another), resourceTimeout: 1800), "another pin: its own session")
+        XCTAssertNil(SessionPool.shared.session(for: .pending(record), resourceTimeout: 1800), "a pairing attempt is never pooled")
+    }
+
     /// Too large is per variant: another original of the same project version is still asked for (Cursor P2.1).
     func testTooLargeIsRememberedPerVariant() {
         let library = OnDeviceLibrary(base: base)
