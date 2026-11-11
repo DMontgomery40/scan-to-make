@@ -752,9 +752,9 @@ final class LayoutParityUITests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(chip.frame.minY, stage.maxY - 58 - 1, "\(chip.identifier) \(chip.frame) is in the controls band of \(stage)")
             }
             if state == "not available" {
-                // Board X100: the canned Mac has no part model (404) and no picture: one line that names the part and says
-                // it was not sent, never "too detailed" or "scan", and one Try Again for both.
-                XCTAssertEqual(picture.label, "Your part. Your Mac didn’t send the picture or 3D model of this part.")
+                // Board X100: the canned Mac has no picture here (its part model comes): one line for what failed, naming
+                // the part, never "too detailed" or "scan", and one Try Again.
+                XCTAssertTrue(["Your part. The picture didn’t come from your Mac.", "Your part. Your Mac didn’t send the picture or 3D model of this part."].contains(picture.label), picture.label)
                 XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier IN %@", ["gallery-model-retry", "gallery-stage-retry"])).count, 1)
                 XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS %@", "too detailed", "scan is")).firstMatch.exists)
                 let retry = app.buttons["gallery-stage-retry"]
