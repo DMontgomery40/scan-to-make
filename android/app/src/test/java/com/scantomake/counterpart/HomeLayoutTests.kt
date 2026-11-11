@@ -988,6 +988,8 @@ class HomeLayoutTests {
     /** F1: a finished print's Printing screen asks "Did it fit?" and goes on to the project, instead of old temperatures. */
     @Test fun aFinishedPrintAsksDidItFitOnPrintingAndOpensTheProject() {
         val fake = companionAnswering()
+        // The answer is kept on the Mac, so the question is asked only of a Mac that can keep it (review S1).
+        state.capabilities.value = setOf("projectSettings")
         state.projects.value = listOf(requireNotNull(Project.decode(finishedClip())))
         var opened = 0
         compose.setContent { WithApp { com.scantomake.counterpart.ui.PrintingScreen(CLIP, back = {}, project = { opened++ }) } }
