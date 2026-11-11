@@ -949,16 +949,27 @@ struct ProjectView: View {
                     if canPrint && !writing {
                         // The page's main action never truncates ("Print Ano…", lead review Nov 10): it keeps its whole
                         // label and the ask field gives way.
+                        // On a phone's width a plain Print Another was as large as the card's own answer and read as
+                        // the first thing to press (captures, Nov 10). There, when Print is not the page's main
+                        // action, it is the printer symbol alone, named for VoiceOver by what it would print.
+                        let quiet = widthClass == .compact && !words.page.printIsMain
+                        let name = words.page.printWords ?? "Print"
                         Button { openPrint(object.id) } label: {
-                            Label(words.page.printWords ?? "Print", systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
-                                .fixedSize().padding(.horizontal, 8).frame(height: 36)
+                            if quiet {
+                                Image(systemName: "printer.fill").frame(width: 36, height: 36)
+                            } else {
+                                Label(name, systemImage: "printer.fill").fontWeight(.semibold).lineLimit(1)
+                                    .fixedSize().padding(.horizontal, 8).frame(height: 36)
+                            }
                         }
                         .mainAction(words.page.printIsMain)
                         .disabled(away)
+                        .buttonBorderShape(quiet ? .circle : .capsule)
                         .controlSize(.large)
                         .fixedSize()
                         .layoutPriority(1)
                         .keyboardShortcut("p", modifiers: .command)
+                        .accessibilityLabel(name)
                         .accessibilityIdentifier("print")
                     }
                 }

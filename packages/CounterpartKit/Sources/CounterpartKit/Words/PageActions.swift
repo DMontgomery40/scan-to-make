@@ -34,6 +34,9 @@ public struct PageActions: Equatable, Sendable {
     /// Print is offered in the bottom bar, filled or not.
     public var printInBar: Bool { printPlace == .bar }
     public var printIsMain: Bool { main == .print }
+    /// The main action's control sits in the state's card, not in the bottom bar: every main action except a Print
+    /// that the bar holds. A page opens with that card in view.
+    public var mainIsInCard: Bool { main != nil && !(main == .print && printPlace == .bar) }
 
     public init(_ project: Project, phase: ProjectPhase, actions: [ProjectAction], sending: Bool = false, localScan: Bool = false) {
         let prints = actions.filter { $0 == .print || $0 == .printChecked }
