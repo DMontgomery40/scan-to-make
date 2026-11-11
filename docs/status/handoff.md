@@ -46,7 +46,7 @@ Not done: the synthesis of the three answers for David; any change to the engine
 
 ### Installed and published
 
-- Mac `/Applications/Counterpart.app`, iPhone and iPad: build `202611102149` (main `d922973f`, #539). Nothing newer is installed. Main is `006dc487` (#527 merged at `6acb3cd7`, then docs).
+- Mac `/Applications/Counterpart.app`, iPhone and iPad: build `202611111737` (main `4718dd56`: #570 and #587), installed by 17:42Z Nov 11; receipts `~/scan-to-make-work/{iphone,ipad,mac}-202611111737/`. Before it: `202611102149` (main `d922973f`, #539).
 - MCPs, published and verified tonight (npm, fresh `npx` start, tag, release, changelog page) and updated in the Mac app through Settings → Printers: **bambu-printer-mcp 1.1.87**, **mcp-3d-printer-server 1.2.69**. What changed, all prompt text: `fdm_design` gained compliant-first, fit by function, printed fasteners, ease of use checked like the hold (1.1.86 / 1.2.67), a corrected pocket-corner rule (1.2.68), and "Find out before you design, and before you ask": when and how to research, for any model with web tools, in a few minutes (1.1.87 / 1.2.69). New prompts `fdm_fit` and `fdm_flexures` are served but the app does not read them yet (it reads `fdm_design`, `fdm_slicing`, `cad_design`: `services/companion/src/touchup/invocation.ts`). If David rolls these back, they are five squash merges in each MCP repo since 1.1.85 / 1.2.66.
 - Kernel repo (private, `DMontgomery40/counterpart-kernel`, lab on agents-136 `~/kernel-lab`): head `de2661e`. Rounds 7 and 7b are in `prints/2026-11-11-compliant-r7/` and `-r7b/` with their reports; research in `docs/research/` (the Forester dash file carries a note that its "bezel cheek" does not exist on the base car).
 
