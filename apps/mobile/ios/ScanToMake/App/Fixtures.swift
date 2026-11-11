@@ -67,7 +67,7 @@ enum Fixtures {
         // with real data (`objects.json` in the folder, each project's files under `objects/<id>/`). Never the Mac's own.
         if set == "real", let base = folder, let data = try? Data(contentsOf: base.appending(path: "objects.json")),
            let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] { return rows }
-        let now = set == "ask-bottle" ? launched : now
+        let now = ["ask-bottle", "ar-stage"].contains(set) ? launched : now
         if set == "limit-stops", let json = ProcessInfo.processInfo.environment["COUNTERPART_LIMIT_FIXTURES"],
            let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
             return rows.enumerated().compactMap { index, row in

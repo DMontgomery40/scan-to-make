@@ -49,7 +49,7 @@ struct ProjectGalleryView: View {
         }
         .onChange(of: "\(modelURL?.path ?? "")#\(project.spoolColour ?? "")") { cancelAR(); arFailed = false }
         .onChange(of: scenePhase) { _, phase in if phase != .active { cancelAR() } }
-        .onChange(of: selected) { cancelAR() }
+        .onChange(of: selected) { cancelAR(); arFailed = false }
         .onDisappear { cancelAR() }
         .task(id: "\(project.id)#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(String(describing: project.scanFiles))#\(scenePhase)") {
             // The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to
@@ -223,7 +223,7 @@ struct ProjectGalleryView: View {
     /// What the stage's AR chip can do for an entry (Nov 11: one AR control, not a chip and a second button). A part is
     /// prepared on tap; the scan is Object Capture's own USDZ. Together, a plate and a multi-colour 3MF's picture have no
     /// AR file the phone can make, so they offer none.
-    enum ARChip: Equatable { case show(URL), prepare(URL), preparing, failed(URL), needsMac }
+    enum ARChip: Equatable { case show(URL), prepare(URL), preparing, failed(URL), failedScan(URL), needsMac }
 
     private func arChip(_ entry: ProjectGallery.Entry) -> ARChip? {
         switch entry.kind {
@@ -234,7 +234,7 @@ struct ProjectGalleryView: View {
             if let modelURL { return arFailed ? .failed(modelURL) : .prepare(modelURL) }
             return store.away ? .needsMac : nil
         case .scan:
-            if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return .show(scanURL) }
+            if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return arFailed ? .failedScan(scanURL) : .show(scanURL) }
             if case .file = scanModel, store.away { return .needsMac }
             return nil
         case .together, .plate:
@@ -247,7 +247,10 @@ struct ProjectGalleryView: View {
         case .show(let url):
             Button {
                 // A file that went away meanwhile (the cache was cleared) is made again rather than showing nothing.
-                if !ARModel.show(url), let modelURL, url == arURL { arURL = nil; prepareAR(modelURL) }
+                if !ARModel.show(url) {
+                    arFailed = true
+                    if let modelURL, url == arURL { arURL = nil; prepareAR(modelURL) }
+                }
             } label: { Label("AR", systemImage: "arkit") }
                 .stageButton(light: light).accessibilityValue("ready")
                 .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
@@ -260,6 +263,9 @@ struct ProjectGalleryView: View {
                 .stageButton(light: light).disabled(true).accessibilityValue("preparing").accessibilityIdentifier("gallery-ar")
         case .failed(let stl):
             Button { prepareAR(stl) } label: { Label("AR didn’t open. Try Again", systemImage: "arkit") }
+                .stageButton(light: light).accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
+        case .failedScan(let url):
+            Button { arFailed = !ARModel.show(url) } label: { Label("AR didn’t open. Try Again", systemImage: "arkit") }
                 .stageButton(light: light).accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
         case .needsMac:
             Button {} label: { Label("AR needs your Mac", systemImage: "arkit") }
