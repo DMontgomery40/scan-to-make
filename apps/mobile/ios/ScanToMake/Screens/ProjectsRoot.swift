@@ -36,6 +36,14 @@ struct ProjectsRoot: View {
                 // The system's page size on the iPad (and the Mac): room for the question after a scan and its three
                 // answers, not a small card over a dimmed Home (U5). The iPhone keeps its full-height sheet.
                 .presentationSizing(.page)
+            case .newFromScan(let id):
+                // "Make something else from this scan" (design §3.3): New holding that project's scan, asking first what it becomes.
+                NewObjectView(store: store, reusing: store.project(id)) { project in
+                    nav.dismissSheet()
+                    nav.open(project.id)
+                }
+                .presentationDetents([.large])
+                .presentationSizing(.page)
             case .print(let id): PrintSheet(store: store, projectId: id)
             case .settings: SettingsView(store: store)
             case .printers: NavigationStack { PrintersView(store: store) }
@@ -133,7 +141,8 @@ struct ProjectsRoot: View {
 
     private func projectPage(_ id: String, close: @escaping () -> Void) -> some View {
         ProjectView(store: store, id: id, close: close, openPrint: { nav.present(.print($0)) },
-                    openPrinting: { nav.openPrinting($0) })
+                    openPrinting: { nav.openPrinting($0) }, makeFromScan: { nav.present(.newFromScan($0)) },
+                    openProject: { nav.open($0) })
     }
 
     /// A pushed page: a project, or a print's Printing screen.
@@ -297,8 +306,10 @@ struct SidebarList: View {
             VStack(alignment: .leading, spacing: 8) {
                 // The same banner as iPhone Home, with Try Again and the way to another Mac (F6): at regular width
                 // Home's cards aren't shown, so without it the iPad said only "isn't answering" in the line below.
-                if let error = store.error {
-                    ConnectionBanner(error: error, pair: store.onPair) { Task { await store.load(); await store.loadPrinters() } }
+                if let error = store.error ?? (store.away ? CompanionError.unreachable : nil) {
+                    ConnectionBanner(error: error, line: store.away && !error.needsPairing ? store.awayLine() : nil, pair: store.onPair) {
+                        Task { await store.load(); await store.loadPrinters() }
+                    }
                 }
                 // Readable at arm's length (first look U11): the system's secondary label colour, not a hierarchical
                 // .secondary that went dark grey over the sidebar's glass, at footnote size.

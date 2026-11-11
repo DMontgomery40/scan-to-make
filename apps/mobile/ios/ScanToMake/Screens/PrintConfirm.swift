@@ -17,8 +17,8 @@ struct PrintConfirmSheet: View {
     @State private var working = false
     @State private var problem: String?
 
-    private var printer: String { project.print?.destination?.name ?? store.catalog?.destination(project.printerDestinationId)?.name ?? "Your printer" }
-    private var via: String { store.catalog?.destination(project.printerDestinationId)?.via ?? "the printer's MCP" }
+    private var printer: String { project.print?.destination?.name ?? store.catalog?.resolved(project.printerDestinationId)?.name ?? "Your printer" }
+    private var via: String { store.catalog?.resolved(project.printerDestinationId)?.via ?? "the printer's MCP" }
     private var words: ConfirmationWords { ConfirmationWords(message: question.message, fileName: project.print?.jobName) }
     private var resuming: Bool { project.print?.live?.state == "paused" }
 
@@ -43,7 +43,7 @@ struct PrintConfirmSheet: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(16)
                                 .glassEffect(.regular, in: .rect(cornerRadius: 24))
-                                .disabled(working || left == 0)
+                                .disabled(working || left == 0 || store.away)
                         }
                         if let problem { Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red) }
                     }
@@ -58,7 +58,7 @@ struct PrintConfirmSheet: View {
                             Text(working ? (resuming ? "Resuming…" : "Starting…") : (resuming ? "Resume" : "Start Print")).fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 44)
                         }
                         .buttonStyle(.glassProminent).controlSize(.large)
-                        .disabled(working || !question.canAccept(values, atMs: now))
+                        .disabled(working || store.away || !question.canAccept(values, atMs: now))
                         .accessibilityIdentifier("start-print")
                         Text(left > 0 ? "Nothing goes to the printer until you confirm · \(Self.clock(left)) left" : "This question expired. Try \(resuming ? "Resume" : "Print") again for a new question.")
                             .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -141,7 +141,7 @@ struct AnswerOnMacSheet: View {
     @State private var problem: String?
 
     private var printer: String { project.print?.destination?.name ?? "Your printer" }
-    private var via: String { store.catalog?.destination(project.printerDestinationId)?.via ?? "The printer's MCP" }
+    private var via: String { store.catalog?.resolved(project.printerDestinationId)?.via ?? "The printer's MCP" }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -189,12 +189,12 @@ struct AnswerOnMacSheet: View {
                             }
                             .buttonStyle(.glassProminent)
                             Button(role: .destructive) { cancel() } label: { Text(working ? "Stopping…" : "Don't Print").frame(maxWidth: .infinity).frame(height: 44) }
-                                .buttonStyle(.glass).disabled(working)
+                                .buttonStyle(.glass).disabled(working || store.away)
                         } else {
                             Button(role: .destructive) { cancel() } label: {
                                 Text(working ? "Stopping…" : "Don't Print").fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 44)
                             }
-                            .buttonStyle(.glassProminent).tint(.red).disabled(working)
+                            .buttonStyle(.glassProminent).tint(.red).disabled(working || store.away)
                             Button { dismiss() } label: { Text("Not Now").frame(maxWidth: .infinity).frame(height: 44) }
                                 .buttonStyle(.glass)
                         }
@@ -225,6 +225,8 @@ struct AnswerOnMacSheet: View {
 
 /// Shows the printer's own question as a sheet once when it arrives (from Print, Pause, Resume or Stop),
 /// wherever the project is on screen; `confirming` reopens it.
+private struct QuestionKey: Equatable { let id: String?; let away: Bool }
+
 struct PrinterQuestion: ViewModifier {
     let store: ProjectsStore
     let project: Project?
@@ -233,8 +235,10 @@ struct PrinterQuestion: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: project?.printConfirmation?.id, initial: true) { _, id in
-                guard let id else { confirming = nil; return }
+            // Not from a copy the phone kept while the Mac isn't answering (X100): it comes up when the Mac answers.
+            .onChange(of: QuestionKey(id: project?.printConfirmation?.id, away: store.away), initial: true) { _, key in
+                guard let id = key.id else { confirming = nil; return }
+                guard !key.away else { confirming = nil; return }
                 guard !shown.contains(id) else { return }
                 shown.insert(id)
                 confirming = IdentifiedProject(id: id)

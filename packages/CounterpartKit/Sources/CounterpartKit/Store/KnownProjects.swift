@@ -5,7 +5,8 @@ import Foundation
 /// day, so a dropped link is his everyday case). Nov 10, the screenshot tool under `away`: 18 of 20 project pages were
 /// replaced by "Couldn't load project" although the phone had loaded every one of them from the list a moment before.
 ///
-/// One file per Mac (`mac` is the pairing's base URL): another Mac's projects are never shown as this one's.
+/// One file, for one Mac: `mac` is who the Mac is (its pin, or its address when it has none, `key(for:)`), so another
+/// Mac's projects are never shown as this one's, even at the same address. It stays on this device: excluded from backups.
 public struct KnownProjects: Codable, Equatable, Sendable {
     public var mac: String
     public var projects: [Project]
@@ -27,6 +28,22 @@ public struct KnownProjects: Codable, Equatable, Sendable {
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard let data = try? JSONEncoder().encode(self) else { return }
         try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        var file = url
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try? file.setResourceValues(values)
+    }
+
+    /// Who the paired Mac is, for the file's key: its pin (the same Mac at any address), else its base URL (a pairing
+    /// without a pin), nil when nothing is paired.
+    public static func key(for status: PairingStatus?) -> String? {
+        guard let status, status.state != .disconnected else { return nil }
+        return status.pin.map { "pin:" + $0 } ?? status.baseUrl
+    }
+
+    /// The saved copy whatever Mac it is for, to tell whether it belongs to another one.
+    public static func owner(of url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url), let known = try? JSONDecoder().decode(KnownProjects.self, from: data) else { return nil }
+        return known.mac
     }
 
     /// The Mac answered with these projects now (`at`); every other saved project keeps its own time.
@@ -49,9 +66,11 @@ public struct KnownProjects: Codable, Equatable, Sendable {
 
     /// The one line a page shows over what the phone already had while the Mac isn't answering: that it isn't, and when
     /// what is shown was true. `heard` nil (never answered on this phone) says only the first half.
-    public static func awayLine(heard: Date?, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current) -> String {
-        guard let heard else { return "Your Mac isn’t answering, so Print and Send wait. This is what your phone already had." }
-        return "Your Mac isn’t answering, so Print and Send wait. This is what your phone had \(when(heard, now: now, calendar: calendar, locale: locale))."
+    /// `checking`: restored at launch and the Mac hasn't answered yet, so this is said without claiming it is down.
+    public static func awayLine(heard: Date?, checking: Bool = false, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current) -> String {
+        let first = checking ? "Checking with your Mac, so anything that needs it waits." : "Your Mac isn’t answering, so anything that needs it waits."
+        guard let heard else { return "\(first) This is what your phone already had." }
+        return "\(first) This is what your phone had \(when(heard, now: now, calendar: calendar, locale: locale))."
     }
 
     /// "at 4:12 PM", "yesterday at 4:12 PM", "on Nov 8 at 4:12 PM".

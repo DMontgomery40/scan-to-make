@@ -137,15 +137,16 @@ class MainActivity : ComponentActivity() {
                     pairAgain = { nav.navigate("pair") },
                 )
             }
-            composable("new?job={job}", arguments = listOf(navArgument("job") { type = NavType.StringType; nullable = true; defaultValue = null })) { entry ->
-                NewProjectScreen(job = entry.arguments?.getString("job"), close = { nav.popBackStack() },
+            composable("new?job={job}&seed={seed}", arguments = listOf(navArgument("job") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("seed") { type = NavType.StringType; nullable = true; defaultValue = null })) { entry ->
+                NewProjectScreen(job = entry.arguments?.getString("job"), seed = entry.arguments?.getString("seed"), close = { nav.popBackStack() },
                     started = { id -> nav.popBackStack(); nav.navigate("project/$id") },
                     scan = { id -> nav.navigate("scan/$id") })
             }
             composable("project/{id}") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable
                 ProjectScreen(id, back = { nav.popBackStack() }, print = { nav.navigate("print/$id") }, printing = { nav.navigate("printing/$id") },
-                    scan = { nav.navigate("scan/$id") })
+                    scan = { nav.navigate("scan/$id") }, makeFromScan = { nav.navigate("new?seed=$id") }, open = { other -> nav.navigate("project/$other") })
             }
             composable("print/{id}") { entry ->
                 val id = entry.arguments?.getString("id") ?: return@composable

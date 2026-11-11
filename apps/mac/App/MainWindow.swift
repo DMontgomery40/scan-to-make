@@ -12,12 +12,15 @@ import ControlKit
 
 struct MainWindow: View {
     @ObservedObject var model: ObjectsModel
+    @ObservedObject private var opened = OpenedFiles.shared
     @State private var inspector = true
     @State private var deleting: Project?
     @State private var stopping: Project?
     @State private var newProject: NewProjectDraft?
     @State private var printing: Project?
     @State private var editorError: String?
+    /// An opened file New Project can't use, named (`ObjectsModel.refusal`).
+    @State private var openRefusal: String?
     /// "Opened in Blender", for a moment.
     @State private var editorNote: String?
 
@@ -45,13 +48,19 @@ struct MainWindow: View {
         .onDisappear { model.setVisible(false); ModelStage.releaseCachedModels() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in model.wake() }
         .dropDestination(for: URL.self) { urls, _ in
-            let usable = urls.filter { ObjectsModel.fileKind($0) != nil }
-            guard !usable.isEmpty, newProject == nil else { return false }
-            startNewProject(NewProjectDraft(files: usable))
+            guard newProject == nil, let draft = NewProjectDraft.from(urls) else { return false }
+            startNewProject(draft)
             return true
         }
+        .modifier(OpenedFilesHandler(opened: opened, composing: newProject != nil, refusal: $openRefusal) { startNewProject($0) })
         .onChange(of: model.selection) { _, selection in if selection != nil { newProject = nil } }
         .onChange(of: newProject) { _, draft in model.composing = draft != nil }
+        // A project's "Make something else from this scan": New, holding that scan (design §3.3).
+        .onChange(of: model.makingFromScan) { _, source in
+            guard let source else { return }
+            model.makingFromScan = nil
+            startNewProject(NewProjectDraft(seed: source))
+        }
         .onAppear {
             #if DEBUG
             if DesignFixtures.assets != nil, DesignFixtures.screen == "new" { startNewProject(NewProjectDraft()) }
@@ -473,6 +482,27 @@ enum ModelEditor {
         guard let copy = try? editorCopy(source) else { return "The model couldn’t be copied for the other app." }
         workspace.open([copy], withApplicationAt: application, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
         return nil
+    }
+}
+
+/// A file opened with Counterpart, or from File ▸ Open…: the same as dropping it on the window. With New Project
+/// already open, the pane takes it as a drop on its drop zone. Files it can't use are named: in the drop zone beside
+/// the ones it took, or alone in an alert.
+private struct OpenedFilesHandler: ViewModifier {
+    @ObservedObject var opened: OpenedFiles
+    let composing: Bool
+    @Binding var refusal: String?
+    let start: (NewProjectDraft) -> Void
+    func body(content: Content) -> some View {
+        content
+            .onReceive(opened.$waiting) { waiting in
+                guard !waiting.isEmpty, !composing else { return }
+                let urls = opened.take()
+                if let draft = NewProjectDraft.from(urls) { start(draft) } else { refusal = ObjectsModel.refusal(for: urls) }
+            }
+            .alert("Couldn’t Open That File", isPresented: Binding(get: { refusal != nil }, set: { if !$0 { refusal = nil } })) {
+                Button("OK", role: .cancel) { refusal = nil }
+            } message: { Text(refusal ?? "") }
     }
 }
 

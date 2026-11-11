@@ -1,9 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, lightStage, photoPicture, still } from "../src/gallery";
+import { canLocate, gallery, drawnColour, photoPicture, still } from "../src/gallery";
 import {
+  MAKE_FROM_SCAN, FIT_CHOICE, COPY_CHOICE, USE_EXISTING_SCAN, canMakeFromScan, scanLineage, scansToReuse, scannedLine,
+  FIT_SIZE_SOURCES, fitSizeDetail, fitMissing, makeFromScanParams, newFitChoice,
   pageActions,
+  projectPage,
   codeEngineRow,
   passEnding,
   stageMark,
@@ -756,14 +759,13 @@ test("a search result whose title lacks the words says where it matched (first l
   assert.equal(searchSnippet(hanger, "  "), undefined);
 });
 
-// A part stays readable on its stage: the same rule as CounterpartKit StageContrast.
-test("black and a dark blue grey move to the light stage; white, yellow and the neutral stay dark", () => {
-  assert.equal(lightStage("#000000"), true);
-  assert.equal(lightStage("#5B6579"), true);
-  assert.equal(lightStage("#FFFFFF"), false);
-  assert.equal(lightStage("#FEC600"), false);
-  assert.equal(lightStage("neutral"), false);
-  assert.equal(lightStage("own"), false);
+// The stage stays dark for every colour (David, Nov 11): a dark part is floored in its material, the same
+// values as CounterpartKit StageMaterial and the Mac's still pictures, from the shared fixture.
+test("every filament colour stays readable on the dark stage", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-gallery.json", import.meta.url), "utf8"));
+  for (const [spool, want] of Object.entries<string>(doc.stage.drawnColours)) assert.equal(drawnColour(spool), want, spool);
+  assert.equal(drawnColour("#000000"), "#333435", "a true black filament is drawn as charcoal, not a silhouette");
+  assert.equal(drawnColour("#5B6579"), "#5B6579", "blue grey is already above the floor");
 });
 
 test("a pass that stopped to ask or stopped short never reads as all ticks", () => {
@@ -872,6 +874,20 @@ test("every project state has its one main action, as on every layout (main-acti
   }
 });
 
+test("the page reads what the companion keeps: no Did it fit? without projectSettings (review of #527 part 4, S1)", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/main-actions.json", import.meta.url), "utf8"));
+  const row = doc.rows.find((r: { name: string }) => r.name === "printed-older-mac");
+  const printed = { title: "", ...row.project } as Project;
+  for (const capabilities of [undefined, {}, { projectSettings: false }]) {
+    const { page, fit } = projectPage(printed, capabilities);
+    assert.equal(page.main, "print", `${JSON.stringify(capabilities)}: Print leads`);
+    assert.equal(fit, undefined, `${JSON.stringify(capabilities)}: no Did it fit? the companion can't keep`);
+  }
+  const { page, fit } = projectPage(printed, { projectSettings: true });
+  assert.equal(page.main, "itWorks");
+  assert.ok(fit, "a companion that keeps the answer asks");
+});
+
 test("search reasons survive a project without a title, and never cut an emoji in half (review F5)", () => {
   const untitled = { ...project, title: undefined, instructions: "A hook for the stroller handle", messages: [] } as unknown as Project;
   const reason = searchSnippet(untitled, "stroller");
@@ -903,3 +919,47 @@ test("a project's printer saved under one of the catalog's aliases is that print
   assert.equal(resolvedPrinter(printers, "Printer"), undefined, "a matching display name is not identity evidence");
 });
 
+
+test("make something else from this scan: every project with a scan offers it, and both pages say where the scan came from", () => {
+  const base = { photos: [], passes: [], state: "ready" } as unknown as Project;
+  const leatherman = { ...base, id: "src", title: "Leatherman Wave+ replica", kind: "copy", scan: "scan.usdz", createdAtMs: 1000 } as Project;
+  const made = (id: string, title: string, ms: number) => ({ ...base, id, title, kind: "fit", scan: "scan.usdz", createdAtMs: ms,
+    scanFrom: { id: "src", title: "Leatherman Wave+ replica" } }) as Project;
+  const belt = made("belt", "Belt case", 2000), clip = made("clip", "Pocket clip", 3000);
+  assert.equal(MAKE_FROM_SCAN, "Make something else from this scan");
+  assert.equal(FIT_CHOICE, "Make something that fits this");
+  assert.equal(COPY_CHOICE, "Copy this object");
+  assert.equal(USE_EXISTING_SCAN, "Use a scan you already have");
+  assert.ok(canMakeFromScan(leatherman), "a copy's scan can become a fit");
+  assert.ok(!canMakeFromScan({ ...base, capture: ["0001.heic"] } as Project));
+  assert.equal(scanLineage(belt, [leatherman, belt, clip]).fromLine, "Uses the scan from “Leatherman Wave+ replica”");
+  assert.equal(scanLineage(leatherman, [leatherman, belt]).madeLine, "Also made from this scan: “Belt case”");
+  assert.equal(scanLineage(leatherman, [leatherman, belt, clip]).madeLine, "Also made from this scan: 2 projects");
+  assert.deepEqual(scanLineage(leatherman, [leatherman, belt, clip]).made.map((l) => l.id), ["clip", "belt"]);
+  assert.equal(scanLineage(belt, [{ ...leatherman, title: "Leatherman Wave+" }, belt]).fromLine, "Uses the scan from “Leatherman Wave+”");
+  const gone = scanLineage(belt, [belt]);
+  assert.equal(gone.fromLine, "Uses the scan from “Leatherman Wave+ replica”, since deleted");
+  assert.equal(gone.from?.exists, false);
+  assert.deepEqual(scansToReuse([leatherman, { ...base, id: "w", title: "Hook", createdAtMs: 9000 } as Project, belt]).map((p) => p.id), ["belt", "src"]);
+  assert.equal(scannedLine({ createdAtMs: 1_762_243_200_000 }, "America/Denver"), "scanned Nov 4");
+});
+
+test("a fit made from a kept scan sends how its size is settled, starting on Use scan, as the iPhone and the Mac do", () => {
+  const id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01";
+  // The same words as CounterpartKit's ProjectFit.SizeSource.
+  assert.deepEqual(FIT_SIZE_SOURCES.map(([, label]) => label), ["Look up", "I measured", "Use scan"]);
+  assert.match(fitSizeDetail("scan"), /^Uses the scan's size as an estimate\. Best for loose holders; your computer says the clearance it allowed\.$/);
+  const choice = newFitChoice();
+  assert.equal(choice.source, "scan", "the scan is the thing it must fit");
+  assert.deepEqual(makeFromScanParams(id, "fit", " A belt case for it ", choice),
+    { id, kind: "fit", instructions: "A belt case for it", fit: { sizeSource: "scan" } });
+  const measured = { ...choice, source: "measured" as const, longest: "115,5", shortest: "" };
+  assert.equal(fitMissing(measured), undefined);
+  assert.deepEqual(makeFromScanParams(id, "fit", "A sheath", measured).fit,
+    { sizeSource: "measured", measured: [{ id: "longest", label: "longest side", mm: 115.5 }] });
+  assert.equal(fitMissing({ ...measured, longest: "" }), "Enter at least one measurement in millimetres.");
+  assert.equal(fitMissing({ ...measured, middle: "wide" }), "Enter at least one measurement in millimetres.");
+  // A copy, or a fit with no words yet, sends no fit.
+  assert.deepEqual(makeFromScanParams(id, "copy", "", choice), { id, kind: "copy" });
+  assert.equal(makeFromScanParams(id, "fit", "  ", choice).fit, undefined);
+});

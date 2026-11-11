@@ -12,7 +12,8 @@ struct ProjectGalleryView: View {
     let words: ProjectWords
     let height: CGFloat
     let modelURL: URL?
-    let arURL: URL?
+    /// The part's AR file once the AR chip has prepared it (the page's Share offers it too).
+    @Binding var arURL: URL?
     /// The scan while it is still only on this phone (before the Mac has it).
     let localScan: URL?
     var working = false
@@ -26,6 +27,10 @@ struct ProjectGalleryView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var measured: [String: [Double]] = [:]
     @State private var showingPhotos = false
+    /// The part's AR file is being written (`ARModel.usdz`), or couldn't be.
+    @State private var arPreparing = false
+    @State private var arFailed = false
+    @State private var arTask: Task<Void, Never>?
 
     private var gallery: ProjectGallery { ProjectGallery(project: project, scanOnThisDevice: localScan != nil) }
     private var entry: ProjectGallery.Entry? {
@@ -42,6 +47,10 @@ struct ProjectGalleryView: View {
             if let entry { unavailable(entry) }
             if gallery.entries.count > 1 { labels }
         }
+        .onChange(of: "\(modelURL?.path ?? "")#\(project.spoolColour ?? "")") { cancelAR(); arFailed = false }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { cancelAR() } }
+        .onChange(of: selected) { cancelAR(); arFailed = false }
+        .onDisappear { cancelAR() }
         .task(id: "\(project.id)#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(String(describing: project.scanFiles))#\(scenePhase)") {
             // The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to
             // the app starts again one that failed meanwhile (a suspended app's transfer drops).
@@ -73,11 +82,14 @@ struct ProjectGalleryView: View {
     private func still(_ entry: ProjectGallery.Entry) -> StagePicture {
         let problem = modelProblem(entry)
         // The model can't be had either: the stage's one line says both; its Try Again also retries the model when that can help.
+        // When the Mac couldn't draw a picture at all, that is what the line says beside the model's reason (review S4).
+        let still = project.still(for: entry)
+        let neverDrawn = still == .notAvailable
         let missing: (line: String, retry: (() -> Void)?)? = problem.map { problem in
             let retry: (() -> Void)? = problem.reason.retryable ? problem.path.map { path in { store.models.retry(project, path) } } : nil
-            return (problem.reason.line(entry.kind, pictureToo: true), retry)
+            return (problem.reason.line(entry.kind, pictureToo: true, neverDrawn: neverDrawn), retry)
         }
-        return StagePicture(project: project, still: project.still(for: entry), label: entry.label,
+        return StagePicture(project: project, still: still, label: entry.label,
                             unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.",
                             modelMissing: missing,
                             failedChanged: { failed in if failed { pictureFailed.insert(entry.id) } else { pictureFailed.remove(entry.id) } },
@@ -91,7 +103,8 @@ struct ProjectGalleryView: View {
         let (path, model): (String?, Project.ScanModel?) = switch entry.drawing {
         case .model(let drawn) where drawn == "model.stl": ("model.stl", nil)
         case .model: (nil, scanURL == nil ? scanModel : nil)
-        case .assembly: (nil, togetherScanURL == nil ? togetherModel : nil)
+        // Together needs both: the scan, and the part (review S4: with the scan here and the part missing it said nothing).
+        case .assembly: togetherScanURL == nil ? (nil, togetherModel) : (modelURL == nil ? "model.stl" : nil, nil)
         case .picture: (nil, nil)
         }
         let fetch: ModelFiles.Fetch? = if let path { modelURL == nil ? store.models.fetch(project, path) : nil }
@@ -110,7 +123,7 @@ struct ProjectGalleryView: View {
     /// state is the stage's (`StagePicture`), never a second line here.
     @ViewBuilder private func unavailable(_ entry: ProjectGallery.Entry) -> some View {
         // The picture failed too: the stage already says both in one line, with one Try Again for both.
-        if let problem = modelProblem(entry), !pictureFailed.contains(entry.id) {
+        if let problem = modelProblem(entry), !pictureFailed.contains(entry.id), project.still(for: entry) != .notAvailable {
             if problem.reason.retryable {
                 HStack(spacing: 8) {
                     Text(problem.reason.line(entry.kind)).font(.footnote).foregroundStyle(.secondary)
@@ -135,13 +148,13 @@ struct ProjectGalleryView: View {
             switch entry.drawing {
             case .model(let path):
                 ModelStage(url: path == "model.stl" ? modelURL : scanURL, tint: tint(entry.colour),
-                           lightStage: StageContrast.lightStage(for: entry.colour), measured: { drawn(entry, $0) },
+                           measured: { drawn(entry, $0) },
                            placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
                            drawn: { undrawable.remove(entry.id) })
                     .id(entry.id)
             case .assembly(_, _, let seats):
                 // Both models or neither: a part with no scan at its seats would not be Together.
-                ModelStage(url: togetherScanURL == nil ? nil : modelURL, tint: tint(entry.colour), lightStage: StageContrast.lightStage(for: entry.colour),
+                ModelStage(url: togetherScanURL == nil ? nil : modelURL, tint: tint(entry.colour),
                            object: togetherScanURL, seats: seats.map(\.matrix), measured: { drawn(entry, $0) }, placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
                            drawn: { undrawable.remove(entry.id) })
                     .id(entry.id)
@@ -165,8 +178,10 @@ struct ProjectGalleryView: View {
         undrawable.remove(entry.id)
     }
 
+    /// The stage's material colour for a spool: floored so a dark filament reads on the dark stage
+    /// (CounterpartKit `StageMaterial`); swatches and names elsewhere keep the spool's real colour.
     private func tint(_ colour: ProjectGallery.Colour) -> UIColor? {
-        guard case .spool(let hex) = colour, let value = Int(hex.dropFirst().prefix(6), radix: 16) else { return nil }
+        guard let hex = StageMaterial.drawnHex(for: colour), let value = Int(hex.dropFirst().prefix(6), radix: 16) else { return nil }
         return UIColor(red: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
     }
 
@@ -178,26 +193,22 @@ struct ProjectGalleryView: View {
 
     @ViewBuilder private var controls: some View {
         if let entry {
-            let light = StageContrast.lightStage(for: entry.colour)
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
-                    if let ar = arTarget(entry) {
-                        Button { ARModel.show(ar) } label: { Label("AR", systemImage: "arkit") }.stageButton(light: light)
-                            .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
-                    }
+                    if let ar = arChip(entry) { arButton(ar) }
                     if entry.kind == .scan, !entry.photos.isEmpty {
                         Button { showingPhotos = true } label: { Label(entry.photos.count == 1 ? "1 photo" : "\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
-                            .stageButton(light: light).accessibilityIdentifier("gallery-photos")
+                            .stageButton().accessibilityIdentifier("gallery-photos")
                     }
                     if entry.kind == .part, let locate, project.canLocate {
                         Button(action: locate) { Label("See it together", systemImage: "cube.transparent") }
-                            .stageButton(light: light).disabled(working).accessibilityIdentifier("gallery-locate")
+                            .stageButton().disabled(working).accessibilityIdentifier("gallery-locate")
                             .accessibilityHint("Your Mac works out where the scanned object sits in this part, without changing it")
                     }
                     Spacer(minLength: 0)
                     if let size = entry.sizeText(measured[entry.id]) {
                         Text(size).font(.caption.monospacedDigit().weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                            .padding(.horizontal, 12).padding(.vertical, 8).stageChip(light: light)
+                            .padding(.horizontal, 12).padding(.vertical, 8).stageChip()
                             .accessibilityLabel("\(entry.measures) size \(size)").accessibilityIdentifier("gallery-size")
                     }
                 }
@@ -208,13 +219,78 @@ struct ProjectGalleryView: View {
         }
     }
 
-    private func arTarget(_ entry: ProjectGallery.Entry) -> URL? {
+    // MARK: AR: one control, for what the stage shows
+
+    /// What the stage's AR chip can do for an entry (Nov 11: one AR control, not a chip and a second button). A part is
+    /// prepared on tap; the scan is Object Capture's own USDZ. Together, a plate and a multi-colour 3MF's picture have no
+    /// AR file the phone can make, so they offer none.
+    enum ARChip: Equatable { case show(URL), prepare(URL), preparing, failed(URL), failedScan(URL), needsMac }
+
+    private func arChip(_ entry: ProjectGallery.Entry) -> ARChip? {
         switch entry.kind {
-        case .part: arURL
-        case .scan: scanURL.flatMap { $0.pathExtension.lowercased() == "usdz" ? $0 : nil }
-        default: nil
+        case .part:
+            guard case .model(let path) = entry.drawing, path == "model.stl" else { return nil }
+            if arPreparing { return .preparing }
+            if let arURL { return .show(arURL) }
+            if let modelURL { return arFailed ? .failed(modelURL) : .prepare(modelURL) }
+            return store.away ? .needsMac : nil
+        case .scan:
+            if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return arFailed ? .failedScan(scanURL) : .show(scanURL) }
+            if case .file = scanModel, store.away { return .needsMac }
+            return nil
+        case .together, .plate:
+            return nil
         }
     }
+
+    @ViewBuilder private func arButton(_ chip: ARChip) -> some View {
+        switch chip {
+        case .show(let url):
+            Button {
+                // A file that went away meanwhile (the cache was cleared) is made again rather than showing nothing.
+                if !ARModel.show(url) {
+                    arFailed = true
+                    if let modelURL, url == arURL { arURL = nil; prepareAR(modelURL) }
+                }
+            } label: { Label("AR", systemImage: "arkit") }
+                .stageButton().accessibilityValue("ready")
+                .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
+        case .prepare(let stl):
+            Button { prepareAR(stl) } label: { Label("AR", systemImage: "arkit") }
+                .stageButton().accessibilityValue("ready")
+                .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
+        case .preparing:
+            Button {} label: { HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Preparing AR…") } }
+                .stageButton().disabled(true).accessibilityValue("preparing").accessibilityIdentifier("gallery-ar")
+        case .failed(let stl):
+            Button { prepareAR(stl) } label: { Label("AR didn’t open. Try Again", systemImage: "arkit") }
+                .stageButton().accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
+        case .failedScan(let url):
+            Button { arFailed = !ARModel.show(url) } label: { Label("AR didn’t open. Try Again", systemImage: "arkit") }
+                .stageButton().accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
+        case .needsMac:
+            Button {} label: { Label("AR needs your Mac", systemImage: "arkit") }
+                .stageButton().disabled(true).accessibilityValue("needs-mac")
+                .accessibilityHint("Your Mac isn’t answering and the model isn’t on this iPhone yet").accessibilityIdentifier("gallery-ar")
+        }
+    }
+
+    /// Writes the part's USDZ (seconds for a large part), then opens AR Quick Look on it.
+    private func prepareAR(_ stl: URL) {
+        arTask?.cancel()
+        arPreparing = true; arFailed = false
+        let tint = project.spoolColour, scene = String(describing: scenePhase)
+        arTask = Task {
+            let prepared = await MediaTrace.$context.withValue(MediaTrace.Context(file: stl, scene: scene)) {
+                await ARModel.usdz(fromSTL: stl, tint: tint)
+            }
+            guard !Task.isCancelled else { return }
+            arPreparing = false
+            if let prepared, ARModel.show(prepared) { arURL = prepared } else { arFailed = true }
+        }
+    }
+
+    private func cancelAR() { arTask?.cancel(); arTask = nil; arPreparing = false }
 
     // MARK: Labels
 

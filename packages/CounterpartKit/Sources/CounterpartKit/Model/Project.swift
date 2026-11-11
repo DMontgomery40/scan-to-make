@@ -125,6 +125,15 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var bytes: Double
         public init(name: String, bytes: Double) { self.name = name; self.bytes = bytes }
     }
+    /// The project whose scan this one was made from ("Make something else from this scan"), with its title when it was
+    /// made: the page says where its scan came from even after that one is renamed or deleted. A build that doesn't know
+    /// the field ignores it.
+    public var scanFrom: ScanSource?
+    public struct ScanSource: Codable, Equatable, Sendable {
+        public var id: String
+        public var title: String
+        public init(id: String, title: String) { self.id = id; self.title = title }
+    }
     /// Published model attribution and files from the companion, retained for shared search.
     public var credit: JSONValue?
     public var files: JSONValue?
@@ -154,7 +163,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, scanFrom, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -175,6 +184,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         completion = optional(Completion.self, .completion)
         credit = optional(JSONValue.self, .credit)
         scanFiles = optional([ScanFile].self, .scanFiles)
+        scanFrom = optional(ScanSource.self, .scanFrom)
         files = optional(JSONValue.self, .files)
         plates = optional([ProjectPlate].self, .plates)
         publishedSelection = optional(PublishedSelection.self, .publishedSelection)
@@ -214,6 +224,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     /// A scan (walk-around or in hand) reached the Mac.
     public var hasScan: Bool { scan != nil || !(capture ?? []).isEmpty }
+    /// The Mac has this project's scan, so something else can be made from it without scanning again (design §3.3):
+    /// on any project with one, whatever its kind.
+    public var canMakeFromScan: Bool { scan != nil }
 
     /// Progress updates do not change saved media. A finished pass can replace the model and renders at the
     /// same paths, so their cached copies expire only when a pass finishes.

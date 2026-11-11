@@ -38,18 +38,8 @@ extension ProjectPhase {
     var color: Color { tone.color }
 }
 
-/// The dark stage behind models and photos.
-/// The light stage (CounterpartKit `StageContrast`): a part that would be a silhouette on the dark stage (black, a
-/// dark blue grey) is drawn on light grey, so it reads at arm's length.
-struct LightStageBackground: View {
-    var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(red: 0.86, green: 0.87, blue: 0.89), Color(red: 0.70, green: 0.71, blue: 0.74)], startPoint: .top, endPoint: .bottom)
-            RadialGradient(colors: [Color.white.opacity(0.35), .clear], center: .init(x: 0.5, y: 0.62), startRadius: 4, endRadius: 220)
-        }
-    }
-}
-
+/// The dark stage behind models and photos: dark for every part, however dark its filament (a dark part is
+/// floored in its material, CounterpartKit `StageMaterial`, never by lightening the stage).
 struct StageBackground: View {
     var body: some View {
         ZStack {

@@ -2,6 +2,7 @@ import {starterModelId, starterProject as bundledStarter, type StarterProject} f
 import {acknowledgePlate, plateNeedsPrinterCheck, projectPlates, retainedPlateProgress, selectedPlateIdentity, selectingPlate} from './plates.js';
 import {copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {createHash, randomUUID} from 'node:crypto';
+import {constants as fsConstants} from 'node:fs';
 import {homedir, tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -168,6 +169,8 @@ function photoName(path: string, taken: string[]): string {
   while (used.has(name.toLowerCase())) name = `${stem}-${n++}${extension}`;
   return name;
 }
+/** Making something from a scan whose phone hasn't finished sending it (its preview came, its photos are still to come). */
+const SCAN_STILL_ARRIVING = 'This scan is still arriving from the phone that recorded it. Finish sending it from that phone, then make something from it.';
 const CAPTURE_PENDING = 'The capture is still missing camera or depth files, or its completed file list. Resume sending it from the phone that recorded it.';
 /** The design's Linux gate: an iPhone's Object Capture scan is rebuilt only by a Mac (PhotogrammetrySession). */
 export const SCANS_NEED_A_MAC = 'Scans from iPhone are rebuilt on a Mac. Pair this iPhone with a Mac to use Scan it.';
@@ -377,6 +380,11 @@ interface Rebuilt { scan: string; photos?: number; inputs?: ReconstructInputs; f
 
 /** Below this many photos a walk-around rarely rebuilds whole (the phone's Done waits for 60, from two heights). */
 export const ENOUGH_PHOTOS = 60;
+
+/** A project made from another's scan while that scan's files are being copied in (design §3.3). */
+export function bringingScan(title: string): string {
+  return `Bringing over the scan from “${title}”.`;
+}
 
 /** A walk-around with too few photos that Apple couldn't rebuild, said plainly. */
 export function tooFewPhotos(count: number): string {
@@ -686,6 +694,98 @@ export class ObjectService {
         return this.#changed(result);
       } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }
     });
+  }
+
+  /**
+   * Make something else from this scan (things-and-versions design §3.3): a new project, of the kind the person chose
+   * and with their words, seeded with a copy of this project's scan, its photos and capture data, and its checked sizes.
+   * Nothing is shared, so either project can be deleted without breaking the other. It returns at once with the new
+   * project saying the scan is being brought over; the files follow (an APFS clone where it can, a copy elsewhere), and
+   * its pass starts when they are all here. The source is not changed.
+   */
+  makeFromScan(sourceId: string, request: {kind: 'fit' | 'copy'; instructions?: string; fit?: Fit}): Promise<StmObject> {
+    return this.#gate(sourceId, async () => {
+      const source = await this.get(sourceId);
+      if (!source.scan) throw new InvalidStateError(source.capture?.length
+        ? 'Your Mac hasn’t finished building this scan yet. Wait until it has, then make something from it.'
+        : 'This project has no scan to make something from.');
+      // A rebuild from the photos writes the scan again: copying it halfway would copy half a scan.
+      if (source.state === 'touching-up' && source.progress) throw new InvalidStateError('Your Mac is still building this scan. Wait until it has finished.');
+      // A walk-around whose phone sent its preview but never finished sending its photos: copied now, it would be designed
+      // from the preview, and the Mac's rebuild from every photo would never run.
+      if (source.captureDeclared) throw new InvalidStateError(SCAN_STILL_ARRIVING);
+      const words = request.instructions?.trim();
+      if (request.kind === 'fit' && !words) throw new InvalidStateError('Say what it should hold, mount or adapt to.');
+      const title = projectTitle(source);
+      const created = await this.#deps.store.create(words, request.kind, request.kind === 'fit' ? request.fit : undefined);
+      // Busy while the files come: nothing can start, change or delete it halfway, and a restart says it was interrupted.
+      const seeded = await this.#deps.store.update(created.id, o => ({...o, state: 'touching-up', progress: bringingScan(title), scanFrom: {id: sourceId, title}}));
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: seeded.id, data: {keys: ['created']}});
+      void this.#gate(seeded.id, () => this.#bringScan(seeded.id)).catch(() => undefined);
+      return this.#changed(seeded);
+    });
+  }
+
+  /**
+   * Copies the scan from the project `scanFrom` names into this one, then starts its pass. On failure the project says
+   * so in words that name the source, and Try Again (start) runs this again. Called inside this project's gate.
+   */
+  async #bringScan(id: string): Promise<StmObject> {
+    const object = await this.get(id);
+    const from = object.scanFrom;
+    if (!from) throw new InvalidStateError('This project has no scan to bring over.');
+    // Once the files are in, a pass that can't start (AI off, say) fails in its own words, not as a failed copy.
+    let copied = false;
+    try {
+      // The source's gate too: it can't be deleted, nor its scan rebuilt, while its files are read.
+      await this.#gate(from.id, async () => {
+        let source: StmObject;
+        try { source = await this.get(from.id); } catch (error) {
+          if (error instanceof ObjectNotFoundError) throw new InvalidStateError(`“${from.title}” has been deleted, so its scan can’t be brought over. Scan the object again.`);
+          throw error;
+        }
+        if (!source.scan) throw new InvalidStateError(`“${projectTitle(source)}” no longer has a scan to bring over.`);
+        if (source.captureDeclared) throw new InvalidStateError(SCAN_STILL_ARRIVING);
+        // Photos sent with a message not yet asked are that message's: they never become the new project's evidence.
+        const pending = new Set(source.pendingPhotos ?? []);
+        const photos = source.photos.filter(name => !pending.has(name));
+        const target = this.dir(id), origin = this.dir(from.id);
+        // Copies, never links: an APFS clone shares no file, so deleting either project leaves the other whole.
+        const copy = async (folder: string, names?: readonly string[]) => {
+          const at = join(origin, folder);
+          const listed = names ?? await readdir(at).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [] as string[]; throw error; });
+          if (!listed.length) return;
+          await mkdir(join(target, folder), {recursive: true});
+          for (const name of listed) {
+            if (!name || name.includes('/') || name === '.' || name === '..') continue;
+            const info = await lstat(join(at, name)).catch(() => undefined);
+            if (!info?.isFile()) continue;
+            await copyFile(join(at, name), join(target, folder, name), fsConstants.COPYFILE_FICLONE);
+          }
+        };
+        await copy('scan');
+        await copy('photos', photos);
+        // The capture's photos, depth and camera file: a scan still on the phone's preview is rebuilt from them here.
+        await copy('capture');
+        await this.#deps.store.update(id, o => ({...o, state: 'new', progress: undefined, failure: undefined, scan: source.scan, photos,
+          ...(source.scanSource ? {scanSource: source.scanSource} : {}), ...(source.capture?.length ? {capture: [...source.capture]} : {}),
+          ...(source.captureDepth?.length ? {captureDepth: [...source.captureDepth]} : {}),
+          ...(source.captureCompletion ? {captureCompletion: source.captureCompletion} : {}), ...(source.captureCamera ? {captureCamera: source.captureCamera} : {}),
+          ...(source.checkedSizes?.length ? {checkedSizes: source.checkedSizes} : {}),
+          scanFrom: {id: from.id, title: projectTitle(source)}}));
+      });
+      copied = true;
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['scan']}});
+      return await this.#start(id);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const failure = copied || error instanceof InvalidStateError ? reason
+        : `Counterpart couldn’t bring the scan over from “${from.title}”: ${reason.replace(/[.\s]+$/, '')}. Try again.`;
+      const failed = await this.#deps.store.update(id, o => o.state === 'touching-up' && !o.scan || o.state === 'new'
+        ? {...o, state: 'failed', progress: undefined, failure} : o).catch(() => undefined);
+      if (failed) { this.#changed(failed); await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['failure']}}); }
+      throw error;
+    }
   }
 
   /**
@@ -1456,6 +1556,14 @@ export class ObjectService {
   start(id: string, captureManifest?: unknown): Promise<StmObject> { return this.#gate(id, () => this.#start(id, captureManifest)); }
   async #start(id: string, captureManifest?: unknown): Promise<StmObject> {
     let object = await this.get(id);
+    // Made from another project's scan whose files never all came (a failure, or a restart halfway): Try Again brings them.
+    if (object.scanFrom && !object.scan && (object.state === 'failed' || object.state === 'new') && captureManifest === undefined) {
+      const waiting = await this.#deps.store.update(id, o => ({...o, state: 'touching-up', failure: undefined, progress: bringingScan(object.scanFrom!.title)}));
+      this.#changed(waiting);
+      // After this start's own turn: the copy runs in this project's gate, like the first one.
+      void this.#gate(id, () => this.#bringScan(id)).catch(() => undefined);
+      return waiting;
+    }
     // A declared walk-around starts only with its own manifest, once every image is here.
     if (captureManifest === undefined && object.captureDeclared) throw new InvalidStateError(CAPTURE_PENDING);
     if (captureManifest !== undefined) {
@@ -1492,8 +1600,9 @@ export class ObjectService {
     // Photos only show what something looks like; without a scan, the description says what to make.
     if (!object.scan && !object.capture?.length && !object.captureDepth?.length && !object.instructions?.trim() && !object.credit?.url && object.state === 'new')
       throw new InvalidStateError('Describe what to make, or add a scan.');
-    // A touch-up works from photos; a model with neither photos nor a request has nothing to go on.
-    if (object.scan && !object.photos.length && !object.capture?.length && !object.instructions?.trim() && (object.state === 'new' || object.state === 'failed'))
+    // A touch-up works from photos; a model with neither photos nor a request has nothing to go on. A scan brought over
+    // from another project with no words is a copy of it: kept as it is, like a copy's scan sent on its own.
+    if (object.scan && !object.scanFrom && !object.photos.length && !object.capture?.length && !object.instructions?.trim() && (object.state === 'new' || object.state === 'failed'))
       throw new InvalidStateError("Add photos of it, or describe what you'd like changed.");
     if (object.state === 'touching-up') return object;
     if (object.kind === 'published' && object.current && ['ready', 'needs-closeup'].includes(object.state)) return object;

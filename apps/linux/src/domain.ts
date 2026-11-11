@@ -893,6 +893,14 @@ const PRINT_NOTES: Record<string, string> = {
   "Print the last version": "Your last version is still here.",
   "Print Again": "The same file is sent to the printer again.",
 };
+/** The project page's actions and its "Did it fit?" question, from what this computer's companion says it keeps
+ *  (review of #527 part 4, S1): without `projectSettings` (or before it is known) a finished print asks nothing and
+ *  Print leads. */
+export function projectPage(p: Project, capabilities: Record<string, unknown> | undefined, sending = false) {
+  const keeps = capabilities?.projectSettings === true;
+  return { page: pageActions(p, sending, keeps), fit: keeps ? didItFitQuestion(p) : undefined };
+}
+
 /** `projectSettings`: the Mac keeps a project's status; on an older Mac a printed project asks nothing and Print leads (review S2). */
 export function pageActions(p: Project, sending = false, projectSettings = true): PageActions {
   const made = p.current ? [p.print?.uncertain ? "printChecked" : "print", "correct"] : [];
@@ -947,4 +955,81 @@ export function pageActions(p: Project, sending = false, projectSettings = true)
 export function resolvedPrinter<P extends { id: string; mcps?: { destinationId: string }[]; aliases?: string[] }>(printers: P[], id: string | undefined) {
   if (!id) return undefined;
   return printers.find((x) => x.id === id) ?? printers.find((x) => x.mcps?.some((m) => m.destinationId === id) || x.aliases?.includes(id));
+}
+
+/**
+ * "Make something else from this scan" (things-and-versions design §3.3), ported word for word from CounterpartKit's
+ * `ScanLineage`: which projects offer it, where a project's scan came from, and what else was made from it.
+ */
+export const MAKE_FROM_SCAN = "Make something else from this scan";
+export const USE_EXISTING_SCAN = "Use a scan you already have";
+export const FIT_CHOICE = "Make something that fits this";
+export const COPY_CHOICE = "Copy this object";
+/** The companion has this project's scan, whatever the project's kind. */
+export function canMakeFromScan(p: Pick<Project, "scan">) {
+  return !!p.scan;
+}
+export interface LineageLink { id: string; title: string; exists: boolean }
+export function scanLineage(p: Project, projects: Project[]) {
+  const live = p.scanFrom ? projects.find((x) => x.id === p.scanFrom!.id) : undefined;
+  const from: LineageLink | undefined = p.scanFrom
+    ? { id: p.scanFrom.id, title: live?.title ?? p.scanFrom.title, exists: !!live }
+    : undefined;
+  const made: LineageLink[] = projects
+    .filter((x) => x.scanFrom?.id === p.id && x.id !== p.id)
+    .sort((a, b) => b.createdAtMs - a.createdAtMs)
+    .map((x) => ({ id: x.id, title: x.title, exists: true }));
+  const fromLine = from
+    ? from.exists ? `Uses the scan from “${from.title}”` : `Uses the scan from “${from.title}”, since deleted`
+    : undefined;
+  const madeLine = made.length === 0 ? undefined
+    : made.length === 1 ? `Also made from this scan: “${made[0]!.title}”`
+    : `Also made from this scan: ${made.length} projects`;
+  return { from, made, fromLine, madeLine };
+}
+/** The scans New offers, newest first. */
+export function scansToReuse(projects: Project[]) {
+  return projects.filter(canMakeFromScan).sort((a, b) => b.createdAtMs - a.createdAtMs);
+}
+/** "scanned Nov 4", under a scan's project name in New. */
+export function scannedLine(p: Pick<Project, "createdAtMs">, timeZone?: string) {
+  return `scanned ${new Date(p.createdAtMs).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(timeZone ? { timeZone } : {}) })}`;
+}
+
+/**
+ * New's "Exact size" for a fit made from a kept scan, word for word from CounterpartKit's `ProjectFit.SizeSource` and
+ * `FitChoice` (the iPhone's and the Mac's): it starts on "Use scan", since the scan is the thing the new part must fit.
+ */
+export type FitSizeSource = "lookup" | "measured" | "scan";
+export const FIT_SIZE_SOURCES: readonly (readonly [FitSizeSource, string])[] = [["lookup", "Look up"], ["measured", "I measured"], ["scan", "Use scan"]];
+export function fitSizeDetail(source: FitSizeSource, computer = "your computer") {
+  const named = computer.charAt(0).toUpperCase() + computer.slice(1);
+  if (source === "lookup") return `${named} identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.`;
+  if (source === "measured") return "Measure the outside of the real thing. Leave a side blank if you don't know it.";
+  return `Uses the scan's size as an estimate. Best for loose holders; ${computer} says the clearance it allowed.`;
+}
+export interface FitChoice { source: FitSizeSource; longest: string; middle: string; shortest: string }
+export const newFitChoice = (): FitChoice => ({ source: "scan", longest: "", middle: "", shortest: "" });
+const SIDES = ["longest", "middle", "shortest"] as const;
+/** The sides typed as positive millimetres (a comma decimal too); blank sides are unknown. */
+export function measuredSizes(c: FitChoice) {
+  return SIDES.flatMap((edge) => {
+    const text = c[edge].trim();
+    const mm = Number(text.replace(",", "."));
+    return text && Number.isFinite(mm) && mm > 0 && mm <= 10_000 ? [{ id: edge, label: `${edge} side`, mm }] : [];
+  });
+}
+/** What is still needed before Send, in words; undefined when nothing is. */
+export function fitMissing(c: FitChoice) {
+  if (c.source !== "measured") return undefined;
+  const typed = SIDES.filter((edge) => c[edge].trim()).length;
+  return typed > 0 && measuredSizes(c).length === typed ? undefined : "Enter at least one measurement in millimetres.";
+}
+/** `objects.makeFromScan`'s parameters: `fit` only with a fit's words, as the iPhone and the Mac send it. */
+export function makeFromScanParams(id: string, kind: "fit" | "copy", instructions: string, choice: FitChoice) {
+  const words = instructions.trim();
+  const measured = choice.source === "measured" ? measuredSizes(choice) : [];
+  const fit = kind === "fit" && words && !(choice.source === "measured" && !measured.length)
+    ? { sizeSource: choice.source, ...(choice.source === "measured" ? { measured } : {}) } : undefined;
+  return { id, kind, ...(words ? { instructions: words } : {}), ...(fit ? { fit } : {}) };
 }

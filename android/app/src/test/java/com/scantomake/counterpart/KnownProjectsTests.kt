@@ -38,9 +38,9 @@ class KnownProjectsTests {
         val zone = ZoneId.of("America/Denver"); val locale = Locale.US
         val now = 1_762_819_200_000L // Nov 10 2025 17:00 MST
         val line = { ms: Long? -> KnownProjects.awayLine(ms, now, zone, locale) }
-        assertTrue(line(now - 48 * 60_000).startsWith("Your computer isn’t answering, so Print and Send wait. This is what your phone had at 4:12"))
+        assertTrue(line(now - 48 * 60_000).startsWith("Your computer isn’t answering, so anything that needs it waits. This is what your phone had at 4:12"))
         assertTrue(line(now - 86_400_000).contains("had yesterday at 5:00"))
         assertTrue(line(now - 3 * 86_400_000).contains("had on Nov 7 at 5:00"))
-        assertEquals("Your computer isn’t answering, so Print and Send wait. This is what your phone already had.", line(null))
+        assertEquals("Your computer isn’t answering, so anything that needs it waits. This is what your phone already had.", line(null))
     }
 }

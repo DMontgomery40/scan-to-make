@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {ModelAccessChoiceSchema} from './model-access-protocol.js';
 import {ObtainRequestSchema, PrinterFormSchema} from './printing/setup.js';
-import {CompanionSettingsPatchSchema, ProjectSettingsPatchSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema, PrintSettingsSchema} from '@scan-to-make/contracts/counterpart';
+import {CompanionSettingsPatchSchema, FitSchema, ProjectSettingsPatchSchema, PrintColourSchema, PrintQualitySchema, PrintStrengthSchema, PrintSettingsSchema} from '@scan-to-make/contracts/counterpart';
 import {ReconstructionAnswerSchema} from '@scan-to-make/contracts/reconstruction';
 
 export const MAX_REQUEST_BYTES = 64 * 1024;
@@ -68,6 +68,8 @@ export const parameters = {
   'objects.settings.get': z.strictObject({id: z.uuid()}),
   'objects.settings.set': ProjectSettingsPatchSchema.safeExtend({id: z.uuid()}).refine(value => Object.keys(value).some(key => key !== 'id')),
   'objects.duplicate': z.strictObject({id: z.uuid()}),
+  /** A new project made from this one's scan: the scan, photos, capture and checked sizes are copied into it. */
+  'objects.makeFromScan': z.strictObject({id: z.uuid(), kind: z.enum(['fit', 'copy']), instructions: z.string().max(8000).optional(), fit: FitSchema.optional()}),
   'objects.locate': z.strictObject({id: z.uuid()}),
   'objects.passActivity': z.strictObject({id: z.uuid(), index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)}),
   'objects.start': z.strictObject({id: z.uuid()}),

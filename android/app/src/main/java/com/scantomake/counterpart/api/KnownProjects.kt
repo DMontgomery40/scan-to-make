@@ -48,7 +48,7 @@ data class KnownProjects(val mac: String, val projects: List<Project> = emptyLis
 
         /** The one line over what the phone already had while the computer isn't answering, and when it was true. */
         fun awayLine(heardMs: Long?, nowMs: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String {
-            val first = "Your computer isn’t answering, so Print and Send wait."
+            val first = "Your computer isn’t answering, so anything that needs it waits."
             heardMs ?: return "$first This is what your phone already had."
             return "$first This is what your phone had ${whenText(heardMs, nowMs, zone, locale)}."
         }

@@ -241,36 +241,50 @@ extension ProjectGallery.Entry {
     }
 }
 
-/// Which stage keeps a part readable (PRD §5.4): the dark stage, or a light one when the part's colour would be a
-/// silhouette on it (black, a dark slate blue). The one with more contrast for the part's colour (WCAG relative
-/// luminance), so white and yellow stay on the dark stage and black moves to the light one. Every layout and the
-/// Mac's pictures use the same rule (`mac-reconstruct picture`, Linux `gallery.ts`).
-public enum StageContrast {
-    /// The stages' own colours, `#RRGGBB`: the dark stage's middle and the light stage's middle.
-    public static let dark = "#22242B"
-    public static let light = "#C8CACF"
+/// How a part stays readable on the stage (PRD §5.4). The stage is the dark stage, always (David, Nov 11, on the
+/// stage switching to light grey for a dark part: "we just entered light mode without a flashbang alert" — the app
+/// never changes mode). A dark spool is kept readable in the material instead: its drawn colour keeps its hue but
+/// is lifted to a minimum brightness that separates it from the stage, the same floor the Mac's still pictures use
+/// (`mac-reconstruct picture`, `plasticRGB`'s `floorLum` for the dark stage), so a still and the live model match.
+/// Only the stage's drawn material is floored; the spool's real colour still shows in swatches and names.
+public enum StageMaterial {
+    /// The dark stage's middle, `#RRGGBB`: the only stage.
+    public static let stage = "#22242B"
+    /// The drawn colour's minimum brightness (sRGB channels weighted 0.2126/0.7152/0.0722, as the Mac's pictures
+    /// compute it): 0.20 against the stage's own 0.14, before the stage's lights add their edge highlight. A true
+    /// black filament is drawn as charcoal; a silhouette is wrong.
+    public static let minimumBrightness = 0.20
 
-    /// True when the part reads better on the light stage. Neutral and own colours stay on the dark stage.
-    public static func lightStage(for colour: ProjectGallery.Colour) -> Bool {
-        guard case .spool(let hex) = colour else { return false }
-        return lightStage(hex: hex)
+    /// The colour the stage draws an entry's model in: a spool's hex floored, nil for neutral and own colours
+    /// (the stage's neutral material, or the model's own textures).
+    public static func drawnHex(for colour: ProjectGallery.Colour) -> String? {
+        guard case .spool(let hex) = colour else { return nil }
+        return drawnHex(hex: hex)
     }
 
-    public static func lightStage(hex: String) -> Bool {
-        guard let part = luminance(hex), let onDark = luminance(dark), let onLight = luminance(light) else { return false }
-        return ratio(part, onLight) > ratio(part, onDark)
+    /// `hex` lifted to the floor, `#RRGGBB` uppercase; a colour already at or above it (white, yellow, blue grey)
+    /// is unchanged, and one that doesn't parse is returned as given.
+    public static func drawnHex(hex: String) -> String {
+        let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        guard digits.count >= 6, let value = Int(digits.prefix(6), radix: 16) else { return hex }
+        var rgb = [16, 8, 0].map { Double((value >> $0) & 255) / 255 }
+        let brightness = Self.brightness(rgb)
+        if brightness < minimumBrightness {
+            // The Mac's pictures' lift: toward the floor grey (f, f·1.01, f·1.04) by how far under the floor it is.
+            let lift = (minimumBrightness - brightness) / minimumBrightness
+            for i in rgb.indices { rgb[i] += lift * minimumBrightness * [1.0, 1.01, 1.04][i] }
+        }
+        let bytes = rgb.map { Int((min(1, max(0, $0)) * 255).rounded()) }
+        return "#" + bytes.map { String(format: "%02X", $0) }.joined()
     }
 
-    static func ratio(_ a: Double, _ b: Double) -> Double { (max(a, b) + 0.05) / (min(a, b) + 0.05) }
+    static func brightness(_ rgb: [Double]) -> Double { 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2] }
 
-    static func luminance(_ hex: String) -> Double? {
+    /// A hex colour's brightness on the floor's scale; nil when it doesn't parse.
+    static func brightness(hex: String) -> Double? {
         let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
         guard digits.count >= 6, let value = Int(digits.prefix(6), radix: 16) else { return nil }
-        func channel(_ shift: Int) -> Double {
-            let c = Double((value >> shift) & 255) / 255
-            return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
-        }
-        return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+        return brightness([16, 8, 0].map { Double((value >> $0) & 255) / 255 })
     }
 }
 
@@ -294,10 +308,21 @@ public enum ModelUnavailable: Equatable, Sendable {
 
     /// The one line under the stage. `pictureToo`: the stage's picture didn't come either, so this is the stage's own
     /// line for both (the gallery then shows no second line).
-    public func line(_ kind: ProjectGallery.Entry.Kind, pictureToo: Bool = false) -> String {
+    /// `neverDrawn`: the Mac couldn't draw a picture at all (not "didn't come"), so the line says that.
+    public func line(_ kind: ProjectGallery.Entry.Kind, pictureToo: Bool = false, neverDrawn: Bool = false) -> String {
         let thing = switch kind { case .part: "this part"; case .plate: "this plate"; case .scan: "your scan"; case .together: "the part and your scan" }
         let model = kind == .together ? "\(thing) in 3D" : "\(thing)’s 3D model"
         let Model = model.prefix(1).uppercased() + model.dropFirst()
+        if pictureToo && neverDrawn {
+            let first = kind == .plate ? "No picture of this plate came with the file" : "Your Mac couldn’t draw a picture of \(thing)"
+            switch self {
+            case .notAnswering: return "\(first), and it isn’t answering, so \(model) can’t come yet."
+            case .didntCome: return "\(first), and \(model) didn’t come."
+            case .refused: return "\(first), and it didn’t send \(model)."
+            case .tooLarge: return "\(first), and \(model) is too large a file to show on a phone."
+            case .undrawable: return "\(first), and \(model) couldn’t be shown on this phone."
+            }
+        }
         if pictureToo {
             switch self {
             case .notAnswering: return "Your Mac isn’t answering, so the picture and 3D model of \(thing) can’t come yet."

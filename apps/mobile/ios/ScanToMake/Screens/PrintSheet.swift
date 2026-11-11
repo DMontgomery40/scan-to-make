@@ -67,6 +67,10 @@ struct PrintSheet: View {
             ScrollViewReader { scroll in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
+                        if store.away {
+                            Label(store.awayLine(projectId), systemImage: "wifi.exclamationmark").font(.subheadline).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("print-away")
+                        }
                         if let project, (project.plates?.count ?? 0) > 1 {
                             ProjectPlatePicker(project: project, busy: busy == "print" || choosingPlate) { plate in choosePlate(plate) }
                                 .font(.headline)
@@ -606,7 +610,8 @@ struct PrintSheet: View {
     }
 
     private var canPrint: Bool {
-        guard busy == nil, !choosingPlate, printer != nil, printer?.isOffline != true else { return false }
+        // Nothing goes to a Mac that isn't answering (X100): the sheet says so above, and Print waits.
+        guard busy == nil, !choosingPlate, !store.away, printer != nil, printer?.isOffline != true else { return false }
         // Only the file shown above prints.
         if shownSlice == nil { return false }
         if uncertain && !checked { return false }

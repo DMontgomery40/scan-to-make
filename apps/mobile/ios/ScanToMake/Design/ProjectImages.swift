@@ -159,7 +159,8 @@ struct StagePicture: View {
     private var shows: Shows {
         switch still {
         case .waiting: return .waiting
-        case .notAvailable: return .notAvailable(unavailableLine, retry: false)
+        // No picture can be had; with the model missing too the gallery's line says both, and Try Again tries the model.
+        case .notAvailable: return .notAvailable(modelMissing?.line ?? unavailableLine, retry: modelMissing?.retry != nil)
         case .picture(let path):
             if load.key == key, let image = load.picture { return .shown(image) }
             if let image = ImageMemory.shared.image(key) { return .shown(image) }

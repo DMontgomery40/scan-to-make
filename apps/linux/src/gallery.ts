@@ -151,17 +151,20 @@ export function canLocate(p: Project): boolean {
 }
 
 /**
- * The part reads better on the light stage than the dark one (WCAG contrast; CounterpartKit `StageContrast`, stage
- * colours #22242B and #C8CACF): black and a dark blue grey move to the light stage, white and yellow stay dark.
+ * The colour the stage's material draws a spool in (CounterpartKit `StageMaterial`): the stage stays dark
+ * (#22242B) for every part, and a dark filament is lifted to a minimum brightness of 0.20 — the Mac's still
+ * pictures' floor — so black is charcoal, never a silhouette. "neutral"/"own" pass through; a spool's real
+ * colour still shows in swatches and names.
  */
-export function lightStage(colour: Colour): boolean {
-  const luminance = (hex: string) => {
-    const value = parseInt(hex.slice(1, 7), 16);
-    const channel = (shift: number) => { const c = ((value >> shift) & 255) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
-    return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0);
-  };
-  if (!/^#[0-9A-Fa-f]{6}$/.test(colour)) return false;
-  const part = luminance(colour), dark = luminance("#22242B"), light = luminance("#C8CACF");
-  const ratio = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-  return ratio(part, light) > ratio(part, dark);
+export function drawnColour(colour: Colour): Colour {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(colour)) return colour;
+  const value = parseInt(colour.slice(1, 7), 16);
+  const rgb = [16, 8, 0].map((shift) => ((value >> shift) & 255) / 255);
+  const floor = 0.20;
+  const brightness = 0.2126 * rgb[0]! + 0.7152 * rgb[1]! + 0.0722 * rgb[2]!;
+  if (brightness < floor) {
+    const lift = (floor - brightness) / floor;
+    [1.0, 1.01, 1.04].forEach((m, i) => { rgb[i] = rgb[i]! + lift * floor * m; });
+  }
+  return "#" + rgb.map((c) => Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, "0").toUpperCase()).join("");
 }

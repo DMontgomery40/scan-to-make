@@ -2,7 +2,7 @@
 import RealityKit
 import Foundation
 
-/// Shares parsing and GPU mesh creation between a poster, interaction and AR export.
+/// Shares parsing and GPU mesh creation between a poster and interaction. (AR writes its own USDZ: `PartUSDZ`.)
 /// Callers receive separate entity hierarchies; mesh resources remain shared.
 @MainActor public final class ModelEntityCache {
     private let limit: Int
@@ -47,35 +47,6 @@ import Foundation
         guard !Task.isCancelled else { return nil }
         return entity?.clone(recursive: true)
     }
-    private static let exports = MediaWork<URL>(label: "ar", timeout: .seconds(30))
-
-    public static func deferExports() { exports.cancelAll() }
-
-    /// AR is optional demand. A late write only touches its own scratch file, never a newer export.
-    @available(iOS 18, macOS 15, *)
-    public static func export(_ entity: Entity, to target: URL) async -> URL? {
-        await exports.run(key: target.path) {
-            let temporary = target.deletingLastPathComponent().appendingPathComponent("ar-\(UUID().uuidString).usdz")
-            defer { try? FileManager.default.removeItem(at: temporary) }
-            MediaTrace.record("ar.export-start")
-            do {
-                guard !Task.isCancelled else { return nil }
-                try await entity.write(to: temporary)
-                guard !Task.isCancelled else { return nil }
-                guard ((try? FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? Int) ?? 0) > 0 else {
-                    MediaTrace.record("ar.export-end", ["success": "false", "code": "empty-export"])
-                    return nil
-                }
-                if !FileManager.default.fileExists(atPath: target.path) { try FileManager.default.moveItem(at: temporary, to: target) }
-                MediaTrace.record("ar.export-end", ["success": "true"])
-                return target
-            } catch {
-                MediaTrace.record("ar.export-end", ["success": "false", "code": String((error as NSError).code)])
-                return nil
-            }
-        }
-    }
-
     public static func hasGeometry(_ entity: Entity) -> Bool {
         if let model = entity.components[ModelComponent.self],
            model.mesh.contents.models.contains(where: { $0.parts.contains(where: { ($0.triangleIndices?.count ?? 0) > 0 }) }) { return true }

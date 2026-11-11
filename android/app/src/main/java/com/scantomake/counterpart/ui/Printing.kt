@@ -123,7 +123,9 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
     var printerProblem by remember { mutableStateOf<String?>(null) }
     var sliceRefusal by remember { mutableStateOf<String?>(null) }
     val uncertain = ProjectWords(project).actions.contains(ProjectAction.PrintChecked)
-    val destination = catalog?.destination(destinationId)
+    val destination = catalog?.resolved(destinationId)
+    // Nothing goes to a computer that isn't answering (X100): Print waits, and the sheet says why.
+    val printAway = state.link.collectAsState().value == com.scantomake.counterpart.api.MacLink.NotAnswering
     val offersQuality = !project.slicedOriginal && destination?.capabilities?.quality == true
     val offersStrength = !project.slicedOriginal && destination?.capabilities?.strength == true
     val offersCopies = !project.slicedOriginal && "printCopies" in capabilities && destination?.capabilities?.copies == true
@@ -323,12 +325,13 @@ fun PrintSheetScreen(id: String, close: () -> Unit, printing: () -> Unit) {
                 Checkbox(checked, { checked = it })
                 Text("The last send of this plate may have reached the printer. I checked: it isn't printing this.", fontSize = 14.sp)
             }
+            if (printAway) Text(com.scantomake.counterpart.api.KnownProjects.awayLine(state.heard.value[id]), color = Palette.secondary, fontSize = 14.sp)
             problem?.let { Text(it, color = Palette.failed) }
             printerProblem?.let { Text(it, color = Palette.failed) }
             sliceRefusal?.let { Text(it, color = Palette.failed) }
         }
         PrimaryButton(if (working) "Sending to the printer…" else "Print", Modifier.fillMaxWidth().padding(16.dp),
-            enabled = !working && !choosingPlate && !selectingPrinter && printerProblem == null && destination != null && !plateChanged &&
+            enabled = !working && !printAway && !choosingPlate && !selectingPrinter && printerProblem == null && destination != null && !plateChanged &&
                 pauseLayers != null && sliceRefusal == null && shownSlice != null && (!uncertain || checked), icon = CIcons.Printer) {
             working = true; problem = null
             scope.launch {
@@ -409,6 +412,11 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
     var problem by remember { mutableStateOf<String?>(null) }
     var confirmStop by remember { mutableStateOf(false) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    // The computer isn't answering (X100, AppState.link): this is the phone's copy, said once, with its time; nothing counts on.
+    val link by state.link.collectAsState()
+    val heard by state.heard.collectAsState()
+    val away = link == com.scantomake.counterpart.api.MacLink.NotAnswering
+    val asOf = heard[id]?.let { com.scantomake.counterpart.api.KnownProjects.whenText(it, System.currentTimeMillis(), java.time.ZoneId.systemDefault(), java.util.Locale.getDefault()) } ?: "earlier"
 
     LaunchedEffect(id, followPrint) {
         if (!followPrint) return@LaunchedEffect
@@ -472,8 +480,10 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
         val live = p.print?.live
         val job = live?.job
         val printer = state.printerName(p) ?: "your printer"
-        val destination = catalog?.destination(p.print?.destinationId ?: p.printerDestinationId)
+        // By id or alias (review S6): a print dispatched under an alias keeps its Pause and Stop.
+        val destination = catalog?.resolved(p.print?.destinationId ?: p.printerDestinationId)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (away) Text(com.scantomake.counterpart.api.KnownProjects.awayLine(heard[id]), Modifier.testTag("printing-away"), color = Palette.secondary, fontSize = 14.sp)
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 10f).clip(RoundedCornerShape(24.dp)).stage(), contentAlignment = Alignment.Center) {
                 image?.let { Image(it, "Camera photo from $printer", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                     ?: Text(if (printEnded) "No camera photo saved for this print." else cameraProblem ?: "Asking $printer for a photo…", color = Palette.secondary)
@@ -484,31 +494,31 @@ fun PrintingScreen(id: String, back: () -> Unit, project: () -> Unit) {
             Text(words.line, fontSize = 17.sp)
             job?.progress?.let { LinearProgressIndicator({ (it / 100).toFloat() }, Modifier.fillMaxWidth().height(8.dp), color = Palette.okGreen) }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                InfoTile("Done", Format.percent(job?.progress) ?: "–", CIcons.Printer, Modifier.weight(1f))
-                if (!printEnded) InfoTile("Left", Format.duration(job?.remainingSec) ?: "–", CIcons.Clock, Modifier.weight(1f))
+                InfoTile(if (away) "Done $asOf" else "Done", Format.percent(job?.progress) ?: "–", CIcons.Printer, Modifier.weight(1f))
+                if (!printEnded) InfoTile(if (away) "Left $asOf" else "Left", Format.duration(job?.remainingSec) ?: "–", CIcons.Clock, Modifier.weight(1f))
                 InfoTile("Layer", job?.layer?.let { l -> job.totalLayers?.let { "$l of $it" } ?: "$l" } ?: "–", CIcons.Layers, Modifier.weight(1f))
             }
-            if (!printEnded) Iso.parse(live?.endsAt)?.let { Text("Ends about ${Format.clock(it)}", color = Palette.secondary) }
+            if (!printEnded && !away) Iso.parse(live?.endsAt)?.let { Text("Ends about ${Format.clock(it)}", color = Palette.secondary) }
             if (!printEnded) live?.temps?.let { t ->
-                Text(listOfNotNull(t.nozzle?.let { "Nozzle ${Format.temperature(it.actual)}" }, t.bed?.let { "Bed ${Format.temperature(it.actual)}" }).joinToString(" · "), color = Palette.secondary, fontSize = 13.sp)
+                Text(listOfNotNull(t.nozzle?.let { "Nozzle ${Format.temperature(it.actual)}" }, t.bed?.let { "Bed ${Format.temperature(it.actual)}" }, if (away) asOf else null).joinToString(" · "), color = Palette.secondary, fontSize = 13.sp)
             }
             live?.problems?.forEach { Text("${it.code}\n${it.message}", color = Palette.needsYou, fontSize = 13.sp) }
             // A finished print's next step: "Did it fit?" and the project (Print Again, changes, files), not old temperatures.
             if (printEnded) {
-                if (ProjectAction.ItWorks in words.actions) DidItFitCard(p, enabled = !working,
+                if (ProjectAction.ItWorks in words.actions) DidItFitCard(p, enabled = !working && !away,
                     itWorks = { answer(ProjectStatus.Works) }, needsChanges = { answer(ProjectStatus.NeedsChanges, project) })
                 PrimaryButton("Open Project", Modifier.fillMaxWidth().testTag("open-project"), icon = CIcons.Cube, onClick = project)
             }
-            if (!printEnded) p.printConfirmation?.let { PrintConfirmationCard(p, it) { body -> scope.launch { try { state.show(app.companion.answerPrintConfirmation(id, body)) } catch (e: CompanionException) { problem = e.message } } } }
+            if (!printEnded && !away) p.printConfirmation?.let { PrintConfirmationCard(p, it) { body -> scope.launch { try { state.show(app.companion.answerPrintConfirmation(id, body)) } catch (e: CompanionException) { problem = e.message } } } }
             problem?.let { Text(it, color = Palette.failed) }
         }
         if (!printEnded) Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (live?.state == "paused") {
-                PrimaryButton("Resume", Modifier.weight(1f), enabled = !working && destination?.canResume != false, icon = CIcons.Play) { control(CompanionClient.PrintControl.Resume) }
+                PrimaryButton("Resume", Modifier.weight(1f), enabled = !working && !away && destination?.canResume != false, icon = CIcons.Play) { control(CompanionClient.PrintControl.Resume) }
             } else {
-                SecondaryButton("Pause", Modifier.weight(1f), enabled = !working && destination?.canPause != false, icon = CIcons.Pause) { control(CompanionClient.PrintControl.Pause) }
+                SecondaryButton("Pause", Modifier.weight(1f), enabled = !working && !away && destination?.canPause != false, icon = CIcons.Pause) { control(CompanionClient.PrintControl.Pause) }
             }
-            SecondaryButton("Stop", Modifier.weight(1f), enabled = !working && destination?.canCancel != false, icon = CIcons.Stop, color = Palette.failed) { confirmStop = true }
+            SecondaryButton("Stop", Modifier.weight(1f), enabled = !working && !away && destination?.canCancel != false, icon = CIcons.Stop, color = Palette.failed) { confirmStop = true }
         }
     }
     if (confirmStop && !printEnded) AlertDialog(onDismissRequest = { confirmStop = false }, title = { Text("Stop the print?") },

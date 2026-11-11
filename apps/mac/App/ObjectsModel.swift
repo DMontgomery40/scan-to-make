@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import UniformTypeIdentifiers
 import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
@@ -53,10 +54,13 @@ protocol ObjectsCompanion: Sendable {
     func fusionAvailable() async -> Bool
     /// Where the scanned object sits in a fit part made before passes said (`objects.locate`, docs/protocols/seats.md).
     func locate(_ id: String) async throws -> Project
+    /// Make something else from this scan (`objects.makeFromScan`, design §3.3).
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit?) async throws -> Project
 }
 
 extension ObjectsCompanion {
     func locate(_ id: String) async throws -> Project { throw ControlClientError.unavailable }
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit?) async throws -> Project { throw ControlClientError.unavailable }
 }
 
 extension ObjectsCompanion {
@@ -136,6 +140,9 @@ struct SocketObjects: ObjectsCompanion {
     }
     func duplicate(_ id: String) async throws -> Project { try await ControlClient(socketPath: path).duplicateObject(id) }
     func locate(_ id: String) async throws -> Project { try await ControlClient(socketPath: path).locateObject(id) }
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit?) async throws -> Project {
+        try await ControlClient(socketPath: path).makeFromScanObject(id, kind: kind, instructions: instructions, fit: fit)
+    }
     func fusionAvailable() async -> Bool {
         guard let state = try? await ControlClient(socketPath: path).companionSettings().fusion?.state else { return false }
         return ["connected", "not-running"].contains(state)
@@ -530,6 +537,7 @@ struct SocketObjects: ObjectsCompanion {
                                    kind:capabilities?.structuredPasses == true ? kind : nil))
             let published = url != nil && capabilities?.publishedModels == true
             for file in files {
+                // Open (review of #582, finding 6): a path, read only now; a file since ejected or evicted fails here, after create.
                 guard var kind = Self.fileKind(file) else { continue }
                 // A published model's own file is the designer's model, never a scan to touch up (PRD §8.11).
                 if published && ["stl", "3mf"].contains(file.pathExtension.lowercased()) { kind = "model" }
@@ -549,14 +557,58 @@ struct SocketObjects: ObjectsCompanion {
 
     static let createUnavailable = "Start new projects on your iPhone for now. This Mac can start them after Counterpart's next update."
 
+    /// The one list of files New Project takes (H1–H3, Nov 11): the drop zone, the window, Choose Files…, File ▸ Open…,
+    /// a file opened with Counterpart, and the document types in `Config/Info.plist` (which declares only the models,
+    /// so Counterpart isn't offered for every photo; `ObjectsModelTests` checks the plist against this list).
+    nonisolated static let photoExtensions = ["jpg", "jpeg", "heic", "heif", "png"]
+    nonisolated static let modelExtensions = ["stl", "3mf", "usdz"]
+    /// The same list as types, for the system file chooser.
+    nonisolated static var acceptedContentTypes: [UTType] {
+        (photoExtensions + modelExtensions).compactMap { UTType(filenameExtension: $0) }
+    }
+
     /// `photos` or `scan`, from the file's type; nil for anything Counterpart can't use.
     nonisolated static func fileKind(_ url: URL) -> String? {
-        switch url.pathExtension.lowercased() {
-        case "jpg", "jpeg", "heic", "heif", "png": return "photos"
-        case "stl", "3mf", "usdz": return "scan"
-        default: return nil
-        }
+        let ext = url.pathExtension.lowercased()
+        if photoExtensions.contains(ext) { return "photos" }
+        if modelExtensions.contains(ext) { return "scan" }
+        return nil
     }
+
+    /// The files New Project keeps from `urls`: the ones it can use, once each, after those it already has.
+    nonisolated static func usable(_ urls: [URL], besides existing: [URL] = []) -> [URL] {
+        var kept: [URL] = []
+        for url in urls where fileKind(url) != nil && !existing.contains(url) && !kept.contains(url) { kept.append(url) }
+        return kept
+    }
+
+    /// The files in `urls` New Project can't use, once each.
+    nonisolated static func unusable(_ urls: [URL]) -> [URL] {
+        var refused: [URL] = []
+        for url in urls where fileKind(url) == nil && !refused.contains(url) { refused.append(url) }
+        return refused
+    }
+
+    /// What New Project takes, in words, from the one list: "photos (JPG, JPEG, HEIC, HEIF or PNG) or models (STL, 3MF or USDZ)".
+    nonisolated static var acceptedWords: String {
+        func either(_ items: [String]) -> String {
+            let upper = items.map { $0.uppercased() }
+            return upper.count < 2 ? upper.joined() : upper.dropLast().joined(separator: ", ") + " or " + upper.last!
+        }
+        return "photos (\(either(photoExtensions))) or models (\(either(modelExtensions)))"
+    }
+
+    /// The sentence for files New Project can't use, named, and what it takes; nil when there are none. One sentence for
+    /// a drop on the drop zone, a drop on the window and a file opened with Counterpart.
+    nonisolated static func refusal(for urls: [URL]) -> String? {
+        let names = unusable(urls).map { "“\($0.lastPathComponent)”" }
+        guard !names.isEmpty else { return nil }
+        let list = names.count < 3 ? names.joined(separator: " and ") : names.dropLast().joined(separator: ", ") + " and " + names.last!
+        return "\(list) can’t start a project, so \(names.count == 1 ? "it wasn’t" : "they weren’t") added. New Project takes \(acceptedWords)."
+    }
+
+    /// The project New Project starts as for these files: a model to copy makes it `copy`, anything else `fit`.
+    nonisolated static func draftKind(for files: [URL]) -> String { files.contains { fileKind($0) == "scan" } ? "copy" : "fit" }
 
     /// The window is on screen (true) or closed, hidden or covered (false).
     func setVisible(_ visible: Bool) { setWatching(visible, by:"window") }
@@ -617,6 +669,28 @@ struct SocketObjects: ObjectsCompanion {
     func locate(_ id: String) async {
         guard !working.contains(id) else { return }
         _ = await change(id, { try await self.companion.locate(id) })
+    }
+
+    /// "Make something else from this scan" was chosen on a project's page: New opens holding that scan (MainWindow).
+    @Published var makingFromScan: Project?
+
+    /// Make something else from this scan (design §3.3): the new project appears at once, selected, saying its scan is
+    /// being brought over. A fit sends how its exact size is settled (`fit`), as the iPhone does. Returns the problem in
+    /// words, or nil.
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit? = nil) async -> String? {
+        do {
+            let made = try await companion.makeFromScan(id, kind: kind, instructions: instructions, fit: kind == "fit" ? fit : nil)
+            readApplied = startRead()
+            objects.removeAll { $0.id == made.id }
+            objects.insert(made, at: 0)
+            selection = made.id
+            wake()
+            return nil
+        } catch let error as ControlClientError where error == .unavailable {
+            return "Update Counterpart to make something else from a scan you already have."
+        } catch {
+            return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     func duplicate(_ id: String) async throws {
@@ -953,4 +1027,34 @@ enum StageStillState: Equatable {
             }
         }
     }
+}
+
+/// New Project's draft: the files it starts with, and the ones it couldn't take (named in the drop zone).
+struct NewProjectDraft: Identifiable, Equatable {
+    let id = UUID()
+    var files: [URL] = []
+    var refused: [URL] = []
+    /// A project whose scan the new one is made from (design §3.3).
+    var seed: Project? = nil
+    /// What a drop on the window or an open makes: the files New Project can use, and the others to name. Nil when
+    /// none can be used: the window shows `ObjectsModel.refusal` instead.
+    static func from(_ urls: [URL]) -> NewProjectDraft? {
+        let files = ObjectsModel.usable(urls)
+        return files.isEmpty ? nil : NewProjectDraft(files: files, refused: ObjectsModel.unusable(urls))
+    }
+}
+
+/// Files opened with Counterpart (Finder Open With, a double-click, the Dock icon, `open -a`) and File ▸ Open…, held
+/// as they came until the window takes them into New Project exactly as a drop on it does (H1, H2, Nov 11). Files it
+/// can't use are kept too, so the window comes forward and names them (review of #582: never refuse in silence).
+@MainActor final class OpenedFiles: ObservableObject {
+    static let shared = OpenedFiles()
+    @Published private(set) var waiting: [URL] = []
+    /// Keeps the opened files, once each; true when there was one.
+    @discardableResult func receive(_ urls: [URL]) -> Bool {
+        var added = false
+        for url in urls where url.isFileURL && !waiting.contains(url) { waiting.append(url); added = true }
+        return added
+    }
+    func take() -> [URL] { defer { waiting = [] }; return waiting }
 }

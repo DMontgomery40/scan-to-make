@@ -29,6 +29,31 @@ struct ProjectDetail: View {
 
     private var words: ObjectWords { object.words }
 
+    /// Design §3.3: Make something else from this scan, on any project this Mac has a scan for, whatever its kind; where
+    /// this one's scan came from; what else was made from it. Each line that names a project opens it.
+    @ViewBuilder private var scanLineage: some View {
+        let lineage = ScanLineage(object, in: model.objects)
+        if object.canMakeFromScan || lineage.from != nil || !lineage.made.isEmpty {
+            HStack(spacing: 12) {
+                if object.canMakeFromScan {
+                    Button(ScanLineage.action, systemImage: "plus.square.on.square") { model.makingFromScan = object }
+                        .buttonStyle(.glass).disabled(blocked)
+                        .help("A case, a holder or another copy, from this scan. No new scan; this project stays as it is.")
+                        .accessibilityIdentifier("make-from-scan")
+                }
+                if let from = lineage.from, let line = lineage.fromLine {
+                    Button(line, systemImage: "arrow.turn.up.left") { model.selection = from.id }
+                        .buttonStyle(.link).disabled(!from.exists).accessibilityIdentifier("scan-from")
+                }
+                if let line = lineage.madeLine {
+                    Menu(line) { ForEach(lineage.made) { link in Button(link.title) { model.selection = link.id } } }
+                        .menuStyle(.button).buttonStyle(.link).fixedSize().accessibilityIdentifier("scan-made")
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
     /// The state; with Project Settings, also the menu that sets it (Done for something printed elsewhere, PRD §5.4).
     @ViewBuilder private var statusCapsule: some View {
         if model.capabilities?.projectSettings == true {
@@ -38,7 +63,7 @@ struct ProjectDetail: View {
                 StatusCapsule(stage: words.stage, text: words.capsule, done: words.done, menu: true)
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            .disabled(working)
+            .disabled(blocked)
             .help("Set the status: Not Printed, Printed, Done or Needs Changes")
             .accessibilityLabel("Status: \(words.capsule)")
         } else {
@@ -46,36 +71,39 @@ struct ProjectDetail: View {
         }
     }
     private var working: Bool { model.working.contains(object.id) }
+    /// Nothing that needs the companion can be pressed while it isn't answering (X100): the line above the card says why.
+    private var blocked: Bool { working || model.availability == .notRunning }
     private var takesPhotos: Bool { model.capabilities?.objectsCreate == true }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             stage
-                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24).environment(\.colorScheme, stageScheme) }
+                .overlay(alignment: .topLeading) { statusCapsule.padding(.top, 70).padding(.leading, 24).environment(\.colorScheme, .dark) }
                 .overlay(alignment: .topTrailing) {
                     if let entry, let size = entry.sizeText(measured[entry.id]) {
                         Text(size).font(.callout.monospacedDigit().weight(.semibold))
                             .padding(.horizontal, 12).padding(.vertical, 7).glassEffect(.regular, in: .capsule)
                             .padding(.top, 64).padding(.trailing, 24)
-                            .environment(\.colorScheme, stageScheme)
+                            .environment(\.colorScheme, .dark)
                             .accessibilityLabel("\(entry.measures) size \(size)")
                     }
                 }
-                .overlay(alignment: .top) { pictureChooser.padding(.top, 64).environment(\.colorScheme, stageScheme) }
+                .overlay(alignment: .top) { pictureChooser.padding(.top, 64).environment(\.colorScheme, .dark) }
                 .overlay(alignment: .topLeading) {
                     // A fit made before passes said where the object sits: the Mac can work it out, changing nothing.
                     if ProjectStageOffer.seeItTogether(object, showing: entry) {
                         Button { Task { await model.locate(object.id) } } label: { Label("See It Together", systemImage: "cube.transparent") }
-                            .buttonStyle(.glass).disabled(working).padding(.top, 108).padding(.leading, 24)
-                            .environment(\.colorScheme, stageScheme)
+                            .buttonStyle(.glass).disabled(blocked).padding(.top, 108).padding(.leading, 24)
+                            .environment(\.colorScheme, .dark)
                             .help("Your Mac works out where the scanned object sits in this part, without changing it")
                             .accessibilityIdentifier("project-locate")
                     }
                 }
                 .ignoresSafeArea(edges: .top)
             VStack(spacing: 12) {
+                scanLineage
                 if (object.plates?.count ?? 0) > 1 {
-                    ProjectPlatesView(project: object, busy: working, thumbnail: { plate in
+                    ProjectPlatesView(project: object, busy: blocked, thumbnail: { plate in
                         if let url = plate.thumbnail.flatMap(object.projectFile) {
                             FillImage(url: url, version: object.updatedAtMs)
                         } else {
@@ -91,7 +119,7 @@ struct ProjectDetail: View {
                 if object.kind == "published" {
                     HStack {
                         Button("Add Model Files", systemImage: "doc.badge.plus") { choosingModelFiles = true }
-                            .buttonStyle(.glass).disabled(working || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
+                            .buttonStyle(.glass).disabled(blocked || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
                         Spacer()
                     }
                 }
@@ -128,7 +156,7 @@ struct ProjectDetail: View {
                     Menu {
                         if model.capabilities?.projectRename == true {
                             Button("Rename Project…", systemImage: "pencil") { projectName = words.title; renaming = true }
-                                .disabled(working)
+                                .disabled(blocked)
                         }
                         if model.capabilities?.projectPreferences == true {
                             Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
@@ -154,8 +182,6 @@ struct ProjectDetail: View {
     // MARK: Stage
 
     private var gallery: ProjectGallery { ProjectGallery(project: object) }
-    /// What floats on the stage reads on it: light glass and dark words on the light stage, as the stage is chosen.
-    private var stageScheme: ColorScheme { entry.map { StageContrast.lightStage(for: $0.colour) } == true ? .light : .dark }
     private var entry: ProjectGallery.Entry? { gallery.entries.first { $0.id == picture } ?? gallery.first }
 
     /// Which picture (PRD §5.4): a segmented control for the common two or three, a pop-up for a designer's many plates
@@ -182,7 +208,6 @@ struct ProjectDetail: View {
             case .model(let path):
                 if let url = path == "model.stl" ? (object.modelURL.flatMap { $0.pathExtension.lowercased() == "stl" ? $0 : nil } ?? object.blenderModelURL) : object.projectFile(path) {
                     ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
-                               lightStage: StageContrast.lightStage(for: entry.colour),
                                accessibilityText: "\(entry.label). Drag to turn it, scroll to zoom.",
                                poster: entry.kind == .part ? (object.pictures?["part"].flatMap(object.projectFile) ?? Self.poster(object)) : object.pictures?["scan"].flatMap(object.projectFile), tint: Self.colour(entry.colour),
                                measured: { measured[entry.id] = $0 })
@@ -191,7 +216,6 @@ struct ProjectDetail: View {
             case .assembly(_, let scan, let seats):
                 if let url = object.blenderModelURL, let scanURL = object.projectFile(scan) {
                     ModelStage(url: url, version: FileVersion.of(url, else: object.updatedAtMs), fit: 0.15,
-                               lightStage: StageContrast.lightStage(for: entry.colour),
                                accessibilityText: "\(words.title) with what you scanned in place. Drag to turn it, scroll to zoom.",
                                tint: Self.colour(entry.colour), object: scanURL, seats: seats.map(\.matrix), measured: { measured[entry.id] = $0 })
                     .id(entry.id)
@@ -218,8 +242,10 @@ struct ProjectDetail: View {
                           unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "This Mac couldn’t draw a picture of this.")
     }
 
+    /// The stage's material colour for a spool: floored so a dark filament reads on the dark stage
+    /// (CounterpartKit `StageMaterial`); swatches and names elsewhere keep the spool's real colour.
     static func colour(_ colour: ProjectGallery.Colour) -> NSColor? {
-        guard case .spool(let hex) = colour, let value = Int(hex.dropFirst().prefix(6), radix: 16) else { return nil }
+        guard let hex = StageMaterial.drawnHex(for: colour), let value = Int(hex.dropFirst().prefix(6), radix: 16) else { return nil }
         return NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
     }
 
@@ -239,7 +265,7 @@ struct ProjectDetail: View {
                 HStack {
                     Button("Try Again") { model.retryQueuedChange(object) }.disabled(object.changesWait)
                     Button("Discard Saved Change") { model.discardQueuedChange(object) }
-                }.disabled(working)
+                }.disabled(blocked)
             }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
         if let pending = object.pendingFollowup {
@@ -249,14 +275,14 @@ struct ProjectDetail: View {
                 HStack {
                     Button("Try Again") { Task { await model.perform(.correct, on: object.id, note: pending) } }
                     Button("Mark Done") { Task { await model.setStatus("works", for: object.id) } }
-                }.disabled(working)
+                }.disabled(blocked)
             }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
         if let previous = object.completionUndoStatus {
             HStack {
                 Label("Marked Done", systemImage: "checkmark.circle.fill")
                 Spacer()
-                Button("Undo") { Task { await model.setStatus(previous.rawValue, for: object.id) } }.disabled(working)
+                Button("Undo") { Task { await model.setStatus(previous.rawValue, for: object.id) } }.disabled(blocked)
             }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
         if let problem = model.problem, problem.id == object.id {
@@ -316,7 +342,7 @@ struct ProjectDetail: View {
         }
             // A size question: its numbers, prefilled, with Confirm as the one obvious action.
             if let ask = object.openAsk, let form = AskSizesForm(ask) {
-                MacAskSizes(form: form, working: working) { sizes in Task { await model.answerSizes(sizes, on: object.id) } }
+                MacAskSizes(form: form, working: blocked) { sizes in Task { await model.answerSizes(sizes, on: object.id) } }
                     .id(ask.id)
             }
             // The question's picture (David, Nov 9: the phone's was "almost impossible to see"; the Mac showed none).
@@ -330,7 +356,7 @@ struct ProjectDetail: View {
 
     private func answer(_ title: String, _ action: ObjectAction) -> some View {
         Button(title) { Task { await model.perform(action, on: object.id) } }
-            .buttonStyle(.glass).controlSize(.large).disabled(working).fixedSize()
+            .buttonStyle(.glass).controlSize(.large).disabled(blocked).fixedSize()
     }
 
     private var progressCard: some View {
@@ -375,7 +401,7 @@ struct ProjectDetail: View {
                 Button("Stop…", role: .destructive) { stopping = true }.buttonStyle(.glass)
             }
         }
-        .disabled(working)
+        .disabled(blocked)
         .confirmationDialog("Stop the print?", isPresented: $stopping, titleVisibility: .visible) {
             Button("Stop Printing", role: .destructive) { Task { await model.control(object.id, .cancel) } }
             Button("Keep Printing", role: .cancel) {}
@@ -395,7 +421,7 @@ struct ProjectDetail: View {
                     .help(words.page.printNote ?? "")
             }
             if words.actions.contains(.retry) {
-                Button("Try Again") { Task { await model.perform(.retry, on: object.id) } }.mainAction(words.page.main == .retry).controlSize(.large).disabled(working).fixedSize()
+                Button("Try Again") { Task { await model.perform(.retry, on: object.id) } }.mainAction(words.page.main == .retry).controlSize(.large).disabled(blocked).fixedSize()
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -404,10 +430,9 @@ struct ProjectDetail: View {
 
     // MARK: The bar
 
-    private var canCorrect: Bool { object.canAskForChanges && !working }
+    private var canCorrect: Bool { object.canAskForChanges && !blocked }
     private var canPrint: Bool {
-        (words.actions.contains(.print) || words.actions.contains(.printChecked)) && !working && model.printer(for: object) != nil
-            && model.availability != .notRunning
+        (words.actions.contains(.print) || words.actions.contains(.printChecked)) && !blocked && model.printer(for: object) != nil
     }
 
     private var bar: some View {
@@ -506,13 +531,13 @@ struct PrintConfirmationForm: View {
                     Button(object.print?.live?.state == "paused" ? "Cancel Resume" : "Cancel Print", role: .destructive) {
                         Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: .init(action: .cancel)) }
                     }
-                    .buttonStyle(.glass).disabled(working || expired)
+                    .buttonStyle(.glass).disabled(working || model.availability == .notRunning || expired)
                     if question.isRenderable {
                         Button(object.print?.live?.state == "paused" ? "Resume" : "Print") {
                             guard let answer = draft.answer(question, at: Date().timeIntervalSince1970 * 1000) else { return }
                             Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: answer) }
                         }
-                        .buttonStyle(.glassProminent).disabled(working || answer == nil)
+                        .buttonStyle(.glassProminent).disabled(working || model.availability == .notRunning || answer == nil)
                     }
                 }
             }
@@ -526,7 +551,7 @@ struct PrintConfirmationForm: View {
             Text(verbatim: question.message).font(.callout).textSelection(.enabled).lineLimit(nil)
             if question.isRenderable {
                 ForEach(question.fields, id: \.name) { field in
-                    ConfirmationFieldRow(field: field, draft: $draft).disabled(working || expired)
+                    ConfirmationFieldRow(field: field, draft: $draft).disabled(working || model.availability == .notRunning || expired)
                 }
             } else {
                 Text("This question can’t be answered here. Cancel the print to continue.").font(.callout).foregroundStyle(.secondary)
@@ -627,7 +652,7 @@ private struct FileAskCard: View {
                     Text("Use \(file.lastPathComponent)?").font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
                     Spacer()
                     Button("Not This") { downloads.dismiss(file, for: object.id) }.buttonStyle(.glass)
-                    Button("Use") { Task { await model.useModelFile(file, for: object.id) } }.buttonStyle(.glassProminent).disabled(working)
+                    Button("Use") { Task { await model.useModelFile(file, for: object.id) } }.buttonStyle(.glassProminent).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
                 }
                 .padding(8).glassEffect(.regular, in: .rect(cornerRadius: 10))
             }
@@ -635,7 +660,7 @@ private struct FileAskCard: View {
                 if let page = ask.url.flatMap(URL.init(string:)) {
                     Button("Open in Browser") { NSWorkspace.shared.open(page) }.buttonStyle(.glass)
                 }
-                Button("Choose File…") { choose() }.buttonStyle(.glass).disabled(working)
+                Button("Choose File…") { choose() }.buttonStyle(.glass).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
                 Spacer()
                 if working { ProgressView().controlSize(.small) }
             }
@@ -676,7 +701,7 @@ private struct ChoiceAskCard: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(ask.options ?? []) { option in
-                        Button { toggle(option.id) } label: { tile(option) }.buttonStyle(.plain).disabled(working)
+                        Button { toggle(option.id) } label: { tile(option) }.buttonStyle(.plain).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
                     }
                 }
             }
@@ -742,11 +767,11 @@ private struct DidItFitCard: View {
                         needsChanges()
                     }
                 }
-                .buttonStyle(.glass).disabled(working)
+                .buttonStyle(.glass).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
                 Button {
                     Task { if await model.setStatus("works", for: object.id) { DidItFit.dismiss(object); hidden = true } }
                 } label: { Label("It Works", systemImage: "checkmark.circle.fill") }
-                    .buttonStyle(.glassProminent).disabled(working)
+                    .buttonStyle(.glassProminent).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .glassEffect(.regular, in: .rect(cornerRadius: 14))

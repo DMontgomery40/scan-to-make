@@ -19,6 +19,7 @@ import com.scantomake.counterpart.api.MacLink
 import com.scantomake.counterpart.api.still
 
 import com.scantomake.counterpart.api.ProjectGallery
+import com.scantomake.counterpart.api.ScanLineage
 
 import android.content.Intent
 import android.net.Uri
@@ -99,7 +100,8 @@ import java.io.File
 
 /** A project (PRD §5.3): its model, what the Mac is doing or asking, and what you can do next. */
 @Composable
-fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () -> Unit, scan: () -> Unit) {
+fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () -> Unit, scan: () -> Unit,
+                  makeFromScan: () -> Unit = {}, open: (String) -> Unit = {}) {
     val context = LocalContext.current
     val app = Counterpart.instance
     val state = AppState.of(context)
@@ -115,6 +117,8 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
     // While this shows, its notifications aren't posted again (the page already shows the change).
     DisposableEffect(id) { state.showing(id, true); onDispose { state.showing(id, false) } }
     var working by remember { mutableStateOf<String?>(null) }
+    /** Free to act: nothing running here, and the computer answering (X100, one fact from AppState.link). */
+    val idle = working == null && !away
     var problem by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf("") }
     var askText by remember { mutableStateOf("") }
@@ -132,11 +136,13 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
 
     LaunchedEffect(id) { state.library.opened(id); if (state.reload(id)?.code == "not-found") back() }
     // The link came back (the event stream's recovery): the page reads the project again by itself.
+    // Keyed on the link itself (review B1): a recovery through Checking or a new pairing still reloads once it answers.
     var wasAway by remember { mutableStateOf(false) }
-    LaunchedEffect(away) { if (away) wasAway = true else if (wasAway && link == MacLink.Connected) { wasAway = false; state.reload(id) } }
+    LaunchedEffect(link) { if (away) wasAway = true else if (wasAway && link == MacLink.Connected) { wasAway = false; state.reload(id) } }
 
     fun run(kind: String, body: suspend () -> Unit) {
-        if (working != null) return
+        // Nothing that needs the computer runs while it isn't answering: its control is disabled and the page says why.
+        if (working != null || away) return
         working = kind; problem = null
         scope.launch {
             try { body() } catch (e: CompanionException) { if (e.code != "cancelled") problem = e.message } catch (e: Exception) { problem = CompanionException.unreachable.message }
@@ -174,7 +180,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 IconButton(onClick = { menu = true }) { Icon(CIcons.Gear, "More") }
                 DropdownMenu(menu, { menu = false }) {
                     if (project != null) {
-                        DropdownMenuItem({ Text(if (project.isArchived) "Show on Home" else "Hide from Home") }, onClick = {
+                        DropdownMenuItem({ Text(if (project.isArchived) "Show on Home" else "Hide from Home") }, enabled = !away, onClick = {
                             menu = false
                             run("archive") {
                                 val p = if (project.settings?.archived != null) app.companion.setArchived(id, !project.isArchived)
@@ -183,12 +189,13 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                             }
                         })
                         ProjectStatus.choices.forEach { s ->
-                            DropdownMenuItem({ Text("Status: ${s.label}" + if (project.projectStatus == s) "  ✓" else "") }, onClick = {
+                            DropdownMenuItem({ Text("Status: ${s.label}" + if (project.projectStatus == s) "  ✓" else "") }, enabled = !away, onClick = {
                                 menu = false; run("status") { app.companion.setStatus(id, s)?.let(state::show) ?: state.reload(id) }
                             })
                         }
-                        if (project.current != null) DropdownMenuItem({ Text("Duplicate") }, onClick = { menu = false; run("dup") { state.show(app.companion.duplicate(id)) } })
-                        DropdownMenuItem({ Text("Delete Project", color = Palette.failed) }, onClick = { menu = false; confirmDelete = true })
+                        if (project.canMakeFromScan) DropdownMenuItem({ Text(ScanLineage.ACTION) }, enabled = !away, onClick = { menu = false; makeFromScan() })
+                        if (project.current != null) DropdownMenuItem({ Text("Duplicate") }, enabled = !away, onClick = { menu = false; run("dup") { state.show(app.companion.duplicate(id)) } })
+                        DropdownMenuItem({ Text("Delete Project", color = Palette.failed) }, enabled = !away, onClick = { menu = false; confirmDelete = true })
                     }
                 }
             }
@@ -215,7 +222,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 // On the picture, with the same dark backing as the size and status chips, so it reads on either stage.
                 if (entry?.kind == ProjectGallery.Kind.Part && project.canLocate) Text("See It Together",
                     Modifier.align(Alignment.BottomEnd).padding(12.dp).clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.62f))
-                        .clickable(enabled = working == null, role = Role.Button) { run("locate") { state.show(app.companion.locate(id)) } }
+                        .clickable(enabled = idle, role = Role.Button) { run("locate") { state.show(app.companion.locate(id)) } }
                         .padding(14.dp, 8.dp), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             }
             if (gallery.entries.size > 1) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).semantics { contentDescription = "Pictures" },
@@ -225,6 +232,29 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     Text(item.label, Modifier.clip(RoundedCornerShape(50)).background(if (selected) Color.White else Color.White.copy(alpha = 0.10f))
                         .selectable(selected = selected, role = Role.Tab) { chosen = item.id }.padding(14.dp, 8.dp),
                         color = if (selected) Color.Black else Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+                }
+            }
+            // Under What you scanned (design §3.3): make something else from this scan, on any project the computer has a
+            // scan for, whatever its kind; where this one's scan came from; what else was made from it.
+            val lineage = ScanLineage(project, projects)
+            if (project.canMakeFromScan) SecondaryButton(ScanLineage.ACTION, Modifier.fillMaxWidth().testTag("make-from-scan"), enabled = idle, color = Palette.filament) { makeFromScan() }
+            lineage.fromLine?.let { line ->
+                Text(line, Modifier.fillMaxWidth().testTag("scan-from").clickable(enabled = lineage.from?.exists == true, role = Role.Button) { lineage.from?.let { open(it.id) } },
+                    color = if (lineage.from?.exists == true) Palette.filament else Palette.secondary, fontSize = 14.sp)
+            }
+            // One project made from it opens at a tap; several are a list to choose from, newest first (as on the
+            // iPhone and the Mac), never just the newest.
+            lineage.madeLine?.let { line ->
+                var choosing by remember { mutableStateOf(false) }
+                Box {
+                    Text(line, Modifier.fillMaxWidth().testTag("scan-made").clickable(role = Role.Button) {
+                        lineage.made.singleOrNull()?.let { open(it.id) } ?: run { choosing = true }
+                    }, color = Palette.filament, fontSize = 14.sp)
+                    DropdownMenu(choosing, { choosing = false }) {
+                        lineage.made.forEach { made ->
+                            DropdownMenuItem({ Text(made.title) }, modifier = Modifier.testTag("scan-made-${made.id}"), onClick = { choosing = false; open(made.id) })
+                        }
+                    }
                 }
             }
             Text(words.status, fontSize = 17.sp)
@@ -238,14 +268,14 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     if (!plate.selected) state.show(app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex))
                     print()
                 } })
-            if (project.kind == "published" && project.canSelectPlate) SecondaryButton("Import More Model Files", Modifier.fillMaxWidth(), enabled = working == null) {
+            if (project.kind == "published" && project.canSelectPlate) SecondaryButton("Import More Model Files", Modifier.fillMaxWidth(), enabled = idle) {
                 pickModel.launch(arrayOf("*/*"))
             }
             if (words.phase == ProjectPhase.Working) {
                 val pass = project.runningPass
                 val stages = pass?.stages ?: emptyList()
                 LinearProgressIndicator(Modifier.fillMaxWidth(), color = Palette.working)
-                Text(listOfNotNull(pass?.currentStage?.words, pass?.estimate?.let { Format.about(maxOf(60.0, it.endsAtMs / 1000 - System.currentTimeMillis() / 1000.0)) }).joinToString(" · ")
+                Text(listOfNotNull(pass?.currentStage?.words, pass?.estimate?.let { Format.about(maxOf(60.0, it.endsAtMs / 1000 - (if (away) heard[id] ?: System.currentTimeMillis() else System.currentTimeMillis()) / 1000.0)) }).joinToString(" · ")
                     .ifEmpty { ProjectWords.PUT_DOWN }, color = Palette.secondary, fontSize = 13.sp)
                 if (stages.isNotEmpty()) Text("Step ${stages.indexOfLast { it.endedAtMs == null }.let { if (it < 0) stages.size else it + 1 }} of ${maxOf(stages.size, if (project.capture.isNullOrEmpty()) 3 else 4)}", color = Palette.secondary, fontSize = 12.sp)
             }
@@ -278,7 +308,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     // A size question: its numbers, prefilled, with Confirm as the one obvious action. Words and a
                     // caliper photo stay below for whatever the numbers don't say.
                     val sizes = AskSizesForm.of(ask)?.let { asked -> askSizes?.takeIf { it.first == ask.id }?.second ?: asked }
-                    if (sizes != null) AskSizesCard(sizes, enabled = working == null, changed = { askSizes = ask.id to it; askProblem = null }) { answer ->
+                    if (sizes != null) AskSizesCard(sizes, enabled = idle, changed = { askSizes = ask.id to it; askProblem = null }) { answer ->
                         run("ask") { state.show(app.companion.answerAsk(id, text = askText.trim().ifBlank { null }, sizes = answer)); askText = "" }
                     }
                     // One answer carries everything the card holds: the numbers as they stand go with words or a photo.
@@ -295,33 +325,33 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                         Text("Update Counterpart on this phone to answer this kind of question here.", color = Palette.secondary, fontSize = 13.sp, modifier = Modifier.testTag("ask-update"))
                     else when (ask.type) {
                         "choice" -> ask.options?.forEach { o ->
-                            SecondaryButton(o.label + (o.detail?.let { " · $it" } ?: ""), Modifier.fillMaxWidth(), enabled = working == null) {
+                            SecondaryButton(o.label + (o.detail?.let { " · $it" } ?: ""), Modifier.fillMaxWidth(), enabled = idle) {
                                 run("ask") { state.show(app.companion.choosePublishedPlate(id, ask.id, o.id)) }
                             }
                         }
                         "file" -> {
                             ask.url?.let { url -> SecondaryButton("Open the Model Page", Modifier.fillMaxWidth()) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
-                            PrimaryButton("Choose the Model File", Modifier.fillMaxWidth(), enabled = working == null) { pickModel.launch(arrayOf("*/*")) }
+                            PrimaryButton("Choose the Model File", Modifier.fillMaxWidth(), enabled = idle) { pickModel.launch(arrayOf("*/*")) }
                         }
                         else -> {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                SecondaryButton(if (sizes != null) "Caliper Photo" else "Take a Photo", Modifier.weight(1f), enabled = working == null, icon = CIcons.Camera) {
+                                SecondaryButton(if (sizes != null) "Caliper Photo" else "Take a Photo", Modifier.weight(1f), enabled = idle, icon = CIcons.Camera) {
                                     photoSizes = carried() ?: return@SecondaryButton
                                     forAsk = true; val (f, uri) = Media.newPhotoTarget(context); pendingCamera = f; takePhoto.launch(uri)
                                 }
-                                if (sizes == null) SecondaryButton("Choose", Modifier.weight(1f), enabled = working == null, icon = CIcons.Photo) {
+                                if (sizes == null) SecondaryButton("Choose", Modifier.weight(1f), enabled = idle, icon = CIcons.Photo) {
                                     photoSizes = emptyList(); forAsk = true; pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                                 }
                             }
                             if ("text" in ask.answers || ask.answers.isEmpty()) {
                                 OutlinedTextField(askText, { askText = it }, Modifier.fillMaxWidth().testTag("ask-text"), placeholder = { Text(if (sizes != null) "Anything the numbers don't say" else "Or tell it in words") })
-                                if (askText.isNotBlank()) SecondaryButton("Send Answer", Modifier.fillMaxWidth(), enabled = working == null) {
+                                if (askText.isNotBlank()) SecondaryButton("Send Answer", Modifier.fillMaxWidth(), enabled = idle) {
                                     val numbers = carried() ?: return@SecondaryButton
                                     run("ask") { state.show(app.companion.answerAsk(id, text = askText.trim(), sizes = numbers)); askText = "" }
                                 }
                             }
                             // A size is confirmed or measured, never guessed.
-                            if (sizes == null) SecondaryButton("Make Your Best Guess", Modifier.fillMaxWidth(), enabled = working == null, icon = CIcons.Wand) {
+                            if (sizes == null) SecondaryButton("Make Your Best Guess", Modifier.fillMaxWidth(), enabled = idle, icon = CIcons.Wand) {
                                 run("ask") { state.show(app.companion.answerAsk(id, bestGuess = true)) }
                             }
                         }
@@ -330,21 +360,21 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             }
 
             // Did it fit?
-            if (ProjectAction.ItWorks in words.actions) DidItFitCard(project, enabled = working == null,
+            if (ProjectAction.ItWorks in words.actions) DidItFitCard(project, enabled = idle,
                 itWorks = { run("fit") { app.companion.setStatus(id, ProjectStatus.Works)?.let(state::show) ?: state.reload(id) } },
                 needsChanges = { run("fit") { app.companion.setStatus(id, ProjectStatus.NeedsChanges)?.let(state::show) ?: state.reload(id) } })
 
             // One filled control on the page, the one `words.page` leads with; everything else is plain.
             val page = words.page
             val retry: () -> Unit = { run("retry") { state.show(app.companion.start(id)) } }
-            if (page.main == MainAction.Retry) PrimaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = working == null, onClick = retry)
+            if (page.main == MainAction.Retry) PrimaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = idle, onClick = retry)
             // Print once, under what it is here ("Print the last version", "Print Again", "Print Another"), and never while a change is being made.
             page.printWords?.let { printWords ->
-                if (page.printIsMain) PrimaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = working == null && !away, onClick = print)
-                else SecondaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = working == null && !away, onClick = print)
+                if (page.printIsMain) PrimaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = idle, onClick = print)
+                else SecondaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = idle, onClick = print)
                 page.printNote?.let { Text(it, color = Palette.secondary, fontSize = 13.sp) }
             }
-            if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth(), enabled = working == null && !away) {
+            if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth(), enabled = idle) {
                 state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) }
             }
             if (ProjectAction.Scan in words.actions) {
@@ -352,15 +382,15 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 if (page.main == MainAction.Scan) PrimaryButton(label, Modifier.fillMaxWidth(), icon = CIcons.Cube, onClick = scan)
                 else SecondaryButton(label, Modifier.fillMaxWidth(), icon = CIcons.Cube, onClick = scan)
             }
-            if (ProjectAction.MakeIt in words.actions) SecondaryButton("Make It", Modifier.fillMaxWidth(), enabled = working == null) { run("start") { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
-            if (ProjectAction.Retry in words.actions && page.main != MainAction.Retry) SecondaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = working == null, onClick = retry)
+            if (ProjectAction.MakeIt in words.actions) SecondaryButton("Make It", Modifier.fillMaxWidth(), enabled = idle) { run("start") { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) } }
+            if (ProjectAction.Retry in words.actions && page.main != MainAction.Retry) SecondaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = idle, onClick = retry)
 
             // Ask for changes: a new pass with your words (and photos).
             if (ProjectAction.Correct in words.actions) GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Ask for changes", fontWeight = FontWeight.SemiBold)
                 OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), minLines = 2, placeholder = { Text("Make the hole 2 mm wider…") })
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SecondaryButton("Add Photo", enabled = working == null, icon = CIcons.Camera) {
+                    SecondaryButton("Add Photo", enabled = idle, icon = CIcons.Camera) {
                         forAsk = false; val (f, uri) = Media.newPhotoTarget(context); pendingCamera = f; takePhoto.launch(uri)
                     }
                     if (messagePhotos.value.isNotEmpty()) Text("${messagePhotos.value.size} photo(s)", color = Palette.secondary)

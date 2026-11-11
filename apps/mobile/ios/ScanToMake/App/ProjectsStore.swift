@@ -15,11 +15,24 @@ import CounterpartKit
     var link = MacLink.checking
     /// The Mac answered the last request (nil until one has).
     var reachable: Bool? { link.reachable }
+    /// The one fact every screen reads (board X100): what is shown is what this phone already had, because the Mac isn't
+    /// answering, or because it was restored and the Mac hasn't answered yet. Nothing that needs the Mac can be pressed
+    /// then (it says why, or queues), and nothing restored counts on as if it were live.
+    var away: Bool { link == .notAnswering || (restoredUnconfirmed && link == .checking) }
+    /// Restored from the saved copy and not yet confirmed by an answer.
+    private(set) var restoredUnconfirmed = false
+    /// When what is shown is from: one project's time, or the newest the phone has.
+    func heardAt(_ id: String? = nil) -> Date? { id.flatMap { heard[$0] } ?? heard.values.max() }
+    /// The one line every screen shows while `away`.
+    func awayLine(_ id: String? = nil) -> String {
+        KnownProjects.awayLine(heard: heardAt(id), checking: link == .checking)
+    }
 
     /// The Mac replied, so nothing is wrong with the connection any more.
     private func answered() {
         let recovered = link.reachable != true
         link.answered()
+        restoredUnconfirmed = false
         if recovered { models.recover() }
         if let shown = error, shown.isUnreachable || shown.needsPairing { error = nil }
     }
@@ -170,16 +183,18 @@ import CounterpartKit
         if Fixtures.folder != nil { return Fixtures.keepsLibrary ? "fixture" : nil }
         #endif
         guard let status = connection, status.state == .paired else { return nil }
-        return status.baseUrl
+        return KnownProjects.key(for: status)
     }
 
     /// Before the first list arrives: the projects this phone last heard from this Mac, so Home and a project page open
     /// at once from them on a slow or dropped link (a relaunch included). The list replaces them when it comes.
     func restoreKnown() {
+        forgetOtherMacsCopy()
         guard projects.isEmpty, let mac = knownMac, let saved = KnownProjects.load(from: Self.knownFile, mac: mac) else { return }
         known = saved
         projects = saved.projects
         heard = saved.heard
+        restoredUnconfirmed = !saved.projects.isEmpty
     }
 
     private func remember(listed: [Project]? = nil, one: Project? = nil, forget: String? = nil) {
@@ -193,7 +208,28 @@ import CounterpartKit
         if let one { copy.heard(one, at: now) }
         if let forget { copy.forget(forget) }
         known = copy
-        copy.save(to: Self.knownFile)
+        saveKnownSoon()
+    }
+
+    /// The copy is written off the main actor, at most every few seconds: the latest one wins (review S2).
+    @ObservationIgnored private var pendingSave: Task<Void, Never>?
+    private func saveKnownSoon() {
+        pendingSave?.cancel()
+        pendingSave = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let copy = self?.known else { return }
+            await Task.detached(priority: .utility) { copy.save(to: ProjectsStore.knownFile) }.value
+        }
+    }
+
+    /// Nothing paired, or another Mac paired now: the saved copy is not this Mac's, so it goes (unpair, a new pairing).
+    private func forgetOtherMacsCopy() {
+        guard let owner = KnownProjects.owner(of: Self.knownFile), owner != knownMac else { return }
+        #if DEBUG
+        if Fixtures.folder != nil { return }
+        #endif
+        pendingSave?.cancel(); known = nil
+        try? FileManager.default.removeItem(at: Self.knownFile)
     }
 
     // MARK: Reading
@@ -372,8 +408,10 @@ import CounterpartKit
         known = nil; heard = [:]
         projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
         stoppedScans = [:]; readyScans = []; sendFailures = [:]
-        // Runs at every launch and pairing: what this phone already had from the Mac now paired (none from another).
-        restoreKnown()
+        restoredUnconfirmed = false
+        // A pairing reset shows nothing from before it. The next load restores this Mac's own copy, if it has one, and
+        // removes one that belongs to another Mac or to no pairing at all.
+        forgetOtherMacsCopy()
     }
 
     /// One consumer for the visible app: events when served, otherwise a refresh every 30 s.
@@ -566,7 +604,8 @@ struct MCPUpdateProgress: Equatable {
                     }
                     catch let error as CompanionError where Self.final.contains(error.code) {
                         // The Mac's refusal for size, or this phone's own limit met mid-transfer (review F5 on #525).
-                        outcome = ["file-too-large", "too-large"].contains(error.code) ? .tooLarge
+                        // Mid-transfer over the phone's limit arrives as `payload-too-large` (review S3): too large, not retried.
+                        outcome = ModelFiles.tooLargeCodes.contains(error.code) ? .tooLarge
                             : ["pairing-required", "pairing-changed"].contains(error.code) ? .failed : .refused
                         break
                     } catch let error as CompanionError where error.code.hasPrefix("http-4") {
@@ -607,10 +646,10 @@ struct MCPUpdateProgress: Equatable {
         running = [:]; generations = [:]; contexts = [:]; demands = [:]; fetches = [:]
     }
 
-    /// Foreground/unlock and a recovered Mac link retry known failed demand.
+    /// Foreground/unlock and a recovered Mac link start unstarted demand and retry known failures.
     func recover() {
         guard active else { return }
-        for (project, path) in Array(demands.values) where fetch(project, path) == .failed { want(project, path) }
+        for (project, path) in Array(demands.values) where fetch(project, path) == nil || fetch(project, path) == .failed { want(project, path) }
     }
 
     /// Try Again: a download that failed starts over.
@@ -622,6 +661,7 @@ struct MCPUpdateProgress: Equatable {
     }
 
     /// Answers that another try won't change: the Mac refused the file, or this phone may not ask for it.
-    private static let final: Set<String> = ["file-too-large", "too-large", "not-found", "invalid-request", "scope-denied", "pairing-required", "pairing-changed"]
+    static let tooLargeCodes: Set<String> = ["file-too-large", "too-large", "payload-too-large"]
+    private static let final: Set<String> = ["file-too-large", "too-large", "payload-too-large", "not-found", "invalid-request", "scope-denied", "pairing-required", "pairing-changed"]
 }
 

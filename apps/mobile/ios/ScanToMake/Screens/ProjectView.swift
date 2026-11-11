@@ -19,6 +19,10 @@ struct ProjectView: View {
     let close: () -> Void
     var openPrint: (String) -> Void = { _ in }
     var openPrinting: (String) -> Void = { _ in }
+    /// "Make something else from this scan": New, holding this project's scan (design §3.3).
+    var makeFromScan: (String) -> Void = { _ in }
+    /// Another project, from a line that names it (where this scan came from, what else was made from it).
+    var openProject: (String) -> Void = { _ in }
     @State private var section = ProjectSection.result
     @State private var note = ""
     @State private var attempts = NoteAttempts()
@@ -34,11 +38,8 @@ struct ProjectView: View {
     @State private var confirmDelete = false
     @State private var modelURL: URL?
     @Environment(\.scenePhase) private var scenePhase
+    /// The part's USDZ once the stage's AR chip has prepared it (Share offers it too).
     @State private var arURL: URL?
-    @State private var arRequested = false
-    @State private var arPreparing = false
-    @State private var arProblem: String?
-    @State private var arGeneration = UUID()
     @State private var scanURL: URL?
     @State private var captureWarning: String?
     @State private var askWorking = false
@@ -57,7 +58,7 @@ struct ProjectView: View {
     @FocusState private var writing: Bool
     private var object: Project? { store.project(id) }
     /// The Mac isn't answering: the page shows what this phone already had and says so, and Print and Send wait (X100).
-    private var away: Bool { store.reachable == false }
+    private var away: Bool { store.away }
 
     var body: some View {
         Group {
@@ -105,7 +106,7 @@ struct ProjectView: View {
         // Photos dropped from Files or Safari join the project; the Mac uses them in its next pass (PRD §6).
         .dropDestination(for: Data.self) { items, _ in
             // One action at a time: a drop while something runs is refused, not quietly lost.
-            guard let object, !working else { return false }
+            guard let object, !working, !away else { return false }
             let forMessage = object.current != nil || object.changesWait || object.openAsk != nil
             Task { await addDropped(items, to: object.id, forMessage: forMessage) }
             return !items.isEmpty
@@ -142,7 +143,7 @@ struct ProjectView: View {
     /// Resume a send cut short (after relaunch too), even when the model or some photos already reached the
     /// Mac. Only a send you asked for: a draft whose scan is attached but never sent waits for Send.
     private func resumeSavedCapture() async {
-        guard !resumed, let object, object.state == .new, !store.sending.contains(object.id), MacConnection.sendRequested(object.id) else { return }
+        guard !resumed, !away, let object, object.state == .new, !store.sending.contains(object.id), MacConnection.sendRequested(object.id) else { return }
         resumed = true
         let saved = HandheldCapture.finished(object.id) ? true : await store.mac.finishedScan(object.id) != nil
         if saved { act { try await finishSending(object) } }
@@ -165,7 +166,8 @@ struct ProjectView: View {
     }
 
     private func act(_ body: @escaping () async throws -> Project?) {
-        guard !working else { return }
+        // Nothing that needs the Mac runs while it isn't answering (X100): its control is disabled and the page says why.
+        guard !working, !away else { return }
         working = true; problem = nil
         Task {
             // A scan started, stopped or sent here changes what this phone still holds for the project.
@@ -212,7 +214,8 @@ struct ProjectView: View {
                             Menu { statusChoices(object, words, inline: true) } label: {
                                 HStack(spacing: 4) { StatusCapsule(phase: words.phase); Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary) }
                             }
-                            .accessibilityIdentifier("status-menu")
+                            .disabled(away)
+                        .accessibilityIdentifier("status-menu")
                             .accessibilityLabel("Status, \(words.phase.label)")
                             .accessibilityHint("Changes the project's status")
                         } else {
@@ -224,7 +227,7 @@ struct ProjectView: View {
                     Button { projectName = words.title; renaming = true } label: {
                         Text(words.title).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain).disabled(working || !store.projectRename)
+                    .buttonStyle(.plain).disabled(working || away || !store.projectRename)
                     .accessibilityIdentifier("project-title")
                     .accessibilityLabel(words.title).accessibilityHint("Rename project")
                     if let credit = object.credit?.object, let raw = credit["url"]?.string, let url = URL(string: raw), ["http", "https"].contains(url.scheme ?? "") {
@@ -248,14 +251,14 @@ struct ProjectView: View {
                 if object.kind == "published" {
                     Button("Add Model Files", systemImage: "doc.badge.plus") { choosingModelFiles = true }
                         .buttonStyle(.glass).padding(.horizontal, 20)
-                        .disabled(working || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
+                        .disabled(working || away || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
                 }
                 if object.current == nil, let captureWarning {
                     Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
                 }
                 if away {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Label(KnownProjects.awayLine(heard: store.heard[object.id]), systemImage: "wifi.exclamationmark")
+                        Label(store.awayLine(object.id), systemImage: "wifi.exclamationmark")
                             .font(.subheadline).foregroundStyle(.secondary)
                         Spacer(minLength: 0)
                         Button("Try Again") { Task { await reload() } }.font(.subheadline.weight(.semibold)).disabled(loading)
@@ -266,6 +269,7 @@ struct ProjectView: View {
                 }
                 if let message = problem ?? (away ? nil : fetchFailure?.message) ?? store.sendFailures[object.id] {
                     Label(message, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
+                        .accessibilityIdentifier("project-problem")
                 }
                 if let notice, problem == nil {
                     Label(notice, systemImage: "photo.badge.checkmark").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 20)
@@ -276,7 +280,7 @@ struct ProjectView: View {
                         HStack {
                             Button("Try Again") { store.retryQueuedChange(object) }.disabled(object.changesWait)
                             Button("Discard Saved Change") { store.discardQueuedChange(object) }
-                        }.disabled(working)
+                        }.disabled(working || away)
                     }.padding(.horizontal, 20)
                 }
                 if let pending = object.pendingFollowup {
@@ -294,7 +298,7 @@ struct ProjectView: View {
                                 store.corrections.sent(pending, for: object.id)
                                 return next
                             } }
-                        }.disabled(working)
+                        }.disabled(working || away)
                     }.padding(.horizontal, 20)
                 }
                 if let previous = object.completionUndoStatus {
@@ -302,10 +306,13 @@ struct ProjectView: View {
                         Label("Marked Done", systemImage: "checkmark.circle.fill")
                         Spacer()
                         Button("Undo") { act { try await store.mac.client.setStatus(object.id, previous) } }
-                            .disabled(working)
+                            .disabled(working || away)
                     }.font(.subheadline).padding(.horizontal, 20)
                 }
+                // Every card's actions need the Mac (Try Again, Did it fit?, an answer, Send, Scan): they wait while it
+                // isn't answering. A print's card handles its own, so Watch the Print still opens (X100).
                 stateCard(object, words).padding(.horizontal, 16)
+                    .disabled(away && !(words.phase == .preparing || words.phase == .printing || object.printConfirmation != nil))
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.pageSpace)).maxY.rounded() } action: { bottom in
                         // Where the card ends below the stage, in the order the card sits now under the title.
                         let now = answerFit(store.words(object))
@@ -356,19 +363,24 @@ struct ProjectView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     if store.macCapabilities.contains("projectPreferences") {
-                        Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
+                        Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true }.disabled(away)
                     }
                     if store.projectRename {
-                        Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }
+                        Button("Rename Project", systemImage: "pencil") { projectName = words.title; renaming = true }.disabled(away)
                     }
                     if store.projectSettings {
-                        statusChoices(object, words)
+                        statusChoices(object, words).disabled(away)
+                        Divider()
+                    }
+                    if object.canMakeFromScan {
+                        Button(ScanLineage.action, systemImage: "plus.square.on.square") { makeFromScan(object.id) }.disabled(away)
+                            .accessibilityIdentifier("more-make-from-scan")
                         Divider()
                     }
                     if let modelURL { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
                     if let arURL { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
-                    Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }
+                    Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }.disabled(away)
                 } label: { Image(systemName: "ellipsis") }
                 .accessibilityLabel("More")
             }
@@ -471,44 +483,67 @@ struct ProjectView: View {
     // MARK: Hero
 
     /// The project's pictures (PRD §5.4): what will print, the two together, what was scanned (`ProjectGalleryView`).
+    /// Under What you scanned (design §3.3): the way to make something else from this scan, on any project the Mac has a
+    /// scan for, whatever its kind (a "copy" of a Leatherman whose scan was really meant for a case); where this one's
+    /// scan came from; and what else was made from it. Each line that names a project opens it.
+    @ViewBuilder private func scanLineage(_ object: Project) -> some View {
+        let lineage = ScanLineage(object, in: store.projects)
+        if object.canMakeFromScan || lineage.from != nil || !lineage.made.isEmpty {
+            VStack(spacing: 6) {
+                if object.canMakeFromScan {
+                    Button { makeFromScan(object.id) } label: {
+                        Label(ScanLineage.action, systemImage: "plus.square.on.square").font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity).frame(minHeight: 32)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(working || away)
+                    .accessibilityHint("A case, a holder or another copy, from this scan. No new scan; this project stays as it is.")
+                    .accessibilityIdentifier("make-from-scan")
+                    if away {
+                        Text(store.awayLine(object.id)).font(.footnote).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("make-from-scan-away")
+                    }
+                }
+                if let from = lineage.from, let line = lineage.fromLine {
+                    if from.exists {
+                        Button { openProject(from.id) } label: { Label(line, systemImage: "arrow.turn.up.left").font(.footnote) }
+                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                            .accessibilityHint("Opens that project").accessibilityIdentifier("scan-from")
+                    } else {
+                        Label(line, systemImage: "arrow.turn.up.left").font(.footnote).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("scan-from")
+                    }
+                }
+                if let line = lineage.madeLine {
+                    if lineage.made.count == 1, let only = lineage.made.first {
+                        Button { openProject(only.id) } label: { Label(line, systemImage: "arrow.turn.down.right").font(.footnote) }
+                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                            .accessibilityHint("Opens that project").accessibilityIdentifier("scan-made")
+                    } else {
+                        Menu {
+                            ForEach(lineage.made) { link in Button(link.title) { openProject(link.id) } }
+                        } label: { Label(line, systemImage: "arrow.turn.down.right").font(.footnote) }
+                        .accessibilityIdentifier("scan-made")
+                    }
+                }
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 20)
+        }
+    }
+
     @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords, stage: CGFloat) -> some View {
         VStack(spacing: 8) {
             ProjectGalleryView(store: store, project: object, words: words,
                                height: stage,
-                               modelURL: modelURL, arURL: nil, localScan: scanURL, working: working,
+                               modelURL: modelURL, arURL: $arURL, localScan: scanURL, working: working || away,
                                locate: { act { try await store.mac.client.locate(object.id) } })
             .task(id: "\(object.id)#\(object.scan ?? "")") {
                 // The scan while it's only on this phone, for Share until the Mac has it.
                 scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
             }
             .ignoresSafeArea(edges: .top)
-            if modelURL != nil, !object.preservesPublishedFilaments {
-                Button {
-                    if let arURL { ARModel.show(arURL) } else { arRequested = true }
-                } label: {
-                    HStack {
-                        if arPreparing { ProgressView() }
-                        Label(arPreparing ? "Preparing AR…" : "View part in your space", systemImage: "arkit")
-                    }
-                }
-                .disabled(arPreparing || scenePhase != .active)
-                .accessibilityIdentifier("project-prepare-ar")
-                if let arProblem { Text(arProblem).font(.footnote).foregroundStyle(.secondary) }
-            }
-        }
-        .task(id: "\(arRequested)#\(scenePhase)#\(modelURL?.path ?? "")#\(object.spoolColour ?? "")") {
-            guard arRequested, scenePhase == .active, let url = modelURL else { return }
-            let generation = UUID()
-            arGeneration = generation; arPreparing = true; arProblem = nil
-            defer { if arGeneration == generation { arPreparing = false } }
-            let prepared = await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: String(describing: scenePhase))) {
-                await ARModel.usdz(fromSTL: url, tint: object.spoolColour)
-            }
-            guard !Task.isCancelled, scenePhase == .active, arGeneration == generation else { return }
-            arURL = prepared
-            if let prepared { ARModel.show(prepared) }
-            else { arProblem = "AR couldn't be prepared. Try again." }
-            arRequested = false
+            scanLineage(object)
         }
     }
 
@@ -543,6 +578,7 @@ struct ProjectView: View {
 
     /// Says so on the Mac, then starts the change in Ask for changes.
     private func needsChanges(_ object: Project) {
+        guard !away else { return }
         act { try await store.mac.client.setStatus(object.id, .needsChanges) }
         if !note.hasPrefix(Self.afterPrinting) { note = Self.afterPrinting + note }
         writing = true
@@ -739,7 +775,7 @@ struct ProjectView: View {
                     }
                 }
                 .controlSize(.large).font(.subheadline)
-                .disabled(working)
+                .disabled(working || away)
             }
             if let pass = object.passes.last {
                 DisclosureGroup("Details") {
@@ -796,7 +832,7 @@ struct ProjectView: View {
                     }
                 }
                 .controlSize(.large).font(.subheadline)
-                .disabled(working)
+                .disabled(working || away)
             }
         }
         .padding(16)
@@ -828,7 +864,7 @@ struct ProjectView: View {
                     }
                 }
                 .controlSize(.large).font(.subheadline)
-                .disabled(working)
+                .disabled(working || away)
             }
         }
         .padding(16)
@@ -862,13 +898,13 @@ struct ProjectView: View {
                                 Button("Take Photo", systemImage: "camera") { attach(object, camera: true) }
                                 Button("Choose Photos", systemImage: "photo.on.rectangle") { attach(object, camera: false) }
                             } label: { Image(systemName: "camera.fill").foregroundStyle(.secondary) }
-                            .disabled(working)
+                            .disabled(working || away)
                             .accessibilityLabel("Add photos")
                             .accessibilityIdentifier("attach-photos")
                             // Dictation is the keyboard's own; nothing here that doesn't do something.
                             if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 Button { sendNote(object) } label: { Image(systemName: "arrow.up.circle.fill").font(.title2) }
-                                    .disabled(working)
+                                    .disabled(working || away)
                                     .accessibilityLabel("Send changes")
                             }
                         }
@@ -926,6 +962,14 @@ struct ProjectView: View {
         // One id for this note across every try, so the Mac never records it twice.
         let photoNames = store.corrections.availablePhotos(object)
         let messageId = attempts.id(for: text, photos: photoNames ?? [], in: object.id)
+        if away {
+            // The change is kept on this phone and sent, once, when the Mac answers (the same queue as a busy pass).
+            store.queue(note: text, for: object.id, messageId: messageId)
+            attempts.settled(object.id)
+            note = ""
+            notice = "Your change is saved on this phone. It goes to your Mac when it answers."
+            return
+        }
         if object.changesWait {
             // The Mac takes changes between passes; this one is sent the moment the pass ends.
             store.queue(note: text, for: object.id, messageId: messageId)
@@ -1028,7 +1072,7 @@ struct ResultSection: View {
                     .font(.headline).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("result-no-printer")
                 Spacer(minLength: 8)
-                Button(none ? "Add a Printer" : "Choose a Printer") { app.route = none ? .printers : .print(project.id) }
+                Button(none ? "Add a Printer" : "Choose a Printer") { app.route = none ? .printers : .print(project.id) }.disabled(store.away)
                     .buttonStyle(.glass)
                     .accessibilityIdentifier("result-choose-printer")
             }
@@ -1250,28 +1294,81 @@ enum StepState: Equatable {
 
 // MARK: AR
 
-/// Quick Look AR for the model at true size: the STL (millimetres, Z up) converted to USDZ (metres, Y up).
+/// Quick Look AR for the model at true size: the STL (millimetres, Z up) as a real USDZ (metres, Y up), resting on the
+/// surface the person points at (`PartUSDZ`). AR Quick Look opens USDZ and Reality files by what they are; until Nov 11
+/// the app wrote a Reality file (`Entity.write(to:)`) and named it `.usdz`, so a designed part never appeared.
 enum ARModel {
-    /// The STL as USDZ for AR Quick Look, written once beside it. RealityKit writes the same mesh the stage shows.
-    /// AR wears what the stage wears: the spool it prints in, or the neutral material before one is chosen.
-    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil) async -> URL? {
-        let target = url.deletingPathExtension().appendingPathExtension("\(hex.map { $0.dropFirst() + "." } ?? "")usdz")
-        if FileManager.default.fileExists(atPath: target.path) { return target }
-        let tint = hex.flatMap { Int($0.dropFirst().prefix(6), radix: 16) }.map {
-            UIColor(red: CGFloat(($0 >> 16) & 255) / 255, green: CGFloat(($0 >> 8) & 255) / 255, blue: CGFloat($0 & 255) / 255, alpha: 1)
-        }
-        guard let entity = await ModelStage.load(url, tint: tint, twoTone: false) else { return nil }
-        guard !Task.isCancelled else { return nil }
-        return await ModelEntityCache.export(entity, to: target)
+    /// The part's AR file beside its STL, named for what it wears: `model.<rrggbb>.ar.usdz`, or `model.neutral.ar.usdz`
+    /// before a spool is chosen. The `.ar` keeps it apart from the files the app wrote before, which are cleared away.
+    static func target(forSTL url: URL, tint hex: String?) -> URL {
+        let colour = hex.map { String($0.drop(while: { $0 == "#" }).prefix(6)).lowercased() } ?? "neutral"
+        return url.deletingPathExtension().appendingPathExtension("\(colour).ar.usdz")
     }
 
-    @MainActor static func show(_ url: URL) {
-        guard let presenter = PhotoSources.topViewController() else { return }
+    /// The spool's colour as sRGB 0…1, or the stage's neutral material before one is chosen (AR wears what the stage wears).
+    static func srgb(_ hex: String?) -> SIMD3<Float> {
+        if let value = hex.flatMap({ Int($0.drop(while: { $0 == "#" }).prefix(6), radix: 16) }) {
+            return SIMD3(Float((value >> 16) & 255), Float((value >> 8) & 255), Float(value & 255)) / 255
+        }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ModelStage.neutral.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return SIMD3(Float(r), Float(g), Float(b))
+    }
+
+    /// The STL as USDZ for AR Quick Look, written once beside it, off the main actor. Nil when it can't be made.
+    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil) async -> URL? {
+        let target = target(forSTL: url, tint: hex)
+        removeStale(beside: url)
+        if PartUSDZ.isUSDZ(target) { return target }
+        MediaTrace.record("ar.export-start", ["format": "usdz"])
+        let colour = srgb(hex)
+        let work = Task.detached(priority: .userInitiated) { () throws -> Int in
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count > 84 else { throw PartUSDZ.Failure.empty }
+            let triangles = STLMesh.triangles(data)
+            try PartUSDZ.write(triangles, srgb: colour, to: target)
+            return triangles.count
+        }
+        do {
+            let triangles = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+            let bytes = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
+            MediaTrace.record("ar.export-end", ["success": "true", "format": "usdz", "triangles": String(triangles), "bytes": String(bytes),
+                                                "preview": String(QLPreviewController.canPreview(target as NSURL))])
+            return target
+        } catch {
+            let code = switch error as? PartUSDZ.Failure {
+            case .empty?: "empty-export"
+            case .notUSDZ?: "not-usdz"
+            case .cancelled?: "cancelled"
+            case nil: String((error as NSError).code)
+            }
+            MediaTrace.record("ar.export-end", ["success": "false", "format": "usdz", "code": code])
+            return nil
+        }
+    }
+
+    /// The AR files the app wrote before Nov 11 beside this STL (`model.usdz`, `model.<rrggbb>.usdz`) are Reality files:
+    /// never handed to AR Quick Look again, and their space comes back.
+    static func removeStale(beside url: URL) {
+        let folder = url.deletingLastPathComponent(), base = url.deletingPathExtension().lastPathComponent + "."
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return }
+        for name in names where name.hasPrefix(base) && name.lowercased().hasSuffix(".usdz") {
+            let file = folder.appendingPathComponent(name)
+            if !PartUSDZ.isUSDZ(file) {
+                try? FileManager.default.removeItem(at: file)
+                MediaTrace.record("ar.stale-removed", ["name": name])
+            }
+        }
+    }
+
+    /// Presents AR Quick Look; false when the file isn't one it can open (then nothing is presented).
+    @discardableResult @MainActor static func show(_ url: URL) -> Bool {
+        guard QLPreviewController.canPreview(url as NSURL), let presenter = PhotoSources.topViewController() else { return false }
         let controller = QLPreviewController()
         let source = ARSource(url: url)
         controller.dataSource = source
         objc_setAssociatedObject(controller, &ARSource.key, source, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         presenter.present(controller, animated: true)
+        return true
     }
 
     private final class ARSource: NSObject, QLPreviewControllerDataSource {

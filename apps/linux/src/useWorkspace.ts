@@ -8,6 +8,8 @@ export function useWorkspace(enabled: boolean) {
   const [questions, setQuestions] = useState<RawQuestion[]>([]);
   const [error, setError] = useState("");
   const [connected, setConnected] = useState(false);
+  // What the companion keeps (`status.get`), read with each refresh until it answers once.
+  const [capabilities, setCapabilities] = useState<Record<string, unknown>>();
   const [mcpReplies, setMcpReplies] = useState<Record<string, string>>({});
   const [mcpEvents, setMcpEvents] = useState<Record<string, string>>({});
   const mcpNotices = {...mcpReplies, ...mcpEvents};
@@ -48,6 +50,7 @@ export function useWorkspace(enabled: boolean) {
         );
         setPrinters(b.destinations);
         setConnected(true);
+        void call<{ capabilities?: Record<string, unknown> }>("status.get").then((s) => setCapabilities(s.capabilities ?? {}), () => {});
         setError("");
       }
     } catch (e) {
@@ -167,6 +170,7 @@ export function useWorkspace(enabled: boolean) {
     questions,
     error,
     connected,
+    capabilities,
     eventNotice,
     mcpNotices,
     recordMcpNotice,

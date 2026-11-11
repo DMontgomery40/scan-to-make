@@ -90,7 +90,10 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
     val grid = visible.filter { phase(it) != ProjectPhase.Confirmed }.sortedWith(compareByDescending<Project> { phase(it) == ProjectPhase.Ready }.thenByDescending { it.updatedAtMs })
 
     val mac = macName ?: "Your computer"
-    val connection = when (link.reachable) { false -> "$mac isn't answering"; true -> "$mac connected"; else -> mac }
+    // Once, for the whole list: not answering, and when what is shown is from (X100).
+    val heard by state.heard.collectAsState()
+    val heardText = heard.values.maxOrNull()?.let { " · this is from " + com.scantomake.counterpart.api.KnownProjects.whenText(it, System.currentTimeMillis(), java.time.ZoneId.systemDefault(), java.util.Locale.getDefault()).removePrefix("at ") } ?: ""
+    val connection = when (link.reachable) { false -> "$mac isn't answering$heardText"; true -> "$mac connected"; else -> mac }
     val printing = catalog?.destinations.orEmpty().filter { printer ->
         projects.any { p -> phase(p) == ProjectPhase.Printing && (p.print?.destinationId ?: p.print?.destination?.id ?: p.printerDestinationId) == printer.id }
     }

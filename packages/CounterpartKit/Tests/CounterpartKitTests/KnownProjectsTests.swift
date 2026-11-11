@@ -45,9 +45,29 @@ final class KnownProjectsTests: XCTestCase {
         let locale = Locale(identifier: "en_US")
         let now = Date(timeIntervalSince1970: 1_762_819_200) // Nov 10 2025 17:00 MST
         let line = { (date: Date?) in KnownProjects.awayLine(heard: date, now: now, calendar: calendar, locale: locale) }
-        XCTAssertTrue(line(now.addingTimeInterval(-48 * 60)).hasPrefix("Your Mac isn’t answering, so Print and Send wait. This is what your phone had at 4:12"), line(now.addingTimeInterval(-48 * 60)))
+        XCTAssertTrue(line(now.addingTimeInterval(-48 * 60)).hasPrefix("Your Mac isn’t answering, so anything that needs it waits. This is what your phone had at 4:12"), line(now.addingTimeInterval(-48 * 60)))
         XCTAssertTrue(line(now.addingTimeInterval(-86_400)).contains("had yesterday at 5:00"))
         XCTAssertTrue(line(now.addingTimeInterval(-3 * 86_400)).contains("had on Nov 7 at 5:00"))
-        XCTAssertEqual(line(nil), "Your Mac isn’t answering, so Print and Send wait. This is what your phone already had.")
+        XCTAssertEqual(line(nil), "Your Mac isn’t answering, so anything that needs it waits. This is what your phone already had.")
+        // Restored at launch, before the Mac has answered: said without claiming it is down.
+        XCTAssertTrue(KnownProjects.awayLine(heard: nil, checking: true).hasPrefix("Checking with your Mac, so anything that needs it waits."))
+    }
+
+    /// Review of #527 part 4, S2: the copy is keyed by who the Mac is (its pin), not where it answers from, and nothing
+    /// unpaired has a key.
+    func testTheKeyIsTheMacsPinNotItsAddress() {
+        let a = PairingStatus(state: .paired, baseUrl: "https://192.168.1.5:9077", activeUrl: nil, deviceId: "d1", expiresAtMs: nil, fixture: false, pin: "aa")
+        let b = PairingStatus(state: .paired, baseUrl: "https://192.168.1.5:9077", activeUrl: nil, deviceId: "d2", expiresAtMs: nil, fixture: false, pin: "bb")
+        XCTAssertNotEqual(KnownProjects.key(for: a), KnownProjects.key(for: b), "another Mac at the same address is another Mac")
+        var moved = a; moved.baseUrl = "https://100.64.0.9:9077"
+        XCTAssertEqual(KnownProjects.key(for: a), KnownProjects.key(for: moved), "the same Mac at another address is the same Mac")
+        var unpinned = a; unpinned.pin = nil
+        XCTAssertEqual(KnownProjects.key(for: unpinned), "https://192.168.1.5:9077")
+        XCTAssertNil(KnownProjects.key(for: .disconnected))
+        let url = FileManager.default.temporaryDirectory.appending(path: "known-\(UUID().uuidString)/projects.json")
+        KnownProjects(mac: KnownProjects.key(for: a)!).save(to: url)
+        XCTAssertEqual(KnownProjects.owner(of: url), KnownProjects.key(for: a))
+        XCTAssertEqual(try? url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true, "kept off backups")
+        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
     }
 }

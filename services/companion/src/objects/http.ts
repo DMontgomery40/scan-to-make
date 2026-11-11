@@ -25,7 +25,7 @@ import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|make-from-scan|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 /** Settings -> Printers: the printer MCP's connection (`route`) and which MCP a printer uses (`mcp`). */
 const PRINTER_CHOICE = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
@@ -543,6 +543,14 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             break;
           }
           case 'duplicate': { object = await service.duplicate(id); break; }
+          // Make something else from this scan: a new project seeded with a copy of this one's scan (design §3.3).
+          case 'make-from-scan': {
+            const input = await json<Record<string, unknown>>(request);
+            const parsed = parameters['objects.makeFromScan'].safeParse({...input, id});
+            if (!parsed.success || 'id' in input) throw new HttpFailure(400, 'invalid-request');
+            const {id: _source, ...made} = parsed.data;
+            return send(response, 201, {object: shown(await service.makeFromScan(id, made))});
+          }
           // Where the scanned object sits in a fit part made before passes said (docs/protocols/seats.md).
           case 'locate': { await json<unknown>(request); object = await service.locate(id); break; }
           case 'corrections': {

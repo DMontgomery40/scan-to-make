@@ -75,6 +75,21 @@ final class ThreeMFTests: XCTestCase {
         XCTAssertGreaterThan(try drawnPixels(image), 1500, "the objects are drawn, not an empty stage")
     }
 
+    func testBlackFilamentKeepsADarkBackdropAndAVisiblePart() throws {
+        let url = try package("black", ["3D/3dmodel.model": model(box(1, "part"), build: "<item objectid=\"1\"/>")])
+        XCTAssertFalse(wantsLightStage(.black))
+        var spec = PictureSpec(); spec.model = url; spec.zUp = true; spec.tint = .black; spec.pixels = 256
+        let output = folder.appendingPathComponent("black.png")
+        try renderPicture(spec, to: output)
+        let image = try XCTUnwrap(NSImage(contentsOf: output)?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        var bytes = [UInt8](repeating: 0, count: 256 * 256 * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: 256, height: 256, bitsPerComponent: 8, bytesPerRow: 256 * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 256, height: 256))
+        XCTAssertLessThan(bytes[0], 64); XCTAssertLessThan(bytes[1], 64); XCTAssertLessThan(bytes[2], 64)
+        XCTAssertGreaterThan(try drawnPixels(image), 200, "black plastic stays visible on the dark stage")
+    }
+
     /// Components kept in another model part (production extension), placed by transforms, in centimetres, with the
     /// colours the materials extension gives (an object's default and a triangle's own).
     func testComponentsInOtherPartsTransformsUnitsAndColoursFollowTheStandard() throws {
@@ -112,6 +127,39 @@ final class ThreeMFTests: XCTestCase {
         let notZip = folder.appendingPathComponent("not.3mf")
         try Data("not a zip".utf8).write(to: notZip)
         XCTAssertThrowsError(try ThreeMF.read(notZip))
+    }
+
+    /// #570: a box and lid can be disconnected solids inside ONE mesh, with one authored colour. The removed
+    /// splitter used to replace that colour with grey or the spool tint. Exercise the final picture, not just its reader.
+    func testDisconnectedSolidsInOneMeshKeepTheirAuthoredColourEvenWithATint() throws {
+        let corners: [(Int, Int, Int)] = [(0,0,0), (1,0,0), (1,1,0), (0,1,0), (0,0,1), (1,0,1), (1,1,1), (0,1,1)]
+        let faces: [(Int, Int, Int)] = [(0,2,1), (0,3,2), (4,5,6), (4,6,7), (0,1,5), (0,5,4), (1,2,6), (1,6,5), (2,3,7), (2,7,6), (3,0,4), (3,4,7)]
+        let vertices = (0..<2).flatMap { solid in
+            corners.map { "<vertex x=\"\($0.0 * 10 + solid * 18)\" y=\"\($0.1 * 10)\" z=\"\($0.2 * 10)\"/>" }
+        }.joined()
+        let triangles = (0..<2).flatMap { solid in
+            faces.map { "<triangle v1=\"\($0.0 + solid * 8)\" v2=\"\($0.1 + solid * 8)\" v3=\"\($0.2 + solid * 8)\"/>" }
+        }.joined()
+        let url = try package("red-box-and-lid", ["3D/3dmodel.model": model(
+            "<basematerials id=\"9\"><base name=\"red\" displaycolor=\"#FF0000\"/></basematerials>"
+            + "<object id=\"1\" type=\"model\" pid=\"9\" pindex=\"0\"><mesh><vertices>\(vertices)</vertices><triangles>\(triangles)</triangles></mesh></object>",
+            build: "<item objectid=\"1\"/>")])
+        XCTAssertEqual(try ThreeMF.read(url).meshes.count, 1)
+        for (name, tint) in [("neutral", nil), ("blue-tint", NSColor.blue)] {
+            var spec = PictureSpec(); spec.model = url; spec.zUp = true; spec.tint = tint; spec.pixels = 256
+            let output = folder.appendingPathComponent("\(name).png")
+            try renderPicture(spec, to: output)
+            let image = try XCTUnwrap(NSImage(contentsOf: output)?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+            var bytes = [UInt8](repeating: 0, count: 256 * 256 * 4)
+            let context = try XCTUnwrap(CGContext(data: &bytes, width: 256, height: 256, bitsPerComponent: 8, bytesPerRow: 256 * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: 256, height: 256))
+            let red = stride(from: 0, to: bytes.count, by: 4).filter { Int(bytes[$0]) > Int(bytes[$0 + 1]) * 2 && Int(bytes[$0]) > Int(bytes[$0 + 2]) * 2 }
+            XCTAssertGreaterThan(red.count, 1000, "both solids stay authored red, with \(name)")
+            for half in 0..<2 {
+                XCTAssertGreaterThan(red.filter { ($0 / 4 % 256) / 128 == half }.count, 200, "red geometry in both halves")
+            }
+        }
     }
 
     /// Pixels clearly off the stage's gradient (the stage is dark grey-blue; a drawn part is lit grey).
