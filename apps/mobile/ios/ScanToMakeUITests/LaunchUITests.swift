@@ -752,6 +752,11 @@ final class LayoutParityUITests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(chip.frame.minY, stage.maxY - 58 - 1, "\(chip.identifier) \(chip.frame) is in the controls band of \(stage)")
             }
             if state == "not available" {
+                // Board X100: the canned Mac has no part model (404) and no picture: one line that names the part and says
+                // it was not sent, never "too detailed" or "scan", and one Try Again for both.
+                XCTAssertEqual(picture.label, "Your part. Your Mac didn’t send the picture or 3D model of this part.")
+                XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier IN %@", ["gallery-model-retry", "gallery-stage-retry"])).count, 1)
+                XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS %@", "too detailed", "scan is")).firstMatch.exists)
                 let retry = app.buttons["gallery-stage-retry"]
                 XCTAssertTrue(retry.exists, "Try Again where trying again can help")
                 XCTAssertTrue(retry.isHittable, "Try Again can be pressed: \(retry.frame)")
@@ -1642,7 +1647,7 @@ final class LayoutParityUITests: XCTestCase {
         // Board X100: the line comes from the actual reason. The canned Mac has no file for 01 (404): it would not send it,
         // and with the picture missing too, the stage says both in one line with one Try Again. 02 is too large: said so.
         for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "Your Mac didn’t send"),
-                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "Your scan’s 3D model is too large a file to show on a phone. Open it on your Mac to see it from every side.")] {
+                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "your scan’s 3D model is too large a file to show on a phone.")] {
             let page = XCUIApplication()
             page.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
                                     "-CounterpartOpen", "counterpart://project/\(id)"]
@@ -1657,8 +1662,8 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertTrue(said.waitForExistence(timeout: 15), "one plain line says why: \(line)")
             XCTAssertFalse(page.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "too detailed")).firstMatch.exists)
             let retries = page.buttons.matching(NSPredicate(format: "identifier IN %@", ["gallery-model-retry", "gallery-stage-retry"])).count
-            if id.hasSuffix("01") { XCTAssertEqual(retries, 1, "one Try Again, for the picture and the model together") }
-            else { XCTAssertFalse(page.buttons["gallery-model-retry"].exists, "too large: trying again won't change it") }
+            XCTAssertEqual(retries, 1, "one line, one Try Again (the picture's; for 01 the model's too)")
+            if id.hasSuffix("02") { XCTAssertFalse(page.buttons["gallery-model-retry"].exists, "too large: trying again won't change it") }
             page.terminate()
         }
     }

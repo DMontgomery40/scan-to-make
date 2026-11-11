@@ -590,7 +590,9 @@ struct ProjectView: View {
 
     private func workingCard(_ object: Project, _ words: ProjectWords) -> some View {
         TimelineView(.periodic(from: .now, by: 10)) { context in
-            let work = WorkProgress(object, now: context.date)
+            // While the Mac isn't answering, time left stays as it was when the phone last heard (the line above says when),
+            // never counting down as if it were live.
+            let work = WorkProgress(object, now: away ? (store.heard[object.id] ?? context.date) : context.date)
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: words.phase.symbol).foregroundStyle(.blue).symbolEffect(.pulse)

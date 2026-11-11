@@ -72,14 +72,16 @@ struct ProjectGalleryView: View {
     /// and if it can't be; that one is coming; or that none can be had.
     private func still(_ entry: ProjectGallery.Entry) -> StagePicture {
         let problem = modelProblem(entry)
-        let missing: (line: String, retry: () -> Void)? = problem.flatMap { problem in
-            guard problem.reason.retryable, let path = problem.path else { return nil }
-            return (problem.reason.line(entry.kind, pictureToo: true), { store.models.retry(project, path) })
+        // The model can't be had either: the stage's one line says both; its Try Again also retries the model when that can help.
+        let missing: (line: String, retry: (() -> Void)?)? = problem.map { problem in
+            let retry: (() -> Void)? = problem.reason.retryable ? problem.path.map { path in { store.models.retry(project, path) } } : nil
+            return (problem.reason.line(entry.kind, pictureToo: true), retry)
         }
         return StagePicture(project: project, still: project.still(for: entry), label: entry.label,
                             unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.",
-                            modelMissing: missing, controlsInset: Self.controlsHeight,
-                            failedChanged: { failed in if failed { pictureFailed.insert(entry.id) } else { pictureFailed.remove(entry.id) } })
+                            modelMissing: missing,
+                            failedChanged: { failed in if failed { pictureFailed.insert(entry.id) } else { pictureFailed.remove(entry.id) } },
+                            controlsInset: Self.controlsHeight)
     }
 
     /// Why an entry's 3D model isn't drawn, from how its fetch actually ended (board X100: a refused part was called "too
@@ -108,7 +110,7 @@ struct ProjectGalleryView: View {
     /// state is the stage's (`StagePicture`), never a second line here.
     @ViewBuilder private func unavailable(_ entry: ProjectGallery.Entry) -> some View {
         // The picture failed too: the stage already says both in one line, with one Try Again for both.
-        if let problem = modelProblem(entry), !(problem.reason.retryable && problem.path != nil && pictureFailed.contains(entry.id)) {
+        if let problem = modelProblem(entry), !pictureFailed.contains(entry.id) {
             if problem.reason.retryable {
                 HStack(spacing: 8) {
                     Text(problem.reason.line(entry.kind)).font(.footnote).foregroundStyle(.secondary)

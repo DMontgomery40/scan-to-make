@@ -302,7 +302,9 @@ public enum ModelUnavailable: Equatable, Sendable {
             switch self {
             case .notAnswering: return "Your Mac isn’t answering, so the picture and 3D model of \(thing) can’t come yet."
             case .refused: return "Your Mac didn’t send the picture or 3D model of \(thing)."
-            default: return "The picture and 3D model of \(thing) didn’t come from your Mac."
+            case .didntCome: return "The picture and 3D model of \(thing) didn’t come from your Mac."
+            case .tooLarge: return "The picture didn’t come from your Mac, and \(model) is too large a file to show on a phone."
+            case .undrawable: return "The picture didn’t come from your Mac, and \(model) couldn’t be shown on this phone."
             }
         }
         switch self {

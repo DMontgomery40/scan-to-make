@@ -123,7 +123,7 @@ struct StagePicture: View {
     var maxPixelSize = 1200
     /// The 3D model under this stage that couldn't be had either (`ProjectGalleryView`): when this picture fails too, the
     /// stage's one line says both and its one Try Again tries both (board X100: never two Try Again buttons).
-    var modelMissing: (line: String, retry: () -> Void)? = nil
+    var modelMissing: (line: String, retry: (() -> Void)?)? = nil
     /// Whether this picture's fetch failed, for the gallery's line under the stage.
     var failedChanged: (Bool) -> Void = { _ in }
     /// The height the stage's own controls take at its bottom (AR, the size chip). The waiting and not-available words lay
@@ -222,7 +222,7 @@ private extension StagePicture {
             }
             .accessibilityHidden(true)
             if retry {
-                Button("Try Again") { attempt += 1; modelMissing?.retry() }.font(.footnote.weight(.semibold)).buttonStyle(.glass)
+                Button("Try Again") { attempt += 1; modelMissing?.retry?() }.font(.footnote.weight(.semibold)).buttonStyle(.glass)
                     .accessibilityIdentifier("gallery-stage-retry")
             }
         }

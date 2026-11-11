@@ -161,6 +161,7 @@ final class ProjectGalleryTests: XCTestCase {
         XCTAssertEqual(ModelUnavailable.refused.line(.together), "Your Mac didn’t send the part and your scan in 3D.")
         XCTAssertEqual(ModelUnavailable.refused.line(.part, pictureToo: true), "Your Mac didn’t send the picture or 3D model of this part.")
         XCTAssertEqual(ModelUnavailable.notAnswering.line(.plate, pictureToo: true), "Your Mac isn’t answering, so the picture and 3D model of this plate can’t come yet.")
+        XCTAssertEqual(ModelUnavailable.tooLarge.line(.scan, pictureToo: true), "The picture didn’t come from your Mac, and your scan’s 3D model is too large a file to show on a phone.")
         for reason in [ModelUnavailable.notAnswering, .didntCome, .refused, .undrawable] {
             for kind in [ProjectGallery.Entry.Kind.part, .plate, .together] {
                 let line = reason.line(kind)
