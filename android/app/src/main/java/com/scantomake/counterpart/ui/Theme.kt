@@ -205,10 +205,15 @@ fun ProjectImage(project: Project, name: String?, modifier: Modifier = Modifier,
     val key = name?.let { "${project.id}/${project.mediaVersion}/$it" + if (maxSide == 1600) "" else "@$maxSide" }
     var bitmap by remember(key) { mutableStateOf(key?.let(ImageCache::get)) }
     LaunchedEffect(key) {
-        if (key == null || bitmap != null) return@LaunchedEffect
-        bitmap = withContext(Dispatchers.IO) {
-            try { ImageCache.decode(Counterpart.instance.companion.download(project, name), maxSide)?.also { ImageCache.put(key, it) } } catch (_: Exception) { null }
-        }
+        if (key == null || name == null || bitmap != null) return@LaunchedEffect
+        // The copy this phone keeps first, with no network (on-device-library.md); then the computer, for this version.
+        val companion = Counterpart.instance.companion
+        val kept = companion.library?.latest(project.id, name)
+        if (kept != null) bitmap = withContext(Dispatchers.IO) { ImageCache.decode(kept.first, maxSide) }
+        if (kept?.second == project.mediaVersion && bitmap != null) { ImageCache.put(key, bitmap!!); return@LaunchedEffect }
+        withContext(Dispatchers.IO) {
+            try { ImageCache.decode(companion.download(project, name), maxSide)?.also { ImageCache.put(key, it) } } catch (_: Exception) { null }
+        }?.let { bitmap = it }
     }
     Box(modifier.stage(), contentAlignment = Alignment.Center) {
         val b = bitmap

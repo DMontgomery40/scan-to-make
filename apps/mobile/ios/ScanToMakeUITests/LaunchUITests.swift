@@ -1466,6 +1466,22 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Setting up… 0 s so far."].waitForExistence(timeout: 10))
     }
 
+    /// On-device library (docs/design/overhaul/on-device-library.md), PRD §6.1: Settings → Keep on this iPhone (iPad) is
+    /// reachable with projects present, offers the three choices, and says how much space it uses with Clear beside it.
+    func testKeepOnThisDeviceIsInSettingsWithProjectsPresent() {
+        let app = launch(screen: "settings")
+        XCTAssertTrue(app.descendants(matching: .any)["mac-status"].waitForExistence(timeout: 20))
+        let keep = app.descendants(matching: .any)["library-keep"]
+        for _ in 0..<12 where !(keep.exists && keep.isHittable) { app.swipeUp() }
+        XCTAssertTrue(keep.isHittable, "Keep on this \(regular ? "iPad" : "iPhone") is reachable")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Uses ")).firstMatch.exists, "how much space it uses")
+        XCTAssertTrue(app.buttons["library-clear"].exists, "and Clear")
+        keep.tap()
+        for choice in ["Pictures only", "Pictures and 3D models", "Everything, scans included"] {
+            XCTAssertTrue(app.buttons[choice].waitForExistence(timeout: 5) || app.staticTexts[choice].exists, "offers \(choice)")
+        }
+    }
+
     /// Q9, PRD §6.1: "Keep printer software up to date" sits in Settings → Printer software, above the MCP copies and
     /// their Update buttons, with projects present, on the iPhone and the iPad; on, as the companion sends it, and it
     /// says what it does. `STM_SHOTS` (`TEST_RUNNER_STM_SHOTS` to xcodebuild) saves a screenshot of it there.
@@ -1788,4 +1804,118 @@ final class LayoutParityUITests: XCTestCase {
         app.buttons["Done"].tap()
     }
 
+}
+
+/// The phone's own library (docs/design/overhaul/on-device-library.md). David, Nov 11: "Never seen app in my life, since
+/// 2009 or so, struggle showing images it just had, 10 minutes later, because of a dependency on some Mac mini". The list
+/// loads, the library fills by itself, the link drops completely, the app is relaunched: every project's picture is still
+/// there, on Home and on its page, where the stage shows it ("shown", never "loading" or a symbol).
+final class OnDeviceLibraryUITests: XCTestCase {
+    override func setUp() { continueAfterFailure = false }
+
+    /// A picture that is not one flat colour (the blank check flags those), as PNG.
+    private func picture(_ hue: CGFloat) -> Data {
+        UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240)).pngData { context in
+            UIColor(hue: hue, saturation: 0.5, brightness: 0.4, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 240))
+            UIColor.white.setFill(); context.cgContext.fillEllipse(in: CGRect(x: 90, y: 50, width: 140, height: 140))
+        }
+    }
+
+    /// A binary STL of `triangles` small triangles: a model of a known size.
+    private func model(triangles: Int) -> Data {
+        var data = Data(count: 80)
+        var count = UInt32(triangles).littleEndian
+        data.append(Data(bytes: &count, count: 4))
+        for index in 0..<triangles {
+            var floats: [Float32] = [0, 0, 1, Float32(index), 0, 0, Float32(index) + 1, 0, 0, Float32(index), 1, 0]
+            data.append(Data(bytes: &floats, count: 48)); data.append(Data(count: 2))
+        }
+        return data
+    }
+
+    private func folder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        try picture(0.1).write(to: folder.appendingPathComponent("thumb-mic.png"))
+        try picture(0.6).write(to: folder.appendingPathComponent("thumb-potato.png"))
+        try picture(0.3).write(to: folder.appendingPathComponent("bed.jpg"))
+        try picture(0.8).write(to: folder.appendingPathComponent("render-live.png"))
+        try model(triangles: 4_000).write(to: folder.appendingPathComponent("mic.stl"))
+        return folder
+    }
+
+    private func launch(_ folder: URL, _ more: [String] = []) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all", "-CounterpartFixtureKeepsLibrary", "YES"] + more
+        app.launch()
+        return app
+    }
+
+    /// What the app's library index says it holds (the app writes it into the test's fixture folder).
+    private struct Entry: Decodable { var project: String; var name: String; var kind: String; var bytes: Int64 }
+    private func entries(_ folder: URL) -> [Entry] {
+        let library = folder.appendingPathComponent("library")
+        guard let mac = try? FileManager.default.contentsOfDirectory(atPath: library.path).first(where: { !$0.hasPrefix(".") }),
+              let data = try? Data(contentsOf: library.appendingPathComponent(mac).appendingPathComponent("index.json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = object["entries"] as? [String: Any] else { return [] }
+        return rows.values.compactMap { try? JSONDecoder().decode(Entry.self, from: JSONSerialization.data(withJSONObject: $0)) }
+    }
+
+    private func waitFor(_ timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end { if condition() { return true }; RunLoop.current.run(until: Date().addingTimeInterval(0.5)) }
+        return condition()
+    }
+
+    func testEveryProjectsPictureShowsAfterARelaunchWithTheMacAwayWithProjectsPresent() throws {
+        let folder = try folder()
+        var app = launch(folder)
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch.waitForExistence(timeout: 20), "the list has loaded")
+        // The library fills by itself: nobody opened a page.
+        XCTAssertTrue(waitFor(30) { Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)).count >= 4 },
+                      "every project's picture comes without a page asking: \(entries(folder).map { "\($0.project.suffix(2)) \($0.name)" })")
+        let kept = Set(entries(folder).filter { $0.kind == "picture" }.map(\.project))
+        app.terminate()
+
+        // The link drops completely, and the app starts again.
+        try Data().write(to: folder.appendingPathComponent("offline"))
+        app = launch(folder)
+        XCTAssertTrue(app.buttons["connection-try-again"].waitForExistence(timeout: 20), "the Mac isn't answering")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch.exists, "Home has the projects it had")
+        let home = XCTAttachment(screenshot: app.screenshot()); home.name = "home-away"; home.lifetime = .keepAlways; add(home)
+        app.terminate()
+
+        // Every project the library holds a picture for: its page, the Mac away, shows the Mac's picture on the stage.
+        for id in kept.sorted() {
+            app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(id)"])
+            let stage = app.images["gallery-stage-picture"]
+            XCTAssertTrue(stage.waitForExistence(timeout: 20), "\(id): the page opens from what the phone has")
+            XCTAssertTrue(waitFor(10) { stage.value as? String == "shown" }, "\(id): the stage shows the picture the phone keeps, not \(String(describing: stage.value))")
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "page-away-\(id.suffix(2))"; shot.lifetime = .keepAlways; add(shot)
+            app.terminate()
+        }
+    }
+
+    /// Past the ceiling, models go before pictures: the library keeps every project's picture and lets the models go.
+    func testFillingPastTheCeilingEvictsModelsBeforePicturesWithProjectsPresent() throws {
+        let folder = try folder()
+        // Room for every picture (a few KB each) and not for one 200 KB model.
+        var app = launch(folder, ["-CounterpartLibraryCeiling", "150000"])
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(waitFor(30) { Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)).count >= 4 }, "pictures came")
+        app.terminate()
+        // The same list again, with no ceiling: the most recent projects' models come too.
+        app = launch(folder)
+        XCTAssertTrue(waitFor(30) { entries(folder).contains { $0.kind == "model" } }, "models came: \(entries(folder).map(\.name))")
+        let pictures = Set(entries(folder).filter { $0.kind == "picture" }.map(\.project))
+        app.terminate()
+        // Back under the ceiling: models go, every picture stays.
+        app = launch(folder, ["-CounterpartLibraryCeiling", "150000"])
+        XCTAssertTrue(waitFor(30) { !entries(folder).contains { $0.kind == "model" } }, "models are evicted first: \(entries(folder).map(\.name))")
+        XCTAssertEqual(Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)), pictures, "pictures stay")
+        XCTAssertLessThanOrEqual(entries(folder).reduce(0) { $0 + $1.bytes }, 150_000)
+        app.terminate()
+    }
 }

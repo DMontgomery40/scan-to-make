@@ -182,6 +182,24 @@ fun SettingsScreen(back: () -> Unit, pairAgain: () -> Unit, openPrinters: () -> 
             SecondaryButton("Save Name", Modifier.fillMaxWidth(), enabled = isPlainText(name, 80)) { app.prefs.edit().putString(Counterpart.DEVICE_NAME_KEY, name.trim()).apply() }
             Text("Your computer shows the new name after you reopen Counterpart here.", color = Palette.secondary, fontSize = 12.sp)
 
+            // Keep on this phone (docs/design/overhaul/on-device-library.md): what it keeps so projects show with the
+            // computer away, the space it takes, and Clear. Same three choices as the iPhone and iPad.
+            SectionTitle("Keep on this phone")
+            val keep by state.library.keep.collectAsState()
+            val usage by state.library.usage.collectAsState()
+            com.scantomake.counterpart.api.OnDeviceLibrary.Keep.entries.forEach { choice ->
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Palette.card).clickable { state.library.choose(choice) }
+                    .padding(14.dp).testTag("library-keep-${choice.name.lowercase()}")) {
+                    Text(choice.title, Modifier.weight(1f)); if (keep == choice) Icon(CIcons.Tick, null, tint = Palette.filament)
+                }
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Uses ${android.text.format.Formatter.formatShortFileSize(context, usage)}", Modifier.weight(1f).testTag("library-usage"), color = Palette.secondary)
+                SecondaryButton("Clear", Modifier.testTag("library-clear"), enabled = usage > 0) { state.library.clear() }
+            }
+            Text("So your projects show even when your computer isn't answering. Pictures always come; 3D models wait for an unmetered connection unless you open one; scans only when you choose Everything. Up to ${android.text.format.Formatter.formatShortFileSize(context, keep.ceiling)}, then the projects you opened longest ago make room.",
+                color = Palette.secondary, fontSize = 12.sp)
+
             SectionTitle("Notifications")
             if (!notifications) SecondaryButton("Turn On Notifications", Modifier.fillMaxWidth()) {
                 if (Build.VERSION.SDK_INT >= 33) permission.launch(Manifest.permission.POST_NOTIFICATIONS)

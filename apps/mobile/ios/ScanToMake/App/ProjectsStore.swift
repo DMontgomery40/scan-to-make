@@ -79,7 +79,7 @@ import CounterpartKit
 
     init(mac: MacConnection, pairing: PairingClient) {
         self.mac = mac; self.pairingClient = pairing
-        models = ModelFiles { project, path in
+        models = ModelFiles(stored: { [client = mac.client] project, path in client.stored(project, path) }) { project, path in
             guard let file = try await mac.download(project, path) else { throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.") }
             return file
         }
@@ -158,13 +158,16 @@ import CounterpartKit
     var heard: [String: Date] = [:]
     @ObservationIgnored private var known: KnownProjects?
     nonisolated static var knownFile: URL {
-        URL.applicationSupportDirectory.appending(path: "Counterpart/known-projects.json")
+        #if DEBUG
+        if Fixtures.keepsLibrary, let folder = Fixtures.folder { return folder.appending(path: "known-projects.json") }
+        #endif
+        return URL.applicationSupportDirectory.appending(path: "Counterpart/known-projects.json")
     }
     /// The paired Mac, so one Mac's copy is never shown as another's. The canned Mac of the UI tests
     /// (`-CounterpartFixtures`) keeps it in memory only, so one test's projects never reach the next.
     private var knownMac: String? {
         #if DEBUG
-        if Fixtures.folder != nil { return nil }
+        if Fixtures.folder != nil { return Fixtures.keepsLibrary ? "fixture" : nil }
         #endif
         guard let status = connection, status.state == .paired else { return nil }
         return status.baseUrl
@@ -514,16 +517,22 @@ struct MCPUpdateProgress: Equatable {
     /// The waits before each new try after a dropped link or a timeout.
     @ObservationIgnored var pauses: [Duration] = [.seconds(2), .seconds(8)]
 
-    init(download: @escaping (Project, String) async throws -> URL) { self.download = download }
+    /// The newest copy this phone keeps of a file (`CompanionClient.stored`), drawn while this version comes or when it can't.
+    @ObservationIgnored private let stored: (Project, String) -> URL?
+
+    init(stored: @escaping (Project, String) -> URL? = { _, _ in nil }, download: @escaping (Project, String) async throws -> URL) {
+        self.stored = stored; self.download = download
+    }
 
     static func key(_ project: Project, _ path: String) -> String {
         "\(project.id)#\(Int64(project.mediaVersion))#\(path)#\(path == "model.stl" ? project.current?.model ?? "" : "")"
     }
     func traceContext(_ project: Project, _ path: String) -> MediaTrace.Context? { contexts[Self.key(project, path)] }
     func fetch(_ project: Project, _ path: String) -> Fetch? { fetches[Self.key(project, path)] }
+    /// This version's file once it has come; until then (or if it can't), the copy this phone keeps of an earlier one.
     func file(_ project: Project, _ path: String) -> URL? {
         if case .ready(let url) = fetch(project, path) { return url }
-        return nil
+        return stored(project, path)
     }
 
     /// Starts the file's download unless it is running, done or refused as too large, and returns at once: the page

@@ -34,6 +34,10 @@ struct CounterpartApp: App {
                     Task { await app.activities.reconcile(projects.compactMap { PrintActivitySnapshot($0) }, mayStart: true) }
                 }
                 .onChange(of: app.projects.settingsChanges) { _, _ in Task { await app.refreshCloud() } }
+                // The phone's library fills from every list, saved or fresh (docs/design/overhaul/on-device-library.md).
+                .onChange(of: app.projects.projects, initial: true) { _, projects in
+                    app.library.fill(projects, fromMac: app.projects.reachable == true)
+                }
         }
     }
 }

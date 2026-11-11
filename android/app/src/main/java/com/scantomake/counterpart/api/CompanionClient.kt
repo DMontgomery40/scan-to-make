@@ -58,6 +58,8 @@ class CompanionClient(
     deviceModel: String?,
     deviceName: String?,
     val cache: File,
+    /** What this phone keeps of the computer's projects (`OnDeviceLibrary`): read first, written once a file has fully arrived. */
+    val library: OnDeviceLibrary? = null,
 ) {
     /** `X-Scan-Device-Model`: the hardware model ("Pixel 8"), shown in the Mac's device list. */
     val deviceModel: String? = deviceModel?.takeIf { Pattern("[A-Za-z0-9,._ -]{1,64}").matches(it) }
@@ -373,7 +375,10 @@ class CompanionClient(
 
     private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png""")
 
-    /** Downloads one project file into the cache, once per project version, and returns where it is. */
+    /** The newest copy of this file the phone keeps, of any version: drawn at once, before (and whether or not) the computer answers. */
+    fun stored(project: Project, name: String): File? = library?.latest(project.id, name)?.first
+
+    /** Downloads one project file into the library (or the cache, for kinds not kept), once per project version, and returns where it is. */
     suspend fun download(project: Project, name: String): File {
         if (!Pattern(UUID).matches(project.id) || !allowed.matches(name) || name.contains("..")) throw CompanionException.transport("invalid-request")
         val version = project.mediaVersion.toString()
@@ -390,13 +395,29 @@ class CompanionClient(
                 if (index >= 0) resource = "original/$index"
             }
         }
+        // The library first: its copy of this version is the file, with no network.
+        val kept = library?.takeIf { it.isActive && it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
+        if (kept != null) {
+            kept.file(project.id, name, project.mediaVersion, filename)?.let { return it }
+            if (kept.isTooLarge(project.id, name, project.mediaVersion)) throw CompanionException("file-too-large", "This file is too large for this phone.")
+        }
         val target = File(folder, filename)
-        if (target.exists()) return target
+        if (kept == null && target.exists()) return target
         val path = "/v1/objects/${project.id}/${encodePath(resource)}"
         val reply = send("GET", path, limit = SCAN_LIMIT)
+        if (reply.status == 413 && kept != null && reply.body.decodeToString().contains("file-too-large")) {
+            kept.markTooLarge(project.id, name, project.mediaVersion)
+            throw CompanionException("file-too-large", "This file is too large for this phone.")
+        }
         if (reply.status != 200 || reply.body.isEmpty()) {
             throw if (reply.status == 404) CompanionException("not-found", "This is no longer on your computer.")
             else CompanionException("download-failed", "That file couldn't be saved on this phone.")
+        }
+        if (kept != null) {
+            // Whole, then into the library; that one file's older copy goes only now.
+            return try { kept.commit(reply.body, project.id, name, project.mediaVersion, filename) } catch (_: Exception) {
+                throw CompanionException("download-failed", "That file couldn't be saved on this phone.")
+            }
         }
         // Older versions of this project are no longer shown.
         folder.parentFile?.listFiles()?.filter { it.name != version }?.forEach { it.deleteRecursively() }

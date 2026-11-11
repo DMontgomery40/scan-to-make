@@ -130,7 +130,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
     val messagePhotos = remember { mutableStateOf(listOf<File>()) }
     var noteAttempt by remember { mutableStateOf<NoteAttempt?>(null) }
 
-    LaunchedEffect(id) { if (state.reload(id)?.code == "not-found") back() }
+    LaunchedEffect(id) { state.library.opened(id); if (state.reload(id)?.code == "not-found") back() }
     // The link came back (the event stream's recovery): the page reads the project again by itself.
     var wasAway by remember { mutableStateOf(false) }
     LaunchedEffect(away) { if (away) wasAway = true else if (wasAway && link == MacLink.Connected) { wasAway = false; state.reload(id) } }

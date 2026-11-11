@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Build
 import android.provider.Settings
 import com.scantomake.counterpart.api.CompanionClient
+import com.scantomake.counterpart.api.OnDeviceLibrary
 import com.scantomake.counterpart.api.ProjectUploader
 import com.scantomake.counterpart.net.PinnedTransport
 import com.scantomake.counterpart.pairing.NearbyPairing
@@ -28,7 +29,10 @@ class Counterpart : Application() {
         val transport = PinnedTransport()
         pairingStore = PairingStore(KeystoreStore(this), chosenName = { prefs.getString(DEVICE_NAME_KEY, null) }, systemName = ::systemDeviceName)
         pairing = PairingClient(pairingStore, transport)
-        companion = CompanionClient(pairing, transport, deviceModel = deviceModel(), deviceName = userAssignedName(), cache = File(cacheDir, "Objects"))
+        companion = CompanionClient(pairing, transport, deviceModel = deviceModel(), deviceName = userAssignedName(), cache = File(cacheDir, "Objects"),
+            library = OnDeviceLibrary(File(noBackupFilesDir, "Library")).also { library ->
+                library.keep = prefs.getString(OnDeviceLibrary.Keep.PREFS_KEY, null)?.let { runCatching { OnDeviceLibrary.Keep.valueOf(it) }.getOrNull() } ?: OnDeviceLibrary.Keep.Models
+            })
         nearby = NearbyPairing(this, pairing, transport)
         uploader = ProjectUploader(companion)
         state = AppState(this)

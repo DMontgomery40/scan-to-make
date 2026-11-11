@@ -32,6 +32,8 @@ import kotlinx.coroutines.launch
  */
 class AppState(private val app: Counterpart) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** What this phone keeps of the computer's projects (docs/design/overhaul/on-device-library.md). */
+    val library by lazy { LibraryFill(app, scope) }
 
     val status = MutableStateFlow<PairingStatus?>(null)
     val projects = MutableStateFlow<List<Project>>(emptyList())
@@ -94,7 +96,12 @@ class AppState(private val app: Counterpart) {
 
     val needsMac: Boolean get() = status.value?.state != PairingStatus.State.Paired
 
-    fun readStatus() { status.value = try { app.pairingStore.status() } catch (_: Exception) { PairingStatus.disconnected } }
+    fun readStatus() {
+        val read = try { app.pairingStore.status() } catch (_: Exception) { null }
+        status.value = read ?: PairingStatus.disconnected
+        // Only a pairing that was read says which computer's library to keep; a failed read clears nothing.
+        library.paired(read)
+    }
 
     fun project(id: String) = projects.value.firstOrNull { it.id == id }
 
@@ -104,6 +111,7 @@ class AppState(private val app: Counterpart) {
         if (projects.value.isNotEmpty()) return
         val saved = KnownProjects.decode(runCatching { knownFile.readText() }.getOrNull(), mac) ?: return
         known = saved; projects.value = saved.projects; heard.value = saved.heard
+        library.fill(saved.projects, fromComputer = false)
     }
 
     private fun remember(change: (KnownProjects, Long) -> KnownProjects) {
@@ -129,6 +137,7 @@ class AppState(private val app: Counterpart) {
             val listed = app.companion.list()
             projects.value = listed
             error.value = null; link.value = link.value.answered()
+            library.fill(listed, fromComputer = true)
             remember { k, now -> k.heard(listed, now) }
         } catch (e: CancellationException) { throw e } catch (e: CompanionException) {
             // The list couldn't be read: the banner says why, whatever the reason.

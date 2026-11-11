@@ -71,6 +71,8 @@ struct SettingsView: View {
 
                 MacSettingsSections(model: macSettings)
 
+                LibrarySettingsSection()
+
                 Section {
                     link(CounterpartIdentifiers.helpPage, SettingsLinkRow(symbol: "book.fill", tint: .blue, title: "Guide", detail: nil))
                     link(URL(string: "#scan", relativeTo: CounterpartIdentifiers.helpPage)!.absoluteURL,
