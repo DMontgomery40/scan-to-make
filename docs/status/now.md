@@ -2,7 +2,7 @@
 
 The lead's live list. It is updated every time the lead is woken, for any reason, and before the lead ends a turn. [`board.md`](board.md) holds every item and its history; this page holds only what is in motion or owed next, so nothing waits unseen. If a line here is more than an hour old, it is stale: check the thing itself.
 
-**Last checked: 2026-11-11 08:24Z** (lead: thread "Take Over Project Recovery Lead").
+**Last checked: 2026-11-11 08:35Z. The lead was removed by David at 08:33Z: [`handoff.md`](handoff.md) has what is running, what is owed and what went wrong. Nobody is watching the rows below until a new lead takes this page.**
 
 ## Running
 
