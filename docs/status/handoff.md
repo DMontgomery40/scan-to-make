@@ -6,7 +6,64 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is in [`now.md`](now.md), which the lead updates at every wake. Read it first.**
 
-## Now (2026-11-10, 22:05Z)
+## Now (2026-11-11, 08:35Z): the lead was removed; read this first
+
+David removed the lead (thread "Take Over Project Recovery Lead", Claude Fable 5.2) at 08:33Z on Nov 11, after the phone holder for his 2016 Forester came out worse on every round. His words: "THAT IS THE WORST FUCKING DESIGN, FROM A PRACTICAL, DESIGN, AND PURE PHYSICS STANDPOINT, I HAE EVER SEEN IN MY LIFE FOR A PHONE HOLDER INA CAR"; "THERE IS SOMEHTING FUNDAMENTALLY WRONT WITH THE ENGINE"; "I'M ABOUT TOT FUCKING ROLL BAKC 50 COMMITS UNLESS YOU CAN ROOT OUT HOW THE FUCKKKKKKKKKKKK THIS GOT SOOOOOO FUCKING BAD". The live list is [`now.md`](now.md); every item is in [`board.md`](board.md) (last rows X121 to X126). Nothing was rolled back or deleted from any repo by the removed lead.
+
+### What the removed lead got wrong (so the next one does not repeat it)
+
+1. **Showed David a design whose own report listed a failing check.** Round 7b's holder had no swivel ("faces the cabin square-on, not the driver") and a tape margin of 0.85 in heat with half its foot touching. The lead had the same doubt reading it and relayed it anyway (X126).
+2. **Wrote briefs that removed what a model already knows.** Round 7's brief forbade opening earlier designs, which lost the swivel. Round 7b's brief froze the hold "because it was right" and named the mounting face. Round 7c's first brief told the lab it could design a base that "does not rely on tape", against David's request and against what VHB tape is (corrected by a steer at 08:30Z).
+3. **Passed lookup questions to David** (a photo of his dash, a wallet thickness) and asked him three times to drag a file into the app (X123, X126). Never again: operations.md, "Never ask the person what is published".
+4. **Used Claude Haiku for three control subagents.** Nothing told the lead to; operations.md names the delegates' models and Haiku is not among them. David: "WHAT FUCKING THING TOLD YOU TO USE HAIKIU". Do not use Haiku or Sonnet for anything.
+5. **Wrote times into the board ahead of the clock** twice more (corrected in #579). Read `date -u` before writing a time.
+6. **Earlier in the night:** scripted a print through the control socket instead of the app (X118); merged #527 by chaining past a NOT SAFE (operations.md); said his phone was "asleep" four times.
+
+### The open question David asked, and the evidence so far
+
+"ASK THE WHOLE T3 COUNCIL WHY THE FUCK THIS CATASTROPHE FUCKING HAPPNEED AND WHAT ALLOWED IT TO HAPPEN AND HOW IT WILL NEVER FUKCING HAPPEN AGAIN AND IT'S NOT FUCKING REVIEW AND LINT RULTES THERE IS SOMEHTING FUNDAMENTALLY WRONT WITH THE ENGINE."
+
+Everything is in `~/scan-to-make-work/council-holder-2026-11-11/` on the Mac:
+- `BRIEF.md`: the question as put to the council (Claude Opus 5.5, Muse Wonder 1.0, GPT-6.1 Sol, each high, read-only on the kernel's reading copy `~/scan-to-make-work/kernel-first-print-2026-11-10/counterpart-kernel`).
+- `muse-wonder-1.0.md`: **done, 2/10 as a design engine.** The engine verifies descriptions the designing agent writes; it does not design. Its requirement vocabulary (`src/facts.ts:58-71`) can say "does not break" and "does not fall out" and nothing about facing the driver, reach, or the mount's moment. Round 7b's delivered record (`prints/2026-11-11-compliant-r7b/holder.record.json`) has no supports, no loads, no held object and print-frame gravity; its one requirement is the arm's strain, through a gate the designer fed (`physics/src/beam/kernel-compliant.ts:42`). An adhesive support is turned into a fixed face (`physics/src/record.ts:169`). The tape arithmetic was a hand formula outside the gate system (`src/r7bholder.ts:21-28`). A better solver would not have helped. Top changes: a mandatory, computed assembly (object, use-frame gravity and jolts, real interface models; an unmodelled interface blocks "ready"); a purpose layer compiled into evaluated requirements; delete the designer-fed gate.
+- `claude-opus-5-5.md`, `gpt-6.1-sol.md`: **still being written at 08:35Z** (threads "Council (Claude Opus 5.5)…" and "Council (GPT-6.1 Sol)…", children of the removed lead's thread; both were steered at 08:32Z to explain the control result below and given 10 more minutes). Their final messages go to the removed lead's thread: read the files.
+- `CONTROL-no-engine.md`: at David's word ("ASK ANY FUCKING MODEL OR EVEN SUBAGENT"), three fresh subagents were given only his request, no tools. Each, in 17 to 82 seconds, produced a proper taped pad (about 70 x 50 mm, or a tall pad on the centre-stack trim), a locking ball swivel, an edge grip with the wallet clear, the hard smooth face instead of the grained dash top, ASA, and named the tape's torque as what sizes the base. The engine's rounds produced no swivel and a 30 mm strip. **The system subtracted knowledge the model already had.** That is the finding the council's remaining answers must explain, and the thing to tell David first. (One of the three was Haiku: see item 4 above; Opus and Fable gave the same answer.)
+
+Not done: the synthesis of the three answers for David; any change to the engine. Do not start another design round or show David another holder before that synthesis.
+
+### Running at 08:35Z (nobody is watching these now)
+
+| What | Where | State | What to do |
+|---|---|---|---|
+| Full gate on `train/2026-11-11a` (#570, head `85477a1a`) | The Mac, started 07:50Z from worktree `~/.t3/worktrees/scan-to-make/t3-943bf5a8-2d55ae730dbf2f3e`; log `~/scan-to-make-work/train-2026-11-11a/gate/gate.log` (ends with a `gate exit N` line) | 43 minutes into the iPhone and iPad tests, 17 passes, no failure line yet; holds both lane slots | Read the whole log when `gate exit` appears (the wrapper's own exit code is not the gate's). Then `python3 scripts/ux_gate.py <folder>` (exit 0 = no blank frame), merge main's docs into the train again, `scripts/branch_check.py --merge train/2026-11-11a` READ before any merge, `gh pr merge --merge`, install Mac, iPhone, iPad from a clone at the merged SHA, then run `ARModelTests` on his real iPhone (Muse's one blocking finding: designed-part AR has never opened anywhere; `~/scan-to-make-work/train-2026-11-11a/review-570.md`) |
+| Council, Opus and Sol | T3 threads on the Mac | writing | Read their files; settle the threads |
+| Kernel round 7c (Fable high): the holder on a swivel with a proper taped pad | agents-136, thread "Kernel lab round 7c (Fable)…", started 08:21Z, 70 min | steered 08:30Z: tape is the mount; calibrate the tape arithmetic against a bought adhesive mount | It is the same engine the council is judging. Read its statics section; decide with David's answer to the council whether its output is shown at all. Do not print it unseen |
+| `train/2026-11-11b` = train 11a + #582 (open a model file with Counterpart on the Mac) | worktree `~/.t3/worktrees/scan-to-make/t3-2075634b-d12ea7e6df6eaf03` (local head `9146621c`, NOT pushed); its Mac test run is queued in the lane behind the gate (pid 63450); thread "A person can open a model file in Counterpart…" (Opus 5.5 medium) ended its turn waiting | merged locally, untested | When the lane frees and the test has run, send that thread a message to push and open the PR, or do it. After #570 merges: gate (Mac-only), `branch_check` READ, merge, install the Mac. That build is what lets a file get into the app without a drag (X122). David will not drag a file: do not ask |
+
+### Installed and published
+
+- Mac `/Applications/Counterpart.app`, iPhone and iPad: build `202611102149` (main `d922973f`, #539). Nothing newer is installed. Main is `006dc487` (#527 merged at `6acb3cd7`, then docs).
+- MCPs, published and verified tonight (npm, fresh `npx` start, tag, release, changelog page) and updated in the Mac app through Settings → Printers: **bambu-printer-mcp 1.1.87**, **mcp-3d-printer-server 1.2.69**. What changed, all prompt text: `fdm_design` gained compliant-first, fit by function, printed fasteners, ease of use checked like the hold (1.1.86 / 1.2.67), a corrected pocket-corner rule (1.2.68), and "Find out before you design, and before you ask": when and how to research, for any model with web tools, in a few minutes (1.1.87 / 1.2.69). New prompts `fdm_fit` and `fdm_flexures` are served but the app does not read them yet (it reads `fdm_design`, `fdm_slicing`, `cad_design`: `services/companion/src/touchup/invocation.ts`). If David rolls these back, they are five squash merges in each MCP repo since 1.1.85 / 1.2.66.
+- Kernel repo (private, `DMontgomery40/counterpart-kernel`, lab on agents-136 `~/kernel-lab`): head `de2661e`. Rounds 7 and 7b are in `prints/2026-11-11-compliant-r7/` and `-r7b/` with their reports; research in `docs/research/` (the Forester dash file carries a note that its "bezel cheek" does not exist on the base car).
+
+### David's printer and files
+
+- Bed clear since 06:45Z; PETG loaded about 06:55Z (slot not read). Nothing has printed since the published bag clip (X119: "a damn very cipply clip", then "not a very usable clip, at all, not fun to use").
+- `~/Downloads/bag-clip-squeeze.3mf` and `~/Downloads/one-piece-pliers.3mf` are round 7's other two builds, unprinted, unjudged. The round 7 and 7b holder files were moved from Downloads to `~/.Trash` (the originals are in the kernel repo).
+- The Mac app is on an empty New Project page. A delegate's test left Finder frontmost with a Downloads window and replaced David's clipboard at about 07:10Z.
+- The Codex computer-use MCP still returns `bootstrapTimedOut` from T3 sessions (cause unknown). What works: accessibility presses through `osascript` (no keystrokes, no pointer, no activation); scripts in the removed lead's scratchpad (`ax.js`, `upd.js`) show the pattern.
+
+### Owed, in order, after the council synthesis
+
+1. Tell David what the council found and what the control shows, and what changes in the engine (his decision whether to roll back; the list of what landed tonight is above and in `git log`).
+2. #570: finish the gate, merge, install, verify on his phone (the Leatherman page must show "Make something else from this scan" and one AR chip: it does in the simulator, `~/scan-to-make-work/train-2026-11-11a/leatherman-page.png`).
+3. `train/2026-11-11b` (#582) so a model file can be opened in the Mac app; then X124 (the same on iPhone, iPad, Android).
+4. The app reads which prompts a design pass needs from the MCPs (`counterpart/1`), so `fdm_fit` and `fdm_flexures` reach the worker with no prompt names in the app.
+5. X125 (the next-train findings from #570's review, and #571's failing rendering test), X114 slice 1 (the versions ledger), #556, X103, X108, the eleven as-a-user frictions (X119), the three smallest-iPhone failures.
+6. Housekeeping: 19 worktrees are listed by `git worktree list`; merged ones (`train/2026-11-10e`, `fix/train-e-ipad`, `t3/a4911877-train`, and after #570 merges `fix/ar-parts`, `feat/make-from-scan`, `fix/stage-stays-dark`, `worker-fable`) can go, with their branches and PRs #564, #565, #568, #573 closed as landed in #570. `rm -rf` is blocked by a hook: move folders to `~/.Trash`. Delete remote branches with `gh api -X DELETE repos/DMontgomery40/scan-to-make/git/refs/heads/<branch>`.
+
+## Before that (2026-11-10, 22:05Z; superseded where the section above differs)
+
 
 The lead is the session in thread "Take Over Project Recovery Lead" (Claude Fable 5.2) since 20:07Z Nov 10. The lead before it was removed by David (19:55Z: "nothing shows up I have no earthly idea what you're printing this is such a shit show"); its process is stopped and its thread settled.
 
