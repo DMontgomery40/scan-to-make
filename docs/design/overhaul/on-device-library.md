@@ -54,6 +54,17 @@ Measured on the iPhone simulator after one normal run of the screenshot tool ove
 
 CounterpartKit `OnDeviceLibraryTests` (the index across a relaunch, backup exclusion, replacement after arrival through the client with the Mac away, one file replaced without the others, too-large remembered, kinds not kept, eviction order, pruning, unpairing and another Mac, Clear, what the fill wants and the link rules). Android `OnDeviceLibraryTests`, the same cases. UI tests `OnDeviceLibraryUITests`: the list loads and the library fills with no page opened; the link drops; the app relaunches; Home has the projects and every project page's stage shows its picture (`shown`); and past a ceiling, models are evicted and every picture stays. `LayoutParityUITests` reaches the setting with projects present. `scripts/ux_screens.py --keep-app-data` keeps the app's data between runs, so `--condition away` shows what a normal run filled.
 
+## Never twice (issue #720)
+
+David, Nov 11, 19:12Z: "if i just saw it 2 seconds ago, how is it having to come from my mac again?" A project's version (`mediaVersion`) moves with every completed pass, but most of its files don't change. Before, a new version meant every file was fetched and decoded again, each on a new TLS session.
+
+- **The Mac tags every project file by its bytes.** The tag is an `ETag`, the SHA-256 of the bytes, remembered per file identity (`services/companion/src/objects/http.ts`, `fileTag`). It covers the model, originals, scans, photos, captures, renders, pictures, the question's photo and print frames. A request whose `If-None-Match` holds that tag is answered `304` with nothing sent.
+- **The phone asks with the tag it has.** For a newer version of a file it keeps, the library sends the tag from the kept copy's entry. On `304` the kept file becomes that version's under the same name on disk, so the mesh and still already drawn from that URL are reused. A file the library doesn't keep (a scan under "Pictures and 3D models") carries its tag beside it in Caches, `<file>.etag`. An older version's cached copy goes one file at a time, never the whole folder.
+- **A Mac picture is named by what it draws** (`pictures/<role>-<files>-<drawing>.png`, the companion's `pictureName`). The library, the decoded-picture memory and the card and stage keys use the name alone, so a newer version neither asks nor decodes it again.
+- **"Coming from your Mac" is only for what the phone has never had, or what changed.** While the phone decodes a picture it keeps (a few milliseconds), the stage is bare. While a newer copy comes, the stage shows the last one decoded.
+- **One connection.** The paired Mac's file downloads share one `URLSession` per pin and address (`SessionPool`, `Transport.swift`). They ride its open TLS connection, and each task's delegate still checks the pin: with no session delegate, URLSession hands the server-trust challenge to the task's delegate (Apple, `URLSessionTaskDelegate.urlSession(_:task:didReceive:completionHandler:)`). The media trace records `request.connection reused=` from `URLSessionTaskTransactionMetrics.isReusedConnection`.
+- **The same Mac stays the same Mac.** The saved list and the library are keyed by the Mac's pin, including while its credential is expired. A Keychain read that failed never clears them; only Forget or a different Mac does (audit row 6, X115).
+
 ## iCloud: not built here
 
 The lead decides from this section.
