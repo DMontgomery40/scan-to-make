@@ -1238,6 +1238,56 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
     }
 
+    /// Nov 11, David: "we now have 'ar' AND 'see it in your space' so there are TWO options". One AR control, on the stage,
+    /// for whichever entry is shown; none on Together or a plate; and with the part shown it opens AR Quick Look (or says
+    /// it is preparing), never nothing. The canned Mac serves `mic.stl` from the assets folder as the part.
+    func testTheProjectPageHasOneARControlAndItOpensThePart() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all", "-CounterpartScreen", "printed"]
+        app.launch()
+        let result = app.buttons["gallery-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["project-prepare-ar"].exists, "the second AR button is gone")
+        let ar = app.buttons["gallery-ar"]
+        let entries = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT (identifier IN %@)", "gallery-",
+                                                       ["gallery-ar", "gallery-photos", "gallery-locate", "gallery-model-retry", "gallery-stage-retry"]))
+        let ids = (0..<entries.count).map { entries.element(boundBy: $0).identifier }
+        XCTAssertTrue(ids.contains("gallery-result"), "\(ids)")
+        for id in ids {
+            app.buttons[id].tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(1))
+            XCTAssertLessThanOrEqual(app.buttons.matching(identifier: "gallery-ar").count, 1, "one AR control on \(id)")
+            XCTAssertLessThanOrEqual(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "in your space")).count, 0)
+            if id == "gallery-together" || id.hasPrefix("gallery-plate-") { XCTAssertFalse(ar.exists, "no AR on \(id)") }
+        }
+        result.tap()
+        XCTAssertTrue(ar.waitForExistence(timeout: 30), "the part's model came, so its AR chip is there")
+        ar.tap()
+        // Preparing, then AR Quick Look over the page (the chip is covered); never "failed", never nothing.
+        let opened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !ar.exists || !ar.isHittable }, object: nil)
+        XCTAssertEqual(XCTWaiter().wait(for: [opened], timeout: 40), .completed, "AR Quick Look is presented: \(String(describing: ar.value))")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "part-ar-quick-look"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertNotEqual(ar.exists ? ar.value as? String : nil, "failed")
+    }
+
+    static func boxSTL() -> Data {
+        let size = SIMD3<Float>(146, 40, 20)
+        let c: [SIMD3<Float>] = (0..<8).map { i in SIMD3(Float(i & 1), Float((i >> 1) & 1), Float((i >> 2) & 1)) * size }
+        let faces = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]
+        let triangles = faces.flatMap { f in [[c[f[0]], c[f[1]], c[f[2]]], [c[f[0]], c[f[2]], c[f[3]]]] }
+        var data = Data(count: 80)
+        withUnsafeBytes(of: UInt32(triangles.count).littleEndian) { data.append(contentsOf: $0) }
+        for t in triangles {
+            for v in [SIMD3<Float>(0, 0, 0)] + t { for x in [v.x, v.y, v.z] { withUnsafeBytes(of: x.bitPattern.littleEndian) { data.append(contentsOf: $0) } } }
+            data.append(contentsOf: [0, 0])
+        }
+        return data
+    }
+
     /// Needs Changes on the finished Printing screen starts the change on the project page, as the project's own card does.
     func testNeedsChangesOnAFinishedPrintStartsTheChangeOnTheProject() {
         let app = launch(screen: "print-finished")

@@ -34,11 +34,8 @@ struct ProjectView: View {
     @State private var confirmDelete = false
     @State private var modelURL: URL?
     @Environment(\.scenePhase) private var scenePhase
+    /// The part's USDZ once the stage's AR chip has prepared it (Share offers it too).
     @State private var arURL: URL?
-    @State private var arRequested = false
-    @State private var arPreparing = false
-    @State private var arProblem: String?
-    @State private var arGeneration = UUID()
     @State private var scanURL: URL?
     @State private var captureWarning: String?
     @State private var askWorking = false
@@ -481,40 +478,13 @@ struct ProjectView: View {
         VStack(spacing: 8) {
             ProjectGalleryView(store: store, project: object, words: words,
                                height: stage,
-                               modelURL: modelURL, arURL: nil, localScan: scanURL, working: working || away,
+                               modelURL: modelURL, arURL: $arURL, localScan: scanURL, working: working || away,
                                locate: { act { try await store.mac.client.locate(object.id) } })
             .task(id: "\(object.id)#\(object.scan ?? "")") {
                 // The scan while it's only on this phone, for Share until the Mac has it.
                 scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
             }
             .ignoresSafeArea(edges: .top)
-            if modelURL != nil, !object.preservesPublishedFilaments {
-                Button {
-                    if let arURL { ARModel.show(arURL) } else { arRequested = true }
-                } label: {
-                    HStack {
-                        if arPreparing { ProgressView() }
-                        Label(arPreparing ? "Preparing AR…" : "View part in your space", systemImage: "arkit")
-                    }
-                }
-                .disabled(arPreparing || scenePhase != .active)
-                .accessibilityIdentifier("project-prepare-ar")
-                if let arProblem { Text(arProblem).font(.footnote).foregroundStyle(.secondary) }
-            }
-        }
-        .task(id: "\(arRequested)#\(scenePhase)#\(modelURL?.path ?? "")#\(object.spoolColour ?? "")") {
-            guard arRequested, scenePhase == .active, let url = modelURL else { return }
-            let generation = UUID()
-            arGeneration = generation; arPreparing = true; arProblem = nil
-            defer { if arGeneration == generation { arPreparing = false } }
-            let prepared = await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: String(describing: scenePhase))) {
-                await ARModel.usdz(fromSTL: url, tint: object.spoolColour)
-            }
-            guard !Task.isCancelled, scenePhase == .active, arGeneration == generation else { return }
-            arURL = prepared
-            if let prepared { ARModel.show(prepared) }
-            else { arProblem = "AR couldn't be prepared. Try again." }
-            arRequested = false
         }
     }
 
@@ -1265,28 +1235,81 @@ enum StepState: Equatable {
 
 // MARK: AR
 
-/// Quick Look AR for the model at true size: the STL (millimetres, Z up) converted to USDZ (metres, Y up).
+/// Quick Look AR for the model at true size: the STL (millimetres, Z up) as a real USDZ (metres, Y up), resting on the
+/// surface the person points at (`PartUSDZ`). AR Quick Look opens USDZ and Reality files by what they are; until Nov 11
+/// the app wrote a Reality file (`Entity.write(to:)`) and named it `.usdz`, so a designed part never appeared.
 enum ARModel {
-    /// The STL as USDZ for AR Quick Look, written once beside it. RealityKit writes the same mesh the stage shows.
-    /// AR wears what the stage wears: the spool it prints in, or the neutral material before one is chosen.
-    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil) async -> URL? {
-        let target = url.deletingPathExtension().appendingPathExtension("\(hex.map { $0.dropFirst() + "." } ?? "")usdz")
-        if FileManager.default.fileExists(atPath: target.path) { return target }
-        let tint = hex.flatMap { Int($0.dropFirst().prefix(6), radix: 16) }.map {
-            UIColor(red: CGFloat(($0 >> 16) & 255) / 255, green: CGFloat(($0 >> 8) & 255) / 255, blue: CGFloat($0 & 255) / 255, alpha: 1)
-        }
-        guard let entity = await ModelStage.load(url, tint: tint, twoTone: false) else { return nil }
-        guard !Task.isCancelled else { return nil }
-        return await ModelEntityCache.export(entity, to: target)
+    /// The part's AR file beside its STL, named for what it wears: `model.<rrggbb>.ar.usdz`, or `model.neutral.ar.usdz`
+    /// before a spool is chosen. The `.ar` keeps it apart from the files the app wrote before, which are cleared away.
+    static func target(forSTL url: URL, tint hex: String?) -> URL {
+        let colour = hex.map { String($0.drop(while: { $0 == "#" }).prefix(6)).lowercased() } ?? "neutral"
+        return url.deletingPathExtension().appendingPathExtension("\(colour).ar.usdz")
     }
 
-    @MainActor static func show(_ url: URL) {
-        guard let presenter = PhotoSources.topViewController() else { return }
+    /// The spool's colour as sRGB 0…1, or the stage's neutral material before one is chosen (AR wears what the stage wears).
+    static func srgb(_ hex: String?) -> SIMD3<Float> {
+        if let value = hex.flatMap({ Int($0.drop(while: { $0 == "#" }).prefix(6), radix: 16) }) {
+            return SIMD3(Float((value >> 16) & 255), Float((value >> 8) & 255), Float(value & 255)) / 255
+        }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ModelStage.neutral.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return SIMD3(Float(r), Float(g), Float(b))
+    }
+
+    /// The STL as USDZ for AR Quick Look, written once beside it, off the main actor. Nil when it can't be made.
+    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil) async -> URL? {
+        let target = target(forSTL: url, tint: hex)
+        removeStale(beside: url)
+        if PartUSDZ.isUSDZ(target) { return target }
+        MediaTrace.record("ar.export-start", ["format": "usdz"])
+        let colour = srgb(hex)
+        let work = Task.detached(priority: .userInitiated) { () throws -> Int in
+            guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count > 84 else { throw PartUSDZ.Failure.empty }
+            let triangles = STLMesh.triangles(data)
+            try PartUSDZ.write(triangles, srgb: colour, to: target)
+            return triangles.count
+        }
+        do {
+            let triangles = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+            let bytes = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
+            MediaTrace.record("ar.export-end", ["success": "true", "format": "usdz", "triangles": String(triangles), "bytes": String(bytes),
+                                                "preview": String(QLPreviewController.canPreview(target as NSURL))])
+            return target
+        } catch {
+            let code = switch error as? PartUSDZ.Failure {
+            case .empty?: "empty-export"
+            case .notUSDZ?: "not-usdz"
+            case .cancelled?: "cancelled"
+            case nil: String((error as NSError).code)
+            }
+            MediaTrace.record("ar.export-end", ["success": "false", "format": "usdz", "code": code])
+            return nil
+        }
+    }
+
+    /// The AR files the app wrote before Nov 11 beside this STL (`model.usdz`, `model.<rrggbb>.usdz`) are Reality files:
+    /// never handed to AR Quick Look again, and their space comes back.
+    static func removeStale(beside url: URL) {
+        let folder = url.deletingLastPathComponent(), base = url.deletingPathExtension().lastPathComponent + "."
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return }
+        for name in names where name.hasPrefix(base) && name.lowercased().hasSuffix(".usdz") {
+            let file = folder.appendingPathComponent(name)
+            if !PartUSDZ.isUSDZ(file) {
+                try? FileManager.default.removeItem(at: file)
+                MediaTrace.record("ar.stale-removed", ["name": name])
+            }
+        }
+    }
+
+    /// Presents AR Quick Look; false when the file isn't one it can open (then nothing is presented).
+    @discardableResult @MainActor static func show(_ url: URL) -> Bool {
+        guard QLPreviewController.canPreview(url as NSURL), let presenter = PhotoSources.topViewController() else { return false }
         let controller = QLPreviewController()
         let source = ARSource(url: url)
         controller.dataSource = source
         objc_setAssociatedObject(controller, &ARSource.key, source, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         presenter.present(controller, animated: true)
+        return true
     }
 
     private final class ARSource: NSObject, QLPreviewControllerDataSource {

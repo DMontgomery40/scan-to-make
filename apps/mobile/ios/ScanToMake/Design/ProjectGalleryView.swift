@@ -12,7 +12,8 @@ struct ProjectGalleryView: View {
     let words: ProjectWords
     let height: CGFloat
     let modelURL: URL?
-    let arURL: URL?
+    /// The part's AR file once the AR chip has prepared it (the page's Share offers it too).
+    @Binding var arURL: URL?
     /// The scan while it is still only on this phone (before the Mac has it).
     let localScan: URL?
     var working = false
@@ -26,6 +27,10 @@ struct ProjectGalleryView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var measured: [String: [Double]] = [:]
     @State private var showingPhotos = false
+    /// The part's AR file is being written (`ARModel.usdz`), or couldn't be.
+    @State private var arPreparing = false
+    @State private var arFailed = false
+    @State private var arTask: Task<Void, Never>?
 
     private var gallery: ProjectGallery { ProjectGallery(project: project, scanOnThisDevice: localScan != nil) }
     private var entry: ProjectGallery.Entry? {
@@ -42,6 +47,10 @@ struct ProjectGalleryView: View {
             if let entry { unavailable(entry) }
             if gallery.entries.count > 1 { labels }
         }
+        .onChange(of: "\(modelURL?.path ?? "")#\(project.spoolColour ?? "")") { cancelAR(); arFailed = false }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { cancelAR() } }
+        .onChange(of: selected) { cancelAR() }
+        .onDisappear { cancelAR() }
         .task(id: "\(project.id)#\(project.scan ?? "")#\(Int64(project.mediaVersion))#\(String(describing: project.scanFiles))#\(scenePhase)") {
             // The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to
             // the app starts again one that failed meanwhile (a suspended app's transfer drops).
@@ -185,10 +194,7 @@ struct ProjectGalleryView: View {
             let light = StageContrast.lightStage(for: entry.colour)
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
-                    if let ar = arTarget(entry) {
-                        Button { ARModel.show(ar) } label: { Label("AR", systemImage: "arkit") }.stageButton(light: light)
-                            .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
-                    }
+                    if let ar = arChip(entry) { arButton(ar, light: light) }
                     if entry.kind == .scan, !entry.photos.isEmpty {
                         Button { showingPhotos = true } label: { Label(entry.photos.count == 1 ? "1 photo" : "\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
                             .stageButton(light: light).accessibilityIdentifier("gallery-photos")
@@ -212,13 +218,72 @@ struct ProjectGalleryView: View {
         }
     }
 
-    private func arTarget(_ entry: ProjectGallery.Entry) -> URL? {
+    // MARK: AR: one control, for what the stage shows
+
+    /// What the stage's AR chip can do for an entry (Nov 11: one AR control, not a chip and a second button). A part is
+    /// prepared on tap; the scan is Object Capture's own USDZ. Together, a plate and a multi-colour 3MF's picture have no
+    /// AR file the phone can make, so they offer none.
+    enum ARChip: Equatable { case show(URL), prepare(URL), preparing, failed(URL), needsMac }
+
+    private func arChip(_ entry: ProjectGallery.Entry) -> ARChip? {
         switch entry.kind {
-        case .part: arURL
-        case .scan: scanURL.flatMap { $0.pathExtension.lowercased() == "usdz" ? $0 : nil }
-        default: nil
+        case .part:
+            guard case .model(let path) = entry.drawing, path == "model.stl" else { return nil }
+            if arPreparing { return .preparing }
+            if let arURL { return .show(arURL) }
+            if let modelURL { return arFailed ? .failed(modelURL) : .prepare(modelURL) }
+            return store.away ? .needsMac : nil
+        case .scan:
+            if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return .show(scanURL) }
+            if case .file = scanModel, store.away { return .needsMac }
+            return nil
+        case .together, .plate:
+            return nil
         }
     }
+
+    @ViewBuilder private func arButton(_ chip: ARChip, light: Bool) -> some View {
+        switch chip {
+        case .show(let url):
+            Button {
+                // A file that went away meanwhile (the cache was cleared) is made again rather than showing nothing.
+                if !ARModel.show(url), let modelURL, url == arURL { arURL = nil; prepareAR(modelURL) }
+            } label: { Label("AR", systemImage: "arkit") }
+                .stageButton(light: light).accessibilityValue("ready")
+                .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
+        case .prepare(let stl):
+            Button { prepareAR(stl) } label: { Label("AR", systemImage: "arkit") }
+                .stageButton(light: light).accessibilityValue("ready")
+                .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
+        case .preparing:
+            Button {} label: { HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Preparing AR…") } }
+                .stageButton(light: light).disabled(true).accessibilityValue("preparing").accessibilityIdentifier("gallery-ar")
+        case .failed(let stl):
+            Button { prepareAR(stl) } label: { Label("AR didn’t open. Try Again", systemImage: "arkit") }
+                .stageButton(light: light).accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
+        case .needsMac:
+            Button {} label: { Label("AR needs your Mac", systemImage: "arkit") }
+                .stageButton(light: light).disabled(true).accessibilityValue("needs-mac")
+                .accessibilityHint("Your Mac isn’t answering and the model isn’t on this iPhone yet").accessibilityIdentifier("gallery-ar")
+        }
+    }
+
+    /// Writes the part's USDZ (seconds for a large part), then opens AR Quick Look on it.
+    private func prepareAR(_ stl: URL) {
+        arTask?.cancel()
+        arPreparing = true; arFailed = false
+        let tint = project.spoolColour, scene = String(describing: scenePhase)
+        arTask = Task {
+            let prepared = await MediaTrace.$context.withValue(MediaTrace.Context(file: stl, scene: scene)) {
+                await ARModel.usdz(fromSTL: stl, tint: tint)
+            }
+            guard !Task.isCancelled else { return }
+            arPreparing = false
+            if let prepared, ARModel.show(prepared) { arURL = prepared } else { arFailed = true }
+        }
+    }
+
+    private func cancelAR() { arTask?.cancel(); arTask = nil; arPreparing = false }
 
     // MARK: Labels
 
