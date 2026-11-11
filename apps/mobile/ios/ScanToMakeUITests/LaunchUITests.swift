@@ -1622,6 +1622,9 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(host.waitForExistence(timeout: 5))
         XCTAssertEqual(host.value as? String, "192.168.1.42", "the address comes from discovery")
         XCTAssertEqual(app.textFields["add-printer-serial"].value as? String, "01P00A451601106", "so does the serial number")
+        // Only the fields its MCP declares for this kind (bambu-printer-mcp's has no port); the fixture companion refuses a
+        // Check or Add that sends anything else, or lacks a required field.
+        XCTAssertFalse(app.textFields["add-printer-port"].exists, "no port: the MCP declares none for this kind")
         XCTAssertTrue(app.staticTexts["On the printer: Settings → Device"].exists || app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Settings → Device")).firstMatch.exists,
                       "the MCP's own hint")
         let add = app.buttons["add-printer-add"]
@@ -1651,6 +1654,9 @@ final class LayoutParityUITests: XCTestCase {
         octo.tap()
         let approve = app.buttons["add-printer-obtain"]
         XCTAssertTrue(approve.waitForExistence(timeout: 5))
+        // OctoPrint's own fields: a port, and no serial number or model (the fixture companion refuses either).
+        XCTAssertEqual(app.textFields["add-printer-port"].value as? String, "80", "the port discovery found")
+        XCTAssertFalse(app.textFields["add-printer-serial"].exists)
         XCTAssertEqual(approve.label, "Approve in OctoPrint", "the MCP's words")
         let add = app.buttons["add-printer-add"]
         XCTAssertFalse(add.isEnabled)

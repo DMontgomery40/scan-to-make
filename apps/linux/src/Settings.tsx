@@ -1,4 +1,4 @@
-import { addressField, AUTO_UPDATE_LABEL, AUTO_UPDATE_WORDS, autoUpdatePatch, autoUpdateSwitch, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, slicerControls, codeEngineRow, type CodeEngineView } from "./domain";
+import { addressField, AUTO_UPDATE_LABEL, AUTO_UPDATE_WORDS, autoUpdatePatch, autoUpdateSwitch, folderModel, keepFields, mcpUsageWords, mcpMoveNotice, mcpMoves, mcpPackageIds, obtainControl, obtainValue, setupField, slicerControls, typeSerial, codeEngineRow, type CodeEngineView } from "./domain";
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
@@ -994,7 +994,9 @@ interface Candidate {
   printerType: string;
   folder?: string;
   added: boolean;
+  /** A folder's `.env` lacks these (names only), and Add fills `fill` (only the model). */
   missing?: string[];
+  fill?: Record<string, string>;
 }
 function AddPrinter({
   options: initial,
@@ -1007,11 +1009,12 @@ function AddPrinter({
 }) {
   const [options, setOptions] = useState(initial);
   const [found, setFound] = useState<Candidate[]>([]);
-  const [form, setForm] = useState<Record<string, string>>({
-    backend: "bambu-printer-mcp",
-    printerType: "bambu",
-    host: "",
-  });
+  // The kind and its MCP come from the MCPs' own list, the first until the person chooses (below).
+  const [form, setForm] = useState<Record<string, string>>({ host: "" });
+  // The model came from discovery or the serial number, not the person: a changed serial picks it again.
+  const [modelInferred, setModelInferred] = useState(false);
+  // A found folder's model, chosen when Counterpart couldn't tell it.
+  const [folderModels, setFolderModels] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [check, setCheck] = useState<{
     reached: boolean;
@@ -1029,11 +1032,14 @@ function AddPrinter({
   useEffect(() => { generation.current++; setObtaining(undefined); }, [form.backend, form.printerType, form.host, form.port]);
   const update = (key: string, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
-  // The MCP that drives this kind here, from the MCPs' own fields: never one that isn't installed.
+  // A kind the MCPs list (the first, until one is chosen), and the MCP that drives it here: never one that isn't installed.
   useEffect(() => {
-    if (type && !type.backends.includes(form.backend) && type.backends[0])
+    const first = options?.types[0];
+    if (!type && first) setForm((f) => keepFields({ ...f, printerType: first.printerType, backend: first.backends[0] ?? "", slicer: "" }, options));
+    else if (type && !type.backends.includes(form.backend) && type.backends[0])
       setForm((f) => ({ ...f, backend: type.backends[0]!, slicer: "" }));
-  }, [type, form.backend]);
+  }, [type, form.backend, options]);
+  const modelField = setupField(options, form.printerType, "model");
   const payload = () =>
     Object.fromEntries(Object.entries(form).filter(([, v]) => v !== ""));
   return (
@@ -1055,14 +1061,34 @@ function AddPrinter({
       >
         Find printers
       </Action>
-      {found.map((p) => (
+      {found.map((p) => {
+        // A found folder whose MCP needs a model nobody could tell: the person chooses it (from that MCP's own list).
+        const model = folderModel(p, options);
+        const chosen = folderModels[p.id];
+        return (
         <div className="settings-row" key={p.id}>
           <strong>{p.name}</strong>
+          {p.folder && !p.added && model.needed && (
+            <select
+              aria-label={`Model for ${p.name}`}
+              value={chosen ?? ""}
+              onChange={(e) => setFolderModels((m) => ({ ...m, [p.id]: e.target.value }))}
+            >
+              <option value="">Choose model</option>
+              {options?.models[p.backend]?.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          )}
           {p.folder ? (
             <Action
-              disabled={p.added}
+              disabled={p.added || (model.needed && !chosen)}
               run={async () => {
-                await invoke("add_discovered_printer", { id: p.id });
+                // Exactly what the row says it will add: the chosen model, else the one Counterpart found.
+                const value = chosen || model.filled;
+                await invoke("add_discovered_printer", { id: p.id, ...(value ? { model: value } : {}) });
                 await onAdded();
               }}
             >
@@ -1071,22 +1097,24 @@ function AddPrinter({
           ) : (
             <button
               disabled={p.added}
-              onClick={() =>
-                setForm({
+              onClick={() => {
+                setForm(keepFields({
                   backend: p.backend,
                   printerType: p.printerType,
                   host: p.host ?? "",
                   port: p.port ?? "",
                   serial: p.serial ?? "",
                   model: p.model ?? "",
-                })
-              }
+                }, options));
+                setModelInferred(!!p.model);
+              }}
             >
               Use
             </button>
           )}
         </div>
-      ))}
+        );
+      })}
       <label className="field">
         Type
         <select
@@ -1098,8 +1126,9 @@ function AddPrinter({
             setForm({
               host: form.host,
               printerType: e.target.value,
-              backend: t?.backends[0] ?? "mcp-3d-printer-server",
+              backend: t?.backends[0] ?? form.backend,
             });
+            setModelInferred(false);
           }}
         >
           {options?.types.map((t) => (
@@ -1114,14 +1143,14 @@ function AddPrinter({
         <select
           value={form.backend}
           // A slicer choice belongs to the MCP that offered it.
-          onChange={(e) => setForm((f) => ({ ...f, backend: e.target.value, slicer: "" }))}
+          onChange={(e) => { setForm((f) => ({ ...f, backend: e.target.value, slicer: "", model: "" })); setModelInferred(false); }}
         >
           {type?.backends.map((b) => (
             <option key={b}>{b}</option>
           ))}
         </select>
       </label>
-      {["name", "host", "port", ...(type?.serial ? ["serial"] : [])].map(
+      {["name", "host", ...(["port", "serial"] as const).filter((key) => setupField(options, form.printerType, key))].map(
         (key) => (
           <label className="field" key={key}>
             {
@@ -1138,18 +1167,11 @@ function AddPrinter({
               value={form[key] ?? ""}
               placeholder={key === "host" ? addressField(options, form.printerType).placeholder : undefined}
               onChange={(e) => {
-                update(key, e.target.value);
-                if (key === "serial") {
-                  // The MCP's own serial table; its prefixes are all one length.
-                  const length = Object.keys(options?.serialModels ?? {})[0]
-                    ?.length;
-                  const detected = length
-                    ? options?.serialModels?.[
-                        e.target.value.trim().slice(0, length).toUpperCase()
-                      ]
-                    : undefined;
-                  if (detected) update("model", detected);
-                }
+                if (key !== "serial") return update(key, e.target.value);
+                // The serial names the model (the MCP's own table) unless the person chose one.
+                const typed = typeSerial(form, e.target.value, options, modelInferred);
+                setForm(typed.form);
+                setModelInferred(typed.inferred);
               }}
             />
             {key === "host" && addressField(options, form.printerType).hint && (
@@ -1158,12 +1180,15 @@ function AddPrinter({
           </label>
         ),
       )}
-      {type?.serial && (
+      {modelField && (
         <label className="field">
-          Model
+          {modelField.label}
           <select
             value={form.model ?? ""}
-            onChange={(e) => update("model", e.target.value)}
+            onChange={(e) => {
+              update("model", e.target.value);
+              setModelInferred(false);
+            }}
           >
             <option value="">Choose model</option>
             {options?.models[form.backend]?.map((m) => (

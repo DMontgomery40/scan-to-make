@@ -159,8 +159,8 @@ private struct AddPrinterForm: View {
             Picker("Brand", selection: Binding(get: { model.form.printerType }, set: { model.choose(type: $0) })) {
                 ForEach(model.options?.types ?? []) { Text($0.label).tag($0.printerType) }
             }
-            if type?.serial == true {
-                Picker(type?.field("model")?.label ?? "Model", selection: Binding(get: { model.form.model ?? "" }, set: { model.choose(model: $0.isEmpty ? nil : $0) })) {
+            if let modelField = type?.field("model") {
+                Picker(modelField.label, selection: Binding(get: { model.form.model ?? "" }, set: { model.choose(model: $0.isEmpty ? nil : $0) })) {
                     if model.form.model == nil { Text("Choose…").tag("") }
                     ForEach(model.models) { Text($0.label).tag($0.value) }
                 }
@@ -177,7 +177,7 @@ private struct AddPrinterForm: View {
                         .keyboardType(.numberPad)
                 }
             }
-            if type?.serial == true {
+            if type?.field("serial") != nil {
                 field("serial", label: type?.field("serial")?.label ?? "Serial number") {
                     TextField(type?.field("serial")?.label ?? "Serial number", text: Binding(get: { model.form.serial }, set: { model.type(serial: $0) }))
                         .textInputAutocapitalization(.characters)
@@ -347,15 +347,14 @@ private struct AddPrinterDone: View {
     var secretMissing: Bool { type?.secret?.required == true && form.secret.isEmpty }
     var formReady: Bool {
         guard !form.host.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
-        if type?.serial == true && (form.serial.trimmingCharacters(in: .whitespaces).isEmpty || form.model == nil) { return false }
-        return !secretMissing
+        return form.lacks(type).isEmpty && !secretMissing
     }
-    /// What the form still needs, in the MCP's words.
+    /// What the form still needs, in the MCP's words: its required fields, in its order, then the secret.
     var missingWords: String {
-        var missing: [String] = []
-        if form.host.trimmingCharacters(in: .whitespaces).isEmpty { missing.append(type?.field("host")?.label ?? "Address") }
-        if type?.serial == true && form.serial.trimmingCharacters(in: .whitespaces).isEmpty { missing.append(type?.field("serial")?.label ?? "Serial number") }
-        if type?.serial == true && form.model == nil { missing.append(type?.field("model")?.label ?? "Model") }
+        let lacking = form.lacks(type)
+        var missing = lacking.map(\.label)
+        // The address is always needed, whether or not the MCP marks its field required.
+        if form.host.trimmingCharacters(in: .whitespaces).isEmpty, !lacking.contains(where: { $0.name == "host" }) { missing.insert(type?.field("host")?.label ?? "Address", at: 0) }
         if secretMissing, let secret = type?.secret { missing.append(secret.label) }
         return missing.isEmpty ? "" : "Still needed: " + missing.joined(separator: ", ") + "."
     }
@@ -393,8 +392,9 @@ private struct AddPrinterDone: View {
             value.backend = first
         }
         form = value
-        modelInferred = value.model != nil
-        if type?.serial == true, form.model == nil, models.count == 1 { form.model = models.first?.value }
+        form.keepFields(of: type)
+        modelInferred = form.model != nil
+        if type?.field("model") != nil, form.model == nil, models.count == 1 { form.model = models.first?.value }
         check = nil; problem = nil; stopObtaining()
         path = [.form]
     }
@@ -402,7 +402,8 @@ private struct AddPrinterDone: View {
     func choose(type value: String) {
         form.printerType = value
         form.backend = options?.types.first { $0.printerType == value }?.backends.first ?? form.backend
-        form.model = nil; form.slicer = nil; modelInferred = false
+        // Values the new kind's MCP doesn't read go with the old kind.
+        form.model = nil; form.slicer = nil; form.keepFields(of: type); modelInferred = false
     }
 
     func choose(backend: String) { form.backend = backend; form.model = nil; form.slicer = nil; modelInferred = false }

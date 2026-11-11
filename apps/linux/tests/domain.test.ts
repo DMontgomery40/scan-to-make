@@ -46,6 +46,9 @@ import {
   obtainControl,
   obtainValue,
   addressField,
+  folderModel,
+  keepFields,
+  typeSerial,
   canSelectPlate,
   printNeedsCheck,
   AUTO_UPDATE_LABEL,
@@ -640,6 +643,72 @@ test("Add a printer's address offers a web address only where the MCP's field ta
   assert.doesNotMatch(addressField(options, "klipper").placeholder, /https:/);
   assert.equal(addressField(options, "klipper").hint, "The printer's IP address or host name");
   assert.doesNotMatch(addressField(undefined, "octoprint").placeholder, /https:/);
+});
+
+// Add a printer's options as the companion builds them from the MCPs' own counterpart_setup_fields (bambu-printer-mcp
+// 1.1.82's Bambu kind; mcp-3d-printer-server's OctoPrint), plus a made-up kind with the same roles under other names.
+const setupOptions = () => {
+  const model = (env: string) => ({ name: "model", env, label: "Model", required: true, choices: [{ value: "p1s", label: "P1S" }, { value: "a1", label: "A1" }] });
+  return {
+    types: [
+      { printerType: "bambu", label: "Bambu Lab", backends: ["bambu-printer-mcp", "mcp-3d-printer-server"], serial: true,
+        fields: [{ name: "host", env: "PRINTER_HOST", label: "Address", required: true }, { name: "serial", env: "BAMBU_SERIAL", label: "Serial number", required: true },
+          model("BAMBU_MODEL"), { name: "secret", env: "BAMBU_TOKEN", label: "Access code", required: true }] },
+      { printerType: "octoprint", label: "OctoPrint", backends: ["mcp-3d-printer-server"], serial: false,
+        fields: [{ name: "host", env: "PRINTER_HOST", label: "Address", required: true }, { name: "port", env: "PRINTER_PORT", label: "Port", required: false },
+          { name: "secret", env: "API_KEY", label: "API key", required: true }] },
+      { printerType: "acme", label: "Acme", backends: ["mcp-3d-printer-server"], serial: true,
+        fields: [{ name: "host", env: "PRINTER_HOST", label: "Address", required: true }, { name: "serial", env: "ACME_SN", label: "Serial", required: true }, model("ACME_KIND")] },
+    ],
+    models: { "bambu-printer-mcp": [{ value: "p1s", label: "P1S" }, { value: "a1", label: "A1" }], "mcp-3d-printer-server": [{ value: "p1s", label: "P1S" }, { value: "a1", label: "A1" }] },
+    serialModels: { "01P": "p1s", "039": "a1" },
+  };
+};
+
+test("Add a printer: a found folder whose model nobody could tell asks for it, by its MCP's own model variable (Muse audit F2)", () => {
+  const options = setupOptions();
+  // David's mcp-3D-printer-server clone for a P1S whose serial names no model: the person chooses, and that goes to Add.
+  assert.deepEqual(folderModel({ printerType: "bambu", missing: ["BAMBU_MODEL", "BAMBU_TOKEN"], fill: {} }, options), { setting: "BAMBU_MODEL", needed: true, filled: undefined });
+  // A model Counterpart could tell is filled, and nothing is asked.
+  assert.deepEqual(folderModel({ printerType: "bambu", missing: ["BAMBU_MODEL"], fill: { BAMBU_MODEL: "p1s" } }, options), { setting: "BAMBU_MODEL", needed: false, filled: "p1s" });
+  // The variable is whatever the kind's model field says, never a name the app knows.
+  assert.deepEqual(folderModel({ printerType: "acme", missing: ["ACME_KIND"] }, options), { setting: "ACME_KIND", needed: true, filled: undefined });
+  assert.equal(folderModel({ printerType: "acme", missing: ["BAMBU_MODEL"] }, options).needed, false);
+  // A kind without a model field, or no fields from the MCPs yet, never asks.
+  assert.deepEqual(folderModel({ printerType: "octoprint", missing: ["API_KEY"] }, options), { setting: undefined, needed: false, filled: undefined });
+  assert.equal(folderModel({ printerType: "bambu", missing: ["BAMBU_MODEL"] }, undefined).needed, false);
+});
+
+test("Add a printer: a typed serial names the model unless the person chose one, and a corrected serial picks again (Muse audit F7)", () => {
+  const options = setupOptions();
+  const form = { backend: "bambu-printer-mcp", printerType: "bambu", host: "192.0.2.1" };
+  // Typing a P1S serial fills its model, as inferred.
+  let typed = typeSerial(form, "01P00A123456789", options, false);
+  assert.deepEqual([typed.form.model, typed.inferred], ["p1s", true]);
+  // A corrected serial picks again; one that names nothing clears the model it had picked.
+  typed = typeSerial(typed.form, "03900A000000001", options, typed.inferred);
+  assert.deepEqual([typed.form.model, typed.inferred], ["a1", true]);
+  typed = typeSerial(typed.form, "ZZZ00A", options, typed.inferred);
+  assert.deepEqual([typed.form.model, typed.inferred], ["", false]);
+  // A model the person chose is never replaced by a serial, on any keystroke.
+  const chosen = { ...form, model: "a1" };
+  for (const serial of ["0", "01", "01P", "01P00A123456789"]) {
+    typed = typeSerial(chosen, serial, options, false);
+    assert.deepEqual([typed.form.model, typed.form.serial, typed.inferred], ["a1", serial, false]);
+  }
+  // A model the MCP doesn't list for this backend is never filled.
+  assert.equal(typeSerial({ ...form, backend: "other" }, "01P00A", options, false).form.model, undefined);
+});
+
+test("Add a printer sends only what the chosen kind's MCP reads: a port for OctoPrint, a serial and model for a Bambu", () => {
+  const options = setupOptions();
+  const typedEverything = { backend: "mcp-3d-printer-server", host: "192.0.2.1", port: "80", serial: "01P00A", model: "p1s", secret: "k" };
+  assert.deepEqual(keepFields({ ...typedEverything, printerType: "octoprint" }, options),
+    { backend: "mcp-3d-printer-server", printerType: "octoprint", host: "192.0.2.1", port: "80", secret: "k" });
+  assert.deepEqual(keepFields({ ...typedEverything, printerType: "bambu" }, options),
+    { backend: "mcp-3d-printer-server", printerType: "bambu", host: "192.0.2.1", serial: "01P00A", model: "p1s", secret: "k" });
+  assert.deepEqual(keepFields({ ...typedEverything, printerType: "acme" }, options).model, "p1s", "any kind that declares a model keeps it");
+  assert.deepEqual(keepFields({ ...typedEverything, printerType: "bambu" }, undefined), { ...typedEverything, printerType: "bambu" }, "unknown fields: kept");
 });
 
 test("while the printer MCP sends the file, a project shows the companion's percentage", () => {

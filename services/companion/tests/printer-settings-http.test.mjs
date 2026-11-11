@@ -231,6 +231,12 @@ test('a paired phone adds a printer through the same discover, check, obtain and
   const found = await f.call('/v1/printers/setup/discover', 'POST', {});
   assert.equal(found.status, 200);
   assert.deepEqual(found.body.options, answers.discover.options, 'the MCPs\' own fields reach the phone unchanged');
+  // The phones' fixture is what the companion builds from the MCPs' captured counterpart_setup_fields, not hand-made.
+  const {setupOptions} = await import('../dist/printing/mcp-setup.js');
+  const {SETUP_FIELDS} = await import('./support/setup-mcp.mjs');
+  assert.deepEqual(answers.discover.options, setupOptions([
+    {package: 'bambu-printer-mcp', label: 'bambu-printer-mcp', setup: SETUP_FIELDS['bambu-printer-mcp'], installed: true},
+    {package: 'mcp-3d-printer-server', label: 'mcp-3D-printer-server', setup: SETUP_FIELDS['mcp-3d-printer-server'], installed: true}]));
   assert.deepEqual(found.body.labels, answers.discover.labels, 'each MCP\'s name as people see it, from the companion');
   const p1s = {backend: 'bambu-printer-mcp', printerType: 'bambu', host: '192.168.1.42', serial: '01P00A451601106', model: 'p1s', secret: '12345678'};
   assert.deepEqual((await f.call('/v1/printers/setup/check', 'POST', {printer: p1s})).body, answers.check);

@@ -37,14 +37,53 @@ final class PrinterSetupTests: XCTestCase {
         XCTAssertNil(catalog.resolved(nil))
     }
 
+    /// The kinds' fields as the MCPs declare them (bambu-printer-mcp's Bambu kind, mcp-3d-printer-server's OctoPrint), and a
+    /// made-up kind with the same roles under other names: the form knows each only by its fields.
+    private func setupOptions() throws -> PrinterSetupOptions {
+        try JSONDecoder().decode(PrinterSetupOptions.self, from: Data("""
+        {"types":[
+          {"printerType":"bambu","label":"Bambu Lab","backends":["bambu-printer-mcp","mcp-3d-printer-server"],"serial":true,"checkCamera":["bambu-printer-mcp"],
+           "fields":[{"name":"host","env":"PRINTER_HOST","label":"Address","required":true},{"name":"serial","env":"BAMBU_SERIAL","label":"Serial number","required":true},
+                     {"name":"model","env":"BAMBU_MODEL","label":"Model","required":true},{"name":"secret","env":"BAMBU_TOKEN","label":"Access code","required":true}]},
+          {"printerType":"octoprint","label":"OctoPrint","backends":["mcp-3d-printer-server"],"serial":false,"checkCamera":[],
+           "fields":[{"name":"host","env":"PRINTER_HOST","label":"Address","required":true},{"name":"port","env":"PRINTER_PORT","label":"Port","required":false},
+                     {"name":"secret","env":"API_KEY","label":"API key","required":true}]},
+          {"printerType":"acme","label":"Acme","backends":["mcp-3d-printer-server"],"serial":true,"checkCamera":["mcp-3d-printer-server"],
+           "fields":[{"name":"host","env":"PRINTER_HOST","label":"Address","required":true},{"name":"serial","env":"ACME_SN","label":"Serial","required":true},
+                     {"name":"model","env":"ACME_KIND","label":"Kind","required":true}]}],
+         "models":{}}
+        """.utf8))
+    }
+
     func testFormSendsOnlyTheFieldsItsBrandUses() throws {
+        let options = try setupOptions()
+        let type = { (kind: String) in options.types.first { $0.printerType == kind } }
         var bambu = PrinterForm()
-        bambu.host = " 192.168.1.40 "; bambu.serial = "01P00A123456789"; bambu.model = "p1s"; bambu.secret = "12345678"
+        XCTAssertEqual([bambu.backend, bambu.printerType], ["", ""], "the sheet sets both from the MCPs' own list")
+        bambu.backend = "bambu-printer-mcp"; bambu.printerType = "bambu"
+        bambu.host = " 192.168.1.40 "; bambu.serial = "01P00A123456789"; bambu.model = "p1s"; bambu.secret = "12345678"; bambu.port = "8883"
+        XCTAssertEqual(bambu.lacks(type("bambu")).map(\.name), [])
+        bambu.keepFields(of: type("bambu"))
         XCTAssertEqual(bambu.json, .object(["backend": .string("bambu-printer-mcp"), "printerType": .string("bambu"), "host": .string("192.168.1.40"),
-                                            "serial": .string("01P00A123456789"), "model": .string("p1s"), "secret": .string("12345678")]))
+                                            "serial": .string("01P00A123456789"), "model": .string("p1s"), "secret": .string("12345678")]),
+                       "no port: the Bambu kind's MCP declares none")
         var octo = PrinterForm()
         octo.backend = "mcp-3d-printer-server"; octo.printerType = "octoprint"; octo.host = "octopi.local"; octo.port = "80"; octo.serial = "ignored"; octo.model = "p1s"
+        octo.keepFields(of: type("octoprint"))
         XCTAssertEqual(octo.json, .object(["backend": .string("mcp-3d-printer-server"), "printerType": .string("octoprint"), "host": .string("octopi.local"), "port": .string("80")]))
+        // Another kind with a serial and a model under its own names: sent the same way, so nothing keys on "bambu".
+        var acme = PrinterForm()
+        acme.backend = "mcp-3d-printer-server"; acme.printerType = "acme"; acme.host = "192.0.2.7"; acme.port = "1"
+        XCTAssertEqual(acme.lacks(type("acme")).map(\.label), ["Serial", "Kind"], "its required fields, in its MCP's words and order")
+        acme.serial = " sn-1 "; acme.model = "k2"
+        acme.keepFields(of: type("acme"))
+        XCTAssertEqual(acme.json, .object(["backend": .string("mcp-3d-printer-server"), "printerType": .string("acme"), "host": .string("192.0.2.7"),
+                                           "serial": .string("sn-1"), "model": .string("k2")]))
+        // Check asks for a camera picture where the chosen MCP says camera_snapshot reads that kind, by its name nowhere.
+        XCTAssertEqual(type("bambu")?.checksCamera("bambu-printer-mcp"), true)
+        XCTAssertEqual(type("bambu")?.checksCamera("mcp-3d-printer-server"), false)
+        XCTAssertEqual(type("octoprint")?.checksCamera("mcp-3d-printer-server"), false)
+        XCTAssertEqual(type("acme")?.checksCamera("mcp-3d-printer-server"), true)
         XCTAssertEqual(PrinterForm(folder: "/Users/someone/mcp-3D-printer-server").json, .object(["folder": .string("/Users/someone/mcp-3D-printer-server")]))
     }
 
@@ -127,13 +166,21 @@ final class PrinterSetupTests: XCTestCase {
         let candidate = try JSONDecoder().decode(PrinterCandidate.self, from: Data("""
         {"id":"folder:/x","source":"folder","name":"P","backend":"mcp-3d-printer-server","printerType":"bambu","folder":"/x","added":false,"missing":["BAMBU_TOKEN","BAMBU_MODEL"],"fill":{}}
         """.utf8))
-        XCTAssertTrue(candidate.needsModel)
+        let kinds = try setupOptions()
+        XCTAssertTrue(candidate.needsModel(kinds), "by the kind's own model field")
+        XCTAssertEqual(candidate.modelSetting(kinds), "BAMBU_MODEL")
+        XCTAssertNil(candidate.route)
         var form = PrinterForm(folder: "/x"); form.model = "p1s"
         XCTAssertEqual(form.json, .object(["folder": .string("/x"), "model": .string("p1s")]))
+        // Settings → Printers names the model's variable and the copied route by the companion's words, never by its own.
         let printer = try JSONDecoder().decode(PrinterDestination.self, from: Data("""
-        {"id":"counterpart-1","name":"P1S","backend":"mcp-3d-printer-server","source":"mcp-profile","origin":"counterpart","incomplete":{"missing":["BAMBU_MODEL"],"fill":{"BAMBU_MODEL":"p1s"}}}
+        {"id":"counterpart-1","name":"P1S","backend":"mcp-3d-printer-server","source":"mcp-profile","origin":"counterpart",
+         "incomplete":{"missing":["BAMBU_MODEL"],"fill":{"BAMBU_MODEL":"p1s"},"modelSetting":"BAMBU_MODEL","route":true}}
         """.utf8))
-        XCTAssertEqual(printer.incomplete, .init(missing: ["BAMBU_MODEL"], fill: ["BAMBU_MODEL": "p1s"]))
+        XCTAssertEqual(printer.incomplete, .init(missing: ["BAMBU_MODEL"], fill: ["BAMBU_MODEL": "p1s"], modelSetting: "BAMBU_MODEL", route: true))
+        XCTAssertEqual(printer.incomplete?.needsModel, false, "filled")
+        XCTAssertEqual(PrinterDestination.Incomplete(missing: ["ACME_KIND"], modelSetting: "ACME_KIND").needsModel, true)
+        XCTAssertEqual(PrinterDestination.Incomplete(missing: ["BAMBU_MODEL"]).needsModel, false, "no model setting from an older companion: nothing asked")
         XCTAssertEqual(ControlClient.timeout(for: "printers.completeSettings"), 40)
     }
 }

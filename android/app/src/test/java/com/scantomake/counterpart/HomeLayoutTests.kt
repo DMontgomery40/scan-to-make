@@ -877,6 +877,9 @@ class HomeLayoutTests {
     @Test fun addAPrinterApprovalFromTheMcpFillsTheKey() {
         val transport = addPrinterFixture()
         compose.onNodeWithTag("add-printer-found-bonjour:octopi.local:80").performClick()
+        // OctoPrint's own fields: a port, and no serial number or model.
+        compose.onNodeWithTag("add-printer-port").assertTextContains("80")
+        org.junit.Assert.assertTrue(compose.onAllNodes(hasTestTag("add-printer-serial")).fetchSemanticsNodes().isEmpty())
         compose.onNodeWithTag("add-printer-add").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("Approve in OctoPrint").performScrollTo().performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("OctoPrint approved Counterpart.")).fetchSemanticsNodes().isNotEmpty() }
@@ -888,6 +891,9 @@ class HomeLayoutTests {
         assertEquals("0b6b8a52-6f1e-4c5a-9d43-4c1c3f6a2e10", (body["session"] as JsonPrimitive).content)
         val added = WireJson.parseToJsonElement(String(transport.calls.last { it.request.url.endsWith("/setup/add") }.request.body!!)).jsonObject["printer"]!!.jsonObject
         assertEquals("OCTO-KEY-FROM-APPROVAL", (added["secret"] as JsonPrimitive).content)
+        // Exactly what OctoPrint's MCP reads: no serial number or model goes with it.
+        assertEquals(mapOf("backend" to "mcp-3d-printer-server", "printerType" to "octoprint", "host" to "octopi.local", "port" to "80",
+            "secret" to "OCTO-KEY-FROM-APPROVAL", "name" to "OctoPi"), added.mapValues { (it.value as JsonPrimitive).content })
     }
 
     /** Home with a project, then Printers → Add a Printer, answered from packages/contracts/fixtures/printer-setup-phone.json. */

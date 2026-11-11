@@ -63,6 +63,8 @@ import com.scantomake.counterpart.api.addPrinter
 import com.scantomake.counterpart.api.addressField
 import com.scantomake.counterpart.api.checkPrinter
 import com.scantomake.counterpart.api.discoverPrinters
+import com.scantomake.counterpart.api.keepFields
+import com.scantomake.counterpart.api.lacks
 import com.scantomake.counterpart.api.obtainControl
 import com.scantomake.counterpart.api.obtainUntilAnswered
 import com.scantomake.counterpart.api.withSerial
@@ -117,8 +119,9 @@ fun AddPrinterScreen(back: () -> Unit, added: () -> Unit) {
         if (!prefilled && types.isNotEmpty() && types.none { it.printerType == next.printerType }) next = next.copy(printerType = types.first().printerType)
         val backends = options?.type(next.printerType)?.backends.orEmpty()
         if (backends.isNotEmpty() && next.backend !in backends) next = next.copy(backend = backends.first())
+        next = next.keepFields(options?.type(next.printerType))
         val models = options?.models?.get(next.backend).orEmpty()
-        if (options?.type(next.printerType)?.serial == true && next.model == null && models.size == 1) next = next.copy(model = models.first().value)
+        if (options?.type(next.printerType)?.field("model") != null && next.model == null && models.size == 1) next = next.copy(model = models.first().value)
         stopObtaining(); check = null; problem = null; form = next
     }
     fun save(value: PrinterForm, id: String) {
@@ -241,19 +244,20 @@ private fun PrinterFormFields(form: PrinterForm, options: PrinterSetupOptions, l
     val type = options.type(form.printerType)
     val models = options.models[form.backend].orEmpty()
     val secretMissing = type?.secret?.required == true && form.secret.isEmpty()
-    val ready = form.host.isNotBlank() && (type?.serial != true || (form.serial.isNotBlank() && form.model != null)) && !secretMissing
+    val ready = form.host.isNotBlank() && form.lacks(type).isEmpty() && !secretMissing
 
     SectionTitle("Printer")
     if (prefilled) Text("Filled in from what ${label(form.backend)} found on the network.", color = Palette.secondary, fontSize = 12.sp)
     ChoiceField("Brand", form.printerType, options.types.map { it.printerType to it.label }, { value ->
-        edit(form.copy(printerType = value, backend = options.type(value)?.backends?.firstOrNull() ?: form.backend, model = null, slicer = null, modelInferred = false))
+        // Values the new kind's MCP doesn't read go with the old kind.
+        edit(form.copy(printerType = value, backend = options.type(value)?.backends?.firstOrNull() ?: form.backend, model = null, slicer = null, modelInferred = false).keepFields(options.type(value)))
     }, "add-printer-brand")
-    if (type?.serial == true) ChoiceField(type.field("model")?.label ?: "Model", form.model, models.map { it.value to it.label }, { edit(form.copy(model = it, modelInferred = false)) }, "add-printer-model")
+    type?.field("model")?.let { modelField -> ChoiceField(modelField.label, form.model, models.map { it.value to it.label }, { edit(form.copy(model = it, modelInferred = false)) }, "add-printer-model") }
     val address = addressField(options, form.printerType)
     TextSetting("host", type?.field("host")?.label ?: "Address", form.host, address.hint ?: type?.field("host")?.hint,
         if (address.url) KeyboardType.Uri else KeyboardType.Ascii, placeholder = address.prompt) { edit(form.copy(host = it)) }
     if (type?.field("port") != null) TextSetting("port", type.field("port")!!.label, form.port ?: "", type.field("port")!!.hint, KeyboardType.Number) { edit(form.copy(port = it.ifEmpty { null })) }
-    if (type?.serial == true) TextSetting("serial", type.field("serial")?.label ?: "Serial number", form.serial, type.field("serial")?.hint, KeyboardType.Ascii, KeyboardCapitalization.Characters) { value -> edit(form.withSerial(value, options)) }
+    type?.field("serial")?.let { serialField -> TextSetting("serial", serialField.label, form.serial, serialField.hint, KeyboardType.Ascii, KeyboardCapitalization.Characters) { value -> edit(form.withSerial(value, options)) } }
     type?.secret?.let { secret ->
         OutlinedTextField(form.secret, { edit(form.copy(secret = it)) }, Modifier.fillMaxWidth().testTag("add-printer-secret"),
             label = { Text(secret.label + if (secret.required) "" else " (optional)") }, singleLine = true,
@@ -307,9 +311,10 @@ private fun PrinterFormFields(form: PrinterForm, options: PrinterSetupOptions, l
 
 private fun stillNeeded(form: PrinterForm, type: PrinterSetupOptions.PrinterType?): String {
     val missing = buildList {
-        if (form.host.isBlank()) add(type?.field("host")?.label ?: "Address")
-        if (type?.serial == true && form.serial.isBlank()) add(type.field("serial")?.label ?: "Serial number")
-        if (type?.serial == true && form.model == null) add(type.field("model")?.label ?: "Model")
+        val lacking = form.lacks(type)
+        // The address is always needed, whether or not the MCP marks its field required.
+        if (form.host.isBlank() && lacking.none { it.name == "host" }) add(type?.field("host")?.label ?: "Address")
+        lacking.forEach { add(it.label) }
         type?.secret?.takeIf { it.required && form.secret.isEmpty() }?.let { add(it.label) }
     }
     return if (missing.isEmpty()) "" else "Still needed: ${missing.joinToString(", ")}."
