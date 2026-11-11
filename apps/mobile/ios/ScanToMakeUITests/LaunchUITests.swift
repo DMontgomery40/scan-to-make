@@ -2165,6 +2165,51 @@ final class OnDeviceLibraryUITests: XCTestCase {
         }
     }
 
+    /// Issue #720. David, Nov 11: "if i just saw it 2 seconds ago, how is it having to come from my mac again?" A project
+    /// opened once, left, and opened again with the Mac not answering at all: its model and picture are drawn from the
+    /// phone, and nothing on the page says it is coming from the Mac. Then the same after a relaunch, still away.
+    func testAProjectSeenOnceDrawsFromThePhoneWhenTheMacIsAwayWithProjectsPresent() throws {
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
+        let folder = try folder()
+        let mic = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
+        var app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(mic)"])
+        let model = app.buttons["Explore in 3D"]
+        XCTAssertTrue(model.waitForExistence(timeout: 30), "the model is drawn the first time, with the Mac answering")
+        XCTAssertTrue(waitFor(20) { entries(folder).contains { $0.project == mic && $0.kind == "model" } }, "and the phone keeps it")
+
+        // Leave the page, the Mac stops answering entirely, come back.
+        try Data().write(to: folder.appendingPathComponent("offline"))
+        let back = app.navigationBars.buttons.firstMatch
+        if back.exists && back.isHittable { back.tap() }
+        else { app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Potato")).firstMatch.tap() }
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Mic mount")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        row.tap()
+        assertDrawnFromThePhone(app, model, "back on the page, Mac away")
+        let again = XCTAttachment(screenshot: app.screenshot()); again.name = "720-page-again-away"; again.lifetime = .keepAlways; add(again)
+        app.terminate()
+
+        // A relaunch, the Mac still away: the same page draws the same way.
+        app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(mic)"])
+        assertDrawnFromThePhone(app, app.buttons["Explore in 3D"], "after a relaunch, Mac away")
+        let relaunched = XCTAttachment(screenshot: app.screenshot()); relaunched.name = "720-page-relaunch-away"; relaunched.lifetime = .keepAlways; add(relaunched)
+        app.terminate()
+    }
+
+    /// The model is drawn within a few seconds, and in the meantime nothing says "coming from your Mac".
+    private func assertDrawnFromThePhone(_ app: XCUIApplication, _ model: XCUIElement, _ when: String, file: StaticString = #filePath, line: UInt = #line) {
+        let coming = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "coming from your Mac"))
+        let end = Date().addingTimeInterval(8)
+        var drawn = false
+        while Date() < end {
+            XCTAssertEqual(coming.count, 0, "\(when): \(coming.firstMatch.exists ? coming.firstMatch.label : "")", file: file, line: line)
+            if model.exists { drawn = true; break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(drawn, "\(when): the model is drawn from the phone", file: file, line: line)
+        XCTAssertEqual(coming.count, 0, when, file: file, line: line)
+    }
+
     /// Past the ceiling, models go before pictures: the library keeps every project's picture and lets the models go.
     func testFillingPastTheCeilingEvictsModelsBeforePicturesWithProjectsPresent() throws {
         let folder = try folder()

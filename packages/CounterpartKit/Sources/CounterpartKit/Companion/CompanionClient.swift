@@ -720,6 +720,7 @@ public final class CompanionClient: @unchecked Sendable {
             if !kept, let older, (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil,
                (try? FileManager.default.moveItem(at: older, to: target)) != nil || FileManager.default.fileExists(atPath: target.path) {
                 if let validator { Self.setValidator(validator, of: target) }
+                Self.pruneOlder(filename, before: folder)
                 MediaTrace.record("file.unchanged")
                 return target
             }
@@ -753,16 +754,11 @@ public final class CompanionClient: @unchecked Sendable {
                 throw CompanionError(code: "download-failed", message: "That file couldn't be saved on this phone.")
             }
         }
-        // Older versions of this project are no longer shown. The current version's folder stays: its other
-        // files may be downloading at the same time.
-        let projectFolder = folder.deletingLastPathComponent()
-        // Only older ones: downloads outlive their page now, so a slow download of an earlier version can finish after
-        // a newer version's files have landed, and must not remove them (review of #527, part 2, F2).
-        let mine = Int64(version) ?? 0
-        for other in (try? FileManager.default.contentsOfDirectory(at: projectFolder, includingPropertiesForKeys: nil)) ?? []
-        where (Int64(other.lastPathComponent) ?? Int64.min) < mine {
-            try? FileManager.default.removeItem(at: other)
-        }
+        // Older versions of this one file are no longer shown; the project's other files stay in their folders until
+        // their own newer version is asked for, so an unchanged photo or scan can still be answered 304 (#720; before,
+        // every older folder went with the first file of a new version). Only older ones: a slow download of an earlier
+        // version can finish after a newer version's files have landed (review of #527, part 2, F2).
+        Self.pruneOlder(filename, before: folder)
         do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         catch { MediaTrace.record("file.write-error", ["code": String((error as NSError).code)]); throw error }
         // Moved into place whole, so a reader never sees half a file; another download of it may have won the race.
@@ -785,6 +781,18 @@ public final class CompanionClient: @unchecked Sendable {
     }
     static func setValidator(_ etag: String, of file: URL) {
         try? Data(etag.utf8).write(to: file.appendingPathExtension("etag"), options: .atomic)
+    }
+    /// Removes `filename` (and its validator) from the project's version folders older than `folder`, and any folder
+    /// left empty.
+    static func pruneOlder(_ filename: String, before folder: URL) {
+        let mine = Int64(folder.lastPathComponent) ?? 0
+        for other in (try? FileManager.default.contentsOfDirectory(at: folder.deletingLastPathComponent(), includingPropertiesForKeys: nil)) ?? []
+        where (Int64(other.lastPathComponent) ?? Int64.min) < mine {
+            let copy = other.appending(path: filename)
+            try? FileManager.default.removeItem(at: copy)
+            try? FileManager.default.removeItem(at: copy.appendingPathExtension("etag"))
+            if ((try? FileManager.default.contentsOfDirectory(atPath: other.path)) ?? []).isEmpty { try? FileManager.default.removeItem(at: other) }
+        }
     }
     /// The newest older version's copy of `filename` beside `folder` (the project's other version folders), if it has a
     /// validator to ask the Mac with.
