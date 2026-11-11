@@ -59,9 +59,11 @@ import CounterpartKit
 
     /// Which Mac's library is in use, from a pairing that was read: another Mac's is cleared. Nothing else clears it here:
     /// a failed or locked read, or a Mac that wants pairing again, is not the person forgetting the Mac (board X96).
+    /// The Mac is who it is by its pin (`KnownProjects.key`, the saved list's key too), not by an address, and an expired
+    /// credential is still the same Mac: its library stays readable while it wants pairing again.
     func paired(_ status: PairingStatus?, fixture: Bool) {
         guard let status else { return }
-        if status.state == .paired, let mac = fixture ? "fixture" : status.baseUrl { library.use(mac: mac) }
+        if let mac = fixture ? "fixture" : KnownProjects.key(for: status) { library.use(mac: mac) }
         refreshUsage()
     }
 

@@ -60,7 +60,8 @@ final class OnDeviceLibraryTests: XCTestCase {
         XCTAssertEqual(again.latest(project: Self.id, name: "model.stl")?.version, 10)
         XCTAssertEqual(again.lastOpened(Self.id), Date(timeIntervalSince1970: 5))
         XCTAssertEqual(again.usage, 6)
-        XCTAssertNil(again.file(project: Self.id, name: "pictures/a.png", version: 11), "another version is not this one")
+        XCTAssertNil(again.file(project: Self.id, name: "model.stl", version: 11), "another version of a model is not this one")
+        XCTAssertEqual(again.file(project: Self.id, name: "pictures/a.png", version: 11), picture, "a Mac picture's name is its content")
 
         // A file removed outside the library leaves no entry behind.
         try FileManager.default.removeItem(at: model)
@@ -91,29 +92,124 @@ final class OnDeviceLibraryTests: XCTestCase {
         }
         let c = try client(fake, library: library)
         let v1 = project(ended: 1000), v2 = project(ended: 2000)
-        let first = try await c.download(v1, "pictures/part-0123456789abcdef.png")
+        let first = try await c.download(v1, "renders/front.png")
         XCTAssertTrue(first.path.hasPrefix(base.path))
 
         // A relaunch with the Mac away: the same version is a library hit, with no request at all.
         away = true
         let calls = fake.calls.count
-        let again = try await c.download(v1, "pictures/part-0123456789abcdef.png")
+        let again = try await c.download(v1, "renders/front.png")
         XCTAssertEqual(again, first)
         XCTAssertEqual(fake.calls.count, calls, "a kept file never asks the Mac")
 
         // A newer version listed while the Mac is away: the old copy is what the screen draws, and it stays.
-        do { _ = try await c.download(v2, "pictures/part-0123456789abcdef.png"); XCTFail("the Mac is away") } catch {}
-        XCTAssertEqual(c.stored(v2, "pictures/part-0123456789abcdef.png"), first)
+        do { _ = try await c.download(v2, "renders/front.png"); XCTFail("the Mac is away") } catch {}
+        XCTAssertEqual(c.stored(v2, "renders/front.png"), first)
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.path), "a failed fetch never removes the copy on screen")
 
         // The Mac answers: the new one lands whole, then the old file goes.
         away = false
         fake.answer = { _, _ in HTTPReply(status: 200, body: Data("second".utf8)) }
-        let second = try await c.download(v2, "pictures/part-0123456789abcdef.png")
+        let second = try await c.download(v2, "renders/front.png")
         XCTAssertNotEqual(second, first)
         XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "second")
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
-        XCTAssertEqual(c.stored(v2, "pictures/part-0123456789abcdef.png"), second)
+        XCTAssertEqual(c.stored(v2, "renders/front.png"), second)
+    }
+
+    // MARK: Never twice (#720)
+
+    /// David, Nov 11: "if i just saw it 2 seconds ago, how is it having to come from my mac again?" A Mac picture is named
+    /// by what it draws, so a newer project version (a finished pass, a print) is the same picture: no request at all.
+    func testAMacPictureIsTheSameFileAtEveryProjectVersionAndNeverAsksTheMacAgain() async throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: Data("png".utf8), headers: ["ETag": "\"p1\""]) }
+        let c = try client(fake, library: library)
+        let first = try await c.download(project(ended: 1000), "pictures/part-0123456789abcdef.png")
+        let calls = fake.calls.count
+        let later = try await c.download(project(ended: 2000), "pictures/part-0123456789abcdef.png")
+        XCTAssertEqual(later, first)
+        XCTAssertEqual(fake.calls.count, calls, "the same picture name is never fetched again")
+        XCTAssertNotNil(library.file(project: Self.id, name: "pictures/part-0123456789abcdef.png", version: 5000), "at any version")
+    }
+
+    /// A completed pass changes the project's version, not its model's bytes: the phone asks with the Mac's tag, the Mac
+    /// answers 304, and the kept file (same path, so the drawn mesh and still are reused) is this version's. Bytes come once.
+    func testAnUnchangedModelIsNotDownloadedTwice() async throws {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        var bodies = 0
+        var asked: [String?] = []
+        let fake = FakeTransport { request, _ in
+            let tag = request.value(forHTTPHeaderField: "If-None-Match")
+            asked.append(tag)
+            if tag == "\"m1\"" { return HTTPReply(status: 304, body: Data(), headers: ["ETag": "\"m1\""]) }
+            bodies += 1
+            return HTTPReply(status: 200, body: Data("solid".utf8), headers: ["ETag": "\"m1\""])
+        }
+        let c = try client(fake, library: library)
+        let first = try await c.download(project(ended: 1000), "model.stl")
+        let second = try await c.download(project(ended: 2000), "model.stl")
+        XCTAssertEqual(second, first, "the same file on disk")
+        XCTAssertEqual(bodies, 1, "the model's bytes came once")
+        XCTAssertEqual(asked, [nil, "\"m1\""])
+        XCTAssertEqual(library.latest(project: Self.id, name: "model.stl")?.version, Int64(project(ended: 2000).mediaVersion))
+        // Asked again at the version it now has: a library hit, no request.
+        _ = try await c.download(project(ended: 2000), "model.stl")
+        XCTAssertEqual(fake.calls.count, 2)
+        // The bytes change: they come, under the new tag.
+        fake.answer = { _, _ in HTTPReply(status: 200, body: Data("newer".utf8), headers: ["ETag": "\"m2\""]) }
+        let third = try await c.download(project(ended: 3000), "model.stl")
+        XCTAssertEqual(try String(contentsOf: third, encoding: .utf8), "newer")
+    }
+
+    /// The same for a file the library doesn't keep (a scan under "Pictures and 3D models"): its tag sits beside it in the
+    /// cache, and a newer version moves the unchanged copy instead of fetching it.
+    func testAnUnchangedFileTheLibraryDoesNotKeepIsNotDownloadedTwice() async throws {
+        OnDeviceLibrary.Keep.chosen = .pictures
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        var bodies = 0
+        let fake = FakeTransport { request, _ in
+            if request.value(forHTTPHeaderField: "If-None-Match") == "\"s1\"" { return HTTPReply(status: 304, body: Data()) }
+            bodies += 1
+            return HTTPReply(status: 200, body: Data("stl".utf8), headers: ["ETag": "\"s1\""])
+        }
+        let c = try client(fake, library: library)
+        let first = try await c.download(project(ended: 1000), "model.stl")
+        XCTAssertFalse(first.path.hasPrefix(base.path))
+        let second = try await c.download(project(ended: 2000), "model.stl")
+        XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "stl")
+        XCTAssertEqual(bodies, 1, "fetched once")
+    }
+
+    /// A file fetched before its kind was kept goes into the library from the cache, with the Mac away (Cursor P2.2).
+    func testACachedFileOfANowKeptKindGoesIntoTheLibraryWithoutTheMac() async throws {
+        OnDeviceLibrary.Keep.chosen = .pictures
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        var away = false
+        let fake = FakeTransport { _, _ in
+            if away { throw TransportError("network") }
+            return HTTPReply(status: 200, body: Data("stl".utf8))
+        }
+        let c = try client(fake, library: library)
+        _ = try await c.download(project(ended: 1000), "model.stl")
+        OnDeviceLibrary.Keep.chosen = .models
+        away = true
+        let kept = try await c.download(project(ended: 1000), "model.stl")
+        XCTAssertTrue(kept.path.hasPrefix(base.path))
+        XCTAssertEqual(try String(contentsOf: kept, encoding: .utf8), "stl")
+    }
+
+    /// Too large is per variant: another original of the same project version is still asked for (Cursor P2.1).
+    func testTooLargeIsRememberedPerVariant() {
+        let library = OnDeviceLibrary(base: base)
+        library.use(mac: "m")
+        library.markTooLarge(project: Self.id, name: "model.stl", version: 7, file: "model-aaa.3mf")
+        XCTAssertTrue(library.isTooLarge(project: Self.id, name: "model.stl", version: 7, file: "model-aaa.3mf"))
+        XCTAssertFalse(library.isTooLarge(project: Self.id, name: "model.stl", version: 7, file: "model-bbb.3mf"))
     }
 
     func testReplacingOneFileLeavesTheProjectsOtherFiles() throws {
@@ -242,6 +338,11 @@ final class OnDeviceLibraryTests: XCTestCase {
         XCTAssertEqual(models, [projects[0].id, projects[2].id, projects[3].id, projects[4].id], "the opened one and the three most recent")
         XCTAssertEqual(wants.first?.kind, .picture, "pictures first")
         XCTAssertTrue(LibraryPlan.wants(projects, opened: [], keep: .pictures).allSatisfy { $0.kind == .picture })
+        // A designer's plates: every plate's picture, for a project never opened too (#556's away proof: two pages said
+        // "not available" for plates the fill had never taken).
+        let plates = project(ended: 9000, extra: #","kind":"published","plates":[{"id":"0-1","fileIndex":0,"plateIndex":1,"name":"Plate 1","fileName":"a.3mf","thumbnail":"renders/plate_1.png","selected":true,"sliced":false,"status":"none"},{"id":"0-2","fileIndex":0,"plateIndex":2,"name":"Plate 2","fileName":"a.3mf","thumbnail":"renders/plate_2.png","selected":false,"sliced":false,"status":"none"}]"#)
+        let names = LibraryPlan.wants([plates], opened: [], keep: .pictures).map(\.name)
+        XCTAssertTrue(names.contains("renders/plate_1.png") && names.contains("renders/plate_2.png"), "\(names)")
     }
 
     func testTheLinkRules() {

@@ -182,8 +182,9 @@ import CounterpartKit
         #if DEBUG
         if Fixtures.folder != nil { return Fixtures.keepsLibrary ? "fixture" : nil }
         #endif
-        guard let status = connection, status.state == .paired else { return nil }
-        return KnownProjects.key(for: status)
+        // Who the Mac is, not whether its credential works today: an expired pairing is still this Mac (audit row 6,
+        // X115), so its saved list stays until Forget or another Mac.
+        return KnownProjects.key(for: connection)
     }
 
     /// Before the first list arrives: the projects this phone last heard from this Mac, so Home and a project page open
@@ -223,11 +224,13 @@ import CounterpartKit
     }
 
     /// Nothing paired, or another Mac paired now: the saved copy is not this Mac's, so it goes (unpair, a new pairing).
+    /// Only a pairing that was read says so: a Keychain read that failed (a locked phone) is not Forget (board X96).
     private func forgetOtherMacsCopy() {
-        guard let owner = KnownProjects.owner(of: Self.knownFile), owner != knownMac else { return }
         #if DEBUG
         if Fixtures.folder != nil { return }
         #endif
+        guard let owner = KnownProjects.owner(of: Self.knownFile), let status = try? pairingClient.store.status(),
+              owner != KnownProjects.key(for: status) else { return }
         pendingSave?.cancel(); known = nil
         try? FileManager.default.removeItem(at: Self.knownFile)
     }
