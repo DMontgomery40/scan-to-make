@@ -226,7 +226,7 @@ struct ProjectView: View {
                     Button { projectName = words.title; renaming = true } label: {
                         Text(words.title).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain).disabled(working || !store.projectRename)
+                    .buttonStyle(.plain).disabled(working || away || !store.projectRename)
                     .accessibilityIdentifier("project-title")
                     .accessibilityLabel(words.title).accessibilityHint("Rename project")
                     if let credit = object.credit?.object, let raw = credit["url"]?.string, let url = URL(string: raw), ["http", "https"].contains(url.scheme ?? "") {

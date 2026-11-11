@@ -802,7 +802,7 @@ final class LayoutParityUITests: XCTestCase {
                 checkNothingFails(app, "\(id) after \(button.label)")
                 XCTAssertTrue(away.exists)
             }
-            for lead in ["it-works", "needs-changes", "failed-retry", "failed-print", "print", "draft.send", "attach-photos", "status-menu"] {
+            for lead in ["it-works", "needs-changes", "failed-retry", "failed-print", "print", "draft.send", "attach-photos", "status-menu", "project-title"] {
                 let button = app.buttons[lead]
                 guard button.exists else { continue }
                 XCTAssertFalse(button.isEnabled, "\(id): \(lead) waits for the Mac")
