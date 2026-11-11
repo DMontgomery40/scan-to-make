@@ -19,7 +19,7 @@ public struct PictureSpec {
     public var zUp = false
     /// The spool a one-colour part prints in; nil draws the stage's neutral material.
     public var tint: NSColor?
-    /// Explicit backdrop override when non-nil (`true` = light stage, `false` = dark stage); nil picks by contrast.
+    /// Legacy backdrop request, ignored: the stage always stays dark. Kept for older command-line callers.
     public var lightStage: Bool?
     /// A scan placed in the model at each seat (row-major 4×4, the part's millimetre frame; docs/protocols/seats.md).
     public var object: URL?
@@ -31,8 +31,9 @@ public struct PictureSpec {
 }
 
 /// The stage the apps draw: a vertical gradient (top 0.13/0.14/0.17 to 0.05/0.05/0.07) with a soft light below centre;
-/// or the light stage (0.86/0.87/0.89 to 0.70/0.71/0.74) for a part that would be a silhouette on the dark one.
+/// the same dark backdrop for every filament colour.
 func stage(_ size: Int, light: Bool = false) -> CGContext? {
+    let light = false // A backdrop request never changes the app’s dark stage.
     guard let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
     let space = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -397,16 +398,8 @@ private func luminance(_ colour: NSColor?) -> CGFloat {
     return 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
 }
 
-/// The part reads better on the light stage than the dark one (WCAG contrast of relative luminance; the same rule as
-/// CounterpartKit `StageContrast`, whose stage colours are #22242B and #C8CACF).
-public func wantsLightStage(_ colour: NSColor?) -> Bool {
-    guard let rgb = colour?.usingColorSpace(.sRGB) else { return false }
-    func linear(_ c: CGFloat) -> Double { let c = Double(c); return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
-    let part = 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722 * linear(rgb.blueComponent)
-    let dark = 0.01776, light = 0.59025
-    func ratio(_ a: Double, _ b: Double) -> Double { (max(a, b) + 0.05) / (min(a, b) + 0.05) }
-    return ratio(part, light) > ratio(part, dark)
-}
+/// The stage never changes mode for a filament colour. Dark parts are lifted in their material instead.
+public func wantsLightStage(_ colour: NSColor?) -> Bool { false }
 
 // MARK: - Scene Geometry Extraction & Component Analysis
 
@@ -1472,7 +1465,7 @@ private func drawInsetBadge(_ insetImage: CGImage, into context: CGContext, size
 
 public func renderPicture(_ spec: PictureSpec, to output: URL) throws {
     let size = spec.pixels
-    let useLightStage = spec.lightStage ?? (spec.model != nil && wantsLightStage(spec.tint))
+    let useLightStage = false
     guard let context = stage(size, light: useLightStage) else { throw HandheldError.io("no drawing context") }
 
     if let model = spec.model {

@@ -215,6 +215,27 @@ final class PictureFramingTests: XCTestCase {
         }
     }
 
+    /// A black spool and even an older explicit light-stage request never turn the picture pale.
+    func testDarkFilamentAndLegacyLightRequestKeepTheStageDark() throws {
+        let model = try writeThreeMF("always-dark", objectsXML: boxObject(id: 1, name: "part",
+            lo: SIMD3(0, 0, 0), hi: SIMD3(40, 30, 20)), buildIds: [1])
+        XCTAssertFalse(wantsLightStage(.black))
+        for requested in [Optional<Bool>.none, false, true] {
+            var spec = PictureSpec()
+            spec.model = model; spec.zUp = true; spec.tint = .black; spec.lightStage = requested; spec.pixels = 128
+            let out = folder.appendingPathComponent("dark-\(String(describing: requested)).png")
+            try renderPicture(spec, to: out)
+            let cg = try XCTUnwrap(NSImage(contentsOf: out)?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+            var bytes = [UInt8](repeating: 0, count: 128 * 128 * 4)
+            let context = try XCTUnwrap(CGContext(data: &bytes, width: 128, height: 128, bitsPerComponent: 8, bytesPerRow: 128 * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: 128, height: 128))
+            XCTAssertLessThan(bytes[0], 64, "red backdrop stays dark")
+            XCTAssertLessThan(bytes[1], 64, "green backdrop stays dark")
+            XCTAssertLessThan(bytes[2], 64, "blue backdrop stays dark")
+        }
+    }
+
     /// Rendering the same file twice produces byte-for-byte identical PNG output so companion picture hashes stay stable.
     func testDeterministicByteForByteOutput() throws {
         let model = try writeThreeMF(
