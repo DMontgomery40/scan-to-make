@@ -168,6 +168,8 @@ data class PairingStatus(
     val activeUrl: String? = null,
     val deviceId: String? = null,
     val expiresAtMs: Double? = null,
+    /** The computer's pin (its public key or certificate hash; not a secret): who it is, wherever it answers from. */
+    val pin: String? = null,
 ) {
     enum class State { Disconnected, Paired, Expired }
 
@@ -179,7 +181,7 @@ data class PairingStatus(
         fun of(record: PairingRecord?, nowMs: Long = System.currentTimeMillis()): PairingStatus {
             if (record == null) return disconnected
             return PairingStatus(if (record.isExpired(nowMs)) State.Expired else State.Paired, record.baseUrl, record.activeUrl,
-                record.deviceId, record.expiresAtMs)
+                record.deviceId, record.expiresAtMs, record.pin)
         }
     }
 }

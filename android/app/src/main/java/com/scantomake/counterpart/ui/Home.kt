@@ -90,7 +90,10 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
     val grid = visible.filter { phase(it) != ProjectPhase.Confirmed }.sortedWith(compareByDescending<Project> { phase(it) == ProjectPhase.Ready }.thenByDescending { it.updatedAtMs })
 
     val mac = macName ?: "Your computer"
-    val connection = when (link.reachable) { false -> "$mac isn't answering"; true -> "$mac connected"; else -> mac }
+    // Once, for the whole list: not answering, and when what is shown is from (X100).
+    val heard by state.heard.collectAsState()
+    val heardText = heard.values.maxOrNull()?.let { " · this is from " + com.scantomake.counterpart.api.KnownProjects.whenText(it, System.currentTimeMillis(), java.time.ZoneId.systemDefault(), java.util.Locale.getDefault()).removePrefix("at ") } ?: ""
+    val connection = when (link.reachable) { false -> "$mac isn't answering$heardText"; true -> "$mac connected"; else -> mac }
     val printing = catalog?.destinations.orEmpty().filter { printer ->
         projects.any { p -> phase(p) == ProjectPhase.Printing && (p.print?.destinationId ?: p.print?.destination?.id ?: p.printerDestinationId) == printer.id }
     }
@@ -154,8 +157,12 @@ fun HomeScreen(open: (String, Boolean) -> Unit, newProject: (String?) -> Unit, p
                     item { Text((if (showArchived) "▾ " else "▸ ") + "Archived · ${archived.size}", color = Palette.secondary, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.clickable { showArchived = !showArchived }.padding(vertical = 6.dp)) }
                     if (showArchived || query.isNotBlank()) items(archived, key = { "arch-" + it.id }) { p ->
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).clickable { open(p.id, false) }.padding(14.dp)) {
-                            Text(state.words(p).title, Modifier.weight(1f)); Text(Format.`when`(p.updatedAtMs.toLong()), color = Palette.secondary, fontSize = 13.sp)
+                        Column {
+                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.card).clickable { open(p.id, false) }.padding(14.dp)) {
+                                Text(state.words(p).title, Modifier.weight(1f)); Text(Format.`when`(p.updatedAtMs.toLong()), color = Palette.secondary, fontSize = 13.sp)
+                            }
+                            // Archived results say why they matched too (review F5).
+                            SearchReason(reason(p))
                         }
                     }
                 }

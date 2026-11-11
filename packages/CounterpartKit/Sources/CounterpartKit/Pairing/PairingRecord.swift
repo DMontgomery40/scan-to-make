@@ -12,28 +12,32 @@ public enum CompanionAddress {
     /// The simulator's local test companions (http 9078, https 9079 on 127.0.0.1). Never on a device.
     public static func isFixture(_ url: URL?) -> Bool {
         #if targetEnvironment(simulator)
-        #if DEBUG
-        return isFixture(url, simulator: true, debug: true)
-        #else
-        return isFixture(url, simulator: true, debug: false)
-        #endif
+        return isFixture(url, simulator: true)
         #else
         return false
         #endif
     }
 
-    /// Ports `scripts/ux_screens.py` may give its capture companions in a Debug simulator build, so several prepared runs
-    /// can wait at once (9079 stays the https fixture).
-    public static let debugFixturePorts: ClosedRange<Int> = 9080...9097
-
-    /// The rule behind `isFixture`, for both kinds of build: only the simulator, only 127.0.0.1; a Release build accepts
-    /// exactly http 9078 and https 9079, a Debug build also http on `debugFixturePorts`.
-    public static func isFixture(_ url: URL?, simulator: Bool, debug: Bool) -> Bool {
+    /// The rule behind `isFixture`: only the simulator, only 127.0.0.1, exactly http 9078 and https 9079. A Debug build
+    /// also accepts http on `debugFixturePorts`; that branch and the range are compiled only into Debug, so a Release
+    /// build can't express the wider rule (scripts/tests/test_fixture_address_rule.py checks the source stays so).
+    static func isFixture(_ url: URL?, simulator: Bool) -> Bool {
         guard simulator, let url, url.host == "127.0.0.1", let port = url.port else { return false }
         if url.scheme == "https" { return port == 9079 }
         guard url.scheme == "http" else { return false }
-        return port == 9078 || (debug && debugFixturePorts.contains(port))
+        if port == 9078 { return true }
+        #if DEBUG
+        return debugFixturePorts.contains(port)
+        #else
+        return false
+        #endif
     }
+
+    #if DEBUG
+    /// Ports `scripts/ux_screens.py` gives its capture companions, so several prepared runs can wait at once (9079 stays
+    /// the https fixture). Debug builds only.
+    static let debugFixturePorts: ClosedRange<Int> = 9080...9097
+    #endif
 
     private static func components(_ value: String?) -> URLComponents? {
         guard let value, value.count <= 300, let c = URLComponents(string: value),
@@ -165,18 +169,20 @@ public struct PairingStatus: Equatable, Sendable {
     public var deviceId: String?
     public var expiresAtMs: Double?
     public var fixture: Bool
+    /// The Mac's pin (its public key or certificate hash; not a secret): who the Mac is, wherever it answers from.
+    public var pin: String?
 
     public static let disconnected = PairingStatus(state: .disconnected, baseUrl: nil, activeUrl: nil, deviceId: nil, expiresAtMs: nil, fixture: false)
 
-    public init(state: State, baseUrl: String?, activeUrl: String?, deviceId: String?, expiresAtMs: Double?, fixture: Bool) {
+    public init(state: State, baseUrl: String?, activeUrl: String?, deviceId: String?, expiresAtMs: Double?, fixture: Bool, pin: String? = nil) {
         self.state = state; self.baseUrl = baseUrl; self.activeUrl = activeUrl
-        self.deviceId = deviceId; self.expiresAtMs = expiresAtMs; self.fixture = fixture
+        self.deviceId = deviceId; self.expiresAtMs = expiresAtMs; self.fixture = fixture; self.pin = pin
     }
 
     public init(_ record: PairingRecord?, now: Date = Date()) {
         guard let record else { self = .disconnected; return }
         self.init(state: record.isExpired(now: now) ? .expired : .paired, baseUrl: record.baseUrl, activeUrl: record.activeUrl,
-                  deviceId: record.deviceId, expiresAtMs: record.expiresAtMs, fixture: record.isFixture)
+                  deviceId: record.deviceId, expiresAtMs: record.expiresAtMs, fixture: record.isFixture, pin: record.pin)
     }
 
     /// The host the phone talks to now, for "Address in use".

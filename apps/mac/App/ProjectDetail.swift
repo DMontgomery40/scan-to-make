@@ -38,7 +38,7 @@ struct ProjectDetail: View {
                 StatusCapsule(stage: words.stage, text: words.capsule, done: words.done, menu: true)
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            .disabled(working)
+            .disabled(blocked)
             .help("Set the status: Not Printed, Printed, Done or Needs Changes")
             .accessibilityLabel("Status: \(words.capsule)")
         } else {
@@ -46,6 +46,8 @@ struct ProjectDetail: View {
         }
     }
     private var working: Bool { model.working.contains(object.id) }
+    /// Nothing that needs the companion can be pressed while it isn't answering (X100): the line above the card says why.
+    private var blocked: Bool { working || model.availability == .notRunning }
     private var takesPhotos: Bool { model.capabilities?.objectsCreate == true }
 
     var body: some View {
@@ -66,7 +68,7 @@ struct ProjectDetail: View {
                     // A fit made before passes said where the object sits: the Mac can work it out, changing nothing.
                     if ProjectStageOffer.seeItTogether(object, showing: entry) {
                         Button { Task { await model.locate(object.id) } } label: { Label("See It Together", systemImage: "cube.transparent") }
-                            .buttonStyle(.glass).disabled(working).padding(.top, 108).padding(.leading, 24)
+                            .buttonStyle(.glass).disabled(blocked).padding(.top, 108).padding(.leading, 24)
                             .environment(\.colorScheme, stageScheme)
                             .help("Your Mac works out where the scanned object sits in this part, without changing it")
                             .accessibilityIdentifier("project-locate")
@@ -75,7 +77,7 @@ struct ProjectDetail: View {
                 .ignoresSafeArea(edges: .top)
             VStack(spacing: 12) {
                 if (object.plates?.count ?? 0) > 1 {
-                    ProjectPlatesView(project: object, busy: working, thumbnail: { plate in
+                    ProjectPlatesView(project: object, busy: blocked, thumbnail: { plate in
                         if let url = plate.thumbnail.flatMap(object.projectFile) {
                             FillImage(url: url, version: object.updatedAtMs)
                         } else {
@@ -91,9 +93,15 @@ struct ProjectDetail: View {
                 if object.kind == "published" {
                     HStack {
                         Button("Add Model Files", systemImage: "doc.badge.plus") { choosingModelFiles = true }
-                            .buttonStyle(.glass).disabled(working || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
+                            .buttonStyle(.glass).disabled(blocked || object.state == .printing || object.state == .touchingUp || object.print?.uncertain == true)
                         Spacer()
                     }
+                }
+                if let line = model.notAnsweringLine {
+                    Label(line, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12).background(.regularMaterial, in: .rect(cornerRadius: 16))
+                        .accessibilityIdentifier("project-not-answering")
                 }
                 card
                 bar
@@ -122,7 +130,7 @@ struct ProjectDetail: View {
                     Menu {
                         if model.capabilities?.projectRename == true {
                             Button("Rename Project…", systemImage: "pencil") { projectName = words.title; renaming = true }
-                                .disabled(working)
+                                .disabled(blocked)
                         }
                         if model.capabilities?.projectPreferences == true {
                             Button("Project Settings", systemImage: "slider.horizontal.3") { showingSettings = true }
@@ -233,7 +241,7 @@ struct ProjectDetail: View {
                 HStack {
                     Button("Try Again") { model.retryQueuedChange(object) }.disabled(object.changesWait)
                     Button("Discard Saved Change") { model.discardQueuedChange(object) }
-                }.disabled(working)
+                }.disabled(blocked)
             }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
         if let pending = object.pendingFollowup {
@@ -243,14 +251,14 @@ struct ProjectDetail: View {
                 HStack {
                     Button("Try Again") { Task { await model.perform(.correct, on: object.id, note: pending) } }
                     Button("Mark Done") { Task { await model.setStatus("works", for: object.id) } }
-                }.disabled(working)
+                }.disabled(blocked)
             }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
         if let previous = object.completionUndoStatus {
             HStack {
                 Label("Marked Done", systemImage: "checkmark.circle.fill")
                 Spacer()
-                Button("Undo") { Task { await model.setStatus(previous.rawValue, for: object.id) } }.disabled(working)
+                Button("Undo") { Task { await model.setStatus(previous.rawValue, for: object.id) } }.disabled(blocked)
             }.padding(12).glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
         if let problem = model.problem, problem.id == object.id {
@@ -310,7 +318,7 @@ struct ProjectDetail: View {
         }
             // A size question: its numbers, prefilled, with Confirm as the one obvious action.
             if let ask = object.openAsk, let form = AskSizesForm(ask) {
-                MacAskSizes(form: form, working: working) { sizes in Task { await model.answerSizes(sizes, on: object.id) } }
+                MacAskSizes(form: form, working: blocked) { sizes in Task { await model.answerSizes(sizes, on: object.id) } }
                     .id(ask.id)
             }
             // The question's picture (David, Nov 9: the phone's was "almost impossible to see"; the Mac showed none).
@@ -324,7 +332,7 @@ struct ProjectDetail: View {
 
     private func answer(_ title: String, _ action: ObjectAction) -> some View {
         Button(title) { Task { await model.perform(action, on: object.id) } }
-            .buttonStyle(.glass).controlSize(.large).disabled(working).fixedSize()
+            .buttonStyle(.glass).controlSize(.large).disabled(blocked).fixedSize()
     }
 
     private var progressCard: some View {
@@ -369,7 +377,7 @@ struct ProjectDetail: View {
                 Button("Stop…", role: .destructive) { stopping = true }.buttonStyle(.glass)
             }
         }
-        .disabled(working)
+        .disabled(blocked)
         .confirmationDialog("Stop the print?", isPresented: $stopping, titleVisibility: .visible) {
             Button("Stop Printing", role: .destructive) { Task { await model.control(object.id, .cancel) } }
             Button("Keep Printing", role: .cancel) {}
@@ -382,8 +390,14 @@ struct ProjectDetail: View {
             Text(words.status).font(.subheadline).lineLimit(4).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
+            // One filled control, the page's main action (`PageActions`): Try Again when a pass stopped, printing
+            // again when the print failed. Printing is offered here under its true name, and then not in the bar.
+            if words.page.printPlace == .card, let print = words.page.printWords {
+                Button("\(print)…", action: self.print).mainAction(words.page.printIsMain).controlSize(.large).disabled(!canPrint).fixedSize()
+                    .help(words.page.printNote ?? "")
+            }
             if words.actions.contains(.retry) {
-                Button("Try Again") { Task { await model.perform(.retry, on: object.id) } }.buttonStyle(.glass).controlSize(.large).disabled(working).fixedSize()
+                Button("Try Again") { Task { await model.perform(.retry, on: object.id) } }.mainAction(words.page.main == .retry).controlSize(.large).disabled(blocked).fixedSize()
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -392,9 +406,9 @@ struct ProjectDetail: View {
 
     // MARK: The bar
 
-    private var canCorrect: Bool { object.canAskForChanges && !working }
+    private var canCorrect: Bool { object.canAskForChanges && !blocked }
     private var canPrint: Bool {
-        (words.actions.contains(.print) || words.actions.contains(.printChecked)) && !working && model.printer(for: object) != nil
+        (words.actions.contains(.print) || words.actions.contains(.printChecked)) && !blocked && model.printer(for: object) != nil
     }
 
     private var bar: some View {
@@ -424,12 +438,11 @@ struct ProjectDetail: View {
                 .padding(.horizontal, 16).frame(height: 44)
                 .glassEffect(targeted ? .regular.tint(Color.filament.opacity(0.25)).interactive() : .regular.interactive(), in: .capsule)
                 .dropDestination(for: URL.self) { urls, _ in drop(urls) } isTargeted: { targeted = $0 && canCorrect }
-                if words.actions.contains(.retry) && object.current == nil {
-                    EmptyView()
-                } else {
-                    Button(action: print) { Label(words.done ? "Print Another…" : object.state == .failed && object.print != nil ? "Print Again…" : "Print…",
-                                                       systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
-                        .buttonStyle(.glassProminent).controlSize(.extraLarge)
+                // Print is in the bar only where the page's one decision puts it, filled only when it leads: never
+                // beside a card that already offers it, and not at all while a change is being made.
+                if words.page.printInBar, let print = words.page.printWords {
+                    Button(action: self.print) { Label("\(print)…", systemImage: "printer.fill").padding(.horizontal, 6).frame(height: 30) }
+                        .mainAction(words.page.printIsMain).controlSize(.extraLarge)
                         .disabled(!canPrint)
                         .help(model.printer(for: object) == nil ? model.missingPrinterText : "")
                 }
@@ -494,13 +507,13 @@ struct PrintConfirmationForm: View {
                     Button(object.print?.live?.state == "paused" ? "Cancel Resume" : "Cancel Print", role: .destructive) {
                         Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: .init(action: .cancel)) }
                     }
-                    .buttonStyle(.glass).disabled(working || expired)
+                    .buttonStyle(.glass).disabled(working || model.availability == .notRunning || expired)
                     if question.isRenderable {
                         Button(object.print?.live?.state == "paused" ? "Resume" : "Print") {
                             guard let answer = draft.answer(question, at: Date().timeIntervalSince1970 * 1000) else { return }
                             Task { await model.answerPrintConfirmation(object.id, confirmationId: question.id, answer: answer) }
                         }
-                        .buttonStyle(.glassProminent).disabled(working || answer == nil)
+                        .buttonStyle(.glassProminent).disabled(working || model.availability == .notRunning || answer == nil)
                     }
                 }
             }
@@ -514,7 +527,7 @@ struct PrintConfirmationForm: View {
             Text(verbatim: question.message).font(.callout).textSelection(.enabled).lineLimit(nil)
             if question.isRenderable {
                 ForEach(question.fields, id: \.name) { field in
-                    ConfirmationFieldRow(field: field, draft: $draft).disabled(working || expired)
+                    ConfirmationFieldRow(field: field, draft: $draft).disabled(working || model.availability == .notRunning || expired)
                 }
             } else {
                 Text("This question can’t be answered here. Cancel the print to continue.").font(.callout).foregroundStyle(.secondary)
@@ -615,7 +628,7 @@ private struct FileAskCard: View {
                     Text("Use \(file.lastPathComponent)?").font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
                     Spacer()
                     Button("Not This") { downloads.dismiss(file, for: object.id) }.buttonStyle(.glass)
-                    Button("Use") { Task { await model.useModelFile(file, for: object.id) } }.buttonStyle(.glassProminent).disabled(working)
+                    Button("Use") { Task { await model.useModelFile(file, for: object.id) } }.buttonStyle(.glassProminent).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
                 }
                 .padding(8).glassEffect(.regular, in: .rect(cornerRadius: 10))
             }
@@ -623,7 +636,7 @@ private struct FileAskCard: View {
                 if let page = ask.url.flatMap(URL.init(string:)) {
                     Button("Open in Browser") { NSWorkspace.shared.open(page) }.buttonStyle(.glass)
                 }
-                Button("Choose File…") { choose() }.buttonStyle(.glass).disabled(working)
+                Button("Choose File…") { choose() }.buttonStyle(.glass).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
                 Spacer()
                 if working { ProgressView().controlSize(.small) }
             }
@@ -664,7 +677,7 @@ private struct ChoiceAskCard: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(ask.options ?? []) { option in
-                        Button { toggle(option.id) } label: { tile(option) }.buttonStyle(.plain).disabled(working)
+                        Button { toggle(option.id) } label: { tile(option) }.buttonStyle(.plain).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
                     }
                 }
             }
@@ -730,11 +743,11 @@ private struct DidItFitCard: View {
                         needsChanges()
                     }
                 }
-                .buttonStyle(.glass).disabled(working)
+                .buttonStyle(.glass).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
                 Button {
                     Task { if await model.setStatus("works", for: object.id) { DidItFit.dismiss(object); hidden = true } }
                 } label: { Label("It Works", systemImage: "checkmark.circle.fill") }
-                    .buttonStyle(.glassProminent).disabled(working)
+                    .buttonStyle(.glassProminent).disabled(working || model.availability == .notRunning || model.availability == .notRunning)
             }
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .glassEffect(.regular, in: .rect(cornerRadius: 14))
@@ -840,6 +853,13 @@ struct MacAskPhoto: View {
 /// What the Mac's question card says and offers for a question (train #499 review, F6).
 enum MacAskWords {
     static let update = "Update Counterpart on this Mac to answer this kind of question here."
+}
+
+extension View {
+    /// The page's one filled control when `main`, a plain glass button otherwise (`PageActions.main` decides).
+    @ViewBuilder func mainAction(_ main: Bool) -> some View {
+        if main { buttonStyle(.glassProminent) } else { buttonStyle(.glass) }
+    }
 }
 
 struct MacAskSizes: View {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { artifact, call, importFiles, openLink, openProject } from "./bridge";
 import {
+  resolvedPrinter,
   AFTER_PRINTING,
   activePrint,
   askCaption,
@@ -15,9 +16,9 @@ import {
   projectThumbnail,
   scanSample,
   scanWords,
-  didItFitQuestion,
   duration,
   passHeading,
+  projectPage,
   requestedChange,
   stageMark,
   words,
@@ -357,7 +358,10 @@ export function ProjectView({
   mutate,
   onBack,
   changes,
+  capabilities,
 }: {
+  /** The companion's capabilities (`status.get`): what it keeps decides what the page offers. */
+  capabilities?: Record<string, unknown>;
   project: Project;
   printers: Printer[];
   apply: (p: Project) => void;
@@ -384,10 +388,8 @@ export function ProjectView({
   >({});
   const queue = changes.queue.filter((q) => q.projectId === p.id);
   const active = p.state === "touching-up" || p.state === "printing";
-  const destination = printers.find(
-    (x) => x.id === (p.print?.destinationId ?? p.printerDestinationId),
-  );
-  const fit = didItFitQuestion(p);
+  const { page, fit } = projectPage(p, capabilities);
+  const destination = resolvedPrinter(printers, p.print?.destinationId ?? p.printerDestinationId);
 
   return (
     <>
@@ -557,25 +559,24 @@ export function ProjectView({
                 Start making
               </Action>
             )}
-            {p.state === "failed" && (
-              <Action run={() => mutate("objects.start", { id: p.id })}>
+            {/* One filled control, the page's main action (`pageActions`): Try again when a pass stopped; Print
+                only when it leads. Printing is named for what it would print, and offered once. */}
+            {page.main === "retry" && (
+              <Action className="primary" run={() => mutate("objects.start", { id: p.id })}>
                 Try again
               </Action>
             )}
-            <button
-              className="primary"
-              disabled={
-                !p.current ||
-                active ||
-                !!p.reconstructionReview ||
-                p.ask?.status === "open"
-              }
-              onClick={() => setPrint(true)}
-            >
-              {p.state === "printed" || p.state === "confirmed"
-                ? "Print another…"
-                : "Print…"}
-            </button>
+            {page.printWords && (
+              <button
+                className={page.main === "print" ? "primary" : undefined}
+                title={page.printNote}
+                data-testid="print"
+                disabled={!!p.reconstructionReview || p.ask?.status === "open"}
+                onClick={() => setPrint(true)}
+              >
+                {page.printWords}…
+              </button>
+            )}
           </footer>
         </div>
         <aside className="inspector">

@@ -390,6 +390,12 @@ request without `messageId` behaves as before. Mac control `objects.correct` tak
 `capabilities.messageIds` is true. (Nov 10: a project held one note twice, 98 seconds apart, and each
 copy had started a design pass.)
 
+Notes stored before ids existed are not rewritten. When a project is served, a note the person sent again
+before any result came back (the same words and photos, with no pass finishing `done` or `unchanged` between the
+two being sent) is shown once: the copy whose pass ran last, at the time the note was first sent. Every pass that
+a dropped copy started names the kept message in `messageId`, and so do `pendingMessageId` and
+`completion.messageId`. The same words sent again after a result are a new request and are both shown.
+
 ### Message photo ownership
 
 New projects record `requestPhotos` explicitly. Photos uploaded after a project starts enter

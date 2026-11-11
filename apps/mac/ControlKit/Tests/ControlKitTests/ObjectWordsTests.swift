@@ -59,6 +59,21 @@ final class ObjectWordsTests: XCTestCase {
         XCTAssertEqual(asking("colour").words.question, "Which colour is the cap?", "the question is still shown")
     }
 
+    /// PRD §5.4 One main action: the Mac's detail view draws its one filled control from the shared decision
+    /// (CounterpartKit `PageActions`, held to `main-actions.json` there). Here: that the Mac's words carry it.
+    func testTheMacsWordsCarryThePagesOneMainAction() {
+        let stopped = ready(["state": "failed", "canRetryCleanup": true, "failure": "Stopped at the step limit. Try again."])
+        XCTAssertEqual(stopped.words.page.main, .retry)
+        XCTAssertEqual(stopped.words.page.printWords, "Print the last version")
+        XCTAssertFalse(stopped.words.page.printInBar, "the card offers it; the bar must not")
+        let printable = ready()
+        XCTAssertEqual(printable.words.page.main, .print)
+        XCTAssertTrue(printable.words.page.printInBar)
+        XCTAssertEqual(printable.words.page.printWords, "Print")
+        let changing = ready(["state": "touching-up", "passes": [["startedAtMs": 1, "endedAtMs": 2, "status": "done"], ["startedAtMs": 3]]])
+        XCTAssertNil(changing.words.page.printWords, "no Print while a change is being made")
+    }
+
     func testAPrintsWordsAreTheCompanionsAsTheyAre() {
         let live: [String: Any] = ["print": ["bundleId": "b", "live": ["source": "counterpart", "state": "printing", "job": ["progress": 3]]]]
         let preparing = ready(["state": "printing"].merging(live) { $1 }.merging(status("preparing", "Getting ready · Heating")) { $1 })

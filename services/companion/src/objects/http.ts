@@ -14,6 +14,7 @@ import {CompanionSettingsPatchSchema, FitSchema, type ObjectStatus, type Project
 import {z} from 'zod';
 import {fitRequest} from './fit.js';
 import {askKind} from './asks.js';
+import {withNotesOnce} from './notes.js';
 import {objectStatus, projectTitle} from '../events/words.js';
 import {ObjectNotFoundError, type ObjectPass, type StmObject} from './store.js';
 import {RECONSTRUCTION_FAILED} from './reconstruct.js';
@@ -95,7 +96,8 @@ export function projectSettingsView(object: StmObject) {
 export function publicObject(stored: StmObject): PublicObject {
   // What the person typed, and the fit choice as fields: never the brief a client once appended to the request.
   const {typed, fit} = fitRequest(stored);
-  const {instructions: _instructions, fit: _fit, ...rest} = stored;
+  // A note sent again before any result came back is shown once (`withNotesOnce`); the stored record keeps them all.
+  const {instructions: _instructions, fit: _fit, ...rest} = withNotesOnce(stored);
   // Every question says its kind, also one saved before kinds were written.
   const kind = askKind(stored);
   const object: StmObject = {...rest, ...(typed ? {instructions: typed} : {}), ...(fit ? {fit} : {}), ...(rest.ask && kind ? {ask: {...rest.ask, kind}} : {})};
@@ -180,6 +182,8 @@ function send(response: ServerResponse, status: number, value: unknown): void {
 
 /** Phone-facing objects: start something, send its scan and photos, follow it, correct it, print it. */
 export function createObjectRoutes(service: ObjectService, options: {printerSetup?: Pick<PrinterSetup, 'chooseMcp'>} = {}) {
+  // Every project a client reads names its printer as the catalog does now, never an older build's "Printer at <address>".
+  const shown = (object: StmObject) => publicObject(service.named(object));
   return {
     async handle(request: IncomingMessage, response: ServerResponse, authorize: (scope: RemoteScope) => Promise<void>, header: (name: string) => string | undefined): Promise<void> {
       const url = new URL(request.url ?? '/', 'http://localhost');
@@ -279,10 +283,10 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           if (!parsed.success || 'id' in input) throw new HttpFailure(400, 'invalid-request');
           const {id: _id, ...patch} = parsed.data;
           const updated = await service.setProjectSettings(id, patch);
-          return send(response, 200, {settings: projectSettingsView(updated), object: publicObject(updated)});
+          return send(response, 200, {settings: projectSettingsView(updated), object: shown(updated)});
         }
         if (!id) {
-          if (method === 'GET') { await authorize(READ); return send(response, 200, {objects: (await service.list()).map(publicObject)}); }
+          if (method === 'GET') { await authorize(READ); return send(response, 200, {objects: (await service.list()).map(shown)}); }
           if (method === 'POST') {
             await authorize(WRITE);
             const input = await json<{instructions?: unknown; kind?: unknown; url?: unknown; starterId?: unknown; fit?: unknown}>(request);
@@ -291,12 +295,12 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             if (fit && !fit.success) throw new HttpFailure(400, 'invalid-request');
             if (starterId !== undefined) {
               if (typeof starterId !== 'string' || Object.keys(input).length !== 1) throw new HttpFailure(400, 'invalid-request');
-              return send(response, 201, {object: publicObject(await service.addStarter(starterId))});
+              return send(response, 201, {object: shown(await service.addStarter(starterId))});
             }
             if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 8000)) throw new HttpFailure(400, 'invalid-request');
             if (kind !== undefined && kind !== 'fit' && kind !== 'copy' && kind !== 'published') throw new HttpFailure(400, 'invalid-request');
             if (link !== undefined && (typeof link !== 'string' || link.length > 2048)) throw new HttpFailure(400, 'invalid-request');
-            return send(response, 201, {object: publicObject(await service.create(instructions, kind, link, fit?.data))});
+            return send(response, 201, {object: shown(await service.create(instructions, kind, link, fit?.data))});
           }
           throw new HttpFailure(405, 'method-not-allowed');
         }
@@ -310,7 +314,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             const fit = sent === undefined || sent === null ? undefined : FitSchema.safeParse(sent);
             if (fit && !fit.success) throw new HttpFailure(400, 'invalid-request');
             if (instructions === undefined && kind === undefined && sent === undefined) throw new HttpFailure(400, 'invalid-request');
-            return send(response, 200, {object: publicObject(await service.updateDraft(id, {
+            return send(response, 200, {object: shown(await service.updateDraft(id, {
               ...(instructions !== undefined ? {instructions} : {}), ...(kind !== undefined ? {kind} : {}),
               ...(sent === null ? {fit: null} : fit ? {fit: fit.data} : {})}))});
           }
@@ -322,7 +326,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           }
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
-          return send(response, 200, {object: publicObject(await service.view(id))});
+          return send(response, 200, {object: shown(await service.view(id))});
         }
         if (action === 'plate-selection') {
           if (method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
@@ -330,7 +334,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           const input = await json<Record<string, unknown>>(request);
           const parsed = parameters['objects.selectPlate'].safeParse({...input, id});
           if (!parsed.success || 'id' in input) throw new HttpFailure(400, 'invalid-request');
-          return send(response, 200, {object: publicObject(await service.selectPlate(id, parsed.data.fileIndex, parsed.data.plateIndex))});
+          return send(response, 200, {object: shown(await service.selectPlate(id, parsed.data.fileIndex, parsed.data.plateIndex))});
         }
         if (action === 'filaments') {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
@@ -442,7 +446,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           if (method !== 'POST') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(PRINT);
           await json<unknown>(request);
-          return send(response, 200, {object: publicObject(await service.control(id, action.slice('print/'.length) as 'pause' | 'resume' | 'cancel'))});
+          return send(response, 200, {object: shown(await service.control(id, action.slice('print/'.length) as 'pause' | 'resume' | 'cancel'))});
         }
         if (action === 'reconstruction-preview.stl') {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
@@ -580,7 +584,7 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           }
           default: throw new HttpFailure(404, 'not-found');
         }
-        return send(response, 200, {object: publicObject(object)});
+        return send(response, 200, {object: shown(object)});
       } catch (error) {
         // Every refusal is logged with its status and code (Nov 6: a refusal nobody could see). `sentence` marks a
         // message written for the person, which the apps show as it is.

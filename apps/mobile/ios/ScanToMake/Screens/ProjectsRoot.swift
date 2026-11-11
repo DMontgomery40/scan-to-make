@@ -297,8 +297,10 @@ struct SidebarList: View {
             VStack(alignment: .leading, spacing: 8) {
                 // The same banner as iPhone Home, with Try Again and the way to another Mac (F6): at regular width
                 // Home's cards aren't shown, so without it the iPad said only "isn't answering" in the line below.
-                if let error = store.error {
-                    ConnectionBanner(error: error, pair: store.onPair) { Task { await store.load(); await store.loadPrinters() } }
+                if let error = store.error ?? (store.away ? CompanionError.unreachable : nil) {
+                    ConnectionBanner(error: error, line: store.away && !error.needsPairing ? store.awayLine() : nil, pair: store.onPair) {
+                        Task { await store.load(); await store.loadPrinters() }
+                    }
                 }
                 // Readable at arm's length (first look U11): the system's secondary label colour, not a hierarchical
                 // .secondary that went dark grey over the sidebar's glass, at footnote size.

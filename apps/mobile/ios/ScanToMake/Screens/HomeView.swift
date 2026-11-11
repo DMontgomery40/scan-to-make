@@ -53,8 +53,11 @@ struct HomeView: View {
                 }.padding(.horizontal, 16).padding(.bottom, 120)
             } else {
                 VStack(alignment: .leading, spacing: 26) {
-                    if let error = store.error {
-                        ConnectionBanner(error: error, pair: store.onPair) { Task { await store.load(); await store.loadPrinters() } }
+                    // Once, for the whole list: the Mac isn't answering and when what is shown is from (X100).
+                    if let error = store.error ?? (store.away ? CompanionError.unreachable : nil) {
+                        ConnectionBanner(error: error, line: store.away && !error.needsPairing ? store.awayLine() : nil, pair: store.onPair) {
+                            Task { await store.load(); await store.loadPrinters() }
+                        }
                     }
                     if !running.isEmpty {
                         HomeSection("Now") {
@@ -157,6 +160,8 @@ struct HomeView: View {
 /// (F6): Try Again reloads from the store, and pairing again is here, not hidden in Settings.
 struct ConnectionBanner: View {
     let error: CompanionError
+    /// While the list is the phone's own copy: the store's away line, with when it is from.
+    var line: String? = nil
     let pair: () -> Void
     let retry: () -> Void
     var body: some View {
@@ -164,7 +169,7 @@ struct ConnectionBanner: View {
             Image(systemName: error.needsPairing ? "desktopcomputer.trianglebadge.exclamationmark" : "wifi.exclamationmark")
                 .font(.title3).foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 10) {
-                Text(error.message).font(.subheadline)
+                Text(line ?? error.message).font(.subheadline).accessibilityIdentifier("connection-line")
                 HStack(spacing: 8) {
                     Button("Try Again", action: retry).buttonStyle(.glassProminent)
                         .accessibilityIdentifier("connection-try-again")
@@ -222,7 +227,7 @@ struct NowPrintingCard: View {
                 // The Mac's own words when it gives them ("Getting ready · …", "The printer stopped: …").
                 Text(project.status?.text.isEmpty == false ? words.line : detail(live)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                 if words.phase == .printing, let progress = live?.job?.progress { ProgressView(value: progress, total: 100).tint(.okGreen) }
-                else { ProgressView().progressViewStyle(.linear).tint(words.phase.color) }
+                else if !store.away { ProgressView().progressViewStyle(.linear).tint(words.phase.color) }
                 if let filament = live?.activeFilament, let material = filament.material {
                     HStack(spacing: 6) {
                         SpoolDot(color: hexColor(filament.color) ?? .gray, size: 14)
@@ -250,6 +255,8 @@ struct NowPrintingCard: View {
         if let layer = live?.job?.layer, let total = live?.job?.totalLayers { parts.append("layer \(layer) of \(total)") }
         if let left = Format.duration(live?.job?.remainingSec) { parts.append("\(left) left") }
         if live?.state == "paused" { parts.append("paused") }
+        // The phone's copy says when it is from, never as if live (X100).
+        if store.away, let at = store.heardAt(project.id) { parts.append(KnownProjects.when(at)) }
         return parts.joined(separator: " · ")
     }
 }
@@ -262,7 +269,8 @@ struct NowWorkingCard: View {
     var body: some View {
         let words = store.words(project)
         TimelineView(.periodic(from: .now, by: 10)) { context in
-            let work = WorkProgress(project, now: context.date)
+            // While the Mac isn't answering, time left holds at what it was when the phone last heard (X100).
+            let work = WorkProgress(project, now: store.away ? (store.heardAt(project.id) ?? context.date) : context.date)
             HStack(spacing: 14) {
                 ProjectImage(project: project, path: project.thumbnailPath, maxPixelSize: 300)
                     .frame(width: 96, height: 96).clipShape(.rect(cornerRadius: 18))
@@ -276,8 +284,9 @@ struct NowWorkingCard: View {
                     }
                     Text(work.stage ?? stageText(words)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     if let fraction = work.fraction { ProgressView(value: fraction).tint(.blue) }
-                    else { ProgressView().progressViewStyle(.linear).tint(.blue) }
-                    Text(footer(work)).font(.caption).foregroundStyle(.secondary)
+                    else if !store.away { ProgressView().progressViewStyle(.linear).tint(.blue) }
+                    Text(store.away ? store.heardAt(project.id).map { "As of " + KnownProjects.when($0).replacingOccurrences(of: "at ", with: "") } ?? footer(work) : footer(work))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }

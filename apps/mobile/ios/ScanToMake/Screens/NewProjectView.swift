@@ -31,6 +31,12 @@ struct NewObjectView: View {
     /// One of the finished scan's own frames, shown beside its question.
     @State private var scanPicture: URL?
     @FocusState private var describing: Bool
+    /// The first measurement, focused when a fit's Send needs one (review F4).
+    @FocusState private var measuring: Bool
+    /// Send on a fit missing its measurement: counts each time it has to take you to the fields (X86).
+    @State private var showMeasurement = 0
+    /// Longest is focused when the scroll that brings it into view has stopped (X86).
+    @State private var focusWhenSettled = false
     /// The scroll's own position, so "the top" is the top of the content below the glass header, not the scroll view's
     /// edge under it (`proxy.scrollTo(_, anchor: .top)` put the question under the header on the iPhone).
     @State private var scrollPosition = ScrollPosition(edge: .top)
@@ -147,8 +153,8 @@ struct NewObjectView: View {
                             .glassEffect(.regular, in: .rect(cornerRadius: 20))
                             .accessibilityIdentifier("describe")
                             .id("describe")
-                        Text(askedForDescription ? missing ?? Self.hint : Self.hint)
-                            .font(.footnote).foregroundStyle(askedForDescription && !canSend ? .red : .secondary)
+                        Text(askedForDescription && !measurementMissing ? missing ?? hint : hint)
+                            .font(.footnote).foregroundStyle(askedForDescription && !canSend && !measurementMissing ? .red : .secondary)
                     }
 
                     if let publishedLink {
@@ -208,6 +214,21 @@ struct NewObjectView: View {
             // Continue on a fit takes you to the words it still needs.
             .onChange(of: describing) { _, now in
                 if now, attached != nil { withAnimation { proxy.scrollTo("describe", anchor: .center) } }
+            }
+            // Send on a fit still missing its measurement takes you to the fields that need it (review F4), and focuses
+            // the first only once they have stopped moving (X86). The size card goes to the top of the sheet, its line
+            // above the fields: the docked keyboard rises from the bottom, and on an iPad with a hardware keyboard the
+            // floating number pad is placed beside the focused field when it appears and stays there. Focused first and
+            // scrolled after, the pad stayed where the field had been and covered the line; with the fields near the top
+            // there is no room for it above them, so it opens below, away from the line.
+            .onChange(of: showMeasurement) {
+                focusWhenSettled = true
+                withAnimation { proxy.scrollTo("fit-dimensions", anchor: .top) }
+                // Already in place, the scroll doesn't move and never settles: focus anyway, a moment later.
+                Task { try? await Task.sleep(for: .seconds(1)); focusMeasurementIfSettling() }
+            }
+            .onScrollPhaseChange { _, phase in
+                if phase == .idle { focusMeasurementIfSettling() }
             }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -301,13 +322,23 @@ struct NewObjectView: View {
                 Text("Your Mac identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.")
                     .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             case .measured:
-                Text("Measure the outside of the real thing. Leave a side blank if you don't know it.")
-                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    measuredField("Longest", text: $measuredLongest, identifier: "fit-size-longest")
-                    measuredField("Middle", text: $measuredMiddle, identifier: "fit-size-middle")
-                    measuredField("Shortest", text: $measuredShortest, identifier: "fit-size-shortest")
+                // What's missing sits right above the fields, and Send brings this card to the top of the sheet before
+                // it focuses a field: below them the docked keyboard covers it, and the iPad's floating number pad opens
+                // below a field near the top (X86; iPad Air, landscape).
+                VStack(alignment: .leading, spacing: 10) {
+                    if askedForDescription, measurementMissing, let missing {
+                        Text(missing).font(.footnote).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("fit-size-missing")
+                    }
+                    Text("Measure the outside of the real thing. Leave a side blank if you don't know it.")
+                        .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        measuredField("Longest", text: $measuredLongest, identifier: "fit-size-longest", focus: $measuring)
+                        measuredField("Middle", text: $measuredMiddle, identifier: "fit-size-middle")
+                        measuredField("Shortest", text: $measuredShortest, identifier: "fit-size-shortest")
+                    }
                 }
+                .id("fit-sizes")
             case .scan:
                 Text("Uses the scan's size as an estimate. Best for loose holders; your Mac says the clearance it allowed.")
                     .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -321,13 +352,17 @@ struct NewObjectView: View {
         }
         .padding(14)
         .glassEffect(.regular, in: .rect(cornerRadius: 20))
+        .id("fit-dimensions")
     }
 
-    private func measuredField(_ label: String, text: Binding<String>, identifier: String) -> some View {
+    private func measuredField(_ label: String, text: Binding<String>, identifier: String, focus: FocusState<Bool>.Binding? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 4) {
-                TextField("0", text: text).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                Group {
+                    if let focus { TextField("0", text: text).focused(focus) } else { TextField("0", text: text) }
+                }
+                .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
                 Text("mm").font(.caption).foregroundStyle(.secondary)
             }
             .padding(9)
@@ -340,6 +375,27 @@ struct NewObjectView: View {
     static let photoLimit = 24
 
     static let hint = "Describe it, scan it, or both. Your Mac can look up published sizes, like a phone or a mic."
+
+    /// What the line under "What do you need?" says: once there's a scan, what's true for the use chosen (review F8).
+    private var hint: String {
+        guard attached != nil else { return Self.hint }
+        switch scanUse {
+        case .fit: return "Say what it should hold, mount or adapt to."
+        case .copy: return "Optional: anything to change from the scan, like “close up the bottom”."
+        case .later: return "Optional: a note to remember it by."
+        case nil: return "Choose what this scan becomes, then add anything your Mac should know."
+        }
+    }
+    private func focusMeasurementIfSettling() {
+        guard focusWhenSettled else { return }
+        focusWhenSettled = false
+        if measurementMissing { measuring = true }
+    }
+
+    /// A fit with words and "I measured", but no valid measurement yet.
+    private var measurementMissing: Bool {
+        attached != nil && scanUse == .fit && described && dimensionSource == .measured && !measuredValid
+    }
 
     /// Chosen photos stay put while something is running.
     private var photosLocked: Bool { working != nil }
@@ -429,6 +485,8 @@ struct NewObjectView: View {
     private func make() async {
         guard canSend else {
             askedForDescription = true
+            // A missing measurement is asked for at its fields, not under the description (review F4).
+            if measurementMissing { describing = false; measuring = false; showMeasurement += 1; return }
             describing = attached == nil || (scanUse == .fit && !described)
             return
         }

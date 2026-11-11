@@ -127,3 +127,13 @@ python3 scripts/ux_screens.py <out> --work <scratch> --devices ipad --project 30
 ```
 
 Screenshots of every iPhone and iPad screen, on every Apple layout, filled with a copy of this Mac's real projects, and an `index.md` listing each image's screen, state, device and data source. How it isolates the copy and what it fakes: [`../docs/operations.md`](../docs/operations.md), "Looking at the app". Each simulator run takes the whole lane by re-running itself through `lane.py --exclusive`, capped by `--max-minutes`, and resumes where the last hold stopped. `scripts/ux_screens/companion.mjs` is the companion it starts. The app reads three Debug-only launch arguments for it: `-CounterpartPairingRecord`, `-CounterpartOpen` with `-CounterpartSection`, and `-CounterpartNewScan`. Not covered yet: the Mac app, Android, Linux.
+
+## The bad-day gate: `ux_gate.py`
+
+```
+python3 scripts/ux_gate.py ~/scan-to-make-work/gate-<train>                 # iPhone and iPad; slow, refusing, away
+python3 scripts/ux_gate.py <folder> --devices iphone --conditions slow       # one device, one condition
+python3 scripts/ux_blank.py <folder>/iphone-slow                             # re-check saved frames, no simulator
+```
+
+Every project page of a fresh copy of the Mac's projects, with the capture companion slow (1.5 s per reply, files at 1 MB/s), refusing files (413/404) or gone after the list (`ux_screens.py --condition`), through the blank check (`ux_blank.py`). It takes several exclusive lane holds and resumes when run again with the same folder. Exit 1 on any blank frame (listed in `gate.md`), 2 when a capture could not finish, 0 when every page passed. Run it on a train before it merges (`docs/operations.md`, "Waiting, failed and empty are screens too").

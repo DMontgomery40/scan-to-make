@@ -21,6 +21,8 @@ struct ProjectGalleryView: View {
     @State private var selected: String?
     /// Entries whose model is here but can't be drawn (review F7 on #525): their picture stays, and the line says so.
     @State private var undrawable: Set<String> = []
+    /// Entries whose stage picture didn't come either: then the stage's own line says both and its Try Again tries both.
+    @State private var pictureFailed: Set<String> = []
     @Environment(\.scenePhase) private var scenePhase
     @State private var measured: [String: [Double]] = [:]
     @State private var showingPhotos = false
@@ -69,17 +71,31 @@ struct ProjectGalleryView: View {
     /// The still for an entry (`StagePicture`, the stage's one still picture): its Mac picture until its model is drawn,
     /// and if it can't be; that one is coming; or that none can be had.
     private func still(_ entry: ProjectGallery.Entry) -> StagePicture {
-        StagePicture(project: project, still: project.still(for: entry), label: entry.label,
-                     unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.")
+        let problem = modelProblem(entry)
+        // The model can't be had either: the stage's one line says both; its Try Again also retries the model when that can help.
+        // When the Mac couldn't draw a picture at all, that is what the line says beside the model's reason (review S4).
+        let still = project.still(for: entry)
+        let neverDrawn = still == .notAvailable
+        let missing: (line: String, retry: (() -> Void)?)? = problem.map { problem in
+            let retry: (() -> Void)? = problem.reason.retryable ? problem.path.map { path in { store.models.retry(project, path) } } : nil
+            return (problem.reason.line(entry.kind, pictureToo: true, neverDrawn: neverDrawn), retry)
+        }
+        return StagePicture(project: project, still: still, label: entry.label,
+                            unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.",
+                            modelMissing: missing,
+                            failedChanged: { failed in if failed { pictureFailed.insert(entry.id) } else { pictureFailed.remove(entry.id) } },
+                            controlsInset: Self.controlsHeight)
     }
 
-    /// One plain line under the stage when an entry's model can't be had: its picture stays above it. A picture's own
-    /// state is the stage's (`StagePicture`), never a second line here.
-    @ViewBuilder private func unavailable(_ entry: ProjectGallery.Entry) -> some View {
+    /// Why an entry's 3D model isn't drawn, from how its fetch actually ended (board X100: a refused part was called "too
+    /// detailed", a scan's words for a size it never had): its line, the file to try again, and whether trying can help.
+    private struct ModelProblem { var reason: ModelUnavailable; var path: String? }
+    private func modelProblem(_ entry: ProjectGallery.Entry) -> ModelProblem? {
         let (path, model): (String?, Project.ScanModel?) = switch entry.drawing {
         case .model(let drawn) where drawn == "model.stl": ("model.stl", nil)
         case .model: (nil, scanURL == nil ? scanModel : nil)
-        case .assembly: (nil, togetherScanURL == nil ? togetherModel : nil)
+        // Together needs both: the scan, and the part (review S4: with the scan here and the part missing it said nothing).
+        case .assembly: togetherScanURL == nil ? (nil, togetherModel) : (modelURL == nil ? "model.stl" : nil, nil)
         case .picture: (nil, nil)
         }
         let fetch: ModelFiles.Fetch? = if let path { modelURL == nil ? store.models.fetch(project, path) : nil }
@@ -87,21 +103,30 @@ struct ProjectGalleryView: View {
             else if case .tooLarge? = model { .tooLarge } else { nil }
         let retryPath: String? = path ?? { if case .file(let file)? = model { return file }; return nil }()
         switch fetch {
-        case .failed?:
-            HStack(spacing: 8) {
-                Text("The 3D view isn’t here yet.").font(.footnote).foregroundStyle(.secondary)
-                if let retryPath {
-                    Button("Try Again") { store.models.retry(project, retryPath) }.font(.footnote.weight(.semibold))
-                        .accessibilityIdentifier("gallery-model-retry")
+        case .failed?: return ModelProblem(reason: store.reachable == false ? .notAnswering : .didntCome, path: retryPath)
+        case .refused?: return ModelProblem(reason: .refused, path: retryPath)
+        case .tooLarge?: return ModelProblem(reason: .tooLarge, path: nil)
+        default: return undrawable.contains(entry.id) ? ModelProblem(reason: .undrawable, path: nil) : nil
+        }
+    }
+
+    /// One plain line under the stage when an entry's model can't be had: its picture stays above it. A picture's own
+    /// state is the stage's (`StagePicture`), never a second line here.
+    @ViewBuilder private func unavailable(_ entry: ProjectGallery.Entry) -> some View {
+        // The picture failed too: the stage already says both in one line, with one Try Again for both.
+        if let problem = modelProblem(entry), !pictureFailed.contains(entry.id), project.still(for: entry) != .notAvailable {
+            if problem.reason.retryable {
+                HStack(spacing: 8) {
+                    Text(problem.reason.line(entry.kind)).font(.footnote).foregroundStyle(.secondary)
+                    if let path = problem.path {
+                        Button("Try Again") { store.models.retry(project, path) }.font(.footnote.weight(.semibold))
+                            .accessibilityIdentifier("gallery-model-retry")
+                    }
                 }
-            }
-            .accessibilityElement(children: .contain).accessibilityIdentifier("gallery-model-unavailable")
-        case .tooLarge?:
-            Text("This scan is too detailed to show in 3D on a phone. Open it on your Mac to see it from every side.").font(.footnote).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).padding(.horizontal, 16).accessibilityIdentifier("gallery-model-unavailable")
-        default:
-            if undrawable.contains(entry.id) {
-                Text("This model couldn’t be shown in 3D on this phone. Open it on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .accessibilityElement(children: .contain).accessibilityIdentifier("gallery-model-unavailable")
+            } else {
+                Text(problem.reason.line(entry.kind)).font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 16).accessibilityIdentifier("gallery-model-unavailable")
             }
         }
@@ -151,6 +176,10 @@ struct ProjectGalleryView: View {
 
     // MARK: Controls on the stage: AR, the scan's photos, Together, and the size of what is shown
 
+    /// What the row of controls takes at the stage's bottom: its padding and one glass button or chip. The stage's words lay
+    /// out above it (`StagePicture.controlsInset`).
+    static let controlsHeight: CGFloat = 14 + 44
+
     @ViewBuilder private var controls: some View {
         if let entry {
             let light = StageContrast.lightStage(for: entry.colour)
@@ -158,7 +187,7 @@ struct ProjectGalleryView: View {
                 HStack(spacing: 10) {
                     if let ar = arTarget(entry) {
                         Button { ARModel.show(ar) } label: { Label("AR", systemImage: "arkit") }.stageButton(light: light)
-                            .accessibilityHint("Places it at true size in your room")
+                            .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
                     }
                     if entry.kind == .scan, !entry.photos.isEmpty {
                         Button { showingPhotos = true } label: { Label(entry.photos.count == 1 ? "1 photo" : "\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
@@ -173,7 +202,7 @@ struct ProjectGalleryView: View {
                     if let size = entry.sizeText(measured[entry.id]) {
                         Text(size).font(.caption.monospacedDigit().weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
                             .padding(.horizontal, 12).padding(.vertical, 8).stageChip(light: light)
-                            .accessibilityLabel("\(entry.measures) size \(size)")
+                            .accessibilityLabel("\(entry.measures) size \(size)").accessibilityIdentifier("gallery-size")
                     }
                 }
                 .labelStyle(.titleAndIcon).font(.caption.weight(.semibold))

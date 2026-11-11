@@ -180,6 +180,42 @@ test('paired clients can read every MCP copy, including hidden profiles, without
   assert.equal((await f.call('/v1/printers/mcps', 'POST', {}, f.readOnly)).status, 405);
 });
 
+// Lead, Nov 10: an address is never part of a printer's name. Names reach read-only clients, notifications and the Live
+// Activity, so no name on any route a read-only client can call carries a host, port or serial from a profile's environment.
+test('no printer name a read-only client can read carries a host, port or serial from a profile', async t => {
+  const f = await fixture(t);
+  const secrets = ['192.0.2.1', '01P00A123456789'];
+  // Projects sliced or printed by an older build keep the name it stored with the print: "Printer at <address>".
+  const legacy = async destinationId => {
+    const {id} = await f.store.create('a bracket');
+    await f.store.update(id, o => ({...o, state: 'printed', print: {bundleId: 'b-' + destinationId, destination: {id: destinationId, name: 'Printer at 192.0.2.1'}}}));
+    return id;
+  };
+  const listed = f.catalog.destinations[0];
+  const kept = await legacy(listed.id), gone = await legacy('profile:removed-since');
+  const names = [];
+  const collect = (value, key) => {
+    if (Array.isArray(value)) { for (const item of value) collect(item, key); return; }
+    if (value && typeof value === 'object') { for (const [k, v] of Object.entries(value)) collect(v, k); return; }
+    if (typeof value === 'string' && /name|printer|title|label/i.test(key ?? '')) names.push(`${key}: ${value}`);
+  };
+  for (const path of ['/v1/printers/mcps', '/v1/objects/printers', '/v1/objects']) {
+    const response = await f.call(path, 'GET', undefined, f.readOnly);
+    if (response.status !== 200) continue;
+    collect(response.body);
+  }
+  // The catalog every other surface (events, notifications, the Live Activity) takes its names from.
+  for (const destination of f.catalog.destinations) names.push(`catalog: ${destination.name}`);
+  assert.ok(names.length > 0);
+  for (const name of names) for (const secret of secrets) assert.equal(name.includes(secret), false, name);
+  assert.ok(f.catalog.destinations.every(destination => !/^Printer at /.test(destination.name)));
+  const shown = (await f.call('/v1/objects', 'GET', undefined, f.readOnly)).body.objects;
+  assert.equal(shown.find(o => o.id === kept).print.destination.name, listed.name, 'a printer still listed reads as the catalog names it');
+  assert.equal(shown.find(o => o.id === gone).print.destination.name, 'Your printer', 'one no longer listed reads as an unnamed printer');
+  assert.equal((await f.objects.get(kept)).print.destination.name, listed.name);
+  assert.equal((await f.store.get(kept)).print.destination.name, 'Printer at 192.0.2.1', 'what was stored is not rewritten');
+});
+
 // Add printer… on the phone (PRD §6.1): the Mac's own printers.* methods behind HTTP, with the shared answers the
 // iPhone and Android tests also read (packages/contracts/fixtures/printer-setup-phone.json).
 test('a paired phone adds a printer through the same discover, check, obtain and add calls as the Mac', async t => {

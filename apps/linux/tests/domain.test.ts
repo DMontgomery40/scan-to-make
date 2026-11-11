@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { canLocate, gallery, lightStage, photoPicture, still } from "../src/gallery";
 import {
+  pageActions,
+  projectPage,
   codeEngineRow,
   passEnding,
   stageMark,
@@ -30,6 +32,7 @@ import {
   parseLayers,
   searchProject,
   searchSnippet,
+  resolvedPrinter,
   projectThumbnail,
   words,
   startersShown,
@@ -852,3 +855,66 @@ test("a row under its phase heading shows the companion's detail, never the head
   assert.equal(rowWords(failed), "The printer stopped.", "no detail: the line as it is");
   for (const p of [asking, ready]) assert.doesNotMatch(rowWords(p), /^(Needs you|Ready to print)/);
 });
+
+test("every project state has its one main action, as on every layout (main-actions.json)", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/main-actions.json", import.meta.url), "utf8"));
+  const numbers: number[] = doc.rows.map((row: { row: number }) => row.row);
+  assert.deepEqual([...new Set(numbers)].sort((a, b) => a - b), Array.from({ length: 16 }, (_, i) => i + 1));
+  for (const row of doc.rows) {
+    const page = pageActions({ title: "", ...row.project } as Project, row.sending === true, row.projectSettings !== false);
+    assert.equal(page.main ?? null, row.expected.main, `${row.name}: main`);
+    assert.deepEqual(page.others, row.expected.others, `${row.name}: others`);
+    assert.equal(page.printWords ?? null, row.expected.printWords, `${row.name}: what printing is called`);
+    assert.equal(page.printPlace ?? null, row.expected.printPlace, `${row.name}: where printing goes`);
+    assert.equal(page.printNote ?? null, row.expected.printNote, `${row.name}: what would be printed`);
+    // The rule: an action once, and Print never both the lead and listed.
+    assert.equal(new Set(page.others).size, page.others.length, row.name);
+    assert.equal(page.main === "print" && page.others.some((a) => a.startsWith("print")), false, row.name);
+  }
+});
+
+test("the page reads what the companion keeps: no Did it fit? without projectSettings (review of #527 part 4, S1)", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/main-actions.json", import.meta.url), "utf8"));
+  const row = doc.rows.find((r: { name: string }) => r.name === "printed-older-mac");
+  const printed = { title: "", ...row.project } as Project;
+  for (const capabilities of [undefined, {}, { projectSettings: false }]) {
+    const { page, fit } = projectPage(printed, capabilities);
+    assert.equal(page.main, "print", `${JSON.stringify(capabilities)}: Print leads`);
+    assert.equal(fit, undefined, `${JSON.stringify(capabilities)}: no Did it fit? the companion can't keep`);
+  }
+  const { page, fit } = projectPage(printed, { projectSettings: true });
+  assert.equal(page.main, "itWorks");
+  assert.ok(fit, "a companion that keeps the answer asks");
+});
+
+test("search reasons survive a project without a title, and never cut an emoji in half (review F5)", () => {
+  const untitled = { ...project, title: undefined, instructions: "A hook for the stroller handle", messages: [] } as unknown as Project;
+  const reason = searchSnippet(untitled, "stroller");
+  assert.ok(reason, "the instructions are still searched for the reason");
+  assert.match(reason.text, /stroller handle/);
+  // A long note with emoji right where the cut lands, and no spaces near it.
+  const emoji = "🙂".repeat(40);
+  const noisy = { ...project, title: "Clip", messages: [{ id: "m", text: `${emoji}holder${emoji}`, atMs: 1, photos: [] }] } as Project;
+  const cut = searchSnippet(noisy, "holder");
+  assert.ok(cut);
+  assert.equal(cut.text.slice(...cut.match), "holder");
+  assert.doesNotMatch(cut.text, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/, "no half of a surrogate pair");
+});
+
+test("a project's printer saved under its other MCP's id is still that printer (review F2)", () => {
+  const printers = [{ id: "current", name: "P1S", mcps: [{ backend: "bambu-printer-mcp", destinationId: "current" }, { backend: "mcp-3d-printer-server", destinationId: "mcp-1a2b" }] }];
+  assert.equal(resolvedPrinter(printers, "mcp-1a2b")?.name, "P1S");
+  assert.equal(resolvedPrinter(printers, "current")?.name, "P1S");
+  assert.equal(resolvedPrinter(printers, "gone"), undefined);
+  assert.equal(resolvedPrinter(printers, undefined), undefined);
+});
+
+test("a project's printer saved under one of the catalog's aliases is that printer, as the Mac resolves it (S4)", () => {
+  const printers = [{ id: "winner", name: "Printer", aliases: ["old-duplicate", "previous-mcp"] }, { id: "other", name: "Printer" }];
+  assert.equal(resolvedPrinter(printers, "old-duplicate")?.id, "winner");
+  assert.equal(resolvedPrinter(printers, "previous-mcp")?.id, "winner");
+  assert.equal(resolvedPrinter(printers, "other")?.id, "other");
+  assert.equal(resolvedPrinter(printers, "unknown"), undefined);
+  assert.equal(resolvedPrinter(printers, "Printer"), undefined, "a matching display name is not identity evidence");
+});
+

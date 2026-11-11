@@ -698,6 +698,25 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertEqual(catalog.listed("current"), "current")
         XCTAssertEqual(catalog.listed("mcp-1a2b"), "current")
         XCTAssertNil(catalog.listed("gone"))
+        // Review F2: the Result row and every name resolve a saved id the way the print sheet does.
+        XCTAssertEqual(catalog.resolved("mcp-1a2b")?.id, "current", "listed under its other MCP's id: still on the Mac")
+        XCTAssertEqual(catalog.resolved(nil)?.id, "current", "no id: the default printer")
+        XCTAssertNil(catalog.resolved("gone"), "really gone")
+        // S4: a project saved under one of the catalog's aliases for a printer finds it, as the Mac does (PrinterSetupTests);
+        // a catalog from an older Mac, without the field, still decodes and resolves as before.
+        let aliased = try JSONDecoder().decode(PrinterCatalog.self, from: Data("""
+        {"defaultDestinationId":"winner","destinations":[
+          {"id":"winner","name":"Printer","backend":"test","source":"mcp-profile","aliases":["old-duplicate","previous-mcp"]},
+          {"id":"other","name":"Printer","backend":"test","source":"mcp-profile"}
+        ]}
+        """.utf8))
+        XCTAssertEqual(aliased.resolved("old-duplicate")?.id, "winner")
+        XCTAssertEqual(aliased.resolved("previous-mcp")?.id, "winner")
+        XCTAssertEqual(aliased.resolved("other")?.id, "other")
+        XCTAssertNil(aliased.destination("other")?.aliases)
+        XCTAssertNil(aliased.resolved("unknown"))
+        XCTAssertNil(aliased.resolved("Printer"), "a matching display name is not identity evidence")
+        XCTAssertNil(older.aliases)
     }
 
     func testPrinterConnectionReadsTheMCPsOwnWordsAndChangesGoThroughTheMac() async throws {
@@ -747,6 +766,15 @@ final class CompanionClientTests: XCTestCase {
         let refused = try client(FakeTransport { _, _ in json(413, ["error": ["code": "file-too-large", "message": "file-too-large"]]) })
         do { _ = try await refused.download(p, "scan/scan.usdz"); XCTFail("refused") }
         catch let error as CompanionError { XCTAssertEqual(error.code, "file-too-large") }
+        let flat = try client(FakeTransport { _, _ in HTTPReply(status: 413, body: Data(#"{"error":"file-too-large"}"#.utf8)) })
+        do { _ = try await flat.download(p, "scan/scan.usdz"); XCTFail("refused") }
+        catch let error as CompanionError { XCTAssertEqual(error.code, "file-too-large", "the companion's flat error shape too") }
+        // Board X100: any other refusal is a refusal, never "too large" (a 413 that isn't the Mac's size limit included).
+        for (status, code) in [(413, "too-large"), (403, "scope-denied"), (409, "busy")] {
+            let other = try client(FakeTransport { _, _ in json(status, ["error": ["code": code, "message": code]]) })
+            do { _ = try await other.download(p, "scan/scan.usdz"); XCTFail("refused") }
+            catch let error as CompanionError { XCTAssertEqual(error.code, "http-\(status)", "\(status) \(code) is not too large") }
+        }
         let bytes = Data(repeating: 7, count: 300_000)
         let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) }
         let file = try await client(fake).download(p, "scan/phone-preview.usdz")

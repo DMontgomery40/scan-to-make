@@ -16,6 +16,8 @@ enum Fixtures {
     static var set: String { UserDefaults.standard.string(forKey: "CounterpartFixtureSet") ?? "all" }
     /// The mic mount's printer: the print sheet's selection, and what `-CounterpartScreen print-noams` starts on.
     nonisolated(unsafe) static var printer = "current"
+    /// The `away-after-list` switch has let its one list through.
+    nonisolated(unsafe) static var listedOnce = false
     /// `supported` or `unsupported`: the mic mount is waiting on its printer's own question.
     nonisolated(unsafe) static var confirmation: String?
     /// `-CounterpartScreen confirm-mac-answers`: the Mac answers any printer question.
@@ -240,6 +242,17 @@ enum Fixtures {
         // whose picture boxes the whole bottle, and a scan of 130 frames. The pictures are `ask-bottle.jpg` and
         // `bottle-capture/NNNN.heic` in the assets folder, never in Git. `COUNTERPART_ASK_NO_PHOTO` drops the ask's picture.
         if set == "ask-bottle" { shown = shown.map { $0["id"] as? String == ids.plush ? bottle(ago) : $0 } }
+        // `-CounterpartFixtureSet stale-printer` / `no-printers` (review F3): the mic mount, never sliced, with a printer
+        // chosen that's no longer on the Mac, or with no printers set up at all.
+        if ["stale-printer", "no-printers", "printers-slow", "printers-refused"].contains(set) {
+            shown = shown.map { project in
+                guard project["id"] as? String == ids.mic else { return project }
+                var changed = project
+                changed["print"] = nil
+                changed["printerDestinationId"] = set == "stale-printer" ? "removed-printer" : nil
+                return changed
+            }
+        }
         // `-CounterpartScreen printer-connection`: the P1S idle, so its Settings → Printers choices can be changed.
         if idlePrinter { shown = shown.filter { $0["state"] as? String != "printing" } }
         // A status set on this run applies last, so It Works on the finished print (Printing screen) makes it Done.
@@ -338,7 +351,7 @@ enum Fixtures {
                      ["id": "developer", "label": "Local network, Developer Mode", "available": false, "reason": "Turn on LAN Only and Developer Mode on the printer first."]]]
     }
 
-    static var catalog: [String: Any] { [
+    static var catalog: [String: Any] { Fixtures.set == "no-printers" ? ["defaultDestinationId": "current", "destinations": [[String: Any]]()] : [
         "defaultDestinationId": "current",
         "destinations": [
             ["id": "current", "name": "P1S", "backend": p1sBackend, "model": "Bambu Lab P1S", "source": "current", "state": "ready",
@@ -466,12 +479,25 @@ struct FixtureTransport: HTTPTransport {
         if FileManager.default.fileExists(atPath: folder.appending(path: "offline").path) { throw TransportError("network") }
         let path = request.url?.path ?? ""
         let method = request.httpMethod ?? "GET"
+        // An `away-after-list` file (X100, the screenshot tool's `away`): the list answers once, then the Mac stops
+        // answering. /healthz still answers, so the Mac's capabilities are known. Each other request fails after a beat,
+        // so a page opened at launch reads its project after the list has landed. Deleting the file brings the Mac back.
+        if FileManager.default.fileExists(atPath: folder.appending(path: "away-after-list").path), path != "/healthz" {
+            let list = method == "GET" && path == "/v1/objects"
+            if !(list && !Fixtures.listedOnce) {
+                try await Task.sleep(for: .seconds(1.5))
+                if FileManager.default.fileExists(atPath: folder.appending(path: "away-after-list").path) { throw TransportError("network") }
+            }
+            if list { Fixtures.listedOnce = true }
+        }
         // `-CounterpartSlowScan <seconds>`: a scan file takes that long to come (a busy Mac over Wi-Fi), for pictures.
         let slow = UserDefaults.standard.double(forKey: "CounterpartSlowScan")
         if path.contains("/scan/"), slow > 0 { try await Task.sleep(for: .seconds(slow)) }
         // `-CounterpartSlowPictures <seconds>`: the Mac's pictures take that long too (review F4 on #525).
         let slowPictures = UserDefaults.standard.double(forKey: "CounterpartSlowPictures")
-        if path.contains("/pictures/"), slowPictures > 0 { try await Task.sleep(for: .seconds(slowPictures)) }
+        // Renders too (a stage's still can be either): the stage stays "loading" for as long as a test looks, then the
+        // picture comes (gate at 412ede2f: a render path skipped the wait and the stage was already "not available").
+        if path.contains("/pictures/") || path.contains("/renders/"), slowPictures > 0 { try await Task.sleep(for: .seconds(slowPictures)) }
         func json(_ value: Any, _ status: Int = 200) -> HTTPReply { HTTPReply(status: status, body: (try? JSONSerialization.data(withJSONObject: value)) ?? Data()) }
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
@@ -508,7 +534,12 @@ struct FixtureTransport: HTTPTransport {
             default: return json(["error": ["code": "not-found"]], 404)
             }
         }
-        if path == "/v1/objects/printers" { return json(Fixtures.catalog) }
+        if path == "/v1/objects/printers" {
+            // Review F3: `printers-slow` keeps the printer list waiting; `printers-refused` is a Mac that won't give it.
+            if Fixtures.set == "printers-slow" { try await Task.sleep(for: .seconds(60)) }
+            if Fixtures.set == "printers-refused" { return json(["error": ["code": "unavailable", "message": "refused"]], 503) }
+            return json(Fixtures.catalog)
+        }
         if path.hasPrefix("/v1/objects/printers/"), path.hasSuffix("/route") {
             guard path.contains("/current/") else { return json(["route": NSNull()]) }
             if method == "PUT", let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }), let route = body["route"] as? String {

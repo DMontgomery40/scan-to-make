@@ -274,7 +274,9 @@ struct PrinterDetailView: View {
                     HStack { Text(ProjectWords.title(project)).font(.headline); Spacer(); Text(Format.percent(live?.job?.progress) ?? "").font(.headline.monospacedDigit()).foregroundStyle(Color.okGreen) }
                     ProgressView(value: (live?.job?.progress ?? 0) / 100).tint(.okGreen)
                     Text([live?.job?.layer.map { layer in live?.job?.totalLayers.map { "Layer \(layer) of \($0)" } ?? "Layer \(layer)" },
-                          Format.duration(live?.job?.remainingSec).map { "\($0) left" }].compactMap { $0 }.joined(separator: " · "))
+                          Format.duration(live?.job?.remainingSec).map { "\($0) left" },
+                          // The phone's copy while the Mac isn't answering says when it is from (X100).
+                          store.away ? store.heardAt(project.id).map { KnownProjects.when($0) } : nil].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)

@@ -161,6 +161,8 @@ export interface Project {
   outcome?: string;
   progress?: string;
   failure?: string;
+  /** The stopped pass can be started again from where it left off. */
+  canRetryCleanup?: boolean;
   pendingFollowup?: string;
   photos: string[];
   capture?: string[];
@@ -212,6 +214,8 @@ export interface Project {
   printConfirmation?: RawQuestion;
   print?: {
     uncertain?: boolean;
+    /** Set once the file was sent to the printer. */
+    dispatchedAt?: string;
     destinationId?: string;
     destination?: { id: string; name: string };
     settings?: PrintOptions;
@@ -246,6 +250,8 @@ export interface Printer {
   mcpId?: string;
   capabilities?: Record<string, unknown>;
   mcps?: { backend: string; destinationId: string }[];
+  /** Other catalog ids that now stand for this same printer, as the Mac resolves them. Absent on older Macs. */
+  aliases?: string[];
   incomplete?: { missing: string[]; fill: Record<string, string> };
 }
 export interface Filament {

@@ -295,6 +295,8 @@ data class PrinterDestination(
     val id: String, val name: String, val backend: String = "", val model: String? = null, val address: String? = null,
     val source: String = "", val origin: String? = null, val state: String? = null, val stateCheckedAt: String? = null,
     val capabilities: Capabilities? = null, val mcpId: String? = null, val mcps: List<McpChoice>? = null,
+    /** Other catalog ids that now stand for this same printer, as the Mac resolves them. Absent on older Macs. */
+    val aliases: List<String>? = null,
 ) {
     @Serializable data class McpChoice(val backend: String, val destinationId: String)
     @Serializable
@@ -323,6 +325,15 @@ data class PrinterDestination(
 @Serializable
 data class PrinterCatalog(val destinations: List<PrinterDestination> = emptyList(), val defaultDestinationId: String = "") {
     fun destination(id: String?): PrinterDestination? = destinations.firstOrNull { it.id == (id ?: defaultDestinationId) }
+    /**
+     * The printer a saved id stands for now: itself, or the printer it became under its other MCP's id (review F2), or
+     * one of the catalog's `aliases` for it (S4), as on iOS and the Mac.
+     */
+    fun resolved(id: String?): PrinterDestination? {
+        val key = id ?: defaultDestinationId
+        return destinations.firstOrNull { it.id == key }
+            ?: destinations.firstOrNull { d -> d.mcps?.any { it.destinationId == key } == true || d.aliases?.contains(key) == true }
+    }
 }
 
 /** A spool the printer reports (`GET /v1/objects/<id>/filaments`). */

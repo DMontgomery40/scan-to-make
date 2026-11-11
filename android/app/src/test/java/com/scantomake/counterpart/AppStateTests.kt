@@ -137,4 +137,19 @@ class AppStateTests {
         assertEquals(com.scantomake.counterpart.api.MacLink.Connected, state.link.value)
         assertNull(state.error.value)
     }
+
+    /** Review of #527 part 4, S1: the production words read the computer's capabilities. On one that doesn't keep a
+     *  project's status, a finished print leads with Print and asks nothing; on one that does, It Works leads. */
+    @Test fun aFinishedPrintAsksDidItFitOnlyWhenTheComputerKeepsTheAnswer() {
+        val rows = com.scantomake.counterpart.core.WireJson.parseToJsonElement(kitFixture("main-actions.json").readText()).jsonObject["rows"]!!.jsonArray
+        val row = rows.first { it.jsonObject["name"]!!.jsonPrimitive.content == "printed-older-mac" }.jsonObject
+        val printed = com.scantomake.counterpart.api.Project.decode(row["project"]!!.jsonObject)!!
+        state.capabilities.value = emptySet()
+        val older = state.words(printed)
+        assertTrue("an older computer: Print leads", older.page.printIsMain)
+        assertTrue(com.scantomake.counterpart.api.ProjectAction.ItWorks !in older.actions)
+        state.capabilities.value = setOf("projectSettings")
+        val keeps = state.words(printed)
+        assertTrue("a computer that keeps the answer asks Did it fit?", com.scantomake.counterpart.api.ProjectAction.ItWorks in keeps.actions)
+    }
 }

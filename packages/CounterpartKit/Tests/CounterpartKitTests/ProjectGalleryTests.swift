@@ -148,4 +148,31 @@ final class ProjectGalleryTests: XCTestCase {
         var designer = scanned(nil); designer.scan = "scan.3mf"
         XCTAssertEqual(designer.scanModel(limit: limit), .none, "a designer's 3MF is not a scanned object")
     }
+
+    /// Board X100: the line under the stage comes from why the model can't be had and names the right thing. A refused
+    /// part is never "too detailed", never "a scan"; too large is said only for size; picture and model both missing is
+    /// one line.
+    func testTheLineUnderTheStageSaysTheActualReasonAndNamesTheRightThing() {
+        XCTAssertEqual(ModelUnavailable.refused.line(.part), "Your Mac didn’t send this part’s 3D model.")
+        XCTAssertEqual(ModelUnavailable.notAnswering.line(.part), "Your Mac isn’t answering, so this part’s 3D model can’t come yet.")
+        XCTAssertEqual(ModelUnavailable.didntCome.line(.scan), "Your scan’s 3D model didn’t come from your Mac.")
+        XCTAssertEqual(ModelUnavailable.tooLarge.line(.scan), "Your scan’s 3D model is too large a file to show on a phone. Open it on your Mac to see it from every side.")
+        XCTAssertEqual(ModelUnavailable.tooLarge.line(.part), "This part’s 3D model is too large a file to show on a phone. Open it on your Mac to see it from every side.")
+        XCTAssertEqual(ModelUnavailable.refused.line(.together), "Your Mac didn’t send the part and your scan in 3D.")
+        XCTAssertEqual(ModelUnavailable.refused.line(.part, pictureToo: true), "Your Mac didn’t send the picture or 3D model of this part.")
+        XCTAssertEqual(ModelUnavailable.notAnswering.line(.plate, pictureToo: true), "Your Mac isn’t answering, so the picture and 3D model of this plate can’t come yet.")
+        XCTAssertEqual(ModelUnavailable.tooLarge.line(.scan, pictureToo: true), "The picture didn’t come from your Mac, and your scan’s 3D model is too large a file to show on a phone.")
+        // Review of #527 part 4, S4: a picture the Mac never drew is said as that, in the same one line.
+        XCTAssertEqual(ModelUnavailable.refused.line(.part, pictureToo: true, neverDrawn: true), "Your Mac couldn’t draw a picture of this part, and it didn’t send this part’s 3D model.")
+        XCTAssertEqual(ModelUnavailable.didntCome.line(.together, pictureToo: true, neverDrawn: true), "Your Mac couldn’t draw a picture of the part and your scan, and the part and your scan in 3D didn’t come.")
+        for reason in [ModelUnavailable.notAnswering, .didntCome, .refused, .undrawable] {
+            for kind in [ProjectGallery.Entry.Kind.part, .plate, .together] {
+                let line = reason.line(kind)
+                XCTAssertFalse(line.contains("scan") && kind != .together, "a \(kind) is not a scan: \(line)")
+                XCTAssertFalse(line.contains("too"), "only size is too large: \(line)")
+            }
+        }
+        XCTAssertTrue(ModelUnavailable.refused.retryable && ModelUnavailable.notAnswering.retryable && ModelUnavailable.didntCome.retryable)
+        XCTAssertFalse(ModelUnavailable.tooLarge.retryable || ModelUnavailable.undrawable.retryable)
+    }
 }
