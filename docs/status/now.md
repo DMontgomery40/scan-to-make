@@ -2,13 +2,14 @@
 
 The lead's live list. It is updated every time the lead is woken, for any reason, and before the lead ends a turn. [`board.md`](board.md) holds every item and its history; this page holds only what is in motion or owed next, so nothing waits unseen. If a line here is more than an hour old, it is stale: check the thing itself.
 
-**Last checked: 2026-11-11 07:28Z** (lead: thread "Take Over Project Recovery Lead").
+**Last checked: 2026-11-11 07:33Z** (lead: thread "Take Over Project Recovery Lead").
 
 ## Running
 
 | What | Who (model) | Started | Budget ends | Last seen doing | If it finishes: next |
 |---|---|---|---|---|---|
 | The build David gets, `train/2026-11-11a` (#570): main + #568 (CAD workers on Fable high) + #564 (AR for parts, one AR control) + #565 (Make something else from this scan) + #571 (picture framing) + #573 (the stage stays dark) | D: GPT-6.1 Sol xhigh, conductor | 05:58Z | 07:58Z (extended 30 min at 06:30Z for #573 and its two joins) | 07:02Z: final whole iPhone and iPad suites holding the lane (18 min in), two more of its jobs queued. Earlier, 06:43Z: all merged; first full phone run iPhone 113 passed / 1 failed, iPad 47 / 1, both the AR Quick Look expectation #564 changed; CounterpartKit 293 of 293 after the merge; Mac, companion, Linux and picture checks running in both lane slots | the lead reads the AR failure and its fix → review (Muse) → gate + bad-link gate → `branch_check` READ, not chained → merge → install Mac, iPhone, iPad → on his phone: the Leatherman page offers "Make something else from this scan", one AR chip, AR on a designed part |
+| The Forester's dash, mapped from published sources (X123): shape, plastic, tape, heat, best spot; the case and the phone's buttons | D: Gemini 4 Carbon high | 07:33Z | 45 min | just started; report to `~/scan-to-make-work/forester-dash-2026-11-11/REPORT.md` | the lead reads it, puts it in the kernel repo's `docs/research/`, and the holder is revised to the real spot (Fable high) |
 | A person can open a model file in Counterpart (X122): Open With, File ▸ Open…, a labelled Choose Files control, every layout | D: Claude Opus 5.5 medium, `fix/open-a-model-file` | 07:13Z | 08:43Z; milestone 07:53Z | just started | review (Muse), then the next train |
 
 ## Finished, waiting on the lead (nobody is working on these)
