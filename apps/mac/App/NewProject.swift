@@ -7,16 +7,12 @@ import CounterpartKit
 import ControlKit
 #endif
 
-struct NewProjectDraft: Identifiable, Equatable {
-    let id = UUID()
-    var files: [URL] = []
-}
-
 /// New Project on the Mac (PRD §7.2): the detail becomes the drop target. Drop photos, an STL, 3MF or USDZ, or
 /// just say what you need. It shows on the phone too, because the phone reads the same projects.
 struct NewProjectPane: View {
     @ObservedObject var model: ObjectsModel
     let close: () -> Void
+    @ObservedObject private var opened = OpenedFiles.shared
     @State private var request = ""
     @State private var files: [URL]
     @State private var kind = "fit"
@@ -28,7 +24,7 @@ struct NewProjectPane: View {
         self.model = model
         self.close = close
         _files = State(initialValue: draft.files)
-        _kind = State(initialValue: draft.files.contains { ObjectsModel.fileKind($0) == "scan" } ? "copy" : "fit")
+        _kind = State(initialValue: ObjectsModel.draftKind(for: draft.files))
     }
 
     private var available: Bool { model.capabilities?.objectsCreate == true }
@@ -91,9 +87,12 @@ struct NewProjectPane: View {
             }
             .font(.system(size: 30, weight: .light)).foregroundStyle(Color.filament)
             Text("Drop photos, STL, 3MF or USDZ files").font(.title3.weight(.semibold))
-            Text("or [choose them](counterpart-choose:), or just describe it below")
-                .font(.callout).foregroundStyle(.secondary)
-                .environment(\.openURL, OpenURLAction { _ in choose(); return .handled })
+            // A real button (H3, Nov 11): the inline "choose them" link had no accessibility action.
+            Button("Choose Files…", systemImage: "folder", action: choose)
+                .buttonStyle(.glass).controlSize(.large)
+                .accessibilityLabel("Choose Files")
+                .accessibilityHint("Photos, STL, 3MF or USDZ files")
+            Text("or just describe it below").font(.callout).foregroundStyle(.secondary)
             if !files.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) { ForEach(files, id: \.self) { url in DroppedChip(url: url) { files.removeAll { $0 == url } } } }
@@ -106,19 +105,21 @@ struct NewProjectPane: View {
         .glassEffect(.regular.tint(Color.filament.opacity(targeted ? 0.22 : 0.10)), in: .rect(cornerRadius: 28))
         .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(Color.filament, style: .init(lineWidth: 2, dash: [8, 6])) }
         .dropDestination(for: URL.self) { urls, _ in add(urls) } isTargeted: { targeted = $0 }
+        // A file opened with Counterpart while New Project is open joins it, as dropping it here does.
+        .onReceive(opened.$waiting) { waiting in if !waiting.isEmpty { add(opened.take()) } }
     }
 
     @discardableResult private func add(_ urls: [URL]) -> Bool {
-        let usable = urls.filter { ObjectsModel.fileKind($0) != nil && !files.contains($0) }
+        let usable = ObjectsModel.usable(urls, besides: files)
         files += usable
-        if usable.contains(where: { ObjectsModel.fileKind($0) == "scan" }) { kind = "copy" }
+        if ObjectsModel.draftKind(for: usable) == "copy" { kind = "copy" }
         return !usable.isEmpty
     }
 
     private func choose() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.jpeg, .heic, .png, .usdz] + ["stl", "3mf"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = ObjectsModel.acceptedContentTypes
         panel.prompt = "Add"
         if panel.runModal() == .OK { add(panel.urls) }
     }

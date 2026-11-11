@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import UniformTypeIdentifiers
 import CounterpartKit
 #if canImport(ControlKit)
 import ControlKit
@@ -549,14 +550,33 @@ struct SocketObjects: ObjectsCompanion {
 
     static let createUnavailable = "Start new projects on your iPhone for now. This Mac can start them after Counterpart's next update."
 
+    /// The one list of files New Project takes (H1–H3, Nov 11): the drop zone, the window, Choose Files…, File ▸ Open…,
+    /// a file opened with Counterpart, and the document types in `Config/Info.plist` (which declares only the models,
+    /// so Counterpart isn't offered for every photo; `ObjectsModelTests` checks the plist against this list).
+    nonisolated static let photoExtensions = ["jpg", "jpeg", "heic", "heif", "png"]
+    nonisolated static let modelExtensions = ["stl", "3mf", "usdz"]
+    /// The same list as types, for the system file chooser.
+    nonisolated static var acceptedContentTypes: [UTType] {
+        (photoExtensions + modelExtensions).compactMap { UTType(filenameExtension: $0) }
+    }
+
     /// `photos` or `scan`, from the file's type; nil for anything Counterpart can't use.
     nonisolated static func fileKind(_ url: URL) -> String? {
-        switch url.pathExtension.lowercased() {
-        case "jpg", "jpeg", "heic", "heif", "png": return "photos"
-        case "stl", "3mf", "usdz": return "scan"
-        default: return nil
-        }
+        let ext = url.pathExtension.lowercased()
+        if photoExtensions.contains(ext) { return "photos" }
+        if modelExtensions.contains(ext) { return "scan" }
+        return nil
     }
+
+    /// The files New Project keeps from `urls`: the ones it can use, once each, after those it already has.
+    nonisolated static func usable(_ urls: [URL], besides existing: [URL] = []) -> [URL] {
+        var kept: [URL] = []
+        for url in urls where fileKind(url) != nil && !existing.contains(url) && !kept.contains(url) { kept.append(url) }
+        return kept
+    }
+
+    /// The project New Project starts as for these files: a model to copy makes it `copy`, anything else `fit`.
+    nonisolated static func draftKind(for files: [URL]) -> String { files.contains { fileKind($0) == "scan" } ? "copy" : "fit" }
 
     /// The window is on screen (true) or closed, hidden or covered (false).
     func setVisible(_ visible: Bool) { setWatching(visible, by:"window") }
@@ -953,4 +973,29 @@ enum StageStillState: Equatable {
             }
         }
     }
+}
+
+/// New Project's draft: the files it starts with.
+struct NewProjectDraft: Identifiable, Equatable {
+    let id = UUID()
+    var files: [URL] = []
+    /// Only the files New Project can use; nil when none are, so a drop or an open of anything else does nothing, as before.
+    static func from(_ urls: [URL]) -> NewProjectDraft? {
+        let files = ObjectsModel.usable(urls)
+        return files.isEmpty ? nil : NewProjectDraft(files: files)
+    }
+}
+
+/// Files opened with Counterpart (Finder Open With, a double-click, the Dock icon, `open -a`) and File ▸ Open…, held
+/// until the window takes them into New Project exactly as a drop on it does (H1, H2, Nov 11).
+@MainActor final class OpenedFiles: ObservableObject {
+    static let shared = OpenedFiles()
+    @Published private(set) var waiting: [URL] = []
+    /// Keeps the files New Project can use; true when there was one.
+    @discardableResult func receive(_ urls: [URL]) -> Bool {
+        let usable = ObjectsModel.usable(urls, besides: waiting)
+        waiting += usable
+        return !usable.isEmpty
+    }
+    func take() -> [URL] { defer { waiting = [] }; return waiting }
 }

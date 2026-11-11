@@ -12,6 +12,7 @@ import ControlKit
 
 struct MainWindow: View {
     @ObservedObject var model: ObjectsModel
+    @ObservedObject private var opened = OpenedFiles.shared
     @State private var inspector = true
     @State private var deleting: Project?
     @State private var stopping: Project?
@@ -45,10 +46,15 @@ struct MainWindow: View {
         .onDisappear { model.setVisible(false); ModelStage.releaseCachedModels() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in model.wake() }
         .dropDestination(for: URL.self) { urls, _ in
-            let usable = urls.filter { ObjectsModel.fileKind($0) != nil }
-            guard !usable.isEmpty, newProject == nil else { return false }
-            startNewProject(NewProjectDraft(files: usable))
+            guard newProject == nil, let draft = NewProjectDraft.from(urls) else { return false }
+            startNewProject(draft)
             return true
+        }
+        // A file opened with Counterpart, or from File ▸ Open…: the same as dropping it on the window. With New Project
+        // already open, the pane takes it as a drop on its drop zone.
+        .onReceive(opened.$waiting) { waiting in
+            guard !waiting.isEmpty, newProject == nil, let draft = NewProjectDraft.from(opened.take()) else { return }
+            startNewProject(draft)
         }
         .onChange(of: model.selection) { _, selection in if selection != nil { newProject = nil } }
         .onChange(of: newProject) { _, draft in model.composing = draft != nil }
