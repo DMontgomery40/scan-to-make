@@ -109,7 +109,7 @@ struct ModelStage: View {
             do { try await Task.sleep(for: .seconds(3)) } catch { return }
             live = false
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; Self.cache.removeAll(); ModelPoster.deferPending(); ModelEntityCache.deferExports() } }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; Self.cache.removeAll(); ModelPoster.deferPending() } }
         .onDisappear { live = false; holder.pivot = nil }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(url == nil ? "No model yet" : "3D model. Drag to turn it, pinch to zoom.")
