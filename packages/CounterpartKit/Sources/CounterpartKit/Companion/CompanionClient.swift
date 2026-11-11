@@ -356,8 +356,10 @@ public final class CompanionClient: @unchecked Sendable {
     private struct MaybeOne: Decodable { var object: Project? }
     /// Sets the project's status (PRD §5.4): It works, Needs changes, Archived… Returns the project when the
     /// Mac sends it back; otherwise read it again. An older Mac answers `not-supported`.
-    public func setStatus(_ id: String, _ status: ProjectStatus) async throws -> Project? {
-        try await changeProjectSettings(id, ["status": status.rawValue])
+    public func setStatus(_ id: String, _ status: ProjectStatus, versionId: String? = nil) async throws -> Project? {
+        var patch = ["status": status.rawValue]
+        if let versionId { patch["versionId"] = versionId }
+        return try await changeProjectSettings(id, patch)
     }
     /// Hides it from Home or shows it again, keeping its status (a Mac whose settings carry `archived`).
     public func setArchived(_ id: String, _ archived: Bool) async throws -> Project? {

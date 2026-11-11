@@ -139,6 +139,7 @@ public struct ProjectWords: Equatable, Sendable {
 
     /// The phase, from the Mac's state plus whether this phone is still sending files.
     public static func phase(_ project: Project, sending: Bool = false) -> ProjectPhase {
+        if let phase = DesignHistory(project).phase { return phase }
         // Only the uploading phone knows a transfer is active. Saved drafts are never ongoing sends.
         if project.state == .new { return sending ? .sending : .draft }
         // You said it works (Did it fit?, or Project Settings): Done, once nothing is running or waiting on you.
@@ -273,7 +274,8 @@ public struct ProjectWords: Equatable, Sendable {
         // The Mac's own words win when it writes them (KAN-214 PR 3), except while this phone is still sending, and
         // except when they're about another phase than the Works shown here.
         let macWords = project.status.flatMap { $0.text.isEmpty || project.state == .new ? nil : $0 }
-        if let macWords, !(phase == .confirmed && macWords.phase != ProjectPhase.confirmed.rawValue) { self.line = macWords.text } else { self.line = line }
+        if let historyLine = DesignHistory(project).line { self.line = historyLine }
+        else if let macWords, !(phase == .confirmed && macWords.phase != ProjectPhase.confirmed.rawValue) { self.line = macWords.text } else { self.line = line }
         page = PageActions(project, phase: phase, actions: actions, sending: sending, localScan: localScan)
     }
 

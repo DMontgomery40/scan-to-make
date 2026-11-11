@@ -128,6 +128,33 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
     /// The project whose scan this one was made from ("Make something else from this scan"), with its title when it was
     /// made: the page says where its scan came from even after that one is renamed or deleted. A build that doesn't know
     /// the field ignores it.
+    public var versions: [DesignVersion]?
+    public var prints: [PrintAttempt]?
+    public var historyRestored: String?
+    public struct DesignVersion: Codable, Equatable, Identifiable, Sendable {
+        public var id: String
+        public var sealedAtMs: Double
+        public var passStartedAtMs: Double?
+        public var note: String?
+        public var modelSha256: String
+        public var result: Result
+        public var picture: String?
+        public var pictures: [String: String]?
+        public var pictureStates: [String: String]?
+        public var outcome: String?
+        public var printedAtMs: Double?
+        public var label: String { result.summary?.isEmpty == false ? result.summary!.components(separatedBy: "\n")[0] : DesignHistory.date(sealedAtMs) }
+    }
+    public struct PrintAttempt: Codable, Equatable, Identifiable, Sendable {
+        public var id: String
+        public var versionId: String?
+        public var startedAtMs: Double
+        public var printId: String?
+        public var bundleId: String
+        public var destination: PrintDestination?
+        public var monitor: PrintMonitor?
+        public var spools: [Spool]?
+    }
     public var inherited: InheritedHistory?
     public struct InheritedHistory: Codable, Equatable, Sendable {
         public var from: ScanSource
@@ -173,7 +200,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, scanFrom, inherited, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, scanFrom, inherited, versions, prints, historyRestored, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -196,6 +223,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         scanFiles = optional([ScanFile].self, .scanFiles)
         scanFrom = optional(ScanSource.self, .scanFrom)
         inherited = optional(InheritedHistory.self, .inherited)
+        versions = optional([DesignVersion].self, .versions)
+        prints = optional([PrintAttempt].self, .prints)
+        historyRestored = optional(String.self, .historyRestored)
         files = optional(JSONValue.self, .files)
         plates = optional([ProjectPlate].self, .plates)
         publishedSelection = optional(PublishedSelection.self, .publishedSelection)

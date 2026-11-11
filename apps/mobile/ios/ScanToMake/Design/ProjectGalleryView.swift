@@ -32,6 +32,10 @@ struct ProjectGalleryView: View {
     @State private var arFailed = false
     @State private var arTask: Task<Void, Never>?
 
+    private var effectiveModelURL: URL? {
+        if let path = project.current?.model, path.hasPrefix("versions/") { return store.models.file(project, path) }
+        return modelURL
+    }
     private var gallery: ProjectGallery { ProjectGallery(project: project, scanOnThisDevice: localScan != nil) }
     private var entry: ProjectGallery.Entry? {
         let entries = gallery.entries
@@ -47,7 +51,7 @@ struct ProjectGalleryView: View {
             if let entry { unavailable(entry) }
             if gallery.entries.count > 1 { labels }
         }
-        .onChange(of: "\(modelURL?.path ?? "")#\(project.spoolColour ?? "")") { cancelAR(); arFailed = false }
+        .onChange(of: "\(effectiveModelURL?.path ?? "")#\(project.spoolColour ?? "")") { cancelAR(); arFailed = false }
         .onChange(of: scenePhase) { _, phase in if phase != .active { cancelAR() } }
         .onChange(of: selected) { cancelAR(); arFailed = false }
         .onDisappear { cancelAR() }
@@ -55,6 +59,7 @@ struct ProjectGalleryView: View {
             // The store fetches them, so leaving the page never stops a download (Nov 10). Coming back to the page or to
             // the app starts again one that failed meanwhile (a suspended app's transfer drops).
             guard scenePhase == .active else { return }
+            if let path = project.current?.model, path.hasPrefix("versions/") { store.models.want(project, path) }
             if case .file(let path) = scanModel { store.models.want(project, path) }
             if gallery.entries.contains(where: { $0.kind == .together }), case .file(let path) = togetherModel { store.models.want(project, path) }
         }
@@ -101,13 +106,13 @@ struct ProjectGalleryView: View {
     private struct ModelProblem { var reason: ModelUnavailable; var path: String? }
     private func modelProblem(_ entry: ProjectGallery.Entry) -> ModelProblem? {
         let (path, model): (String?, Project.ScanModel?) = switch entry.drawing {
-        case .model(let drawn) where drawn == "model.stl": ("model.stl", nil)
+        case .model(let drawn) where entry.kind == .part || drawn == "model.stl": (drawn, nil)
         case .model: (nil, scanURL == nil ? scanModel : nil)
         // Together needs both: the scan, and the part (review S4: with the scan here and the part missing it said nothing).
-        case .assembly: togetherScanURL == nil ? (nil, togetherModel) : (modelURL == nil ? "model.stl" : nil, nil)
+        case .assembly: togetherScanURL == nil ? (nil, togetherModel) : (effectiveModelURL == nil ? "model.stl" : nil, nil)
         case .picture: (nil, nil)
         }
-        let fetch: ModelFiles.Fetch? = if let path { modelURL == nil ? store.models.fetch(project, path) : nil }
+        let fetch: ModelFiles.Fetch? = if let path { effectiveModelURL == nil ? store.models.fetch(project, path) : nil }
             else if case .file(let file)? = model { store.models.fetch(project, file) }
             else if case .tooLarge? = model { .tooLarge } else { nil }
         let retryPath: String? = path ?? { if case .file(let file)? = model { return file }; return nil }()
@@ -147,14 +152,14 @@ struct ProjectGalleryView: View {
         if let entry {
             switch entry.drawing {
             case .model(let path):
-                ModelStage(url: path == "model.stl" ? modelURL : scanURL, tint: tint(entry.colour),
+                ModelStage(url: entry.kind == .part || path == "model.stl" ? effectiveModelURL : scanURL, tint: tint(entry.colour),
                            measured: { drawn(entry, $0) },
                            placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
                            drawn: { undrawable.remove(entry.id) })
                     .id(entry.id)
             case .assembly(_, _, let seats):
                 // Both models or neither: a part with no scan at its seats would not be Together.
-                ModelStage(url: togetherScanURL == nil ? nil : modelURL, tint: tint(entry.colour),
+                ModelStage(url: togetherScanURL == nil ? nil : effectiveModelURL, tint: tint(entry.colour),
                            object: togetherScanURL, seats: seats.map(\.matrix), measured: { drawn(entry, $0) }, placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
                            drawn: { undrawable.remove(entry.id) })
                     .id(entry.id)
@@ -232,7 +237,7 @@ struct ProjectGalleryView: View {
             guard case .model(let path) = entry.drawing, path == "model.stl" else { return nil }
             if arPreparing { return .preparing }
             if let arURL { return .show(arURL) }
-            if let modelURL { return arFailed ? .failed(modelURL) : .prepare(modelURL) }
+            if let effectiveModelURL { return arFailed ? .failed(effectiveModelURL) : .prepare(effectiveModelURL) }
             return store.away ? .needsMac : nil
         case .scan:
             if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return arFailed ? .failedScan(scanURL) : .show(scanURL) }
@@ -250,7 +255,7 @@ struct ProjectGalleryView: View {
                 // A file that went away meanwhile (the cache was cleared) is made again rather than showing nothing.
                 if !ARModel.show(url) {
                     arFailed = true
-                    if let modelURL, url == arURL { arURL = nil; prepareAR(modelURL) }
+                    if let effectiveModelURL, url == arURL { arURL = nil; prepareAR(effectiveModelURL) }
                 }
             } label: { Label("AR", systemImage: "arkit") }
                 .stageButton().accessibilityValue("ready")

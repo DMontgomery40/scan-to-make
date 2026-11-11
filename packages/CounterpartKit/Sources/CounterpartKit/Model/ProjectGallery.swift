@@ -110,7 +110,7 @@ extension Project {
             let render = pictures?["part"] ?? current.renders.first.map(Self.renderPath) ?? plates?.first?.thumbnail ?? ""
             return [PrintablePart(id: "result", label: label, drawing: .picture(render), colour: .own, sizeMm: current.sizeMm)]
         }
-        return [PrintablePart(id: "result", label: label, drawing: .model("model.stl"), colour: spoolColour.map { .spool($0) } ?? .neutral, sizeMm: current.sizeMm)]
+        return [PrintablePart(id: "result", label: label, drawing: .model(current.model.hasPrefix("versions/") ? current.model : "model.stl"), colour: spoolColour.map { .spool($0) } ?? .neutral, sizeMm: current.sizeMm)]
     }
 
     /// The one spool the result prints in (PRD §5.4): the spool its last print was sent with, as the printer MCP reported
@@ -137,7 +137,7 @@ extension Project {
         photos.isEmpty ? (capture ?? []).map { "capture/\($0)" } : photos.map { "photos/\($0)" }
     }
 
-    static func renderPath(_ render: String) -> String { "renders/\(render.split(separator: "/").last ?? Substring(render))" }
+    static func renderPath(_ render: String) -> String { if render.hasPrefix("versions/") { return render }; return "renders/\(render.split(separator: "/").last ?? Substring(render))" }
 
     static func hex(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespaces)

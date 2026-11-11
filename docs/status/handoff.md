@@ -6,6 +6,16 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is in [`now.md`](now.md), which the lead updates at every wake. Read it first.**
 
+## Implementation handoff: history and designs (Nov 11)
+
+Lane A: milestone 1 is PR [#600](https://github.com/DMontgomery40/scan-to-make/pull/600), branch `feat/fork-carries-history`, head `26be32a8`: source conversation snapshots, worker context, shared Apple words and conversation UI, fixture and iPhone screenshot. Focused tests: Node 42, Kit 13, Mac model 1, iPhone layout 1 passed. iPad test execution remains with the lead's gate; Android/Linux presentation follows on `feat/inherited-history-android-linux`.
+
+Milestone 2 is **incomplete draft** [#602](https://github.com/DMontgomery40/scan-to-make/pull/602), branch `feat/versions-slice-1`, stacked on #600. The companion commit `5589ebe9` passed 78 focused tests (versions, printing, make-from-scan). It adds sealing, attempts, version-scoped outcomes/pictures, version asset reads, headline derivation and a startup migration. Migration tests use synthetic structures; no live Application Support project was modified.
+
+Stopped under the brief's repeated-identical-failure rule: queued Kit/iPhone/Mac compilation reported `ProjectWords.swift: immutable value self.line may only be initialized once`. The source was corrected, but **not rebuilt**. The later Apple model/view changes are pushed work in progress, not verified or ready to merge. Next: compile Kit before launching app builds; finish migration verification against copied real structures (Fusion/code source recovery, chain checks, frame-only attempts and ambiguous print attribution); add version contract schemas and fixture tests; finish Activity restoration/sealing lines, per-version Did it fit, notification wording, and iPhone/iPad/Mac reachability tests and captures. The UI skeleton has read-only What you have / Earlier designs and projection into the existing stage; it needs review and verification. Android/Linux versions UI follows separately on `feat/versions-android-linux`. The lead gates and merges both PRs; this delegate ran neither ci_local nor branch_check.
+
+Evidence and compiler logs: `~/scan-to-make-work/versions-slice-1/evidence/`. The lane is returned to clean main; no device installs or printer actions were performed.
+
 ## Now (2026-11-11, 08:46Z): a new lead
 
 The new lead is Claude Opus 5.5 (high) in a T3 thread on agents-173, since 08:40Z. The council's synthesis reached David at 08:41Z in the removed lead's thread. #570's three gate failures are fixed on the train (`203d13e0`) and the gate is running again; [`now.md`](now.md) has the live state.
