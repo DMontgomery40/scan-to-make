@@ -2148,7 +2148,8 @@ final class OnDeviceLibraryUITests: XCTestCase {
         try Data().write(to: folder.appendingPathComponent("offline"))
         app = launch(folder)
         XCTAssertTrue(app.buttons["connection-try-again"].waitForExistence(timeout: 20), "the Mac isn't answering")
-        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch.exists, "Home has the projects it had")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch.waitForExistence(timeout: 10),
+                      "Home has the projects it had: \(app.debugDescription)")
         let home = XCTAttachment(screenshot: app.screenshot()); home.name = "home-away"; home.lifetime = .keepAlways; add(home)
         app.terminate()
 
@@ -2169,7 +2170,10 @@ final class OnDeviceLibraryUITests: XCTestCase {
     /// opened once, left, and opened again with the Mac not answering at all: its model and picture are drawn from the
     /// phone, and nothing on the page says it is coming from the Mac. Then the same after a relaunch, still away.
     func testAProjectSeenOnceDrawsFromThePhoneWhenTheMacIsAwayWithProjectsPresent() throws {
-        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            addTeardownBlock { XCUIDevice.shared.orientation = .portrait }
+        }
         let folder = try folder()
         // A model the stage can draw (a 40 mm cube), so the 3D path is checked too, not only the picture.
         try cube(40).write(to: folder.appendingPathComponent("mic.stl"))
