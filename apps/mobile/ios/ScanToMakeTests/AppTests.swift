@@ -1,4 +1,7 @@
 import XCTest
+import QuickLook
+import UniformTypeIdentifiers
+import RealityKit
 import CounterpartKit
 @testable import ScanToMake
 
@@ -646,4 +649,56 @@ private actor HeldDownload {
     private var continuation: CheckedContinuation<URL, Never>?
     func wait() async -> URL { await withCheckedContinuation { continuation = $0 } }
     func open(_ url: URL) { continuation?.resume(returning: url); continuation = nil }
+}
+
+/// Nov 11 (David: AR "doesn't work on non-scanned items, never has"): the part's AR file was a Reality file named `.usdz`.
+@MainActor final class ARModelTests: XCTestCase {
+    /// A binary STL box, millimetres, Z up, its corner at the origin.
+    static func boxSTL(_ size: SIMD3<Float> = [146, 40, 20]) -> Data {
+        let c: [SIMD3<Float>] = (0..<8).map { i in SIMD3(Float(i & 1), Float((i >> 1) & 1), Float((i >> 2) & 1)) * size }
+        let faces = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]
+        let triangles = faces.flatMap { f in [[c[f[0]], c[f[1]], c[f[2]]], [c[f[0]], c[f[2]], c[f[3]]]] }
+        var data = Data(count: 80)
+        withUnsafeBytes(of: UInt32(triangles.count).littleEndian) { data.append(contentsOf: $0) }
+        for t in triangles {
+            for v in [SIMD3<Float>(0, 0, 0)] + t { for x in [v.x, v.y, v.z] { withUnsafeBytes(of: x.bitPattern.littleEndian) { data.append(contentsOf: $0) } } }
+            data.append(contentsOf: [0, 0])
+        }
+        return data
+    }
+
+    /// The file AR Quick Look gets is the USDZ its name says, Quick Look can preview it, it is the part at true size in
+    /// its spool's colour, and the Reality file an earlier build wrote beside it is gone.
+    func testAPartsARFileIsARealUSDZThatQuickLookOpensAtTrueSize() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let stl = folder.appendingPathComponent("model.stl")
+        try Self.boxSTL().write(to: stl)
+        let stale = folder.appendingPathComponent("model.ff8800.usdz")
+        try await ModelEntity(mesh: .generateBox(size: 0.1), materials: [SimpleMaterial()]).write(to: stale)
+        XCTAssertFalse(PartUSDZ.isUSDZ(stale), "what the app used to write")
+
+        let made = await ARModel.usdz(fromSTL: stl, tint: "#FF8800")
+        let url = try XCTUnwrap(made)
+        XCTAssertEqual(url.lastPathComponent, "model.ff8800.ar.usdz")
+        XCTAssertTrue(PartUSDZ.isUSDZ(url), "a USD layer first in the zip, by its bytes")
+        XCTAssertEqual(UTType(filenameExtension: url.pathExtension), .usdz)
+        #if targetEnvironment(simulator)
+        // The iOS 27.2 simulator answered false here for this file (Nov 11, iPhone 17 Pro and iPad Pro 13): not yet known
+        // whether the simulator's Quick Look has no 3D previewer or the file is refused. A real device must answer true.
+        print("ar.canPreview simulator:", QLPreviewController.canPreview(url as NSURL))
+        #else
+        XCTAssertTrue(QLPreviewController.canPreview(url as NSURL))
+        #endif
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path), "the old Reality file is removed, never reused")
+        let bounds = try await Entity(contentsOf: url).visualBounds(relativeTo: nil)
+        XCTAssertEqual(bounds.extents.x, 0.146, accuracy: 0.0005, "146 mm, in metres")
+        XCTAssertEqual(bounds.extents.y, 0.020, accuracy: 0.0005, "STL Z is up")
+        XCTAssertEqual(bounds.min.y, 0, accuracy: 0.0005, "it rests on the surface")
+        // Asked again, the file is reused, not rewritten.
+        let again = await ARModel.usdz(fromSTL: stl, tint: "#FF8800")
+        XCTAssertEqual(again, url)
+        XCTAssertEqual(ARModel.target(forSTL: stl, tint: nil).lastPathComponent, "model.neutral.ar.usdz")
+    }
 }
