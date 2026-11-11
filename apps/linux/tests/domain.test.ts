@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { canLocate, gallery, drawnColour, photoPicture, still } from "../src/gallery";
 import {
   MAKE_FROM_SCAN, FIT_CHOICE, COPY_CHOICE, USE_EXISTING_SCAN, canMakeFromScan, scanLineage, scansToReuse, scannedLine,
+  FIT_SIZE_SOURCES, fitSizeDetail, fitMissing, makeFromScanParams, newFitChoice,
   pageActions,
   projectPage,
   codeEngineRow,
@@ -941,4 +942,24 @@ test("make something else from this scan: every project with a scan offers it, a
   assert.equal(gone.from?.exists, false);
   assert.deepEqual(scansToReuse([leatherman, { ...base, id: "w", title: "Hook", createdAtMs: 9000 } as Project, belt]).map((p) => p.id), ["belt", "src"]);
   assert.equal(scannedLine({ createdAtMs: 1_762_243_200_000 }, "America/Denver"), "scanned Nov 4");
+});
+
+test("a fit made from a kept scan sends how its size is settled, starting on Use scan, as the iPhone and the Mac do", () => {
+  const id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01";
+  // The same words as CounterpartKit's ProjectFit.SizeSource.
+  assert.deepEqual(FIT_SIZE_SOURCES.map(([, label]) => label), ["Look up", "I measured", "Use scan"]);
+  assert.match(fitSizeDetail("scan"), /^Uses the scan's size as an estimate\. Best for loose holders; your computer says the clearance it allowed\.$/);
+  const choice = newFitChoice();
+  assert.equal(choice.source, "scan", "the scan is the thing it must fit");
+  assert.deepEqual(makeFromScanParams(id, "fit", " A belt case for it ", choice),
+    { id, kind: "fit", instructions: "A belt case for it", fit: { sizeSource: "scan" } });
+  const measured = { ...choice, source: "measured" as const, longest: "115,5", shortest: "" };
+  assert.equal(fitMissing(measured), undefined);
+  assert.deepEqual(makeFromScanParams(id, "fit", "A sheath", measured).fit,
+    { sizeSource: "measured", measured: [{ id: "longest", label: "longest side", mm: 115.5 }] });
+  assert.equal(fitMissing({ ...measured, longest: "" }), "Enter at least one measurement in millimetres.");
+  assert.equal(fitMissing({ ...measured, middle: "wide" }), "Enter at least one measurement in millimetres.");
+  // A copy, or a fit with no words yet, sends no fit.
+  assert.deepEqual(makeFromScanParams(id, "copy", "", choice), { id, kind: "copy" });
+  assert.equal(makeFromScanParams(id, "fit", "  ", choice).fit, undefined);
 });

@@ -28,6 +28,12 @@ import {
   USE_EXISTING_SCAN,
   scannedLine,
   scansToReuse,
+  FIT_SIZE_SOURCES,
+  fitSizeDetail,
+  fitMissing,
+  makeFromScanParams,
+  newFitChoice,
+  type FitChoice,
 } from "./domain";
 import { useWorkspace } from "./useWorkspace";
 import { useChangeQueue } from "./useChangeQueue";
@@ -511,12 +517,15 @@ function NewProject({
   const [kind, setKind] = useState("fit");
   // A kept scan asks first what it becomes: nothing is chosen for the person.
   const [scanUse, setScanUse] = useState<"fit" | "copy">();
+  // A fit's exact size, as the iPhone and the Mac ask it: starts on "Use scan", the thing it must fit.
+  const [fitChoice, setFitChoice] = useState<FitChoice>(newFitChoice);
   const [url, setUrl] = useState("");
   const [draft, setDraft] = useState<Project>();
   const [inputs, setInputs] = useState<PickedInput[]>([]);
   const [error, setError] = useState("");
   if (seed) {
     const fitWithoutWords = scanUse === "fit" && !instructions.trim();
+    const sizeMissing = scanUse === "fit" ? fitMissing(fitChoice) : undefined;
     return (
       <Modal title="New project" onClose={onClose}>
         <div className="seed-scan">
@@ -525,13 +534,36 @@ function NewProject({
             <h3>What should this scan become?</h3>
             <p className="muted">{seed.title} · {scannedLine(seed)}</p>
           </div>
-          {!initialSeed && <button onClick={() => { setSeed(undefined); setScanUse(undefined); }}>Remove</button>}
+          {!initialSeed && <button onClick={() => { setSeed(undefined); setScanUse(undefined); setFitChoice(newFitChoice()); }}>Remove</button>}
         </div>
         <div className="segmented">
           {([["copy", COPY_CHOICE], ["fit", FIT_CHOICE]] as const).map(([v, l]) => (
             <button key={v} aria-pressed={scanUse === v} onClick={() => setScanUse(v)}>{l}</button>
           ))}
         </div>
+        {scanUse === "fit" && (
+          <div className="field">
+            Exact size
+            <div className="segmented">
+              {FIT_SIZE_SOURCES.map(([v, l]) => (
+                <button key={v} aria-pressed={fitChoice.source === v} onClick={() => setFitChoice({ ...fitChoice, source: v })}>{l}</button>
+              ))}
+            </div>
+            <p className="muted">{fitSizeDetail(fitChoice.source)}</p>
+            {fitChoice.source === "measured" && (
+              <div className="fit-sides">
+                {(["longest", "middle", "shortest"] as const).map((edge) => (
+                  <label key={edge} className="field">
+                    {edge.charAt(0).toUpperCase() + edge.slice(1)} (mm)
+                    <input inputMode="decimal" value={fitChoice[edge]} placeholder="0"
+                      onChange={(e) => setFitChoice({ ...fitChoice, [edge]: e.target.value })} />
+                  </label>
+                ))}
+              </div>
+            )}
+            {sizeMissing && <p className="error">{sizeMissing}</p>}
+          </div>
+        )}
         <label className="field">
           What do you need?
           <textarea autoFocus value={instructions} maxLength={8000}
@@ -545,11 +577,9 @@ function NewProject({
         {error && <p className="error">{error}</p>}
         <div className="dialog-actions">
           <button onClick={onClose}>Cancel</button>
-          <Action className="primary" disabled={!scanUse || fitWithoutWords} onError={setError}
+          <Action className="primary" disabled={!scanUse || fitWithoutWords || !!sizeMissing} onError={setError}
             run={async () => {
-              const { object } = await call<{ object: Project }>("objects.makeFromScan", {
-                id: seed.id, kind: scanUse!, ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
-              });
+              const { object } = await call<{ object: Project }>("objects.makeFromScan", makeFromScanParams(seed.id, scanUse!, instructions, fitChoice));
               onCreated(object);
             }}>
             {!scanUse ? "Choose what this scan becomes" : fitWithoutWords ? "Say what it should hold or fit" : scanUse === "copy" ? COPY_CHOICE : "Make it"}
