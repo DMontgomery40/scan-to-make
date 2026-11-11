@@ -2,13 +2,13 @@
 
 The lead's live list. It is updated every time the lead is woken, for any reason, and before the lead ends a turn. [`board.md`](board.md) holds every item and its history; this page holds only what is in motion or owed next, so nothing waits unseen. If a line here is more than an hour old, it is stale: check the thing itself.
 
-**Last checked: 2026-11-11 15:15Z by the lead (Claude Opus 5.5 high, T3 thread on agents-173, since 08:40Z). Claude delegates are unavailable: the Claude subscription hit its weekly limit at about 09:00Z (resets Nov 13 10pm MT on the Mac, Nov 14 05:00Z on agents-136). Every delegate since runs on GPT-6.1 Sol (or Muse); the lead does the rest directly.**
+**Last checked: 2026-11-11 17:20Z by the lead (Claude Opus 5.5 high, T3 thread on agents-173, since 08:40Z). Claude delegates are unavailable: the Claude subscription hit its weekly limit at about 09:00Z (resets Nov 13 10pm MT on the Mac, Nov 14 05:00Z on agents-136). Every delegate since runs on GPT-6.1 Sol (or Muse); the lead does the rest directly. No Claude model on API keys or the proxy (David, 16:55Z).**
 
 ## Running
 
 | What | Who (model) | Started | Budget ends | Last seen doing | If it finishes: next |
 |---|---|---|---|---|---|
-| Full gate on `train/2026-11-11a` (#570) at `63b0db96`: the 203d13e0 fixes plus every review fix (below) | D: GPT-6.1 Sol medium, Mac, "Gate train 11a (#570) at 63b0db96 on the Mac" | 15:10Z | 16:40Z | started; the lead's own ssh run was stopped because ssh cannot read the Spillover include in the Mac's ssh config, so agents-171 looked unreachable | `ux_gate.py`, `ux_screens.py` captures (iPhone, iPad, Duo folded/unfolded), council scores ≥9, `branch_check` READ, merge, install Mac/iPhone/iPad, ARModelTests on David's iPhone |
+| The #570 gate: every job passed at `63b0db96` except mobile/app, which failed twice on one iPad test each time, both test-side (a Pinyin keyboard on the iPad simulator, fixed `93e24446`; `isHittable` throwing on a scrolled-out row, fixed `35e7ce4b`; board X129). iPhone 92/92 both times. Mobile job rerunning at `35e7ce4b` | D: GPT-6.1 Sol medium, Mac, "Rerun the mobile gate job on train 11a at 35e7ce4b" | 16:45Z | 18:00Z | running | `ux_gate.py`, `ux_screens.py --project ba9346cd…` on iPhone, iPad, Duo folded and open (the lead looks; no council, #594), `branch_check` READ, merge, install Mac/iPhone/iPad, ARModelTests on David's iPhone |
 
 ## Finished, waiting on the lead (nobody is working on these)
 
