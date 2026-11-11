@@ -2,14 +2,14 @@
 
 The lead's live list. It is updated every time the lead is woken, for any reason, and before the lead ends a turn. [`board.md`](board.md) holds every item and its history; this page holds only what is in motion or owed next, so nothing waits unseen. If a line here is more than an hour old, it is stale: check the thing itself.
 
-**Last checked: 2026-11-11 08:35Z. The lead was removed by David at 08:33Z: [`handoff.md`](handoff.md) has what is running, what is owed and what went wrong. Nobody is watching the rows below until a new lead takes this page.**
+**Last checked: 2026-11-11 08:46Z by the new lead (Claude Opus 5.5 high, T3 thread on agents-173, since 08:40Z). The previous lead was removed by David at 08:33Z: [`handoff.md`](handoff.md) has what went wrong.**
 
 ## Running
 
 | What | Who (model) | Started | Budget ends | Last seen doing | If it finishes: next |
 |---|---|---|---|---|---|
 | Kernel round 7c: the holder on a swivel, with a base that carries the torque (X126) | D: Claude Fable 5.2 high, agents-136 | 08:24Z | 70 min; milestone 20 min (the statics, the base and the swivel chosen) | just started | the lead checks the statics and every margin in its report before David sees it |
-| The build David gets, `train/2026-11-11a` (#570, head 85477a1a): #568 + #564 + #565 + #573 and the conductor's fixes; #571 left out (one rendering test failed) | The lead: full gate running since 07:50Z (`~/scan-to-make-work/train-2026-11-11a/gate/gate.log`) | 07:50Z | about 08:50Z | 08:20Z: in the iPhone and iPad tests, no failures. Conductor's own runs: iPhone 114, iPad 48, kit 293, Mac 55, Linux 52, companion 452, none failed. Muse's review (`review-570.md`): merge after part AR is opened once on a real iPhone; four next-train findings | bad-link gate → `branch_check` READ → merge → install Mac, iPhone, iPad → run `ARModelTests` on his real iPhone and open the Leatherman page there |
+| The build David gets, `train/2026-11-11a` (#570, head `203d13e0`) | Lead fixed the 85477a1a gate's three failures in `203d13e0`: Android `HomeLayoutTests` (a bad import hid a second failure, `setContent` twice; 127 unit tests now pass on agents-173), the companion's stale capabilities expectation (`remote-auth` 34/34), and the iPad Mac-away test (not a hang: the away line came within 1 s of each launch; one test launched the app five times and read every button, 131 s; now one test per project state). Full gate + `ux_gate.py` running on the Mac: D: "Gate train 11a (#570) at 203d13e0…" (Claude Opus 5.5 medium), log `~/scan-to-make-work/train-2026-11-11a/gate2/gate.log` | 08:45Z | about 11:00Z | started | read the `gate exit` line and `ux_gate` result → `branch_check --merge` READ → merge → install Mac, iPhone, iPad → `ARModelTests` on his iPhone. `train/2026-11-11b` (#587) has the same fixes merged in (`39e90a69`) |
 
 ## Finished, waiting on the lead (nobody is working on these)
 
