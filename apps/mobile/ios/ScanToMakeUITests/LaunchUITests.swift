@@ -2223,7 +2223,16 @@ final class OnDeviceLibraryUITests: XCTestCase {
     private func leaveAndComeBack(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
         let back = app.navigationBars.buttons.firstMatch
         if back.exists && back.isHittable { back.tap() }
-        else { app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Potato")).firstMatch.tap() }
+        else {
+            // The iPad's sidebar may have folded away after the last pick: open it, then pick another project.
+            let other = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Potato")).firstMatch
+            if !other.exists {
+                let toggle = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "sidebar")).firstMatch
+                if toggle.exists { toggle.tap() }
+            }
+            XCTAssertTrue(other.waitForExistence(timeout: 5), app.debugDescription, file: file, line: line)
+            other.tap()
+        }
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
         for _ in 0..<6 where !row.isHittable { app.swipeUp() }
