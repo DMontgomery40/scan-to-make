@@ -640,6 +640,39 @@ export function spoolTitle(f: import("./types").Filament): string {
   return f.label ? `${f.label} · ${f.name}` : `${f.material} · ${f.name || f.colour}`;
 }
 
+/**
+ * PRD §8.10: an update that hears nothing more from the companion says so, as on the Mac and phones. A wait for
+ * Counterpart's own work: the companion waits up to 60 s, then admits the update after one claim and one npm lookup
+ * (~97 s at most before `started`).
+ */
+export const MCP_WAIT_LIMIT_MS = 120_000;
+/** An update under way: three install steps of up to 10 minutes each plus the MCP's restart. */
+export const MCP_STARTED_LIMIT_MS = 35 * 60_000;
+export const MCP_UNHEARD = "Counterpart didn’t say whether this updated. Try Update again.";
+export type McpPhase = "waiting" | "started";
+
+/** Where an Update answer, or an mcp.update.* event, leaves that install: waiting, under way, or neither. */
+export function mcpPhase(change: {type?: string; update?: {state: string}; state?: string}): McpPhase | undefined {
+  const state = change.type ? change.type.replace(/^mcp\.update\./, "") : change.update?.state ?? change.state;
+  return state === "waiting" || state === "started" ? state : undefined;
+}
+
+/**
+ * The clock for each install: `note` on every change of its state (waiting or started starts that phase's clock,
+ * anything else stops it); `expire` runs for an install that heard nothing more within its phase's limit.
+ */
+export function mcpWaitClock(expire: (mcpId: string) => void, limits: Record<McpPhase, number> = {waiting: MCP_WAIT_LIMIT_MS, started: MCP_STARTED_LIMIT_MS}) {
+  const clocks = new Map<string, ReturnType<typeof setTimeout>>();
+  return {
+    note(mcpId: string, phase: McpPhase | undefined) {
+      clearTimeout(clocks.get(mcpId));
+      clocks.delete(mcpId);
+      if (phase) clocks.set(mcpId, setTimeout(() => { clocks.delete(mcpId); expire(mcpId); }, limits[phase]));
+    },
+    stop() { for (const clock of clocks.values()) clearTimeout(clock); clocks.clear(); },
+  };
+}
+
 /** Keep the latest software result for every MCP operation. */
 export function mcpUpdateNotices(previous: Record<string, string>, events: {type: string; title: string; body: string; data?: {mcpId?: string}}[]): Record<string, string> {
   const next = {...previous};

@@ -2,7 +2,7 @@ import { addressField, AUTO_UPDATE_LABEL, AUTO_UPDATE_WORDS, autoUpdatePatch, au
 import { deviceConnected } from "./device-presence";
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { mcpUpdateNotice } from "./domain";
+import { mcpUpdateNotice, mcpPhase, type McpPhase } from "./domain";
 import { call, host, storeCredential, openLink } from "./bridge";
 import type { ObtainStep } from "./types";
 import { invoke } from "@tauri-apps/api/core";
@@ -91,7 +91,7 @@ export function Settings({
   onRefresh: () => Promise<void>;
   onPair: () => Promise<void>;
   mcpNotices: Record<string, string>;
-  recordMcpNotice: (id: string, words: string, begins?: boolean) => void;
+  recordMcpNotice: (id: string, words: string, begins?: boolean, phase?: McpPhase) => void;
 }) {
   const [tab, setTab] = useState("Printers");
   return (
@@ -661,7 +661,7 @@ function Printers({
   printers: Printer[];
   onRefresh: () => Promise<void>;
   notices: Record<string, string>;
-  setNotice: (id: string, words: string, begins?: boolean) => void;
+  setNotice: (id: string, words: string, begins?: boolean, phase?: McpPhase) => void;
 }) {
   const [packages, setPackages] = useState<McpPackage[]>([]);
   const [options, setOptions] = useState<SetupOptions>();
@@ -754,7 +754,7 @@ function Printers({
                     "printers.updateMcp",
                     { mcpId, fresh: true },
                   );
-                  setNotice(mcpId, mcpMoveNotice(result));
+                  setNotice(mcpId, mcpMoveNotice(result), false, mcpPhase(result));
                   await refresh();
                 }}
               >
@@ -793,7 +793,7 @@ function Printers({
                     toVersion?: string;
                     found?: string;
                   }>("printers.updateMcp", { mcpId: pkg.appMcpId });
-                  setNotice(pkg.appMcpId, mcpUpdateNotice(r));
+                  setNotice(pkg.appMcpId, mcpUpdateNotice(r), false, mcpPhase(r));
                   await refresh();
                 }}
               >

@@ -569,6 +569,17 @@ struct FixtureTransport: HTTPTransport {
             return json(["settings": settings])
         }
         if path.hasPrefix("/v1/settings/") && method == "POST" { return json(["check": ["state": "checking"]]) }
+        if path.hasPrefix("/v1/printers/mcp/"), method == "POST" {
+            // What the companion was asked, for UI tests to check (one line per request).
+            let log = folder.appending(path: "mcp-update-requests.log")
+            if !FileManager.default.fileExists(atPath: log.path) { FileManager.default.createFile(atPath: log.path, contents: nil) }
+            if let handle = try? FileHandle(forWritingTo: log) {
+                defer { try? handle.close() }
+                let line = path + " " + (String(data: request.httpBody ?? Data(), encoding: .utf8) ?? "") + "\n"
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: Data(line.utf8))
+            }
+        }
         if completingMove, path.hasPrefix("/v1/printers/mcp/"), method == "POST" { await Fixtures.mcpCopyState.accept() }
         if path.hasPrefix("/v1/printers/mcp/"), method == "POST", FileManager.default.fileExists(atPath: folder.appending(path: "mcp-update-waiting.json").path) { return HTTPReply(status: 200, body: try Data(contentsOf: folder.appending(path: "mcp-update-waiting.json"))) }
         if path.hasPrefix("/v1/printers/mcp/") && method == "POST" { return json(["update": ["mcpId": "mcp-3d", "state": "waiting", "fromVersion": "1.2.9", "toVersion": "1.2.22"]]) }

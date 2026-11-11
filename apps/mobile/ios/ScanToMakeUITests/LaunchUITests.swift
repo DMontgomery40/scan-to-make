@@ -1618,6 +1618,44 @@ final class LayoutParityUITests: XCTestCase {
 
     func testPrinterMoveCompletionSurvivesDismissingPrinters() throws { try checkCopyMove(completes: true, reopen: true) }
 
+    /// PRD §8.10 on the iPhone and iPad: the Mac answered "waiting" and its finishing event never came (the canned Mac
+    /// serves no events, as after a companion restart). The Move asked the companion for that install, said it waits,
+    /// and after the clock ran out says so and offers the Move again, rather than staying disabled forever.
+    func testAMoveThatNeverHearsBackSaysSoAndCanBePressedAgain() throws {
+        let folder = try copyFixtures(["mcp-profile-copies.json", "mcp-update-waiting.json"])
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all"]
+        app.launchEnvironment["COUNTERPART_MCP_WAIT_SECONDS"] = "3"
+        app.launch()
+        XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20), "with projects present")
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Printers")).firstMatch.tap()
+        let move = app.buttons["mcp-move-mcp-0000000000000002"]
+        XCTAssertTrue(move.waitForExistence(timeout: 5), app.debugDescription)
+        reveal(move, in: app.collectionViews.firstMatch)
+        move.tap()
+        let waiting = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "finishes its work on this printer")).firstMatch
+        XCTAssertTrue(waiting.waitForExistence(timeout: 5))
+        XCTAssertFalse(move.isEnabled, "no second Move while the first one waits")
+        let requests = try String(contentsOf: folder.appendingPathComponent("mcp-update-requests.log"), encoding: .utf8)
+        XCTAssertTrue(requests.hasPrefix("/v1/printers/mcp/mcp-0000000000000002/update "), requests)
+        XCTAssertTrue(requests.contains("\"fresh\":true"), "a Move asks for Counterpart's copy: \(requests)")
+        XCTAssertTrue(app.staticTexts["Counterpart didn’t say whether this updated. Try Update again."].waitForExistence(timeout: 10))
+        XCTAssertFalse(waiting.exists, "the wait no longer claims to be waiting")
+        XCTAssertTrue(move.isEnabled, "the Move can be pressed again")
+    }
+
+    private func copyFixtures(_ names: [String]) throws -> URL {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for name in names {
+            try FileManager.default.copyItem(at: root.appendingPathComponent("packages/contracts/fixtures/" + name), to: folder.appendingPathComponent(name))
+        }
+        return folder
+    }
+
     private func checkCopyMove(completes: Bool, reopen: Bool = false) throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }

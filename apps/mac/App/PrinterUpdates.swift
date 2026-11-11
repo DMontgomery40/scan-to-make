@@ -3,6 +3,7 @@ import SwiftUI
 #if canImport(ControlKit)
 import ControlKit
 #endif
+import class CounterpartKit.MCPUpdateWaits
 
 /// One printer MCP install's update, as Settings → Printers shows it (PRD §8.10). The companion does the work; the
 /// Mac shows what `printers.updateMcp` answers and what the `mcp.update.*` events say after it.
@@ -71,21 +72,20 @@ enum McpUpdateStatus: Equatable, Sendable {
 
     func set(_ mcpId: String, _ status: McpUpdateStatus?) { record(mcpId, status) }
 
-    /// How long a wait may go without word from the companion, which ends every wait within a minute (a send, slice or
-    /// design that is still going ends it with a sentence). Past this, an event went missing, say a companion restart.
-    var waitingLimit: Duration = .seconds(90)
-    static let unheard = "Counterpart didn’t say whether this updated. Try Update again."
-    private var waits: [String: UUID] = [:]
+    /// How long a wait may go without word from the companion (CounterpartKit's `MCPUpdateWaits`, shared with the phones).
+    var waitingLimit: Duration { get { waits.waitingLimit } set { waits.waitingLimit = newValue } }
+    var startedLimit: Duration { get { waits.startedLimit } set { waits.startedLimit = newValue } }
+    static let unheard = MCPUpdateWaits.unheard
+    private let waits = MCPUpdateWaits()
 
-    /// Every change of an install's state: a wait that hears nothing more becomes a sentence and Update is offered again.
+    /// Every change of an install's state: a wait or an update under way that hears nothing more becomes a sentence and
+    /// Update is offered again.
     private func record(_ mcpId: String, _ value: McpUpdateStatus?) {
         status[mcpId] = value
-        guard value == .waiting else { waits[mcpId] = nil; return }
-        let token = UUID(), limit = waitingLimit
-        waits[mcpId] = token
-        Task { [weak self] in
-            try? await Task.sleep(for: limit)
-            guard let self, self.waits[mcpId] == token, self.status[mcpId] == .waiting else { return }
+        let phase: MCPUpdateWaits.Phase?
+        switch value { case .waiting: phase = .waiting; case .updating: phase = .started; default: phase = nil }
+        waits.note(mcpId, phase) { [weak self] in
+            guard let self, self.status[mcpId]?.busy == true else { return }
             self.record(mcpId, .problem(Self.unheard))
         }
     }
@@ -137,6 +137,8 @@ struct PrinterMCP: Identifiable, Equatable {
     let missing: [String]
     /// The install, as `printers.updateMcp` names it.
     let mcpId: String?
+    /// The package, as the companion names it (`bambu-printer-mcp`, `mcp-3d-printer-server`).
+    var package: String? = nil
     /// The install itself when the companion names it; else what tells installs apart for an older companion.
     var id: String { mcpId ?? "\(name)|\(origin ?? "")|\(version ?? "")" }
     /// A newer version is published (or the companion says this one lacks something).
@@ -144,32 +146,49 @@ struct PrinterMCP: Identifiable, Equatable {
 
     static func == (a: PrinterMCP, b: PrinterMCP) -> Bool { a.id == b.id && a.printers == b.printers }
 
-    /// A printer MCP's name as people know it, from its package.
+    /// A printer MCP's name as people know it. Only the Add Printer sheet still calls this (PrinterSetupViews.swift,
+    /// lane B's); the rows below take the name the companion sends. Remove with that caller (AGENTS.md: no package branching).
     static func label(_ backend: String) -> String { backend == "bambu-printer-mcp" ? "bambu-printer-mcp" : "mcp-3D-printer-server" }
 
     static func list(_ printers: [PrinterDestination]) -> [PrinterMCP] {
         // One row per install: by `mcpId` when the companion names it, so two installs never share a row (or an Update).
-        let grouped = Dictionary(grouping:printers) { $0.mcpId ?? "\($0.mcpName)|\($0.origin ?? "")|\($0.capabilities?.server?.version ?? "")" }
+        let grouped = Dictionary(grouping:printers) { $0.mcpId ?? "\(Self.packageKey($0.backend))|\($0.origin ?? "")|\($0.capabilities?.server?.version ?? "")" }
         let rows = grouped.values.map { members in
             let first = members[0]
-            return PrinterMCP(name:first.mcpName, version:first.capabilities?.server?.version, origin:first.origin, printers:members.map(\.name),
+            return PrinterMCP(name:Self.name(first), version:first.capabilities?.server?.version, origin:first.origin, printers:members.map(\.name),
                               update:members.compactMap { $0.capabilities?.update }.first, missing:first.capabilities?.missing ?? [],
-                              mcpId:members.compactMap(\.mcpId).first)
+                              mcpId:members.compactMap(\.mcpId).first, package:first.backend)
         }
         // A printer set up in both MCPs is listed once, under the MCP its prints go through; the other MCP still gets
-        // its row (Nov 6: "now i only see one to update and missing the other one").
-        let shown = Set(rows.map { $0.name.lowercased() })
-        var others: [String: [String]] = [:]
+        // its row, with its own install, name, version and Update, as the companion names them (Nov 6: "now i only see
+        // one to update and missing the other one"). Left out only when that install already has a row: by `mcpId`, or
+        // by package for a companion that doesn't name installs. Never by shown name.
+        let shownInstalls = Set(rows.compactMap(\.mcpId)), shownPackages = Set(rows.compactMap { $0.package.map(Self.packageKey) })
+        var others: [String: (choice: PrinterDestination.McpChoice, printers: [String])] = [:]
         for printer in printers {
-            for choice in printer.mcps ?? [] where choice.backend != printer.backend && !shown.contains(choice.backend.lowercased()) {
-                others[choice.backend, default: []].append(printer.name)
+            for choice in printer.mcps ?? [] where Self.packageKey(choice.backend) != Self.packageKey(printer.backend) {
+                if let id = choice.mcpId { if shownInstalls.contains(id) { continue } }
+                else if shownPackages.contains(Self.packageKey(choice.backend)) { continue }
+                let key = choice.mcpId ?? Self.packageKey(choice.backend)
+                others[key, default: (choice, [])].printers.append(printer.name)
             }
         }
-        let more = others.map { backend, names in
-            PrinterMCP(name:label(backend), version:nil, origin:nil, printers:names, update:nil, missing:[], mcpId:nil)
+        let more = others.values.map { other in
+            let choice = other.choice
+            return PrinterMCP(name:choice.label ?? choice.backend, version:choice.version, origin:nil, printers:other.printers,
+                              update:choice.latestVersion.map { .init(message:"", package:choice.backend, command:nil, latestVersion:$0) },
+                              missing:[], mcpId:choice.mcpId, package:choice.backend)
         }
         return (rows + more).sorted { $0.name == $1.name ? ($0.origin ?? "") < ($1.origin ?? "") : $0.name < $1.name }
     }
+
+    /// The MCP a printer's prints go through, as the companion names it; an older companion's package id as sent.
+    static func name(_ printer: PrinterDestination) -> String {
+        printer.mcps?.first { Self.packageKey($0.backend) == Self.packageKey(printer.backend) }?.label ?? printer.mcpLabel ?? printer.backend
+    }
+
+    /// A package as the companion names it, whatever its case.
+    static func packageKey(_ backend: String) -> String { backend.lowercased() }
 
     /// Where its config lives, as people know it.
     var source: String {
