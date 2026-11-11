@@ -292,6 +292,7 @@ The lead looked at the images for U3–U5 himself. Each row lands on every layou
 | Nov 11 04:25Z | "we know have 'ar' AND 'see it in your space' ... it does't work on non-scanned items, never has" | X116 |
 | Nov 11 04:30Z | "HAVE YOU BUILT A FUCKING TRACKING MECHINISM FOR THE 5TH TIME ... THIS IS **YOUR CODEBASE**"; "OBVIOUS UX ISSUES STILL GOING THROUGH THE GATE" | X117, X116 |
 | Nov 11 05:30Z | "YOU MUST DO IT THOUGH THE APP AS A USER"; "DO NOTHING THAT A USER COULD NOT DO INCLUDING THE LINK"; "USE CODEX COMPUTER USE ... I HAVE TO REPEAT THIS EVERY SESSION"; "REALLY REFLECT ON WHY THE FUCK YOU WOULD SCRIPT A PRINT" | X118; operations.md |
+| Nov 11 06:50Z | "that is ot a very usable clip, at all, not fun to use" (the published clip) | X119, X121: the published clip is the yardstick for bite only; ease of use is a pass/fail check on every kernel build, equal to its force check (kernel round 7 told 06:50Z) |
 | Nov 11 06:45Z | "that is done and cleared and that is a damn very cipply clip. now redesign the phone holder with all the new engine and research stuff" | X119 (the published clip is the yardstick; bed clear), X121 (holder moved to first in kernel round 7) |
 | Nov 11 06:35Z | "redesign the phone holder from scratch. take the orignal prompt ... run the prompt agian, just through the new prompts and physics and design engines" | X121 |
 | Nov 11 06:20Z | "that's not visual and spatial that is just basic fucking code representing spatial" | X120 |
