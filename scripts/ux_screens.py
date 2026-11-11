@@ -584,7 +584,9 @@ def run_devices(keys: list[str], items: list[dict], app: Path, out: Path, record
                 if fresh_simulator:
                     udid = created[base] = simctl('create', f'ux-screens-{base}-{RUN_ID}', kind, runtime)
                 else:
-                    udid = kept[base] = kept_simulator(base, kind, runtime)
+                    # --keep-app-data uses a kept simulator of its own (stm-ux-<kind>-kept): another run on the shared
+                    # one uninstalls the app between holds, which would take the kept data with it.
+                    udid = kept[base] = kept_simulator(base + ('-kept' if keep_data else ''), kind, runtime)
                 simctl('boot', udid, check=False)  # already booted is fine
                 simctl('bootstatus', udid, '-b')
                 fresh_app(udid, app, keep_data=keep_data and not fresh_simulator)
@@ -679,9 +681,9 @@ def main() -> int:
     parser.add_argument('--fresh-simulator', action='store_true',
                         help='create and delete a simulator for this run (the behaviour before Nov 10) instead of the kept stm-ux-* one')
     parser.add_argument('--keep-app-data', action='store_true',
-                        help="keep the app's data from the last run on the kept simulator (its on-device library and saved project "
-                             "list): run once normally, then again with --condition away --keep-app-data to see what the phone shows "
-                             "from what it kept")
+                        help="keep the app's data from the last --keep-app-data run (its on-device library and saved project list), "
+                             "on a kept simulator of its own (stm-ux-<kind>-kept): run once with --keep-app-data, then again with "
+                             "--condition away --keep-app-data to see what the phone shows from what it kept")
     parser.add_argument('--pages', type=int, help='at most this many scrolled pages per screen')
     parser.add_argument('--redo', action='store_true', help='capture the selected screens again (with --devices/--screens)')
     args = parser.parse_args()
