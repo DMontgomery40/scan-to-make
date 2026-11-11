@@ -117,7 +117,9 @@ struct MainWindow: View {
         case .notSetUp:
             QuietMessage(title: "Not Set Up Yet", text: "Counterpart needs Claude Code and your printer set up on this Mac first.")
                 .navigationTitle("Counterpart")
-        case .notRunning:
+        // A project already shown stays, with one line that the companion isn't answering (board X100); the whole page
+        // says so only when there is nothing to show.
+        case .notRunning where model.selected == nil:
             QuietMessage(title: "Not Running", text: "Counterpart couldn’t start in the background.")
                 .navigationTitle("Counterpart")
         default:

@@ -807,6 +807,15 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(model.objects.count, 1)
         await model.refresh()
         XCTAssertEqual(model.availability, .notRunning)
+        // Board X100: what was shown stays, with one line saying the companion isn't answering and since when.
+        XCTAssertEqual(model.objects.map(\.id), ["a"], "the project already shown is kept")
+        XCTAssertNotNil(model.heardAt)
+        XCTAssertTrue(model.notAnsweringLine?.hasPrefix("Counterpart’s background service isn’t answering, so Print waits. This is what it showed at") == true,
+                      model.notAnsweringLine ?? "no line")
+        await companion.failList(with: nil)
+        await model.refresh()
+        XCTAssertEqual(model.availability, .ready)
+        XCTAssertNil(model.notAnsweringLine, "it answered, so the line goes")
     }
 
     func testAnUncertainPrintIsSentWithCheckedAndTheResultShowsAtOnce() async {

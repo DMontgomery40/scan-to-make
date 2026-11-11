@@ -1016,6 +1016,42 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(mic.waitForExistence(timeout: 10), "with its projects")
     }
 
+    /// Board X100: David's phone reaches his Mac through a tunnel from cellular, so the link drops after the list has
+    /// loaded. Opening a project then shows what the phone already has (its title, its state, the stage's picture) with one
+    /// line that the Mac isn't answering and Try Again, never "Couldn't load project"; Print waits; the Mac coming back
+    /// clears the line. With projects present, on the iPhone and the iPad.
+    func testAProjectOpensFromWhatThePhoneHasWhenTheMacStopsAnsweringWithProjectsPresent() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "all"]
+        app.launch()
+        let mic = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch
+        XCTAssertTrue(mic.waitForExistence(timeout: 20), "the list has loaded")
+        let offline = folder.appendingPathComponent("offline")
+        try Data().write(to: offline)
+        mic.tap()
+        let away = app.descendants(matching: .any)["project-away"]
+        XCTAssertTrue(away.waitForExistence(timeout: 20), "one line says the Mac isn't answering: \(app.debugDescription)")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Your Mac isn’t answering, so Print and Send wait. This is what your phone had at")).firstMatch.exists,
+                      "and when what is shown was true")
+        XCTAssertFalse(app.staticTexts["Couldn't load project"].exists, "the page is not replaced")
+        let title = app.buttons["project-title"]
+        XCTAssertTrue(title.exists && title.label.contains("Mic mount"), "the title the phone had: \(title.label)")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ OR identifier == %@", "Status", "status-menu")).firstMatch.exists
+                      || app.staticTexts.matching(NSPredicate(format: "label IN %@", ["Ready", "Done", "Working", "Needs you", "Printing", "Failed"])).firstMatch.exists, "its state")
+        let picture = app.images["gallery-stage-picture"]
+        XCTAssertTrue(picture.waitForExistence(timeout: 10), "the stage keeps its picture, not a blank: \(String(describing: picture.value))")
+        XCTAssertNotEqual(picture.value as? String, "", "the picture says what it is")
+        let print = app.buttons["print"]
+        if print.exists { XCTAssertFalse(print.isEnabled, "Print waits for the Mac rather than failing after a tap") }
+        try FileManager.default.removeItem(at: offline)
+        app.buttons["project-away-retry"].tap()
+        XCTAssertTrue(away.waitForNonExistence(timeout: 15), "the Mac answered, so the line goes")
+        if print.exists { XCTAssertTrue(print.isEnabled) }
+    }
+
     // A fold, an unfold and an iPad resize with a project or the print sheet open are unit tests of the navigation
     // value now (CounterpartKit `ProjectsNavigationTests`): XCTest has no hinge API and could not drive them here.
     // The hinge itself is looked at on the iPhone Duo simulator with `agent-device fold open|closed`, and

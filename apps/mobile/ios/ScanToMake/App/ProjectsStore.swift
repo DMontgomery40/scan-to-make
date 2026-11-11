@@ -152,14 +152,53 @@ import CounterpartKit
 
     private var reads = ProjectReads()
 
+    // MARK: What this phone already has (board X100)
+
+    /// When the Mac last answered with each project (`KnownProjects`): a page shown while the Mac isn't answering says it.
+    var heard: [String: Date] = [:]
+    @ObservationIgnored private var known: KnownProjects?
+    nonisolated static var knownFile: URL {
+        URL.applicationSupportDirectory.appending(path: "Counterpart/known-projects.json")
+    }
+    /// The paired Mac, so one Mac's copy is never shown as another's. A fixture pairing (UI tests) keeps it in memory only.
+    private var knownMac: String? {
+        guard let status = connection, status.state == .paired, !status.fixture else { return nil }
+        return status.baseUrl
+    }
+
+    /// Before the first list arrives: the projects this phone last heard from this Mac, so Home and a project page open
+    /// at once from them on a slow or dropped link (a relaunch included). The list replaces them when it comes.
+    func restoreKnown() {
+        guard projects.isEmpty, let mac = knownMac, let saved = KnownProjects.load(from: Self.knownFile, mac: mac) else { return }
+        known = saved
+        projects = saved.projects
+        heard = saved.heard
+    }
+
+    private func remember(listed: [Project]? = nil, one: Project? = nil, forget: String? = nil) {
+        let now = Date()
+        if let listed { for project in listed { heard[project.id] = now } }
+        if let one { heard[one.id] = now }
+        if let forget { heard[forget] = nil }
+        guard let mac = knownMac else { return }
+        var copy = known?.mac == mac ? known! : KnownProjects(mac: mac)
+        if let listed { copy.heard(listed, at: now) }
+        if let one { copy.heard(one, at: now) }
+        if let forget { copy.forget(forget) }
+        known = copy
+        copy.save(to: Self.knownFile)
+    }
+
     // MARK: Reading
 
     func load() async {
+        if !loaded { restoreKnown() }
         let ticket = reads.start()
         do {
             let latest = try await mac.list()
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return }
             projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; answered()
+            remember(listed: latest)
             refreshStoppedScans()
             for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
         } catch let failure as CompanionError {
@@ -177,7 +216,7 @@ import CounterpartKit
             let latest = try await mac.get(id)
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return .cancelled }
             answered()
-            if reads.accept(id, ticket: ticket) { show(latest) }
+            if reads.accept(id, ticket: ticket) { show(latest); remember(one: latest) }
             return nil
         } catch {
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return .cancelled }
@@ -268,7 +307,7 @@ import CounterpartKit
 
     @discardableResult func replace(_ project: Project, ticket: Int) -> Bool {
         guard reads.accept(project.id, ticket: ticket) else { return false }
-        show(project)
+        show(project); remember(one: project)
         return true
     }
 
@@ -317,14 +356,17 @@ import CounterpartKit
         sendQueuedNote(project)
     }
     private var correcting: Set<String> = []
-    func remove(_ id: String) { reads.remove(id); corrections.remove(id); projects.removeAll { $0.id == id } }
+    func remove(_ id: String) { reads.remove(id); corrections.remove(id); projects.removeAll { $0.id == id }; remember(forget: id) }
 
     /// Clears everything read from the previous Mac.
     func reset() {
         reads.reset()
         models.reset()
+        known = nil; heard = [:]
         projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
         stoppedScans = [:]; readyScans = []; sendFailures = [:]
+        // Runs at every launch and pairing: what this phone already had from the Mac now paired (none from another).
+        restoreKnown()
     }
 
     /// One consumer for the visible app: events when served, otherwise a refresh every 30 s.

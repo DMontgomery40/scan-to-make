@@ -14,6 +14,8 @@ import com.scantomake.counterpart.api.canLocate
 
 import com.scantomake.counterpart.api.photoPicture
 import com.scantomake.counterpart.api.Still
+import com.scantomake.counterpart.api.KnownProjects
+import com.scantomake.counterpart.api.MacLink
 import com.scantomake.counterpart.api.still
 
 import com.scantomake.counterpart.api.ProjectGallery
@@ -106,6 +108,10 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
     val failures by state.sendFailures.collectAsState()
     val sending by state.sending.collectAsState()
     val project = projects.firstOrNull { it.id == id }
+    // The computer isn't answering: the page shows what this phone already had and says so; Print and Send wait (X100).
+    val link by state.link.collectAsState()
+    val heard by state.heard.collectAsState()
+    val away = link == MacLink.NotAnswering
     // While this shows, its notifications aren't posted again (the page already shows the change).
     DisposableEffect(id) { state.showing(id, true); onDispose { state.showing(id, false) } }
     var working by remember { mutableStateOf<String?>(null) }
@@ -125,6 +131,9 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
     var noteAttempt by remember { mutableStateOf<NoteAttempt?>(null) }
 
     LaunchedEffect(id) { if (state.reload(id)?.code == "not-found") back() }
+    // The link came back (the event stream's recovery): the page reads the project again by itself.
+    var wasAway by remember { mutableStateOf(false) }
+    LaunchedEffect(away) { if (away) wasAway = true else if (wasAway && link == MacLink.Connected) { wasAway = false; state.reload(id) } }
 
     fun run(kind: String, body: suspend () -> Unit) {
         if (working != null) return
@@ -219,7 +228,11 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                 }
             }
             Text(words.status, fontSize = 17.sp)
-            ProjectPlates(project, working != null,
+            if (away) Row(Modifier.fillMaxWidth().testTag("project-away"), verticalAlignment = Alignment.CenterVertically) {
+                Text(KnownProjects.awayLine(heard[id]), Modifier.weight(1f), color = Palette.secondary, fontSize = 14.sp)
+                TextButton({ scope.launch { state.reload(id) } }, Modifier.testTag("project-away-retry")) { Text("Try Again") }
+            }
+            ProjectPlates(project, working != null || away,
                 select = { plate -> run("plate") { state.show(app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex)) } },
                 print = { plate -> run("plate") {
                     if (!plate.selected) state.show(app.companion.selectPlate(id, plate.fileIndex, plate.plateIndex))
@@ -327,11 +340,11 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
             if (page.main == MainAction.Retry) PrimaryButton("Try Again", Modifier.fillMaxWidth().testTag("retry"), icon = CIcons.Refresh, enabled = working == null, onClick = retry)
             // Print once, under what it is here ("Print the last version", "Print Again", "Print Another"), and never while a change is being made.
             page.printWords?.let { printWords ->
-                if (page.printIsMain) PrimaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = working == null, onClick = print)
-                else SecondaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = working == null, onClick = print)
+                if (page.printIsMain) PrimaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = working == null && !away, onClick = print)
+                else SecondaryButton(printWords, Modifier.fillMaxWidth().testTag("print"), icon = CIcons.Printer, enabled = working == null && !away, onClick = print)
                 page.printNote?.let { Text(it, color = Palette.secondary, fontSize = 13.sp) }
             }
-            if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth(), enabled = working == null) {
+            if (ProjectAction.FinishSending in words.actions && id !in sending) PrimaryButton("Send to Your Computer", Modifier.fillMaxWidth(), enabled = working == null && !away) {
                 state.sendInBackground(id) { state.show(Media.sendProject(context, app.uploader, app.companion, id, emptyList())) }
             }
             if (ProjectAction.Scan in words.actions) {

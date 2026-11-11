@@ -56,6 +56,8 @@ struct ProjectView: View {
     @State private var answerRoom = AnswerRoom()
     @FocusState private var writing: Bool
     private var object: Project? { store.project(id) }
+    /// The Mac isn't answering: the page shows what this phone already had and says so, and Print and Send wait (X100).
+    private var away: Bool { store.reachable == false }
 
     var body: some View {
         Group {
@@ -93,6 +95,10 @@ struct ProjectView: View {
             store.askAfterPrinting = nil
             if !note.hasPrefix(Self.afterPrinting) { note = Self.afterPrinting + note }
             writing = true
+        }
+        // The link came back (the store's own recovery, #539): the page reads the project again by itself.
+        .onChange(of: store.reachable) { _, now in
+            if now == true, fetchFailure != nil { Task { await reload() } }
         }
         .onAppear { app.showing(id, true) }
         .onDisappear { app.showing(id, false) }
@@ -231,7 +237,7 @@ struct ProjectView: View {
                 .padding(.horizontal, 20)
 
                 if (object.plates?.count ?? 0) > 1 {
-                    ProjectPlatesView(project: object, busy: working, thumbnail: { plate in
+                    ProjectPlatesView(project: object, busy: working || away, thumbnail: { plate in
                         ProjectImage(project: object, path: plate.thumbnail, maxPixelSize: 400, contentMode: .fit)
                     }, select: { plate in
                         act { try await store.mac.client.selectPlate(object.id, fileIndex: plate.fileIndex, plateIndex: plate.plateIndex) }
@@ -247,7 +253,18 @@ struct ProjectView: View {
                 if object.current == nil, let captureWarning {
                     Label(captureWarning, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
                 }
-                if let message = problem ?? fetchFailure?.message ?? store.sendFailures[object.id] {
+                if away {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Label(KnownProjects.awayLine(heard: store.heard[object.id]), systemImage: "wifi.exclamationmark")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Button("Try Again") { Task { await reload() } }.font(.subheadline.weight(.semibold)).disabled(loading)
+                            .accessibilityIdentifier("project-away-retry")
+                    }
+                    .padding(.horizontal, 20)
+                    .accessibilityElement(children: .contain).accessibilityIdentifier("project-away")
+                }
+                if let message = problem ?? (away ? nil : fetchFailure?.message) ?? store.sendFailures[object.id] {
                     Label(message, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
                 }
                 if let notice, problem == nil {
@@ -715,6 +732,7 @@ struct ProjectView: View {
                             Label(print, systemImage: "printer").fontWeight(words.page.printIsMain ? .semibold : .regular).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).frame(height: 30)
                         }
                         .mainAction(words.page.printIsMain)
+                        .disabled(away)
                         .accessibilityIdentifier("failed-print")
                     }
                 }
@@ -765,6 +783,7 @@ struct ProjectView: View {
                         Label("Send to your Mac", systemImage: "arrow.up.circle").frame(maxWidth: .infinity).frame(height: 30)
                     }
                     .buttonStyle(.glassProminent)
+                    .disabled(away)
                     .accessibilityIdentifier("stopped-scan.send")
                     if store.canScan {
                         Button { act { try await scan(object, handheld: false) } } label: {
@@ -792,6 +811,7 @@ struct ProjectView: View {
                             Label("Send to your Mac", systemImage: "arrow.up.circle").frame(maxWidth: .infinity).frame(height: 30)
                         }
                         .buttonStyle(.glassProminent)
+                        .disabled(away)
                         .accessibilityIdentifier("draft.send")
                     }
                     if words.actions.contains(.scan) && store.canScan {
@@ -861,6 +881,7 @@ struct ProjectView: View {
                                 .fixedSize().padding(.horizontal, 8).frame(height: 36)
                         }
                         .mainAction(words.page.printIsMain)
+                        .disabled(away)
                         .controlSize(.large)
                         .fixedSize()
                         .layoutPriority(1)

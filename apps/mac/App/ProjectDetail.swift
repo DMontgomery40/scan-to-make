@@ -95,6 +95,12 @@ struct ProjectDetail: View {
                         Spacer()
                     }
                 }
+                if let line = model.notAnsweringLine {
+                    Label(line, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12).background(.regularMaterial, in: .rect(cornerRadius: 16))
+                        .accessibilityIdentifier("project-not-answering")
+                }
                 card
                 bar
             }
@@ -401,6 +407,7 @@ struct ProjectDetail: View {
     private var canCorrect: Bool { object.canAskForChanges && !working }
     private var canPrint: Bool {
         (words.actions.contains(.print) || words.actions.contains(.printChecked)) && !working && model.printer(for: object) != nil
+            && model.availability != .notRunning
     }
 
     private var bar: some View {

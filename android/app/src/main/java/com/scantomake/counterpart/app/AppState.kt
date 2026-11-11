@@ -6,6 +6,7 @@ import android.content.Context
 import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.CounterpartEvent
 import com.scantomake.counterpart.api.EventUpdate
+import com.scantomake.counterpart.api.KnownProjects
 import com.scantomake.counterpart.api.MacLink
 import com.scantomake.counterpart.api.PrinterCatalog
 import com.scantomake.counterpart.api.Project
@@ -72,6 +73,7 @@ class AppState(private val app: Counterpart) {
 
     init {
         readStatus()
+        restoreKnown()
         scope.launch {
             app.pairingStore.changes.collect {
                 readStatus()
@@ -88,6 +90,29 @@ class AppState(private val app: Counterpart) {
     fun readStatus() { status.value = try { app.pairingStore.status() } catch (_: Exception) { PairingStatus.disconnected } }
 
     fun project(id: String) = projects.value.firstOrNull { it.id == id }
+
+    // What this phone already has (board X100): a page opens from it while the computer isn't answering, relaunch too.
+    /** When the computer last answered with each project. */
+    val heard = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private var known: KnownProjects? = null
+    private val knownFile get() = java.io.File(app.filesDir, "known-projects.json")
+    private val knownMac: String? get() = status.value?.takeIf { it.state == PairingStatus.State.Paired }?.baseUrl
+
+    /** Before the first list arrives: the projects this phone last heard from this computer. */
+    fun restoreKnown() {
+        val mac = knownMac ?: return
+        if (projects.value.isNotEmpty()) return
+        val saved = KnownProjects.decode(runCatching { knownFile.readText() }.getOrNull(), mac) ?: return
+        known = saved; projects.value = saved.projects; heard.value = saved.heard
+    }
+
+    private fun remember(change: (KnownProjects, Long) -> KnownProjects) {
+        val mac = knownMac ?: return
+        val now = System.currentTimeMillis()
+        val next = change(known?.takeIf { it.mac == mac } ?: KnownProjects(mac), now)
+        known = next; heard.value = next.heard
+        scope.launch(Dispatchers.IO) { runCatching { knownFile.writeText(next.encode()) } }
+    }
     fun printerName(p: Project): String? = p.print?.destination?.name ?: catalog.value?.resolved(p.printerDestinationId)?.name
     fun words(p: Project) = ProjectWords(p, sending = p.id in sending.value, localScan = Media.captureFinished(app, p.id), printerName = printerName(p))
     val anyRunning: Boolean get() = projects.value.any { words(it).busy } || sending.value.isNotEmpty()
@@ -99,9 +124,12 @@ class AppState(private val app: Counterpart) {
     }
 
     suspend fun load() {
+        if (!loaded.value) restoreKnown()
         try {
-            projects.value = app.companion.list()
+            val listed = app.companion.list()
+            projects.value = listed
             error.value = null; link.value = link.value.answered()
+            remember { k, now -> k.heard(listed, now) }
         } catch (e: CancellationException) { throw e } catch (e: CompanionException) {
             // The list couldn't be read: the banner says why, whatever the reason.
             if (e.code != "cancelled") { link.value = link.value.failed(e); error.value = e }
@@ -112,7 +140,8 @@ class AppState(private val app: Counterpart) {
     /** A project refresh tells the link what happened, as the list load does: an answer, a refusal (still an answer),
      *  pairing lost, or no answer at all. */
     suspend fun reload(id: String): CompanionException? = try {
-        show(app.companion.get(id)); answered(); null
+        val latest = app.companion.get(id)
+        show(latest); answered(); remember { k, now -> k.heard(latest, now) }; null
     } catch (e: CompanionException) {
         if (e.code != "cancelled") requestFailed(e)
         if (e.code == "not-found") remove(id)
@@ -123,7 +152,7 @@ class AppState(private val app: Counterpart) {
         projects.update { list -> if (list.any { it.id == p.id }) list.map { if (it.id == p.id) p else it } else listOf(p) + list }
     }
 
-    fun remove(id: String) { projects.update { list -> list.filterNot { it.id == id } } }
+    fun remove(id: String) { projects.update { list -> list.filterNot { it.id == id } }; remember { k, _ -> k.forget(id) } }
 
     suspend fun loadPrinters() { try { catalog.value = app.companion.printers() } catch (_: Exception) {}; loadMcpCopies() }
     suspend fun loadMcpCopies() {
@@ -146,6 +175,8 @@ class AppState(private val app: Counterpart) {
         capabilities.value = emptySet(); eventsSupported.value = null; sendFailures.value = emptyMap()
         mcpUpdateAttempts.value = emptyMap()
         mcpUpdateEvents.value = emptyMap(); mcpCopies.value = null; mcpCopiesProblem.value = null
+        known = null; heard.value = emptyMap()
+        restoreKnown()
     }
 
     /** Projects whose page or Printing screen is showing, counted (a push then a pop never loses one). */

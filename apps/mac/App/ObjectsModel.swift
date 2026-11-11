@@ -255,6 +255,15 @@ struct SocketObjects: ObjectsCompanion {
     private let now: () -> Date
     private var extrasReadAt: Date?
     private var loadedOnce = false
+    /// When the companion last answered with the list (board X100): while it isn't answering, a project's page stays
+    /// and says what it shows is from then.
+    @Published private(set) var heardAt: Date?
+    /// The one line over a project shown while the companion isn't answering; nil while it answers.
+    var notAnsweringLine: String? {
+        guard availability == .notRunning else { return nil }
+        let when = heardAt.map { " This is what it showed \(KnownProjects.when($0, now: now()))." } ?? ""
+        return "Counterpart’s background service isn’t answering, so Print waits." + when
+    }
     /// New Project is open in the window: nothing is selected on purpose.
     var composing = false
     /// How often the footer's phone and AI, and the capability flags, are read again.
@@ -460,6 +469,7 @@ struct SocketObjects: ObjectsCompanion {
             let read = startRead()
             let (fetched, extras) = try await companion.objectsWithExtras()
             failures = 0
+            heardAt = now()
             // A newer read may already be shown (the event relay's): this one's list is dropped, the rest still runs.
             if apply(read: read, fetched, extras) {
                 DownloadsWatcher.shared.follow(extras, titles: Dictionary(uniqueKeysWithValues: fetched.map { ($0.id, $0.words.title) }))
