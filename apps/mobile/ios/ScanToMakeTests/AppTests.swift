@@ -344,6 +344,28 @@ import CounterpartKit
         XCTAssertEqual(uses?.first?.canMove, true, "its explicit move action remains available")
     }
 
+    /// #720: a launch into one project's page reads that project alone, before (or without) the list. That one project is
+    /// not the Mac's list, so the library must not take every other project as deleted and let its files go.
+    func testOneProjectReadAloneIsNotTheMacsListForTheLibrary() {
+        let mac = SettingsMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let store = ProjectsStore(mac: MacConnection(client: CompanionClient(pairing: pairing, transport: mac)), pairing: pairing)
+        let project = Project(id: "d79d4c15-d786-461c-b76e-ec687c8e2dad", createdAtMs: 1, updatedAtMs: 2, state: .ready)
+        XCTAssertTrue(store.replace(project, ticket: store.startRequest()))
+        XCTAssertEqual(store.projects.map(\.id), [project.id])
+        XCTAssertFalse(store.listedFromMac, "one project read alone never prunes the library")
+        let library = OnDeviceLibrary(base: FileManager.default.temporaryDirectory.appending(path: "prune-\(UUID().uuidString)"))
+        library.use(mac: "m")
+        let other = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a11"
+        let file = FileManager.default.temporaryDirectory.appending(path: "kept-\(UUID().uuidString)")
+        try? Data("png".utf8).write(to: file)
+        _ = try? library.commit(file, project: other, name: "pictures/a.png", version: 1, file: "a.png")
+        let filler = LibraryFiller(client: CompanionClient(pairing: pairing, transport: mac, library: library))
+        filler.fill(store.projects, fromMac: store.listedFromMac)
+        XCTAssertNotNil(library.latest(project: other, name: "pictures/a.png"), "another project's kept picture stays")
+        try? FileManager.default.removeItem(at: library.base)
+    }
+
     func testRemoteDeletionEvictsProjectAndRejectsOlderReplies() async throws {
         let mac = SettingsMac()
         let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
