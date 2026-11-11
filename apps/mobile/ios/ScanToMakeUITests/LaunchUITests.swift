@@ -2327,8 +2327,9 @@ final class OnDeviceLibraryUITests: XCTestCase {
     }
 
     /// Issue #720. David, Nov 11: "if i just saw it 2 seconds ago, how is it having to come from my mac again?" A project
-    /// opened once, left, and opened again with the Mac not answering at all: its model and picture are drawn from the
-    /// phone, and nothing on the page says it is coming from the Mac. Then the same after a relaunch, still away.
+    /// opened once, left, and opened again: with the Mac answering, then with it not answering at all, then after a
+    /// relaunch still away. Each time its model is on the stage from the phone (a drag turns it live, `model-stage`) and
+    /// nothing says it is coming from the Mac.
     func testAProjectSeenOnceDrawsFromThePhoneWhenTheMacIsAwayWithProjectsPresent() throws {
         if UIDevice.current.userInterfaceIdiom == .pad {
             XCUIDevice.shared.orientation = .landscapeLeft
@@ -2338,27 +2339,88 @@ final class OnDeviceLibraryUITests: XCTestCase {
         // A model the stage can draw (a 40 mm cube), so the 3D path is checked too, not only the picture.
         try cube(40).write(to: folder.appendingPathComponent("mic.stl"))
         let mic = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
-        var app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(mic)"])
-        let model = app.buttons["Explore in 3D"]
-        XCTAssertTrue(model.waitForExistence(timeout: 30), "the model is drawn the first time, with the Mac answering")
+        var app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(mic)", "-CounterpartStageIdle", "30"])
+        assertTurnsFromThePhone(app, "first visit, Mac answering")
         XCTAssertTrue(waitFor(20) { entries(folder).contains { $0.project == mic && $0.kind == "model" } }, "and the phone keeps it")
         XCTAssertTrue(waitFor(10) { FileManager.default.fileExists(atPath: folder.appendingPathComponent("known-projects.json").path) }, "the saved list is written")
 
-        // Leave the page and come back with the Mac answering (the stage's own revisit, whatever the Mac does)...
+        // Leave the page and come back with the Mac answering...
         leaveAndComeBack(app)
-        assertDrawnFromThePhone(app, model, "back on the page, Mac answering")
+        assertTurnsFromThePhone(app, "back on the page, Mac answering")
         // ...then the Mac stops answering entirely, and again.
         try Data().write(to: folder.appendingPathComponent("offline"))
         leaveAndComeBack(app)
-        assertDrawnFromThePhone(app, model, "back on the page, Mac away")
+        assertTurnsFromThePhone(app, "back on the page, Mac away")
         let again = XCTAttachment(screenshot: app.screenshot()); again.name = "720-page-again-away"; again.lifetime = .keepAlways; add(again)
         app.terminate()
 
         // A relaunch, the Mac still away: the same page draws the same way.
-        app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(mic)"])
-        assertDrawnFromThePhone(app, app.buttons["Explore in 3D"], "after a relaunch, Mac away")
+        app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(mic)", "-CounterpartStageIdle", "30"])
+        assertTurnsFromThePhone(app, "after a relaunch, Mac away")
         let relaunched = XCTAttachment(screenshot: app.screenshot()); relaunched.name = "720-page-relaunch-away"; relaunched.lifetime = .keepAlways; add(relaunched)
         app.terminate()
+    }
+
+    /// Back to Home and into Mic mount again (iPhone), or to another project and back by the sidebar (iPad). The iPad finds
+    /// each row with the sidebar's own search, which also says how many projects the list holds: a project missing from
+    /// the list while the Mac is away is told apart from a row scrolled out of view.
+    private func leaveAndComeBack(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let search = app.textFields["project-search"]
+        if app.collectionViews["Sidebar"].exists, search.exists {
+            pick(app, search, "Crochet potato", "sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", file: file, line: line)
+            pick(app, search, "Mic mount", "sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", file: file, line: line)
+        } else {
+            let back = app.navigationBars.buttons.firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 5), app.debugDescription, file: file, line: line)
+            back.tap()
+            let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
+            for _ in 0..<6 where !row.isHittable { app.swipeUp() }
+            row.tap()
+        }
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
+        XCTAssertEqual(app.buttons["project-title"].label, "Mic mount", file: file, line: line)
+    }
+
+    /// Types `query` into the sidebar's search and taps the row `identifier`; the search's summary goes into the failure.
+    private func pick(_ app: XCUIApplication, _ search: XCUIElement, _ query: String, _ identifier: String, file: StaticString, line: UInt) {
+        search.tap()
+        let old = (search.value as? String) ?? ""
+        if !old.isEmpty && old != search.placeholderValue { search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+        search.typeText(query)
+        let row = app.descendants(matching: .any)[identifier]
+        let found = row.waitForExistence(timeout: 10)
+        let summary = app.descendants(matching: .any)["project-search-summary"]
+        let said = summary.exists ? summary.label : "no summary"
+        let note = XCTAttachment(string: "search \(query): \(said)"); note.name = "sidebar search: \(query)"; note.lifetime = .keepAlways; add(note)
+        XCTAssertTrue(found, "\(query) is in the sidebar's list (search says: \(said)): \(app.debugDescription)", file: file, line: line)
+        row.tap()
+    }
+
+    /// The stage has the model from the phone (its still, "still") within a few seconds, a drag turns it live, and nothing
+    /// says "coming from your Mac" meanwhile.
+    private func assertTurnsFromThePhone(_ app: XCUIApplication, _ when: String, file: StaticString = #filePath, line: UInt = #line) {
+        let coming = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "coming from your Mac"))
+        let stage = app.descendants(matching: .any)["model-stage"]
+        let end = Date().addingTimeInterval(20)
+        var ready = false
+        while Date() < end {
+            XCTAssertEqual(coming.count, 0, "\(when): \(coming.firstMatch.exists ? coming.firstMatch.label : "")", file: file, line: line)
+            if stage.exists, ["still", "failed"].contains(stage.value as? String ?? "") { ready = true; break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        if !ready || stage.value as? String != "still" {
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "not-drawn: \(when)"; shot.lifetime = .keepAlways; add(shot)
+            let tree = XCTAttachment(string: app.debugDescription); tree.name = "not-drawn tree: \(when)"; tree.lifetime = .keepAlways; add(tree)
+        }
+        XCTAssertEqual(stage.value as? String, "still", "\(when): the model is on the stage from the phone (\(stage.exists ? String(describing: stage.value) : "no model stage"))", file: file, line: line)
+        let area = stage.frame
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: area.midX - area.width * 0.2, dy: area.midY - area.height * 0.1))
+            .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: area.midX + area.width * 0.2, dy: area.midY)))
+        let live = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "live"), object: stage)
+        XCTAssertEqual(XCTWaiter().wait(for: [live], timeout: 40), .completed, "\(when): a drag turns it: \(String(describing: stage.value))", file: file, line: line)
+        XCTAssertEqual(coming.count, 0, when, file: file, line: line)
     }
 
     /// A binary STL cube of `size` mm: 12 triangles.
@@ -2373,61 +2435,6 @@ final class OnDeviceLibraryUITests: XCTestCase {
             data.append(Data(bytes: &floats, count: 48)); data.append(Data(count: 2))
         }
         return data
-    }
-
-    /// Back to Home (iPhone) or another project (iPad's sidebar), then this project's own card or row ("Mic mount", never
-    /// "Mic mount v1").
-    private func leaveAndComeBack(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-        let back = app.navigationBars.buttons.firstMatch
-        if back.exists && back.isHittable { back.tap() }
-        else {
-            // The iPad's sidebar may have folded away after the last pick: open it, then pick another project.
-            // Crochet potato's sidebar row (Fixtures.ids.potato).
-            let other = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"]
-            if !other.exists {
-                let toggle = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "sidebar")).firstMatch
-                if toggle.exists { toggle.tap() }
-            }
-            XCTAssertTrue(other.waitForExistence(timeout: 5), app.debugDescription, file: file, line: line)
-            other.tap()
-        }
-        // Mic mount's own sidebar row (iPad), else its card on Home (iPhone); never "Mic mount v1".
-        let sidebarRow = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
-        // The away banner pushes the sidebar's list down: scroll it until the row is there.
-        let sidebar = app.collectionViews["Sidebar"]
-        if sidebar.exists {
-            for _ in 0..<6 where !sidebarRow.exists { sidebar.swipeUp() }
-            for _ in 0..<8 where !sidebarRow.exists { sidebar.swipeDown() }
-        }
-        let row = sidebarRow.exists ? sidebarRow
-            : app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
-        for _ in 0..<6 where !row.isHittable { app.swipeUp() }
-        row.tap()
-        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
-        XCTAssertEqual(app.buttons["project-title"].label, "Mic mount", file: file, line: line)
-    }
-
-    /// The stage draws from the phone within a few seconds (the model, or the Mac's picture the phone keeps, "shown"), and
-    /// nothing says "coming from your Mac" meanwhile. On the iPhone a revisited page's model still (the offscreen poster)
-    /// may not come back even with the Mac answering (#720 run 4); that is ModelStage's revisit, #606's, so the picture
-    /// the phone keeps counts as drawn here. The iPad draws the model again.
-    private func assertDrawnFromThePhone(_ app: XCUIApplication, _ model: XCUIElement, _ when: String, file: StaticString = #filePath, line: UInt = #line) {
-        let coming = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "coming from your Mac"))
-        let end = Date().addingTimeInterval(15)
-        var drawn = false
-        while Date() < end {
-            XCTAssertEqual(coming.count, 0, "\(when): \(coming.firstMatch.exists ? coming.firstMatch.label : "")", file: file, line: line)
-            let stage = app.images["gallery-stage-picture"]
-            if model.exists || (stage.exists && stage.value as? String == "shown") { drawn = true; break }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        }
-        if !drawn {
-            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "not-drawn: \(when)"; shot.lifetime = .keepAlways; add(shot)
-            let tree = XCTAttachment(string: app.debugDescription); tree.name = "not-drawn tree: \(when)"; tree.lifetime = .keepAlways; add(tree)
-        }
-        XCTAssertTrue(drawn, "\(when): the stage draws from the phone", file: file, line: line)
-        XCTAssertEqual(coming.count, 0, when, file: file, line: line)
     }
 
     /// Past the ceiling, models go before pictures: the library keeps every project's picture and lets the models go.
