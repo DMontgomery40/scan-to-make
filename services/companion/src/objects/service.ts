@@ -44,6 +44,7 @@ import {ProjectPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
+import {inheritHistory} from './inherited.js';
 import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesNote, withCheckedSizes} from './asks.js';
 /** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
 export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
@@ -92,6 +93,14 @@ const BEST_GUESS_NOTE = "Make your best guess for the parts you couldn't see in 
  * so an open question, a failure and Done are exactly as they were when it ends.
  */
 const SUPERSEDES_A_QUESTION: ReadonlySet<NonNullable<StmObject['passes'][number]['trigger']>> = new Set(['new', 'changes', 'late-photos', 'ask-answer']);
+/**
+ * What follows the reason a pass stopped at a limit, where Try Again is offered. A hint may only say something true
+ * that the button under it does not. Until Nov 10 it read "Try again or review the saved checkpoint.": the first
+ * half is the button, and no client has anywhere to review a checkpoint. What a person wants to know then is whether
+ * the work is lost: when the next request carries on the worker's session (`passResume`), say so; when it would start
+ * over, say nothing and let the reason stand alone. New stops only: a stored failure keeps the words it was given.
+ */
+const stopHint = (carriesOn: boolean) => carriesOn ? ' Trying again carries on from where it stopped.' : '';
 const UNCERTAIN = 'The printer may have started this print. Check the printer before printing again.';
 
 export {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './errors.js';
@@ -686,7 +695,10 @@ export class ObjectService {
         // A code design's inputs list names its own snapshots, so the copy gets its own list.
         if (isCodeDesign(current.design)) await copyDesign(absoluteDesign(this.dir(id), current.design), join(this.dir(duplicate.id), 'current', 'design'));
         const credit = (source as StmObject & {credit?: unknown}).credit;
+        // A copy is made from another project too: what was asked and answered there goes with it.
+        const inherited = inheritHistory(source, projectTitle(source));
         const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current, ...(source.checkedSizes?.length ? {checkedSizes: source.checkedSizes} : {}),
+          ...(inherited.items.length || inherited.fit ? {inherited} : {}),
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
           preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {}),
           ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {}), ...(scan ? {scan} : {})}));
@@ -719,7 +731,7 @@ export class ObjectService {
       const title = projectTitle(source);
       const created = await this.#deps.store.create(words, request.kind, request.kind === 'fit' ? request.fit : undefined);
       // Busy while the files come: nothing can start, change or delete it halfway, and a restart says it was interrupted.
-      const seeded = await this.#deps.store.update(created.id, o => ({...o, state: 'touching-up', progress: bringingScan(title), scanFrom: {id: sourceId, title}}));
+      const seeded = await this.#deps.store.update(created.id, o => ({...o, state: 'touching-up', progress: bringingScan(title), scanFrom: {id: sourceId, title}, inherited: inheritHistory(source, title)}));
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: seeded.id, data: {keys: ['created']}});
       void this.#gate(seeded.id, () => this.#bringScan(seeded.id)).catch(() => undefined);
       return this.#changed(seeded);
@@ -3378,7 +3390,7 @@ export class ObjectService {
       failure: undefined, ask, reconstructionReview: review,
       question: {closeup: needed.review.kind === 'region' ? 'which part is the object' : 'how big the object is'},
       passes: withPassEnded(o.passes, startedAtMs, {status: 'needs_closeup'}, now,
-        pass => ({activity: this.#activity(pass.activity, [{atMs: now, kind: 'message', text: question}])}))}));
+        pass => ({question, activity: this.#activity(pass.activity, [{atMs: now, kind: 'message', text: question}])}))}));
     await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, data: {askId: ask.id}, detail: {question}});
     return this.#changed(updated);
   }
@@ -3482,13 +3494,13 @@ export class ObjectService {
     const ask = result.status === 'needs_closeup' ? await this.#ask(id, result) : undefined;
     const state: StmObject['state'] = result.status === 'needs_closeup' ? 'needs-closeup'
       : current && (result.status === 'done' || result.status === 'unchanged') ? 'ready' : 'failed';
-    const failure = result.status === 'capped'
-      ? `${result.limit ? limitWords(result.limit) : `Stopped at the ${result.reason?.includes('time') ? 'time' : 'step'} limit`}. ${current ? 'Try again or review the saved checkpoint.' : 'Try again.'}`
-      : result.reason ?? 'The touch-up stopped without a model.';
-    const now = Date.now();
     // The worker's own verdict on continuing (runner.ts: only a limit or an exit without a final answer may), carried
     // by the endings that can continue; an answer or a question never does.
     const resumable = result.resumable ?? false;
+    const failure = result.status === 'capped'
+      ? `${result.limit ? limitWords(result.limit) : `Stopped at the ${result.reason?.includes('time') ? 'time' : 'step'} limit`}.${stopHint(resumable && !!result.sessionId)}`
+      : result.reason ?? 'The touch-up stopped without a model.';
+    const now = Date.now();
     const end: PassEnd = interrupted ? {status: 'interrupted', resumable, ...(result.limit ? {limit: result.limit} : {})}
       : result.status === 'capped' || result.status === 'failed' ? {status: result.status, resumable, ...(result.limit ? {limit: result.limit} : {})}
       : {status: result.status};
@@ -3507,7 +3519,7 @@ export class ObjectService {
         ...(result.engine ? {engine: result.engine} : {}), ...(result.note ? {engineNote: this.#publicText(result.note)} : {}),
         ...(state === 'failed' || seatNote ? {activity: this.#activity(p.activity, [...(seatNote ? [{atMs: Date.now(), kind: 'message' as const, text: seatNote}] : []),
           ...(state === 'failed' ? [{atMs: Date.now(), kind: 'message' as const, text: failure}] : [])])} : {}),
-        ...(result.summary ? {summary: result.summary} : {}), seconds: result.stats.seconds, toolCalls: result.stats.toolCalls,
+        ...(result.summary ? {summary: result.summary} : {}), ...(ask ? {question: ask.question} : {}), seconds: result.stats.seconds, toolCalls: result.stats.toolCalls,
         ...(result.sessionId ? {sessionId: result.sessionId} : {}), ...(result.sessionCwd ? {sessionCwd: result.sessionCwd} : {}), checkpoints: result.checkpoints,
         ...(result.resume ? {resume: result.resume} : {}),
         ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir}))}));

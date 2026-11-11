@@ -76,10 +76,12 @@ import CounterpartKit
     var macCapabilities: Set<String> = []
     /// Bumped by `settings.changed`: Settings reads again.
     var settingsChanges = 0
-    /// What each printer MCP's update is doing, from `mcp.update.*` events and the Update reply.
     var mcpCopies: [MCPPackageCopies]?
     var mcpCopiesProblem: String?
-    var mcpUpdates: [String: MCPUpdateProgress] = [:]
+    /// What each printer MCP's update is doing, from `mcp.update.*` events and the Update reply. Set through `recordMCPUpdate`.
+    private(set) var mcpUpdates: [String: MCPUpdateProgress] = [:]
+    /// A wait (120 s) or an update under way (35 min) that hears nothing more says so and offers Update again (the Mac's clock, CounterpartKit).
+    @ObservationIgnored let mcpWaits = MCPUpdateWaits()
     var attemptedMcpMoves: [String: String] = [:]
     /// What each printer last reported loaded, from a print sheet (the Mac reports spools per project).
     var spools: [String: [PrinterFilament]] = [:]
@@ -99,6 +101,23 @@ import CounterpartKit
         mac.onSendProgress = { [weak self] id, share in
             guard let self, self.sending.contains(id) else { return }
             self.sendProgress[id] = share
+        }
+        #if DEBUG
+        // UI tests: a wait that never hears from the canned Mac expires within the test.
+        if Fixtures.folder != nil, let seconds = ProcessInfo.processInfo.environment["COUNTERPART_MCP_WAIT_SECONDS"].flatMap(Double.init) {
+            mcpWaits.waitingLimit = .milliseconds(Int(seconds * 1000))
+        }
+        #endif
+    }
+
+    /// Every change of an MCP update's state, from an event or an Update reply. A wait or an update under way that hears
+    /// nothing more becomes a sentence and Update and Move are offered again (PRD §8.10: nothing in an update waits forever).
+    func recordMCPUpdate(_ mcpId: String, _ progress: MCPUpdateProgress?) {
+        mcpUpdates[mcpId] = progress
+        let phase: MCPUpdateWaits.Phase? = progress?.state == "waiting" ? .waiting : progress?.state == "started" ? .started : nil
+        mcpWaits.note(mcpId, phase) { [weak self] in
+            guard let self, self.mcpUpdates[mcpId]?.isRunning == true else { return }
+            self.recordMCPUpdate(mcpId, .unheard)
         }
     }
 
@@ -279,7 +298,7 @@ import CounterpartKit
             if event.type == "project.deleted" { remove(project) }
             else { await reload(project) }
         } else if event.type.hasPrefix("mcp.update.") {
-            if let id = event.data?.mcpId { mcpUpdates[id] = MCPUpdateProgress(event) }
+            if let id = event.data?.mcpId { recordMCPUpdate(id, MCPUpdateProgress(event)) }
             await loadPrinters()
             await loadMCPCopies()
         } else if event.type == "settings.changed" { settingsChanges += 1 }
@@ -403,7 +422,7 @@ import CounterpartKit
         reads.reset()
         models.reset()
         known = nil; heard = [:]
-        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
+        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; mcpWaits.forget(); attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
         stoppedScans = [:]; readyScans = []; sendFailures = [:]
         restoredUnconfirmed = false
         // A pairing reset shows nothing from before it. The next load restores this Mac's own copy, if it has one, and
@@ -503,7 +522,7 @@ import CounterpartKit
 
 /// A printer MCP's update, in words (PRD §8.10).
 struct MCPUpdateProgress: Equatable {
-    /// started, waiting, done, failed, current, unresolved
+    /// started, waiting, done, failed, current, unresolved, and unheard (a wait that heard nothing more)
     var state: String
     var fromVersion: String?
     var toVersion: String?
@@ -515,6 +534,9 @@ struct MCPUpdateProgress: Equatable {
         fromVersion = event.data?.fromVersion; toVersion = event.data?.toVersion; log = event.data?.log
     }
     init(_ update: MCPUpdate) { state = update.state; fromVersion = update.fromVersion; toVersion = update.toVersion; found = update.found }
+    private init(state: String) { self.state = state }
+    /// A wait the companion never ended: its event went missing (MCPUpdateWaits).
+    static let unheard = MCPUpdateProgress(state: "unheard")
 
     var words: String {
         let versions = [fromVersion, toVersion].compactMap { $0 }.joined(separator: " → ")
@@ -525,6 +547,7 @@ struct MCPUpdateProgress: Equatable {
         case "current": return "Already the latest version"
         case "unresolved": return "Counterpart couldn't tell how this is installed" + (found.map { " (found \($0))" } ?? "") + "."
         case "failed": return "The update didn't finish."
+        case "unheard": return MCPUpdateWaits.unheard
         default: return state
         }
     }

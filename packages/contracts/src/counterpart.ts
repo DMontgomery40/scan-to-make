@@ -287,8 +287,15 @@ export const PrinterDestinationSchema = z.strictObject({
   capabilities: PrinterCapabilitiesSchema.optional(),
   /** PRD §8.10 (PR 6): the MCP install this printer runs; every printer on the same install shares it. */
   mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/).optional(),
-  /** The same printer reached through both MCPs: each MCP's profile, the one in use first (`printers.chooseMcp`). */
-  mcps: z.array(z.strictObject({backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server']), destinationId: text(256)})).max(2).optional(),
+  /** The MCP its prints go through, as people know it (`mcp-3D-printer-server`): clients show it as sent. */
+  mcpLabel: text(64).optional(),
+  /**
+   * The same printer reached through both MCPs: each MCP's profile, the one in use first (`printers.chooseMcp`). Each
+   * names the install it runs, its name as people know it and its versions, so every MCP keeps its Settings row and Update.
+   */
+  mcps: z.array(z.strictObject({backend: z.enum(['bambu-printer-mcp', 'mcp-3d-printer-server']), destinationId: text(256),
+    mcpId: z.string().regex(/^mcp-[0-9a-f]{16}$/).optional(), label: text(64).optional(), version: text(64).optional(),
+    latestVersion: text(64).optional()})).max(2).optional(),
   /** A printer added in Counterpart (`origin: "counterpart"`): the folder its MCP runs in, whose `.env` holds its settings. */
   folder: text(4096).optional(),
   /** Its `.env` lacks settings its MCP needs (names only); `fill` is what `printers.completeSettings` adds (only the model). */
@@ -452,3 +459,15 @@ export const LiveActivityTokensSchema = z.strictObject({
   activities: z.array(z.strictObject({ printId: uuid, deviceId: uuid, token: apnsToken, updatedAt: iso })).max(1024),
 });
 export type LiveActivityTokens = z.infer<typeof LiveActivityTokensSchema>;
+
+// A read-only snapshot: deleting or changing the source never changes the new project's context.
+// `items` are the person's words (`you`) and the app's replies and questions (`app`), in time order. An item copied
+// from an earlier generation (the source was itself made from another) names that project in `from`; the source's
+// own items have none. `fit` is how the source's size was settled, measured sizes included: a brief, not words.
+const InheritedFromSchema = z.object({id: z.string(), title: z.string()});
+export const InheritedHistorySchema = z.object({
+  from: InheritedFromSchema,
+  items: z.array(z.object({at: z.number().finite(), who: z.enum(['you', 'app']), text: z.string(), from: InheritedFromSchema.optional()})),
+  fit: FitSchema.optional(),
+});
+export type InheritedHistory = z.infer<typeof InheritedHistorySchema>;

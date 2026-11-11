@@ -640,6 +640,39 @@ export function spoolTitle(f: import("./types").Filament): string {
   return f.label ? `${f.label} · ${f.name}` : `${f.material} · ${f.name || f.colour}`;
 }
 
+/**
+ * PRD §8.10: an update that hears nothing more from the companion says so, as on the Mac and phones. A wait for
+ * Counterpart's own work: the companion waits up to 60 s, then admits the update after one claim and one npm lookup
+ * (~97 s at most before `started`).
+ */
+export const MCP_WAIT_LIMIT_MS = 120_000;
+/** An update under way: three install steps of up to 10 minutes each plus the MCP's restart. */
+export const MCP_STARTED_LIMIT_MS = 35 * 60_000;
+export const MCP_UNHEARD = "Counterpart didn’t say whether this updated. Try Update again.";
+export type McpPhase = "waiting" | "started";
+
+/** Where an Update answer, or an mcp.update.* event, leaves that install: waiting, under way, or neither. */
+export function mcpPhase(change: {type?: string; update?: {state: string}; state?: string}): McpPhase | undefined {
+  const state = change.type ? change.type.replace(/^mcp\.update\./, "") : change.update?.state ?? change.state;
+  return state === "waiting" || state === "started" ? state : undefined;
+}
+
+/**
+ * The clock for each install: `note` on every change of its state (waiting or started starts that phase's clock,
+ * anything else stops it); `expire` runs for an install that heard nothing more within its phase's limit.
+ */
+export function mcpWaitClock(expire: (mcpId: string) => void, limits: Record<McpPhase, number> = {waiting: MCP_WAIT_LIMIT_MS, started: MCP_STARTED_LIMIT_MS}) {
+  const clocks = new Map<string, ReturnType<typeof setTimeout>>();
+  return {
+    note(mcpId: string, phase: McpPhase | undefined) {
+      clearTimeout(clocks.get(mcpId));
+      clocks.delete(mcpId);
+      if (phase) clocks.set(mcpId, setTimeout(() => { clocks.delete(mcpId); expire(mcpId); }, limits[phase]));
+    },
+    stop() { for (const clock of clocks.values()) clearTimeout(clock); clocks.clear(); },
+  };
+}
+
 /** Keep the latest software result for every MCP operation. */
 export function mcpUpdateNotices(previous: Record<string, string>, events: {type: string; title: string; body: string; data?: {mcpId?: string}}[]): Record<string, string> {
   const next = {...previous};
@@ -708,6 +741,66 @@ export async function obtainValue(
     if (!stopped()) onStep(step);
   }
   return step;
+}
+
+/** A kind's setting by its form role (`host`, `port`, `serial`, `model`, `secret`), as the MCP declares it. */
+export function setupField(options: SetupOptions | undefined, printerType: string | undefined, name: string) {
+  return options?.types.find((t) => t.printerType === printerType)?.fields?.find((f) => f.name === name);
+}
+
+/** A found MCP folder, as Add a printer lists it: what its `.env` lacks and what Add fills (only the model). */
+export interface FoundFolder { printerType: string; missing?: string[]; fill?: Record<string, string> }
+
+/**
+ * The model a found folder's MCP needs: the variable it reads it from (the kind's `model` field, never a name the app
+ * knows), whether Counterpart couldn't tell it (so the person chooses), and the one Add fills. Port of CounterpartKit's
+ * `PrinterCandidate.modelSetting/needsModel/filledModel`.
+ */
+export function folderModel(candidate: FoundFolder, options: SetupOptions | undefined) {
+  const setting = setupField(options, candidate.printerType, "model")?.env;
+  return {
+    setting,
+    needed: !!setting && !!candidate.missing?.includes(setting) && candidate.fill?.[setting] === undefined,
+    filled: setting ? candidate.fill?.[setting] : undefined,
+  };
+}
+
+/**
+ * The model a typed serial number names, looked up in the MCP's own answer (`serialModels` from
+ * counterpart_setup_fields, keyed by its own key length). The app keeps no such table. Port of CounterpartKit's
+ * `PrinterSetupOptions.model(forSerial:)`; this lookup was inline in Settings.tsx.
+ */
+export function modelForSerial(options: SetupOptions | undefined, serial: string) {
+  const length = Object.keys(options?.serialModels ?? {})[0]?.length;
+  const key = length ? serial.trim().slice(0, length).toUpperCase() : "";
+  return length && key.length === length ? options?.serialModels?.[key] : undefined;
+}
+
+/**
+ * Types the serial number into the form. The model the MCP's answer names for it fills the form unless the person
+ * chose one, so a corrected serial fills again and one the MCP names nothing for clears a model it had filled.
+ * `inferred` says whether the current model came from discovery or the serial; the result says whether it now does.
+ * Port of CounterpartKit's `PrinterForm.setSerial`.
+ */
+export function typeSerial(form: Record<string, string>, value: string, options: SetupOptions | undefined, inferred: boolean) {
+  const next: Record<string, string> = { ...form, serial: value };
+  if (form.model && !inferred) return { form: next, inferred: false };
+  const found = modelForSerial(options, value);
+  const named = found && options?.models[form.backend]?.some((m) => m.value === found) ? found : undefined;
+  if (named || inferred) next.model = named ?? "";
+  return { form: next, inferred: !!named };
+}
+
+/**
+ * The form for a kind: values for fields its MCP doesn't declare (port, serial, model) are dropped, so they are never
+ * sent. Kept as they are when the kind's fields are unknown. Port of CounterpartKit's `PrinterForm.keepFields(of:)`.
+ */
+export function keepFields(form: Record<string, string>, options: SetupOptions | undefined) {
+  const fields = options?.types.find((t) => t.printerType === form.printerType)?.fields;
+  if (!fields) return form;
+  const next = { ...form };
+  for (const name of ["port", "serial", "model"]) if (!fields.some((f) => f.name === name)) delete next[name];
+  return next;
 }
 
 /** Add a printer's address field: the MCP's hint, and a placeholder that offers a web address only where the MCP takes one. */

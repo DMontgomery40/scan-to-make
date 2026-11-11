@@ -210,7 +210,7 @@ test('a model the engine stopped early is kept without claiming completion', asy
   const settled = await service.settled(object.id);
   assert.equal(settled.state, 'failed');
   assert.match(settled.current.summary, /time limit/);
-  assert.equal(settled.failure, 'Stopped at the time limit. Try again or review the saved checkpoint.');
+  assert.equal(settled.failure, 'Stopped at the time limit.');
 });
 
 test('a close-up answer after a correction carries on from the corrected model and the correction', async () => {

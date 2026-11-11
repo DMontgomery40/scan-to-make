@@ -376,7 +376,9 @@ for (const [limit, reason] of [['step', 'stopped at the 120 tool-call limit'], [
       await f.service.addScan(object.id, 'scan.usdz', Buffer.from('original capture'));
       await f.service.start(object.id);
       const stopped = await f.service.settled(object.id);
-      const expected = `Stopped at the ${limit} limit. ${checkpoint ? 'Try again or review the saved checkpoint.' : 'Try again.'}`;
+      // The reason stands alone: this worker gave no session to carry on, so Try Again starts over and there is
+      // nothing true to add that the button does not say (until Nov 10: "Try again or review the saved checkpoint.").
+      const expected = `Stopped at the ${limit} limit.`;
       assert.equal(stopped.state, 'failed');
       assert.equal(publicObject(stopped).status.phase, 'failed');
       assert.equal(stopped.failure, expected);
@@ -418,6 +420,12 @@ for (const status of ['capped', 'failed']) test(`the next project request resume
   const stopped = await f.service.settled(object.id), pass = stopped.passes.at(-1);
   assert.equal(pass.sessionId, 'recover-me');
   assert.equal(publicObject(stopped).canRetryCleanup, true);
+  // Whether the work is lost is the one thing worth saying under the reason: this stop can be carried on.
+  if (status === 'capped') {
+    assert.equal(stopped.failure, 'Stopped after 10 minutes without worker activity. Trying again carries on from where it stopped.');
+    assert.equal(publicObject(stopped).status.detail, 'Stopped after 10 minutes without worker activity', 'the row is still the reason alone');
+    assert.doesNotMatch(stopped.failure, /checkpoint|session|Try again/);
+  } else assert.equal(stopped.failure, 'Stopped at a limit.', 'a worker\'s own failure sentence is left as it is');
   assert.deepEqual(pass.limit, {kind:'inactivity',value:600000});
   assert.equal(pass.toolCalls, 2);
   assert.deepEqual(pass.checkpoints, []);

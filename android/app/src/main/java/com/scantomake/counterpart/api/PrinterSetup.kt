@@ -76,8 +76,11 @@ data class PrinterCandidate(val id: String, val source: String, val name: String
     val approvalPage: String? get() = approveUrl?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) }
 }
 
-/** What Check and Add send: a found folder, or the form's fields (`PrinterFormSchema`). `secret` is the access code or API key. */
-data class PrinterForm(val folder: String? = null, val backend: String = "bambu-printer-mcp", val printerType: String = "bambu",
+/**
+ * What Check and Add send: a found folder, or the form's fields (`PrinterFormSchema`). `secret` is the access code or API key.
+ * `backend` and `printerType` come from the MCPs' own list; the sheet sets both before anything is sent.
+ */
+data class PrinterForm(val folder: String? = null, val backend: String = "", val printerType: String = "",
                        val host: String = "", val port: String? = null, val serial: String = "", val model: String? = null,
                        val secret: String = "", val name: String? = null, val slicer: String? = null, val slicerPath: String? = null,
                        val profiles: String? = null,
@@ -87,11 +90,10 @@ data class PrinterForm(val folder: String? = null, val backend: String = "bambu-
     fun json(): JsonObject {
         if (folder != null) return jsonOf("folder" to folder, "model" to model)
         val fields = linkedMapOf<String, JsonPrimitive>("backend" to JsonPrimitive(backend), "printerType" to JsonPrimitive(printerType), "host" to JsonPrimitive(host.trim()))
+        // Each value the form holds; keepFields drops what the chosen kind's MCP doesn't read.
         if (!port.isNullOrEmpty()) fields["port"] = JsonPrimitive(port)
-        if (printerType == "bambu") {
-            fields["serial"] = JsonPrimitive(serial.trim())
-            model?.let { fields["model"] = JsonPrimitive(it) }
-        }
+        if (serial.isNotBlank()) fields["serial"] = JsonPrimitive(serial.trim())
+        model?.let { fields["model"] = JsonPrimitive(it) }
         if (secret.isNotEmpty()) fields["secret"] = JsonPrimitive(secret)
         if (!name.isNullOrEmpty()) fields["name"] = JsonPrimitive(name)
         if (!slicer.isNullOrEmpty()) fields["slicer"] = JsonPrimitive(slicer)
@@ -125,6 +127,23 @@ suspend fun CompanionClient.obtainUntilAnswered(form: PrinterForm, field: String
         shown(current)
     }
     return current
+}
+
+/** The form for a kind: values for fields its MCP doesn't declare (port, serial, model) are dropped, so they are never sent. Port of CounterpartKit's `keepFields(of:)`. */
+fun PrinterForm.keepFields(type: PrinterSetupOptions.PrinterType?): PrinterForm {
+    val declared = type?.fields?.map { it.name }?.toSet() ?: return this
+    return copy(port = port.takeIf { "port" in declared }, serial = serial.takeIf { "serial" in declared } ?: "",
+        model = model.takeIf { "model" in declared }, modelInferred = modelInferred && "model" in declared)
+}
+
+/** The kind's required address, serial and model fields the form lacks, in the MCP's order. Port of CounterpartKit's `lacks(_:)`. */
+fun PrinterForm.lacks(type: PrinterSetupOptions.PrinterType?): List<PrinterSetupOptions.Field> = type?.fields.orEmpty().filter { field ->
+    field.required && when (field.name) {
+        "host" -> host.isBlank()
+        "serial" -> serial.isBlank()
+        "model" -> model == null
+        else -> false
+    }
 }
 
 /** The serial names the model (the MCP's own table), unless the person chose one: a corrected serial picks again. */
