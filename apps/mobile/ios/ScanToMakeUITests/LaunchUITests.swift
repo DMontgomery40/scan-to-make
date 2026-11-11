@@ -1876,7 +1876,11 @@ final class OnDeviceLibraryUITests: XCTestCase {
         // The library fills by itself: nobody opened a page.
         XCTAssertTrue(waitFor(30) { Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)).count >= 4 },
                       "every project's picture comes without a page asking: \(entries(folder).map { "\($0.project.suffix(2)) \($0.name)" })")
-        let kept = Set(entries(folder).filter { $0.kind == "picture" }.map(\.project))
+        // The pages to check: projects the phone keeps a picture the Mac drew for (`pictures/`, `renders/`), which is what
+        // a stage shows. A project whose only kept picture is its question's photo (the plush) has no Mac picture of its
+        // scan yet, so its stage honestly says the picture is coming.
+        let kept = Set(entries(folder).filter { $0.kind == "picture" && ($0.name.hasPrefix("pictures/") || $0.name.hasPrefix("renders/")) }.map(\.project))
+        XCTAssertGreaterThanOrEqual(kept.count, 4, "the Mac's pictures of every project that has one")
         app.terminate()
 
         // The link drops completely, and the app starts again.
