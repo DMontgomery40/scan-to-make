@@ -6,7 +6,11 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is in [`now.md`](now.md), which the lead updates at every wake. Read it first.**
 
-## Now (2026-11-11, 08:35Z): the lead was removed; read this first
+## Now (2026-11-11, 08:46Z): a new lead
+
+The new lead is Claude Opus 5.5 (high) in a T3 thread on agents-173, since 08:40Z. The council's synthesis reached David at 08:41Z in the removed lead's thread. #570's three gate failures are fixed on the train (`203d13e0`) and the gate is running again; [`now.md`](now.md) has the live state.
+
+## Before that (2026-11-11, 08:35Z): the lead was removed
 
 David removed the lead (thread "Take Over Project Recovery Lead", Claude Fable 5.2) at 08:33Z on Nov 11, after the phone holder for his 2016 Forester came out worse on every round. His words: "THAT IS THE WORST FUCKING DESIGN, FROM A PRACTICAL, DESIGN, AND PURE PHYSICS STANDPOINT, I HAE EVER SEEN IN MY LIFE FOR A PHONE HOLDER INA CAR"; "THERE IS SOMEHTING FUNDAMENTALLY WRONT WITH THE ENGINE"; "I'M ABOUT TOT FUCKING ROLL BAKC 50 COMMITS UNLESS YOU CAN ROOT OUT HOW THE FUCKKKKKKKKKKKK THIS GOT SOOOOOO FUCKING BAD". The live list is [`now.md`](now.md); every item is in [`board.md`](board.md) (last rows X121 to X126). Nothing was rolled back or deleted from any repo by the removed lead.
 
