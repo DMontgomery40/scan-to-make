@@ -99,7 +99,7 @@ public final class CompanionClient: @unchecked Sendable {
             if is_("/v1/objects/printers/[A-Za-z0-9_-]+/(route|mcp)") { return "projects:write" }
         case "POST":
             if is_("/v1/blender/(check|update)") { return "projects:write" }
-            if is_("/v1/objects") || is_(one + "/(start|duplicate|locate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-manifest|capture-depth)") { return "captures:import" }
+            if is_("/v1/objects") || is_(one + "/(start|duplicate|make-from-scan|locate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-manifest|capture-depth)") { return "captures:import" }
             if is_(one + "/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)") { return "printer-handoff:use" }
             if is_("/v1/devices/live-activity-tokens") { return "projects:write" }
             if is_("/v1/settings/(ai/test|fusion/setup|cad/setup)") { return "projects:write" }

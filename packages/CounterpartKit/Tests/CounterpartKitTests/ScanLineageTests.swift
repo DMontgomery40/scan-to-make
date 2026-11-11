@@ -59,6 +59,11 @@ final class ScanLineageTests: XCTestCase {
         XCTAssertNil(copy["instructions"]); XCTAssertNil(copy["fit"], "only a fit says how its size is settled")
     }
 
+    /// The client refuses a path it has no scope for ("That request isn't allowed", seen on David's real data, Nov 11).
+    func testTheRouteNeedsTheScopeNewAlreadyUses() {
+        XCTAssertEqual(CompanionClient.scope("POST", "/v1/objects/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01/make-from-scan"), "captures:import")
+    }
+
     func testMakingFromAScanIsASheetThatHoldsWork() {
         var nav = ProjectsNavigation()
         nav.open("src")
