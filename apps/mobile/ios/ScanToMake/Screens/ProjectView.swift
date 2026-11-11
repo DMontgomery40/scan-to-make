@@ -1315,8 +1315,12 @@ enum ARModel {
         return SIMD3(Float(r), Float(g), Float(b))
     }
 
-    /// The STL as USDZ for AR Quick Look, written once beside it, off the main actor. Nil when it can't be made.
-    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil) async -> URL? {
+    /// How long writing a part's USDZ may take before the chip offers Try Again (#606: it had no deadline, so a conversion
+    /// that never returned left "Preparing AR…" up for good). A large part takes seconds.
+    static let exportDeadline: Duration = .seconds(60)
+
+    /// The STL as USDZ for AR Quick Look, written once beside it, off the main actor. Nil when it can't be made in time.
+    @MainActor static func usdz(fromSTL url: URL, tint hex: String? = nil, deadline: Duration = exportDeadline) async -> URL? {
         let target = target(forSTL: url, tint: hex)
         removeStale(beside: url)
         if PartUSDZ.isUSDZ(target) { return target }
@@ -1329,7 +1333,7 @@ enum ARModel {
             return triangles.count
         }
         do {
-            let triangles = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+            let triangles = try await bounded(work, deadline: deadline)
             let bytes = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
             MediaTrace.record("ar.export-end", ["success": "true", "format": "usdz", "triangles": String(triangles), "bytes": String(bytes),
                                                 "preview": String(QLPreviewController.canPreview(target as NSURL))])
@@ -1339,10 +1343,55 @@ enum ARModel {
             case .empty?: "empty-export"
             case .notUSDZ?: "not-usdz"
             case .cancelled?: "cancelled"
-            case nil: String((error as NSError).code)
+            case nil: error is Deadline ? "deadline" : String((error as NSError).code)
             }
             MediaTrace.record("ar.export-end", ["success": "false", "format": "usdz", "code": code])
             return nil
+        }
+    }
+
+    struct Deadline: Error {}
+
+    /// `work`'s result, or `Deadline` once `deadline` passes, or `CancellationError` when the caller is cancelled: whichever
+    /// comes first. It never waits for work that ignores cancellation (Model I/O's conversion can't be stopped): that work
+    /// is cancelled and left to finish on its own, and `PartUSDZ.write` moves its file into place only once it is whole.
+    static func bounded<T: Sendable>(_ work: Task<T, Error>, deadline: Duration) async throws -> T {
+        let once = Once<T>()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                once.install(continuation)
+                let timer = Task {
+                    do { try await Task.sleep(for: deadline) } catch { return }
+                    if once.finish(.failure(Deadline())) { work.cancel() }
+                }
+                Task {
+                    let result: Result<T, Error>
+                    do { result = .success(try await work.value) } catch { result = .failure(error) }
+                    timer.cancel(); once.finish(result)
+                }
+            }
+        } onCancel: {
+            work.cancel(); once.finish(.failure(CancellationError()))
+        }
+    }
+
+    /// The first result wins, including one that arrives before the continuation is installed.
+    private final class Once<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<T, Error>?
+        private var continuation: CheckedContinuation<T, Error>?
+        func install(_ continuation: CheckedContinuation<T, Error>) {
+            lock.lock()
+            if let result { lock.unlock(); continuation.resume(with: result) } else { self.continuation = continuation; lock.unlock() }
+        }
+        @discardableResult func finish(_ value: Result<T, Error>) -> Bool {
+            lock.lock()
+            guard result == nil else { lock.unlock(); return false }
+            result = value
+            let continuation = continuation; self.continuation = nil
+            lock.unlock()
+            continuation?.resume(with: value)
+            return true
         }
     }
 

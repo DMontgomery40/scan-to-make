@@ -171,8 +171,9 @@ struct ProjectGalleryView: View {
         }
     }
 
-    /// The model drew (`ModelStage` measured it): its size for the chip, and any earlier "couldn't be shown" line goes
-    /// (review S5 on #539). ModelStage measures before it draws its poster, so a poster that then fails still says so.
+    /// The model loaded (`ModelStage` measured it): its size for the chip, and any earlier "couldn't be shown" line goes
+    /// (review S5 on #539). A still that then fails to render says nothing: the model still turns (#606). A live view that
+    /// can't open says so through `undrawable` on its own.
     private func drawn(_ entry: ProjectGallery.Entry, _ size: [Double]) {
         measured[entry.id] = size
         undrawable.remove(entry.id)
@@ -223,8 +224,18 @@ struct ProjectGalleryView: View {
 
     /// What the stage's AR chip can do for an entry (Nov 11: one AR control, not a chip and a second button). A part is
     /// prepared on tap; the scan is Object Capture's own USDZ. Together, a plate and a multi-colour 3MF's picture have no
-    /// AR file the phone can make, so they offer none.
-    enum ARChip: Equatable { case show(URL), prepare(URL), preparing, failed(URL), failedScan(URL), needsMac }
+    /// AR file the phone can make, so they offer none. While the model comes the chip is there and says so; when it didn't
+    /// come, the chip asks for it again (#606, David: "ar is gone").
+    enum ARChip: Equatable { case show(URL), prepare(URL), preparing, failed(URL), failedScan(URL), needsMac, coming, didntCome(String) }
+
+    /// The chip while the model a chip needs isn't on this phone yet: coming, or didn't come (asks for it again).
+    private func waiting(for path: String) -> ARChip? {
+        switch store.models.fetch(project, path) {
+        case .failed?, .refused?: return .didntCome(path)
+        case .tooLarge?: return nil
+        default: return .coming
+        }
+    }
 
     private func arChip(_ entry: ProjectGallery.Entry) -> ARChip? {
         switch entry.kind {
@@ -233,10 +244,11 @@ struct ProjectGalleryView: View {
             if arPreparing { return .preparing }
             if let arURL { return .show(arURL) }
             if let modelURL { return arFailed ? .failed(modelURL) : .prepare(modelURL) }
-            return store.away ? .needsMac : nil
+            return store.away ? .needsMac : waiting(for: path)
         case .scan:
             if let scanURL, scanURL.pathExtension.lowercased() == "usdz" { return arFailed ? .failedScan(scanURL) : .show(scanURL) }
             if case .file = scanModel, store.away { return .needsMac }
+            if case .file(let path) = scanModel, (path as NSString).pathExtension.lowercased() == "usdz" { return waiting(for: path) }
             return nil
         case .together, .plate:
             return nil
@@ -268,6 +280,14 @@ struct ProjectGalleryView: View {
         case .failedScan(let url):
             Button { arFailed = !ARModel.show(url) } label: { Label("AR didn’t open. Try Again", systemImage: "arkit") }
                 .stageButton().accessibilityValue("failed").accessibilityIdentifier("gallery-ar")
+        case .coming:
+            Button {} label: { HStack(spacing: 6) { ProgressView().controlSize(.small); Text("AR") } }
+                .stageButton().disabled(true).accessibilityLabel("AR").accessibilityValue("loading")
+                .accessibilityHint("The model is coming from your Mac").accessibilityIdentifier("gallery-ar")
+        case .didntCome(let path):
+            Button { store.models.retry(project, path) } label: { Label("Try AR Again", systemImage: "arkit") }
+                .stageButton().accessibilityValue("failed")
+                .accessibilityHint("The model didn’t come from your Mac; this asks for it again").accessibilityIdentifier("gallery-ar")
         case .needsMac:
             Button {} label: { Label("AR needs your Mac", systemImage: "arkit") }
                 .stageButton().disabled(true).accessibilityValue("needs-mac")
