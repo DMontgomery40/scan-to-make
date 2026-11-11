@@ -254,6 +254,7 @@ class AppState(private val app: Counterpart) {
 
     fun forgetMac() {
         try { app.pairing.forget() } catch (_: Exception) {}
+        library.forgot()
         app.prefs.edit().remove(MAC_NAME_KEY).apply(); macName.value = null
         readStatus()
     }

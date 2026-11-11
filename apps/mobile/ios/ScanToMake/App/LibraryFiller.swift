@@ -26,7 +26,9 @@ import CounterpartKit
     private(set) var expensive = false
     private(set) var constrained = false
     @ObservationIgnored private let monitor = NWPathMonitor()
-    @ObservationIgnored private var running: Task<Void, Never>?
+    @ObservationIgnored private var pump: Task<Void, Never>?
+    @ObservationIgnored private var queue: [LibraryPlan.Want] = []
+    @ObservationIgnored private var inFlight: Set<String> = []
     @ObservationIgnored private var last: (projects: [Project], fromMac: Bool)?
     @ObservationIgnored private var opened: Set<String> = []
     /// The ceiling: the choice's own, or (debug builds) `-CounterpartLibraryCeiling <bytes>` for the eviction UI test.
@@ -55,12 +57,18 @@ import CounterpartKit
         refreshUsage()
     }
 
-    /// Which Mac's library is in use, from a pairing that was read: another Mac's, or none after unpairing, is cleared.
-    /// A failed or locked read changes nothing (board X96).
+    /// Which Mac's library is in use, from a pairing that was read: another Mac's is cleared. Nothing else clears it here:
+    /// a failed or locked read, or a Mac that wants pairing again, is not the person forgetting the Mac (board X96).
     func paired(_ status: PairingStatus?, fixture: Bool) {
         guard let status else { return }
         if status.state == .paired, let mac = fixture ? "fixture" : status.baseUrl { library.use(mac: mac) }
-        else if status.state == .disconnected { library.unpair(); opened = []; last = nil }
+        refreshUsage()
+    }
+
+    /// Forget This Mac: everything kept goes.
+    func forgot() {
+        queue = []
+        library.unpair(); opened = []; last = nil
         refreshUsage()
     }
 
@@ -82,26 +90,41 @@ import CounterpartKit
             .filter { LibraryPlan.fetches($0, keep: keep, expensive: expensive, constrained: constrained) }
             .filter { library.file(project: $0.project.id, name: $0.name, version: Int64($0.project.mediaVersion)) == nil }
             .filter { !library.isTooLarge(project: $0.project.id, name: $0.name, version: Int64($0.project.mediaVersion)) }
-        running?.cancel()
-        let client = client, keep = keep
-        running = Task { [weak self] in
-            if !wants.isEmpty { MediaTrace.record("library.fill", ["files": String(wants.count)]) }
-            await withTaskGroup(of: Void.self) { group in
-                var next = wants.makeIterator()
-                for _ in 0..<Self.width { if let want = next.next() { group.addTask { _ = try? await client.download(want.project, want.name) } } }
-                while await group.next() != nil {
-                    guard !Task.isCancelled else { group.cancelAll(); return }
-                    if let want = next.next() { group.addTask { _ = try? await client.download(want.project, want.name) } }
+        // Added to what is being fetched, never cancelling a file in flight: on a slow link the event stream reloads the
+        // list constantly, and cancelling would throw each transfer away.
+        let fresh = wants.filter { inFlight.insert(Self.key($0)).inserted }
+        guard !fresh.isEmpty else { return }
+        MediaTrace.record("library.fill", ["files": String(fresh.count)])
+        queue.append(contentsOf: fresh)
+        if pump == nil { pump = Task { await drain() } }
+    }
+
+    nonisolated private static func key(_ want: LibraryPlan.Want) -> String { "\(want.project.id)#\(want.name)#\(Int64(want.project.mediaVersion))" }
+
+    /// Fetches the queue three at a time until it is empty, then keeps the library under its ceiling.
+    private func drain() async {
+        let client = client
+        await withTaskGroup(of: String.self) { group in
+            var running = 0
+            while true {
+                while running < Self.width, !queue.isEmpty {
+                    let want = queue.removeFirst(), key = Self.key(want)
+                    group.addTask { _ = try? await client.download(want.project, want.name); return key }
+                    running += 1
                 }
+                guard running > 0, let done = await group.next() else { break }
+                running -= 1
+                inFlight.remove(done)
             }
-            client.library.evict(keep: keep, ceiling: Self.ceiling)
-            self?.refreshUsage()
         }
+        library.evict(keep: keep, ceiling: Self.ceiling)
+        refreshUsage()
+        pump = nil
     }
 
     /// Settings → Clear: this Mac's files go; the next list fills it again.
     func clear() {
-        running?.cancel()
+        queue = []
         library.clear()
         refreshUsage()
     }

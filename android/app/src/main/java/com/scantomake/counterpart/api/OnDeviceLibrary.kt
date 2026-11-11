@@ -2,7 +2,6 @@ package com.scantomake.counterpart.api
 
 import com.scantomake.counterpart.core.Hex
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -146,11 +145,11 @@ class OnDeviceLibrary(val base: File) {
     }
 
     private val json = Json { ignoreUnknownKeys = true }
-    private fun read(root: File): Index = runCatching { json.decodeFromString<Index>(File(root, "index.json").readText()) }.getOrNull()
+    private fun read(root: File): Index = runCatching { json.decodeFromString(Index.serializer(), File(root, "index.json").readText()) }.getOrNull()
         ?.let { i -> i.copy(entries = i.entries.filterValues { File(File(root, it.project), it.file).exists() }) } ?: Index()
     private fun save(root: File) {
         val temp = File(root, "index.json.part")
-        runCatching { temp.writeText(json.encodeToString(index)); temp.renameTo(File(root, "index.json")) }
+        runCatching { temp.writeText(json.encodeToString(Index.serializer(), index)); temp.renameTo(File(root, "index.json")) }
     }
 }
 

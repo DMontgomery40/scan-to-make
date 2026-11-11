@@ -396,17 +396,17 @@ class CompanionClient(
             }
         }
         // The library first: its copy of this version is the file, with no network.
-        val kept = library?.takeIf { it.isActive && it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
-        if (kept != null) {
-            kept.file(project.id, name, project.mediaVersion, filename)?.let { return it }
-            if (kept.isTooLarge(project.id, name, project.mediaVersion)) throw CompanionException("file-too-large", "This file is too large for this phone.")
-        }
+        val active = library?.takeIf { it.isActive }
+        val kept = active?.takeIf { it.keep.keeps(OnDeviceLibrary.Kind.of(name)) }
+        kept?.file(project.id, name, project.mediaVersion, filename)?.let { return it }
+        // A refusal for size is remembered for any file, kept or not, so it is never asked for again.
+        if (active?.isTooLarge(project.id, name, project.mediaVersion) == true) throw CompanionException("file-too-large", "This file is too large for this phone.")
         val target = File(folder, filename)
         if (kept == null && target.exists()) return target
         val path = "/v1/objects/${project.id}/${encodePath(resource)}"
         val reply = send("GET", path, limit = SCAN_LIMIT)
-        if (reply.status == 413 && kept != null && reply.body.decodeToString().contains("file-too-large")) {
-            kept.markTooLarge(project.id, name, project.mediaVersion)
+        if (reply.status == 413 && active != null && reply.body.decodeToString().contains("file-too-large")) {
+            active.markTooLarge(project.id, name, project.mediaVersion)
             throw CompanionException("file-too-large", "This file is too large for this phone.")
         }
         if (reply.status != 200 || reply.body.isEmpty()) {

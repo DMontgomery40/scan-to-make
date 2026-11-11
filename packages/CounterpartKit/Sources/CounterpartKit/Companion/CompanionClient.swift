@@ -660,15 +660,14 @@ public final class CompanionClient: @unchecked Sendable {
         // The library first: its copy of this version is the file, with no network and no Keychain read.
         let mediaVersion = Int64(project.mediaVersion)
         let kept = library.isActive && OnDeviceLibrary.Keep.chosen.keeps(OnDeviceLibrary.Kind.of(name))
-        if kept {
-            if let hit = library.file(project: project.id, name: name, version: mediaVersion, file: filename) {
-                MediaTrace.record("file.hit", ["bytes": String((try? FileManager.default.attributesOfItem(atPath: hit.path)[.size] as? Int) ?? 0), "store": "library"])
-                return hit
-            }
-            if library.isTooLarge(project: project.id, name: name, version: mediaVersion) {
-                MediaTrace.record("file.refused", ["status": "413", "store": "library"])
-                throw CompanionError(code: "file-too-large", message: "This file is too large for this phone.")
-            }
+        if kept, let hit = library.file(project: project.id, name: name, version: mediaVersion, file: filename) {
+            MediaTrace.record("file.hit", ["bytes": String((try? FileManager.default.attributesOfItem(atPath: hit.path)[.size] as? Int) ?? 0), "store": "library"])
+            return hit
+        }
+        // A refusal for size is remembered for any file, kept or not, so it is never asked for again.
+        if library.isActive, library.isTooLarge(project: project.id, name: name, version: mediaVersion) {
+            MediaTrace.record("file.refused", ["status": "413", "store": "library"])
+            throw CompanionError(code: "file-too-large", message: "This file is too large for this phone.")
         }
         let target = folder.appending(path: filename)
         let cachedBytes = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
@@ -680,7 +679,7 @@ public final class CompanionClient: @unchecked Sendable {
         let (reply, fetched) = try await fetchFile(path, limit: Self.scanLimit)
         guard reply.status == 200, let fetched else {
             MediaTrace.record("file.refused", ["status": String(reply.status)])
-            if reply.status == 413, Self.refusalCode(reply.body) == "file-too-large", kept {
+            if reply.status == 413, Self.refusalCode(reply.body) == "file-too-large", library.isActive {
                 library.markTooLarge(project: project.id, name: name, version: mediaVersion)
             }
             // Too large only when the Mac says so in its own words (`file-too-large`, the companion's limit for a phone); any
