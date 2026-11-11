@@ -278,7 +278,7 @@ struct ProjectView: View {
                         HStack {
                             Button("Try Again") { store.retryQueuedChange(object) }.disabled(object.changesWait)
                             Button("Discard Saved Change") { store.discardQueuedChange(object) }
-                        }.disabled(working)
+                        }.disabled(working || away)
                     }.padding(.horizontal, 20)
                 }
                 if let pending = object.pendingFollowup {
@@ -296,7 +296,7 @@ struct ProjectView: View {
                                 store.corrections.sent(pending, for: object.id)
                                 return next
                             } }
-                        }.disabled(working)
+                        }.disabled(working || away)
                     }.padding(.horizontal, 20)
                 }
                 if let previous = object.completionUndoStatus {
@@ -304,7 +304,7 @@ struct ProjectView: View {
                         Label("Marked Done", systemImage: "checkmark.circle.fill")
                         Spacer()
                         Button("Undo") { act { try await store.mac.client.setStatus(object.id, previous) } }
-                            .disabled(working)
+                            .disabled(working || away)
                     }.font(.subheadline).padding(.horizontal, 20)
                 }
                 // Every card's actions need the Mac (Try Again, Did it fit?, an answer, Send, Scan): they wait while it
@@ -745,7 +745,7 @@ struct ProjectView: View {
                     }
                 }
                 .controlSize(.large).font(.subheadline)
-                .disabled(working)
+                .disabled(working || away)
             }
             if let pass = object.passes.last {
                 DisclosureGroup("Details") {
@@ -802,7 +802,7 @@ struct ProjectView: View {
                     }
                 }
                 .controlSize(.large).font(.subheadline)
-                .disabled(working)
+                .disabled(working || away)
             }
         }
         .padding(16)
@@ -834,7 +834,7 @@ struct ProjectView: View {
                     }
                 }
                 .controlSize(.large).font(.subheadline)
-                .disabled(working)
+                .disabled(working || away)
             }
         }
         .padding(16)
@@ -874,7 +874,7 @@ struct ProjectView: View {
                             // Dictation is the keyboard's own; nothing here that doesn't do something.
                             if !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                 Button { sendNote(object) } label: { Image(systemName: "arrow.up.circle.fill").font(.title2) }
-                                    .disabled(working)
+                                    .disabled(working || away)
                                     .accessibilityLabel("Send changes")
                             }
                         }
