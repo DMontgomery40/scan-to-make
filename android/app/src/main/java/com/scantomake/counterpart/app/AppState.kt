@@ -114,7 +114,9 @@ class AppState(private val app: Counterpart) {
         scope.launch(Dispatchers.IO) { runCatching { knownFile.writeText(next.encode()) } }
     }
     fun printerName(p: Project): String? = p.print?.destination?.name ?: catalog.value?.resolved(p.printerDestinationId)?.name
-    fun words(p: Project) = ProjectWords(p, sending = p.id in sending.value, localScan = Media.captureFinished(app, p.id), printerName = printerName(p))
+    /** The page's words, with what this computer can keep (review S1: an older one without `projectSettings` asks nothing after a print). */
+    fun words(p: Project) = ProjectWords(p, sending = p.id in sending.value, localScan = Media.captureFinished(app, p.id), printerName = printerName(p),
+        projectSettings = "projectSettings" in capabilities.value)
     val anyRunning: Boolean get() = projects.value.any { words(it).busy } || sending.value.isNotEmpty()
 
     /** Keeps the credential alive when the app opens and each time it comes back. */

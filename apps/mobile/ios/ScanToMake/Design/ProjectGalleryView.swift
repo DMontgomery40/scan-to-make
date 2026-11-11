@@ -73,11 +73,14 @@ struct ProjectGalleryView: View {
     private func still(_ entry: ProjectGallery.Entry) -> StagePicture {
         let problem = modelProblem(entry)
         // The model can't be had either: the stage's one line says both; its Try Again also retries the model when that can help.
+        // When the Mac couldn't draw a picture at all, that is what the line says beside the model's reason (review S4).
+        let still = project.still(for: entry)
+        let neverDrawn = still == .notAvailable
         let missing: (line: String, retry: (() -> Void)?)? = problem.map { problem in
             let retry: (() -> Void)? = problem.reason.retryable ? problem.path.map { path in { store.models.retry(project, path) } } : nil
-            return (problem.reason.line(entry.kind, pictureToo: true), retry)
+            return (problem.reason.line(entry.kind, pictureToo: true, neverDrawn: neverDrawn), retry)
         }
-        return StagePicture(project: project, still: project.still(for: entry), label: entry.label,
+        return StagePicture(project: project, still: still, label: entry.label,
                             unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.",
                             modelMissing: missing,
                             failedChanged: { failed in if failed { pictureFailed.insert(entry.id) } else { pictureFailed.remove(entry.id) } },
@@ -91,7 +94,8 @@ struct ProjectGalleryView: View {
         let (path, model): (String?, Project.ScanModel?) = switch entry.drawing {
         case .model(let drawn) where drawn == "model.stl": ("model.stl", nil)
         case .model: (nil, scanURL == nil ? scanModel : nil)
-        case .assembly: (nil, togetherScanURL == nil ? togetherModel : nil)
+        // Together needs both: the scan, and the part (review S4: with the scan here and the part missing it said nothing).
+        case .assembly: togetherScanURL == nil ? (nil, togetherModel) : (modelURL == nil ? "model.stl" : nil, nil)
         case .picture: (nil, nil)
         }
         let fetch: ModelFiles.Fetch? = if let path { modelURL == nil ? store.models.fetch(project, path) : nil }
@@ -110,7 +114,7 @@ struct ProjectGalleryView: View {
     /// state is the stage's (`StagePicture`), never a second line here.
     @ViewBuilder private func unavailable(_ entry: ProjectGallery.Entry) -> some View {
         // The picture failed too: the stage already says both in one line, with one Try Again for both.
-        if let problem = modelProblem(entry), !pictureFailed.contains(entry.id) {
+        if let problem = modelProblem(entry), !pictureFailed.contains(entry.id), project.still(for: entry) != .notAvailable {
             if problem.reason.retryable {
                 HStack(spacing: 8) {
                     Text(problem.reason.line(entry.kind)).font(.footnote).foregroundStyle(.secondary)

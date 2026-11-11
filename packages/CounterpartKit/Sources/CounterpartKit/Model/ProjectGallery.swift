@@ -294,10 +294,21 @@ public enum ModelUnavailable: Equatable, Sendable {
 
     /// The one line under the stage. `pictureToo`: the stage's picture didn't come either, so this is the stage's own
     /// line for both (the gallery then shows no second line).
-    public func line(_ kind: ProjectGallery.Entry.Kind, pictureToo: Bool = false) -> String {
+    /// `neverDrawn`: the Mac couldn't draw a picture at all (not "didn't come"), so the line says that.
+    public func line(_ kind: ProjectGallery.Entry.Kind, pictureToo: Bool = false, neverDrawn: Bool = false) -> String {
         let thing = switch kind { case .part: "this part"; case .plate: "this plate"; case .scan: "your scan"; case .together: "the part and your scan" }
         let model = kind == .together ? "\(thing) in 3D" : "\(thing)’s 3D model"
         let Model = model.prefix(1).uppercased() + model.dropFirst()
+        if pictureToo && neverDrawn {
+            let first = kind == .plate ? "No picture of this plate came with the file" : "Your Mac couldn’t draw a picture of \(thing)"
+            switch self {
+            case .notAnswering: return "\(first), and it isn’t answering, so \(model) can’t come yet."
+            case .didntCome: return "\(first), and \(model) didn’t come."
+            case .refused: return "\(first), and it didn’t send \(model)."
+            case .tooLarge: return "\(first), and \(model) is too large a file to show on a phone."
+            case .undrawable: return "\(first), and \(model) couldn’t be shown on this phone."
+            }
+        }
         if pictureToo {
             switch self {
             case .notAnswering: return "Your Mac isn’t answering, so the picture and 3D model of \(thing) can’t come yet."

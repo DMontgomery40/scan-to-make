@@ -17,8 +17,8 @@ struct PrintConfirmSheet: View {
     @State private var working = false
     @State private var problem: String?
 
-    private var printer: String { project.print?.destination?.name ?? store.catalog?.destination(project.printerDestinationId)?.name ?? "Your printer" }
-    private var via: String { store.catalog?.destination(project.printerDestinationId)?.via ?? "the printer's MCP" }
+    private var printer: String { project.print?.destination?.name ?? store.catalog?.resolved(project.printerDestinationId)?.name ?? "Your printer" }
+    private var via: String { store.catalog?.resolved(project.printerDestinationId)?.via ?? "the printer's MCP" }
     private var words: ConfirmationWords { ConfirmationWords(message: question.message, fileName: project.print?.jobName) }
     private var resuming: Bool { project.print?.live?.state == "paused" }
 
@@ -141,7 +141,7 @@ struct AnswerOnMacSheet: View {
     @State private var problem: String?
 
     private var printer: String { project.print?.destination?.name ?? "Your printer" }
-    private var via: String { store.catalog?.destination(project.printerDestinationId)?.via ?? "The printer's MCP" }
+    private var via: String { store.catalog?.resolved(project.printerDestinationId)?.via ?? "The printer's MCP" }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in

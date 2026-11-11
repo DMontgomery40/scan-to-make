@@ -893,6 +893,14 @@ const PRINT_NOTES: Record<string, string> = {
   "Print the last version": "Your last version is still here.",
   "Print Again": "The same file is sent to the printer again.",
 };
+/** The project page's actions and its "Did it fit?" question, from what this computer's companion says it keeps
+ *  (review of #527 part 4, S1): without `projectSettings` (or before it is known) a finished print asks nothing and
+ *  Print leads. */
+export function projectPage(p: Project, capabilities: Record<string, unknown> | undefined, sending = false) {
+  const keeps = capabilities?.projectSettings === true;
+  return { page: pageActions(p, sending, keeps), fit: keeps ? didItFitQuestion(p) : undefined };
+}
+
 /** `projectSettings`: the Mac keeps a project's status; on an older Mac a printed project asks nothing and Print leads (review S2). */
 export function pageActions(p: Project, sending = false, projectSettings = true): PageActions {
   const made = p.current ? [p.print?.uncertain ? "printChecked" : "print", "correct"] : [];

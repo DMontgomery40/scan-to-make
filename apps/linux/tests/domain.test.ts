@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { canLocate, gallery, lightStage, photoPicture, still } from "../src/gallery";
 import {
   pageActions,
+  projectPage,
   codeEngineRow,
   passEnding,
   stageMark,
@@ -870,6 +871,20 @@ test("every project state has its one main action, as on every layout (main-acti
     assert.equal(new Set(page.others).size, page.others.length, row.name);
     assert.equal(page.main === "print" && page.others.some((a) => a.startsWith("print")), false, row.name);
   }
+});
+
+test("the page reads what the companion keeps: no Did it fit? without projectSettings (review of #527 part 4, S1)", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/CounterpartKit/Tests/CounterpartKitTests/Fixtures/main-actions.json", import.meta.url), "utf8"));
+  const row = doc.rows.find((r: { name: string }) => r.name === "printed-older-mac");
+  const printed = { title: "", ...row.project } as Project;
+  for (const capabilities of [undefined, {}, { projectSettings: false }]) {
+    const { page, fit } = projectPage(printed, capabilities);
+    assert.equal(page.main, "print", `${JSON.stringify(capabilities)}: Print leads`);
+    assert.equal(fit, undefined, `${JSON.stringify(capabilities)}: no Did it fit? the companion can't keep`);
+  }
+  const { page, fit } = projectPage(printed, { projectSettings: true });
+  assert.equal(page.main, "itWorks");
+  assert.ok(fit, "a companion that keeps the answer asks");
 });
 
 test("search reasons survive a project without a title, and never cut an emoji in half (review F5)", () => {

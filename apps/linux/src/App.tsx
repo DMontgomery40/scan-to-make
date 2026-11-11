@@ -289,6 +289,7 @@ export function App() {
               printers={workspace.printers}
               apply={workspace.apply}
               mutate={workspace.mutate}
+              capabilities={workspace.capabilities}
               onBack={() => setSelected(undefined)}
             />
           ) : (

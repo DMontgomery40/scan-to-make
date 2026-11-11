@@ -16,10 +16,9 @@ import {
   projectThumbnail,
   scanSample,
   scanWords,
-  didItFitQuestion,
   duration,
   passHeading,
-  pageActions,
+  projectPage,
   requestedChange,
   stageMark,
   words,
@@ -359,7 +358,10 @@ export function ProjectView({
   mutate,
   onBack,
   changes,
+  capabilities,
 }: {
+  /** The companion's capabilities (`status.get`): what it keeps decides what the page offers. */
+  capabilities?: Record<string, unknown>;
   project: Project;
   printers: Printer[];
   apply: (p: Project) => void;
@@ -386,9 +388,8 @@ export function ProjectView({
   >({});
   const queue = changes.queue.filter((q) => q.projectId === p.id);
   const active = p.state === "touching-up" || p.state === "printing";
-  const page = pageActions(p);
+  const { page, fit } = projectPage(p, capabilities);
   const destination = resolvedPrinter(printers, p.print?.destinationId ?? p.printerDestinationId);
-  const fit = didItFitQuestion(p);
 
   return (
     <>
