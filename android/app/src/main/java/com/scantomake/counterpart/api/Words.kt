@@ -295,3 +295,33 @@ object ScanPhotos {
 /** The line under a project's title where its phase is already named beside it (CounterpartKit `ProjectWords.row`):
  *  the computer's own detail for that row, else the card line as it is. */
 fun rowLine(project: Project, line: String): String = project.status?.detail?.trim()?.takeIf { it.isNotEmpty() } ?: line
+
+/**
+ * "Make something else from this scan" (things-and-versions design §3.3), ported word for word from CounterpartKit's
+ * `ScanLineage`: which projects offer it, where a project's scan came from, and what else was made from it.
+ */
+class ScanLineage(project: Project, projects: List<Project>) {
+    data class Link(val id: String, val title: String, val exists: Boolean)
+    val from: Link? = project.scanFrom?.let { (id, title) ->
+        val live = projects.firstOrNull { it.id == id }
+        Link(id, live?.let { ProjectWords.title(it) } ?: title, live != null)
+    }
+    val made: List<Link> = projects.filter { it.scanFrom?.first == project.id && it.id != project.id }
+        .sortedByDescending { it.createdAtMs }.map { Link(it.id, ProjectWords.title(it), true) }
+    val fromLine: String? get() = from?.let { if (it.exists) "Uses the scan from “${it.title}”" else "Uses the scan from “${it.title}”, since deleted" }
+    val madeLine: String? get() = when (made.size) {
+        0 -> null
+        1 -> "Also made from this scan: “${made[0].title}”"
+        else -> "Also made from this scan: ${made.size} projects"
+    }
+    companion object {
+        const val ACTION = "Make something else from this scan"
+        const val USE_EXISTING = "Use a scan you already have"
+        const val FIT_CHOICE = "Make something that fits this"
+        const val COPY_CHOICE = "Copy this object"
+        fun scans(projects: List<Project>): List<Project> = projects.filter { it.canMakeFromScan }.sortedByDescending { it.createdAtMs }
+        fun scannedLine(project: Project, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+            "scanned " + java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.US)
+                .format(java.time.Instant.ofEpochMilli(project.createdAtMs.toLong()).atZone(zone))
+    }
+}

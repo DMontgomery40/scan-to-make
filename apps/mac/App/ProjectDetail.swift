@@ -29,6 +29,31 @@ struct ProjectDetail: View {
 
     private var words: ObjectWords { object.words }
 
+    /// Design §3.3: Make something else from this scan, on any project this Mac has a scan for, whatever its kind; where
+    /// this one's scan came from; what else was made from it. Each line that names a project opens it.
+    @ViewBuilder private var scanLineage: some View {
+        let lineage = ScanLineage(object, in: model.objects)
+        if object.canMakeFromScan || lineage.from != nil || !lineage.made.isEmpty {
+            HStack(spacing: 12) {
+                if object.canMakeFromScan {
+                    Button(ScanLineage.action, systemImage: "plus.square.on.square") { model.makingFromScan = object }
+                        .buttonStyle(.glass).disabled(blocked)
+                        .help("A case, a holder or another copy, from this scan. No new scan; this project stays as it is.")
+                        .accessibilityIdentifier("make-from-scan")
+                }
+                if let from = lineage.from, let line = lineage.fromLine {
+                    Button(line, systemImage: "arrow.turn.up.left") { model.selection = from.id }
+                        .buttonStyle(.link).disabled(!from.exists).accessibilityIdentifier("scan-from")
+                }
+                if let line = lineage.madeLine {
+                    Menu(line) { ForEach(lineage.made) { link in Button(link.title) { model.selection = link.id } } }
+                        .menuStyle(.button).buttonStyle(.link).fixedSize().accessibilityIdentifier("scan-made")
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
     /// The state; with Project Settings, also the menu that sets it (Done for something printed elsewhere, PRD §5.4).
     @ViewBuilder private var statusCapsule: some View {
         if model.capabilities?.projectSettings == true {
@@ -76,6 +101,7 @@ struct ProjectDetail: View {
                 }
                 .ignoresSafeArea(edges: .top)
             VStack(spacing: 12) {
+                scanLineage
                 if (object.plates?.count ?? 0) > 1 {
                     ProjectPlatesView(project: object, busy: blocked, thumbnail: { plate in
                         if let url = plate.thumbnail.flatMap(object.projectFile) {

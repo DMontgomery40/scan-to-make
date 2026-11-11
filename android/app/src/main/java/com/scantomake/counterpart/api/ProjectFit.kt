@@ -56,3 +56,13 @@ fun draftBody(instructions: String, kind: String?, fit: ProjectFit?): JsonObject
     json["fit"] = if (kind == "fit" && fit != null) fit.json else JsonNull
     return JsonObject(json)
 }
+
+/** "Make something else from this scan" (design §3.3): the kind chosen, the words, and a fit's size choice. */
+fun makeFromScanBody(kind: String, instructions: String, fit: ProjectFit?): JsonObject {
+    val text = instructions.trim()
+    val json = LinkedHashMap<String, JsonElement>()
+    json["kind"] = JsonPrimitive(if (kind == "fit") "fit" else "copy")
+    if (text.isNotEmpty()) json["instructions"] = JsonPrimitive(text)
+    if (fit != null && kind == "fit" && text.isNotEmpty()) json["fit"] = fit.json
+    return JsonObject(json)
+}

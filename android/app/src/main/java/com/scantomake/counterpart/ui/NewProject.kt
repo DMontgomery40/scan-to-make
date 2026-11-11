@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -58,6 +61,8 @@ import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectFit
 import com.scantomake.counterpart.api.PublishedModelLink
+import com.scantomake.counterpart.api.ProjectWords
+import com.scantomake.counterpart.api.ScanLineage
 import com.scantomake.counterpart.app.AppState
 import com.scantomake.counterpart.app.Counterpart
 import com.scantomake.counterpart.app.Media
@@ -69,10 +74,17 @@ import java.io.File
  * attached; Send creates the project at once and the files follow while the project shows Sending.
  */
 @Composable
-fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit, scan: (String) -> Unit) {
+fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit, scan: (String) -> Unit, seed: String? = null) {
     val context = LocalContext.current
     val app = Counterpart.instance
     val state = AppState.of(context)
+    val known by state.projects.collectAsState()
+    // A kept scan (design §3.3): the page's ("Make something else from this scan"), or one chosen below.
+    var picked by remember { mutableStateOf(seed) }
+    known.firstOrNull { it.id == picked }?.let { source ->
+        SeededNewProject(source, close = { if (seed != null) close() else picked = null }, removable = seed == null, started = started)
+        return
+    }
     val prefs = app.prefs
     val scope = rememberCoroutineScope()
     val macName by state.macName.collectAsState()
@@ -249,6 +261,7 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
                 }
                 Spacer(Modifier.weight(1f))
             }
+            if (!scanned) ExistingScans(known) { picked = it }
             // The scan sits beside its question (above); Added is what else you attach.
             if (photos.isNotEmpty()) {
                 Text("Added", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
@@ -300,6 +313,72 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
                 prefs.edit().remove("CounterpartNewDraft").remove("CounterpartNewDraftId").apply()
                 state.sendInBackground(d.id) { state.show(Media.sendProject(context, app.uploader, app.companion, d.id, chosen)) }
                 started(d.id)
+            }
+        }
+    }
+}
+
+/** New holding a scan the computer already has: the question first, the scan named, then the words (design §3.3). */
+@Composable
+private fun SeededNewProject(source: Project, close: () -> Unit, removable: Boolean, started: (String) -> Unit) {
+    val app = Counterpart.instance
+    val state = AppState.of(LocalContext.current)
+    val scope = rememberCoroutineScope()
+    var use by remember { mutableStateOf<String?>(null) }
+    var words by remember { mutableStateOf("") }
+    var working by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    val ready = use != null && !(use == "fit" && words.isBlank())
+    Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().imePadding()) {
+        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = close, enabled = !working) { Icon(CIcons.Close, "Close") }
+            Text("New Project", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ProjectImage(source, source.pictures["scan"] ?: source.picture, Modifier.size(56.dp).clip(RoundedCornerShape(14.dp)).testTag("scan-use-scan"))
+                Column(Modifier.weight(1f)) {
+                    Text("What should this scan become?", fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.testTag("scan-use"))
+                    Text("${ProjectWords.title(source)} · ${ScanLineage.scannedLine(source)}", color = Palette.secondary, fontSize = 13.sp, modifier = Modifier.testTag("scan-use-source"))
+                }
+                if (removable) TextButton(close) { Text("Remove") }
+            }
+            ScanUseChoice(ScanLineage.COPY_CHOICE, "Clean up the scan and print the same thing.", use == "copy", "scan-use-copy") { use = "copy" }
+            ScanUseChoice(ScanLineage.FIT_CHOICE, "A holder, mount, case or adapter. The scan is what it must fit, not the print.", use == "fit", "scan-use-fit") { use = "fit" }
+            Text("Your computer copies this scan, its photos and its checked sizes into a new project. The project it came from stays as it is.", color = Palette.secondary, fontSize = 13.sp)
+            Text("What do you need?", fontWeight = FontWeight.SemiBold)
+            OutlinedTextField(words, { words = it }, Modifier.fillMaxWidth().testTag("describe"), minLines = 3,
+                placeholder = { Text(if (use == "copy") "Copy this. Close up the bottom." else "A belt case for it…") })
+            problem?.let { Text(it, color = Palette.failed, fontSize = 14.sp) }
+        }
+        PrimaryButton(when { use == null -> "Choose what this scan becomes"; use == "fit" && words.isBlank() -> "Say what it should fit"; use == "copy" -> ScanLineage.COPY_CHOICE; else -> "Send" },
+            Modifier.fillMaxWidth().padding(20.dp, 8.dp).testTag("send"), enabled = ready && !working) {
+            working = true; problem = null
+            scope.launch {
+                try {
+                    val made = app.companion.makeFromScan(source.id, use!!, words, if (use == "fit") ProjectFit.of("lookup", emptyList()) else null)
+                    state.show(made); started(made.id)
+                } catch (e: CompanionException) {
+                    problem = if (e.code == "not-found") "Update Counterpart on your computer to make something else from a scan you already have." else e.message
+                } catch (e: Exception) { problem = CompanionException.unreachable.message }
+                finally { working = false }
+            }
+        }
+    }
+}
+
+/** New → "Use a scan you already have" (design §3.3): the scans the computer keeps, by picture and name. */
+@Composable
+fun ExistingScans(projects: List<Project>, pick: (String) -> Unit) {
+    val scans = ScanLineage.scans(projects)
+    if (scans.isEmpty()) return
+    Text(ScanLineage.USE_EXISTING, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("use-existing-scan"), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        scans.forEach { project ->
+            Column(Modifier.width(128.dp).clickable(role = Role.Button) { pick(project.id) }.testTag("existing-scan-${project.id}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ProjectImage(project, project.pictures["scan"] ?: project.picture, Modifier.size(128.dp, 96.dp).clip(RoundedCornerShape(16.dp)))
+                Text(ProjectWords.title(project), fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 2)
+                Text(ScanLineage.scannedLine(project), color = Palette.secondary, fontSize = 12.sp)
             }
         }
     }

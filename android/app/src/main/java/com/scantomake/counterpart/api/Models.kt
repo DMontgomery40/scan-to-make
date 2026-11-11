@@ -69,6 +69,8 @@ data class Project(
     }
 
     val hasScan: Boolean get() = scan != null || !capture.isNullOrEmpty()
+    /** The computer has this project's scan, so something else can be made from it (design §3.3), whatever its kind. */
+    val canMakeFromScan: Boolean get() = scan != null
     /** Cached copies of renders expire only when a pass finishes. */
     /** A locate pass changes no file (docs/protocols/seats.md), so it never rolls the version over. */
     val mediaVersion: Long get() = (passes.lastOrNull { it.endedAtMs != null && it.trigger != "locate" }?.endedAtMs ?: createdAtMs).toLong()
@@ -165,6 +167,8 @@ data class Project(
 
     /** The project's picture (PRD §5.1): the object alone on the stage, as the computer drew it (`pictures/…png`). */
     val picture: String? get() = raw["picture"].str
+    /** The project whose scan this one was made from, with its title then ("Make something else from this scan"). */
+    val scanFrom: Pair<String, String>? get() = raw["scanFrom"].obj?.let { from -> from["id"].str?.let { id -> id to (from["title"].str ?: "") } }
     /** Each gallery picture the computer drew: `part`, `scan`, `together`, `photo`. */
     val pictures: Map<String, String> get() = raw["pictures"].obj?.mapNotNull { (key, value) -> value.str?.let { key to it } }?.toMap() ?: emptyMap()
     /** A picture the computer has not drawn, by role: `drawing`, or `failed` (none is coming until what it shows changes). */
