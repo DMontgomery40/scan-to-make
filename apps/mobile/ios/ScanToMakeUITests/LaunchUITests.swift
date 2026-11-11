@@ -783,11 +783,15 @@ final class LayoutParityUITests: XCTestCase {
             app.launch()
             return app
         }
-        let failed = NSPredicate(format: "label CONTAINS %@", "then try again")
-        let macActions = ["It Works", "Needs Changes", "Print", "Send to your Mac", "Scan", "Make Your Best Guess", "Send Answer", "Review", "Don’t Print"]
+        // A tap that failed shows the page's own failure line (its identifier), not words: the failed pass's own text says
+        // "then try again" too. Print is checked by its identifier below; its label would also match "Printers".
+        let macActions = ["It Works", "Needs Changes", "Send to your Mac", "Scan", "Make Your Best Guess", "Send Answer", "Review", "Don’t Print"]
         func checkNothingFails(_ app: XCUIApplication, _ page: String) {
             XCTAssertEqual(app.alerts.count, 0, "\(page): no error alert")
-            XCTAssertFalse(app.staticTexts.matching(failed).firstMatch.exists, "\(page): no failure line after a tap")
+            for line in ["project-problem", "printing-problem"] {
+                let failure = app.descendants(matching: .any)[line]
+                XCTAssertFalse(failure.exists, "\(page): no failure line after a tap: \(failure.exists ? failure.label : "")")
+            }
         }
         // printed (Did it fit?), failed (Try Again), working, a question, printing.
         for id in ["6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a07", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
@@ -795,7 +799,8 @@ final class LayoutParityUITests: XCTestCase {
             let app = open(id)
             let away = app.descendants(matching: .any)["project-away"]
             XCTAssertTrue(away.waitForExistence(timeout: 20), "\(id): the one line: \(app.debugDescription)")
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Your Mac isn’t answering, so anything that needs it waits.")).firstMatch.exists)
+            let awayLine = away.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Your Mac isn’t answering, so anything that needs it waits.")).firstMatch
+            XCTAssertTrue(awayLine.exists, "\(id): the away line says why: \(away.debugDescription)")
             for button in app.buttons.allElementsBoundByIndex where button.exists && macActions.contains(where: { button.label.hasPrefix($0) }) {
                 XCTAssertFalse(button.isEnabled, "\(id): \(button.label) waits for the Mac")
                 button.tap()

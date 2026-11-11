@@ -52,7 +52,7 @@ struct PrintingView: View {
                     // A finished print's temperatures are history, not news: what's next is "Did it fit?" and the project.
                     if printEnded { ended(project).padding(.horizontal, 16) } else { tiles(project).padding(.horizontal, 16) }
                     if let problems = live?.problems, !problems.isEmpty { problemsCard(problems).padding(.horizontal, 16) }
-                    if let problem { Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red).padding(.horizontal, 20) }
+                    if let problem { Label(problem, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.red).padding(.horizontal, 20).accessibilityIdentifier("printing-problem") }
                 }
                 .padding(.bottom, 16)
             }

@@ -268,6 +268,7 @@ struct ProjectView: View {
                 }
                 if let message = problem ?? (away ? nil : fetchFailure?.message) ?? store.sendFailures[object.id] {
                     Label(message, systemImage: "exclamationmark.triangle.fill").font(.subheadline).foregroundStyle(.orange).padding(.horizontal, 20)
+                        .accessibilityIdentifier("project-problem")
                 }
                 if let notice, problem == nil {
                     Label(notice, systemImage: "photo.badge.checkmark").font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 20)
