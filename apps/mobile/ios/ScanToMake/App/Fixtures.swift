@@ -103,7 +103,7 @@ enum Fixtures {
                     copy(ids.potato, "DAD sign copy", [["name": "scan.usdz", "bytes": 191_981_699]], ago: 120_000),
                     ["id": ids.v1, "createdAtMs": ms - 9_000_000, "updatedAtMs": ms - 8_000_000, "state": "confirmed", "title": "Mic mount v1", "kind": "fit",
                      "photos": [], "passes": [["startedAtMs": ms - 8_900_000, "endedAtMs": ms - 8_000_000, "status": "done"]],
-                     "current": ["model": "current/model.stl", "renders": ["current/renders/mic.png"], "sizeMm": [48, 50, 54]]]]
+                     "current": ["model": "current/model.stl", "renders": ["current/renders/mic.png"], "sizeMm": [48, 50, 54]]]] + duplicates
         }
         // `-CounterpartFixtureSet picture-stage` (review B1/B2 on #539): three designer 3MFs, each a `.picture` stage. The
         // first has the Mac's picture (shown, slow, or refused by an empty folder); the second's is still being drawn; the
