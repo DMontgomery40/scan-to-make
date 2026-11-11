@@ -729,6 +729,8 @@ export class ObjectService {
     const object = await this.get(id);
     const from = object.scanFrom;
     if (!from) throw new InvalidStateError('This project has no scan to bring over.');
+    // Once the files are in, a pass that can't start (AI off, say) fails in its own words, not as a failed copy.
+    let copied = false;
     try {
       // The source's gate too: it can't be deleted, nor its scan rebuilt, while its files are read.
       await this.#gate(from.id, async () => {
@@ -763,11 +765,13 @@ export class ObjectService {
           ...(source.checkedSizes?.length ? {checkedSizes: source.checkedSizes} : {}),
           scanFrom: {id: from.id, title: projectTitle(source)}}));
       });
+      copied = true;
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['scan']}});
       return await this.#start(id);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      const failure = error instanceof InvalidStateError ? reason : `Counterpart couldn’t bring the scan over from “${from.title}”: ${reason}. Try again.`;
+      const failure = copied || error instanceof InvalidStateError ? reason
+        : `Counterpart couldn’t bring the scan over from “${from.title}”: ${reason.replace(/[.\s]+$/, '')}. Try again.`;
       const failed = await this.#deps.store.update(id, o => o.state === 'touching-up' && !o.scan || o.state === 'new'
         ? {...o, state: 'failed', progress: undefined, failure} : o).catch(() => undefined);
       if (failed) { this.#changed(failed); await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['failure']}}); }
