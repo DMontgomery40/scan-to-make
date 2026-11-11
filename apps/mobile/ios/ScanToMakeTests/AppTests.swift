@@ -344,6 +344,29 @@ import CounterpartKit
         XCTAssertEqual(uses?.first?.canMove, true, "its explicit move action remains available")
     }
 
+    /// #720, on the device: a newer project version with the same model bytes asks the Mac with the kept file's tag, gets 304,
+    /// and keeps the same file. The bytes come once.
+    func testAnUnchangedModelIsNotDownloadedTwiceOnThisDevice() async throws {
+        let mac = TaggedMac()
+        let pairing = PairingClient(store: PairingStore(store: Fixtures.store()), transport: mac)
+        let base = FileManager.default.temporaryDirectory.appending(path: "tagged-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let library = OnDeviceLibrary(base: base.appending(path: "library"))
+        library.use(mac: "m")
+        let keep = OnDeviceLibrary.Keep.chosen
+        OnDeviceLibrary.Keep.chosen = .models
+        defer { OnDeviceLibrary.Keep.chosen = keep }
+        let client = CompanionClient(pairing: pairing, transport: mac, cache: base.appending(path: "cache"), library: library)
+        func project(_ ended: Int) throws -> Project {
+            try JSONDecoder().decode(Project.self, from: Data(#"{"id":"d79d4c15-d786-461c-b76e-ec687c8e2dad","createdAtMs":1,"updatedAtMs":2,"state":"ready","kind":"fit","photos":[],"passes":[{"startedAtMs":1,"endedAtMs":\#(ended),"status":"done"}],"current":{"model":"current/model.stl","renders":[]}}"#.utf8))
+        }
+        let first = try await client.download(project(1000), "model.stl")
+        let second = try await client.download(project(2000), "model.stl")
+        XCTAssertEqual(first, second, "the same file on disk, so its mesh and still are reused")
+        XCTAssertEqual(mac.bodies, 1, "the model's bytes came once")
+        XCTAssertEqual(mac.tags, [nil, "\"m1\""])
+    }
+
     /// #720: a launch into one project's page reads that project alone, before (or without) the list. That one project is
     /// not the Mac's list, so the library must not take every other project as deleted and let its files go.
     func testOneProjectReadAloneIsNotTheMacsListForTheLibrary() {
@@ -552,6 +575,23 @@ private actor ResyncMac: HTTPTransport {
 }
 
 /// A Mac that serves settings, can stop answering, and can refuse an AI choice.
+/// A Mac that tags its model `"m1"` and answers 304 to a request that has it (#720).
+private final class TaggedMac: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _bodies = 0, _tags: [String?] = []
+    var bodies: Int { lock.withLock { _bodies } }
+    var tags: [String?] { lock.withLock { _tags } }
+    func send(_ request: URLRequest, trust: TrustPolicy, limit: Int, resourceTimeout: TimeInterval) async throws -> HTTPReply {
+        let tag = request.value(forHTTPHeaderField: "If-None-Match")
+        return lock.withLock {
+            _tags.append(tag)
+            if tag == "\"m1\"" { return HTTPReply(status: 304, body: Data(), headers: ["ETag": "\"m1\""]) }
+            _bodies += 1
+            return HTTPReply(status: 200, body: Data("solid".utf8), headers: ["ETag": "\"m1\""])
+        }
+    }
+}
+
 private final class SettingsMac: HTTPTransport, @unchecked Sendable {
     static let refusal = "The AI choice changed on another device. Choose again."
     private let lock = NSLock()
