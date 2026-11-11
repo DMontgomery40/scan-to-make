@@ -49,3 +49,12 @@ Open PRs here: #527 (the fifth train, to be rebuilt) and its pieces #509, #510, 
 **How work lands** (operations.md): finished branches go on a train, with one review, one gate (`scripts/ci_local.py` and `scripts/branch_check.py --merge` printing SAFE), a merge commit, and an install the same day from a clone pinned at the merged SHA. The Mac has two build slots and one simulator session at a time (`scripts/lane.py`; every hold that boots a simulator is `--exclusive`).
 
 Never-landed work is kept as tags: `git ls-remote --tags origin 'archive/*'`. Evidence and receipts: `~/scan-to-make-work/` on the Mac. Releases: [`../distribution.md`](../distribution.md).
+
+
+## Train 2026-11-11a conductor handoff (Nov 11)
+
+PR #570, branch `train/2026-11-11a`: retains #568, #564, #565 and #573. #571 was merged then its implementation removed under the lead’s explicit fallback: after the dark-stage join, 40/41 renderer tests passed; the vertical black thin part was unreadable. Shape-aware framing/contact shadows need a separate fix/review.
+
+Whole iPhone run: 114 passed / 0 failed / 2 iPad-only skips; iPad Air 11-inch landscape: 48 passed / 0 failed / 1 phone-only skip. Real-data capture then found unstarted scan demand being skipped on activation. Reproduced red, fixed in the store; all 29 unit + 2 focused iPhone UI tests and 2 iPad UI tests passed after that final fix. CounterpartKit 293, Mac model 55, Linux units 52, retained renderer 37 passed; companion 452 passed with 4 Blender-dependent skips. Prepared Linux frontend build and release renderer compiled.
+
+Evidence: `~/scan-to-make-work/train-2026-11-11a/` (`RESOLUTIONS.md`, `VERIFICATION.md`, `DISCOVERY.txt`, test logs/results). `leatherman-page.png` was visually inspected: one AR chip, new action immediately below gallery labels, full title, no overlap. Capture uses a copy only. The full gate, branch_check, main merge and install remain the lead’s. Physical-device AR remains unverified; Android tests not run locally.
