@@ -1,4 +1,5 @@
 import XCTest
+import UniformTypeIdentifiers
 import CounterpartKit
 import RealityKit
 
@@ -154,6 +155,16 @@ private actor FakeObjects: ObjectsCompanion {
         return try change(id, "confirmation:\(confirmationId):\(answer.action.rawValue)", ["printConfirmation":NSNull()])
     }
     func start(_ id: String) async throws -> Project { try change(id, "start", ["state": "touching-up"]) }
+    /// New Project as the companion takes it: the project, then each file with its kind, recorded in `calls`.
+    func create(instructions: String?, kind: String?) async throws -> Project {
+        let id = "new\(items.count)"
+        items.insert(item(id, "new", kind.map { ["kind": $0] } ?? [:]), at: 0)
+        calls.append("create \(kind ?? "-")")
+        return try decode(items[0])
+    }
+    func addFile(_ id: String, kind: String, path: String) async throws -> Project {
+        try change(id, "addFile \(kind) \((path as NSString).lastPathComponent)", [:])
+    }
     /// As the companion does: the chosen plate is selected, and a send it couldn't confirm stays on its own plate.
     func selectPlate(_ id: String, fileIndex: Int, plateIndex: Int) async throws -> Project {
         guard let index = items.firstIndex(where: { $0["id"] as? String == id }) else { throw ControlRemoteError(code:"not-found", message:"gone") }
@@ -1111,6 +1122,92 @@ private func project(_ item: [String: Any]) throws -> Project {
         XCTAssertEqual(ObjectsModel.fileKind(URL(fileURLWithPath:"/a/b.HEIC")), "photos")
         XCTAssertEqual(ObjectsModel.fileKind(URL(fileURLWithPath:"/a/b.3mf")), "scan")
         XCTAssertNil(ObjectsModel.fileKind(URL(fileURLWithPath:"/a/b.pdf")))
+    }
+
+    /// H1–H3 (Nov 11): the drop zone, the window, Choose Files…, File ▸ Open… and the document types a Finder Open With
+    /// offers Counterpart for read one list. The plist declares only its models, so Counterpart isn't offered for photos.
+    func testNewProjectTakesOneListOfFiles() throws {
+        let plist = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Config/Info.plist")
+        let info = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: plist), format: nil) as? [String: Any])
+        let types = try XCTUnwrap(info["CFBundleDocumentTypes"] as? [[String: Any]])
+        var declared: [String] = []
+        for type in types {
+            XCTAssertEqual(type["CFBundleTypeRole"] as? String, "Viewer", "never an editor of someone's slicer file")
+            XCTAssertEqual(type["LSHandlerRank"] as? String, "Alternate", "never the default app for STL or 3MF")
+            declared += type["CFBundleTypeExtensions"] as? [String] ?? []
+            for identifier in type["LSItemContentTypes"] as? [String] ?? [] {
+                declared += try XCTUnwrap(UTType(identifier), identifier).tags[.filenameExtension] ?? []
+            }
+        }
+        XCTAssertEqual(Set(declared.map { $0.lowercased() }), Set(ObjectsModel.modelExtensions),
+                       "the plist declares New Project's models and nothing else (no photos, no OBJ)")
+        for ext in ObjectsModel.photoExtensions + ObjectsModel.modelExtensions {
+            let url = URL(fileURLWithPath: "/a/b.\(ext.uppercased())")
+            XCTAssertNotNil(ObjectsModel.fileKind(url), ext)
+            XCTAssertTrue(ObjectsModel.acceptedContentTypes.contains { UTType(filenameExtension: ext)?.conforms(to: $0) == true },
+                          "the file chooser offers .\(ext)")
+        }
+        XCTAssertNil(ObjectsModel.fileKind(URL(fileURLWithPath: "/a/b.obj")), "OBJ isn't one New Project takes")
+    }
+
+    /// H1, H2 (Nov 11): a file opened with Counterpart (Open With, a double-click, the Dock icon, `open -a`) or from
+    /// File ▸ Open… starts the same New Project a drop on the window does, and becomes the same project.
+    func testAnOpenedFileStartsTheProjectADropDoes() async throws {
+        for ext in ObjectsModel.photoExtensions + ObjectsModel.modelExtensions {
+            let file = URL(fileURLWithPath: "/tmp/holder.\(ext)")
+            let dropped = try XCTUnwrap(NewProjectDraft.from([file]))
+            let inbox = OpenedFiles()
+            XCTAssertTrue(inbox.receive([file, file]))
+            XCTAssertEqual(inbox.waiting, [file], "once each")
+            let opened = try XCTUnwrap(NewProjectDraft.from(inbox.take()))
+            XCTAssertTrue(inbox.waiting.isEmpty, "taken once")
+            XCTAssertEqual(opened.files, dropped.files)
+            XCTAssertEqual(ObjectsModel.draftKind(for: opened.files), ObjectsModel.draftKind(for: dropped.files))
+
+            var made: [[String]] = []
+            for draft in [dropped, opened] {
+                let companion = FakeObjects()
+                await companion.setCapabilities(.init(objectsCreate: true, structuredPasses: true))
+                let model = ObjectsModel(companion: companion)
+                await model.refresh()
+                let refused = await model.startProject(instructions: "", files: draft.files, kind: ObjectsModel.draftKind(for: draft.files))
+                XCTAssertNil(refused, ext)
+                made.append(await companion.calls.filter { $0.hasPrefix("create") || $0.hasPrefix("addFile") })
+            }
+            let kind = ObjectsModel.modelExtensions.contains(ext) ? "scan" : "photos"
+            XCTAssertEqual(made[0], ["create \(kind == "scan" ? "copy" : "fit")", "addFile \(kind) holder.\(ext)"], ext)
+            XCTAssertEqual(made[1], made[0], "an opened .\(ext) makes the project a dropped one does")
+        }
+    }
+
+    /// Review of #582: a file New Project can't use, opened or dropped, is named with what New Project takes (from the one
+    /// list), never refused in silence. A mixed set keeps the usable files and names the rest.
+    func testAFileNewProjectCantUseIsNamedNotIgnored() throws {
+        let words = ObjectsModel.acceptedWords
+        XCTAssertEqual(words, "photos (JPG, JPEG, HEIC, HEIF or PNG) or models (STL, 3MF or USDZ)")
+        for ext in ObjectsModel.photoExtensions + ObjectsModel.modelExtensions { XCTAssertTrue(words.contains(ext.uppercased()), ext) }
+
+        let inbox = OpenedFiles()
+        let gcode = URL(fileURLWithPath: "/tmp/plate.gcode")
+        XCTAssertTrue(inbox.receive([gcode]), "an open of anything brings the window forward")
+        let alone = inbox.take()
+        XCTAssertNil(NewProjectDraft.from(alone), "nothing to start New Project with")
+        XCTAssertEqual(ObjectsModel.refusal(for: alone),
+                       "“plate.gcode” can’t start a project, so it wasn’t added. New Project takes \(words).")
+
+        let mixed = [URL(fileURLWithPath: "/tmp/notes.pdf"), URL(fileURLWithPath: "/tmp/holder.3mf"), URL(fileURLWithPath: "/tmp/part.obj"),
+                     URL(fileURLWithPath: "/tmp/folder")]
+        XCTAssertTrue(inbox.receive(mixed + mixed))
+        let draft = try XCTUnwrap(NewProjectDraft.from(inbox.take()))
+        XCTAssertEqual(draft.files.map(\.lastPathComponent), ["holder.3mf"], "the usable file still goes in")
+        XCTAssertEqual(draft.refused.map(\.lastPathComponent), ["notes.pdf", "part.obj", "folder"], "once each")
+        XCTAssertEqual(ObjectsModel.refusal(for: draft.refused),
+                       "“notes.pdf”, “part.obj” and “folder” can’t start a project, so they weren’t added. New Project takes \(words).")
+        XCTAssertEqual(ObjectsModel.refusal(for: mixed), ObjectsModel.refusal(for: draft.refused),
+                       "a drop of the same files on the drop zone says the same")
+        XCTAssertNil(ObjectsModel.refusal(for: [URL(fileURLWithPath: "/tmp/a.STL"), URL(fileURLWithPath: "/tmp/b.heic")]), "nothing to say")
+        XCTAssertFalse(inbox.receive([URL(string: "https://example.com/a.stl")!]), "only files")
     }
 
     func testErrorSentencesNeverDumpTheError() {
