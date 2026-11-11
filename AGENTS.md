@@ -10,7 +10,7 @@ The app covers capture (LiDAR Object Capture plus close-up stills) and cleanup (
 
 Android app: see [`android/AGENTS.md`](android/AGENTS.md) and [`android/README.md`](android/README.md).
 
-New session? Read the working PRD, [`docs/design/overhaul/PRD.md`](docs/design/overhaul/PRD.md): what is built and accepted, from the code (§0 is the status table). Then [`docs/status/handoff.md`](docs/status/handoff.md) (one screen: owner, installed builds, what is in motion), [`docs/status/board.md`](docs/status/board.md) (every open item with its owner and next step; anything David says gets a row there in the same turn) and [`docs/operations.md`](docs/operations.md) (how to gate, build, install and drive the apps). Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
+New session? Read the working PRD, [`docs/design/overhaul/PRD.md`](docs/design/overhaul/PRD.md): what is built and accepted, from the code (§0 is the status table). Then [`docs/status/handoff.md`](docs/status/handoff.md) (one screen: owner, installed builds, what is in motion), the pinned issue [#610 "Now"](https://github.com/DMontgomery40/scan-to-make/issues/610) (what is running, next and installed) and the repo's GitHub issues (every open item with its owner and next step; anything David says gets an issue in the same turn; labels and rules in [`docs/status/board.md`](docs/status/board.md)) and [`docs/operations.md`](docs/operations.md) (how to gate, build, install and drive the apps). Handoffs go in `docs/status/handoff.md`, not in temp folders or agent memory.
 
 ## One trunk
 
@@ -39,7 +39,7 @@ David, 2026-11-04: "agents are CONSTANTLY blurring the boundary and adding backe
 David, 2026-11-05, after the starters went missing on the Mac and iPad: "how do make sure thing like that don't happen again?"
 
 - A user-facing feature lands on every layout in the same PR: iPhone (compact), iPad/regular width, Mac, Android and Linux. If a layout can't have it, PRD §6.1 names the exception with David's quote.
-- A layout that is behind or failing does not hold the others' release (David, Nov 11: "why are we letting failed android or Linux or iPad builds or small bugs block a full [train] of working shit"): the feature is still built for every layout, and the one that fails gets a board row and its own branch (`docs/operations.md`, "What holds a train").
+- A layout that is behind or failing does not hold the others' release (David, Nov 11: "why are we letting failed android or Linux or iPad builds or small bugs block a full [train] of working shit"): the feature is still built for every layout, and the one that fails gets an issue (label `held-off-train`) and its own branch (`docs/operations.md`, "What holds a train").
 - Its reachability test runs with projects present on each client: `LayoutParityUITests` (the mobile gate runs it on an iPhone and an iPad), Mac `ObjectsModelTests`, Android `HomeLayoutTests`, Linux `domain.test.ts`. Update the §6.1 table in the same PR.
 
 ## Read bambu-printer-mcp before you build
