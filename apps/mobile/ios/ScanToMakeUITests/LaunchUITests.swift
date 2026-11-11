@@ -2236,6 +2236,12 @@ final class OnDeviceLibraryUITests: XCTestCase {
         }
         // Mic mount's own sidebar row (iPad), else its card on Home (iPhone); never "Mic mount v1".
         let sidebarRow = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        // The away banner pushes the sidebar's list down: scroll it until the row is there.
+        let sidebar = app.collectionViews["Sidebar"]
+        if sidebar.exists {
+            for _ in 0..<6 where !sidebarRow.exists { sidebar.swipeUp() }
+            for _ in 0..<8 where !sidebarRow.exists { sidebar.swipeDown() }
+        }
         let row = sidebarRow.exists ? sidebarRow
             : app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
