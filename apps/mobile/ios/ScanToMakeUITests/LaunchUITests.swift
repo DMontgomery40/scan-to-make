@@ -2225,7 +2225,8 @@ final class OnDeviceLibraryUITests: XCTestCase {
         if back.exists && back.isHittable { back.tap() }
         else {
             // The iPad's sidebar may have folded away after the last pick: open it, then pick another project.
-            let other = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Potato")).firstMatch
+            // Crochet potato's sidebar row (Fixtures.ids.potato).
+            let other = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"]
             if !other.exists {
                 let toggle = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "sidebar")).firstMatch
                 if toggle.exists { toggle.tap() }
@@ -2233,7 +2234,10 @@ final class OnDeviceLibraryUITests: XCTestCase {
             XCTAssertTrue(other.waitForExistence(timeout: 5), app.debugDescription, file: file, line: line)
             other.tap()
         }
-        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
+        // Mic mount's own sidebar row (iPad), else its card on Home (iPhone); never "Mic mount v1".
+        let sidebarRow = app.descendants(matching: .any)["sidebar-project-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        let row = sidebarRow.exists ? sidebarRow
+            : app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
         for _ in 0..<6 where !row.isHittable { app.swipeUp() }
         row.tap()
