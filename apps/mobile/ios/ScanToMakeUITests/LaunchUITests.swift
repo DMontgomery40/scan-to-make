@@ -581,6 +581,27 @@ final class LayoutParityUITests: XCTestCase {
     /// this on the next build, that will confirm the root problem(s) are not solved". A copy whose scan is really the thing
     /// a case must fit: the page offers Make something else from this scan without scrolling, New opens holding that scan
     /// and asks first what it becomes, and Send lands on a new fit project made from the same scan. The source stays.
+    func testMadeFromAnotherProjectShowsItsRequestUnderFromWithProjectsPresent() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "inherited-history",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "-CounterpartSection", "inputs"]
+        app.launch()
+        let tab = app.buttons["What you sent"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 20))
+        scrollProjectPage(app, until: tab)
+        tab.tap()
+        let from = app.buttons["From “Forester phone mount”"]
+        scrollProjectPage(app, until: from)
+        XCTAssertTrue(from.waitForExistence(timeout: 5))
+        let request = app.staticTexts["A mount for my phone."]
+        scrollProjectPage(app, until: request)
+        XCTAssertTrue(request.exists, app.debugDescription)
+        XCTAssertLessThan(from.frame.minY, request.frame.minY)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "What you sent — inherited history"; shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     func testACopysScanMakesAFitFromItsPageWithoutScanningAgainWithProjectsPresent() {
         let source = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         let app = XCUIApplication()

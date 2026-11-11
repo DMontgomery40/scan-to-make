@@ -63,6 +63,60 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        if set == "inherited-history" {
+            let data = Data(#"""
+[
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01",
+    "title": "Forester phone mount",
+    "state": "ready",
+    "createdAtMs": 1794348000010,
+    "updatedAtMs": 1794348000040,
+    "photos": [],
+    "passes": []
+  },
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
+    "title": "Swivel phone mount",
+    "instructions": "Add a swivel.",
+    "state": "new",
+    "createdAtMs": 1794348000060,
+    "updatedAtMs": 1794348000060,
+    "photos": [],
+    "passes": [],
+    "inherited": {
+      "from": {
+        "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01",
+        "title": "Forester phone mount"
+      },
+      "items": [
+        {
+          "at": 1794348000010,
+          "who": "you",
+          "text": "A mount for my phone."
+        },
+        {
+          "at": 1794348000020,
+          "who": "app",
+          "text": "Which case is on the phone?"
+        },
+        {
+          "at": 1794348000030,
+          "who": "you",
+          "text": "The case is a JETech clear case."
+        },
+        {
+          "at": 1794348000040,
+          "who": "app",
+          "text": "Made a holder for that case."
+        }
+      ]
+    }
+  }
+]
+"""#.utf8)
+            return (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+        }
         // `-CounterpartFixtureSet real`: a throwaway copy of real projects, as the companion serves them, for screenshots
         // with real data (`objects.json` in the folder, each project's files under `objects/<id>/`). Never the Mac's own.
         if set == "real", let base = folder, let data = try? Data(contentsOf: base.appending(path: "objects.json")),

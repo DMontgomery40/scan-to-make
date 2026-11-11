@@ -459,3 +459,15 @@ export const LiveActivityTokensSchema = z.strictObject({
   activities: z.array(z.strictObject({ printId: uuid, deviceId: uuid, token: apnsToken, updatedAt: iso })).max(1024),
 });
 export type LiveActivityTokens = z.infer<typeof LiveActivityTokensSchema>;
+
+// A read-only snapshot: deleting or changing the source never changes the new project's context.
+// `items` are the person's words (`you`) and the app's replies and questions (`app`), in time order. An item copied
+// from an earlier generation (the source was itself made from another) names that project in `from`; the source's
+// own items have none. `fit` is how the source's size was settled, measured sizes included: a brief, not words.
+const InheritedFromSchema = z.object({id: z.string(), title: z.string()});
+export const InheritedHistorySchema = z.object({
+  from: InheritedFromSchema,
+  items: z.array(z.object({at: z.number().finite(), who: z.enum(['you', 'app']), text: z.string(), from: InheritedFromSchema.optional()})),
+  fit: FitSchema.optional(),
+});
+export type InheritedHistory = z.infer<typeof InheritedHistorySchema>;

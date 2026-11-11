@@ -52,6 +52,19 @@ test('the same words again after a result are a new request and stay; different 
   }
 });
 
+test('the same answer to two different questions is two answers', () => {
+  // "Yes" to the first question; the pass that read it asked a second, answered "Yes" too. Neither pass was a result.
+  const answer = (startedAtMs, endedAtMs, status, messageId, question) => ({startedAtMs, endedAtMs, status, trigger: 'ask-answer', messageId,
+    note: `Answer to "${question}": Yes`});
+  const asked = base({messages: [note('a', 1000, 'Yes'), note('b', 3000, 'Yes')], passes: [pass(10, 500, 'needs_closeup'),
+    answer(1005, 2000, 'needs_closeup', 'a', 'Is there a case?'), answer(3005, 4000, 'done', 'b', 'Should the cable pass under it?')]});
+  assert.deepEqual(withNotesOnce(asked).messages.map(m => m.id), ['a', 'b']);
+  // An answer sent twice while one question stood is still one answer.
+  const twice = base({messages: [note('a', 1000, 'Yes'), note('b', 1100, 'Yes')], passes: [pass(10, 500, 'needs_closeup'),
+    answer(1005, 1090, 'failed', 'a', 'Is there a case?'), answer(1105, 2000, 'done', 'b', 'Is there a case?')]});
+  assert.deepEqual(withNotesOnce(twice).messages.map(m => m.id), ['b']);
+});
+
 test('the held message and the Done note follow the copy that is kept', () => {
   const held = base({pendingMessageId: 'a', completion: {messageId: 'a', note: 'DONE', atMs: 1, previousStatus: 'printed'},
     messages: [note('a', 1000, 'DONE'), note('b', 1100, 'DONE')], passes: []});

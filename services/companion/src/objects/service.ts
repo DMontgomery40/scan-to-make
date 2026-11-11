@@ -44,6 +44,7 @@ import {ProjectPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
+import {inheritHistory} from './inherited.js';
 import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesNote, withCheckedSizes} from './asks.js';
 /** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
 export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
@@ -694,7 +695,10 @@ export class ObjectService {
         // A code design's inputs list names its own snapshots, so the copy gets its own list.
         if (isCodeDesign(current.design)) await copyDesign(absoluteDesign(this.dir(id), current.design), join(this.dir(duplicate.id), 'current', 'design'));
         const credit = (source as StmObject & {credit?: unknown}).credit;
+        // A copy is made from another project too: what was asked and answered there goes with it.
+        const inherited = inheritHistory(source, projectTitle(source));
         const result = await this.#deps.store.update(duplicate.id, o => ({...o, state: 'ready', current, ...(source.checkedSizes?.length ? {checkedSizes: source.checkedSizes} : {}),
+          ...(inherited.items.length || inherited.fit ? {inherited} : {}),
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
           preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {}),
           ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {}), ...(scan ? {scan} : {})}));
@@ -727,7 +731,7 @@ export class ObjectService {
       const title = projectTitle(source);
       const created = await this.#deps.store.create(words, request.kind, request.kind === 'fit' ? request.fit : undefined);
       // Busy while the files come: nothing can start, change or delete it halfway, and a restart says it was interrupted.
-      const seeded = await this.#deps.store.update(created.id, o => ({...o, state: 'touching-up', progress: bringingScan(title), scanFrom: {id: sourceId, title}}));
+      const seeded = await this.#deps.store.update(created.id, o => ({...o, state: 'touching-up', progress: bringingScan(title), scanFrom: {id: sourceId, title}, inherited: inheritHistory(source, title)}));
       await this.#emit({id: randomUUID(), type: 'project.updated', projectId: seeded.id, data: {keys: ['created']}});
       void this.#gate(seeded.id, () => this.#bringScan(seeded.id)).catch(() => undefined);
       return this.#changed(seeded);
@@ -3386,7 +3390,7 @@ export class ObjectService {
       failure: undefined, ask, reconstructionReview: review,
       question: {closeup: needed.review.kind === 'region' ? 'which part is the object' : 'how big the object is'},
       passes: withPassEnded(o.passes, startedAtMs, {status: 'needs_closeup'}, now,
-        pass => ({activity: this.#activity(pass.activity, [{atMs: now, kind: 'message', text: question}])}))}));
+        pass => ({question, activity: this.#activity(pass.activity, [{atMs: now, kind: 'message', text: question}])}))}));
     await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, data: {askId: ask.id}, detail: {question}});
     return this.#changed(updated);
   }
@@ -3515,7 +3519,7 @@ export class ObjectService {
         ...(result.engine ? {engine: result.engine} : {}), ...(result.note ? {engineNote: this.#publicText(result.note)} : {}),
         ...(state === 'failed' || seatNote ? {activity: this.#activity(p.activity, [...(seatNote ? [{atMs: Date.now(), kind: 'message' as const, text: seatNote}] : []),
           ...(state === 'failed' ? [{atMs: Date.now(), kind: 'message' as const, text: failure}] : [])])} : {}),
-        ...(result.summary ? {summary: result.summary} : {}), seconds: result.stats.seconds, toolCalls: result.stats.toolCalls,
+        ...(result.summary ? {summary: result.summary} : {}), ...(ask ? {question: ask.question} : {}), seconds: result.stats.seconds, toolCalls: result.stats.toolCalls,
         ...(result.sessionId ? {sessionId: result.sessionId} : {}), ...(result.sessionCwd ? {sessionCwd: result.sessionCwd} : {}), checkpoints: result.checkpoints,
         ...(result.resume ? {resume: result.resume} : {}),
         ...(result.stats.costUsd !== undefined ? {costUsd: result.stats.costUsd} : {}), dir: result.passDir}))}));

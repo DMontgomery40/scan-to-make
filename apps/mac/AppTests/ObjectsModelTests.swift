@@ -532,6 +532,23 @@ private func project(_ item: [String: Any]) throws -> Project {
     /// Design §3.3 on the Mac, with projects present (AGENTS.md "Every layout"): a copy whose scan should become a case.
     /// Its page offers Make something else from this scan; New opens holding the scan; the new fit project is selected,
     /// says where its scan came from, and the source is still listed and says what was made from it.
+    func testMadeFromAnotherProjectShowsItsSourceConversationWithProjectsPresent() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appending(path: "packages/contracts/fixtures/inherited-history.json"))
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let companion = FakeObjects()
+        await companion.set(rows)
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let copy = try XCTUnwrap(model.objects.first { $0.title == "Swivel phone mount" })
+        model.selection = copy.id
+        let conversation = ProjectConversation(project: try XCTUnwrap(model.selected), projects: model.objects)
+        XCTAssertEqual(conversation.inheritedLine, "From “Forester phone mount”")
+        XCTAssertEqual(conversation.inheritedEntries.first?.text, "A mount for my phone.")
+        XCTAssertEqual(conversation.inheritedEntries.count, 4)
+        XCTAssertEqual(conversation.entries.first?.text, "Add a swivel.")
+    }
+
     func testMakeSomethingElseFromACopysScanWithProjectsPresent() async throws {
         let companion = FakeObjects()
         await companion.set([item("source", "ready", ["kind": "copy", "title": "Leatherman Wave+ replica", "scan": "scan.usdz"]),
