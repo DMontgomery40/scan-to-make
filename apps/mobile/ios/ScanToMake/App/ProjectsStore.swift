@@ -8,6 +8,10 @@ import CounterpartKit
     let pairingClient: PairingClient
     var projects: [Project] = []
     var loaded = false
+    /// The Mac's whole list arrived in this session (not the saved copy, not one project read on its own): only then may a
+    /// project missing from `projects` be taken as deleted (#720: a launch into one project's page read that project alone,
+    /// and the library let every other project's files go).
+    private(set) var listedFromMac = false
     var error: CompanionError?
     var catalog: PrinterCatalog?
     var printerProblem: String?
@@ -244,6 +248,7 @@ import CounterpartKit
             let latest = try await mac.list()
             guard !Task.isCancelled, reads.isCurrent(ticket) else { return }
             projects = reads.merge(latest, ticket: ticket, current: projects); error = nil; answered()
+            listedFromMac = true
             remember(listed: latest)
             refreshStoppedScans()
             for project in projects where corrections.pending(project.id) != nil { sendQueuedNote(project) }
@@ -409,7 +414,7 @@ import CounterpartKit
         reads.reset()
         models.reset()
         known = nil; heard = [:]
-        projects = []; loaded = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
+        projects = []; loaded = false; listedFromMac = false; error = nil; catalog = nil; printerProblem = nil; link = .checking; events = nil; spools = [:]; macCapabilities = []; mcpUpdates = [:]; attemptedMcpMoves = [:]; mcpCopies = nil; mcpCopiesProblem = nil
         stoppedScans = [:]; readyScans = []; sendFailures = [:]
         restoredUnconfirmed = false
         // A pairing reset shows nothing from before it. The next load restores this Mac's own copy, if it has one, and
