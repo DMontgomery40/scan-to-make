@@ -160,9 +160,13 @@ import CounterpartKit
     nonisolated static var knownFile: URL {
         URL.applicationSupportDirectory.appending(path: "Counterpart/known-projects.json")
     }
-    /// The paired Mac, so one Mac's copy is never shown as another's. A fixture pairing (UI tests) keeps it in memory only.
+    /// The paired Mac, so one Mac's copy is never shown as another's. The canned Mac of the UI tests
+    /// (`-CounterpartFixtures`) keeps it in memory only, so one test's projects never reach the next.
     private var knownMac: String? {
-        guard let status = connection, status.state == .paired, !status.fixture else { return nil }
+        #if DEBUG
+        if Fixtures.folder != nil { return nil }
+        #endif
+        guard let status = connection, status.state == .paired else { return nil }
         return status.baseUrl
     }
 
