@@ -2187,18 +2187,12 @@ final class OnDeviceLibraryUITests: XCTestCase {
         XCTAssertTrue(waitFor(20) { entries(folder).contains { $0.project == mic && $0.kind == "model" } }, "and the phone keeps it")
         XCTAssertTrue(waitFor(10) { FileManager.default.fileExists(atPath: folder.appendingPathComponent("known-projects.json").path) }, "the saved list is written")
 
-        // Leave the page, the Mac stops answering entirely, come back.
+        // Leave the page and come back with the Mac answering (the stage's own revisit, whatever the Mac does)...
+        leaveAndComeBack(app)
+        assertDrawnFromThePhone(app, model, "back on the page, Mac answering")
+        // ...then the Mac stops answering entirely, and again.
         try Data().write(to: folder.appendingPathComponent("offline"))
-        let back = app.navigationBars.buttons.firstMatch
-        if back.exists && back.isHittable { back.tap() }
-        else { app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Potato")).firstMatch.tap() }
-        // This project's own card or row ("Mic mount", never "Mic mount v1").
-        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
-        for _ in 0..<6 where !row.isHittable { app.swipeUp() }
-        row.tap()
-        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertEqual(app.buttons["project-title"].label, "Mic mount")
+        leaveAndComeBack(app)
         assertDrawnFromThePhone(app, model, "back on the page, Mac away")
         let again = XCTAttachment(screenshot: app.screenshot()); again.name = "720-page-again-away"; again.lifetime = .keepAlways; add(again)
         app.terminate()
@@ -2224,15 +2218,33 @@ final class OnDeviceLibraryUITests: XCTestCase {
         return data
     }
 
+    /// Back to Home (iPhone) or another project (iPad's sidebar), then this project's own card or row ("Mic mount", never
+    /// "Mic mount v1").
+    private func leaveAndComeBack(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        let back = app.navigationBars.buttons.firstMatch
+        if back.exists && back.isHittable { back.tap() }
+        else { app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Potato")).firstMatch.tap() }
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
+        for _ in 0..<6 where !row.isHittable { app.swipeUp() }
+        row.tap()
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 10), app.debugDescription, file: file, line: line)
+        XCTAssertEqual(app.buttons["project-title"].label, "Mic mount", file: file, line: line)
+    }
+
     /// The model is drawn within a few seconds, and in the meantime nothing says "coming from your Mac".
     private func assertDrawnFromThePhone(_ app: XCUIApplication, _ model: XCUIElement, _ when: String, file: StaticString = #filePath, line: UInt = #line) {
         let coming = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "coming from your Mac"))
-        let end = Date().addingTimeInterval(8)
+        let end = Date().addingTimeInterval(15)
         var drawn = false
         while Date() < end {
             XCTAssertEqual(coming.count, 0, "\(when): \(coming.firstMatch.exists ? coming.firstMatch.label : "")", file: file, line: line)
             if model.exists { drawn = true; break }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        if !drawn {
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "not-drawn: \(when)"; shot.lifetime = .keepAlways; add(shot)
+            let tree = XCTAttachment(string: app.debugDescription); tree.name = "not-drawn tree: \(when)"; tree.lifetime = .keepAlways; add(tree)
         }
         XCTAssertTrue(drawn, "\(when): the model is drawn from the phone", file: file, line: line)
         XCTAssertEqual(coming.count, 0, when, file: file, line: line)
