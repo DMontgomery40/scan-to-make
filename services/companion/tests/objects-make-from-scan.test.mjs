@@ -281,7 +281,7 @@ const QUESTIONS = [
 ];
 async function talkedThrough(service, store, fit = MEASURED) {
   const source = await scanned(service, store, 'A mount for my phone.', 'fit', fit);
-  await tick(); await service.answerCloseup(source.id, {text: 'Yes, a JETech clear case.'}); await service.settled(source.id);
+  await tick(); await service.answerCloseup(source.id, {text: 'Yes'}); await service.settled(source.id);
   await tick(); await service.answerCloseup(source.id, {text: 'Yes'}); await service.settled(source.id);
   await tick(); await service.correct(source.id, 'Make it thinner.'); await service.settled(source.id);
   return store.get(source.id);
@@ -290,7 +290,7 @@ const CONVERSATION = [
   ['you', 'A mount for my phone.'],
   ['app', 'I need one detail before I can finish.'],
   ['app', 'Is there a case on the phone?'],
-  ['you', 'Yes, a JETech clear case.'],
+  ['you', 'Yes'],
   ['app', 'One more thing.'],
   ['app', 'Should the cable pass under the mount?'],
   ['you', 'Yes'],
@@ -338,8 +338,8 @@ test('a question saved before passes kept it is recovered from its answer\'s not
   await store.update(asked.id, o => ({...o, passes: o.passes.map(({question: _question, ...pass}) => pass)}));
   const source = await store.get(asked.id);
   assert.ok(source.passes.every(pass => pass.question === undefined));
-  // The second answer's note repeats the first answer's line, and both answers start "Yes".
-  assert.match(source.passes[2].note, /^Answer to "Is there a case on the phone\?": Yes, a JETech clear case\.\nAnswer to "Should the cable pass under the mount\?": Yes$/);
+  // The second answer's note repeats the first answer's line, and both answers are "Yes".
+  assert.match(source.passes[2].note, /^Answer to "Is there a case on the phone\?": Yes\nAnswer to "Should the cable pass under the mount\?": Yes$/);
   const made = await service.makeFromScan(source.id, {kind: 'copy', instructions: 'Add a swivel.'});
   const ready = await until(() => store.get(made.id), o => o.state === 'ready', 'the inherited project');
   assert.deepEqual(said(ready.inherited), [...CONVERSATION.slice(0, 9), ['app', 'Before I make it thinner:'], ['app', 'How thin can the back be?']]);
