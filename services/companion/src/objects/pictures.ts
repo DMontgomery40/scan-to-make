@@ -106,7 +106,7 @@ export function leadPicture(names: ProjectPictureNames | undefined, object?: Pic
   return names?.part ?? names?.scan ?? names?.photo;
 }
 
-/** How the pictures are drawn (`mac-reconstruct picture`): raised when the drawing changes, so every picture is redrawn. 2: the light stage; 3: pale parts keep their shading; 4: shape-aware framing and contact shadows; 5: always dark, including dark filament. */
+/** How the pictures are drawn (`mac-reconstruct picture`): raised when the drawing changes, so every picture is redrawn. 2: the light stage; 3: pale parts keep their shading; 5: always dark, with a material floor for dark filament. */
 const PICTURE_VERSION = 5;
 
 /**

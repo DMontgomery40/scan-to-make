@@ -75,6 +75,21 @@ final class ThreeMFTests: XCTestCase {
         XCTAssertGreaterThan(try drawnPixels(image), 1500, "the objects are drawn, not an empty stage")
     }
 
+    func testBlackFilamentKeepsADarkBackdropAndAVisiblePart() throws {
+        let url = try package("black", ["3D/3dmodel.model": model(box(1, "part"), build: "<item objectid=\"1\"/>")])
+        XCTAssertFalse(wantsLightStage(.black))
+        var spec = PictureSpec(); spec.model = url; spec.zUp = true; spec.tint = .black; spec.pixels = 256
+        let output = folder.appendingPathComponent("black.png")
+        try renderPicture(spec, to: output)
+        let image = try XCTUnwrap(NSImage(contentsOf: output)?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        var bytes = [UInt8](repeating: 0, count: 256 * 256 * 4)
+        let context = try XCTUnwrap(CGContext(data: &bytes, width: 256, height: 256, bitsPerComponent: 8, bytesPerRow: 256 * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 256, height: 256))
+        XCTAssertLessThan(bytes[0], 64); XCTAssertLessThan(bytes[1], 64); XCTAssertLessThan(bytes[2], 64)
+        XCTAssertGreaterThan(try drawnPixels(image), 200, "black plastic stays visible on the dark stage")
+    }
+
     /// Components kept in another model part (production extension), placed by transforms, in centimetres, with the
     /// colours the materials extension gives (an object's default and a triangle's own).
     func testComponentsInOtherPartsTransformsUnitsAndColoursFollowTheStandard() throws {
