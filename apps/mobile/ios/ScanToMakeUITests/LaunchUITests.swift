@@ -2142,6 +2142,9 @@ final class OnDeviceLibraryUITests: XCTestCase {
         // scan yet, so its stage honestly says the picture is coming.
         let kept = Set(entries(folder).filter { $0.kind == "picture" && ($0.name.hasPrefix("pictures/") || $0.name.hasPrefix("renders/")) }.map(\.project))
         XCTAssertGreaterThanOrEqual(kept.count, 4, "the Mac's pictures of every project that has one")
+        // The saved list is written a moment after the list arrives (ProjectsStore.saveKnownSoon, 2 s): wait for it, as a
+        // person's phone does, before the app goes.
+        XCTAssertTrue(waitFor(10) { FileManager.default.fileExists(atPath: folder.appendingPathComponent("known-projects.json").path) }, "the saved list is written")
         app.terminate()
 
         // The link drops completely, and the app starts again.
@@ -2182,15 +2185,20 @@ final class OnDeviceLibraryUITests: XCTestCase {
         let model = app.buttons["Explore in 3D"]
         XCTAssertTrue(model.waitForExistence(timeout: 30), "the model is drawn the first time, with the Mac answering")
         XCTAssertTrue(waitFor(20) { entries(folder).contains { $0.project == mic && $0.kind == "model" } }, "and the phone keeps it")
+        XCTAssertTrue(waitFor(10) { FileManager.default.fileExists(atPath: folder.appendingPathComponent("known-projects.json").path) }, "the saved list is written")
 
         // Leave the page, the Mac stops answering entirely, come back.
         try Data().write(to: folder.appendingPathComponent("offline"))
         let back = app.navigationBars.buttons.firstMatch
         if back.exists && back.isHittable { back.tap() }
         else { app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Potato")).firstMatch.tap() }
-        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Mic mount")).firstMatch
+        // This project's own card or row ("Mic mount", never "Mic mount v1").
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT (label BEGINSWITH %@)", "Mic mount", "Mic mount v")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10), app.debugDescription)
+        for _ in 0..<6 where !row.isHittable { app.swipeUp() }
         row.tap()
+        XCTAssertTrue(app.buttons["project-title"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(app.buttons["project-title"].label, "Mic mount")
         assertDrawnFromThePhone(app, model, "back on the page, Mac away")
         let again = XCTAttachment(screenshot: app.screenshot()); again.name = "720-page-again-away"; again.lifetime = .keepAlways; add(again)
         app.terminate()
