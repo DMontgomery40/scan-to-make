@@ -243,6 +243,8 @@ The lead looked at the images for U3–U5 himself. Each row lands on every layou
 
 | History follow-up | David, Nov 11: “when you do a revision or addition to an existing thing all that projects history and context need to go with it”. | Milestone 1 ready for lead gate: #600, `26be32a8`, Node 42 / Kit 13 / Mac 1 / iPhone 1 passed. Milestone 2 #602 is an incomplete draft: companion tests 78 passed at `5589ebe9`; Apple code is unverified after a repeated shared compiler failure (source corrected, no rebuild). Next owner: lead assigns continuation; exact remaining work is in handoff.md. Android/Linux follow-ups: `feat/inherited-history-android-linux`, `feat/versions-android-linux`. |
 
+| History capture follow-up | The milestone 1 iPhone fixture screenshot shows the existing New-project Send and Photos buttons as “Sen…” / “Ph…”. The inherited request is visible below From; this separate action-row layout was not changed. Evidence: `docs/design/screenshots/inherited-history/iphone.png` (#600). | Lead assigns a small action-row layout fix; outside the history brief. |
+
 ## Carried from before Nov 9 (checked against the code and both MCP repos on Nov 10)
 
 | ID | What | Owner |
