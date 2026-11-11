@@ -995,3 +995,41 @@ export function scansToReuse(projects: Project[]) {
 export function scannedLine(p: Pick<Project, "createdAtMs">, timeZone?: string) {
   return `scanned ${new Date(p.createdAtMs).toLocaleDateString("en-US", { month: "short", day: "numeric", ...(timeZone ? { timeZone } : {}) })}`;
 }
+
+/**
+ * New's "Exact size" for a fit made from a kept scan, word for word from CounterpartKit's `ProjectFit.SizeSource` and
+ * `FitChoice` (the iPhone's and the Mac's): it starts on "Use scan", since the scan is the thing the new part must fit.
+ */
+export type FitSizeSource = "lookup" | "measured" | "scan";
+export const FIT_SIZE_SOURCES: readonly (readonly [FitSizeSource, string])[] = [["lookup", "Look up"], ["measured", "I measured"], ["scan", "Use scan"]];
+export function fitSizeDetail(source: FitSizeSource, computer = "your computer") {
+  const named = computer.charAt(0).toUpperCase() + computer.slice(1);
+  if (source === "lookup") return `${named} identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.`;
+  if (source === "measured") return "Measure the outside of the real thing. Leave a side blank if you don't know it.";
+  return `Uses the scan's size as an estimate. Best for loose holders; ${computer} says the clearance it allowed.`;
+}
+export interface FitChoice { source: FitSizeSource; longest: string; middle: string; shortest: string }
+export const newFitChoice = (): FitChoice => ({ source: "scan", longest: "", middle: "", shortest: "" });
+const SIDES = ["longest", "middle", "shortest"] as const;
+/** The sides typed as positive millimetres (a comma decimal too); blank sides are unknown. */
+export function measuredSizes(c: FitChoice) {
+  return SIDES.flatMap((edge) => {
+    const text = c[edge].trim();
+    const mm = Number(text.replace(",", "."));
+    return text && Number.isFinite(mm) && mm > 0 && mm <= 10_000 ? [{ id: edge, label: `${edge} side`, mm }] : [];
+  });
+}
+/** What is still needed before Send, in words; undefined when nothing is. */
+export function fitMissing(c: FitChoice) {
+  if (c.source !== "measured") return undefined;
+  const typed = SIDES.filter((edge) => c[edge].trim()).length;
+  return typed > 0 && measuredSizes(c).length === typed ? undefined : "Enter at least one measurement in millimetres.";
+}
+/** `objects.makeFromScan`'s parameters: `fit` only with a fit's words, as the iPhone and the Mac send it. */
+export function makeFromScanParams(id: string, kind: "fit" | "copy", instructions: string, choice: FitChoice) {
+  const words = instructions.trim();
+  const measured = choice.source === "measured" ? measuredSizes(choice) : [];
+  const fit = kind === "fit" && words && !(choice.source === "measured" && !measured.length)
+    ? { sizeSource: choice.source, ...(choice.source === "measured" ? { measured } : {}) } : undefined;
+  return { id, kind, ...(words ? { instructions: words } : {}), ...(fit ? { fit } : {}) };
+}

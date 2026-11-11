@@ -604,6 +604,11 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertFalse(app.buttons["send"].isEnabled, "it asks what the scan becomes before anything else")
         XCTAssertEqual(app.buttons["scan-use-fit"].label.components(separatedBy: ",").first, "Make something that fits this")
         app.buttons["scan-use-fit"].tap()
+        // The kept scan is what the new part must fit: its exact size starts from the scan, not a lookup (review of #570).
+        let sizeSource = app.segmentedControls["fit-dimension-source"]
+        XCTAssertTrue(sizeSource.waitForExistence(timeout: 5))
+        XCTAssertTrue(sizeSource.buttons["Use scan"].isSelected, "a fit from a kept scan starts on Use scan")
+        XCTAssertFalse(sizeSource.buttons["Look up"].isSelected)
         let describe = app.descendants(matching: .any).matching(identifier: "describe").firstMatch
         XCTAssertTrue(describe.waitForExistence(timeout: 5))
         describe.tap()
@@ -651,8 +656,16 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["scan-use-question"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["scan-use-copy"].exists && app.buttons["scan-use-fit"].exists)
         XCTAssertFalse(app.buttons["scan-object"].exists)
+        app.buttons["scan-use-fit"].tap()
+        let sizeSource = app.segmentedControls["fit-dimension-source"]
+        XCTAssertTrue(sizeSource.buttons["Use scan"].isSelected, "choosing an existing scan also defaults to its size")
+        sizeSource.buttons["Look up"].tap()
         app.buttons["scan-use-remove"].tap()
         XCTAssertFalse(app.staticTexts["scan-use-question"].exists, "Remove goes back to New as it was")
+        for _ in 0..<4 where !offered.isHittable { sheet.swipeUp() }
+        offered.tap()
+        app.buttons["scan-use-fit"].tap()
+        XCTAssertTrue(sizeSource.buttons["Use scan"].isSelected, "another selection starts from that scan again")
     }
 
     /// PRD §5.4 One main action (board U17), the pair seen with real projects on Nov 10: a pass stopped on a project
