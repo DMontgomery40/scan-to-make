@@ -769,7 +769,7 @@ final class LayoutParityUITests: XCTestCase {
             }
             XCTAssertTrue(inside.isEmpty, "\(state): \(inside.map { "\($0.identifier) '\($0.label)' \($0.frame)" }) inside the button at \(send.frame)")
             // Back to the top, only as far as needed: a swipe down at the top would dismiss the sheet.
-            for _ in 0..<8 where !(question.isHittable && copy.isHittable) { sheet.swipeDown(velocity: .slow) }
+            for _ in 0..<8 where !(question.shown(in: sheet) && copy.shown(in: sheet)) { sheet.swipeDown(velocity: .slow) }
         }
         let describe = app.staticTexts["What do you need?"]
         XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
@@ -2046,4 +2046,15 @@ final class LayoutParityUITests: XCTestCase {
         app.buttons["Done"].tap()
     }
 
+}
+
+extension XCUIElement {
+    /// Whether the element's middle is inside `container`, read from frames alone. `isHittable` on a row scrolled out of an
+    /// iPad sheet can throw "Activation point invalid and no suggested hit points" instead of answering false (the gate,
+    /// Nov 11, in a loop that scrolls back to the top), so a scroll loop asks this and leaves `isHittable` to the asserts.
+    func shown(in container: XCUIElement) -> Bool {
+        guard exists else { return false }
+        let own = frame
+        return !own.isEmpty && container.frame.contains(CGPoint(x: own.midX, y: own.midY))
+    }
 }
