@@ -851,7 +851,15 @@ final class LayoutParityUITests: XCTestCase {
     /// Review of #527 part 4, B1: with the Mac away, nothing a person can tap fails after the tap, and nothing kept from
     /// before is shown as live: on the project page (each state's lead actions), Printing and Home. The canned Mac answers
     /// the list once and then stops (`away-after-list`, the screenshot tool's `away`).
-    func testWithTheMacAwayNothingFailsAfterATapOnTheProjectPagePrintingAndHome() throws {
+    /// One test per project state: as one test it launched the app five times and ran past XCTest's 2-minute allowance on
+    /// the iPad (131 s on train 11a's gate, the away line each time within a second of launch), so the time was the test's.
+    func testWithTheMacAwayNothingFailsAfterATapOnAPrintedProject() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05") }
+    func testWithTheMacAwayNothingFailsAfterATapOnAFailedProject() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a07") }
+    func testWithTheMacAwayNothingFailsAfterATapOnAWorkingProject() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02") }
+    func testWithTheMacAwayNothingFailsAfterATapOnAProjectWithAQuestion() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04") }
+    func testWithTheMacAwayNothingFailsAfterATapOnAPrintingProjectPrintingAndHome() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03") }
+
+    private func checkTheMacAway(_ id: String) throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
@@ -872,9 +880,7 @@ final class LayoutParityUITests: XCTestCase {
                 XCTAssertFalse(failure.exists, "\(page): no failure line after a tap: \(failure.exists ? failure.label : "")")
             }
         }
-        // printed (Did it fit?), failed (Try Again), working, a question, printing.
-        for id in ["6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a07", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
-                   "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03"] {
+        do {
             let app = open(id)
             let away = app.descendants(matching: .any)["project-away"]
             XCTAssertTrue(away.waitForExistence(timeout: 20), "\(id): the one line: \(app.debugDescription)")
@@ -885,7 +891,9 @@ final class LayoutParityUITests: XCTestCase {
                 XCTAssertFalse(make.isEnabled, "making from the scan waits for the Mac")
                 XCTAssertTrue(app.staticTexts["make-from-scan-away"].exists, "the disabled scan action explains why it waits")
             }
-            for button in app.buttons.allElementsBoundByIndex where button.exists && macActions.contains(where: { button.label.hasPrefix($0) }) {
+            // Ask for the Mac's actions only, instead of reading every button's label one query at a time.
+            let macAction = NSCompoundPredicate(orPredicateWithSubpredicates: macActions.map { NSPredicate(format: "label BEGINSWITH %@", $0) })
+            for button in app.buttons.matching(macAction).allElementsBoundByIndex where button.exists {
                 XCTAssertFalse(button.isEnabled, "\(id): \(button.label) waits for the Mac")
                 button.tap()
                 checkNothingFails(app, "\(id) after \(button.label)")

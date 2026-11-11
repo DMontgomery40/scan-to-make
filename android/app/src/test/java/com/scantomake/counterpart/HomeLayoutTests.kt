@@ -27,7 +27,6 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performTextInput
@@ -216,11 +215,16 @@ class HomeLayoutTests {
         app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
         state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
         state.loaded.value = true
-        var asked = false
-        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}, makeFromScan = { asked = true }) } }
+        // One composition (a test can set its content once): the page's action opens New holding the scan.
+        var seed by mutableStateOf<String?>(null)
+        compose.setContent { WithApp {
+            val held = seed
+            if (held == null) com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}, makeFromScan = { seed = id })
+            else com.scantomake.counterpart.ui.NewProjectScreen(job = null, close = {}, started = {}, scan = {}, seed = held)
+        } }
         compose.onNode(hasTestTag("make-from-scan")).performScrollTo().assertExists().performClick()
-        assertTrue("the page's action opens New holding the scan", asked)
-        compose.setContent { WithApp { com.scantomake.counterpart.ui.NewProjectScreen(job = null, close = {}, started = {}, scan = {}, seed = id) } }
+        compose.waitForIdle()
+        assertEquals("the page's action opens New holding the scan", id, seed)
         compose.onNode(hasTestTag("scan-use")).assertExists()
         compose.onNodeWithText("Make something that fits this").assertExists()
         compose.onNodeWithText("Just save this scan").assertDoesNotExist()
