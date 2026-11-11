@@ -71,9 +71,11 @@ class AppState(private val app: Counterpart) {
     // What this phone already has (board X100): a page opens from it while the computer isn't answering, relaunch too.
     /** When the computer last answered with each project. */
     val heard = MutableStateFlow<Map<String, Long>>(emptyMap())
-    private var known: KnownProjects? = null
-    private val knownFile get() = java.io.File(app.filesDir, "known-projects.json")
-    private val knownMac: String? get() = status.value?.takeIf { it.state == PairingStatus.State.Paired }?.baseUrl
+    @Volatile private var known: KnownProjects? = null
+    private val knownLock = Any()
+    // Kept on this phone only (noBackupFilesDir is never in Auto Backup), keyed by who the computer is (its pin).
+    private val knownFile get() = java.io.File(app.noBackupFilesDir, "known-projects.json")
+    private val knownMac: String? get() = status.value?.takeIf { it.state == PairingStatus.State.Paired }?.let { it.pin?.let { pin -> "pin:$pin" } ?: it.baseUrl }
 
     private var following: Job? = null
     private var foreground = false
@@ -111,7 +113,8 @@ class AppState(private val app: Counterpart) {
         val now = System.currentTimeMillis()
         val next = change(known?.takeIf { it.mac == mac } ?: KnownProjects(mac), now)
         known = next; heard.value = next.heard
-        scope.launch(Dispatchers.IO) { runCatching { knownFile.writeText(next.encode()) } }
+        // The newest copy wins: each write takes what is current when it runs, one at a time.
+        scope.launch(Dispatchers.IO) { synchronized(knownLock) { known?.let { latest -> runCatching { knownFile.writeText(latest.encode()) } } } }
     }
     fun printerName(p: Project): String? = p.print?.destination?.name ?: catalog.value?.resolved(p.printerDestinationId)?.name
     /** The page's words, with what this computer can keep (review S1: an older one without `projectSettings` asks nothing after a print). */
@@ -178,7 +181,9 @@ class AppState(private val app: Counterpart) {
         mcpUpdateAttempts.value = emptyMap()
         mcpUpdateEvents.value = emptyMap(); mcpCopies.value = null; mcpCopiesProblem.value = null
         known = null; heard.value = emptyMap()
-        restoreKnown()
+        // A pairing reset shows nothing from before it; a copy for no pairing or another computer goes.
+        val owner = runCatching { knownFile.readText() }.getOrNull()?.let { text -> KnownProjects.decode(text, knownMac ?: "") }
+        if (owner == null) runCatching { knownFile.delete() }
     }
 
     /** Projects whose page or Printing screen is showing, counted (a push then a pop never loses one). */
