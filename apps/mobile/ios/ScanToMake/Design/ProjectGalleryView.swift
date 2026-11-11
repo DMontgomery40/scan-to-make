@@ -139,13 +139,13 @@ struct ProjectGalleryView: View {
             switch entry.drawing {
             case .model(let path):
                 ModelStage(url: path == "model.stl" ? modelURL : scanURL, tint: tint(entry.colour),
-                           lightStage: StageContrast.lightStage(for: entry.colour), measured: { drawn(entry, $0) },
+                           measured: { drawn(entry, $0) },
                            placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
                            drawn: { undrawable.remove(entry.id) })
                     .id(entry.id)
             case .assembly(_, _, let seats):
                 // Both models or neither: a part with no scan at its seats would not be Together.
-                ModelStage(url: togetherScanURL == nil ? nil : modelURL, tint: tint(entry.colour), lightStage: StageContrast.lightStage(for: entry.colour),
+                ModelStage(url: togetherScanURL == nil ? nil : modelURL, tint: tint(entry.colour),
                            object: togetherScanURL, seats: seats.map(\.matrix), measured: { drawn(entry, $0) }, placeholder: AnyView(still(entry)), undrawable: { undrawable.insert(entry.id) },
                            drawn: { undrawable.remove(entry.id) })
                     .id(entry.id)
@@ -169,8 +169,10 @@ struct ProjectGalleryView: View {
         undrawable.remove(entry.id)
     }
 
+    /// The stage's material colour for a spool: floored so a dark filament reads on the dark stage
+    /// (CounterpartKit `StageMaterial`); swatches and names elsewhere keep the spool's real colour.
     private func tint(_ colour: ProjectGallery.Colour) -> UIColor? {
-        guard case .spool(let hex) = colour, let value = Int(hex.dropFirst().prefix(6), radix: 16) else { return nil }
+        guard let hex = StageMaterial.drawnHex(for: colour), let value = Int(hex.dropFirst().prefix(6), radix: 16) else { return nil }
         return UIColor(red: CGFloat((value >> 16) & 255) / 255, green: CGFloat((value >> 8) & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
     }
 
@@ -182,26 +184,25 @@ struct ProjectGalleryView: View {
 
     @ViewBuilder private var controls: some View {
         if let entry {
-            let light = StageContrast.lightStage(for: entry.colour)
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
                     if let ar = arTarget(entry) {
-                        Button { ARModel.show(ar) } label: { Label("AR", systemImage: "arkit") }.stageButton(light: light)
+                        Button { ARModel.show(ar) } label: { Label("AR", systemImage: "arkit") }.stageButton()
                             .accessibilityHint("Places it at true size in your room").accessibilityIdentifier("gallery-ar")
                     }
                     if entry.kind == .scan, !entry.photos.isEmpty {
                         Button { showingPhotos = true } label: { Label(entry.photos.count == 1 ? "1 photo" : "\(entry.photos.count) photos", systemImage: "photo.on.rectangle") }
-                            .stageButton(light: light).accessibilityIdentifier("gallery-photos")
+                            .stageButton().accessibilityIdentifier("gallery-photos")
                     }
                     if entry.kind == .part, let locate, project.canLocate {
                         Button(action: locate) { Label("See it together", systemImage: "cube.transparent") }
-                            .stageButton(light: light).disabled(working).accessibilityIdentifier("gallery-locate")
+                            .stageButton().disabled(working).accessibilityIdentifier("gallery-locate")
                             .accessibilityHint("Your Mac works out where the scanned object sits in this part, without changing it")
                     }
                     Spacer(minLength: 0)
                     if let size = entry.sizeText(measured[entry.id]) {
                         Text(size).font(.caption.monospacedDigit().weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                            .padding(.horizontal, 12).padding(.vertical, 8).stageChip(light: light)
+                            .padding(.horizontal, 12).padding(.vertical, 8).stageChip()
                             .accessibilityLabel("\(entry.measures) size \(size)").accessibilityIdentifier("gallery-size")
                     }
                 }

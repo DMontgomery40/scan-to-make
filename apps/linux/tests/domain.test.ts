@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, lightStage, photoPicture, still } from "../src/gallery";
+import { canLocate, gallery, drawnColour, photoPicture, still } from "../src/gallery";
 import {
   pageActions,
   projectPage,
@@ -757,14 +757,13 @@ test("a search result whose title lacks the words says where it matched (first l
   assert.equal(searchSnippet(hanger, "  "), undefined);
 });
 
-// A part stays readable on its stage: the same rule as CounterpartKit StageContrast.
-test("black and a dark blue grey move to the light stage; white, yellow and the neutral stay dark", () => {
-  assert.equal(lightStage("#000000"), true);
-  assert.equal(lightStage("#5B6579"), true);
-  assert.equal(lightStage("#FFFFFF"), false);
-  assert.equal(lightStage("#FEC600"), false);
-  assert.equal(lightStage("neutral"), false);
-  assert.equal(lightStage("own"), false);
+// The stage stays dark for every colour (David, Nov 11): a dark part is floored in its material, the same
+// values as CounterpartKit StageMaterial and the Mac's still pictures, from the shared fixture.
+test("every filament colour stays readable on the dark stage", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/project-gallery.json", import.meta.url), "utf8"));
+  for (const [spool, want] of Object.entries<string>(doc.stage.drawnColours)) assert.equal(drawnColour(spool), want, spool);
+  assert.equal(drawnColour("#000000"), "#333435", "a true black filament is drawn as charcoal, not a silhouette");
+  assert.equal(drawnColour("#5B6579"), "#5B6579", "blue grey is already above the floor");
 });
 
 test("a pass that stopped to ask or stopped short never reads as all ticks", () => {

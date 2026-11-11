@@ -3,6 +3,7 @@ package com.scantomake.counterpart
 import com.scantomake.counterpart.api.Project
 import com.scantomake.counterpart.api.ProjectGallery
 import com.scantomake.counterpart.api.canLocate
+import com.scantomake.counterpart.api.drawnColour
 import com.scantomake.counterpart.api.photoPicture
 import com.scantomake.counterpart.api.picturePath
 import com.scantomake.counterpart.api.Still
@@ -54,6 +55,15 @@ class ProjectGalleryTests {
                 }
             }
         }
+    }
+
+    /** The stage stays dark for every colour (David, Nov 11): a dark part is floored in its material, not by lightening the backdrop. */
+    @Test fun everyFilamentColourStaysReadableOnTheDarkStage() {
+        val drawn = doc["stage"]!!.jsonObject["drawnColours"]!!.jsonObject
+        for ((spool, want) in drawn) if (spool.startsWith("#")) assertEquals(spool, want.jsonPrimitive.content, drawnColour(spool))
+        assertEquals("#333435", drawnColour("#000000")) // a true black filament is charcoal, not a silhouette
+        assertEquals(ProjectGallery.Colour.Neutral, drawnColour(ProjectGallery.Colour.Neutral))
+        assertEquals(ProjectGallery.Colour.Own, drawnColour(ProjectGallery.Colour.Own))
     }
 
     /** Review of #451, finding 5: a locate pass changes no file, so the media version (and the download cache) stays. */
