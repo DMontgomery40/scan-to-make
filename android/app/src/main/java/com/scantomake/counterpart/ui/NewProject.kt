@@ -81,10 +81,6 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
     val known by state.projects.collectAsState()
     // A kept scan (design §3.3): the page's ("Make something else from this scan"), or one chosen below.
     var picked by remember { mutableStateOf(seed) }
-    known.firstOrNull { it.id == picked }?.let { source ->
-        SeededNewProject(source, close = { if (seed != null) close() else picked = null }, removable = seed == null, started = started)
-        return
-    }
     val prefs = app.prefs
     val scope = rememberCoroutineScope()
     val macName by state.macName.collectAsState()
@@ -98,11 +94,14 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
     var draftId by remember { mutableStateOf(prefs.getString("CounterpartNewDraftId", "") ?: "") }
     var scanned by remember { mutableStateOf(false) }
     var scanUse by remember { mutableStateOf(job) }
-    var dimensionSource by remember { mutableStateOf("lookup") }
-    var measuredLongest by remember { mutableStateOf("") }
-    var measuredMiddle by remember { mutableStateOf("") }
-    var measuredShortest by remember { mutableStateOf("") }
+    val sizes = remember { FitSizes("lookup") }
     var pendingCamera by remember { mutableStateOf<File?>(null) }
+    // The draft is kept while New holds a kept scan instead: everything it remembers sits above this, so choosing a
+    // scan and then Remove brings back its words and photos as they were.
+    known.firstOrNull { it.id == picked }?.let { source ->
+        SeededNewProject(source, close = { if (seed != null) close() else picked = null }, removable = seed == null, started = started)
+        return
+    }
     val link = PublishedModelLink.find(text)
 
     LaunchedEffect(text) { prefs.edit().putString("CounterpartNewDraft", text).apply() }
@@ -119,18 +118,11 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
     fun chosenKind(): String? = scanUse?.takeIf { it != "later" } ?: job
     fun kind(): String? = chosenKind()
 
-    fun measuredValues(): List<Pair<String, Double>> = listOf("longest" to measuredLongest, "middle" to measuredMiddle, "shortest" to measuredShortest).mapNotNull { (edge, value) ->
-        value.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 && it <= 10_000 }?.let { edge to it }
-    }
-    fun measuredValid(): Boolean {
-        val typed = listOf(measuredLongest, measuredMiddle, measuredShortest).count { it.isNotBlank() }
-        return typed > 0 && measuredValues().size == typed
-    }
     /** For a fit made from a scan: how its exact size is settled, sent as fields beside the request. The computer
      *  turns them into its worker's brief; nothing is appended to the person's words. */
     fun fitChoice(): ProjectFit? {
         if (!scanned || scanUse != "fit" || text.isBlank()) return null
-        return ProjectFit.of(dimensionSource, measuredValues().map { ProjectFit.Size(it.first, "${it.first} side", it.second) })
+        return sizes.fit()
     }
     /** A computer that doesn't take the fields would design without them, so it is asked to update instead. */
     suspend fun requireFitFields(fit: ProjectFit?) {
@@ -206,28 +198,7 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
                 ScanUseChoice("Make something that fits this", "A holder, mount, case or adapter. The scan is what it must fit, not the print.", scanUse == "fit", "scan-use-fit") { scanUse = "fit" }
                 ScanUseChoice("Just save this scan", "Keep its shape with this project and decide later.", scanUse == "later", "scan-use-later") { scanUse = "later" }
                 if (scanUse == "fit") GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Exact size", fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SecondaryButton("Look up", Modifier.weight(1f).testTag("fit-size-lookup"), enabled = working == null) { dimensionSource = "lookup" }
-                        SecondaryButton("I measured", Modifier.weight(1f).testTag("fit-size-measured"), enabled = working == null) { dimensionSource = "measured" }
-                        SecondaryButton("Use scan", Modifier.weight(1f).testTag("fit-size-scan"), enabled = working == null) { dimensionSource = "scan" }
-                    }
-                    when (dimensionSource) {
-                        "measured" -> {
-                            // What's missing sits above the fields (X86, as on iOS): focusing Longest brings only the field
-                            // into view above the keyboard, so a line below it stayed under the keyboard.
-                            if (measureAsked && !measuredValid()) Text("Enter at least one measurement in millimetres.", color = Palette.failed, fontSize = 13.sp,
-                                modifier = Modifier.testTag("fit-size-missing"))
-                            Text("Measure the outside of the real thing. Leave a side blank if you don't know it.", color = Palette.secondary, fontSize = 13.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(measuredLongest, { measuredLongest = it }, Modifier.weight(1f).focusRequester(measureFocus).testTag("fit-size-longest"), label = { Text("Longest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
-                                OutlinedTextField(measuredMiddle, { measuredMiddle = it }, Modifier.weight(1f).testTag("fit-size-middle"), label = { Text("Middle mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
-                                OutlinedTextField(measuredShortest, { measuredShortest = it }, Modifier.weight(1f).testTag("fit-size-shortest"), label = { Text("Shortest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
-                            }
-                        }
-                        "scan" -> Text("Uses the scan's size as an estimate. Best for loose holders; your computer says the clearance it allowed.", color = Palette.secondary, fontSize = 13.sp)
-                        else -> Text("Your computer identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.", color = Palette.secondary, fontSize = 13.sp)
-                    }
+                    FitSizeChoice(sizes, measureAsked, measureFocus, enabled = working == null)
                     SecondaryButton("Add a caliper photo", Modifier.fillMaxWidth().testTag("fit-caliper-photo"), enabled = working == null && photos.size < 24, icon = CIcons.Camera) {
                         val (file, uri) = Media.newPhotoTarget(context); pendingCamera = file; takePhoto.launch(uri)
                     }
@@ -282,7 +253,7 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         val missing = when {
             scanned && scanUse == null -> "Choose whether to copy it, make something that fits it, or save the scan."
             scanned && scanUse == "fit" && text.isBlank() -> "Say what it should hold, mount or adapt to."
-            scanned && scanUse == "fit" && dimensionSource == "measured" && !measuredValid() -> "Enter at least one measurement in millimetres."
+            scanned && scanUse == "fit" && sizes.missing -> "Enter at least one measurement in millimetres."
             !scanned && text.isBlank() -> "Describe what to make, or add a scan."
             else -> null
         }
@@ -302,7 +273,7 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
         PrimaryButton(sendLabel, Modifier.fillMaxWidth().padding(20.dp, 8.dp).testTag("send"),
             enabled = working == null && !(scanned && scanUse == null), icon = sendIcon) {
             if (describeFirst) { describeFocus.requestFocus(); return@PrimaryButton }
-            if (scanned && scanUse == "fit" && dimensionSource == "measured" && !measuredValid()) {
+            if (scanned && scanUse == "fit" && sizes.missing) {
                 measureAsked = true; measureFocus.requestFocus(); return@PrimaryButton
             }
             if (missing != null) { problem = missing; return@PrimaryButton }
@@ -318,6 +289,54 @@ fun NewProjectScreen(job: String?, close: () -> Unit, started: (String) -> Unit,
     }
 }
 
+/** How a fit's exact size is settled: the maker's published size you confirm, your own measurements, or the scan. */
+class FitSizes(initial: String) {
+    var source by mutableStateOf(initial)
+    var longest by mutableStateOf("")
+    var middle by mutableStateOf("")
+    var shortest by mutableStateOf("")
+
+    /** Measurements typed, by the edge named: blank sides are simply unknown. */
+    fun values(): List<Pair<String, Double>> = listOf("longest" to longest, "middle" to middle, "shortest" to shortest).mapNotNull { (edge, value) ->
+        value.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 && it <= 10_000 }?.let { edge to it }
+    }
+    /** "I measured" with no measurement, or one that isn't a size: there is nothing to send yet. */
+    val missing: Boolean get() {
+        if (source != "measured") return false
+        val typed = listOf(longest, middle, shortest).count { it.isNotBlank() }
+        return typed == 0 || values().size != typed
+    }
+    fun fit(): ProjectFit? = ProjectFit.of(source, values().map { ProjectFit.Size(it.first, "${it.first} side", it.second) })
+}
+
+/** Exact size, for a fit (New after a scan, and New holding a kept scan): Look up, I measured, Use scan. */
+@Composable
+fun FitSizeChoice(sizes: FitSizes, asked: Boolean, focus: FocusRequester, enabled: Boolean) {
+    Text("Exact size", fontWeight = FontWeight.SemiBold)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SecondaryButton("Look up", Modifier.weight(1f).testTag("fit-size-lookup"), enabled = enabled) { sizes.source = "lookup" }
+        SecondaryButton("I measured", Modifier.weight(1f).testTag("fit-size-measured"), enabled = enabled) { sizes.source = "measured" }
+        SecondaryButton("Use scan", Modifier.weight(1f).testTag("fit-size-scan"), enabled = enabled) { sizes.source = "scan" }
+    }
+    when (sizes.source) {
+        "measured" -> {
+            // What's missing sits above the fields (X86, as on iOS): focusing Longest brings only the field
+            // into view above the keyboard, so a line below it stayed under the keyboard.
+            if (asked && sizes.missing) Text("Enter at least one measurement in millimetres.", color = Palette.failed, fontSize = 13.sp,
+                modifier = Modifier.testTag("fit-size-missing"))
+            Text("Measure the outside of the real thing. Leave a side blank if you don't know it.", color = Palette.secondary, fontSize = 13.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(sizes.longest, { sizes.longest = it }, Modifier.weight(1f).focusRequester(focus).testTag("fit-size-longest"), label = { Text("Longest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                OutlinedTextField(sizes.middle, { sizes.middle = it }, Modifier.weight(1f).testTag("fit-size-middle"), label = { Text("Middle mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                OutlinedTextField(sizes.shortest, { sizes.shortest = it }, Modifier.weight(1f).testTag("fit-size-shortest"), label = { Text("Shortest mm") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+            }
+        }
+        "scan" -> Text("Uses the scan's size as an estimate. Best for loose holders; your computer says the clearance it allowed.", color = Palette.secondary, fontSize = 13.sp,
+            modifier = Modifier.testTag("fit-size-scan-line"))
+        else -> Text("Your computer identifies it, finds the maker's published size, and asks “I found this exact size — is that right?” before designing to it.", color = Palette.secondary, fontSize = 13.sp)
+    }
+}
+
 /** New holding a scan the computer already has: the question first, the scan named, then the words (design §3.3). */
 @Composable
 private fun SeededNewProject(source: Project, close: () -> Unit, removable: Boolean, started: (String) -> Unit) {
@@ -328,6 +347,11 @@ private fun SeededNewProject(source: Project, close: () -> Unit, removable: Bool
     var words by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<String?>(null) }
+    // A kept scan's checked sizes go with it, so a fit made from it starts on the scan's size (the companion's own
+    // make-from-scan case); Look up and I measured stay a tap away, as in New after a scan.
+    val sizes = remember { FitSizes("scan") }
+    val measureFocus = remember { FocusRequester() }
+    var measureAsked by remember { mutableStateOf(false) }
     val ready = use != null && !(use == "fit" && words.isBlank())
     Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -346,6 +370,10 @@ private fun SeededNewProject(source: Project, close: () -> Unit, removable: Bool
             ScanUseChoice(ScanLineage.COPY_CHOICE, "Clean up the scan and print the same thing.", use == "copy", "scan-use-copy") { use = "copy" }
             ScanUseChoice(ScanLineage.FIT_CHOICE, "A holder, mount, case or adapter. The scan is what it must fit, not the print.", use == "fit", "scan-use-fit") { use = "fit" }
             Text("Your computer copies this scan, its photos and its checked sizes into a new project. The project it came from stays as it is.", color = Palette.secondary, fontSize = 13.sp)
+            // A kept scan's project starts on the computer with what it has; a caliper photo goes in its conversation after.
+            if (use == "fit") GlassCard(Modifier.fillMaxWidth()) { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                FitSizeChoice(sizes, measureAsked, measureFocus, enabled = !working)
+            } }
             Text("What do you need?", fontWeight = FontWeight.SemiBold)
             OutlinedTextField(words, { words = it }, Modifier.fillMaxWidth().testTag("describe"), minLines = 3,
                 placeholder = { Text(if (use == "copy") "Copy this. Close up the bottom." else "A belt case for it…") })
@@ -353,10 +381,12 @@ private fun SeededNewProject(source: Project, close: () -> Unit, removable: Bool
         }
         PrimaryButton(when { use == null -> "Choose what this scan becomes"; use == "fit" && words.isBlank() -> "Say what it should fit"; use == "copy" -> ScanLineage.COPY_CHOICE; else -> "Send" },
             Modifier.fillMaxWidth().padding(20.dp, 8.dp).testTag("send"), enabled = ready && !working) {
+            // "I measured" with nothing measured would send no size at all: it goes to the fields and says so there.
+            if (use == "fit" && sizes.missing) { measureAsked = true; measureFocus.requestFocus(); return@PrimaryButton }
             working = true; problem = null
             scope.launch {
                 try {
-                    val made = app.companion.makeFromScan(source.id, use!!, words, if (use == "fit") ProjectFit.of("lookup", emptyList()) else null)
+                    val made = app.companion.makeFromScan(source.id, use!!, words, if (use == "fit") sizes.fit() else null)
                     state.show(made); started(made.id)
                 } catch (e: CompanionException) {
                     problem = if (e.code == "not-found") "Update Counterpart on your computer to make something else from a scan you already have." else e.message
