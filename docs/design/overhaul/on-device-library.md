@@ -29,7 +29,7 @@ His phone reaches his Mac through WireGuard from cellular most of the day (board
 | The 3D model (`model.stl`) | opened projects and the three most recently changed | unmetered only, unless the page asks |
 | The scan model (`phone-preview.usdz` when the Mac lists it, else the scan, never over 64 MB) | opened projects, only when the person keeps everything | unmetered; on a metered link only when listed under 25 MB |
 
-Three files at a time. "Metered": iOS `NWPath.isExpensive` (cellular, a personal hotspot) or `isConstrained` (Low Data Mode); Apple asks apps to put off discretionary transfers on those links (`URLRequest.allowsExpensiveNetworkAccess`, `allowsConstrainedNetworkAccess`). Android: the active network lacks `NET_CAPABILITY_NOT_METERED`. A page's own request always fetches what it shows, on any link. **Not verified:** whether iOS reports the path under David's WireGuard tunnel as expensive when the phone is on cellular. If it does not, models also fill over cellular there; the rule is still right for everyone else.
+Three files at a time. A new list adds to what is being fetched and never cancels a file in flight (the event stream reloads the list often on a slow link); the ceiling is enforced each time the queue drains. "Metered": iOS `NWPath.isExpensive` (cellular, a personal hotspot) or `isConstrained` (Low Data Mode); Apple asks apps to put off discretionary transfers on those links (`URLRequest.allowsExpensiveNetworkAccess`, `allowsConstrainedNetworkAccess`). Android: the active network lacks `NET_CAPABILITY_NOT_METERED`. A page's own request always fetches what it shows, on any link. **Not verified:** whether iOS reports the path under David's WireGuard tunnel as expensive when the phone is on cellular. If it does not, models also fill over cellular there; the rule is still right for everyone else.
 
 **The person chooses.** Settings → *Keep on this iPhone* (iPad, phone):
 
@@ -39,9 +39,9 @@ Three files at a time. "Metered": iOS `NWPath.isExpensive` (cellular, a personal
 | Pictures and 3D models (default) | and the models | 500 MB | 65.7 MB if every model were kept; the fill keeps opened and recent ones |
 | Everything, scans included | and the scans the phone may fetch | 2 GB | 98.1 MB |
 
-A line says how much space it uses, with Clear. Past the ceiling, scans go first, then models, then pictures, each from the project opened longest ago. Choosing a smaller option lets go of what it no longer keeps at once.
+Measured on the iPhone simulator after one normal run of the screenshot tool over that copy, with no project page opened: the default choice had filled 28 pictures for all 20 projects (10.7 MB) and the 3 most recent projects' models (1.5 MB), 12.2 MB in all. A line says how much space it uses, with Clear. Past the ceiling, scans go first, then models, then pictures, each from the project opened longest ago. Choosing a smaller option lets go of what it no longer keeps at once.
 
-**It forgets.** A project no longer in the Mac's list loses its files. Pairing another Mac clears the old Mac's library; unpairing clears all of it. A pairing that could not be read (a locked phone's Keychain) changes nothing: board X96 found exactly that read reported as "pairing changed", and clearing on it would repeat that defect.
+**It forgets.** A project no longer in the Mac's list loses its files. Pairing another Mac clears the old Mac's library; Forget This Mac clears all of it. Nothing else does: a pairing that could not be read (a locked phone's Keychain), or a Mac that wants pairing again, changes nothing. Board X96 found exactly that read reported as "pairing changed", and clearing on it would repeat that defect.
 
 ### Every layout
 
