@@ -414,7 +414,7 @@ class ContractTests {
                     "limit-absolute" to "Stopped at the absolute time limit of 2 hours",
                     "limit-tool-calls" to "Stopped at the 120 tool-call limit"
                 ).getValue(name)
-                assertEquals("$reason. Try again or review the saved checkpoint.", words.status)
+                assertEquals("$reason. Trying again carries on from where it stopped.", words.status)
                 assertFalse(words.line.lowercase().contains("cancelled"))
             }
             val actions = words.actions
