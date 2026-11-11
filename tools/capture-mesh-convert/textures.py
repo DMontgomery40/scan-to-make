@@ -1,4 +1,4 @@
-"""Small, explicit USD Preview Surface / OBJ base-colour bridge."""
+"""Small, explicit USD Preview Surface / OBJ bridge: base colour, plus the normal and occlusion maps beside it."""
 import io
 import math
 import re
@@ -111,6 +111,64 @@ def base_colour(prim, src, read_asset):
             "uvPrimvar":str(uv_name), "png":data, "sourceAsset":asset_name,
             "imageSize":list(size), "sourceFormat":image_format,
             "clamp":wrap[0] == "clamp", "wrapModes":wrap, "textureWarnings":texture_warnings}
+
+
+# Object Capture's material also carries the surface's measured detail: a tangent-space normal map and an
+# ambient-occlusion map, baked from its dense reconstruction onto the coarse mesh. They share the base colour's UVs.
+SURFACE_MAPS = (("normal", "normal", "rgb"), ("occlusion", "occlusion", "r"))
+
+
+def surface_maps(prim, src, read_asset, uv_name):
+    """Return (maps, warnings): the normal and occlusion textures bound through UsdPreviewSurface.
+
+    Each map is kept as PNG bytes with how to read it (scale, bias, channel, colour space). A map whose graph is not
+    a plain UsdUVTexture on the base colour's UV set is left out with a warning: geometry and base colour never
+    depend on it."""
+    from pxr import UsdShade
+    material, _ = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
+    if not material:
+        return [], []
+    try:
+        surface = _source(material.GetSurfaceOutput(), "UsdPreviewSurface", "surface")
+    except UnsupportedTexture:
+        return [], []
+    maps, warnings = [], []
+    for role, input_name, output in SURFACE_MAPS:
+        inp = surface.GetInput(input_name)
+        if not inp or not inp.GetConnectedSource():
+            continue
+        try:
+            texture = _source(inp, "UsdUVTexture", output)
+            reader = _source(texture.GetInput("st"), "UsdPrimvarReader_float2", "result")
+            if _value(reader.GetInput("varname")) != uv_name:
+                raise UnsupportedTexture("UV set differs from the base colour's")
+            if any(i.GetAttr().GetNumTimeSamples() or (i.HasConnectedSource() and i.GetBaseName() != "st")
+                   for i in texture.GetInputs()):
+                raise UnsupportedTexture("animated or computed texture inputs")
+            file_input = texture.GetInput("file")
+            asset = file_input.Get() if file_input else None
+            if not asset or not asset.resolvedPath:
+                raise UnsupportedTexture("texture asset is missing or unresolved")
+            asset_name, data = read_asset(src, asset.resolvedPath)
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as image:
+                image.load()
+                size, image_format, bands = image.size, image.format, image.getbands()
+                if image_format != "PNG":
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="PNG")
+                    data = buffer.getvalue()
+            scale = texture.GetInput("scale")
+            bias = texture.GetInput("bias")
+            space = _value(texture.GetInput("sourceColorSpace"))
+            maps.append({"role": role, "png": data, "sourceAsset": asset_name, "imageSize": list(size),
+                         "sourceFormat": image_format, "channels": "".join(bands), "output": output,
+                         "uvPrimvar": uv_name, "sourceColorSpace": space or "auto",
+                         "scale": list(scale.Get()) if scale and scale.Get() is not None else [1, 1, 1, 1],
+                         "bias": list(bias.Get()) if bias and bias.Get() is not None else [0, 0, 0, 0]})
+        except (UnsupportedTexture, OSError, ValueError) as exc:
+            warnings.append(f"{role} map not exported: {exc}")
+    return maps, warnings
 
 
 def uv_coordinates(prim, name, counts, indices, point_count):

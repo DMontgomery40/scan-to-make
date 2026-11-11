@@ -367,3 +367,16 @@ test('a scan sent with no words gets one sentence that states the job', async ()
   const prompt = buildTouchupInvocation({pass: await pass(), printer, claudePath: '/c', sourceEnv}).args.at(-1);
   assert.ok(prompt.startsWith(`${TOUCHUP_INSTRUCTION}\n\nFiles:\n`));
 });
+
+// #734: a cleanup's surface detail comes from the scan (its normal map for a capture), never from colour; flat
+// regions and lost features are found by colour, and a lost line becomes one cord along its curve.
+test('cleanup rules: relief from the normal map, regions and placed features from colour', () => {
+  for (const engine of ['blender', 'code']) {
+    const rules = systemRules({kind: 'copy', engine});
+    assert.match(rules, /normal map \(the scan file named \*_normal_N\.png\), at the height the scan measured/);
+    assert.match(rules, /Never make surface texture \(stitches, weave, grain\) from colour/);
+    assert.match(rules, /choosing that region by the scan's colour/);
+    assert.match(rules, /a round one as a bead, a line as a cord that follows its own curve/);
+  }
+  assert.doesNotMatch(systemRules({kind: 'fit', request: true}), /normal map/, 'a new design has no scan to clean');
+});
