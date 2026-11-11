@@ -2,13 +2,16 @@
 
 The lead's live list. It is updated every time the lead is woken, for any reason, and before the lead ends a turn. [`board.md`](board.md) holds every item and its history; this page holds only what is in motion or owed next, so nothing waits unseen. If a line here is more than an hour old, it is stale: check the thing itself.
 
-**Last checked: 2026-11-11 08:46Z by the new lead (Claude Opus 5.5 high, T3 thread on agents-173, since 08:40Z). The previous lead was removed by David at 08:33Z: [`handoff.md`](handoff.md) has what went wrong.**
+**Last checked: 2026-11-11 09:00Z by the new lead (Claude Opus 5.5 high, T3 thread on agents-173, since 08:40Z). The previous lead was removed by David at 08:33Z: [`handoff.md`](handoff.md) has what went wrong.**
 
 ## Running
 
 | What | Who (model) | Started | Budget ends | Last seen doing | If it finishes: next |
 |---|---|---|---|---|---|
 | Kernel round 7c: the holder on a swivel, with a base that carries the torque (X126) | D: Claude Fable 5.2 high, agents-136 | 08:24Z | 70 min; milestone 20 min (the statics, the base and the swivel chosen) | just started | the lead checks the statics and every margin in its report before David sees it |
+| #570 review fixes, Mac/iPhone/Linux/companion: fit sent from a scan on Mac and Linux with the size choice, iPhone defaults to the scan and keeps added photos, unsent photos not copied, half-uploaded sources refused, wordless copies of imported scans, 3MF colours kept (Cursor, Composer and Codex P1/P2s that Muse had put on the next train; P1s block this train under "Every layout") | D: Claude Opus 5.5 high, Mac `~/fleet/stm-lane-a`, branch `fix/570-review-apple` | 08:58Z | 10:40Z | started | lead merges into the train, gates once |
+| #570 review fixes, Android: the fit size choice from a scan, the draft kept, a chooser for every derived project, lineage cases in the shared fixtures | D: Claude Opus 5.5 high, agents-173 worktree, branch `fix/570-review-android` | 08:58Z | 10:15Z | started | same |
+| Both MCPs' `fdm_design`: keep what every bought version of a thing has; compliant-first is for the flexing element only; connections judged against products that work (the council's top finding, in the text every user's design worker reads) | D: Claude Fable 5.2 high, agents-173, PRs only | 09:00Z | 10:30Z | started | lead merges and publishes, updates both through the app |
 | The build David gets, `train/2026-11-11a` (#570, head `203d13e0`) | Lead fixed the 85477a1a gate's three failures in `203d13e0`: Android `HomeLayoutTests` (a bad import hid a second failure, `setContent` twice; 127 unit tests now pass on agents-173), the companion's stale capabilities expectation (`remote-auth` 34/34), and the iPad Mac-away test (not a hang: the away line came within 1 s of each launch; one test launched the app five times and read every button, 131 s; now one test per project state). Full gate + `ux_gate.py` running on the Mac: D: "Gate train 11a (#570) at 203d13e0…" (Claude Opus 5.5 medium), log `~/scan-to-make-work/train-2026-11-11a/gate2/gate.log` | 08:45Z | about 11:00Z | started | read the `gate exit` line and `ux_gate` result → `branch_check --merge` READ → merge → install Mac, iPhone, iPad → `ARModelTests` on his iPhone. `train/2026-11-11b` (#587) has the same fixes merged in (`39e90a69`) |
 
 ## Finished, waiting on the lead (nobody is working on these)
