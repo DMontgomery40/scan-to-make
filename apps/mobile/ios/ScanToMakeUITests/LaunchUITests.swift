@@ -1815,7 +1815,7 @@ final class OnDeviceLibraryUITests: XCTestCase {
 
     /// A picture that is not one flat colour (the blank check flags those), as PNG.
     private func picture(_ hue: CGFloat) -> Data {
-        UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240)).pngData { context in
+        UIGraphicsImageRenderer(size: CGSize(width: 320, height: 240), format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }()).pngData { context in
             UIColor(hue: hue, saturation: 0.5, brightness: 0.4, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 320, height: 240))
             UIColor.white.setFill(); context.cgContext.fillEllipse(in: CGRect(x: 90, y: 50, width: 140, height: 140))
         }
@@ -1890,9 +1890,11 @@ final class OnDeviceLibraryUITests: XCTestCase {
         // Every project the library holds a picture for: its page, the Mac away, shows the Mac's picture on the stage.
         for id in kept.sorted() {
             app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(id)"])
-            let stage = app.images["gallery-stage-picture"]
-            XCTAssertTrue(stage.waitForExistence(timeout: 20), "\(id): the page opens from what the phone has")
-            XCTAssertTrue(waitFor(10) { stage.value as? String == "shown" }, "\(id): the stage shows the picture the phone keeps, not \(String(describing: stage.value))")
+            // The stage shows the Mac's picture the phone keeps ("shown"), or, for a recent project whose model the phone
+            // also keeps, that model drawn (its Explore in 3D control). Never "loading", "not available" or a bare stage.
+            let stage = app.images["gallery-stage-picture"], model = app.buttons["Explore in 3D"]
+            XCTAssertTrue(waitFor(20) { (stage.exists && stage.value as? String == "shown") || model.exists },
+                          "\(id): the stage shows what the phone keeps, not \(stage.exists ? String(describing: stage.value) : "nothing"): \(app.debugDescription)")
             let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "page-away-\(id.suffix(2))"; shot.lifetime = .keepAlways; add(shot)
             app.terminate()
         }
@@ -1901,21 +1903,20 @@ final class OnDeviceLibraryUITests: XCTestCase {
     /// Past the ceiling, models go before pictures: the library keeps every project's picture and lets the models go.
     func testFillingPastTheCeilingEvictsModelsBeforePicturesWithProjectsPresent() throws {
         let folder = try folder()
-        // Room for every picture (a few KB each) and not for one 200 KB model.
-        var app = launch(folder, ["-CounterpartLibraryCeiling", "150000"])
+        var app = launch(folder)
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Mic mount")).firstMatch.waitForExistence(timeout: 20))
-        XCTAssertTrue(waitFor(30) { Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)).count >= 4 }, "pictures came")
+        // With no ceiling to speak of, every picture and the recent projects' models (200 KB each) come by themselves.
+        XCTAssertTrue(waitFor(30) { Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)).count >= 4 && entries(folder).contains { $0.kind == "model" } },
+                      "pictures and models came: \(entries(folder).map(\.name))")
         app.terminate()
-        // The same list again, with no ceiling: the most recent projects' models come too.
-        app = launch(folder)
-        XCTAssertTrue(waitFor(30) { entries(folder).contains { $0.kind == "model" } }, "models came: \(entries(folder).map(\.name))")
         let pictures = Set(entries(folder).filter { $0.kind == "picture" }.map(\.project))
-        app.terminate()
-        // Back under the ceiling: models go, every picture stays.
-        app = launch(folder, ["-CounterpartLibraryCeiling", "150000"])
+        // A ceiling with room for the pictures and not for one model.
+        let ceiling = entries(folder).filter { $0.kind == "picture" }.reduce(0) { $0 + $1.bytes } * 2 + 20_000
+        XCTAssertLessThan(ceiling, 200_000)
+        app = launch(folder, ["-CounterpartLibraryCeiling", String(ceiling)])
         XCTAssertTrue(waitFor(30) { !entries(folder).contains { $0.kind == "model" } }, "models are evicted first: \(entries(folder).map(\.name))")
-        XCTAssertEqual(Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)), pictures, "pictures stay")
-        XCTAssertLessThanOrEqual(entries(folder).reduce(0) { $0 + $1.bytes }, 150_000)
+        XCTAssertEqual(Set(entries(folder).filter { $0.kind == "picture" }.map(\.project)), pictures, "every project's picture stays")
+        XCTAssertLessThanOrEqual(entries(folder).reduce(0) { $0 + $1.bytes }, ceiling)
         app.terminate()
     }
 }
