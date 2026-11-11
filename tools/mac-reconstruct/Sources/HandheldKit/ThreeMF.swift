@@ -172,8 +172,9 @@ private struct Reader {
         var pid: String?, pindex: Int?
         var positions: [SIMD3<Float>] = []
         var triangles: [SIMD3<UInt32>] = []
-        /// Each triangle's property group and index (pid, p1), when it names one.
+        /// Each triangle's property group and index (pid, p1), populated only when triangles override object properties.
         var properties: [(String, Int)?] = []
+        var hasTriangleProperties = false
         var components: [Component] = []
     }
     struct Part {
@@ -226,14 +227,28 @@ private struct Reader {
         if !object.positions.isEmpty {
             try placed.consume(vertices: object.positions.count, triangles: object.triangles.count)
             let m = transform * scale
-            let positions = object.positions.map { p -> SIMD3<Float> in let q = m * SIMD4(p, 1); return SIMD3(q.x, q.y, q.z) }
-            guard positions.allSatisfy({ $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }) else {
-                throw ThreeMFError.unsupported("non-finite placed geometry")
+            let c0 = SIMD3<Float>(m.columns.0.x, m.columns.0.y, m.columns.0.z)
+            let c1 = SIMD3<Float>(m.columns.1.x, m.columns.1.y, m.columns.1.z)
+            let c2 = SIMD3<Float>(m.columns.2.x, m.columns.2.y, m.columns.2.z)
+            let c3 = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
+            var positions = [SIMD3<Float>]()
+            positions.reserveCapacity(object.positions.count)
+            for p in object.positions {
+                let q = c0 * p.x + c1 * p.y + c2 * p.z + c3
+                guard q.x.isFinite && q.y.isFinite && q.z.isFinite else {
+                    throw ThreeMFError.unsupported("non-finite placed geometry")
+                }
+                positions.append(q)
             }
             let fallback = object.pid.flatMap { pid in object.pindex.flatMap { part.colours[pid]?[safe: $0] ?? nil } }
-            let colours = object.properties.map { property -> SIMD4<Float>? in
-                guard let (pid, index) = property else { return fallback }
-                return part.colours[pid]?[safe: index] ?? fallback
+            let colours: [SIMD4<Float>?]
+            if object.hasTriangleProperties {
+                colours = object.properties.map { property -> SIMD4<Float>? in
+                    guard let (pid, index) = property else { return fallback }
+                    return part.colours[pid]?[safe: index] ?? fallback
+                }
+            } else {
+                colours = [SIMD4<Float>?](repeating: fallback, count: object.triangles.count)
             }
             meshes.append(ThreeMF.Mesh(name: object.name, positions: positions, triangles: object.triangles, colours: colours))
         }
@@ -246,6 +261,9 @@ private struct Reader {
 
 /// One model part's XML, streamed (a model part is often several megabytes).
 private final class ModelParser: NSObject, XMLParserDelegate {
+    private static let units: [String: Float] = [
+        "micron": 0.001, "millimeter": 1, "centimeter": 10, "inch": 25.4, "foot": 304.8, "meter": 1000
+    ]
     private let parser: XMLParser
     var part = Reader.Part()
     var failure: ThreeMFError?
@@ -272,7 +290,25 @@ private final class ModelParser: NSObject, XMLParserDelegate {
 
     private func fail(_ error: ThreeMFError) { failure = error; parser.abortParsing() }
 
-    private static func local(_ name: String) -> String { name.split(separator: ":").last.map(String.init) ?? name }
+    @inline(__always)
+    private static func local(_ name: String) -> Substring {
+        if let colon = name.lastIndex(of: ":") { return name[name.index(after: colon)...] }
+        return name[...]
+    }
+
+    @inline(__always)
+    private static func parseUInt32(_ text: String) -> UInt32? {
+        let utf8 = text.utf8
+        guard !utf8.isEmpty else { return nil }
+        var acc: UInt64 = 0
+        for byte in utf8 {
+            guard byte >= 48 && byte <= 57 else { return UInt32(text) }
+            acc = acc &* 10 &+ UInt64(byte - 48)
+            if acc > UInt64(UInt32.max) { return nil }
+        }
+        return UInt32(acc)
+    }
+
     private static func path(_ attributes: [String: String]) -> String? {
         attributes.first { Self.local($0.key) == "path" && $0.key != "path" }?.value
     }
@@ -283,9 +319,8 @@ private final class ModelParser: NSObject, XMLParserDelegate {
         xmlDepth += 1
         switch Self.local(element) {
         case "model":
-            let units: [String: Float] = ["micron": 0.001, "millimeter": 1, "centimeter": 10, "inch": 25.4, "foot": 304.8, "meter": 1000]
             let unit = attributes["unit"] ?? "millimeter"
-            guard let scale = units[unit] else { fail(.unsupported("unknown unit \(unit)")); return }
+            guard let scale = Self.units[unit] else { fail(.unsupported("unknown unit \(unit)")); return }
             part.scale = scale
         case "object":
             guard let id = attributes["id"] else { return }
@@ -302,16 +337,29 @@ private final class ModelParser: NSObject, XMLParserDelegate {
             vertices += 1
             object!.value.positions.append(SIMD3(x, y, z))
         case "triangle":
-            guard object != nil, let a = attributes["v1"].flatMap(UInt32.init), let b = attributes["v2"].flatMap(UInt32.init),
-                  let c = attributes["v3"].flatMap(UInt32.init) else { return }
+            guard object != nil, let a = attributes["v1"].flatMap(Self.parseUInt32), let b = attributes["v2"].flatMap(Self.parseUInt32),
+                  let c = attributes["v3"].flatMap(Self.parseUInt32) else { return }
             guard triangles < limits.triangles else { fail(.budget("parsed triangles")); return }
             triangles += 1
+            let vertexCount = object!.value.positions.count
             // Core meshes put vertices before triangles. Invalid indices cannot become an empty SceneKit success.
-            guard Int(a) < object!.value.positions.count, Int(b) < object!.value.positions.count, Int(c) < object!.value.positions.count else { return }
+            guard Int(a) < vertexCount, Int(b) < vertexCount, Int(c) < vertexCount else { return }
             object!.value.triangles.append(SIMD3(a, b, c))
-            let pid = attributes["pid"] ?? object!.value.pid
-            let index = attributes["p1"].flatMap(Int.init) ?? (attributes["pid"] == nil ? object!.value.pindex : nil)
-            object!.value.properties.append(pid.flatMap { pid in index.map { (pid, $0) } })
+            let attrPid = attributes["pid"]
+            let attrP1 = attributes["p1"]
+            if attrPid != nil || attrP1 != nil {
+                if !object!.value.hasTriangleProperties {
+                    let defaultProp = object!.value.pid.flatMap { pid in object!.value.pindex.map { (pid, $0) } }
+                    object!.value.properties = [(String, Int)?](repeating: defaultProp, count: object!.value.triangles.count - 1)
+                    object!.value.hasTriangleProperties = true
+                }
+                let pid = attrPid ?? object!.value.pid
+                let index = attrP1.flatMap(Int.init) ?? (attrPid == nil ? object!.value.pindex : nil)
+                object!.value.properties.append(pid.flatMap { pid in index.map { (pid, $0) } })
+            } else if object!.value.hasTriangleProperties {
+                let defaultProp = object!.value.pid.flatMap { pid in object!.value.pindex.map { (pid, $0) } }
+                object!.value.properties.append(defaultProp)
+            }
         case "component":
             guard object != nil, let id = attributes["objectid"] else { return }
             guard let transform = try? threeMFTransform(attributes["transform"]) else { fail(.unreadable("malformed component transform")); return }
