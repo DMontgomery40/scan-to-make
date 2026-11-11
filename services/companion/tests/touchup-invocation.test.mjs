@@ -26,7 +26,8 @@ test('args are exactly the lean worker', async () => {
   const inv = buildTouchupInvocation({pass: p, printer, claudePath: '/usr/local/bin/claude', sourceEnv});
   assert.equal(inv.command, '/usr/local/bin/claude');
   for (const flag of ['-p', '--strict-mcp-config', '--disable-slash-commands', '--verbose']) assert.ok(inv.args.includes(flag), flag);
-  assert.equal(valueOf(inv.args, '--model'), 'claude-opus-5-5');
+  assert.equal(valueOf(inv.args, '--model'), 'claude-fable-5-2');
+  assert.equal(valueOf(inv.args, '--effort'), 'high');
   assert.equal(valueOf(inv.args, '--effort'), 'high');
   assert.equal(valueOf(inv.args, '--mcp-config'), inv.mcpConfigPath);
   assert.equal(valueOf(inv.args, '--tools'), 'Read,WebSearch,WebFetch');
