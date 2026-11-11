@@ -4,6 +4,8 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **How the owner works (David, Nov 6–10).** An item ends only as *done and verified on David's real install* (with evidence: SHA, log line, AX read, camera frame) or *blocked on one small thing only David can do*, named exactly. Green CI is not verification. Find facts yourself (code, logs, `object.json`, MQTT, camera); never ask David what you can read. Never end a turn "waiting"; re-drive agents that do. Scanning by hand is physically hard for him. He cannot leave his iPhone unlocked. Never take his screen and never press controls in his installed app: read and drive through the companion's control socket. Rules and notes in this repo can be stale: when one contradicts what David said later or what the code does, fix the note in the same PR.
 
+**What is running and owed this hour is in [`now.md`](now.md), which the lead updates at every wake. Read it first.**
+
 ## Now (2026-11-10, 22:05Z)
 
 The lead is the session in thread "Take Over Project Recovery Lead" (Claude Fable 5.2) since 20:07Z Nov 10. The lead before it was removed by David (19:55Z: "nothing shows up I have no earthly idea what you're printing this is such a shit show"); its process is stopped and its thread settled.
