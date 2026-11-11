@@ -895,8 +895,11 @@ test('a duplicated fit project keeps how its size is settled, whichever way the 
     assert.deepEqual(copied.fit, project === fields ? fit : splitFitBrief(worker).fit);
     const stored = await store.get(copied.id);
     assert.equal(stored.instructions, 'A pegboard holder for this bottle.', 'the copy is stored as fields');
-    // A change asked of the copy is designed from the same brief as the source.
-    assert.equal(workerRequest(stored), worker);
+    // A change asked of the copy is designed from the same brief as the source, after what was said there.
+    const request = workerRequest(stored);
+    assert.ok(request.endsWith(`\n\n${worker}`), request);
+    assert.match(request, /^What was asked and answered for the project this came from: “A pegboard holder/);
+    assert.deepEqual(stored.inherited.fit, copied.fit, 'the sizes travel as measured, not as the person\'s words');
   }
 });
 

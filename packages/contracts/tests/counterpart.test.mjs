@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import * as c from '../dist/counterpart.js';
 
 const fixture = JSON.parse(await readFile(new URL('../fixtures/counterpart-v1.json', import.meta.url), 'utf8'));
@@ -31,6 +32,9 @@ test('every other wire fixture validates against its schema', () => {
   c.PrintEstimateSchema.parse({...fixture.estimate, slicerWarning: 'It seems object clean_flat.stl has floating cantilever. Please re-orient the object or enable support generation.'});
   assert.throws(() => c.PrintEstimateSchema.parse({...fixture.estimate, slicerWarning: 'x'.repeat(2001)}));
   for (const destination of fixture.destinations) c.PrinterDestinationSchema.parse(destination);
+  // A printer in both MCPs: each MCP's install, name and versions (PRD §8.10, every MCP keeps its row).
+  const both = JSON.parse(readFileSync(new URL('../fixtures/printer-both-mcps.json', import.meta.url), 'utf8'));
+  for (const destination of both.destinations) c.PrinterDestinationSchema.parse(destination);
   c.AskSchema.parse(fixture.ask);
   for (const change of fixture.changes) c.ChangeSchema.parse(change);
   for (const stage of fixture.stages) c.PassStageSchema.parse(stage);

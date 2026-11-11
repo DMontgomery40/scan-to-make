@@ -607,8 +607,10 @@ async fn save_change_queue(app: tauri::AppHandle, queue: Value) -> Result<()> {
         .map_err(|_| "Cannot save changes.")?;
     Ok(())
 }
+/// Adds a found MCP folder as it is. `model` is the person's choice when its MCP needs one Counterpart couldn't tell
+/// (the companion checks it against that MCP's own list); otherwise the model discovery found.
 #[tauri::command]
-async fn add_discovered_printer(app: tauri::AppHandle, id: String) -> Result<Value> {
+async fn add_discovered_printer(app: tauri::AppHandle, id: String, model: Option<String>) -> Result<Value> {
     let discovery = request(&app, "printers.discover", json!({})).await?;
     let candidate = discovery["found"]
         .as_array()
@@ -618,7 +620,7 @@ async fn add_discovered_printer(app: tauri::AppHandle, id: String) -> Result<Val
         .as_str()
         .ok_or("Enter this printer’s connection settings.")?;
     let mut printer = json!({"folder":folder});
-    if let Some(model) = candidate["model"].as_str() {
+    if let Some(model) = model.as_deref().or(candidate["model"].as_str()) {
         printer["model"] = json!(model)
     }
     request(&app, "printers.add", json!({"printer":printer})).await

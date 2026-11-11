@@ -125,6 +125,20 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var bytes: Double
         public init(name: String, bytes: Double) { self.name = name; self.bytes = bytes }
     }
+    /// What was asked and answered for the project this one was made from (Make something else from this scan, or
+    /// Duplicate), as the companion snapshotted it: the person's words (`you`) and the Mac's replies and questions
+    /// (`app`), in time order. The companion's `fit` and per-item `from` fields are for the worker's brief; this build
+    /// ignores them.
+    public var inherited: InheritedHistory?
+    public struct InheritedHistory: Codable, Equatable, Sendable {
+        public var from: ScanSource
+        public var items: [Item]
+        public struct Item: Codable, Equatable, Sendable {
+            public var at: Double
+            public var who: String
+            public var text: String
+        }
+    }
     /// The project whose scan this one was made from ("Make something else from this scan"), with its title when it was
     /// made: the page says where its scan came from even after that one is renamed or deleted. A build that doesn't know
     /// the field ignores it.
@@ -163,7 +177,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, scanFrom, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, scanFrom, inherited, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -185,6 +199,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         credit = optional(JSONValue.self, .credit)
         scanFiles = optional([ScanFile].self, .scanFiles)
         scanFrom = optional(ScanSource.self, .scanFrom)
+        inherited = optional(InheritedHistory.self, .inherited)
         files = optional(JSONValue.self, .files)
         plates = optional([ProjectPlate].self, .plates)
         publishedSelection = optional(PublishedSelection.self, .publishedSelection)

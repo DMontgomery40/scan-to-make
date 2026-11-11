@@ -66,6 +66,60 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        if set == "inherited-history" {
+            let data = Data(#"""
+[
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01",
+    "title": "Forester phone mount",
+    "state": "ready",
+    "createdAtMs": 1794348000010,
+    "updatedAtMs": 1794348000040,
+    "photos": [],
+    "passes": []
+  },
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
+    "title": "Swivel phone mount",
+    "instructions": "Add a swivel.",
+    "state": "new",
+    "createdAtMs": 1794348000060,
+    "updatedAtMs": 1794348000060,
+    "photos": [],
+    "passes": [],
+    "inherited": {
+      "from": {
+        "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01",
+        "title": "Forester phone mount"
+      },
+      "items": [
+        {
+          "at": 1794348000010,
+          "who": "you",
+          "text": "A mount for my phone."
+        },
+        {
+          "at": 1794348000020,
+          "who": "app",
+          "text": "Which case is on the phone?"
+        },
+        {
+          "at": 1794348000030,
+          "who": "you",
+          "text": "The case is a JETech clear case."
+        },
+        {
+          "at": 1794348000040,
+          "who": "app",
+          "text": "Made a holder for that case."
+        }
+      ]
+    }
+  }
+]
+"""#.utf8)
+            return (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+        }
         // `-CounterpartFixtureSet real`: a throwaway copy of real projects, as the companion serves them, for screenshots
         // with real data (`objects.json` in the folder, each project's files under `objects/<id>/`). Never the Mac's own.
         if set == "real", let base = folder, let data = try? Data(contentsOf: base.appending(path: "objects.json")),
@@ -518,6 +572,18 @@ struct FixtureTransport: HTTPTransport {
            let data = try? Data(contentsOf: folder.appending(path: "printer-setup-phone.json")),
            let answers = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            // As the companion does (PrinterFormSchema against the MCP's fields): a form carries a value only for a field its
+            // kind declares, and every required one, so these fixtures catch a phone sending another kind's values.
+            if ["check", "add"].contains(String(path.dropFirst("/v1/printers/setup/".count))), let printer = body["printer"] as? [String: Any], printer["folder"] == nil {
+                let types = ((answers["discover"] as? [String: Any])?["options"] as? [String: Any])?["types"] as? [[String: Any]] ?? []
+                let fields = (types.first { $0["printerType"] as? String == printer["printerType"] as? String }?["fields"] as? [[String: Any]]) ?? []
+                let declared = Set(fields.compactMap { $0["name"] as? String })
+                let stray = ["port", "serial", "model"].filter { printer[$0] != nil && !declared.contains($0) }
+                let lacking = fields.filter { $0["required"] as? Bool == true && $0["name"] as? String != "secret" && ($0["name"] as? String).map { (printer[$0] as? String ?? "").isEmpty } == true }
+                guard stray.isEmpty, lacking.isEmpty else {
+                    return json(["error": ["code": "invalid-request", "message": "form fields", "sentence": "The form sent \(stray) and lacks \(lacking.compactMap { $0["label"] as? String })."]], 400)
+                }
+            }
             switch path.dropFirst("/v1/printers/setup/".count) {
             case "discover": return json(answers["discover"] ?? [:])
             case "check":
@@ -572,6 +638,17 @@ struct FixtureTransport: HTTPTransport {
             return json(["settings": settings])
         }
         if path.hasPrefix("/v1/settings/") && method == "POST" { return json(["check": ["state": "checking"]]) }
+        if path.hasPrefix("/v1/printers/mcp/"), method == "POST" {
+            // What the companion was asked, for UI tests to check (one line per request).
+            let log = folder.appending(path: "mcp-update-requests.log")
+            if !FileManager.default.fileExists(atPath: log.path) { FileManager.default.createFile(atPath: log.path, contents: nil) }
+            if let handle = try? FileHandle(forWritingTo: log) {
+                defer { try? handle.close() }
+                let line = path + " " + (String(data: request.httpBody ?? Data(), encoding: .utf8) ?? "") + "\n"
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: Data(line.utf8))
+            }
+        }
         if completingMove, path.hasPrefix("/v1/printers/mcp/"), method == "POST" { await Fixtures.mcpCopyState.accept() }
         if path.hasPrefix("/v1/printers/mcp/"), method == "POST", FileManager.default.fileExists(atPath: folder.appending(path: "mcp-update-waiting.json").path) { return HTTPReply(status: 200, body: try Data(contentsOf: folder.appending(path: "mcp-update-waiting.json"))) }
         if path.hasPrefix("/v1/printers/mcp/") && method == "POST" { return json(["update": ["mcpId": "mcp-3d", "state": "waiting", "fromVersion": "1.2.9", "toVersion": "1.2.22"]]) }

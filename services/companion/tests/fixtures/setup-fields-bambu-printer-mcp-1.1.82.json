@@ -1,0 +1,187 @@
+{
+ "contract": "counterpart/1",
+ "server": {
+  "name": "bambu-printer-mcp",
+  "version": "1.1.82"
+ },
+ "kinds": [
+  {
+   "kind": "bambu",
+   "label": "Bambu Lab",
+   "env": {
+    "MCP_TRANSPORT": "stdio"
+   },
+   "cameraSnapshot": true,
+   "fields": [
+    {
+     "name": "host",
+     "env": "PRINTER_HOST",
+     "aliases": [
+      "BAMBU_PRINTER_HOST"
+     ],
+     "label": "Address",
+     "hint": "The printer's IP address: on the printer, Settings → WLAN",
+     "required": true
+    },
+    {
+     "name": "serial",
+     "env": "BAMBU_SERIAL",
+     "aliases": [
+      "BAMBU_PRINTER_SERIAL"
+     ],
+     "label": "Serial number",
+     "hint": "On the printer: Settings → Device",
+     "required": true,
+     "transform": "uppercase"
+    },
+    {
+     "name": "model",
+     "env": "BAMBU_MODEL",
+     "aliases": [
+      "BAMBU_PRINTER_MODEL"
+     ],
+     "label": "Model",
+     "required": true,
+     "choices": [
+      {
+       "value": "p1s",
+       "label": "P1S"
+      },
+      {
+       "value": "p1p",
+       "label": "P1P"
+      },
+      {
+       "value": "p2s",
+       "label": "P2S"
+      },
+      {
+       "value": "x1c",
+       "label": "X1C"
+      },
+      {
+       "value": "x1e",
+       "label": "X1E"
+      },
+      {
+       "value": "a1",
+       "label": "A1"
+      },
+      {
+       "value": "a1mini",
+       "label": "A1 Mini"
+      },
+      {
+       "value": "h2d",
+       "label": "H2D"
+      },
+      {
+       "value": "h2dpro",
+       "label": "H2D Pro"
+      },
+      {
+       "value": "h2s",
+       "label": "H2S"
+      },
+      {
+       "value": "h2c",
+       "label": "H2C"
+      },
+      {
+       "value": "x2d",
+       "label": "X2D"
+      }
+     ],
+     "fromSerial": {
+      "prefixLength": 3,
+      "models": {
+       "239": "h2dpro",
+       "093": "h2s",
+       "094": "h2d",
+       "31B": "h2c",
+       "20P": "x2d",
+       "00M": "x1c",
+       "03W": "x1e",
+       "01S": "p1p",
+       "01P": "p1s",
+       "22E": "p2s",
+       "039": "a1",
+       "030": "a1mini"
+      }
+     }
+    },
+    {
+     "name": "secret",
+     "env": "BAMBU_TOKEN",
+     "aliases": [
+      "BAMBU_PRINTER_ACCESS_TOKEN"
+     ],
+     "label": "Access code",
+     "hint": "On the printer: Settings → WLAN → Access Code",
+     "required": true
+    }
+   ]
+  }
+ ],
+ "slicer": {
+  "type": "bambustudio",
+  "path": "/opt/nowhere/bambu-studio",
+  "found": false,
+  "profilesRoot": "/opt/nowhere/resources/profiles",
+  "profilesFound": false,
+  "fields": [
+   {
+    "name": "slicer",
+    "env": "SLICER_TYPE",
+    "label": "Slicer",
+    "required": false,
+    "choices": [
+     {
+      "value": "bambustudio",
+      "label": "Bambu Studio"
+     },
+     {
+      "value": "orcaslicer",
+      "label": "OrcaSlicer"
+     },
+     {
+      "value": "orcaslicer-bambulab",
+      "label": "OrcaSlicer-bambulab (FULU)"
+     },
+     {
+      "value": "orca-slicer-api",
+      "label": "OrcaSlicer API (remote)"
+     },
+     {
+      "value": "prusaslicer",
+      "label": "PrusaSlicer"
+     },
+     {
+      "value": "cura",
+      "label": "Cura"
+     },
+     {
+      "value": "slic3r",
+      "label": "Slic3r"
+     }
+    ]
+   },
+   {
+    "name": "slicer-path",
+    "env": "SLICER_PATH",
+    "label": "Bambu Studio app",
+    "input": "path",
+    "required": true,
+    "hint": "Bambu Studio isn't at /opt/nowhere/bambu-studio. Install it, or choose where it is."
+   },
+   {
+    "name": "profiles",
+    "env": "BAMBU_PROFILES_ROOT",
+    "label": "Bambu profiles folder",
+    "input": "path",
+    "required": true,
+    "hint": "The folder with Bambu Studio's BBL profiles (it holds BBL/machine). Install Bambu Studio, or choose the folder."
+   }
+  ]
+ }
+}

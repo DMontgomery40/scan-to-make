@@ -1,6 +1,7 @@
 import {FitSchema, type Fit} from '@scan-to-make/contracts/counterpart';
 import type {StmObject} from './store.js';
 import {checkedSizesBrief} from './asks.js';
+import {inheritedBrief} from '../touchup/inherited.js';
 
 /**
  * A fit project's request is two things: what the person typed, and how the size is settled (`fit`). Until Nov 10
@@ -51,7 +52,7 @@ export function splitFitBrief(instructions: string | undefined): {typed?: string
   return fit && typed ? {typed, fit} : {typed: text};
 }
 
-type Request = Pick<StmObject, 'instructions' | 'fit' | 'checkedSizes'>;
+type Request = Pick<StmObject, 'instructions' | 'fit' | 'checkedSizes' | 'inherited'>;
 /** What the person typed, and how the size is settled, whichever way the project stored them. */
 export function fitRequest(object: Request): {typed?: string; fit?: Fit} {
   const saved = splitFitBrief(object.instructions);
@@ -64,6 +65,6 @@ export function fitRequest(object: Request): {typed?: string; fit?: Fit} {
 export function workerRequest(object: Request): string | undefined {
   const {typed, fit} = fitRequest(object);
   // Sizes the person checked in answer to a question follow on any project, a fit or not.
-  const parts = [typed, typed && fit ? fitBrief(fit) : undefined, checkedSizesBrief(object.checkedSizes)].filter(Boolean);
+  const parts = [inheritedBrief(object.inherited), typed, typed && fit ? fitBrief(fit) : undefined, checkedSizesBrief(object.checkedSizes)].filter(Boolean);
   return parts.length ? parts.join('\n\n') : undefined;
 }

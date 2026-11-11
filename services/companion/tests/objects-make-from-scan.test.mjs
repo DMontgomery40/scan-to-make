@@ -5,7 +5,8 @@ import {mkdir, readFile, readdir, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService} from '../dist/objects/service.js';
-import {createObjectRoutes} from '../dist/objects/http.js';
+import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
+import {fitBrief} from '../dist/objects/fit.js';
 import {createControlDispatcher} from '../dist/local-control-services.js';
 import {tempDir} from './support/temp.mjs';
 
@@ -14,7 +15,8 @@ import {tempDir} from './support/temp.mjs';
 
 const STL = 'solid m\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid m\n';
 
-async function fixture(t, {denied = []} = {}) {
+/** `replies`: what each pass's worker answers, in order (a question, say); a model ("Made.") once they run out. */
+async function fixture(t, {denied = [], replies = []} = {}) {
   const root = await tempDir('objects-make-from-scan-');
   const store = new ObjectStore(join(root, 'objects'));
   const inputs = [];
@@ -22,7 +24,11 @@ async function fixture(t, {denied = []} = {}) {
     inputs.push(input);
     const out = join(root, 'pass', String(inputs.length)); await mkdir(out, {recursive: true});
     await writeFile(join(out, 'touched.stl'), STL); await writeFile(join(out, 'front.png'), 'png');
-    return {status: 'done', summary: 'Made.', model: join(out, 'touched.stl'), renders: [join(out, 'front.png')], checkpoints: [], stats: {seconds: 1, toolCalls: 1}, passDir: join(root, 'pass', String(inputs.length))};
+    // Each step of a real conversation happens at its own time.
+    await new Promise(r => setTimeout(r, 3));
+    const reply = replies.shift() ?? {status: 'done', summary: 'Made.'};
+    return {...(reply.status === 'done' ? {model: join(out, 'touched.stl')} : {}), renders: [join(out, 'front.png')], checkpoints: [],
+      stats: {seconds: 1, toolCalls: 1}, passDir: join(root, 'pass', String(inputs.length)), ...reply};
   };
   const events = [];
   const service = new ObjectService({store, runTouchup, stlInfo: async () => [60, 40, 20], claudePath: '/c',
@@ -244,4 +250,168 @@ test('Copy this object with no words keeps an imported scan with no photos as th
   assert.equal(ready.instructions, undefined, 'the source\'s words are not carried over');
   assert.ok(ready.current?.model, 'the scan is the model');
   assert.equal(inputs.length, passesBefore, 'kept as it is, never touched up');
+});
+
+// David, Nov 11: "when you do a revision or addition to an existing thing all that projects history and context need
+// to go with it ... you're basically 'forking' the project". Every source below is made through the routes the person
+// uses (New, the Mac's questions answered in words, Ask for changes), so its object.json has the shape production writes:
+// a question lives on the pass that asked it and the project's `ask`, its answer is the person's bare message, and
+// the two meet only in the answering pass's note (`Answer to "…": …`).
+
+const tick = () => new Promise(r => setTimeout(r, 3));
+const MEASURED = {sizeSource: 'measured', measured: [{id: 'width', label: 'Width', mm: 75.1}, {id: 'height', label: 'Height', mm: 158}]};
+
+/** A project with a scan, made from the person's words (and a fit's sizes), and its first pass run. */
+async function scanned(service, store, words, kind = 'fit', fit) {
+  const project = await service.create(words, kind, undefined, fit);
+  const dir = store.dir(project.id);
+  await mkdir(join(dir, 'scan'), {recursive: true});
+  await writeFile(join(dir, 'scan', 'scan.usdz'), 'the phone, scanned');
+  await store.update(project.id, o => ({...o, scan: 'scan.usdz'}));
+  await tick();
+  await service.start(project.id); await service.settled(project.id);
+  return service.setProjectSettings(project.id, {title: 'Phone mount'});
+}
+
+/** Two questions answered in words (the second asked by the pass that read the first answer), then a change. */
+const QUESTIONS = [
+  {status: 'needs_closeup', summary: 'I need one detail before I can finish.', ask: {question: 'Is there a case on the phone?'}},
+  {status: 'needs_closeup', summary: 'One more thing.', ask: {question: 'Should the cable pass under the mount?'}},
+  {status: 'done', summary: 'Made the mount.'},
+];
+async function talkedThrough(service, store, fit = MEASURED) {
+  const source = await scanned(service, store, 'A mount for my phone.', 'fit', fit);
+  await tick(); await service.answerCloseup(source.id, {text: 'Yes'}); await service.settled(source.id);
+  await tick(); await service.answerCloseup(source.id, {text: 'Yes'}); await service.settled(source.id);
+  await tick(); await service.correct(source.id, 'Make it thinner.'); await service.settled(source.id);
+  return store.get(source.id);
+}
+const CONVERSATION = [
+  ['you', 'A mount for my phone.'],
+  ['app', 'I need one detail before I can finish.'],
+  ['app', 'Is there a case on the phone?'],
+  ['you', 'Yes'],
+  ['app', 'One more thing.'],
+  ['app', 'Should the cable pass under the mount?'],
+  ['you', 'Yes'],
+  ['app', 'Made the mount.'],
+  ['you', 'Make it thinner.'],
+  ['app', 'Made it thinner.'],
+];
+const said = history => history.items.map(item => [item.who, item.text]);
+/** The conversation lines of a worker's brief, as [who, text]. */
+const briefLines = brief => brief.split('\n').map(line => /^\S+ · (Person|Counterpart): (.*)$/.exec(line)).filter(Boolean)
+  .map(match => [match[1] === 'Person' ? 'you' : 'app', match[2]]);
+
+test('a new project carries each question the source asked with its answer, the request as typed and its sizes as measured', async t => {
+  const {service, store, inputs} = await fixture(t, {replies: [...QUESTIONS, {status: 'done', summary: 'Made it thinner.'}]});
+  const source = await talkedThrough(service, store);
+  assert.deepEqual(source.passes.slice(0, 2).map(pass => pass.question), ['Is there a case on the phone?', 'Should the cable pass under the mount?'],
+    'the passes that asked keep their questions');
+  const before = await store.get(source.id);
+  const made = await service.makeFromScan(source.id, {kind: 'copy', instructions: 'Add a swivel.'});
+  const ready = await until(() => store.get(made.id), o => o.state === 'ready', 'the inherited project');
+  assert.deepEqual(said(ready.inherited), CONVERSATION);
+  assert.deepEqual(ready.inherited.from, {id: source.id, title: 'Phone mount'});
+  const times = ready.inherited.items.map(item => item.at);
+  assert.deepEqual(times, [...times].sort((a, b) => a - b), 'in the order it was said');
+  assert.deepEqual(ready.inherited.fit, MEASURED, 'the sizes the person measured travel, as measured');
+  // The worker reads the same conversation, then the new request.
+  const brief = inputs.at(-1).instructions;
+  assert.deepEqual(briefLines(brief), CONVERSATION);
+  assert.match(brief, /Sizes the person measured on the real object for “Phone mount”: Width 75\.1 mm, Height 158 mm\. Treat these as measured\./);
+  assert.ok(brief.indexOf('Treat these as measured.') < brief.indexOf('Add a swivel.'), brief);
+  assert.doesNotMatch(brief, /Fit brief:|Do not print a copy/, 'the source\'s directions are not the new request\'s');
+  // A snapshot: the source is untouched, and deleting it changes nothing here. Every client reads it as stored.
+  assert.deepEqual(await store.get(source.id), before);
+  await service.delete(source.id);
+  assert.deepEqual((await store.get(made.id)).inherited, ready.inherited);
+  assert.deepEqual(publicObject(await store.get(made.id)).inherited, ready.inherited);
+});
+
+test('a question saved before passes kept it is recovered from its answer\'s note, and the open one from the project\'s ask', async t => {
+  const {service, store} = await fixture(t, {replies: [...QUESTIONS,
+    {status: 'needs_closeup', summary: 'Before I make it thinner:', ask: {question: 'How thin can the back be?'}}]});
+  const asked = await talkedThrough(service, store);
+  assert.equal(asked.state, 'needs-closeup');
+  // As every project saved before Nov 11 is: no pass names its question.
+  await store.update(asked.id, o => ({...o, passes: o.passes.map(({question: _question, ...pass}) => pass)}));
+  const source = await store.get(asked.id);
+  assert.ok(source.passes.every(pass => pass.question === undefined));
+  // The second answer's note repeats the first answer's line, and both answers are "Yes".
+  assert.match(source.passes[2].note, /^Answer to "Is there a case on the phone\?": Yes\nAnswer to "Should the cable pass under the mount\?": Yes$/);
+  const made = await service.makeFromScan(source.id, {kind: 'copy', instructions: 'Add a swivel.'});
+  const ready = await until(() => store.get(made.id), o => o.state === 'ready', 'the inherited project');
+  assert.deepEqual(said(ready.inherited), [...CONVERSATION.slice(0, 9), ['app', 'Before I make it thinner:'], ['app', 'How thin can the back be?']]);
+});
+
+test('a request saved with the brief a client once appended is carried as the person\'s words, and its sizes as measured', async t => {
+  const {service, store, inputs} = await fixture(t);
+  const made0 = await scanned(service, store, 'A mount for my phone.', 'fit');
+  // The phone and Android appended this block to the request until Nov 10; older projects still hold it.
+  await store.update(made0.id, o => ({...o, instructions: `A mount for my phone.\n\n${fitBrief(MEASURED)}`, fit: undefined}));
+  const source = await store.get(made0.id);
+  assert.equal(source.fit, undefined);
+  const made = await service.makeFromScan(source.id, {kind: 'copy', instructions: 'Copy it, thinner.'});
+  const ready = await until(() => store.get(made.id), o => o.state === 'ready', 'the inherited project');
+  assert.deepEqual(ready.inherited.items[0], {at: source.createdAtMs, who: 'you', text: 'A mount for my phone.'});
+  assert.ok(ready.inherited.items.every(item => !item.text.includes('Fit brief')), 'the machine\'s block is not the person\'s words');
+  assert.deepEqual(ready.inherited.fit, {sizeSource: 'measured', measured: [{id: 'Width', label: 'Width', mm: 75.1}, {id: 'Height', label: 'Height', mm: 158}]});
+  const brief = inputs.at(-1).instructions;
+  assert.doesNotMatch(brief, /Fit brief:/);
+  assert.match(brief, /Width 75\.1 mm, Height 158 mm\. Treat these as measured\./);
+});
+
+test('a note sent again before any result came back is carried once', async t => {
+  const {service, store, inputs} = await fixture(t);
+  const made0 = await scanned(service, store, 'A mount for my phone.', 'fit');
+  // The stored shape of a real project on Nov 10 (notes-once.test.mjs, board X67): one note sent three times before a
+  // note carried its sender's id, because its pass failed twice; each copy has its own pass.
+  const at = Date.now() + 1000;
+  const note = (id, atMs) => ({id, atMs, text: 'Make it wider.', photos: []});
+  const pass = (startedAtMs, status, messageId) => ({startedAtMs, endedAtMs: startedAtMs + 100, status, trigger: 'changes', messageId, note: 'Make it wider.',
+    ...(status === 'done' ? {summary: 'Made it wider.'} : {})});
+  await store.update(made0.id, o => ({...o, messages: [note('m2', at), note('m3', at + 660_000), note('m4', at + 900_000)],
+    passes: [...o.passes, pass(at + 10, 'failed', 'm2'), pass(at + 660_010, 'failed', 'm3'), pass(at + 900_010, 'done', 'm4')]}));
+  const source = await store.get(made0.id);
+  assert.equal(source.messages.length, 3, 'the record keeps every send');
+  const made = await service.makeFromScan(source.id, {kind: 'copy', instructions: 'Add a swivel.'});
+  const ready = await until(() => store.get(made.id), o => o.state === 'ready', 'the inherited project');
+  assert.deepEqual(said(ready.inherited), [['you', 'A mount for my phone.'], ['app', 'Made.'], ['you', 'Make it wider.'], ['app', 'Made it wider.']]);
+  assert.equal(ready.inherited.items[2].at, at, 'when it was first sent');
+  assert.equal(inputs.at(-1).instructions.split('Make it wider.').length - 1, 1, 'the worker is told once');
+});
+
+test('Duplicate carries the source conversation, and a change asked of the copy reads it', async t => {
+  const {service, store, inputs} = await fixture(t, {replies: [...QUESTIONS, {status: 'done', summary: 'Made it thinner.'}]});
+  const source = await talkedThrough(service, store);
+  const copy = await service.duplicate(source.id);
+  assert.deepEqual(copy.inherited.from, {id: source.id, title: 'Phone mount'});
+  assert.deepEqual(said(copy.inherited), CONVERSATION);
+  assert.deepEqual(copy.inherited.fit, MEASURED);
+  await service.correct(copy.id, 'Make it wider.'); await service.settled(copy.id);
+  const brief = inputs.at(-1).instructions;
+  assert.deepEqual(briefLines(brief), CONVERSATION);
+  assert.match(brief, /project this came from: “Phone mount”/);
+});
+
+test('a project made from one that was itself made from another says which project each part was said in', async t => {
+  const {service, store, inputs} = await fixture(t, {replies: [...QUESTIONS, {status: 'done', summary: 'Made it thinner.'}]});
+  const first = await talkedThrough(service, store);
+  const second = await service.makeFromScan(first.id, {kind: 'fit', instructions: 'Add a swivel.'});
+  await until(() => store.get(second.id), o => o.state === 'ready', 'the second generation');
+  await service.setProjectSettings(second.id, {title: 'Swivel mount'});
+  const third = await service.makeFromScan(second.id, {kind: 'copy', instructions: 'Copy it in black.'});
+  const ready = await until(() => store.get(third.id), o => o.state === 'ready', 'the third generation');
+  const parent = {id: first.id, title: 'Phone mount'};
+  assert.deepEqual(ready.inherited.from, {id: second.id, title: 'Swivel mount'});
+  assert.deepEqual(ready.inherited.items.map(item => [item.who, item.text, item.from]),
+    [...CONVERSATION.map(([who, text]) => [who, text, parent]), ['you', 'Add a swivel.', undefined], ['app', 'Made.', undefined]]);
+  const brief = inputs.at(-1).instructions;
+  assert.ok(brief.indexOf('Earlier, in “Phone mount”:') < brief.indexOf('A mount for my phone.'), brief);
+  assert.ok(brief.indexOf('Made it thinner.') < brief.indexOf('Then, in “Swivel mount”:'), brief);
+  assert.ok(brief.indexOf('Then, in “Swivel mount”:') < brief.indexOf('Add a swivel.'), brief);
+  // The second generation asked for no size of its own: the sizes measured on the first travel on (review of #731).
+  assert.deepEqual(ready.inherited.fit, MEASURED, 'the measured sizes reach the third generation');
+  assert.match(brief, /Width 75\.1 mm, Height 158 mm\. Treat these as measured\./);
 });
