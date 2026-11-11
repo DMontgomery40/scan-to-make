@@ -19,6 +19,10 @@ struct ProjectView: View {
     let close: () -> Void
     var openPrint: (String) -> Void = { _ in }
     var openPrinting: (String) -> Void = { _ in }
+    /// "Make something else from this scan": New, holding this project's scan (design §3.3).
+    var makeFromScan: (String) -> Void = { _ in }
+    /// Another project, from a line that names it (where this scan came from, what else was made from it).
+    var openProject: (String) -> Void = { _ in }
     @State private var section = ProjectSection.result
     @State private var note = ""
     @State private var attempts = NoteAttempts()
@@ -368,6 +372,11 @@ struct ProjectView: View {
                         statusChoices(object, words).disabled(away)
                         Divider()
                     }
+                    if object.canMakeFromScan {
+                        Button(ScanLineage.action, systemImage: "plus.square.on.square") { makeFromScan(object.id) }.disabled(away)
+                            .accessibilityIdentifier("more-make-from-scan")
+                        Divider()
+                    }
                     if let modelURL { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
                     if let arURL { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
@@ -474,6 +483,55 @@ struct ProjectView: View {
     // MARK: Hero
 
     /// The project's pictures (PRD §5.4): what will print, the two together, what was scanned (`ProjectGalleryView`).
+    /// Under What you scanned (design §3.3): the way to make something else from this scan, on any project the Mac has a
+    /// scan for, whatever its kind (a "copy" of a Leatherman whose scan was really meant for a case); where this one's
+    /// scan came from; and what else was made from it. Each line that names a project opens it.
+    @ViewBuilder private func scanLineage(_ object: Project) -> some View {
+        let lineage = ScanLineage(object, in: store.projects)
+        if object.canMakeFromScan || lineage.from != nil || !lineage.made.isEmpty {
+            VStack(spacing: 6) {
+                if object.canMakeFromScan {
+                    Button { makeFromScan(object.id) } label: {
+                        Label(ScanLineage.action, systemImage: "plus.square.on.square").font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity).frame(minHeight: 32)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(working || away)
+                    .accessibilityHint("A case, a holder or another copy, from this scan. No new scan; this project stays as it is.")
+                    .accessibilityIdentifier("make-from-scan")
+                    if away {
+                        Text(store.awayLine(object.id)).font(.footnote).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("make-from-scan-away")
+                    }
+                }
+                if let from = lineage.from, let line = lineage.fromLine {
+                    if from.exists {
+                        Button { openProject(from.id) } label: { Label(line, systemImage: "arrow.turn.up.left").font(.footnote) }
+                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                            .accessibilityHint("Opens that project").accessibilityIdentifier("scan-from")
+                    } else {
+                        Label(line, systemImage: "arrow.turn.up.left").font(.footnote).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("scan-from")
+                    }
+                }
+                if let line = lineage.madeLine {
+                    if lineage.made.count == 1, let only = lineage.made.first {
+                        Button { openProject(only.id) } label: { Label(line, systemImage: "arrow.turn.down.right").font(.footnote) }
+                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                            .accessibilityHint("Opens that project").accessibilityIdentifier("scan-made")
+                    } else {
+                        Menu {
+                            ForEach(lineage.made) { link in Button(link.title) { openProject(link.id) } }
+                        } label: { Label(line, systemImage: "arrow.turn.down.right").font(.footnote) }
+                        .accessibilityIdentifier("scan-made")
+                    }
+                }
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 20)
+        }
+    }
+
     @ViewBuilder private func hero(_ object: Project, _ words: ProjectWords, stage: CGFloat) -> some View {
         VStack(spacing: 8) {
             ProjectGalleryView(store: store, project: object, words: words,
@@ -485,6 +543,7 @@ struct ProjectView: View {
                 scanURL = object.current == nil ? store.mac.localScan(object.id) : nil
             }
             .ignoresSafeArea(edges: .top)
+            scanLineage(object)
         }
     }
 

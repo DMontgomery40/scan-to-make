@@ -27,6 +27,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performTextInput
@@ -197,6 +198,32 @@ class HomeLayoutTests {
         assertTrue("only the strip's five frames: $fetched", fetched.size <= ScanPhotos.SHOWN)
         assertEquals(listOf(0, 32, 65, 97, 129), ScanPhotos.sample(130))
         assertEquals("Your project’s picture. No picture came with this question.", AskPicture.caption(null))
+    }
+
+    /** Design §3.3 with projects present (AGENTS.md "Every layout"): a copy whose scan is really the thing a case must fit
+     *  offers Make something else from this scan on its page, and its New opens holding that scan, asking first. */
+    @Test fun aCopysPageOffersMakeSomethingElseFromItsScanWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
+        val data = WireJson.parseToJsonElement(
+            """{"id":"$id","title":"Leatherman Wave+ replica","state":"ready","kind":"copy","scan":"scan.usdz","createdAtMs":1,"updatedAtMs":2,
+               "photos":[],"passes":[{"startedAtMs":1,"endedAtMs":2,"status":"done"}]}""").jsonObject
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        var asked = false
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}, makeFromScan = { asked = true }) } }
+        compose.onNode(hasTestTag("make-from-scan")).performScrollTo().assertExists().performClick()
+        assertTrue("the page's action opens New holding the scan", asked)
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.NewProjectScreen(job = null, close = {}, started = {}, scan = {}, seed = id) } }
+        compose.onNode(hasTestTag("scan-use")).assertExists()
+        compose.onNodeWithText("Make something that fits this").assertExists()
+        compose.onNodeWithText("Just save this scan").assertDoesNotExist()
     }
 
     /** A size question is number fields, not a camera (David answered one in a paragraph of caliper readings, Nov 10):

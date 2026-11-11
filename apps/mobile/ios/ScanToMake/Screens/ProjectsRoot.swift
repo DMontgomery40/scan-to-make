@@ -36,6 +36,14 @@ struct ProjectsRoot: View {
                 // The system's page size on the iPad (and the Mac): room for the question after a scan and its three
                 // answers, not a small card over a dimmed Home (U5). The iPhone keeps its full-height sheet.
                 .presentationSizing(.page)
+            case .newFromScan(let id):
+                // "Make something else from this scan" (design §3.3): New holding that project's scan, asking first what it becomes.
+                NewObjectView(store: store, reusing: store.project(id)) { project in
+                    nav.dismissSheet()
+                    nav.open(project.id)
+                }
+                .presentationDetents([.large])
+                .presentationSizing(.page)
             case .print(let id): PrintSheet(store: store, projectId: id)
             case .settings: SettingsView(store: store)
             case .printers: NavigationStack { PrintersView(store: store) }
@@ -133,7 +141,8 @@ struct ProjectsRoot: View {
 
     private func projectPage(_ id: String, close: @escaping () -> Void) -> some View {
         ProjectView(store: store, id: id, close: close, openPrint: { nav.present(.print($0)) },
-                    openPrinting: { nav.openPrinting($0) })
+                    openPrinting: { nav.openPrinting($0) }, makeFromScan: { nav.present(.newFromScan($0)) },
+                    openProject: { nav.open($0) })
     }
 
     /// A pushed page: a project, or a print's Printing screen.

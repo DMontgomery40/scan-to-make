@@ -20,6 +20,8 @@ public struct ProjectsNavigation: Equatable, Sendable {
     public enum Sheet: Equatable, Sendable {
         /// New project, with the job's raw value when Home asked for one ("fit", "copy").
         case new(job: String?)
+        /// New, already holding this project's scan: "Make something else from this scan" (design §3.3).
+        case newFromScan(String)
         /// The print sheet for a project.
         case print(String)
         case settings
@@ -90,7 +92,7 @@ public struct ProjectsNavigation: Equatable, Sendable {
     /// or spools chosen and a slice computed. Settings and Printers hold nothing.
     public var sheetHoldsWork: Bool {
         switch sheet {
-        case .new, .print: true
+        case .new, .newFromScan, .print: true
         case .settings, .printers, nil: false
         }
     }

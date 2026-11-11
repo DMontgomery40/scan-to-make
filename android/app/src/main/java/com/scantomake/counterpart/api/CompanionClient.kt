@@ -100,7 +100,7 @@ class CompanionClient(
                 "PUT" -> if (m("$one/scan")) return "captures:import"
                 "POST" -> {
                     if (m("/v1/blender/(check|update)")) return "projects:write"
-                    if (m("/v1/objects") || m("$one/(start|duplicate|locate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
+                    if (m("/v1/objects") || m("$one/(start|duplicate|make-from-scan|locate|corrections|closeup|model|ask|plate-selection|photos|capture|capture-depth|capture-camera|reconstruction)")) return "captures:import"
                     if (m("$one/(print|printer|print-confirmation|estimate|print/pause|print/resume|print/cancel)")) return "printer-handoff:use"
                     if (m("/v1/devices/live-activity-tokens")) return "projects:write"
                     if (m("/v1/settings/(ai/test|fusion/setup|cad/setup)")) return "projects:write"
@@ -271,6 +271,9 @@ class CompanionClient(
     suspend fun setArchived(id: String, archived: Boolean) = changeProjectSettings(id, jsonOf("archived" to archived))
     suspend fun rename(id: String, title: String) = changeProjectSettings(id, jsonOf("title" to title))
     suspend fun duplicate(id: String) = one(request("POST", "/v1/objects/$id/duplicate", JsonObject(emptyMap())))
+    /** Make something else from this project's scan (design §3.3): the computer copies the scan into a new project. */
+    suspend fun makeFromScan(id: String, kind: String, instructions: String, fit: ProjectFit? = null) =
+        one(request("POST", "/v1/objects/$id/make-from-scan", makeFromScanBody(kind, instructions, fit)))
     /** Where the scanned object sits in a fit part made before passes said: a short pass that changes no geometry (docs/protocols/seats.md). */
     suspend fun locate(id: String) = one(request("POST", "/v1/objects/$id/locate", JsonObject(emptyMap())))
 

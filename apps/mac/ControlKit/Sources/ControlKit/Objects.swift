@@ -386,6 +386,15 @@ public extension ControlClient {
         let result: ObjectReply = try await call("objects.duplicate", ["id": .string(id)])
         return result.object
     }
+    /// Make something else from this project's scan (design §3.3): a new project of `kind` with these words, seeded on
+    /// this Mac with a copy of the scan, its photos and checked sizes. `objects.makeFromScan`.
+    func makeFromScanObject(_ id: String, kind: String, instructions: String) async throws -> Project {
+        var parameters: [String: JSONValue] = ["id": .string(id), "kind": .string(kind == "fit" ? "fit" : "copy")]
+        let words = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !words.isEmpty { parameters["instructions"] = .string(words) }
+        let result: ObjectReply = try await call("objects.makeFromScan", parameters)
+        return result.object
+    }
     /// A short pass that reports where the scanned object sits in the finished part, changing nothing (docs/protocols/seats.md).
     func locateObject(_ id: String) async throws -> Project {
         let result: ObjectReply = try await call("objects.locate", ["id": .string(id)])

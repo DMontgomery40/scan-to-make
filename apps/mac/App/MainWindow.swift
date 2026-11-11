@@ -52,6 +52,12 @@ struct MainWindow: View {
         }
         .onChange(of: model.selection) { _, selection in if selection != nil { newProject = nil } }
         .onChange(of: newProject) { _, draft in model.composing = draft != nil }
+        // A project's "Make something else from this scan": New, holding that scan (design §3.3).
+        .onChange(of: model.makingFromScan) { _, source in
+            guard let source else { return }
+            model.makingFromScan = nil
+            startNewProject(NewProjectDraft(seed: source))
+        }
         .onAppear {
             #if DEBUG
             if DesignFixtures.assets != nil, DesignFixtures.screen == "new" { startNewProject(NewProjectDraft()) }

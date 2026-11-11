@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { canLocate, gallery, lightStage, photoPicture, still } from "../src/gallery";
 import {
+  MAKE_FROM_SCAN, FIT_CHOICE, COPY_CHOICE, USE_EXISTING_SCAN, canMakeFromScan, scanLineage, scansToReuse, scannedLine,
   pageActions,
   projectPage,
   codeEngineRow,
@@ -918,3 +919,27 @@ test("a project's printer saved under one of the catalog's aliases is that print
   assert.equal(resolvedPrinter(printers, "Printer"), undefined, "a matching display name is not identity evidence");
 });
 
+
+test("make something else from this scan: every project with a scan offers it, and both pages say where the scan came from", () => {
+  const base = { photos: [], passes: [], state: "ready" } as unknown as Project;
+  const leatherman = { ...base, id: "src", title: "Leatherman Wave+ replica", kind: "copy", scan: "scan.usdz", createdAtMs: 1000 } as Project;
+  const made = (id: string, title: string, ms: number) => ({ ...base, id, title, kind: "fit", scan: "scan.usdz", createdAtMs: ms,
+    scanFrom: { id: "src", title: "Leatherman Wave+ replica" } }) as Project;
+  const belt = made("belt", "Belt case", 2000), clip = made("clip", "Pocket clip", 3000);
+  assert.equal(MAKE_FROM_SCAN, "Make something else from this scan");
+  assert.equal(FIT_CHOICE, "Make something that fits this");
+  assert.equal(COPY_CHOICE, "Copy this object");
+  assert.equal(USE_EXISTING_SCAN, "Use a scan you already have");
+  assert.ok(canMakeFromScan(leatherman), "a copy's scan can become a fit");
+  assert.ok(!canMakeFromScan({ ...base, capture: ["0001.heic"] } as Project));
+  assert.equal(scanLineage(belt, [leatherman, belt, clip]).fromLine, "Uses the scan from “Leatherman Wave+ replica”");
+  assert.equal(scanLineage(leatherman, [leatherman, belt]).madeLine, "Also made from this scan: “Belt case”");
+  assert.equal(scanLineage(leatherman, [leatherman, belt, clip]).madeLine, "Also made from this scan: 2 projects");
+  assert.deepEqual(scanLineage(leatherman, [leatherman, belt, clip]).made.map((l) => l.id), ["clip", "belt"]);
+  assert.equal(scanLineage(belt, [{ ...leatherman, title: "Leatherman Wave+" }, belt]).fromLine, "Uses the scan from “Leatherman Wave+”");
+  const gone = scanLineage(belt, [belt]);
+  assert.equal(gone.fromLine, "Uses the scan from “Leatherman Wave+ replica”, since deleted");
+  assert.equal(gone.from?.exists, false);
+  assert.deepEqual(scansToReuse([leatherman, { ...base, id: "w", title: "Hook", createdAtMs: 9000 } as Project, belt]).map((p) => p.id), ["belt", "src"]);
+  assert.equal(scannedLine({ createdAtMs: 1_762_243_200_000 }, "America/Denver"), "scanned Nov 4");
+});

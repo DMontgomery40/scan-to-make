@@ -333,8 +333,17 @@ def project_screens(name: str, pid: str, state: str, data: str, record: str) -> 
     base = ['-CounterpartPairingRecord', record, '-CounterpartOpen', f'counterpart://project/{pid}']
     tabs = [('result', 'Project: Result', [], 4), ('sent', 'Project: What you sent', ['-CounterpartSection', 'inputs'], 4),
             ('activity', 'Project: Activity', ['-CounterpartSection', 'activity'], 3)]
-    return [{'order': 0, 'name': f'project-{name}-{tab}', 'screen': screen, 'state': state, 'data': data, 'args': base + extra,
-             'actions': [], 'pages': pages, 'note': ''} for tab, screen, extra, pages in tabs]
+    items = [{'order': 0, 'name': f'project-{name}-{tab}', 'screen': screen, 'state': state, 'data': data, 'args': base + extra,
+              'actions': [], 'pages': pages, 'note': ''} for tab, screen, extra, pages in tabs]
+    # Make something else from this scan (design §3.3), on a project with a scan: New holding it, and the new fit project
+    # it makes. The second writes a project into the capture's copy of the data, never into the real app's.
+    open_new = [['press', 'id="make-from-scan"']]
+    made = open_new + [['press', 'id="scan-use-fit"'], ['press', 'id="describe"'], ['type', 'A belt case for it'], ['press', 'id="send"']]
+    items += [{'order': 0, 'name': f'project-{name}-make-from-scan', 'screen': 'New, holding this scan', 'state': state, 'data': data,
+               'args': base, 'actions': open_new, 'pages': 2, 'note': 'Make something else from this scan, pressed'},
+              {'order': 0, 'name': f'project-{name}-made-from-scan', 'screen': 'The project made from this scan', 'state': state, 'data': data,
+               'args': base, 'actions': made, 'pages': 2, 'note': 'Make something that fits this, "A belt case for it", Send (in the copy)'}]
+    return items
 
 
 class LoadSampler:

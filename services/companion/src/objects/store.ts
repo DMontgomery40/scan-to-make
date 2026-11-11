@@ -129,6 +129,13 @@ export interface StmObject {
   /** File name under scan/. */
   scan?: string;
   /**
+   * The project whose scan this one was made from ("Make something else from this scan"), with its title then, so this
+   * page can say so after that one is renamed or deleted. Its files were copied in: nothing is shared. A plain new
+   * field on object.json, which no build parses strictly: an older companion keeps it through its updates and sends it
+   * on, and every client decodes projects ignoring fields it doesn't know.
+   */
+  scanFrom?: {id: string; title: string};
+  /**
    * The project's picture (PRD §5.1): the object alone on the stage, drawn by the companion (`pictures/…png`), and
    * each of its gallery pictures for clients that show pictures (`part`, `scan`, `together`, `photo`).
    */

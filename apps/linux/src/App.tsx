@@ -23,6 +23,11 @@ import {
   startersShown,
   words,
   rowWords,
+  COPY_CHOICE,
+  FIT_CHOICE,
+  USE_EXISTING_SCAN,
+  scannedLine,
+  scansToReuse,
 } from "./domain";
 import { useWorkspace } from "./useWorkspace";
 import { useChangeQueue } from "./useChangeQueue";
@@ -37,6 +42,8 @@ export function App() {
   const [selected, setSelected] = useState<string>();
   const [settings, setSettings] = useState(false);
   const [creating, setCreating] = useState(false);
+  /** New, holding a project's scan (design §3.3). */
+  const [seed, setSeed] = useState<Project>();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [invitation, setInvitation] = useState<{
@@ -291,6 +298,9 @@ export function App() {
               mutate={workspace.mutate}
               capabilities={workspace.capabilities}
               onBack={() => setSelected(undefined)}
+              projects={workspace.projects}
+              onOpenProject={(id) => { const p = workspace.projects.find((x) => x.id === id); if (p) open(p); }}
+              onMakeFromScan={(p) => { setSeed(p); setCreating(true); }}
             />
           ) : (
             <section className="welcome">
@@ -461,10 +471,14 @@ export function App() {
       )}{" "}
       {creating && (
         <NewProject
-          onClose={() => setCreating(false)}
+          seed={seed}
+          projects={workspace.projects}
+          onClose={() => { setCreating(false); setSeed(undefined); }}
           onCreated={(p) => {
+            workspace.apply(p);
             open(p);
             setCreating(false);
+            setSeed(undefined);
           }}
         />
       )}
@@ -483,16 +497,67 @@ export function App() {
 function NewProject({
   onClose,
   onCreated,
+  seed: initialSeed,
+  projects = [],
 }: {
   onClose: () => void;
   onCreated: (p: Project) => void;
+  /** A project whose scan this one is made from ("Make something else from this scan", design §3.3). */
+  seed?: Project;
+  projects?: Project[];
 }) {
+  const [seed, setSeed] = useState<Project | undefined>(initialSeed);
   const [instructions, setInstructions] = useState("");
   const [kind, setKind] = useState("fit");
+  // A kept scan asks first what it becomes: nothing is chosen for the person.
+  const [scanUse, setScanUse] = useState<"fit" | "copy">();
   const [url, setUrl] = useState("");
   const [draft, setDraft] = useState<Project>();
   const [inputs, setInputs] = useState<PickedInput[]>([]);
   const [error, setError] = useState("");
+  if (seed) {
+    const fitWithoutWords = scanUse === "fit" && !instructions.trim();
+    return (
+      <Modal title="New project" onClose={onClose}>
+        <div className="seed-scan">
+          <Picture id={seed.id} path={seed.pictures?.scan ?? seed.picture} alt={`The scan from ${seed.title}`} />
+          <div>
+            <h3>What should this scan become?</h3>
+            <p className="muted">{seed.title} · {scannedLine(seed)}</p>
+          </div>
+          {!initialSeed && <button onClick={() => { setSeed(undefined); setScanUse(undefined); }}>Remove</button>}
+        </div>
+        <div className="segmented">
+          {([["copy", COPY_CHOICE], ["fit", FIT_CHOICE]] as const).map(([v, l]) => (
+            <button key={v} aria-pressed={scanUse === v} onClick={() => setScanUse(v)}>{l}</button>
+          ))}
+        </div>
+        <label className="field">
+          What do you need?
+          <textarea autoFocus value={instructions} maxLength={8000}
+            placeholder={scanUse === "copy" ? "Copy this. Close up the bottom." : "A belt case for it…"}
+            onChange={(e) => setInstructions(e.target.value)} />
+        </label>
+        <p className="muted">
+          {scanUse ? "Your computer copies this scan, its photos and its checked sizes into a new project. The project it came from stays as it is."
+            : "Choose what this scan becomes, then add anything your computer should know."}
+        </p>
+        {error && <p className="error">{error}</p>}
+        <div className="dialog-actions">
+          <button onClick={onClose}>Cancel</button>
+          <Action className="primary" disabled={!scanUse || fitWithoutWords} onError={setError}
+            run={async () => {
+              const { object } = await call<{ object: Project }>("objects.makeFromScan", {
+                id: seed.id, kind: scanUse!, ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
+              });
+              onCreated(object);
+            }}>
+            {!scanUse ? "Choose what this scan becomes" : fitWithoutWords ? "Say what it should hold or fit" : scanUse === "copy" ? COPY_CHOICE : "Make it"}
+          </Action>
+        </div>
+      </Modal>
+    );
+  }
   const create = async () => {
     if (draft) return draft;
     const { object } = await call<{ object: Project }>("objects.create", {
@@ -577,6 +642,20 @@ function NewProject({
           </Action>
         ))}
       </div>
+      {!draft && !inputs.length && scansToReuse(projects).length > 0 && (
+        <section className="reuse-scans" aria-label={USE_EXISTING_SCAN}>
+          <h3>{USE_EXISTING_SCAN}</h3>
+          <div className="reuse-scan-row">
+            {scansToReuse(projects).map((p) => (
+              <button key={p.id} className="reuse-scan" onClick={() => { setSeed(p); setScanUse(undefined); setError(""); }}>
+                <Picture id={p.id} path={p.pictures?.scan ?? p.picture} alt="" />
+                <strong>{p.title}</strong>
+                <span className="muted">{scannedLine(p)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       {inputs.length > 0 && (
         <div className="selected-inputs">
           {inputs.map((i) => (

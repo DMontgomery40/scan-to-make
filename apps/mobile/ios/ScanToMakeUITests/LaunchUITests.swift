@@ -576,6 +576,84 @@ final class LayoutParityUITests: XCTestCase {
         }
     }
 
+    /// Design §3.3, David on his Leatherman "replica" (Nov 10): "if i don't see a fucking option here of what to do with
+    /// this on the next build, that will confirm the root problem(s) are not solved". A copy whose scan is really the thing
+    /// a case must fit: the page offers Make something else from this scan without scrolling, New opens holding that scan
+    /// and asks first what it becomes, and Send lands on a new fit project made from the same scan. The source stays.
+    func testACopysScanMakesAFitFromItsPageWithoutScanningAgainWithProjectsPresent() {
+        let source = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
+                               "-CounterpartOpen", "counterpart://project/\(source)"]
+        app.launch()
+        let title = app.buttons["project-title"]
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Bottle copy"), object: title)], timeout: 20) == .completed)
+        let action = app.buttons["make-from-scan"]
+        XCTAssertTrue(action.waitForExistence(timeout: 10), "the action is on the page under What you scanned, not only in •••")
+        XCTAssertEqual(action.label, "Make something else from this scan")
+        XCTAssertTrue(action.isHittable, "on the screen as the page opens, without scrolling")
+        action.tap()
+
+        // New, already holding the scan: the question first, the scan named, nothing to scan or send from this phone.
+        let question = app.staticTexts["scan-use-question"]
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["scan-use-source"].label.hasPrefix("Bottle copy"), app.staticTexts["scan-use-source"].label)
+        XCTAssertFalse(app.buttons["scan-object"].exists, "no rescan")
+        XCTAssertFalse(app.buttons["scan-use-later"].exists, "the scan is already saved, on its project")
+        XCTAssertFalse(app.buttons["send"].isEnabled, "it asks what the scan becomes before anything else")
+        XCTAssertEqual(app.buttons["scan-use-fit"].label.components(separatedBy: ",").first, "Make something that fits this")
+        app.buttons["scan-use-fit"].tap()
+        let describe = app.descendants(matching: .any).matching(identifier: "describe").firstMatch
+        XCTAssertTrue(describe.waitForExistence(timeout: 5))
+        describe.tap()
+        describe.typeText("A belt case for it")
+        if app.buttons["Done"].exists { app.buttons["Done"].tap() }
+        let send = app.buttons["send"]
+        XCTAssertTrue(send.isEnabled)
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: send)], timeout: 5)
+        sleep(1) // the bar settles where the keyboard was
+        send.tap()
+        let problem = app.staticTexts["new-problem"]
+        XCTAssertFalse(problem.waitForExistence(timeout: 3), "Send failed: \(problem.exists ? problem.label : "")")
+
+        // The new project opens: a fit, made from the same scan, saying where it came from.
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "A belt case for it"), object: title)], timeout: 15) == .completed,
+                      "landed on the new project, not \(title.label)")
+        let from = app.buttons["scan-from"]
+        XCTAssertTrue(from.waitForExistence(timeout: 10))
+        XCTAssertEqual(from.label, "Uses the scan from “Bottle copy”")
+        XCTAssertTrue(app.images["gallery-stage-picture"].waitForExistence(timeout: 10), "What you scanned shows the scan, not an empty stage")
+        XCTAssertTrue(app.buttons["make-from-scan"].exists, "the new project's scan can make something else too")
+
+        // The source is still there and says what was made from its scan.
+        if regular {
+            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Bottle copy")).firstMatch.exists,
+                          "the source is still in the sidebar")
+        }
+        from.tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Bottle copy"), object: title)], timeout: 10) == .completed)
+        let made = app.buttons["scan-made"]
+        XCTAssertTrue(made.waitForExistence(timeout: 10))
+        XCTAssertEqual(made.label, "Also made from this scan: “A belt case for it”")
+    }
+
+    /// The same, from New (design §3.3): "Use a scan you already have" offers the scans the Mac keeps, by picture and name.
+    func testNewOffersAScanYouAlreadyHaveWithProjectsPresent() {
+        let app = launch(set: "scan-stage", screen: "new")
+        let offered = app.buttons["existing-scan-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        let sheet = app.scrollViews.firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 20))
+        for _ in 0..<4 where !offered.isHittable { sheet.swipeUp() }
+        XCTAssertTrue(offered.isHittable, "Use a scan you already have lists the Bottle copy's scan")
+        XCTAssertTrue(app.staticTexts["Use a scan you already have"].exists)
+        offered.tap()
+        XCTAssertTrue(app.staticTexts["scan-use-question"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["scan-use-copy"].exists && app.buttons["scan-use-fit"].exists)
+        XCTAssertFalse(app.buttons["scan-object"].exists)
+        app.buttons["scan-use-remove"].tap()
+        XCTAssertFalse(app.staticTexts["scan-use-question"].exists, "Remove goes back to New as it was")
+    }
+
     /// PRD §5.4 One main action (board U17), the pair seen with real projects on Nov 10: a pass stopped on a project
     /// that already had a result, and the page showed Try Again, Print Again and a floating Print at once. Try Again
     /// leads; the earlier result prints from the card, once, under its true name; the bar keeps Ask for changes.
