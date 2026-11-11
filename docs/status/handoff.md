@@ -6,6 +6,22 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is in [`now.md`](now.md), which the lead updates at every wake. Read it first.**
 
+## #570 review continuation (Nov 11)
+
+Owner: implementation delegate, `fix/570-review-apple` in `~/fleet/stm-lane-a`, based on `origin/train/2026-11-11a` at `203d13e0`. The inherited commits were kept, reviewed and pushed. The lead merges this branch into the train and gates it; this delegate opens no PR, merges nothing and installs nothing on David’s devices.
+
+- `a4e6185a`: reuse excludes unsent correction photos, refuses a declared capture still arriving (including Try Again), and keeps a wordless imported scan as a copy. `objects-make-from-scan.test.mjs`: **9/9**; includes Mac/Linux control requests with scan and measured `fit`. Companion build passes after the requested four `npm ci --ignore-scripts` installs.
+- `5cd8cb06`: Linux's seeded fit offers Look up / I measured / Use scan, defaults to Use scan and sends `fit`. Linux suite: **53/53**; frontend build passes after the README's `prepare-frontend.sh` step (the first unprepared build lacked generated `shared/catalog.json`).
+- `01e3737e`: Mac pane and model send the selected `fit`. `ObjectsClientTests`: **24/24**, including `testMakeFromScanCarriesTheFitsSizeSourceToTheControlSocket`; `ObjectsModelTests`: **55/55**, including `testMakeSomethingElseFromACopysScanWithProjectsPresent`; shared `FitChoiceTests`: **2/2**.
+- `683faef9`: authored-colour regression coverage. The defective disconnected-solid splitter had already been removed by train commit `e46e733d`; no old framing code was restored. `ThreeMFTests`: **24/24**, including `testDisconnectedSolidsInOneMeshKeepTheirAuthoredColourEvenWithATint`, which checks the rendered red solids with both no tint and a blue tint.
+- `ecb4fafc`: iPhone/iPad edits: both reuse entry paths default Exact size to Use scan. Draft photos are hidden while reusing a scan, drops are refused, and the sheet explicitly says those photos will not be sent. The existing reuse endpoint starts immediately and accepts no attachments, so attaching them before its pass would require a protocol change. Removing the scan restores the draft's photo strip. The focused `LayoutParityUITests.testACopysScanMakesAFitFromItsPageWithoutScanningAgainWithProjectsPresent` and `testNewOffersAScanYouAlreadyHaveWithProjectsPresent` pass **2/2 on iPhone 18 Pro and 2/2 on iPad Air 11-inch in landscape**.
+
+Duo fold validation is **incomplete**: `agent-device fold closed` and `fold open` both returned “the first hinge-angle read returned no sample to verify it”. After the first error, the advised snapshot and screenshot showed Use scan selected on the 466 × 678 outer panel (`duo-closed.txt`, `duo-closed.png` in the evidence folder). The same error on open ended fold attempts, per the brief; no pose-read success is claimed. Owner: lead/tooling for a working hinge read before the train’s Duo acceptance. The focused phone/iPad UI tests themselves are green.
+
+Logs and XCTest results: `~/scan-to-make-work/570-fixes/`. Every Apple build/test used `scripts/lane.py`; mobile tests hold both slots and run one simulator at a time. No Android source, David’s installed app, printer or install checkout was touched. PRD §6.1's Mac/Linux cells now describe the fit choices and payload.
+
+Current Apple references consulted: [Picker](https://developer.apple.com/documentation/swiftui/picker), [onChange(of:initial:_:)](https://developer.apple.com/documentation/swiftui/view/onchange(of:initial:_:)-4psgg), [glassEffect(_:in:)](https://developer.apple.com/documentation/swiftui/view/glasseffect(_:in:)), and [HIG Pickers](https://developer.apple.com/design/human-interface-guidelines/pickers).
+
 ## Now (2026-11-10, 22:05Z)
 
 The lead is the session in thread "Take Over Project Recovery Lead" (Claude Fable 5.2) since 20:07Z Nov 10. The lead before it was removed by David (19:55Z: "nothing shows up I have no earthly idea what you're printing this is such a shit show"); its process is stopped and its thread settled.
