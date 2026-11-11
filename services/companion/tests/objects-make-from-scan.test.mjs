@@ -173,4 +173,3 @@ test('the Mac app makes one through the control socket, and a source deleted bef
   const failed = await until(() => store.get(gone.id), o => o.state === 'failed' && !o.progress, 'the refusal');
   assert.equal(failed.failure, '“Old Leatherman” has been deleted, so its scan can’t be brought over. Scan the object again.');
 });
-

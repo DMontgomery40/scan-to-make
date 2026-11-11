@@ -863,7 +863,7 @@ final class LayoutParityUITests: XCTestCase {
         }
         // A tap that failed shows the page's own failure line (its identifier), not words: the failed pass's own text says
         // "then try again" too. Print is checked by its identifier below; its label would also match "Printers".
-        let macActions = ["It Works", "Needs Changes", "Send to your Mac", "Scan", "Make Your Best Guess", "Send Answer", "Review", "Don’t Print"]
+        let macActions = ["Make something else from this scan", "It Works", "Needs Changes", "Send to your Mac", "Scan", "Make Your Best Guess", "Send Answer", "Review", "Don’t Print"]
         func checkNothingFails(_ app: XCUIApplication, _ page: String) {
             XCTAssertEqual(app.alerts.count, 0, "\(page): no error alert")
             for line in ["project-problem", "printing-problem"] {
@@ -879,6 +879,11 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertTrue(away.waitForExistence(timeout: 20), "\(id): the one line: \(app.debugDescription)")
             let awayLine = away.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Your Mac isn’t answering, so anything that needs it waits.")).firstMatch
             XCTAssertTrue(awayLine.exists, "\(id): the away line says why: \(away.debugDescription)")
+            let make = app.buttons["make-from-scan"]
+            if make.exists {
+                XCTAssertFalse(make.isEnabled, "making from the scan waits for the Mac")
+                XCTAssertTrue(app.staticTexts["make-from-scan-away"].exists, "the disabled scan action explains why it waits")
+            }
             for button in app.buttons.allElementsBoundByIndex where button.exists && macActions.contains(where: { button.label.hasPrefix($0) }) {
                 XCTAssertFalse(button.isEnabled, "\(id): \(button.label) waits for the Mac")
                 button.tap()
