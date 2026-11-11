@@ -6,7 +6,80 @@ Updated in place; git history keeps the rest. This is the only handoff: no dated
 
 **What is running and owed this hour is in [`now.md`](now.md), which the lead updates at every wake. Read it first.**
 
-## Now (2026-11-11, 08:46Z): a new lead
+## Now (2026-11-11, 17:55Z): the lead was removed again. Read this first.
+
+David, 17:48Z, holding a failed print of his AirPods Max desk hanger: "ARE YOU FUCKING KIDDING ME ... since fable 5.2 took lead it's been a fucking trainwreck. You can't no longer be in charge". This section is the handoff he asked for: everything since the Fable 5.2 lead took over at 20:07Z Nov 10, what was done, what failed, what is running, and what is true right now. The sections below it are older and are superseded where they differ. There is no lead until David names one.
+
+### Who led, when
+
+| When (UTC) | Lead | Ended |
+|---|---|---|
+| Nov 10 20:07Z to Nov 11 08:33Z | Claude Fable 5.2, Mac thread "Take Over Project Recovery Lead" | Removed by David (the phone holder with no swivel, a file he was asked three times to drag) |
+| Nov 11 08:40Z to about 17:25Z | Claude Opus 5.5, T3 thread on agents-173 | Same thread; David switched its model |
+| Nov 11 about 17:25Z to 17:48Z | Claude Fable 5.2, the same thread | Removed by David |
+
+### What is true right now (checked 17:50Z)
+
+- **Main is `38629288`; app code is `4718dd56`.** Merged today: #570 (make something else from a scan, one AR chip, the queued-download fix, every Cursor/Composer/Codex review fix) at 17:32Z, and #587 (Open With ▸ Counterpart, File ▸ Open…, Choose Files on the Mac) at 17:36Z.
+- **Installed: Mac, iPhone and iPad on build `202611111737`** from `4718dd56`, by 17:42Z. Receipts `~/scan-to-make-work/{iphone,ipad,mac}-202611111737/` on the Mac; Mac rollback `Counterpart-202611102149.app` in the Mac receipt folder. Checked on the Mac only: the companion answers, 22 projects, a real `objects.estimate` in 4.3 s, STL/3MF/USDZ document types. **Nobody has looked at the new build on his phone.**
+- **MCPs in the app: bambu-printer-mcp 1.1.88, mcp-3d-printer-server 1.2.70** (published today, prompt text only: `fdm_design` starts from what every bought version of a thing has; compliant-first is scoped to the gripping element). Roll back by reverting one squash merge in each repo (#143, #99). mcp-3d-printer-server reports its PrusaSlicer path missing on this Mac (seen at the install; not looked into).
+- **The Claude subscription limit reset** (a Claude delegate answered on the Mac at 17:39Z; it was out from about 09:00Z). David, 16:55Z: no Claude model through API keys or the proxy.
+- **Mac disk: 95% full, 47 GB free.**
+
+### Open defects David is looking at right now, most urgent first
+
+1. **The AirPods Max desk hanger came off the bed with open infill where solid faces should be** (his photos, 17:47Z: `~/.t3/userdata/attachments/acf8693b-…-53305767-….jpg` and `…-b3f983b2-….jpg` on agents-173; he calls it half printed). He printed it himself from the app, 15:54Z to 17:41Z, project `5158831c`. What is known: the printer ran all 400 layers of the file and reported `finished` (events.ndjson, print `c2a0ae5b`); the sliced file's settings are ordinary (5 top layers, 3 bottom, 2 walls, 15% infill: `…/objects/5158831c…/slices/shown/8f5822c7….3mf`); the Mac install's idle check ran at 17:41:34Z, three seconds before the printer reported finished, and the app was swapped after it. **Not diagnosed.** First things to check: whether the sliced plate holds the whole model (compare `current/model.stl`, 89.2 × 104.5 × 80 mm, with the slice's `plate_1.json` and its 400 layers at 0.2 mm), whether the model is a closed solid, and whether anything changed its orientation or cut it between the design's last pass and the slice. The slice was made with bambu-printer-mcp 1.1.88, which the lead had installed at 15:02Z (its diff from 1.1.87 is prompt text; verify that rather than trust it).
+2. **AR, turning and zooming the model, and slow loading** (David, about 17:28Z: "ar is gone you can't rotate the thing and zoom in on the 3d thing anymore it's slower to load than its ever fucking been, and like 10 other issues"). The audit is done: `~/scan-to-make-work/regression-audit-2026-11-11/AUDIT.md` on the Mac (21 ranked rows, each with file lines and the smallest fix). Its first three: AR is partly fixed in the new build (a real USDZ, one chip) but the chip is still absent while a model downloads; **turning the model is NOT fixed: live 3D now needs an off-screen poster to succeed first** (`ModelStage.swift:53–100`, commit `6e976504`); loading is partly fixed (old hangs bounded) with repeated TLS sessions, repeated picture/model/poster work and a broad cache-key bump still there. None of its rows is on the board yet.
+3. **A revision must carry its project's history** (David, about 17:38Z: "when you do a revision or addition to an existing thing all that projects history and context need to go with it ... you're basically 'forking' the project"). In work, see Running.
+4. **The phone holder.** His project "Forester phone mount" (`53a48b5e`) holds his request, his answer (JETech clear case) and the first design (two parts, an M5 tilt bolt, sprung side jaws; never printed). **A change pass the lead started in it at 17:43Z is still running**, see Running, and the next lead must decide about it before anything else touches that project.
+
+### Running at 17:50Z (nobody is watching these now)
+
+| What | Where | State | The next lead's decision |
+|---|---|---|---|
+| **A design pass in David's own project "Forester phone mount"**, started by the lead through the control socket (`objects.correct`) with a note written in David's voice from things he said today: "Redesign this from my original request, from scratch. It should be on a swivel … The base that tapes to the dash has to be big enough for the leverage of the phone … Keep the squeezy grip on the case edges with the wallet clear." | The installed Mac app's design worker, pass 3 of `53a48b5e` | `touching-up` since 17:43Z | David did not ask for this message to be sent in his name. When it finishes it replaces the project's visible model. The project as it was is copied to `~/scan-to-make-work/forester-before-redesign-2026-11-11/` on the Mac. Tell David it is there; stop or keep it on his word; look at its pictures before describing it to him |
+| **Forks carry history, then versions slice 1** | GPT-6.1 Sol xhigh, Mac `~/fleet/stm-lane-a`, thread `t3-thread://v2/11412686-e469-46d5-8f3a-5aaa68539c60/mcp:launch:f49ff7c26b8b89aefd08eeea5e4e74bc557d8a45334f635a97c5efcef615ae85` | Milestone 1 pushed: **PR #600** `feat/fork-carries-history` (`26be32a8`; a project made from another carries its request and conversation; companion, CounterpartKit, iPhone, Mac; not reviewed, not gated). Now on `feat/versions-slice-1` (DESIGN.md slice 1; budget to about 23:10Z) | Read #600 before merging. Remote children do not wake a parent: read the thread. Stop it with `task_cancel` from the thread that started it, or interrupt the thread, if David wants the work paused |
+| The regression audit | GPT-6.1 Sol xhigh, Mac `~/fleet/stm-lane-b`, thread `…/mcp:launch:82ac7a87f0adf58c7e03e4365d88199b4b7394b3342b5160d3925366fe913609` | AUDIT.md written (52 KB) at 17:48Z; the thread may still be adding Part 2 | Put its rows on the board; check the lane is back on clean main |
+
+Nothing else is running. No print is running; the printer reads `ready`; the bed has David's hanger off it by his photo.
+
+### What was done, Nov 10 20:07Z to Nov 11 17:50Z
+
+- **Builds on his devices:** `202611102149` (main `d922973f`, #539: the stage shows the Mac's picture instead of a blank) late Nov 10; `202611111737` today. Between them #527 (the fifth train) merged at 05:55Z and was never installed by itself.
+- **Trains merged:** #527, #539, #570, #587. PRD §5.4 pictures/gallery (Nov 10), one main action per page, a size question answered with numbers, make something else from a scan, Open With on the Mac.
+- **MCPs published (both repos, each verified on npm, tag, release, changelog page, installed through the app):** 1.1.86/1.2.67–68 (compliant-first, fit by function, printed fasteners), 1.1.87/1.2.69 (research before designing or asking), 1.1.88/1.2.70 (start from the product).
+- **Kernel lab (repo `counterpart-kernel`, agents-136 `~/kernel-lab`, head `0faca42`):** rounds 6, 7, 7b, 7c of compliant designs, physics rounds, the Forester dash research, three test plates printed. A three-model council scored the engine 2/10 on the phone holder; three bare models with no engine each produced a better holder in under 90 seconds (`~/scan-to-make-work/council-holder-2026-11-11/` on the Mac: `SYNTHESIS.md`, `CONTROL-no-engine.md`). Round 7c (a ball swivel on an 84 × 38 mm pad) was rejected by David on sight today.
+- **Design written and not built until today:** `~/scan-to-make-work/things-and-versions-2026-11-11/DESIGN.md` (versions that are never overwritten; slice 3 shipped in #570; slices 1, 2, 4 not built).
+- **Rules written today** (David's words quoted in each): the council is not run on every change (#594); what holds a train and what does not, and a test run is a command, not a session (#597, `operations.md`).
+- **Prints through the app:** the published bag clip (06:14Z), David's hanger (15:54Z, failed as above). No holder was printed.
+
+### What went wrong, so the next lead does not repeat it
+
+The first Fable lead's own list is below under "What the removed lead got wrong" and still stands. Added since 08:40Z:
+
+1. **Nine hours to land a finished train.** #570 was built by 08:30Z and merged at 17:32Z, after David demanded it. The time went to: a real gate failure (fixed in an hour); then **about five hours when nothing happened** (every Claude delegate died at about 09:00Z on the weekly limit, the lead read "rate limit" as passing, and the lead's own session was idle from about 09:35Z to 14:36Z with a passing gate result unread); then review fixes held as blocking; then three 45-minute reruns of the phone test job, each failing on a different simulator flake. David: "why are we letting failed android or Linux or iPad builds or small bugs block a full [train] of working shit". The rule is now in `operations.md`.
+2. **Regressions reached his phone and nobody looked.** Build `202611102149` replaced a model he could turn with a still picture whenever the model's download or poster did not land, which also removed AR. Every check was on a simulator beside the Mac. The same root (the one-shot download → mesh → poster chain, board X85, X92) was diagnosed on Nov 10 and never fixed; today's build fixes parts of it and the audit says turning is still gated on a poster. Before any install, someone has to open the build on the real phone, or read a trace from it, for: AR on a scan and on a part, turning and zooming, the gallery, Print, Send, Ask for changes.
+3. **Work was lost between sessions and trackers.** `board.md` went unreconciled from 20:30Z Nov 10 to 17:20Z Nov 11 while `now.md` was kept; it is 330 lines of prose rows that nobody can scan. Finished work sat in open PRs (#556 the on-device library, #404, #410, #413, #532, #533; the audit rows 6, 9, 10, 17, 18, 19). David: "how many things got half built or fully built and then just disappeared".
+4. **The holder, four times.** Designs were made in a lab outside his project, so each lost what the project knew (his request, the swivel, the case). Today the lead put round 7c into his app as a new project with no history (deleted 17:39Z after he called it hideous with zero context), then sent a redesign request into his own project in his voice without asking (still running, above). Both were done through the control socket, which the first lead's list already said not to use in place of the app.
+5. **A Mac install was started while his print was in its last minutes.** The printer finished three seconds after the install's idle check and before the app was replaced, so the install did not cut the print, but the lead did not know that when it was ordered. Do not install on the Mac while a print is running.
+6. **Times written ahead of the clock**, again (corrected in #599). Run `date -u` before writing a time.
+7. **Unverified test changes are on main.** Three fixes to iPhone/iPad UI tests and the gate's simulator keyboard setup (`93e24446`, `35e7ce4b`, `d634210b`) were merged with #570 without one green run of the phone job after them (board X129). The next gate may fail on them.
+8. **Too many sessions for small jobs.** A dozen threads each ran one Android test command per commit (the state-machines session, Nov 10). David: "How many sessions need to fucking work on a fucking android test".
+
+### What David said today that is not yet answered
+
+- "like 10 other issues": he named three (AR, turning the model, slow loading). The audit lists 21 from the code; he has not been shown it. Ask him for nothing; show him the list and fix from the top.
+- The hero showing one image (about 16:20Z): answered in words only (the gallery's labels show only when a project has more than one picture); which project he meant is unknown.
+- Whether the redesign pass in his Forester project should stand.
+
+### Housekeeping left
+
+- agents-173: worktrees `~/stm-wt/train-11a` and `~/stm-wt/train-11b` (branches `train/2026-11-11a`, `train/2026-11-11b`, local `fix/train-11a-gate`, `wt/train-11b`) can be removed; both trains are merged. Remote branches to delete: `train/2026-11-11a`, `train/2026-11-11b`, `fix/570-review-apple`, `fix/570-review-android`, `fix/open-a-model-file`, and the stale ones `branch_check` lists.
+- Mac: about fourteen T3 worktrees under `~/.t3/worktrees/scan-to-make/` for merged branches; gate evidence under `~/scan-to-make-work/train-2026-11-11a/gate*` (several GB); the stopped rerun's simulators were deleted.
+- Open PRs: #600 (new), #556, #533, #532, #413, #410, #404. Board rows X127 to X141 are today's; the audit's rows are not on the board.
+- A small control-socket client used today is at `~/scan-to-make-work/holder-7c-print/ctl.py` on the Mac (read-only use is fine; it was also used for the two writes described above).
+
+## Before that (2026-11-11, 08:46Z): a new lead (Opus 5.5)
 
 The new lead is Claude Opus 5.5 (high) in a T3 thread on agents-173, since 08:40Z. The council's synthesis reached David at 08:41Z in the removed lead's thread. #570's three gate failures are fixed on the train (`203d13e0`) and the gate is running again; [`now.md`](now.md) has the live state.
 
