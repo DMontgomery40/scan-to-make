@@ -2,7 +2,7 @@
 
 The lead's live list. It is updated every time the lead is woken, for any reason, and before the lead ends a turn. [`board.md`](board.md) holds every item and its history; this page holds only what is in motion or owed next, so nothing waits unseen. If a line here is more than an hour old, it is stale: check the thing itself.
 
-**Last checked: 2026-11-11 17:46Z by the lead (Claude Fable 5.2 since 17:25Z; Opus 5.5 before, T3 thread on agents-173, since 08:40Z). Claude delegates are unavailable: the Claude subscription hit its weekly limit at about 09:00Z (resets Nov 13 10pm MT on the Mac, Nov 14 05:00Z on agents-136). Every delegate since runs on GPT-6.1 Sol (or Muse); the lead does the rest directly. No Claude model on API keys or the proxy (David, 16:55Z).**
+**Last checked: 2026-11-11 17:55Z. There is no lead: David removed the lead at 17:48Z. [`handoff.md`](handoff.md)'s first section is the handoff and lists what is still running; the rows below are as the removed lead left them and nobody is watching them.**
 
 ## Running
 
