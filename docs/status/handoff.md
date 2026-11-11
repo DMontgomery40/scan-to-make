@@ -1,10 +1,20 @@
 # Handoff: Counterpart
 
-Updated in place; git history keeps the rest. This is the only handoff: no dated copies or prompt files. What is built and accepted is in the [working PRD](../design/overhaul/PRD.md) (§0, §8.0); how to gate, build and install is in [operations](../operations.md); machines, paths, ports and state folders are in the [infrastructure map](../infrastructure.md). Every open item, its owner and its next step is in [`board.md`](board.md): read it after this page. Anything David says, and anything a report leaves undone, gets a row there in the same turn.
+Updated in place; git history keeps the rest. This is the only handoff: no dated copies or prompt files. What is built and accepted is in the [working PRD](../design/overhaul/PRD.md) (§0, §8.0); how to gate, build and install is in [operations](../operations.md); machines, paths, ports and state folders are in the [infrastructure map](../infrastructure.md). Every open item, its owner and its next step is a GitHub issue; the pinned [#610 "Now"](https://github.com/DMontgomery40/scan-to-make/issues/610) is the one screen (labels and rules: [`board.md`](board.md)). Anything David says, and anything a report leaves undone, gets an issue in the same turn.
 
 **How the owner works (David, Nov 6–10).** An item ends only as *done and verified on David's real install* (with evidence: SHA, log line, AX read, camera frame) or *blocked on one small thing only David can do*, named exactly. Green CI is not verification. Find facts yourself (code, logs, `object.json`, MQTT, camera); never ask David what you can read. Never end a turn "waiting"; re-drive agents that do. Scanning by hand is physically hard for him. He cannot leave his iPhone unlocked. Never take his screen and never press controls in his installed app: read and drive through the companion's control socket. Rules and notes in this repo can be stale: when one contradicts what David said later or what the code does, fix the note in the same PR.
 
-**What is running and owed this hour is in [`now.md`](now.md), which the lead updates at every wake. Read it first.**
+**What is running and owed this hour is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610), which the lead updates at every wake. Read it first.**
+
+## Now (2026-11-11, 19:15Z): a new lead, and the tracker is GitHub Issues
+
+The lead is Claude Opus 5.5 (high), T3 thread "Recover Work and Stabilize Counterpart" on agents-173, since 18:46Z (David named it). Live state is the pinned issue [#610](https://github.com/DMontgomery40/scan-to-make/issues/610); this section only records what changed since the section below it.
+
+- **Tracker:** board.md and now.md are pointers now. Every open board row and the 21 regression-audit rows are issues (101 filed; mapping `~/scan-to-make-work/board-to-issues-2026-11-11.md` on agents-173).
+- **Lost work:** all four machines swept; everything unpushed is on GitHub as `archive/2026-11-11/<host>/…` branches. Still needed and filed: #611, #612, #618; untracked requests of David's filed: #616, #617. The rest of the finished-but-stranded work is the open PRs, now on train 11c (#532, #410, 065a9c89 + #533, #413, #404) and #720 (#556, P0).
+- **The hanger (#605):** the slice was whole (top skins at 80/36/10 mm); the plastic stopped feeding at about 30 mm after the 16:48Z frame and the printer ran on to 400/400. Neither MCP keeps report history or checks the part grew: #628 and #630 are being built in both MCPs; #631 (spool choice into the MCPs) next.
+- **The Forester phone mount:** David kept the redesign and started its print himself at 18:56:36Z (print `cd6b27c8`, about 4 h 21 min, PETG). No Mac install until it finishes. #607 closed with his words.
+- **#600** reviewed by Muse: four companion blockers being fixed on its branch; follow-ups #613–#615.
 
 ## Now (2026-11-11, 17:55Z): the lead was removed again. Read this first.
 
