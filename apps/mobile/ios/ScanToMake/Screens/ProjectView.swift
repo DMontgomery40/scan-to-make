@@ -56,6 +56,8 @@ struct ProjectView: View {
     @State private var confirming: IdentifiedProject?
     /// What the page measured, for sizing the stage when a card has to be answered (board X80).
     @State private var answerRoom = AnswerRoom()
+    /// The answer card's bottom in the page's content (`pageSpace`), as it sits now.
+    @State private var cardBottom: CGFloat?
     @FocusState private var writing: Bool
     private var object: Project? { store.project(id) }
     /// The Mac isn't answering: the page shows what this phone already had and says so, and Print and Send wait (X100).
@@ -319,7 +321,10 @@ struct ProjectView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.pageSpace)).maxY.rounded() } action: { bottom in
                         // Where the card ends below the stage, in the order the card sits now under the title. Measured once
                         // per state and text size (review S5): a line or row that appears later as things load does not
-                        // resize the stage under the person.
+                        // resize the stage under the person. Where it ends now is kept every time: a row that loads after the
+                        // measurement (the picture tabs, Make Something Else) can push it under the bar, and the page then
+                        // scrolls to it (`cardBelow`). The page space is the scroll's content, so scrolling doesn't move it.
+                        cardBottom = bottom
                         let key = answerKey(store.words(object))
                         guard answerRoom.belowStage == nil || answerRoom.measuredFor != key else { return }
                         let now = answerFit(store.words(object))
@@ -507,12 +512,14 @@ struct ProjectView: View {
         let room0 = answerRoom.belowStage == nil ? Self.lastRoom[answerKey(words)] : answerRoom
         guard let room0, let below = room0.belowStage, room0.viewport > 0 else { return (300, false, false) }
         let room = room0.viewport - Self.answerMargin - below
+        // The card as it sits now, after anything that loaded since the measurement: under the bar, the page scrolls to it.
+        let under = (cardBottom ?? 0) > room0.viewport - Self.answerMargin
         // The card moves above the request before the stage would drop below a recognisable picture (review S5).
         if room >= Self.recognisable || room0.request == 0 {
-            return (min(Self.fullStage, max(Self.stageFloor, room)), false, room < Self.stageFloor)
+            return (min(Self.fullStage, max(Self.stageFloor, room)), false, room < Self.stageFloor || under)
         }
         let moved = room + room0.request
-        return (min(Self.fullStage, max(Self.stageFloor, moved)), true, moved < Self.stageFloor)
+        return (min(Self.fullStage, max(Self.stageFloor, moved)), true, moved < Self.stageFloor || under)
     }
 
     // MARK: Hero
