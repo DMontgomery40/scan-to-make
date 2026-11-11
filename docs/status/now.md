@@ -2,26 +2,24 @@
 
 The lead's live list. It is updated every time the lead is woken, for any reason, and before the lead ends a turn. [`board.md`](board.md) holds every item and its history; this page holds only what is in motion or owed next, so nothing waits unseen. If a line here is more than an hour old, it is stale: check the thing itself.
 
-**Last checked: 2026-11-11 04:55Z** (lead: thread "Take Over Project Recovery Lead").
+**Last checked: 2026-11-11 06:00Z** (lead: thread "Take Over Project Recovery Lead").
 
 ## Running
 
 | What | Who (model) | Started | Budget ends | Last seen doing | If it finishes: next |
 |---|---|---|---|---|---|
-| Bad-link check on the fifth train (#527): every project page, iPhone then iPad, slow / refusing / away | Lead, `scripts/ux_gate.py`, output `~/scan-to-make-work/gate-train-g/` | 04:10Z | about 05:30Z (six lane holds) | 04:44Z: iPhone slow and refusing done, iPhone away in its hold; iPad's three to come | exit 0 → `branch_check --merge` → merge #527. Any blank frame → fix first |
-| "Make something else from this scan" on every layout (X115) | D: Opus 5.5 high, branch `feat/make-from-scan` | 04:22Z | 06:22Z; milestone 05:22Z (companion route + iPhone/iPad action pushed) | 04:44Z: pushed the action on iPhone, iPad and Linux (`786f0f46`); Mac and Android to come | review (Muse) → on top of #527 → this is the build David's devices get |
-| AR for designed parts, one AR control (X116) | D: Opus 5.5 high, branch `fix/ar-parts` | 04:33Z | 05:48Z | 04:50Z: code pushed (`72ae41e1`, one AR control, PRD); its iPhone and iPad tests are queued in the lane | review → same build as the line above |
-| The Mac's picture framing (X105) | D: Gemini 4 Carbon, branch `feat/picture-framing` | 04:38Z | 05:53Z | 04:44Z: nothing pushed yet | review → next build |
-| Kernel lab round 6: real limits, new flexure primitives, the three compliant builds (bag clip, locking pliers, car phone cradle with no clamp) | D: GPT-6.1 Sol xhigh, agents-136, `~/kernel-lab` | 04:52Z | 07:52Z; milestones 05:37Z (limits), 06:32Z (clip sliced), 07:32Z (all three) | just started | three 3MFs in `prints/2026-11-11-compliant/` → into his app with a picture and plain words → print on a clear bed |
-| Physics lab round 5: material cards, a flexure's bite, preload, slip and creep, the three builds' numbers checked, the strength swing, printed-screw checks | D: Opus 5.5 xhigh, agents-173, `~/physics-lab` | 04:52Z | 07:52Z; milestones 06:02Z, 06:42Z | just started | its numbers beside the study's for the three builds; handoffs to the kernel lab |
+| The build David gets: main + #568 (CAD workers on Fable high) + #564 (AR for parts, one AR control) + #565 (Make something else from this scan), as `train/2026-11-11a` | D: GPT-6.1 Sol xhigh, conductor | 05:58Z | 07:28Z; milestone 06:33Z (all three merged, compiling, pushed) | just started | review (Muse) → gate + bad-link gate → `branch_check` READ, not chained → merge → install Mac, iPhone, iPad → verify on his phone (the Leatherman page, AR on a part, the trace) |
+| The Mac's picture framing (X105) | D: Gemini 4 Carbon, branch `feat/picture-framing` | 04:38Z | extended to 06:23Z | 05:38Z: first version pushed (view from the shape, 82% fit, contact shadow) after the lead's nudge | review → next train |
+| Kernel lab round 6: real limits, flexure primitives, the three compliant builds | D: GPT-6.1 Sol xhigh, agents-136 | 04:52Z | 07:52Z | 05:16Z: limits by duty pushed; told to size the clip from the physics checks to at least 50 N on a bag, and given the third plate's readings | three 3MFs → added and printed THROUGH THE APP (X118) |
+| Physics lab round 5 | D: Opus 5.5 xhigh, agents-173 (left running: started before David's rule that CAD work is Fable high) | 04:52Z | 07:52Z | 05:44Z: the clip question settled against real clips (the published C-clip: 55 to 58 N on a finger in PLA; engine, a 2D solve and the study agree); printed-screw check; 3 GB ceiling enforced | its report; the next physics round is Fable high |
 
 ## Finished, waiting on the lead (nobody is working on these)
 
 | What | State | Next step, and when |
 |---|---|---|
-| #527 the fifth train | Gate green at `8a8e97dd`; five review parts, the last says merge | Merge when the bad-link check passes. NOT installed on David's devices by itself (X115) |
+| #527 the fifth train | **Merged 05:55Z, main `6acb3cd7`.** Bad-link gate: 0 blank frames, iPhone and iPad, slow / refusing / away. The lead chained the merge onto `branch_check`, which printed NOT SAFE on one boundary flag at p=0.30 (`CompanionClient.swift:48`, the app reading its own companion's refusal body: not backend knowledge; the same check had passed all 57 chunks minutes earlier). Read after the fact; the merge stands; never chained again | Not installed by itself (X115). #509 still shows open on GitHub: check whether its branch has commits the train did not carry |
 | #556 the on-device library (X110) | Built; 2 of 16 away pages still "not available" (plate pictures of unopened projects); 4 pages uncaptured; one unit test to recheck after rebase | Back to a delegate after #527 merges: fill plate pictures, rebase, finish the proof, review |
-| Versions ledger and migration (X114, design slice 1) | Design done: `~/scan-to-make-work/things-and-versions-2026-11-11/DESIGN.md` | Start a delegate when #527 is on main (same files) |
+| Versions ledger and migration (X114, design slice 1) | Design done: `~/scan-to-make-work/things-and-versions-2026-11-11/DESIGN.md`; main now has #527 | Start next (GPT-6.1 Sol xhigh), on main, once the conductor's merge milestone is in so it branches from the same files |
 | #527's leftovers (review parts 3 to 5) | Listed on the board (X115) | Next train: Home's question buttons and Printing's Did it fit while the Mac is away; the queued change visible and discardable; the stage jumping as content loads; one-main-action gaps; the number pad's 1 s fallback |
 | Size card records guesses as measured (X103); look up a named product first (X108) | Not started | Delegate after the versions slice starts; owner of the card is the state-machines session |
 | MCP prompts: flexing, toughness, lookups, printed screws, fit-by-function (X113) | Not started; the compliant study landed 04:50Z (`docs/research/compliant-mechanisms-proven.md` in the kernel repo, `4df39d7`) | Next free delegate slot: one release in both MCP repos (Muse Wonder Full drafts the prompt text; Sol reviews) |
