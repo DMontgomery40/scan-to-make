@@ -10,6 +10,17 @@
 <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
 <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
 <key>LSMinimumSystemVersion</key><string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+<!-- H1 (Nov 11): the models New Project takes (ObjectsModel.modelExtensions; ObjectsModelTests checks this list against it).
+     Viewer and Alternate: Counterpart is offered in Open With and takes a drop on its Dock icon, never the default app for these files. -->
+<key>CFBundleDocumentTypes</key><array>
+<dict><key>CFBundleTypeName</key><string>STL Model</string><key>CFBundleTypeRole</key><string>Viewer</string><key>LSHandlerRank</key><string>Alternate</string>
+<key>LSItemContentTypes</key><array><string>public.standard-tesselated-geometry-format</string></array></dict>
+<dict><key>CFBundleTypeName</key><string>USDZ Model</string><key>CFBundleTypeRole</key><string>Viewer</string><key>LSHandlerRank</key><string>Alternate</string>
+<key>LSItemContentTypes</key><array><string>com.pixar.universal-scene-description-mobile</string></array></dict>
+<!-- macOS has no system type for 3MF (each slicer declares its own), so this one is claimed by its extension. -->
+<dict><key>CFBundleTypeName</key><string>3MF Model</string><key>CFBundleTypeRole</key><string>Viewer</string><key>LSHandlerRank</key><string>Alternate</string>
+<key>CFBundleTypeExtensions</key><array><string>3mf</string></array></dict>
+</array>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>NSLocalNetworkUsageDescription</key><string>Counterpart needs to talk to your printer and your iPhone over your home network.</string>
 <key>NSBonjourServices</key><array><string>_scantomake._tcp</string></array>

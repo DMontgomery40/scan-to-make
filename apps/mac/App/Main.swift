@@ -1,6 +1,7 @@
 import SwiftUI
 import Sparkle
 import ServiceManagement
+import UniformTypeIdentifiers
 import AgentKit
 import CounterpartKit
 #if canImport(ControlKit)
@@ -153,6 +154,10 @@ struct CounterpartCommands: Commands {
             Button("New Project…") { newProject?() }
                 .keyboardShortcut("n")
                 .disabled(newProject == nil)
+            // H2 (Nov 11): the system file chooser for the files New Project takes. Not tied to the window's focus, as
+            // New Project… is; with no window open, whether the menu has it is unchecked (review of #582, finding 4).
+            Button("Open…") { OpenedFiles.choose() }
+                .keyboardShortcut("o")
             Button("Add a Phone…") { NSApp.activate(); openWindow(id:"pairing") }
         }
         CommandGroup(replacing: .help) {
@@ -206,7 +211,8 @@ struct CounterpartCommands: Commands {
         NearbyModel.shared.start()
         EventRelay.shared.start()
         // At login the app stays in the menu bar; opened by hand, it shows its window (or the pairing code first).
-        if !loginLaunch { AppRouter.shared.open(AppRouter.shared.home) }
+        // Open (review of #582, finding 5): a file opened on a Mac not yet set up goes to New Project, not pairing.
+        if !loginLaunch { AppRouter.shared.open(OpenedFiles.shared.waiting.isEmpty ? AppRouter.shared.home : .main) }
         #if DEBUG
         DesignSnapshot.scheduleIfAsked() // design QA of a Debug build against the real companion
         #endif
@@ -215,6 +221,13 @@ struct CounterpartCommands: Commands {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { AppRouter.shared.open(AppRouter.shared.home) }
         return true
+    }
+
+    /// H1 (Nov 11): Finder's Open With, a double-click with Counterpart chosen, a drop on the Dock icon and `open -a`
+    /// all land here. The window comes forward and takes the files into New Project as a drop on it does, naming any
+    /// it can't use.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        if OpenedFiles.shared.receive(urls.filter(\.isFileURL)) { AppRouter.shared.open(.main) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -273,5 +286,17 @@ struct CounterpartCommands: Commands {
             }
         }
         return true
+    }
+}
+
+extension OpenedFiles {
+    /// File ▸ Open…: the system file chooser for the files New Project takes.
+    static func choose() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = ObjectsModel.acceptedContentTypes
+        panel.prompt = "Open"
+        NSApp.activate()
+        if panel.runModal() == .OK, shared.receive(panel.urls) { AppRouter.shared.open(.main) }
     }
 }
