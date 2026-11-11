@@ -84,8 +84,9 @@ struct ModelStage: View {
                     if showsLive { ProgressView().tint(.white.opacity(0.6)).padding(14).accessibilityHidden(true) }
                 }
             }
+            // Where Explore in 3D sits (the two never show together): clear of the gallery's chips along the stage's bottom.
             if interactive && !live && (failed || liveFailed) && (placeholder != nil || liveFailed) {
-                VStack { Spacer(); Button("Try 3D Again") { if failed { retryGeneration += 1 } else { touch() } }.stageButton() }.padding(16)
+                VStack { HStack { Spacer(); Button("Try 3D Again", systemImage: "rotate.3d") { if failed { retryGeneration += 1 } else { touch() } }.stageButton() }; Spacer() }.padding(16)
             }
             if interactive && url != nil && meshReady && !live && !failed && !liveFailed {
                 VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }.stageButton() }; Spacer() }.padding(16)
