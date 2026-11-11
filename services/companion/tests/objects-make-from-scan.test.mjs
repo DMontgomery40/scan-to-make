@@ -411,4 +411,7 @@ test('a project made from one that was itself made from another says which proje
   assert.ok(brief.indexOf('Earlier, in “Phone mount”:') < brief.indexOf('A mount for my phone.'), brief);
   assert.ok(brief.indexOf('Made it thinner.') < brief.indexOf('Then, in “Swivel mount”:'), brief);
   assert.ok(brief.indexOf('Then, in “Swivel mount”:') < brief.indexOf('Add a swivel.'), brief);
+  // The second generation asked for no size of its own: the sizes measured on the first travel on (review of #731).
+  assert.deepEqual(ready.inherited.fit, MEASURED, 'the measured sizes reach the third generation');
+  assert.match(brief, /Width 75\.1 mm, Height 158 mm\. Treat these as measured\./);
 });

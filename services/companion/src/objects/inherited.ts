@@ -33,7 +33,7 @@ export function answeredQuestion(note: string | undefined, answer: string | unde
  * the pass that asked it (`question`, since Nov 11), else from the answering pass's note, else, for the question still
  * on the project, from its `ask`. Only sent words and ended replies: a pending message is held for retry, not part of
  * the conversation. A source that was itself made from another brings that history first, each item naming the
- * project it was said in.
+ * project it was said in, and its inherited `fit` when it has none of its own.
  */
 export function inheritHistory(stored: StmObject, title: string): InheritedHistory {
   const source = withNotesOnce(stored);
@@ -63,7 +63,10 @@ export function inheritHistory(stored: StmObject, title: string): InheritedHisto
   if (source.completion && !source.completion.messageId) add(source.completion.atMs, 'you', source.completion.note);
   items.sort((a, b) => a.at - b.at);
   const earlier = source.inherited ? source.inherited.items.map(item => item.from ? item : {...item, from: source.inherited!.from}) : [];
-  return {from: {id: source.id, title}, items: [...earlier, ...items], ...(fit ? {fit} : {})};
+  // A source with no size of its own (a revision of a fit, say) carries the size it inherited, so a third generation
+  // keeps the measured sizes of the first.
+  const carried = fit ?? source.inherited?.fit;
+  return {from: {id: source.id, title}, items: [...earlier, ...items], ...(carried ? {fit: carried} : {})};
 }
 
 /** The question an older asking pass ended on, from the note of the next design pass when that pass answered it. */
