@@ -189,6 +189,8 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
 // The project's status line (PRD §4 state table)
 
 export interface StatusSource extends TitleSource {
+  versions?: {id: string; outcome?: string; printedAtMs?: number; sealedAtMs: number}[];
+  prints?: {versionId?: string; startedAtMs: number; monitor?: {endState?: string; endedAt?: string}}[];
   photos?: string[];
   state: string;
   progress?: string;
@@ -226,6 +228,18 @@ export function rowDetail(text: string | undefined, reason = false): string | un
 
 /** The §4 line for a project, with its symbol and colour. */
 export function objectStatus(object: StatusSource, updatedAtMs?: number): ObjectStatus {
+  const latest = object.versions?.at(-1);
+  if (latest && !['new', 'touching-up', 'needs-closeup', 'printing', 'failed', 'sent'].includes(object.state)) {
+    const printed = (version: typeof latest) => version.printedAtMs ?? object.prints?.filter(p => p.versionId === version.id && p.monitor?.endState === 'done').map(p => p.monitor?.endedAt ? Date.parse(p.monitor.endedAt) : p.startedAtMs).filter(Number.isFinite).sort((a,b) => b-a)[0];
+    const at = printed(latest);
+    if (at !== undefined) {
+      if (latest.outcome === 'works') return {phase: 'confirmed', text: 'Done · it works', symbol: 'checkmark.circle.fill', tint: 'green'};
+      return {phase: 'printed', text: `Printed ${formatDate(new Date(at).toISOString())}`, symbol: 'shippingbox', tint: 'secondary'};
+    }
+    const earlier = object.versions!.slice(0,-1).map(printed).filter((n): n is number => n !== undefined).sort((a,b) => b-a)[0];
+    if (earlier !== undefined) return {phase: 'ready', text: `New one ready · printed ${formatDate(new Date(earlier).toISOString())}`, detail: `Printed ${formatDate(new Date(earlier).toISOString())} · the earlier design is unchanged`, symbol: 'checkmark.seal', tint: 'accent'};
+    return {phase: 'ready', text: 'Ready to print', symbol: 'checkmark.seal', tint: 'accent'};
+  }
   const printer = object.print?.destination?.name ?? 'your printer';
   switch (object.state) {
     case 'new': return {phase: 'draft', text: object.scan || object.capture?.length || object.photos?.length
@@ -235,6 +249,8 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       const stage = pass?.stages?.filter(item => item.endedAtMs === undefined).at(-1)?.words ?? object.progress;
       const minutes = pass?.estimate ? Math.max(1, Math.round(pass.estimate.remainingSec / 60)) : undefined;
       const doing = joined(stage, minutes ? `about ${minutes} min` : undefined);
+      const previousPrinted = object.versions?.some(v => v.printedAtMs !== undefined || object.prints?.some(p => p.versionId === v.id && p.monitor?.endState === 'done'));
+      if (previousPrinted) return {phase: 'working', text: 'Making your changes · the one on your desk is unchanged', detail: rowDetail(doing) ?? 'The printed design is unchanged', symbol: 'wand.and.sparkles', tint: 'blue'};
       return {phase: 'working', text: joined('Your Mac is working', stage, minutes ? `about ${minutes} min` : undefined).slice(0, 300), ...(rowDetail(doing) ? {detail: rowDetail(doing)} : {}), symbol: 'wand.and.sparkles', tint: 'blue'};
     }
     case 'needs-closeup': {

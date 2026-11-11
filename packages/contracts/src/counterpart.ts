@@ -433,6 +433,7 @@ export const ProjectPreferencesSchema = z.strictObject({
 export type ProjectPreferences = z.infer<typeof ProjectPreferencesSchema>;
 export const ProjectSettingsPatchSchema = ProjectPreferencesSchema.extend({
   title: z.string().trim().min(1).max(120).regex(/^[^\u0000-\u001f\u007f]+$/).optional(),
+  versionId: z.string().min(1).max(128).optional(),
   status: ProjectStatusSchema.optional(), archived: z.boolean().optional(),
   printerDestinationId: z.string().min(1).max(256).nullable().optional(),
 }).refine(value => Object.keys(value).length > 0);

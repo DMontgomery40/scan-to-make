@@ -85,7 +85,7 @@ export function pictureSpecs(object: StmObject): Partial<Record<PictureRole, Pic
   const ownPlatePictures = published && plates.length > 0 && plates.every(plate => plate.thumbnail);
   if (current && model && /\.(stl|3mf)$/i.test(model) && !ownPlatePictures) {
     const tint = threeMF ? firstColour(object) : spoolColour(object);
-    specs.part = {model: published || threeMF ? model : 'current/model.stl', zUp: true, ...(tint ? {tint} : {})};
+    specs.part = {model, zUp: true, ...(tint ? {tint} : {})};
     if (!published && !threeMF && scan && /\.usdz$/i.test(scan) && current.seats?.length) specs.together = {...specs.part, object: scan, seats: current.seats.map(seat => seatMatrix(seat))};
   }
   if (scan && object.kind !== 'published') specs.scan = /\.stl$/i.test(scan) ? {model: scan, zUp: true} : {model: scan};
@@ -251,3 +251,38 @@ export function macDrawPicture(binary: string): DrawPicture {
   };
 }
 
+
+/** Sealed designs draw from their own files and attempts. No pruning can remove an earlier design's picture. */
+export class VersionPictures {
+  #queue: Promise<unknown> = Promise.resolve();
+  readonly #pending = new Set<string>();
+  readonly #attempted = new Map<string, string>();
+  constructor(private draw: DrawPicture | undefined, private read: (id: string) => Promise<StmObject>,
+    private save: (id: string, versionId: string, names: ProjectPictureNames, states: ProjectPictureStates) => Promise<void>) {}
+  ensure(object: StmObject, dir: string): void {
+    if (!this.draw || this.#pending.has(object.id) || !object.versions?.length) return;
+    this.#pending.add(object.id);
+    this.#queue = this.#queue.then(async () => {
+      const fresh = await this.read(object.id);
+      for (const version of fresh.versions ?? []) {
+        const print = fresh.prints?.filter(p => p.versionId === version.id && p.dispatchedAt).at(-1);
+        const view: StmObject = {...fresh, current: version.result, print, pictures: version.pictures, picture: version.picture};
+        const specs = pictureSpecs(view), names: ProjectPictureNames = {}, states: ProjectPictureStates = {};
+        for (const role of ['part', 'together'] as const) {
+          const spec = specs[role]; if (!spec) continue;
+          const name = await pictureName(dir, role, spec); if (!name) continue;
+          const path = `versions/${version.id}/${name}`, key = `${object.id}:${version.id}:${role}`;
+          await mkdir(join(dir, 'versions', version.id, 'pictures'), {recursive: true});
+          if (await exists(dir, path)) { names[role] = path; continue; }
+          if (this.#attempted.get(key) === path) { states[role] = 'failed'; continue; }
+          this.#attempted.set(key, path);
+          const temp = `${path}.drawing.png`;
+          if (await this.draw!(dir, spec, join(dir, temp)).catch(() => false)) { await rename(join(dir, temp), join(dir, path)); names[role] = path; }
+          else { await rm(join(dir, temp), {force: true}); states[role] = 'failed'; }
+        }
+        if (!sameNames(version.pictures ?? {}, names) || !sameNames(version.pictureStates ?? {}, states)) await this.save(object.id, version.id, names, states);
+      }
+    }).catch(() => undefined).finally(() => this.#pending.delete(object.id));
+  }
+  async idle(): Promise<void> { await this.#queue; }
+}

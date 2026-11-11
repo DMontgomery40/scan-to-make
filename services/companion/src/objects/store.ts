@@ -3,6 +3,7 @@ import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises'
 import {join} from 'node:path';
 import type {Fit} from '@scan-to-make/contracts/counterpart';
 import {withPassEnded, type PassStatus} from './pass-end.js';
+import {retainAttempts, migrateProjectVersions} from './versions.js';
 import type {TouchupActivity, TouchupChange, WorkerLimit} from '../touchup/runner.js';
 import type {PassStage} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
@@ -135,6 +136,10 @@ export interface StmObject {
    * on, and every client decodes projects ignoring fields it doesn't know.
    */
   scanFrom?: {id: string; title: string};
+  versions?: import('./versions.js').DesignVersion[];
+  prints?: import('./versions.js').PrintAttempt[];
+  versionsV1?: boolean;
+  historyRestored?: string;
   inherited?: import('@scan-to-make/contracts/counterpart').InheritedHistory;
   /**
    * The project's picture (PRD §5.1): the object alone on the stage, drawn by the companion (`pictures/…png`), and
@@ -212,7 +217,7 @@ export interface StmObject {
   /** The pass (its `startedAtMs`) whose ending is `failure`. Dropped by `update` when anything else changes the failure. */
   failedPass?: number;
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
-  print?: {plate?: import('./plates.js').PlateIdentity; bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[];
+  print?: {versionId?: string; plate?: import('./plates.js').PlateIdentity; bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[];
     /** PRD §8.5: one uuid per print, from Print. */
     printId?: string;
     destinationId?: string;
@@ -267,7 +272,7 @@ export class ObjectStore {
 
   async create(instructions?: string, kind?: 'fit' | 'copy' | 'published', fit?: Fit): Promise<StmObject> {
     const now = Date.now();
-    const object: StmObject = {id: randomUUID(), createdAtMs: now, updatedAtMs: now, state: 'new', photos: [], requestPhotos: [], pendingPhotos: [], messages: [], passes: [],
+    const object: StmObject = {id: randomUUID(), createdAtMs: now, updatedAtMs: now, state: 'new', versionsV1: true, versions: [], prints: [], photos: [], requestPhotos: [], pendingPhotos: [], messages: [], passes: [],
       ...(instructions?.trim() ? {instructions: instructions.trim()} : {}), ...(kind ? {kind} : {}), ...(fit ? {fit} : {})};
     await mkdir(this.dir(object.id), {recursive: true});
     await this.#write(object);
@@ -297,7 +302,7 @@ export class ObjectStore {
     const previous = this.#queues.get(id) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
       const before = await this.get(id);
-      const updated = {...change(before), id, updatedAtMs: options.keepUpdatedAt ? before.updatedAtMs : Date.now()};
+      const updated = retainAttempts(before, {...change(before), id, updatedAtMs: options.keepUpdatedAt ? before.updatedAtMs : Date.now()});
       // A failure belongs to the pass that set it only until something else sets one: a change that carries
       // `failedPass` over while the project stops being failed, or fails for another reason, loses it.
       if (updated.failedPass !== undefined && updated.failedPass === before.failedPass && (updated.state !== 'failed' || updated.failure !== before.failure)) delete updated.failedPass;
@@ -324,6 +329,17 @@ export class ObjectStore {
   async remove(id: string): Promise<void> {
     await this.get(id);
     await rm(this.dir(id), {recursive: true, force: true});
+  }
+
+  /** Runs before recovery. Read old source folders and events, write only additive project fields and sealed copies. */
+  async migrateVersions(options: {eventsPath?: string; stlInfo?: (path: string) => Promise<[number, number, number] | undefined>} = {}): Promise<void> {
+    const lines = options.eventsPath ? await readFile(options.eventsPath, 'utf8').catch(() => '') : '';
+    const events = lines.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    for (const object of await this.list()) {
+      if (object.versionsV1) continue;
+      const migrated = await migrateProjectVersions(object, this.dir(object.id), {...options, events: events.filter(e => e.projectId === object.id)});
+      await this.update(object.id, () => migrated, {keepUpdatedAt: true});
+    }
   }
 
   /** After a restart nothing is still running: record interruption, never successful completion. */
