@@ -68,6 +68,13 @@ class AppState(private val app: Counterpart) {
     /** A `scantomake://pair` link waiting for the pairing screen. */
     val pendingLink = MutableStateFlow<String?>(null)
 
+    // What this phone already has (board X100): a page opens from it while the computer isn't answering, relaunch too.
+    /** When the computer last answered with each project. */
+    val heard = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private var known: KnownProjects? = null
+    private val knownFile get() = java.io.File(app.filesDir, "known-projects.json")
+    private val knownMac: String? get() = status.value?.takeIf { it.state == PairingStatus.State.Paired }?.baseUrl
+
     private var following: Job? = null
     private var foreground = false
 
@@ -90,13 +97,6 @@ class AppState(private val app: Counterpart) {
     fun readStatus() { status.value = try { app.pairingStore.status() } catch (_: Exception) { PairingStatus.disconnected } }
 
     fun project(id: String) = projects.value.firstOrNull { it.id == id }
-
-    // What this phone already has (board X100): a page opens from it while the computer isn't answering, relaunch too.
-    /** When the computer last answered with each project. */
-    val heard = MutableStateFlow<Map<String, Long>>(emptyMap())
-    private var known: KnownProjects? = null
-    private val knownFile get() = java.io.File(app.filesDir, "known-projects.json")
-    private val knownMac: String? get() = status.value?.takeIf { it.state == PairingStatus.State.Paired }?.baseUrl
 
     /** Before the first list arrives: the projects this phone last heard from this computer. */
     fun restoreKnown() {
