@@ -2349,6 +2349,15 @@ final class OnDeviceLibraryUITests: XCTestCase {
         assertTurnsFromThePhone(app, "back on the page, Mac answering")
         // ...then the Mac stops answering entirely, and again.
         try Data().write(to: folder.appendingPathComponent("offline"))
+        if app.collectionViews["Sidebar"].exists {
+            // The iPad: every project the phone had stays in the sidebar while the Mac is away, reachable by scrolling it
+            // (#720: the away banner, pinned above the list, left four rows and hid Mic mount below them).
+            let sidebar = app.collectionViews["Sidebar"], row = app.descendants(matching: .any)["sidebar-project-\(mic)"]
+            XCTAssertTrue(app.descendants(matching: .any)["connection-try-again"].waitForExistence(timeout: 20), "the Mac isn't answering")
+            for _ in 0..<8 where !(row.exists && row.isHittable) { sidebar.swipeUp() }
+            XCTAssertTrue(row.exists && row.isHittable, "Mic mount is in the sidebar with the Mac away: \(app.debugDescription)")
+            for _ in 0..<8 { sidebar.swipeDown() }
+        }
         leaveAndComeBack(app)
         assertTurnsFromThePhone(app, "back on the page, Mac away")
         let again = XCTAttachment(screenshot: app.screenshot()); again.name = "720-page-again-away"; again.lifetime = .keepAlways; add(again)

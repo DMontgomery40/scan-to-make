@@ -50,6 +50,8 @@ struct ModelStage: View {
     @State private var liveDrawn = false
     /// The model this stage wants drawn now, and its load (#720: the load outlives a cancelled task, never a newer model).
     @State private var wantedIdentity: String?
+    /// This stage's own tag in the media trace (which instance began, published, appeared).
+    @State private var instance = String(UUID().uuidString.prefix(8))
     @State private var loadJob: Task<Void, Never>?
 
     private var identity: String { "\(url?.absoluteString ?? "empty")#\(tint?.description ?? "default")#\(twoTone)#\(yaw)#\(pitch)#\(fit)#\(object?.absoluteString ?? "")#\(seats.count)" }
@@ -64,7 +66,7 @@ struct ModelStage: View {
             // so a model whose still failed never turned).
             if live && scenePhase == .active && interactive {
                 realityView
-            } else if let poster {
+            } else if let poster = poster ?? cachedPoster {
                 Image(decorative: poster, scale: 1).resizable().scaledToFit()
             } else if let placeholder {
                 placeholder
@@ -113,7 +115,7 @@ struct ModelStage: View {
             let stillWanted = { [self] in wantedIdentity == wanted }
             let job = Task { @MainActor in
                 await MediaTrace.$context.withValue(MediaTrace.Context(file: url, scene: "active")) {
-                    MediaTrace.record("stage.begin", ["scene": "active"])
+                    MediaTrace.record("stage.begin", ["scene": "active", "stage": instance, "identity": String(String(UInt(bitPattern: wanted.hashValue), radix: 16).prefix(8))])
                     defer { MediaTrace.record(stillWanted() ? "stage.end" : "stage.superseded", ["scene": "active"]) }
                     let loaded = await Self.load(url, tint: tint, twoTone: twoTone, object: object, seats: seats)
                     guard stillWanted() else { return }
@@ -131,7 +133,7 @@ struct ModelStage: View {
                     // The model loaded, so it turns live; the Mac's picture stays until then (#606). Only a stage with no other
                     // picture that never turns (the starters') says it couldn't be shown.
                     if image == nil, !hasPlaceholder, !interactive { failed = true; undrawable?() }
-                    MediaTrace.record("stage.published", ["picture": String(image != nil)])
+                    MediaTrace.record("stage.published", ["picture": String(image != nil), "stage": instance])
                 }
             }
             loadJob = job
@@ -142,7 +144,8 @@ struct ModelStage: View {
             live = false
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; loadJob?.cancel(); wantedIdentity = nil; Self.cache.removeAll(); ModelPoster.deferPending() } }
-        .onDisappear { live = false; holder.pivot = nil }
+        .onDisappear { live = false; holder.pivot = nil; MediaTrace.record("stage.disappear", ["stage": instance]) }
+        .onAppear { MediaTrace.record("stage.appear", ["stage": instance, "identity": String(String(UInt(bitPattern: identity.hashValue), radix: 16).prefix(8)), "url": String(url != nil)]) }
         .accessibilityElement(children: .contain)
     }
 
@@ -152,7 +155,14 @@ struct ModelStage: View {
         if url == nil { return "empty" }
         if live && scenePhase == .active && interactive { return liveDrawn ? "live" : "opening" }
         if failed { return "failed" }
-        return meshReady ? "still" : "loading"
+        return meshReady || cachedPoster != nil ? "still" : "loading"
+    }
+
+    /// The still this process already drew for this model (ModelPoster's cache), whatever this instance's own load did:
+    /// a page pushed again can be drawn by a stage whose task never ran (#720, the iPhone's revisit).
+    private var cachedPoster: CGImage? {
+        guard url != nil else { return nil }
+        return ModelPoster.cached(key: identity, yaw: yaw, pitch: pitch, fit: fit)
     }
 
     /// Seconds after the last touch before the stage goes back to its still.
