@@ -497,7 +497,9 @@ struct MCPUpdateProgress: Equatable {
 /// page that asked for it, runs once per file and project version (the files are cached per version, as before), starts
 /// again by itself after a dropped link, and says how it ended, so the page keeps the Mac's picture and says why.
 @MainActor @Observable final class ModelFiles {
-    enum Fetch: Equatable { case loading, ready(URL), failed, tooLarge }
+    /// `failed`: it didn't come (a dropped link, a timeout), tried again by itself when the link returns. `refused`: the Mac
+    /// answered and would not give it (not found, not allowed, any refusal but size). `tooLarge`: too large for a phone.
+    enum Fetch: Equatable { case loading, ready(URL), failed, refused, tooLarge }
     private(set) var fetches: [String: Fetch] = [:]
     @ObservationIgnored private var running: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var generations: [String: UUID] = [:]
@@ -551,7 +553,11 @@ struct MCPUpdateProgress: Equatable {
                     }
                     catch let error as CompanionError where Self.final.contains(error.code) {
                         // The Mac's refusal for size, or this phone's own limit met mid-transfer (review F5 on #525).
-                        outcome = ["file-too-large", "too-large"].contains(error.code) ? .tooLarge : .failed
+                        outcome = ["file-too-large", "too-large"].contains(error.code) ? .tooLarge
+                            : ["pairing-required", "pairing-changed"].contains(error.code) ? .failed : .refused
+                        break
+                    } catch let error as CompanionError where error.code.hasPrefix("http-4") {
+                        outcome = .refused  // the Mac answered and would not send it; Try Again asks once more
                         break
                     } catch { outcome = .failed }
                 }
@@ -597,7 +603,7 @@ struct MCPUpdateProgress: Equatable {
     /// Try Again: a download that failed starts over.
     func retry(_ project: Project, _ path: String) {
         let key = Self.key(project, path)
-        guard running[key] == nil, fetches[key] == .failed else { return }
+        guard running[key] == nil, fetches[key] == .failed || fetches[key] == .refused else { return }
         fetches[key] = nil
         want(project, path)
     }

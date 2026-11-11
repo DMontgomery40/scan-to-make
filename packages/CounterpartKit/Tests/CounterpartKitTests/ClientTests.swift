@@ -766,6 +766,15 @@ final class CompanionClientTests: XCTestCase {
         let refused = try client(FakeTransport { _, _ in json(413, ["error": ["code": "file-too-large", "message": "file-too-large"]]) })
         do { _ = try await refused.download(p, "scan/scan.usdz"); XCTFail("refused") }
         catch let error as CompanionError { XCTAssertEqual(error.code, "file-too-large") }
+        let flat = try client(FakeTransport { _, _ in HTTPReply(status: 413, body: Data(#"{"error":"file-too-large"}"#.utf8)) })
+        do { _ = try await flat.download(p, "scan/scan.usdz"); XCTFail("refused") }
+        catch let error as CompanionError { XCTAssertEqual(error.code, "file-too-large", "the companion's flat error shape too") }
+        // Board X100: any other refusal is a refusal, never "too large" (a 413 that isn't the Mac's size limit included).
+        for (status, code) in [(413, "too-large"), (403, "scope-denied"), (409, "busy")] {
+            let other = try client(FakeTransport { _, _ in json(status, ["error": ["code": code, "message": code]]) })
+            do { _ = try await other.download(p, "scan/scan.usdz"); XCTFail("refused") }
+            catch let error as CompanionError { XCTAssertEqual(error.code, "http-\(status)", "\(status) \(code) is not too large") }
+        }
         let bytes = Data(repeating: 7, count: 300_000)
         let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: bytes) }
         let file = try await client(fake).download(p, "scan/phone-preview.usdz")

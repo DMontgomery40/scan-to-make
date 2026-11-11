@@ -121,6 +121,11 @@ struct StagePicture: View {
     /// The not-available symbol: a neutral one, never the project's phase (a "Ready" seal beside "couldn't" reads as done).
     var symbol = "cube.transparent"
     var maxPixelSize = 1200
+    /// The 3D model under this stage that couldn't be had either (`ProjectGalleryView`): when this picture fails too, the
+    /// stage's one line says both and its one Try Again tries both (board X100: never two Try Again buttons).
+    var modelMissing: (line: String, retry: () -> Void)? = nil
+    /// Whether this picture's fetch failed, for the gallery's line under the stage.
+    var failedChanged: (Bool) -> Void = { _ in }
     @State private var load = PictureLoad<UIImage>()
     @State private var attempt = 0
 
@@ -135,7 +140,7 @@ struct StagePicture: View {
         case .picture(let path):
             if load.key == key, let image = load.picture { return .shown(image) }
             if let image = ImageMemory.shared.image(key) { return .shown(image) }
-            if load.key == key, load.failed { return .notAvailable("The picture didn’t come from your Mac.", retry: true) }
+            if load.key == key, load.failed { return .notAvailable(modelMissing?.line ?? "The picture didn’t come from your Mac.", retry: true) }
             return .loading(ImageMemory.shared.anySize(project, path))
         }
     }
@@ -176,7 +181,7 @@ struct StagePicture: View {
                     }
                     .accessibilityHidden(true)
                     if retry {
-                        Button("Try Again") { attempt += 1 }.font(.footnote.weight(.semibold)).buttonStyle(.glass)
+                        Button("Try Again") { attempt += 1; modelMissing?.retry() }.font(.footnote.weight(.semibold)).buttonStyle(.glass)
                             .accessibilityIdentifier("gallery-stage-retry")
                     }
                 }
@@ -184,6 +189,7 @@ struct StagePicture: View {
             }
         }
         .clipped()
+        .onChange(of: load.key == key && load.failed, initial: true) { _, failed in failedChanged(failed) }
         // Coming back to the app, or Try Again, fetches a picture that failed again.
         .task(id: "\(key)#\(attempt)#\(scenePhase)") {
             guard let path else { return }

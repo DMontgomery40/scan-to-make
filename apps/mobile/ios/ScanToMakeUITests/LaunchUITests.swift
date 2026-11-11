@@ -1602,8 +1602,10 @@ final class LayoutParityUITests: XCTestCase {
         let card = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Bottle copy")).firstMatch
         XCTAssertTrue(card.waitForExistence(timeout: 20), "projects are present")
         app.terminate()
-        for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "The 3D view isn’t here yet."),
-                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "This scan is too detailed to show in 3D on a phone. Open it on your Mac to see it from every side.")] {
+        // Board X100: the line comes from the actual reason. The canned Mac has no file for 01 (404): it would not send it,
+        // and with the picture missing too, the stage says both in one line with one Try Again. 02 is too large: said so.
+        for (id, line) in [("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01", "Your Mac didn’t send"),
+                           ("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02", "Your scan’s 3D model is too large a file to show on a phone. Open it on your Mac to see it from every side.")] {
             let page = XCUIApplication()
             page.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
                                     "-CounterpartOpen", "counterpart://project/\(id)"]
@@ -1614,9 +1616,11 @@ final class LayoutParityUITests: XCTestCase {
             // No pictures in this folder: the picture can't be had, so the stage draws the project's symbol, not a backdrop.
             XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "not available"), object: picture)], timeout: 15) == .completed,
                           "the symbol, not an empty stage: \(String(describing: picture.value))")
-            let said = page.staticTexts[line]
+            let said = page.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", line)).firstMatch
             XCTAssertTrue(said.waitForExistence(timeout: 15), "one plain line says why: \(line)")
-            if id.hasSuffix("01") { XCTAssertTrue(page.buttons["gallery-model-retry"].exists, "and how to try again") }
+            XCTAssertFalse(page.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "too detailed")).firstMatch.exists)
+            let retries = page.buttons.matching(NSPredicate(format: "identifier IN %@", ["gallery-model-retry", "gallery-stage-retry"])).count
+            if id.hasSuffix("01") { XCTAssertEqual(retries, 1, "one Try Again, for the picture and the model together") }
             else { XCTAssertFalse(page.buttons["gallery-model-retry"].exists, "too large: trying again won't change it") }
             page.terminate()
         }

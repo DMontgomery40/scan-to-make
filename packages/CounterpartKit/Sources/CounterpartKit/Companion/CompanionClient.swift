@@ -45,6 +45,12 @@ public final class CompanionClient: @unchecked Sendable {
 
     public static let jsonLimit = 4 * 1024 * 1024
     public static let scanLimit = 64 * 1024 * 1024
+    /// The Mac's code for a refusal: `{"error":{"code":…}}` or `{"error":"…"}`.
+    static func refusalCode(_ body: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return nil }
+        if let error = object["error"] as? [String: Any] { return error["code"] as? String }
+        return object["error"] as? String
+    }
     public static let photoLimit = 25 * 1024 * 1024
     public static let depthLimit = 8 * 1024 * 1024
     static let uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
@@ -651,8 +657,10 @@ public final class CompanionClient: @unchecked Sendable {
         let (reply, fetched) = try await fetchFile(path, limit: Self.scanLimit)
         guard reply.status == 200, let fetched else {
             MediaTrace.record("file.refused", ["status": String(reply.status)])
+            // Too large only when the Mac says so in its own words (`file-too-large`, the companion's limit for a phone); any
+            // other refusal is a refusal, never "too large" (board X100: a refused part was called "too detailed").
             throw reply.status == 404 ? CompanionError(code: "not-found", message: "This is no longer on your Mac.")
-                : reply.status == 413 ? CompanionError(code: "file-too-large", message: "This file is too large for this phone.")
+                : reply.status == 413 && Self.refusalCode(reply.body) == "file-too-large" ? CompanionError(code: "file-too-large", message: "This file is too large for this phone.")
                 : CompanionError(code: "http-\(reply.status)", message: "Your Mac couldn't send this file. Try again.")
         }
         defer { try? FileManager.default.removeItem(at: fetched) }

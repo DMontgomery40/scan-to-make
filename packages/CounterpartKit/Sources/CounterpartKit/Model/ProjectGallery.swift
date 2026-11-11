@@ -273,3 +273,44 @@ public enum StageContrast {
         return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
     }
 }
+
+/// Why an entry's 3D model isn't on the stage, from how its fetch actually ended (board X100). Nov 10, under refused
+/// downloads: a part read "This scan is too detailed to show in 3D on a phone", a scan's words for a size it never had,
+/// beside a stage already saying the picture didn't come. One line under the stage, naming the right thing.
+public enum ModelUnavailable: Equatable, Sendable {
+    /// The Mac isn't answering: it comes when it does.
+    case notAnswering
+    /// It didn't come (a dropped transfer, a timeout).
+    case didntCome
+    /// The Mac answered and would not send it.
+    case refused
+    /// Too large a file for a phone (the Mac said so, or the size it lists is over the phone's limit).
+    case tooLarge
+    /// Here, but this phone couldn't draw it.
+    case undrawable
+
+    /// Trying again can change the answer.
+    public var retryable: Bool { self == .notAnswering || self == .didntCome || self == .refused }
+
+    /// The one line under the stage. `pictureToo`: the stage's picture didn't come either, so this is the stage's own
+    /// line for both (the gallery then shows no second line).
+    public func line(_ kind: ProjectGallery.Entry.Kind, pictureToo: Bool = false) -> String {
+        let thing = switch kind { case .part: "this part"; case .plate: "this plate"; case .scan: "your scan"; case .together: "the part and your scan" }
+        let model = kind == .together ? "\(thing) in 3D" : "\(thing)’s 3D model"
+        let Model = model.prefix(1).uppercased() + model.dropFirst()
+        if pictureToo {
+            switch self {
+            case .notAnswering: return "Your Mac isn’t answering, so the picture and 3D model of \(thing) can’t come yet."
+            case .refused: return "Your Mac didn’t send the picture or 3D model of \(thing)."
+            default: return "The picture and 3D model of \(thing) didn’t come from your Mac."
+            }
+        }
+        switch self {
+        case .notAnswering: return "Your Mac isn’t answering, so \(model) can’t come yet."
+        case .didntCome: return "\(Model) didn’t come from your Mac."
+        case .refused: return "Your Mac didn’t send \(model)."
+        case .tooLarge: return "\(Model) is too large a file to show on a phone. Open it on your Mac to see it from every side."
+        case .undrawable: return "\(Model) couldn’t be shown on this phone. Open it on your Mac."
+        }
+    }
+}

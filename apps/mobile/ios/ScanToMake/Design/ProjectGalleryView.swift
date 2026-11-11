@@ -21,6 +21,8 @@ struct ProjectGalleryView: View {
     @State private var selected: String?
     /// Entries whose model is here but can't be drawn (review F7 on #525): their picture stays, and the line says so.
     @State private var undrawable: Set<String> = []
+    /// Entries whose stage picture didn't come either: then the stage's own line says both and its Try Again tries both.
+    @State private var pictureFailed: Set<String> = []
     @Environment(\.scenePhase) private var scenePhase
     @State private var measured: [String: [Double]] = [:]
     @State private var showingPhotos = false
@@ -69,13 +71,21 @@ struct ProjectGalleryView: View {
     /// The still for an entry (`StagePicture`, the stage's one still picture): its Mac picture until its model is drawn,
     /// and if it can't be; that one is coming; or that none can be had.
     private func still(_ entry: ProjectGallery.Entry) -> StagePicture {
-        StagePicture(project: project, still: project.still(for: entry), label: entry.label,
-                     unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.")
+        let problem = modelProblem(entry)
+        let missing: (line: String, retry: () -> Void)? = problem.flatMap { problem in
+            guard problem.reason.retryable, let path = problem.path else { return nil }
+            return (problem.reason.line(entry.kind, pictureToo: true), { store.models.retry(project, path) })
+        }
+        return StagePicture(project: project, still: project.still(for: entry), label: entry.label,
+                            unavailableLine: entry.kind == .plate ? "No picture of this plate came with the file." : "Your Mac couldn’t draw a picture of this.",
+                            modelMissing: missing,
+                            failedChanged: { failed in if failed { pictureFailed.insert(entry.id) } else { pictureFailed.remove(entry.id) } })
     }
 
-    /// One plain line under the stage when an entry's model can't be had: its picture stays above it. A picture's own
-    /// state is the stage's (`StagePicture`), never a second line here.
-    @ViewBuilder private func unavailable(_ entry: ProjectGallery.Entry) -> some View {
+    /// Why an entry's 3D model isn't drawn, from how its fetch actually ended (board X100: a refused part was called "too
+    /// detailed", a scan's words for a size it never had): its line, the file to try again, and whether trying can help.
+    private struct ModelProblem { var reason: ModelUnavailable; var path: String? }
+    private func modelProblem(_ entry: ProjectGallery.Entry) -> ModelProblem? {
         let (path, model): (String?, Project.ScanModel?) = switch entry.drawing {
         case .model(let drawn) where drawn == "model.stl": ("model.stl", nil)
         case .model: (nil, scanURL == nil ? scanModel : nil)
@@ -87,21 +97,30 @@ struct ProjectGalleryView: View {
             else if case .tooLarge? = model { .tooLarge } else { nil }
         let retryPath: String? = path ?? { if case .file(let file)? = model { return file }; return nil }()
         switch fetch {
-        case .failed?:
-            HStack(spacing: 8) {
-                Text("The 3D view isn’t here yet.").font(.footnote).foregroundStyle(.secondary)
-                if let retryPath {
-                    Button("Try Again") { store.models.retry(project, retryPath) }.font(.footnote.weight(.semibold))
-                        .accessibilityIdentifier("gallery-model-retry")
+        case .failed?: return ModelProblem(reason: store.reachable == false ? .notAnswering : .didntCome, path: retryPath)
+        case .refused?: return ModelProblem(reason: .refused, path: retryPath)
+        case .tooLarge?: return ModelProblem(reason: .tooLarge, path: nil)
+        default: return undrawable.contains(entry.id) ? ModelProblem(reason: .undrawable, path: nil) : nil
+        }
+    }
+
+    /// One plain line under the stage when an entry's model can't be had: its picture stays above it. A picture's own
+    /// state is the stage's (`StagePicture`), never a second line here.
+    @ViewBuilder private func unavailable(_ entry: ProjectGallery.Entry) -> some View {
+        // The picture failed too: the stage already says both in one line, with one Try Again for both.
+        if let problem = modelProblem(entry), !(problem.reason.retryable && problem.path != nil && pictureFailed.contains(entry.id)) {
+            if problem.reason.retryable {
+                HStack(spacing: 8) {
+                    Text(problem.reason.line(entry.kind)).font(.footnote).foregroundStyle(.secondary)
+                    if let path = problem.path {
+                        Button("Try Again") { store.models.retry(project, path) }.font(.footnote.weight(.semibold))
+                            .accessibilityIdentifier("gallery-model-retry")
+                    }
                 }
-            }
-            .accessibilityElement(children: .contain).accessibilityIdentifier("gallery-model-unavailable")
-        case .tooLarge?:
-            Text("This scan is too detailed to show in 3D on a phone. Open it on your Mac to see it from every side.").font(.footnote).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).padding(.horizontal, 16).accessibilityIdentifier("gallery-model-unavailable")
-        default:
-            if undrawable.contains(entry.id) {
-                Text("This model couldn’t be shown in 3D on this phone. Open it on your Mac.").font(.footnote).foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .accessibilityElement(children: .contain).accessibilityIdentifier("gallery-model-unavailable")
+            } else {
+                Text(problem.reason.line(entry.kind)).font(.footnote).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 16).accessibilityIdentifier("gallery-model-unavailable")
             }
         }
