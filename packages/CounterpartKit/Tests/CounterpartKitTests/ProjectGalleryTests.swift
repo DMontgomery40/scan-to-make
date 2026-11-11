@@ -82,16 +82,23 @@ final class ProjectGalleryTests: XCTestCase {
         XCTAssertEqual(entry.sizeText([66.2, 30.6, 150]), "Part · 66.2 × 30.6 × 150 mm")
     }
 
-    /// A part stays readable on the stage (lead review, Nov 10: a black holder was a silhouette): black and a dark slate
-    /// blue move to the light stage; white, yellow and the neutral material stay on the dark one.
-    func testEveryFilamentColourStaysReadableOnItsStage() {
-        XCTAssertTrue(StageContrast.lightStage(hex: "#000000"))
-        XCTAssertTrue(StageContrast.lightStage(hex: "#5B6579"), "a blue grey close to the dark stage")
-        XCTAssertTrue(StageContrast.lightStage(hex: "#1F2A44"))
-        XCTAssertFalse(StageContrast.lightStage(hex: "#FFFFFF"))
-        XCTAssertFalse(StageContrast.lightStage(hex: "#FEC600"))
-        XCTAssertFalse(StageContrast.lightStage(for: .neutral))
-        XCTAssertFalse(StageContrast.lightStage(for: .own), "a scan's own colours stay on the dark stage")
+    /// The stage stays dark for every colour (David, Nov 11: "we just entered light mode without a flashbang
+    /// alert"): a dark part is made readable in its material, not by changing the backdrop. Its drawn colour is
+    /// lifted to the floor the Mac's still pictures use; colours already above it are drawn as they are.
+    func testEveryFilamentColourStaysReadableOnTheDarkStage() throws {
+        let data = try Data(contentsOf: repoRoot.appending(path: "packages/contracts/fixtures/project-gallery.json"))
+        let doc = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let drawn = try XCTUnwrap((doc["stage"] as? [String: Any])?["drawnColours"] as? [String: String])
+        XCTAssertEqual(StageMaterial.stage, "#22242B", "the one stage, dark")
+        for (spool, want) in drawn where spool.hasPrefix("#") {
+            XCTAssertEqual(StageMaterial.drawnHex(hex: spool), want, spool)
+            let brightness = try XCTUnwrap(StageMaterial.brightness(hex: want), want)
+            XCTAssertGreaterThanOrEqual(brightness, StageMaterial.minimumBrightness - 0.01, "\(spool) drawn as \(want) is above the floor")
+        }
+        XCTAssertEqual(StageMaterial.drawnHex(hex: "#000000"), "#333435", "a true black filament is drawn as charcoal, not a silhouette")
+        XCTAssertEqual(StageMaterial.drawnHex(hex: "#5B6579"), "#5B6579", "blue grey is already above the floor")
+        XCTAssertNil(StageMaterial.drawnHex(for: .neutral))
+        XCTAssertNil(StageMaterial.drawnHex(for: .own), "a scan's own colours are drawn as they are")
     }
 
     /// Review of #451, finding 5: a locate pass changes no file, so the phone doesn't download the model and scan again.

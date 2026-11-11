@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import ModelIO
 
 /// The app opens same-account discovery with an explicit code fallback when no Mac is paired.
 final class LaunchUITests: XCTestCase {
@@ -576,6 +577,97 @@ final class LayoutParityUITests: XCTestCase {
         }
     }
 
+    /// Design §3.3, David on his Leatherman "replica" (Nov 10): "if i don't see a fucking option here of what to do with
+    /// this on the next build, that will confirm the root problem(s) are not solved". A copy whose scan is really the thing
+    /// a case must fit: the page offers Make something else from this scan without scrolling, New opens holding that scan
+    /// and asks first what it becomes, and Send lands on a new fit project made from the same scan. The source stays.
+    func testACopysScanMakesAFitFromItsPageWithoutScanningAgainWithProjectsPresent() {
+        let source = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "scan-stage",
+                               "-CounterpartOpen", "counterpart://project/\(source)"]
+        app.launch()
+        let title = app.buttons["project-title"]
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Bottle copy"), object: title)], timeout: 20) == .completed)
+        let action = app.buttons["make-from-scan"]
+        XCTAssertTrue(action.waitForExistence(timeout: 10), "the action is on the page under What you scanned, not only in •••")
+        XCTAssertEqual(action.label, "Make something else from this scan")
+        XCTAssertTrue(action.isHittable, "on the screen as the page opens, without scrolling")
+        action.tap()
+
+        // New, already holding the scan: the question first, the scan named, nothing to scan or send from this phone.
+        let question = app.staticTexts["scan-use-question"]
+        XCTAssertTrue(question.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["scan-use-source"].label.hasPrefix("Bottle copy"), app.staticTexts["scan-use-source"].label)
+        XCTAssertFalse(app.buttons["scan-object"].exists, "no rescan")
+        XCTAssertFalse(app.buttons["scan-use-later"].exists, "the scan is already saved, on its project")
+        XCTAssertFalse(app.buttons["send"].isEnabled, "it asks what the scan becomes before anything else")
+        XCTAssertEqual(app.buttons["scan-use-fit"].label.components(separatedBy: ",").first, "Make something that fits this")
+        app.buttons["scan-use-fit"].tap()
+        // The kept scan is what the new part must fit: its exact size starts from the scan, not a lookup (review of #570).
+        let sizeSource = app.segmentedControls["fit-dimension-source"]
+        XCTAssertTrue(sizeSource.waitForExistence(timeout: 5))
+        XCTAssertTrue(sizeSource.buttons["Use scan"].isSelected, "a fit from a kept scan starts on Use scan")
+        XCTAssertFalse(sizeSource.buttons["Look up"].isSelected)
+        let describe = app.descendants(matching: .any).matching(identifier: "describe").firstMatch
+        XCTAssertTrue(describe.waitForExistence(timeout: 5))
+        describe.tap()
+        describe.typeText("A belt case for it")
+        if app.buttons["Done"].exists { app.buttons["Done"].tap() }
+        let send = app.buttons["send"]
+        XCTAssertTrue(send.isEnabled)
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: send)], timeout: 5)
+        sleep(1) // the bar settles where the keyboard was
+        send.tap()
+        let problem = app.staticTexts["new-problem"]
+        XCTAssertFalse(problem.waitForExistence(timeout: 3), "Send failed: \(problem.exists ? problem.label : "")")
+
+        // The new project opens: a fit, made from the same scan, saying where it came from.
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "A belt case for it"), object: title)], timeout: 15) == .completed,
+                      "landed on the new project, not \(title.label)")
+        let from = app.buttons["scan-from"]
+        XCTAssertTrue(from.waitForExistence(timeout: 10))
+        XCTAssertEqual(from.label, "Uses the scan from “Bottle copy”")
+        XCTAssertTrue(app.images["gallery-stage-picture"].waitForExistence(timeout: 10), "What you scanned shows the scan, not an empty stage")
+        XCTAssertTrue(app.buttons["make-from-scan"].exists, "the new project's scan can make something else too")
+
+        // The source is still there and says what was made from its scan.
+        if regular {
+            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Bottle copy")).firstMatch.exists,
+                          "the source is still in the sidebar")
+        }
+        from.tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Bottle copy"), object: title)], timeout: 10) == .completed)
+        let made = app.buttons["scan-made"]
+        XCTAssertTrue(made.waitForExistence(timeout: 10))
+        XCTAssertEqual(made.label, "Also made from this scan: “A belt case for it”")
+    }
+
+    /// The same, from New (design §3.3): "Use a scan you already have" offers the scans the Mac keeps, by picture and name.
+    func testNewOffersAScanYouAlreadyHaveWithProjectsPresent() {
+        let app = launch(set: "scan-stage", screen: "new")
+        let offered = app.buttons["existing-scan-6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"]
+        let sheet = app.scrollViews.firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 20))
+        for _ in 0..<4 where !offered.isHittable { sheet.swipeUp() }
+        XCTAssertTrue(offered.isHittable, "Use a scan you already have lists the Bottle copy's scan")
+        XCTAssertTrue(app.staticTexts["Use a scan you already have"].exists)
+        offered.tap()
+        XCTAssertTrue(app.staticTexts["scan-use-question"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["scan-use-copy"].exists && app.buttons["scan-use-fit"].exists)
+        XCTAssertFalse(app.buttons["scan-object"].exists)
+        app.buttons["scan-use-fit"].tap()
+        let sizeSource = app.segmentedControls["fit-dimension-source"]
+        XCTAssertTrue(sizeSource.buttons["Use scan"].isSelected, "choosing an existing scan also defaults to its size")
+        sizeSource.buttons["Look up"].tap()
+        app.buttons["scan-use-remove"].tap()
+        XCTAssertFalse(app.staticTexts["scan-use-question"].exists, "Remove goes back to New as it was")
+        for _ in 0..<4 where !offered.isHittable { sheet.swipeUp() }
+        offered.tap()
+        app.buttons["scan-use-fit"].tap()
+        XCTAssertTrue(sizeSource.buttons["Use scan"].isSelected, "another selection starts from that scan again")
+    }
+
     /// PRD §5.4 One main action (board U17), the pair seen with real projects on Nov 10: a pass stopped on a project
     /// that already had a result, and the page showed Try Again, Print Again and a floating Print at once. Try Again
     /// leads; the earlier result prints from the card, once, under its true name; the bar keeps Ask for changes.
@@ -677,7 +769,7 @@ final class LayoutParityUITests: XCTestCase {
             }
             XCTAssertTrue(inside.isEmpty, "\(state): \(inside.map { "\($0.identifier) '\($0.label)' \($0.frame)" }) inside the button at \(send.frame)")
             // Back to the top, only as far as needed: a swipe down at the top would dismiss the sheet.
-            for _ in 0..<8 where !(question.isHittable && copy.isHittable) { sheet.swipeDown(velocity: .slow) }
+            for _ in 0..<8 where !(question.shown(in: sheet) && copy.shown(in: sheet)) { sheet.swipeDown(velocity: .slow) }
         }
         let describe = app.staticTexts["What do you need?"]
         XCTAssertTrue(!describe.exists || describe.frame.minY > question.frame.maxY, "the question comes first")
@@ -772,7 +864,15 @@ final class LayoutParityUITests: XCTestCase {
     /// Review of #527 part 4, B1: with the Mac away, nothing a person can tap fails after the tap, and nothing kept from
     /// before is shown as live: on the project page (each state's lead actions), Printing and Home. The canned Mac answers
     /// the list once and then stops (`away-after-list`, the screenshot tool's `away`).
-    func testWithTheMacAwayNothingFailsAfterATapOnTheProjectPagePrintingAndHome() throws {
+    /// One test per project state: as one test it launched the app five times and ran past XCTest's 2-minute allowance on
+    /// the iPad (131 s on train 11a's gate, the away line each time within a second of launch), so the time was the test's.
+    func testWithTheMacAwayNothingFailsAfterATapOnAPrintedProject() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05") }
+    func testWithTheMacAwayNothingFailsAfterATapOnAFailedProject() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a07") }
+    func testWithTheMacAwayNothingFailsAfterATapOnAWorkingProject() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02") }
+    func testWithTheMacAwayNothingFailsAfterATapOnAProjectWithAQuestion() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04") }
+    func testWithTheMacAwayNothingFailsAfterATapOnAPrintingProjectPrintingAndHome() throws { try checkTheMacAway("6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03") }
+
+    private func checkTheMacAway(_ id: String) throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
@@ -785,7 +885,7 @@ final class LayoutParityUITests: XCTestCase {
         }
         // A tap that failed shows the page's own failure line (its identifier), not words: the failed pass's own text says
         // "then try again" too. Print is checked by its identifier below; its label would also match "Printers".
-        let macActions = ["It Works", "Needs Changes", "Send to your Mac", "Scan", "Make Your Best Guess", "Send Answer", "Review", "Don’t Print"]
+        let macActions = ["Make something else from this scan", "It Works", "Needs Changes", "Send to your Mac", "Scan", "Make Your Best Guess", "Send Answer", "Review", "Don’t Print"]
         func checkNothingFails(_ app: XCUIApplication, _ page: String) {
             XCTAssertEqual(app.alerts.count, 0, "\(page): no error alert")
             for line in ["project-problem", "printing-problem"] {
@@ -793,15 +893,20 @@ final class LayoutParityUITests: XCTestCase {
                 XCTAssertFalse(failure.exists, "\(page): no failure line after a tap: \(failure.exists ? failure.label : "")")
             }
         }
-        // printed (Did it fit?), failed (Try Again), working, a question, printing.
-        for id in ["6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a05", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a07", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
-                   "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a04", "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03"] {
+        do {
             let app = open(id)
             let away = app.descendants(matching: .any)["project-away"]
             XCTAssertTrue(away.waitForExistence(timeout: 20), "\(id): the one line: \(app.debugDescription)")
             let awayLine = away.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Your Mac isn’t answering, so anything that needs it waits.")).firstMatch
             XCTAssertTrue(awayLine.exists, "\(id): the away line says why: \(away.debugDescription)")
-            for button in app.buttons.allElementsBoundByIndex where button.exists && macActions.contains(where: { button.label.hasPrefix($0) }) {
+            let make = app.buttons["make-from-scan"]
+            if make.exists {
+                XCTAssertFalse(make.isEnabled, "making from the scan waits for the Mac")
+                XCTAssertTrue(app.staticTexts["make-from-scan-away"].exists, "the disabled scan action explains why it waits")
+            }
+            // Ask for the Mac's actions only, instead of reading every button's label one query at a time.
+            let macAction = NSCompoundPredicate(orPredicateWithSubpredicates: macActions.map { NSPredicate(format: "label BEGINSWITH %@", $0) })
+            for button in app.buttons.matching(macAction).allElementsBoundByIndex where button.exists {
                 XCTAssertFalse(button.isEnabled, "\(id): \(button.label) waits for the Mac")
                 button.tap()
                 checkNothingFails(app, "\(id) after \(button.label)")
@@ -983,7 +1088,10 @@ final class LayoutParityUITests: XCTestCase {
         // Put the keyboard away first, or the next tap only dismisses it.
         app.navigationBars["New Project"].buttons["Done"].tap()
         let measured = app.buttons["I measured"]
-        for _ in 0..<6 where !(measured.exists && measured.isHittable) { sheet.swipeDown(velocity: .slow) }
+        // Below the navigation bar, not just hittable: XCTest counts a control under the translucent bar as hittable, and
+        // in the gate (Nov 11) both taps on I measured landed on the bar, with the picker scrolled up under it.
+        let bar = app.navigationBars["New Project"]
+        for _ in 0..<6 where !(measured.exists && measured.isHittable && measured.frame.minY >= bar.frame.maxY) { sheet.swipeDown(velocity: .slow) }
         measured.tap()
         let chosen = NSPredicate(format: "isSelected == true")
         if XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: measured)], timeout: 3) != .completed { measured.tap() }
@@ -1236,6 +1344,83 @@ final class LayoutParityUITests: XCTestCase {
         XCTAssertTrue(print.exists)
         XCTAssertEqual(print.label, "Print Another")
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label MATCHES %@", "Print( .*)?")).count, 1, "printing is offered once")
+    }
+
+    /// Nov 11, David: "we now have 'ar' AND 'see it in your space' so there are TWO options". One AR control, on the stage,
+    /// for whichever entry is shown; none on Together or a plate; and with the part shown it opens AR Quick Look (or says
+    /// it is preparing), never nothing. The canned Mac serves `mic.stl` from the assets folder as the part.
+    func testTheProjectPageHasOneARControlAndItOpensThePart() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Self.boxSTL().write(to: folder.appendingPathComponent("mic.stl"))
+        let layer = folder.appendingPathComponent("scan.usda")
+        try """
+        #usda 1.0
+        (
+            defaultPrim = "Scan"
+            metersPerUnit = 1
+            upAxis = "Y"
+        )
+        def Mesh "Scan" {
+            int[] faceVertexCounts = [3]
+            int[] faceVertexIndices = [0, 1, 2]
+            point3f[] points = [(0, 0, 0), (0.1, 0, 0), (0, 0.1, 0)]
+            uniform token subdivisionScheme = "none"
+        }
+        """.write(to: layer, atomically: true, encoding: .utf8)
+        MDLUtility.convert(toUSDZ: layer, writeTo: folder.appendingPathComponent("scan.usdz"))
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", folder.path, "-CounterpartFixtureSet", "ar-stage", "-CounterpartScreen", "printed"]
+        app.launch()
+        let result = app.buttons["gallery-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["project-prepare-ar"].exists, "the second AR button is gone")
+        let ar = app.buttons["gallery-ar"]
+        let entries = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT (identifier IN %@)", "gallery-",
+                                                       ["gallery-ar", "gallery-photos", "gallery-locate", "gallery-model-retry", "gallery-stage-retry"]))
+        let ids = (0..<entries.count).map { entries.element(boundBy: $0).identifier }
+        XCTAssertTrue(ids.contains("gallery-result"), "\(ids)")
+        for id in ids {
+            app.buttons[id].tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(1))
+            if id == "gallery-scan" { XCTAssertTrue(ar.waitForExistence(timeout: 10), "the scan demand starts too, even when the gallery opens before scene activation") }
+            XCTAssertLessThanOrEqual(app.buttons.matching(identifier: "gallery-ar").count, 1, "one AR control on \(id)")
+            XCTAssertLessThanOrEqual(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "in your space")).count, 0)
+            if id == "gallery-together" || id.hasPrefix("gallery-plate-") { XCTAssertFalse(ar.exists, "no AR on \(id)") }
+        }
+        result.tap()
+        XCTAssertTrue(ar.waitForExistence(timeout: 30), "the part's model came, so its AR chip is there")
+        ar.tap()
+        // A device opens Quick Look; a simulator without a previewer must keep a visible retry.
+        #if targetEnvironment(simulator)
+        // This simulator's Quick Look reports canPreview == false for a valid USDZ (also checked by ARModelTests).
+        // Exercise the real tap anyway: it must open or visibly offer retry, never silently return to ready.
+        let opened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            !ar.exists || !ar.isHittable || (ar.value as? String == "failed" && ar.label == "AR didn’t open. Try Again")
+        }, object: nil)
+        #else
+        let opened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !ar.exists || !ar.isHittable }, object: nil)
+        #endif
+        XCTAssertEqual(XCTWaiter().wait(for: [opened], timeout: 40), .completed, "AR opens or explains its failure: \(String(describing: ar.value))")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); shot.name = "part-ar-result"; shot.lifetime = .keepAlways; add(shot)
+        #if !targetEnvironment(simulator)
+        XCTAssertNotEqual(ar.exists ? ar.value as? String : nil, "failed")
+        #endif
+    }
+
+    static func boxSTL() -> Data {
+        let size = SIMD3<Float>(146, 40, 20)
+        let c: [SIMD3<Float>] = (0..<8).map { i in SIMD3(Float(i & 1), Float((i >> 1) & 1), Float((i >> 2) & 1)) * size }
+        let faces = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]
+        let triangles = faces.flatMap { f in [[c[f[0]], c[f[1]], c[f[2]]], [c[f[0]], c[f[2]], c[f[3]]]] }
+        var data = Data(count: 80)
+        withUnsafeBytes(of: UInt32(triangles.count).littleEndian) { data.append(contentsOf: $0) }
+        for t in triangles {
+            for v in [SIMD3<Float>(0, 0, 0)] + t { for x in [v.x, v.y, v.z] { withUnsafeBytes(of: x.bitPattern.littleEndian) { data.append(contentsOf: $0) } } }
+            data.append(contentsOf: [0, 0])
+        }
+        return data
     }
 
     /// Needs Changes on the finished Printing screen starts the change on the project page, as the project's own card does.
@@ -1864,4 +2049,15 @@ final class LayoutParityUITests: XCTestCase {
         app.buttons["Done"].tap()
     }
 
+}
+
+extension XCUIElement {
+    /// Whether the element's middle is inside `container`, read from frames alone. `isHittable` on a row scrolled out of an
+    /// iPad sheet can throw "Activation point invalid and no suggested hit points" instead of answering false (the gate,
+    /// Nov 11, in a loop that scrolls back to the top), so a scroll loop asks this and leaves `isHittable` to the asserts.
+    func shown(in container: XCUIElement) -> Bool {
+        guard exists else { return false }
+        let own = frame
+        return !own.isEmpty && container.frame.contains(CGPoint(x: own.midX, y: own.midY))
+    }
 }

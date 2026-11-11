@@ -16,8 +16,6 @@ struct ModelStage: View {
     /// One filament colour for the whole model; nil for the default printed look.
     var tint: UIColor? = nil
     var backdrop: Color? = nil
-    /// The light stage, for a part that would be a silhouette on the dark one (CounterpartKit `StageContrast`).
-    var lightStage = false
     /// Two-tone like a two-colour AMS print: the upper part in a warm tone (the mic-mount mockup).
     var twoTone = false
     /// Together (docs/protocols/seats.md): a scan drawn in its own colours at each seat (row-major 4×4, the part's
@@ -51,7 +49,7 @@ struct ModelStage: View {
 
     var body: some View {
         ZStack {
-            if let backdrop { backdrop } else if lightStage { LightStageBackground() } else { StageBackground() }
+            if let backdrop { backdrop } else { StageBackground() }
             if live && poster != nil && scenePhase == .active && interactive {
                 realityView
             } else if let poster {
@@ -62,10 +60,10 @@ struct ModelStage: View {
                 Text("This model couldn't be shown.").font(.footnote).foregroundStyle(.secondary)
             } else if url != nil { ProgressView() }
             if failed, placeholder != nil {
-                VStack { Spacer(); Button("Try 3D Again") { retryGeneration += 1 }.stageButton(light: lightStage) }.padding(16)
+                VStack { Spacer(); Button("Try 3D Again") { retryGeneration += 1 }.stageButton() }.padding(16)
             }
             if interactive && url != nil && poster != nil && !live && !failed {
-                VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }.stageButton(light: lightStage) }; Spacer() }.padding(16)
+                VStack { HStack { Spacer(); Button("Explore in 3D", systemImage: "rotate.3d") { touch() }.stageButton() }; Spacer() }.padding(16)
             }
         }
         .contentShape(Rectangle())
@@ -109,7 +107,7 @@ struct ModelStage: View {
             do { try await Task.sleep(for: .seconds(3)) } catch { return }
             live = false
         }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; Self.cache.removeAll(); ModelPoster.deferPending(); ModelEntityCache.deferExports() } }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { live = false; holder.pivot = nil; Self.cache.removeAll(); ModelPoster.deferPending() } }
         .onDisappear { live = false; holder.pivot = nil }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(url == nil ? "No model yet" : "3D model. Drag to turn it, pinch to zoom.")
@@ -244,16 +242,11 @@ struct ModelStage: View {
 
 }
 
-/// What floats on the stage stays readable on both stages (lead review, Nov 10: orange on glass over the light stage
-/// was nearly invisible): clear glass on the dark stage; on the light stage a dark backing with white words.
+/// What floats on the stage: clear glass, as on the dark stage everywhere.
 extension View {
-    @ViewBuilder func stageButton(light: Bool) -> some View {
-        if light { self.buttonStyle(.glassProminent).tint(Color.black.opacity(0.62)).foregroundStyle(.white) }
-        else { self.buttonStyle(.glass) }
-    }
-    func stageChip(light: Bool) -> some View {
-        self.foregroundStyle(light ? Color.white : Color.primary)
-            .glassEffect(light ? .regular.tint(Color.black.opacity(0.62)) : .regular, in: .capsule)
+    func stageButton() -> some View { self.buttonStyle(.glass) }
+    func stageChip() -> some View {
+        self.foregroundStyle(Color.primary).glassEffect(.regular, in: .capsule)
     }
 }
 

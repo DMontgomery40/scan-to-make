@@ -369,7 +369,8 @@ export function buildTouchupInvocation(input: {resumeSessionId?: string; pass: T
   const args = [
     '-p',
     ...(input.resumeSessionId ? ['--resume', input.resumeSessionId] : []),
-    '--model', 'claude-opus-5-5',
+    // The design worker writes CAD. David, Nov 11 2026: "ALL CAD SPECIFIC TYPE WORK MUST BE DONE BY FABLE HIGH NOT OPUS".
+    '--model', 'claude-fable-5-2',
     '--effort', 'high',
     '--mcp-config', mcpConfigPath,
     '--strict-mcp-config',

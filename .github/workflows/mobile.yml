@@ -100,6 +100,16 @@ jobs:
           SIM=$(xcrun simctl create "mobile-ci-${GITHUB_RUN_ID:-local}-$$" "$SIM_TYPE" "$SIM_RUNTIME")
           IPAD=$(xcrun simctl create "mobile-ci-ipad-${GITHUB_RUN_ID:-local}-$$" "$IPAD_TYPE" "$SIM_RUNTIME")
           trap 'for s in "$SIM" "$IPAD"; do xcrun simctl shutdown "$s" >/dev/null 2>&1 || true; xcrun simctl delete "$s" >/dev/null 2>&1 || true; done; rm -rf "${{ runner.temp }}/app-tests"' EXIT
+          # One keyboard, US English. The iPad simulator ships with French, German and Chinese Pinyin keyboards too; on
+          # Nov 11 a layout test's hardware key went into a Pinyin composition ("iT" marked, candidates it / its), the
+          # field never settled and the test ran out of time. Set before the tests boot it; it survives a reboot.
+          for s in "$SIM" "$IPAD"; do
+            xcrun simctl bootstatus "$s" -b >/dev/null
+            xcrun simctl spawn "$s" defaults write -g AppleKeyboards -array "en_US@sw=QWERTY;hw=Automatic" "emoji@sw=Emoji"
+            xcrun simctl spawn "$s" defaults write -g ApplePasscodeKeyboards -array en_US emoji
+            xcrun simctl spawn "$s" defaults write -g AppleLanguages -array en-US
+            xcrun simctl shutdown "$s"
+          done
           # Ad hoc signing gives the Simulator build its Keychain entitlement, as on a device.
           xcodebuild build-for-testing -project apps/mobile/ios/ScanToMake.xcodeproj -scheme ScanToMake \
             -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "${{ runner.temp }}/app-tests" \

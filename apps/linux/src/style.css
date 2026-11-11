@@ -278,10 +278,6 @@ main > .model-view {
 .dimensions:empty {
   display: none;
 }
-/* The light stage (gallery.ts lightStage): a black or dark blue-grey part is never a silhouette on the dark stage. */
-.light-stage .model-view .canvas {
-  background: linear-gradient(#dbdee3, #b3b5bd);
-}
 /* The gallery's labels (PRD §5.4 Pictures): under the stage's top controls, a row that scrolls for a dozen plates. */
 .gallery-labels {
   position: absolute;
@@ -1151,3 +1147,16 @@ hr {
   color: var(--muted, #8e8e96);
   font-size: 0.85em;
 }
+
+/* Make something else from this scan (design §3.3). */
+.scan-lineage { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 10px 0 14px; }
+.scan-lineage .primary-outline { border: 1px solid var(--accent, #e8834a); color: var(--accent, #e8834a); background: transparent; border-radius: 999px; padding: 8px 18px; font-weight: 600; }
+.seed-scan { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.seed-scan img, .seed-scan .picture { width: 64px; height: 64px; border-radius: 14px; object-fit: cover; }
+.seed-scan h3 { margin: 0; }
+.fit-sides { display: flex; gap: 8px; }
+.fit-sides .field { flex: 1; }
+.reuse-scans h3 { margin: 14px 0 8px; }
+.reuse-scan-row { display: flex; gap: 10px; overflow-x: auto; }
+.reuse-scan { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 140px; text-align: left; }
+.reuse-scan img, .reuse-scan .picture { width: 140px; height: 100px; border-radius: 12px; object-fit: cover; }

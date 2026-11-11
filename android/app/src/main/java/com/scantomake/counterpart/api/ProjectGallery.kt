@@ -157,3 +157,27 @@ fun Project.still(entry: ProjectGallery.Entry): Still {
 val Project.canLocate: Boolean get() = kind == "fit" && scan?.lowercase(Locale.ROOT)?.endsWith(".usdz") == true && current != null &&
     current.model.lowercase(Locale.ROOT).endsWith(".stl") && current.seats.isNullOrEmpty() &&
     state != Project.State.Printing && state != Project.State.TouchingUp
+
+/**
+ * The colour the stage's material draws a spool in (CounterpartKit `StageMaterial`): the stage stays dark (#22242B)
+ * for every part, and a dark filament is lifted to a minimum brightness of 0.20 — the Mac's still pictures' floor —
+ * so black is charcoal, never a silhouette. Neutral and own colours pass through; a spool's real colour still shows
+ * in swatches and names.
+ */
+fun drawnColour(colour: ProjectGallery.Colour): ProjectGallery.Colour = when (colour) {
+    is ProjectGallery.Colour.Spool -> ProjectGallery.Colour.Spool(drawnColour(colour.hex))
+    else -> colour
+}
+
+fun drawnColour(hex: String): String {
+    if (!Regex("^#[0-9A-Fa-f]{6}$").matches(hex)) return hex
+    val value = hex.substring(1).toInt(16)
+    val rgb = doubleArrayOf(((value shr 16) and 255) / 255.0, ((value shr 8) and 255) / 255.0, (value and 255) / 255.0)
+    val floor = 0.20
+    val brightness = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+    if (brightness < floor) {
+        val lift = (floor - brightness) / floor
+        doubleArrayOf(1.0, 1.01, 1.04).forEachIndexed { i, m -> rgb[i] += lift * floor * m }
+    }
+    return "#" + rgb.joinToString("") { String.format(Locale.ROOT, "%02X", Math.round(it.coerceIn(0.0, 1.0) * 255).toInt()) }
+}

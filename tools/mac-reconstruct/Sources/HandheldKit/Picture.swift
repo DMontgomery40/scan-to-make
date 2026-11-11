@@ -26,8 +26,9 @@ public struct PictureSpec {
 }
 
 /// The stage the apps draw: a vertical gradient (top 0.13/0.14/0.17 to 0.05/0.05/0.07) with a soft light below centre;
-/// or the light stage (0.86/0.87/0.89 to 0.70/0.71/0.74) for a part that would be a silhouette on the dark one.
+/// the same dark backdrop for every filament colour.
 private func stage(_ size: Int, light: Bool = false) -> CGContext? {
+    let light = false
     guard let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
     let space = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -63,7 +64,7 @@ func threeMFNode(_ model: ThreeMF, tint: NSColor?, limits: ThreeMFLimits = Three
     func material(_ colour: SIMD4<Float>?) -> SCNMaterial {
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
-        m.diffuse.contents = colour.map { NSColor(srgbRed: CGFloat($0.x), green: CGFloat($0.y), blue: CGFloat($0.z), alpha: 1) } ?? tint ?? neutral()
+        m.diffuse.contents = drawnPlastic(colour.map { NSColor(srgbRed: CGFloat($0.x), green: CGFloat($0.y), blue: CGFloat($0.z), alpha: 1) } ?? tint ?? neutral())
         m.roughness.contents = 0.55
         m.metalness.contents = 0.0
         m.isDoubleSided = true
@@ -116,7 +117,7 @@ private func loadNode(_ url: URL, zUp: Bool, tint: NSColor?, own: Bool) throws -
                 material.lightingModel = .constant
             } else {
                 material.lightingModel = .physicallyBased
-                material.diffuse.contents = tint ?? neutral()
+                material.diffuse.contents = drawnPlastic(tint ?? neutral())
                 material.roughness.contents = 0.55
                 material.metalness.contents = 0.0
             }
@@ -146,20 +147,25 @@ private func luminance(_ colour: NSColor?) -> CGFloat {
     return 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
 }
 
-/// The part reads better on the light stage than the dark one (WCAG contrast of relative luminance; the same rule as
-/// CounterpartKit `StageContrast`, whose stage colours are #22242B and #C8CACF).
-public func wantsLightStage(_ colour: NSColor?) -> Bool {
-    guard let rgb = colour?.usingColorSpace(.sRGB) else { return false }
-    func linear(_ c: CGFloat) -> Double { let c = Double(c); return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
-    let part = 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722 * linear(rgb.blueComponent)
-    let dark = 0.01776, light = 0.59025
-    func ratio(_ a: Double, _ b: Double) -> Double { (max(a, b) + 0.05) / (min(a, b) + 0.05) }
-    return ratio(part, light) > ratio(part, dark)
+/// The stage never changes mode for a filament colour. Lift the material instead.
+public func wantsLightStage(_ colour: NSColor?) -> Bool { false }
+
+/// The same sRGB brightness floor as CounterpartKit StageMaterial, applied only to drawn plastic.
+private func drawnPlastic(_ colour: NSColor) -> NSColor {
+    guard let rgb = colour.usingColorSpace(.sRGB) else { return colour }
+    var c = [rgb.redComponent, rgb.greenComponent, rgb.blueComponent]
+    let brightness = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    let floor: CGFloat = 0.20
+    if brightness < floor {
+        let lift = (floor - brightness) / floor
+        for i in c.indices { c[i] += lift * floor * [1.0, 1.01, 1.04][i] }
+    }
+    return NSColor(srgbRed: min(1, c[0]), green: min(1, c[1]), blue: min(1, c[2]), alpha: 1)
 }
 
 public func renderPicture(_ spec: PictureSpec, to output: URL) throws {
     let size = spec.pixels
-    guard let context = stage(size, light: spec.model != nil && wantsLightStage(spec.tint)) else { throw HandheldError.io("no drawing context") }
+    guard let context = stage(size, light: false) else { throw HandheldError.io("no drawing context") }
     if let model = spec.model {
         let scene = SCNScene()
         scene.background.contents = NSColor.clear

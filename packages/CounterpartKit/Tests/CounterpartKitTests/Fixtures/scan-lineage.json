@@ -1,0 +1,32 @@
+{
+ "comment": "Make something else from this scan (design §3.3). Which projects offer it, and what a project page says about where its scan came from and what else was made from it. Read by CounterpartKit ScanLineageTests and Android ScanLineageTests: the same words on every layout. `among` and `project` name keys of `projects`; `made` and `scans` are project ids, newest first.",
+ "words": {
+  "action": "Make something else from this scan",
+  "fitChoice": "Make something that fits this",
+  "copyChoice": "Copy this object",
+  "useExisting": "Use a scan you already have"
+ },
+ "projects": {
+  "src": {"id": "src", "title": "Leatherman Wave+ replica", "kind": "copy", "state": "ready", "scan": "scan.usdz", "createdAtMs": 1000, "updatedAtMs": 2, "photos": [], "passes": []},
+  "srcRenamed": {"id": "src", "title": "Leatherman Wave+", "kind": "copy", "state": "ready", "scan": "scan.usdz", "createdAtMs": 1000, "updatedAtMs": 2, "photos": [], "passes": []},
+  "belt": {"id": "belt", "title": "Belt case", "kind": "fit", "state": "ready", "scan": "scan.usdz", "createdAtMs": 2000, "updatedAtMs": 2, "photos": [], "passes": [], "scanFrom": {"id": "src", "title": "Leatherman Wave+ replica"}},
+  "clip": {"id": "clip", "title": "Pocket clip", "kind": "fit", "state": "ready", "scan": "scan.usdz", "createdAtMs": 3000, "updatedAtMs": 2, "photos": [], "passes": [], "scanFrom": {"id": "src", "title": "Leatherman Wave+ replica"}},
+  "fitWithScan": {"id": "f", "kind": "fit", "state": "ready", "scan": "scan.usdz", "createdAtMs": 1, "updatedAtMs": 2, "photos": [], "passes": []},
+  "capturing": {"id": "c", "state": "new", "capture": ["0001.heic"], "createdAtMs": 1, "updatedAtMs": 2, "photos": [], "passes": []},
+  "wordsOnly": {"id": "w", "kind": "fit", "state": "ready", "instructions": "A hook", "createdAtMs": 5000, "updatedAtMs": 2, "photos": [], "passes": []}
+ },
+ "canMakeFromScan": [
+  {"project": "src", "expected": true, "why": "a copy's scan can become a fit: the Leatherman"},
+  {"project": "fitWithScan", "expected": true, "why": "any kind, as long as the computer has its scan"},
+  {"project": "capturing", "expected": false, "why": "a scan still on its way isn't one the computer has"},
+  {"project": "wordsOnly", "expected": false, "why": "no scan at all"}
+ ],
+ "lineage": [
+  {"name": "made from a source that is here", "project": "belt", "among": ["src", "belt", "clip"], "fromLine": "Uses the scan from “Leatherman Wave+ replica”", "fromExists": true, "madeLine": null, "made": []},
+  {"name": "a source with one project made from it", "project": "src", "among": ["src", "belt"], "fromLine": null, "fromExists": null, "madeLine": "Also made from this scan: “Belt case”", "made": ["belt"]},
+  {"name": "a source with two, newest first", "project": "src", "among": ["src", "belt", "clip"], "fromLine": null, "fromExists": null, "madeLine": "Also made from this scan: 2 projects", "made": ["clip", "belt"]},
+  {"name": "a renamed source reads by its name now", "project": "belt", "among": ["srcRenamed", "belt"], "fromLine": "Uses the scan from “Leatherman Wave+”", "fromExists": true, "madeLine": null, "made": []},
+  {"name": "a deleted source says so and opens nothing", "project": "belt", "among": ["belt"], "fromLine": "Uses the scan from “Leatherman Wave+ replica”, since deleted", "fromExists": false, "madeLine": null, "made": []}
+ ],
+ "scans": {"among": ["src", "wordsOnly", "belt"], "expected": ["belt", "src"]}
+}

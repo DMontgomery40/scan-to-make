@@ -67,7 +67,7 @@ enum Fixtures {
         // with real data (`objects.json` in the folder, each project's files under `objects/<id>/`). Never the Mac's own.
         if set == "real", let base = folder, let data = try? Data(contentsOf: base.appending(path: "objects.json")),
            let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] { return rows }
-        let now = set == "ask-bottle" ? launched : now
+        let now = ["ask-bottle", "ar-stage"].contains(set) ? launched : now
         if set == "limit-stops", let json = ProcessInfo.processInfo.environment["COUNTERPART_LIMIT_FIXTURES"],
            let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] {
             return rows.enumerated().compactMap { index, row in
@@ -103,7 +103,7 @@ enum Fixtures {
                     copy(ids.potato, "DAD sign copy", [["name": "scan.usdz", "bytes": 191_981_699]], ago: 120_000),
                     ["id": ids.v1, "createdAtMs": ms - 9_000_000, "updatedAtMs": ms - 8_000_000, "state": "confirmed", "title": "Mic mount v1", "kind": "fit",
                      "photos": [], "passes": [["startedAtMs": ms - 8_900_000, "endedAtMs": ms - 8_000_000, "status": "done"]],
-                     "current": ["model": "current/model.stl", "renders": ["current/renders/mic.png"], "sizeMm": [48, 50, 54]]]]
+                     "current": ["model": "current/model.stl", "renders": ["current/renders/mic.png"], "sizeMm": [48, 50, 54]]]] + duplicates
         }
         // `-CounterpartFixtureSet picture-stage` (review B1/B2 on #539): three designer 3MFs, each a `.picture` stage. The
         // first has the Mac's picture (shown, slow, or refused by an empty folder); the second's is still being drawn; the
@@ -453,6 +453,7 @@ enum Fixtures {
         if path.hasSuffix("/" + bottlePicture) { return "bottle-picture.png" }
         if let range = path.range(of: #"/capture/[0-9]{4}\.heic$"#, options: .regularExpression) { return "bottle-capture/" + path[range].dropFirst("/capture/".count) }
         if path.hasSuffix("/model.stl") { return "mic.stl" }
+        if Fixtures.set == "ar-stage", path.contains("/scan/") { return "scan.usdz" }
         if path.hasSuffix("/pictures/scan-0123456789abcdef.png") || path.hasSuffix("/pictures/part-0123456789abcdef.png") { return "thumb-potato.png" }
         if path.hasSuffix("/camera.jpg") { return "bed.jpg" }
         if path.contains("/renders/mic.png") { return "thumb-mic.png" }
@@ -502,7 +503,7 @@ struct FixtureTransport: HTTPTransport {
         let objects = Fixtures.objects()
         func object(_ id: String) -> [String: Any]? { objects.first { $0["id"] as? String == id } }
         let parts = path.split(separator: "/").map(String.init)
-        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "fitFields": true, "mcpUpdates": true, "mcpCopies": FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies.json").path), "projectSettings": true, "projectRename": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true, "printerAdd": FileManager.default.fileExists(atPath: folder.appending(path: "printer-setup-phone.json").path)]]) }
+        if path == "/healthz" { return json(["status": "ok", "protocolVersion": "0.1.0", "capabilities": ["genericConfirmations": Fixtures.macAnswers, "fitFields": true, "mcpUpdates": true, "mcpCopies": FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies.json").path), "projectSettings": true, "projectRename": true, "makeFromScan": true, "projectPreferences": true, "printCopies": true, "printLayerPauses": true, "printerChoices": true, "printerAdd": FileManager.default.fileExists(atPath: folder.appending(path: "printer-setup-phone.json").path)]]) }
         let completingMove = FileManager.default.fileExists(atPath: folder.appending(path: "mcp-profile-copies-moved.json").path)
         if path == "/v1/printers/mcps" {
             let moved = await Fixtures.mcpCopyState.moved
@@ -609,6 +610,25 @@ struct FixtureTransport: HTTPTransport {
                 Fixtures.duplicates.append(copied)
                 return json(["object": copied], 201)
             }
+            // Make something else from this scan (design §3.3): a new project of the chosen kind holding a copy of this one's
+            // scan, as the companion answers once the copy is in and its pass has started.
+            if parts[3] == "make-from-scan", method == "POST", let source = object(id), source["scan"] != nil,
+               let body = request.httpBody.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
+               let kind = body["kind"] as? String, ["fit", "copy"].contains(kind) {
+                let ms = Date().timeIntervalSince1970 * 1000, words = body["instructions"] as? String ?? ""
+                let sourceTitle = source["title"] as? String ?? "Project"
+                var made: [String: Any] = ["id": UUID().uuidString.lowercased(), "createdAtMs": ms, "updatedAtMs": ms, "state": "touching-up", "kind": kind,
+                                           "title": words.isEmpty ? "\(sourceTitle) copy" : String(words.prefix(1).uppercased() + words.dropFirst()),
+                                           "messages": [Any](), "photos": source["photos"] ?? [Any](), "scanFrom": ["id": id, "title": sourceTitle],
+                                           "passes": [["startedAtMs": ms, "trigger": "new", "stages": [["id": "working", "words": "Designing it", "startedAtMs": ms, "typicalSec": 600]]]],
+                                           "status": ["phase": "working", "text": "Your Mac is working · Designing it", "symbol": "wand.and.sparkles", "tint": "blue"]]
+                if !words.isEmpty { made["instructions"] = words }
+                if let fit = body["fit"] { made["fit"] = fit }
+                for key in ["scan", "scanFiles", "scanSource", "capture", "picture", "pictures"] { made[key] = source[key] }
+                Fixtures.duplicates.append(made)
+                return json(["object": made], 201)
+            }
+            if parts[3] == "make-from-scan" { return json(["error": ["code": "invalid-state", "message": "This project has no scan to make something from."]], 409) }
             if parts[3] == "filaments" { return json(["filaments": Fixtures.filaments(for: id == Fixtures.ids.mic ? Fixtures.printer : "current")]) }
             if parts[3] == "colour-mapping" {
                 // A two-colour pick, as the printer MCP proposes it: body on the black spool, letters on the closest yellow.

@@ -386,6 +386,27 @@ public extension ControlClient {
         let result: ObjectReply = try await call("objects.duplicate", ["id": .string(id)])
         return result.object
     }
+    /// Make something else from this project's scan (design §3.3): a new project of `kind` with these words, seeded on
+    /// this Mac with a copy of the scan, its photos and checked sizes. `objects.makeFromScan`.
+    /// A fit carries `fit` (how its exact size is settled), as the iPhone's request does (`CompanionClient.makeFromScanBody`).
+    func makeFromScanObject(_ id: String, kind: String, instructions: String, fit: ProjectFit? = nil) async throws -> Project {
+        let result: ObjectReply = try await call("objects.makeFromScan", Self.makeFromScanParameters(id, kind: kind, instructions: instructions, fit: fit))
+        return result.object
+    }
+    /// `objects.makeFromScan`'s parameters: `fit` only with a fit's words, like the iPhone's body.
+    static func makeFromScanParameters(_ id: String, kind: String, instructions: String, fit: ProjectFit?) -> [String: JSONValue] {
+        var parameters: [String: JSONValue] = ["id": .string(id), "kind": .string(kind == "fit" ? "fit" : "copy")]
+        let words = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !words.isEmpty { parameters["instructions"] = .string(words) }
+        if let fit, kind == "fit", !words.isEmpty {
+            var value: [String: JSONValue] = ["sizeSource": .string(fit.sizeSource.rawValue)]
+            if fit.sizeSource == .measured {
+                value["measured"] = .array(fit.measured.map { .object(["id": .string($0.id), "label": .string($0.label), "mm": .number($0.mm)]) })
+            }
+            parameters["fit"] = .object(value)
+        }
+        return parameters
+    }
     /// A short pass that reports where the scanned object sits in the finished part, changing nothing (docs/protocols/seats.md).
     func locateObject(_ id: String) async throws -> Project {
         let result: ObjectReply = try await call("objects.locate", ["id": .string(id)])

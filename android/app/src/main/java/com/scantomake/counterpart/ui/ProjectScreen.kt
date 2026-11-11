@@ -19,6 +19,7 @@ import com.scantomake.counterpart.api.MacLink
 import com.scantomake.counterpart.api.still
 
 import com.scantomake.counterpart.api.ProjectGallery
+import com.scantomake.counterpart.api.ScanLineage
 
 import android.content.Intent
 import android.net.Uri
@@ -99,7 +100,8 @@ import java.io.File
 
 /** A project (PRD §5.3): its model, what the Mac is doing or asking, and what you can do next. */
 @Composable
-fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () -> Unit, scan: () -> Unit) {
+fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () -> Unit, scan: () -> Unit,
+                  makeFromScan: () -> Unit = {}, open: (String) -> Unit = {}) {
     val context = LocalContext.current
     val app = Counterpart.instance
     val state = AppState.of(context)
@@ -191,6 +193,7 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                                 menu = false; run("status") { app.companion.setStatus(id, s)?.let(state::show) ?: state.reload(id) }
                             })
                         }
+                        if (project.canMakeFromScan) DropdownMenuItem({ Text(ScanLineage.ACTION) }, enabled = !away, onClick = { menu = false; makeFromScan() })
                         if (project.current != null) DropdownMenuItem({ Text("Duplicate") }, enabled = !away, onClick = { menu = false; run("dup") { state.show(app.companion.duplicate(id)) } })
                         DropdownMenuItem({ Text("Delete Project", color = Palette.failed) }, enabled = !away, onClick = { menu = false; confirmDelete = true })
                     }
@@ -229,6 +232,29 @@ fun ProjectScreen(id: String, back: () -> Unit, print: () -> Unit, printing: () 
                     Text(item.label, Modifier.clip(RoundedCornerShape(50)).background(if (selected) Color.White else Color.White.copy(alpha = 0.10f))
                         .selectable(selected = selected, role = Role.Tab) { chosen = item.id }.padding(14.dp, 8.dp),
                         color = if (selected) Color.Black else Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
+                }
+            }
+            // Under What you scanned (design §3.3): make something else from this scan, on any project the computer has a
+            // scan for, whatever its kind; where this one's scan came from; what else was made from it.
+            val lineage = ScanLineage(project, projects)
+            if (project.canMakeFromScan) SecondaryButton(ScanLineage.ACTION, Modifier.fillMaxWidth().testTag("make-from-scan"), enabled = idle, color = Palette.filament) { makeFromScan() }
+            lineage.fromLine?.let { line ->
+                Text(line, Modifier.fillMaxWidth().testTag("scan-from").clickable(enabled = lineage.from?.exists == true, role = Role.Button) { lineage.from?.let { open(it.id) } },
+                    color = if (lineage.from?.exists == true) Palette.filament else Palette.secondary, fontSize = 14.sp)
+            }
+            // One project made from it opens at a tap; several are a list to choose from, newest first (as on the
+            // iPhone and the Mac), never just the newest.
+            lineage.madeLine?.let { line ->
+                var choosing by remember { mutableStateOf(false) }
+                Box {
+                    Text(line, Modifier.fillMaxWidth().testTag("scan-made").clickable(role = Role.Button) {
+                        lineage.made.singleOrNull()?.let { open(it.id) } ?: run { choosing = true }
+                    }, color = Palette.filament, fontSize = 14.sp)
+                    DropdownMenu(choosing, { choosing = false }) {
+                        lineage.made.forEach { made ->
+                            DropdownMenuItem({ Text(made.title) }, modifier = Modifier.testTag("scan-made-${made.id}"), onClick = { choosing = false; open(made.id) })
+                        }
+                    }
                 }
             }
             Text(words.status, fontSize = 17.sp)

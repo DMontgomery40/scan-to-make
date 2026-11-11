@@ -199,6 +199,162 @@ class HomeLayoutTests {
         assertEquals("Your project’s picture. No picture came with this question.", AskPicture.caption(null))
     }
 
+    /** Design §3.3 with projects present (AGENTS.md "Every layout"): a copy whose scan is really the thing a case must fit
+     *  offers Make something else from this scan on its page, and its New opens holding that scan, asking first. */
+    @Test fun aCopysPageOffersMakeSomethingElseFromItsScanWithProjectsPresent() {
+        val id = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
+        val data = WireJson.parseToJsonElement(
+            """{"id":"$id","title":"Leatherman Wave+ replica","state":"ready","kind":"copy","scan":"scan.usdz","createdAtMs":1,"updatedAtMs":2,
+               "photos":[],"passes":[{"startedAtMs":1,"endedAtMs":2,"status":"done"}]}""").jsonObject
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$id") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), requireNotNull(Project.decode(data)))
+        state.loaded.value = true
+        // One composition (a test can set its content once): the page's action opens New holding the scan.
+        var seed by mutableStateOf<String?>(null)
+        compose.setContent { WithApp {
+            val held = seed
+            if (held == null) com.scantomake.counterpart.ui.ProjectScreen(id, back = {}, print = {}, printing = {}, scan = {}, makeFromScan = { seed = id })
+            else com.scantomake.counterpart.ui.NewProjectScreen(job = null, close = {}, started = {}, scan = {}, seed = held)
+        } }
+        compose.onNode(hasTestTag("make-from-scan")).performScrollTo().assertExists().performClick()
+        compose.waitForIdle()
+        assertEquals("the page's action opens New holding the scan", id, seed)
+        compose.onNode(hasTestTag("scan-use")).assertExists()
+        compose.onNodeWithText("Make something that fits this").assertExists()
+        compose.onNodeWithText("Just save this scan").assertDoesNotExist()
+    }
+
+    private val keptScan = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a0a"
+    private fun keptScanProject(id: String = keptScan, title: String = "Leatherman Wave+ replica", createdAtMs: Long = 1, from: String? = null) =
+        requireNotNull(Project.decode(WireJson.parseToJsonElement(
+            """{"id":"$id","title":"$title","state":"ready","kind":"${if (from == null) "copy" else "fit"}","scan":"scan.usdz","createdAtMs":$createdAtMs,"updatedAtMs":2,"photos":[],"passes":[]""" +
+                (from?.let { ""","scanFrom":{"id":"$it","title":"Leatherman Wave+ replica"}""" } ?: "") + "}").jsonObject))
+
+    /** The companion answers make-from-scan with a new fit project, keeping the bodies it was sent; a kept scan is listed. */
+    private fun answerMakeFromScan(sent: MutableList<JsonObject>) {
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val made = WireJson.parseToJsonElement(
+            """{"id":"made","title":"Belt case","state":"new","kind":"fit","scan":"scan.usdz","createdAtMs":3,"updatedAtMs":3,"photos":[],"passes":[],
+               "scanFrom":{"id":"$keptScan","title":"Leatherman Wave+ replica"}}""").jsonObject
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$keptScan/make-from-scan") -> {
+                synchronized(sent) { sent += WireJson.parseToJsonElement(String(request.body!!)).jsonObject }
+                HttpReply(201, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to made))).toByteArray())
+            }
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), keptScanProject())
+        state.loaded.value = true
+    }
+
+    /** PR #570 review: a fit made from a kept scan offers the same Exact size choice as New after a scan, starts on the
+     *  scan's size (its checked sizes go with it), and sends that choice, with projects present. */
+    @Config(qualifiers = "w411dp-h891dp")
+    @Test fun aFitFromAKeptScanStartsOnTheScansSizeAndSendsItWithProjectsPresent() {
+        val sent = mutableListOf<JsonObject>(); answerMakeFromScan(sent)
+        var started: String? = null
+        compose.setContent { WithApp { NewProjectScreen(job = null, close = {}, started = { started = it }, scan = {}, seed = keptScan) } }
+        compose.onNodeWithTag("fit-size-scan").assertDoesNotExist()
+        compose.onNodeWithTag("scan-use-fit").performClick()
+        for (tag in listOf("fit-size-lookup", "fit-size-measured", "fit-size-scan")) compose.onNodeWithTag(tag).assertExists()
+        compose.onNodeWithTag("fit-size-scan-line").performScrollTo().assertIsDisplayed()
+        // As on the iPhone: a kept scan's caliper photo goes in its conversation after, not here.
+        compose.onNodeWithTag("fit-caliper-photo").assertDoesNotExist()
+        compose.onNodeWithTag("describe").performScrollTo().performTextInput("A belt case for it")
+        compose.onNodeWithTag("send").performClick()
+        compose.waitUntil(5_000) { started != null }
+        assertEquals("made", started)
+        assertEquals("""{"sizeSource":"scan"}""", synchronized(sent) { sent.single()["fit"].toString() })
+    }
+
+    /** I measured on a kept scan: Send with nothing measured goes to the fields and sends nothing; then the size goes. */
+    @Config(qualifiers = "w411dp-h891dp")
+    @Test fun aFitFromAKeptScanSendsWhatYouMeasuredWithProjectsPresent() {
+        val sent = mutableListOf<JsonObject>(); answerMakeFromScan(sent)
+        var started: String? = null
+        compose.setContent { WithApp { NewProjectScreen(job = null, close = {}, started = { started = it }, scan = {}, seed = keptScan) } }
+        compose.onNodeWithTag("scan-use-fit").performClick()
+        compose.onNodeWithTag("describe").performScrollTo().performTextInput("A belt case for it")
+        compose.onNodeWithTag("fit-size-measured").performScrollTo().performClick()
+        compose.onNodeWithTag("send").performClick()
+        compose.onNodeWithTag("fit-size-missing").assertExists().assertTextContains("Enter at least one measurement in millimetres.")
+        compose.onNodeWithTag("fit-size-longest").assertIsFocused()
+        compose.waitForIdle()
+        assertTrue("nothing is sent without a size", synchronized(sent) { sent.isEmpty() })
+        compose.onNodeWithTag("fit-size-longest").performTextInput("107")
+        compose.onNodeWithTag("send").performClick()
+        compose.waitUntil(5_000) { started != null }
+        assertEquals("""{"sizeSource":"measured","measured":[{"id":"longest","label":"longest side","mm":107}]}""",
+            synchronized(sent) { sent.single()["fit"].toString() })
+    }
+
+    /** PR #570 review: photos added to a draft, then a kept scan chosen, then Remove: the draft comes back with its photos. */
+    @Config(qualifiers = "w411dp-h891dp")
+    @Test fun choosingAKeptScanThenRemoveKeepsTheDraftsPhotosWithProjectsPresent() {
+        state.projects.value = listOf(project("other", "Existing project", "ready"), keptScanProject())
+        state.loaded.value = true
+        val photo = File(app.cacheDir, "picked.jpg").apply {
+            outputStream().use { android.graphics.Bitmap.createBitmap(8, 8, android.graphics.Bitmap.Config.ARGB_8888).compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+        }
+        // The photo picker answers at once with one JPEG.
+        val registry = object : androidx.activity.result.ActivityResultRegistry() {
+            override fun <I, O> onLaunch(requestCode: Int, contract: androidx.activity.result.contract.ActivityResultContract<I, O>, input: I,
+                                         options: androidx.core.app.ActivityOptionsCompat?) {
+                dispatchResult(requestCode, listOf(android.net.Uri.fromFile(photo)))
+            }
+        }
+        val owner = object : androidx.activity.result.ActivityResultRegistryOwner {
+            override val activityResultRegistry: androidx.activity.result.ActivityResultRegistry get() = registry
+        }
+        compose.setContent {
+            CompositionLocalProvider(androidx.activity.compose.LocalActivityResultRegistryOwner provides owner) {
+                WithApp { NewProjectScreen(job = null, close = {}, started = {}, scan = {}) }
+            }
+        }
+        compose.onNodeWithText("From Photos").performScrollTo().performClick()
+        compose.onNodeWithText("Added").performScrollTo().assertExists()
+        compose.onNodeWithTag("existing-scan-$keptScan").performScrollTo().performClick()
+        compose.onNodeWithTag("scan-use-source").assertExists()
+        compose.onNodeWithText("Remove").performClick()
+        compose.onNodeWithText("Added").performScrollTo().assertExists()
+        compose.onAllNodes(hasContentDescription("Remove")).assertCountEquals(1)
+    }
+
+    /** PR #570 review: a scan with several projects made from it lists them all to choose from, not just the newest. */
+    @Config(qualifiers = "w411dp-h891dp")
+    @Test fun aScanWithSeveralProjectsMadeFromItListsThemAllWithProjectsPresent() {
+        val source = keptScanProject()
+        val data = WireJson.parseToJsonElement(
+            """{"id":"$keptScan","title":"Leatherman Wave+ replica","state":"ready","kind":"copy","scan":"scan.usdz","createdAtMs":1,"updatedAtMs":2,"photos":[],"passes":[]}""").jsonObject
+        app.pairingStore.save(v2Record(ADDRESSES[0]), false)
+        val fake = FakeTransport { request, _ -> when {
+            request.url.endsWith("/v1/objects/$keptScan") -> HttpReply(200, WireJson.encodeToString(JsonElement.serializer(), JsonObject(mapOf("object" to data))).toByteArray())
+            else -> json(404, mapOf("error" to mapOf("code" to "not-found", "message" to "not here")))
+        } }
+        app.pairing = PairingClient(app.pairingStore, fake)
+        app.companion = CompanionClient(app.pairing, fake, null, null, app.cacheDir)
+        state.projects.value = listOf(project("other", "Existing project", "ready"), source,
+            keptScanProject("belt", "Belt case", 2, from = keptScan), keptScanProject("clip", "Pocket clip", 3, from = keptScan))
+        state.loaded.value = true
+        var opened: String? = null
+        compose.setContent { WithApp { com.scantomake.counterpart.ui.ProjectScreen(keptScan, back = {}, print = {}, printing = {}, scan = {}, open = { opened = it }) } }
+        compose.onNodeWithTag("scan-made").performScrollTo().assertTextContains("Also made from this scan: 2 projects").performClick()
+        compose.waitForIdle()
+        assertEquals("a tap with two made opens neither until one is chosen", null, opened)
+        compose.onNodeWithTag("scan-made-clip").assertExists()
+        compose.onNodeWithTag("scan-made-belt").assertExists().performClick()
+        compose.waitForIdle()
+        assertEquals("belt", opened)
+    }
+
     /** A size question is number fields, not a camera (David answered one in a paragraph of caliper readings, Nov 10):
      *  one field per size the computer asked about, in its words and prefilled, with Confirm; the numbers go back as
      *  numbers, with projects present. */

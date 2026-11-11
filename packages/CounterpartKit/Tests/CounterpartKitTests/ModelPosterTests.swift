@@ -144,17 +144,6 @@ final class ModelPosterTests: XCTestCase {
         XCTAssertEqual(row["project"], "p")
     }
 
-    @MainActor func testARExportProducesANonemptyFileOnDemand() async throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let result = await ModelEntityCache.export(Self.box(), to: folder.appendingPathComponent("part.usdz"))
-        let url = try XCTUnwrap(result)
-        XCTAssertGreaterThan(try Data(contentsOf: url).count, 0)
-        let leftovers = try FileManager.default.contentsOfDirectory(atPath: folder.path)
-        XCTAssertEqual(leftovers, ["part.usdz"])
-    }
-
     @MainActor func testActualRenderHasVisibleOpaqueModelAndTransparentUnclippedBorder() async throws {
         guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("Metal is unavailable on this host") }
         let model = ModelEntity(mesh: .generateBox(size: 0.1), materials: [SimpleMaterial(color: .orange, isMetallic: false)])

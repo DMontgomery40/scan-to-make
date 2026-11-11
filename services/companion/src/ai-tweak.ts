@@ -149,7 +149,7 @@ function plan(access:Exclude<ModelAccess,{kind:'none'}>,options:AiTweakOptions,b
  if(cli==='claude'){
   Object.assign(env,{CLAUDE_CODE_DISABLE_CLAUDE_MDS:'1',ENABLE_CLAUDEAI_MCP_SERVERS:'false',CLAUDE_CODE_DISABLE_AUTO_MEMORY:'1'});
   if(access.kind==='api')env.ANTHROPIC_API_KEY=key(access.keyEnv);
-  const model=('model' in access&&access.model)||'claude-opus-5-5';
+  const model=('model' in access&&access.model)||'claude-fable-5-2';
   const settings=JSON.stringify({disableAllHooks:true,autoMemoryEnabled:false,enabledPlugins:{}});
   return {cli,executable,env,args:(_last,prompt)=>['-p',prompt,'--model',model,'--dangerously-skip-permissions','--setting-sources','','--settings',settings,'--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--output-format','stream-json','--verbose']};
  }

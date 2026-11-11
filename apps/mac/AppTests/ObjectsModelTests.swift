@@ -8,6 +8,8 @@ private actor FakeObjects: ObjectsCompanion {
     var listError: Error?
     var actionError: Error?
     private(set) var calls: [String] = []
+    /// Each makeFromScan's `fit`, in order.
+    private(set) var madeFits: [ProjectFit?] = []
     private(set) var correctionPhotoNames: [[String]?] = []
     private(set) var messageUploadFlags: [Bool] = []
     private var beforeDuplicateReply: (@Sendable () async -> Void)?
@@ -86,6 +88,18 @@ private actor FakeObjects: ObjectsCompanion {
         calls.append("duplicate")
         await beforeDuplicateReply?()
         return try decode(copied)
+    }
+    func makeFromScan(_ id: String, kind: String, instructions: String, fit: ProjectFit?) async throws -> Project {
+        if let actionError { throw actionError }
+        madeFits.append(fit)
+        let source = items.first { $0["id"] as? String == id }!
+        let made: [String: Any] = ["id": "made", "createdAtMs": 9_000_000, "updatedAtMs": 9_000_000, "state": "touching-up", "kind": kind,
+                                   "title": instructions, "instructions": instructions, "photos": [], "passes": [],
+                                   "progress": "Bringing over the scan from “\(source["title"] as? String ?? "")”.",
+                                   "scanFrom": ["id": id, "title": source["title"] as? String ?? ""]]
+        items.append(made)
+        calls.append("makeFromScan \(kind)")
+        return try decode(made)
     }
     func locate(_ id: String) async throws -> Project {
         if let actionError { throw actionError }
@@ -502,6 +516,35 @@ private func project(_ item: [String: Any]) throws -> Project {
         await empty.refresh()
         XCTAssertEqual(empty.missingPhoneText, "No phone connected yet")
         XCTAssertEqual(empty.missingPrinterText, "No printer found in your printer MCP’s settings.")
+    }
+
+    /// Design §3.3 on the Mac, with projects present (AGENTS.md "Every layout"): a copy whose scan should become a case.
+    /// Its page offers Make something else from this scan; New opens holding the scan; the new fit project is selected,
+    /// says where its scan came from, and the source is still listed and says what was made from it.
+    func testMakeSomethingElseFromACopysScanWithProjectsPresent() async throws {
+        let companion = FakeObjects()
+        await companion.set([item("source", "ready", ["kind": "copy", "title": "Leatherman Wave+ replica", "scan": "scan.usdz"]),
+                             item("other", "ready", ["kind": "fit", "title": "Mic mount"])])
+        let model = ObjectsModel(companion: companion)
+        await model.refresh()
+        let source = try XCTUnwrap(model.objects.first { $0.id == "source" })
+        XCTAssertTrue(source.canMakeFromScan, "a copy's scan is offered, whatever its kind")
+        XCTAssertFalse(try XCTUnwrap(model.objects.first { $0.id == "other" }).canMakeFromScan)
+        XCTAssertEqual(ScanLineage.scans(in: model.objects).map(\.id), ["source"], "New's Use a scan you already have")
+
+        model.makingFromScan = source
+        // New Project's seeded pane holds a FitChoice: it starts on "Use scan", since the scan is what the part must fit.
+        let problem = await model.makeFromScan("source", kind: "fit", instructions: "A belt case for it", fit: FitChoice().fit)
+        XCTAssertNil(problem)
+        XCTAssertEqual(model.selection, "made")
+        let calls = await companion.calls
+        XCTAssertTrue(calls.contains("makeFromScan fit"))
+        let fits = await companion.madeFits
+        XCTAssertEqual(fits, [ProjectFit(sizeSource: .scan)], "the Mac's fit carries its size source, as the iPhone's does")
+        let made = try XCTUnwrap(model.selected)
+        XCTAssertEqual(ScanLineage(made, in: model.objects).fromLine, "Uses the scan from “Leatherman Wave+ replica”")
+        XCTAssertTrue(model.objects.contains { $0.id == "source" }, "the source stays")
+        XCTAssertEqual(ScanLineage(source, in: model.objects).madeLine, "Also made from this scan: “A belt case for it”")
     }
 
     func testDuplicateReplyDoesNotInsertASecondIdentityAfterBackgroundRefresh() async throws {

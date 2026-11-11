@@ -10,6 +10,8 @@ import ControlKit
 struct NewProjectDraft: Identifiable, Equatable {
     let id = UUID()
     var files: [URL] = []
+    /// A project whose scan the new one is made from (design §3.3).
+    var seed: Project? = nil
 }
 
 /// New Project on the Mac (PRD §7.2): the detail becomes the drop target. Drop photos, an STL, 3MF or USDZ, or
@@ -23,10 +25,17 @@ struct NewProjectPane: View {
     @State private var targeted = false
     @State private var starting = false
     @State private var problem: String?
+    /// The kept scan this project is made from: the page's, or one chosen under "Use a scan you already have".
+    @State private var seed: Project?
+    /// Asked first for a kept scan: nothing is chosen for the person.
+    @State private var scanUse: String?
+    /// A fit's exact size, as the iPhone's seeded sheet asks it: starts on "Use scan", the thing it must fit.
+    @State private var fitChoice = FitChoice()
 
     init(model: ObjectsModel, draft: NewProjectDraft, close: @escaping () -> Void) {
         self.model = model
         self.close = close
+        _seed = State(initialValue: draft.seed)
         _files = State(initialValue: draft.files)
         _kind = State(initialValue: draft.files.contains { ObjectsModel.fileKind($0) == "scan" } ? "copy" : "fit")
     }
@@ -41,12 +50,17 @@ struct NewProjectPane: View {
             StageBackground().ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Picker("", selection: $kind) {
-                        Text("Make something that fits").tag("fit")
-                        Text("Copy something").tag("copy")
+                    if let seed {
+                        seeded(seed)
+                    } else {
+                        Picker("", selection: $kind) {
+                            Text("Make something that fits").tag("fit")
+                            Text("Copy something").tag("copy")
+                        }
+                        .pickerStyle(.segmented).labelsHidden().frame(width: 380)
+                        dropZone
+                        if files.isEmpty { existingScans }
                     }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 380)
-                    dropZone
                     VStack(alignment: .leading, spacing: 8) {
                         Text("What do you need?").font(.headline)
                         TextField(kind == "fit" ? "A hook for my stroller handle…" : "Copy this, and close up the bottom…", text: $request, axis: .vertical)
@@ -64,9 +78,9 @@ struct NewProjectPane: View {
                         Spacer()
                         if starting { ProgressView().controlSize(.small) }
                         Button("Cancel", action: close).controlSize(.extraLarge).keyboardShortcut(.cancelAction)
-                        Button { start() } label: { Text(link == nil ? "Create Project" : "Get This Model").padding(.horizontal, 6) }
+                        Button { start() } label: { Text(sendLabel).padding(.horizontal, 6) }
                             .buttonStyle(.glassProminent).controlSize(.extraLarge).keyboardShortcut(.defaultAction)
-                            .disabled(!available || starting || empty)
+                            .disabled(!available || starting || (seed == nil ? empty : scanUse == nil || (scanUse == "fit" && (wordless || fitChoice.missing != nil))))
                     }
                     // Or start from a starter: New Project is where a Mac with projects goes to start something
                     // (PRD §5.11). Adding one opens it, which closes this pane.
@@ -80,8 +94,112 @@ struct NewProjectPane: View {
             .defaultScrollAnchor(.center, for: .alignment)
         }
         .environment(\.colorScheme, .dark)
+        // Another scan is another thing to fit: its size starts from the scan again.
+        .onChange(of: seed?.id) { fitChoice = FitChoice() }
         .navigationTitle("New Project")
         .navigationSubtitle("Your Mac starts as soon as you create it")
+    }
+
+    private var wordless: Bool { request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var sendLabel: String {
+        guard seed != nil else { return link == nil ? "Create Project" : "Get This Model" }
+        switch scanUse {
+        case nil: return "Choose What This Scan Becomes"
+        case "fit": return wordless ? "Say What It Should Fit" : "Create Project"
+        default: return ScanLineage.copyChoice
+        }
+    }
+
+    /// New holding a scan this Mac already has (design §3.3): the question first, the scan named by its project.
+    @ViewBuilder private func seeded(_ seed: Project) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                ProjectThumbnail(object: seed).frame(width: 72, height: 72).clipShape(.rect(cornerRadius: 16))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("What should this scan become?").font(.title2.bold())
+                    Text("\(ProjectWords.title(seed)) · \(ScanLineage.scannedLine(seed))").font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Remove") { self.seed = nil; scanUse = nil }.disabled(starting)
+            }
+            HStack(spacing: 10) {
+                ForEach([("copy", ScanLineage.copyChoice, "doc.on.doc"), ("fit", ScanLineage.fitChoice, "ruler")], id: \.0) { value, title, symbol in
+                    Button { scanUse = value } label: {
+                        Label(title, systemImage: scanUse == value ? "checkmark.circle.fill" : symbol).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    }
+                    .buttonStyle(.glass).controlSize(.large)
+                    .overlay { if scanUse == value { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.filament, lineWidth: 2) } }
+                    .accessibilityAddTraits(scanUse == value ? .isSelected : [])
+                }
+            }
+            Text("Your Mac copies this scan, its photos and its checked sizes into a new project. The project it came from stays as it is.")
+                .font(.callout).foregroundStyle(.secondary)
+            if scanUse == "fit" { exactSize }
+        }
+        .padding(20).glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+
+    /// How a fit made from this scan gets its exact size: the iPhone's choice, in its words.
+    @ViewBuilder private var exactSize: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Exact size").font(.headline)
+            Picker("Exact size", selection: $fitChoice.source) {
+                ForEach(ProjectFit.SizeSource.allCases, id: \.self) { source in Text(source.label).tag(source) }
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(width: 380)
+            .accessibilityIdentifier("fit-dimension-source")
+            Text(fitChoice.source.detail()).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if fitChoice.source == .measured {
+                HStack(spacing: 10) {
+                    side("Longest", $fitChoice.longest)
+                    side("Middle", $fitChoice.middle)
+                    side("Shortest", $fitChoice.shortest)
+                }
+                if let missing = fitChoice.missing {
+                    Text(missing).font(.callout).foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func side(_ label: String, _ text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                TextField("0", text: text).textFieldStyle(.plain).multilineTextAlignment(.trailing)
+                Text("mm").font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(9).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+        }
+        .frame(width: 120)
+        .accessibilityIdentifier("fit-size-\(label.lowercased())")
+    }
+
+    /// "Use a scan you already have": the scans this Mac keeps on other projects, by picture and name.
+    @ViewBuilder private var existingScans: some View {
+        let scans = ScanLineage.scans(in: model.objects)
+        if !scans.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(ScanLineage.useExisting).font(.headline)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(scans) { project in
+                            Button { seed = project; scanUse = nil } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ProjectThumbnail(object: project).frame(width: 140, height: 100).clipShape(.rect(cornerRadius: 14))
+                                    Text(ProjectWords.title(project)).font(.callout.weight(.semibold)).lineLimit(2)
+                                    Text(ScanLineage.scannedLine(project)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                .frame(width: 140, alignment: .topLeading)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("existing-scan-\(project.id)")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var dropZone: some View {
@@ -127,7 +245,9 @@ struct NewProjectPane: View {
         starting = true
         problem = nil
         Task {
-            if let link {
+            if let seed, let scanUse {
+                problem = await model.makeFromScan(seed.id, kind: scanUse, instructions: request, fit: fitChoice.fit)
+            } else if let link {
                 problem = await model.startProject(instructions: ModelLink.words(in: request, without: link), files: files, kind: "published",
                                                    url: link.absoluteString)
             } else {
