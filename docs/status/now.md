@@ -2,7 +2,7 @@
 
 The lead's live list. It is updated every time the lead is woken, for any reason, and before the lead ends a turn. [`board.md`](board.md) holds every item and its history; this page holds only what is in motion or owed next, so nothing waits unseen. If a line here is more than an hour old, it is stale: check the thing itself.
 
-**Last checked: 2026-11-11 17:50Z by the lead (Claude Fable 5.2 since 17:25Z; Opus 5.5 before, T3 thread on agents-173, since 08:40Z). Claude delegates are unavailable: the Claude subscription hit its weekly limit at about 09:00Z (resets Nov 13 10pm MT on the Mac, Nov 14 05:00Z on agents-136). Every delegate since runs on GPT-6.1 Sol (or Muse); the lead does the rest directly. No Claude model on API keys or the proxy (David, 16:55Z).**
+**Last checked: 2026-11-11 18:10Z by the lead (Claude Fable 5.2 since 17:25Z; Opus 5.5 before, T3 thread on agents-173, since 08:40Z). Claude delegates are unavailable: the Claude subscription hit its weekly limit at about 09:00Z (resets Nov 13 10pm MT on the Mac, Nov 14 05:00Z on agents-136). Every delegate since runs on GPT-6.1 Sol (or Muse); the lead does the rest directly. No Claude model on API keys or the proxy (David, 16:55Z).**
 
 ## Running
 
@@ -10,6 +10,7 @@ The lead's live list. It is updated every time the lead is woken, for any reason
 |---|---|---|---|---|---|
 | **Install main `4718dd56`** (#570 + #587 Open With) on the iPhone, the Mac, the iPad, in that order, with receipts | D: GPT-6.1 Sol high, Mac, "Install main 4718dd56 on David's Mac, iPhone and iPad" | 17:40Z | 18:55Z | started | The lead reads each receipt, checks the Mac through the control socket, updates Installed in handoff.md |
 | **The regression audit** (board X134, X135): AR, turn and zoom, and slow loading traced on both builds; everything built and gone, or asked and never built | D: GPT-6.1 Sol xhigh, Mac `stm-lane-b`, "Audit: what David asked for or had…" | 17:45Z | 19:25Z (Part 1 by 18:35Z) | started | Its rows go on the board ranked; the model-loading chain is fixed at the root on its own branch, first |
+| **A revision keeps its project's history** (board X140): milestone 1, a project made from another carries its request and conversation; milestone 2, versions slice 1 (nothing overwritten, migration) | D: GPT-6.1 Sol xhigh, Mac `stm-lane-a`, "A revision keeps its project's history…" | 18:02Z | M1 19:35Z; M2 23:35Z | started | The lead reads M1's PR and screenshot, gates Mac + companion + iPhone, merges, installs |
 
 ## Finished, waiting on the lead (nobody is working on these)
 
