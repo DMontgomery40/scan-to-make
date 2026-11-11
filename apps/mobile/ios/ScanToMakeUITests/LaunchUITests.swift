@@ -2171,6 +2171,8 @@ final class OnDeviceLibraryUITests: XCTestCase {
     func testAProjectSeenOnceDrawsFromThePhoneWhenTheMacIsAwayWithProjectsPresent() throws {
         if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
         let folder = try folder()
+        // A model the stage can draw (a 40 mm cube), so the 3D path is checked too, not only the picture.
+        try cube(40).write(to: folder.appendingPathComponent("mic.stl"))
         let mic = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         var app = launch(folder, ["-CounterpartOpen", "counterpart://project/\(mic)"])
         let model = app.buttons["Explore in 3D"]
@@ -2194,6 +2196,20 @@ final class OnDeviceLibraryUITests: XCTestCase {
         assertDrawnFromThePhone(app, app.buttons["Explore in 3D"], "after a relaunch, Mac away")
         let relaunched = XCTAttachment(screenshot: app.screenshot()); relaunched.name = "720-page-relaunch-away"; relaunched.lifetime = .keepAlways; add(relaunched)
         app.terminate()
+    }
+
+    /// A binary STL cube of `size` mm: 12 triangles.
+    private func cube(_ size: Float32) -> Data {
+        let v: [[Float32]] = [[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]].map { $0.map { $0 * size } }
+        let faces = [[0,2,1],[0,3,2],[4,5,6],[4,6,7],[0,1,5],[0,5,4],[1,2,6],[1,6,5],[2,3,7],[2,7,6],[3,0,4],[3,4,7]]
+        var data = Data(count: 80)
+        var count = UInt32(faces.count).littleEndian
+        data.append(Data(bytes: &count, count: 4))
+        for face in faces {
+            var floats: [Float32] = [0, 0, 0] + face.flatMap { v[$0] }
+            data.append(Data(bytes: &floats, count: 48)); data.append(Data(count: 2))
+        }
+        return data
     }
 
     /// The model is drawn within a few seconds, and in the meantime nothing says "coming from your Mac".

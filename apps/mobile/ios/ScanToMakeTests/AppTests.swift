@@ -215,9 +215,16 @@ import CounterpartKit
         let project = Project(id: "p", createdAtMs: 1, updatedAtMs: 2, state: .ready)
         XCTAssertNil(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png"))
         let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4)) }
-        ImageMemory.shared.store(image, "p#\(Int64(project.mediaVersion))#pictures/part-0123456789abcdef.png#300")
+        ImageMemory.shared.store(image, ImageMemory.key(project, "pictures/part-0123456789abcdef.png", 300))
         XCTAssertTrue(ImageMemory.shared.anySize(project, "pictures/part-0123456789abcdef.png") === image)
         XCTAssertNil(ImageMemory.shared.anySize(project, nil))
+        // #720: a Mac picture is named by what it draws, so a newer project version finds it decoded already.
+        let later = Project(id: "p", createdAtMs: 9_000, updatedAtMs: 9_001, state: .ready)
+        XCTAssertNotEqual(later.mediaVersion, project.mediaVersion)
+        XCTAssertTrue(ImageMemory.shared.anySize(later, "pictures/part-0123456789abcdef.png") === image)
+        // A render is per version: the last one decoded stands in while the newer version's comes.
+        ImageMemory.shared.store(image, ImageMemory.key(project, "renders/front.png", 300), project: "p", path: "renders/front.png")
+        XCTAssertTrue(ImageMemory.shared.anySize(later, "renders/front.png") === image)
     }
 
     func testAnEstimateShowsOnlyForItsOwnSettings() throws {
