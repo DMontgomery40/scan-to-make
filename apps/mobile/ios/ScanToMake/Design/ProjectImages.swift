@@ -166,6 +166,8 @@ struct StagePicture: View {
     @State private var attempt = 0
     /// The copy of this picture the phone keeps, by key: shown while a newer one comes and when the Mac doesn't answer.
     @State private var kept: (key: String, image: UIImage)?
+    /// The picture this stage wants now (#720: its fetch outlives a cancelled task, never a newer picture).
+    @State private var wantedKey: String?
 
     private var path: String? { if case .picture(let path) = still { path } else { nil } }
     private var key: String { ImageMemory.key(project, path, maxPixelSize) }
@@ -248,18 +250,27 @@ struct StagePicture: View {
         .task(id: "\(key)#\(attempt)#\(scenePhase)") {
             guard let path else { return }
             let key = key
+            wantedKey = key
             if let cached = ImageMemory.shared.image(key) { load.start(key, cached: cached); return }
             if load.key == key, load.picture != nil { return }
-            if kept?.key != key, let copy = await ImageMemory.kept(app, project, path, maxPixelSize: maxPixelSize), !Task.isCancelled {
-                kept = (key, copy.image)
-                if copy.current { ImageMemory.shared.store(copy.image, key, project: project.id, path: path); load.start(key, cached: copy.image); return }
+            guard scenePhase == .active || kept?.key != key else { return }
+            // As ModelStage's load (#720): a page pushed onto a NavigationStack can have this task cancelled as it appears
+            // and never run again, which left the revisited stage "loading". The work runs to the end and publishes while
+            // the stage still wants this picture.
+            let still = { [self] in wantedKey == key }
+            let (app, project, size, active) = (app, project, maxPixelSize, scenePhase == .active)
+            Task { @MainActor in
+                if kept?.key != key, let copy = await ImageMemory.kept(app, project, path, maxPixelSize: size), still() {
+                    kept = (key, copy.image)
+                    if copy.current { ImageMemory.shared.store(copy.image, key, project: project.id, path: path); load.start(key, cached: copy.image); return }
+                }
+                guard active, still() else { return }
+                load.start(key, cached: nil)
+                let decoded = await ImageMemory.load(app, project, path, maxPixelSize: size)
+                if let decoded { ImageMemory.shared.store(decoded, key, project: project.id, path: path) }
+                guard still() else { return }
+                load.decoded(decoded, for: key)
             }
-            guard scenePhase == .active else { return }
-            load.start(key, cached: nil)
-            let decoded = await ImageMemory.load(app, project, path, maxPixelSize: maxPixelSize)
-            guard !Task.isCancelled else { return }
-            if let decoded { ImageMemory.shared.store(decoded, key, project: project.id, path: path) }
-            load.decoded(decoded, for: key)
         }
     }
 }
