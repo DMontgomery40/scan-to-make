@@ -162,6 +162,44 @@ class LaneTests(unittest.TestCase):
         self.assertEqual([h['label'] for h in self.status()['holders']], ['x'])
         self.assertEqual(sorted(p.name for p in (self.folder / 'lane/holders').iterdir()), [n['_name'] for n in self.status()['holders']])
 
+    def test_a_waiter_stopped_before_its_turn_is_listed_until_it_is_queued_again(self):
+        """#703: a T3 restart cancelled every queued hold and nobody noticed. A waiter stopped by a signal, or killed
+        outright, is kept with its label, folder and command; one that got its turn never is."""
+        self.hold_both_slots()
+        termed = self.caller('termed'); self.queued('termed')
+        killed = self.caller('killed', '--exclusive'); self.queued('killed')
+        os.killpg(termed.pid, signal.SIGTERM); termed.wait(10)
+        os.killpg(killed.pid, signal.SIGKILL); killed.wait(10)
+        report = self.status()
+        self.assertEqual(report['waiters'], [])
+        cancelled = {entry['label']: entry for entry in report['cancelled']}
+        self.assertEqual(sorted(cancelled), ['killed', 'termed'])
+        self.assertEqual(cancelled['termed']['how'], 'stopped by SIGTERM while waiting')
+        self.assertIn('killed, or its session restarted', cancelled['killed']['how'])
+        self.assertTrue(cancelled['killed']['exclusive'])
+        for entry in cancelled.values():
+            self.assertEqual(entry['cwd'], os.getcwd())
+            self.assertEqual(entry['command'][:2], [sys.executable, '-c'])
+            self.assertEqual(entry['command'][-1], entry['label'])
+        text = self.status_text()
+        self.assertIn('stopped while waiting, never ran', text); self.assertIn('"termed" in ' + os.getcwd(), text)
+        # Queued again from the same folder: the old entry is answered. The other stays.
+        self.caller('termed'); self.queued('termed')
+        self.assertEqual([entry['label'] for entry in self.status()['cancelled']], ['killed'])
+        self.release('a'); self.release('b')
+        self.wait_for(lambda: self.started('termed'), 'the re-queued caller')
+        self.release('termed')
+        self.wait_for(lambda: not self.status()['holders'], 'every hold to end')
+        self.assertEqual([entry['label'] for entry in self.status()['cancelled']], ['killed'], 'a hold that ran is never listed')
+
+    def test_cancelled_waiters_older_than_the_keep_window_are_deleted(self):
+        folder = self.folder / 'lane/cancelled'; folder.mkdir(parents=True)
+        old = time.time() - (24 * 3600 + 60)  # lane.CANCELLED_KEEP_HOURS
+        (folder / '000000000001-1.json').write_text(json.dumps({'label': 'old', 'pid': 1, 'since': old - 5, 'endedAt': old, 'how': 'x'}))
+        (folder / '000000000002-2.json').write_text(json.dumps({'label': 'new', 'pid': 2, 'since': time.time() - 5, 'endedAt': time.time(), 'how': 'x'}))
+        self.assertEqual([entry['label'] for entry in self.status()['cancelled']], ['new'])
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), ['000000000002-2.json'])
+
     def test_a_direct_lockf_holder_of_slot_1_leaves_slot_2_and_blocks_exclusive(self):
         slot1 = self.env['STM_LANE_SLOT1']
         hold = [sys.executable, '-c', HOLD, str(self.folder), 'direct']

@@ -6,6 +6,7 @@ import {ObjectService} from '../dist/objects/service.js';
 import {runTouchup} from '../dist/touchup/touchup.js';
 import {PrintGate} from '../dist/printing/print-gate.js';
 import {join} from 'node:path';
+import {spawnSync} from 'node:child_process';
 import {resolveMcpInstall, shellCommand, forcedCommand, mcpIdFor, installedVersion, findNpm} from '../dist/printing/mcp-install.js';
 import {McpUpdater, McpOverrides} from '../dist/printing/mcp-updates.js';
 import {tempDir, tempDirSync} from './support/temp.mjs';
@@ -323,6 +324,21 @@ test('a print check that never answers ends the update with a sentence, never a 
   assert.equal((await later.updates.update(later.mcpId)).state, 'started', 'nothing stays reserved');
 });
 
+/** Resolves once `pid` is no longer running: gone, or a zombie its new parent hasn't reaped yet (kill(pid, 0) still
+ * succeeds on one). A fixed pause before checking failed under load (#690): the SIGKILLed orphan was a zombie for
+ * longer than the pause. The bound is far below the 30 s the commands would otherwise run, so a process that was
+ * never stopped still fails. */
+async function stopped(pid, message) {
+  const end = Date.now() + 5_000;
+  for (;;) {
+    try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; }
+    const state = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {encoding: 'utf8'});
+    if (state.status !== 0 || state.stdout.trim().startsWith('Z')) return;
+    if (Date.now() > end) assert.fail(`${message}: pid ${pid} is still ${state.stdout.trim()}`);
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+}
+
 test('a command whose child keeps its output open still answers by its deadline, and its process group is stopped', async t => {
   const {runCommand} = await import('../dist/printing/mcp-updates.js');
   // npm exits, but a postinstall grandchild still holds stdout: execFile alone would wait for the grandchild.
@@ -331,18 +347,20 @@ test('a command whose child keeps its output open still answers by its deadline,
   assert.equal(exited.code, 0);
   assert.match(exited.output, /installed/);
   assert.ok(Date.now() - started < 15_000, 'answers within the grace after its own exit');
-  const left = Number(exited.output.match(/left:(\d+)/)[1]);
-  await new Promise(resolve => setTimeout(resolve, 100));
-  assert.throws(() => process.kill(left, 0), {code: 'ESRCH'}, 'what it left running is stopped with it');
-  // A character split between two writes reads whole.
-  const split = await runCommand(process.execPath, ['-e', "const b = Buffer.from('€'); process.stdout.write(b.subarray(0, 1)); setTimeout(() => process.stdout.write(b.subarray(1)), 50)"], {env: process.env, timeoutMs: 10_000});
+  await stopped(Number(exited.output.match(/left:(\d+)/)[1]), 'what it left running is stopped with it');
+  // A character split between two writes reads whole. (From sh's printf, not a second node: under load node's own
+  // start-up outlasted this deadline, which isn't what is tested here.)
+  const split = await runCommand('/bin/sh', ['-c', "printf '\\342'; sleep 0.05; printf '\\202\\254'"], {env: process.env, timeoutMs: 10_000});
   assert.equal(split.output, '€');
-  // A command that never exits answers at its deadline with a sentence, its group stopped.
-  const hung = await runCommand('/bin/sh', ['-c', 'echo "looking:$$"; sleep 30'], {env: process.env, timeoutMs: 200});
+  // A command that never exits answers at its deadline with a sentence, its group stopped. The shell writes its pid to a
+  // file rather than its output: under load it may not have printed anything by the 200 ms deadline.
+  const folder = await tempDir('run-command-');
+  const pidFile = join(folder, 'pid');
+  const hung = await runCommand('/bin/sh', ['-c', 'echo $$ > "$1"; sleep 30', 'sh', pidFile], {env: process.env, timeoutMs: 200});
   assert.notEqual(hung.code, 0);
-  assert.match(hung.output, /looking/);
-  await new Promise(resolve => setTimeout(resolve, 100));
-  assert.throws(() => process.kill(Number(hung.output.match(/looking:(\d+)/)[1]), 0), {code: 'ESRCH'}, 'stopped at its deadline');
+  assert.match(hung.output, /sh was stopped \(SIG(TERM|KILL)\)\.|didn't finish within/);
+  const pid = Number((await readFile(pidFile, 'utf8').catch(() => '')).trim());
+  if (pid) await stopped(pid, 'stopped at its deadline'); // no pid: the shell was stopped before it could start anything
   assert.ok(Date.now() - started < 30_000);
 });
 

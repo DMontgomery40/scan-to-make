@@ -1,35 +1,22 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {execFileSync, spawnSync} from 'node:child_process';
+import {spawnSync} from 'node:child_process';
 import {EventEmitter} from 'node:events';
-import {readFile, rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {PassThrough} from 'node:stream';
 import {createHash, randomBytes, X509Certificate} from 'node:crypto';
-import {createServer} from 'node:net';
 import {request} from 'node:https';
-import {RemoteAuthStore} from '../dist/remote-auth.js';
 import {startCompanionServer} from '../dist/server.js';
 import {NearbyPairing} from '../dist/nearby-pairing.js';
 import {advertise, instanceName} from '../dist/bonjour.js';
 import {parsePairingLink} from '@scan-to-make/contracts/pairing-link';
 import {NEARBY_PICKUP_MS, NEARBY_SESSION_MS, nearbyCodeFromDigest, nearbyCodeInput, nearbyCommitInput} from '@scan-to-make/contracts/nearby-pairing';
-import {tempDir} from './support/temp.mjs';
+import {lanFixture} from './support/lan.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest();
 const b64 = bytes => Buffer.from(bytes).toString('base64url');
 
-async function fixture(t) {
-  const root = await tempDir('nearby-'); t.after(() => rm(root, {recursive: true, force: true}));
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-days', '1', '-subj', '/CN=127.0.0.1',
-    '-addext', 'subjectAltName=IP:127.0.0.1', '-keyout', join(root, 'key.pem'), '-out', join(root, 'cert.pem')], {stdio: 'ignore'});
-  const cert = await readFile(join(root, 'cert.pem')), key = await readFile(join(root, 'key.pem'));
-  const reservation = createServer(); await new Promise(r => reservation.listen(0, '127.0.0.1', r));
-  const port = reservation.address().port; await new Promise(r => reservation.close(r));
-  const certificateSha256 = new X509Certificate(cert).fingerprint256.replaceAll(':', '').toLowerCase();
-  const store = await RemoteAuthStore.create(join(root, 'auth'), {transport: 'lan', host: `127.0.0.1:${port}`, certificateSha256, allowedLogins: ['lan']});
-  return {root, store, cert, key, port};
-}
+const fixture=t=>lanFixture(t,{prefix:'nearby-',keyArgs:['-newkey','ec','-pkeyopt','ec_paramgen_curve:P-256']});
 
 /** One HTTPS request as the phone makes it: no name check, and S taken from this handshake's certificate. */
 function call(f, path, body, {method = 'POST', signal} = {}) {
@@ -47,8 +34,7 @@ function call(f, path, body, {method = 'POST', signal} = {}) {
 
 async function start(t, f, extra = {}) {
   const adverts = [];
-  const server = await startCompanionServer({remoteAuth: f.store, lanTls: {cert: f.cert, key: f.key},
-    nearby: {name: "David's Mac mini", advertise: options => { const advert = {options, closed: false, async close() { advert.closed = true; }}; adverts.push(advert); return advert; }}, ...extra});
+  const server = await f.serve({nearby: {name: "David's Mac mini", advertise: options => { const advert = {options, closed: false, async close() { advert.closed = true; }}; adverts.push(advert); return advert; }}, ...extra});
   t.after(() => server.close());
   return {server, adverts};
 }
@@ -227,7 +213,7 @@ test('a waiting phone is released by its own hang-up and by close(); other route
 
 test('without the nearby option the routes do not exist, and nearby needs LAN pairing', async t => {
   const f = await fixture(t);
-  const server = await startCompanionServer({remoteAuth: f.store, lanTls: {cert: f.cert, key: f.key}});
+  const server = await f.serve();
   t.after(() => server.close());
   assert.equal(server.nearby, undefined);
   assert.equal((await call(f, '/v1/pair/nearby', {commit: b64(randomBytes(32)), deviceName: 'p'})).status, 404);

@@ -333,19 +333,29 @@ def run_mac(spec, workspace, directory, host):
 
 
 def linux_hosts():
-    """Configured Linux boxes that answer SSH now; a dead box is skipped instead of failing its lane."""
+    """Configured Linux boxes, every one of which must answer SSH now. A configured box that doesn't stops the gate
+    before any job runs (#650): on the Mac over ssh, an unreadable ~/.ssh/config include made every box look dead and
+    the gate used to skip them with a line nobody read. To run without a box, name the ones to use in
+    CI_LOCAL_LINUX_HOSTS."""
     configured = [h.strip() for h in os.environ.get('CI_LOCAL_LINUX_HOSTS', 'agents-136,agents-173,agents-171').split(',') if h.strip()]
-    def alive(host):
+    def probe(host):
+        """None when the host answers, else why not (ssh's last line)."""
         try:
-            return subprocess.run(['ssh', '-o', 'ConnectTimeout=5', '-o', 'BatchMode=yes', host, 'true'],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).returncode == 0
+            done = subprocess.run(['ssh', '-o', 'ConnectTimeout=5', '-o', 'BatchMode=yes', host, 'true'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=15)
         except subprocess.TimeoutExpired:
-            return False
+            return 'no answer within 15 s'
+        if done.returncode == 0: return None
+        lines = (done.stderr or '').strip().splitlines()
+        return (lines[-1] if lines else 'ssh exited ' + str(done.returncode))[:300]
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(configured))) as pool:
-        up = [h for h, ok in zip(configured, pool.map(alive, configured)) if ok]
-    for host in configured:
-        if host not in up: print('ci-local: skipping unreachable Linux host ' + host, file=sys.stderr, flush=True)
-    return up
+        failures = [(h, why) for h, why in zip(configured, pool.map(probe, configured)) if why]
+    if failures:
+        raise ValueError('Linux host(s) did not answer SSH, so their Ubuntu jobs would not run; the gate stops instead of skipping them:\n'
+            + '\n'.join('  ' + h + ': ' + why for h, why in failures)
+            + '\nFix SSH to them (run as this user: ssh -o BatchMode=yes <host> true), or name the hosts this gate should use: '
+            + 'CI_LOCAL_LINUX_HOSTS=' + (','.join(h for h in configured if h not in dict(failures)) or '<host>') + '.')
+    return configured
 
 
 LINUX_JOBS = '/var/tmp/stm-ci'
@@ -476,7 +486,7 @@ def main():
             raise ValueError('Runner unavailable: '+runner)
         except Exception as error:
             return {'spec': spec, 'status':'FAIL', 'steps':[{'name':'Local runner','command':'','status':'FAIL','seconds':0,'note':str(error)}]}
-    # On the Mac, ubuntu jobs go to the Linux boxes: one lane per reachable box, lanes in parallel, while Apple jobs run here.
+    # On the Mac, ubuntu jobs go to the Linux boxes: one lane per configured box (each checked first), lanes in parallel, while Apple jobs run here.
     ubuntu = [i for i, spec in enumerate(jobs) if str(spec['job'].get('runs-on','')).startswith('ubuntu')]
     hosts = linux_hosts() if platform.system()=='Darwin' and ubuntu else []
     remote = ubuntu if hosts else []
