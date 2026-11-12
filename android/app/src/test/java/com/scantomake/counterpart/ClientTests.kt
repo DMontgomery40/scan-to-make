@@ -6,6 +6,7 @@ import com.scantomake.counterpart.api.keepFields
 import com.scantomake.counterpart.api.lacks
 import com.scantomake.counterpart.api.ColourMapping
 import com.scantomake.counterpart.api.CompanionClient
+import com.scantomake.counterpart.api.OnDeviceLibrary
 import com.scantomake.counterpart.api.ModelColourFilament
 import com.scantomake.counterpart.api.CompanionException
 import com.scantomake.counterpart.api.CounterpartEvent
@@ -184,6 +185,65 @@ class CompanionClientTests {
         assertEquals(false, java.io.File(first.parentFile, "model.stl.etag").exists())
         // The next version again: still one copy, still asked by its validator.
         assertEquals("solid model", companion.download(version(30), "model.stl").readText())
+    }
+
+    /** #748 (review of #741, P2): a file cached before its kind was kept goes into the library with the validator it was
+     *  fetched with, as the iPhone's `validator(of: target)`. Without it the next version asked with no If-None-Match and
+     *  downloaded the unchanged model again. */
+    @Test fun aCachedFileMovedIntoTheLibraryKeepsItsETagAndANewVersionIsAnswered304() = kotlinx.coroutines.runBlocking {
+        val etag = "\"sha256-model\""
+        val fake = FakeTransport { request, _ ->
+            when {
+                !request.url.endsWith("/model.stl") -> json(404, mapOf("error" to "not-found"))
+                request.headers.entries.any { it.key.equals("If-None-Match", true) && it.value == etag } -> HttpReply(304, ByteArray(0), mapOf("ETag" to etag))
+                else -> HttpReply(200, "solid model".toByteArray(), mapOf("ETag" to etag))
+            }
+        }
+        val store = PairingStore(MemoryStore()).apply { save(v2Record(), false) }
+        val dir = File(System.getProperty("java.io.tmpdir"), "cp-promote-${System.nanoTime()}")
+        val library = OnDeviceLibrary(File(dir, "library")).apply { use("m") }
+        val companion = CompanionClient(PairingClient(store, fake), fake, "Pixel 8", "David’s Pixel", File(dir, "cache"), library)
+        val pid = "0b6f0f43-7c35-4b8a-9a3c-8f0b4c4b2a12"
+        fun version(endedAt: Int) = Project.decode(parseObject("""{"id":"$pid","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[{"startedAtMs":${endedAt - 1},"endedAtMs":$endedAt,"status":"done"}]}""")!!)!!
+        fun asks() = fake.calls.map { it.request }.filter { it.url.endsWith("/model.stl") }
+        try {
+            // Fetched while models weren't kept: into the cache, with its validator beside it.
+            library.keep = OnDeviceLibrary.Keep.Pictures
+            companion.download(version(10), "model.stl")
+            assertEquals(1, asks().size)
+            // Now kept: the same version moves into the library without the network, carrying that validator.
+            library.keep = OnDeviceLibrary.Keep.Models
+            assertEquals("solid model", companion.download(version(10), "model.stl").readText())
+            assertEquals("promoted without asking the computer", 1, asks().size)
+            assertEquals(etag, library.entries.single { it.name == "model.stl" }.etag)
+            // The next version asks by that validator, and the 304 keeps the promoted copy.
+            assertEquals("solid model", companion.download(version(20), "model.stl").readText())
+            assertEquals(2, asks().size)
+            assertEquals(etag, asks().last().headers.entries.firstOrNull { it.key.equals("If-None-Match", true) }?.value)
+            assertEquals(20L, library.entries.single { it.name == "model.stl" }.version)
+        } finally { dir.deleteRecursively() }
+    }
+
+    /** #616 (#743): an earlier design's thumbnail and model come from `versions/<id>/…`, as CounterpartKit's
+     *  `testASealedDesignsFilesDownloadAndNothingElseUnderVersions`: the allowlist and the scope table both know it, and
+     *  nothing else under versions is fetched. Its It works / Needs changes names the design. */
+    @Test fun aSealedDesignsFilesDownloadAndNothingElseUnderVersions() = runBlocking {
+        val fake = FakeTransport { request, _ -> if (request.method == "PATCH") json(200, mapOf("object" to null)) else HttpReply(200, "png".toByteArray()) }
+        val companion = client(fake)
+        val project = Project.decode(parseObject("""{"id":"$id","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[]}""")!!)!!
+        val version = "2d67e062-42b7-4d91-ab77-212a490a5a65"
+        for (path in listOf("versions/$version/renders/0-1_overview.png", "versions/$version/touched.stl", "versions/$version/pictures/part-9080508a.png")) {
+            assertEquals(path, "png", companion.download(project, path).readText())
+        }
+        assertTrue(fake.calls.any { it.request.url.endsWith("/v1/objects/$id/versions/$version/renders/0-1_overview.png") })
+        assertEquals("projects:read", CompanionClient.scope("GET", "/v1/objects/$id/versions/$version/touched.stl"))
+        assertEquals("projects:read", CompanionClient.scope("GET", "/v1/objects/$id/versions/$version/renders/front.png"))
+        for (refused in listOf("versions/$version/../object.json", "versions/$version/design/inputs/scan.obj", "versions/not-a-design/touched.stl")) {
+            try { companion.download(project, refused); fail(refused) } catch (_: CompanionException) {}
+        }
+        companion.setStatus(id, com.scantomake.counterpart.api.ProjectStatus.Works, versionId = version)
+        val patch = fake.calls.last { it.request.method == "PATCH" }
+        assertEquals("""{"status":"works","versionId":"$version"}""", String(patch.request.body!!))
     }
 
     @Test fun scopes() {

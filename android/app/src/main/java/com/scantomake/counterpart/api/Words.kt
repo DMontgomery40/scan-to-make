@@ -126,6 +126,8 @@ class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolea
         }
 
         fun phase(project: Project, sending: Boolean = false): ProjectPhase {
+            // #616: a changed-but-printed project is Ready (its newest design), with the printed one still on its page.
+            DesignHistory(project).phase?.let { return it }
             if (project.state == Project.State.New) return if (sending) ProjectPhase.Sending else ProjectPhase.Draft
             if (project.projectStatus == ProjectStatus.Works &&
                 project.state in setOf(Project.State.Ready, Project.State.Printed, Project.State.Confirmed) && project.printConfirmation == null &&
@@ -259,7 +261,8 @@ class ProjectWords(project: Project, sending: Boolean = false, localScan: Boolea
         page = PageActions(project, phase, a, sending)
         // The Mac's own words win when it writes them, except while this phone is still sending.
         val mac = project.status?.takeIf { it.text.isNotEmpty() && project.state != Project.State.New }
-        line = if (mac != null && !(phase == ProjectPhase.Confirmed && mac.phase != ProjectPhase.Confirmed.wire)) mac.text else l
+        // #616: a computer that knows designs writes the two-truth line itself; with none written it is derived here.
+        line = if (mac != null && !(phase == ProjectPhase.Confirmed && mac.phase != ProjectPhase.Confirmed.wire)) mac.text else DesignHistory(project).line ?: l
     }
 }
 

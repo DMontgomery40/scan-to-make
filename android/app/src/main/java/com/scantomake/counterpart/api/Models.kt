@@ -168,6 +168,19 @@ data class Project(
         val spools: List<Spool>? = null,
     )
 
+    /** Sealed designs of this project, oldest first (#616); `prints`, every print attempt, each naming its design;
+     *  `historyRestored`, the plain line the computer wrote when it rebuilt them from its records. Older computers send none. */
+    val versions: List<DesignVersion>? by lazy { raw.opt<List<DesignVersion>>("versions") }
+    val prints: List<PrintAttempt>? by lazy { raw.opt<List<PrintAttempt>>("prints") }
+    val historyRestored: String? get() = raw["historyRestored"].str
+    /** What was asked and answered for the project this one was made from (Make something else from this scan, or
+     *  Duplicate), as the computer snapshotted it (#600). Its `fit` and per-item `from` are for the worker; ignored here. */
+    val inherited: InheritedHistory? by lazy { raw.opt<InheritedHistory>("inherited") }
+    @Serializable data class InheritedHistory(val from: Source, val items: List<Item> = emptyList()) {
+        @Serializable data class Source(val id: String, val title: String)
+        @Serializable data class Item(val at: Double, val who: String, val text: String)
+    }
+
     /** The project's picture (PRD §5.1): the object alone on the stage, as the computer drew it (`pictures/…png`). */
     val picture: String? get() = raw["picture"].str
     /** The project whose scan this one was made from, with its title then ("Make something else from this scan"). */

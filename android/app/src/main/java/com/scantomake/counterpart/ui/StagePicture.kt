@@ -41,6 +41,20 @@ import kotlinx.coroutines.withContext
  * progress mark and what is coming; not available, a symbol and one line, with Try again where a fetch failed. Never a
  * picture of something else. Its state is the `gallery-stage-picture` node's state description.
  */
+/** What the stage shows (iOS `StagePicture.Shows`). `Decoding`: the phone keeps this picture and is decoding it now (a few
+ *  milliseconds): the bare stage, never a spinner or "coming from your computer" for bytes already on the phone (#748;
+ *  review of #741, P2). Its state description is "loading", as on the iPhone. */
+enum class StageShows(val description: String) { Shown("shown"), Loading("loading"), Decoding("loading"), NotAvailable("not available") }
+
+/** The stage's state from what it has (pure, so the decoding case is unit-tested): a picture, a failed fetch, a kept copy. */
+fun stageShows(still: Still, hasImage: Boolean, failed: Boolean, libraryHas: Boolean): StageShows = when {
+    hasImage -> StageShows.Shown
+    still is Still.Picture && !failed && libraryHas -> StageShows.Decoding
+    still is Still.Picture && !failed -> StageShows.Loading
+    still == Still.Waiting -> StageShows.Loading
+    else -> StageShows.NotAvailable
+}
+
 @Composable
 fun StagePicture(project: Project, still: Still, label: String, unavailableLine: String, modifier: Modifier = Modifier) {
     val path = (still as? Still.Picture)?.path
@@ -63,23 +77,25 @@ fun StagePicture(project: Project, still: Still, label: String, unavailableLine:
     }
     val coming = "$label: coming from your computer"
     val image = bitmap
-    val line = when {
-        image != null -> "$label, as your computer drew it"
-        path != null && !failed -> coming
-        still == Still.Waiting -> coming
-        path != null -> "The picture didn't come from your computer."
-        else -> unavailableLine
+    val libraryHas = remember(key) { path != null && Counterpart.instance.companion.library?.latest(project.id, path) != null }
+    val shows = stageShows(still, image != null, failed, libraryHas)
+    val line = when (shows) {
+        StageShows.Shown, StageShows.Decoding -> "$label, as your computer drew it"
+        StageShows.Loading -> coming
+        StageShows.NotAvailable -> if (path != null) "The picture didn't come from your computer." else unavailableLine
     }
-    val shows = when { image != null -> "shown"; line == coming -> "loading"; else -> "not available" }
-    Box(modifier.stage().testTag("gallery-stage-picture").semantics { contentDescription = if (image != null) line else "$label. $line"; stateDescription = shows },
+    Box(modifier.stage().testTag("gallery-stage-picture").semantics {
+            contentDescription = if (shows == StageShows.Shown || shows == StageShows.Decoding) line else "$label. $line"; stateDescription = shows.description },
         contentAlignment = Alignment.Center) {
-        when {
-            image != null -> Image(image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-            shows == "loading" -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        when (shows) {
+            StageShows.Shown -> image?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
+            // The phone has it: the bare stage for the moment it takes to decode.
+            StageShows.Decoding -> Unit
+            StageShows.Loading -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 CircularProgressIndicator(Modifier.size(28.dp), color = Color.White.copy(alpha = 0.6f), strokeWidth = 2.dp)
                 Text(line, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
             }
-            else -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            StageShows.NotAvailable -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(CIcons.Cube, null, tint = Color.White.copy(alpha = 0.4f), modifier = Modifier.size(42.dp))
                 Text(line, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
                 if (path != null) TextButton(onClick = { failed = false; attempt++ }) { Text("Try again") }

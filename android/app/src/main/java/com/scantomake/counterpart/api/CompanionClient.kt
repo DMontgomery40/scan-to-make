@@ -86,7 +86,7 @@ class CompanionClient(
                     if (m("/v1/objects(?:/printers)?") || m(one) || m("$one/passes/(0|[1-9][0-9]{0,15})/activity")) return "projects:read"
                     if (m("/healthz")) return "generation:health"
                     if (m("/v1/events") || m("/v1/settings") || m("/v1/settings/cad") || m("/v1/devices")) return "projects:read"
-                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+)")) return "projects:read"
+                    if (m("$one/(model\\.stl|reconstruction-preview\\.stl|renders/[^/]+|photos/[^/]+|capture/[^/]+|scan/[^/]+|pictures/[^/]+|original/[0-9]+|asks/[^/]+|prints/[^/]+/frames/[^/]+|versions/[^/]+/(?:(?:renders|pictures)/)?[^/]+)")) return "projects:read"
                     if (m("$one/(filaments|colour-mapping|camera\\.jpg)") || m("/v1/objects/printers/[^/]+/camera\\.jpg")) return "printer-handoff:use"
                     if (m("/v1/objects/printers/[A-Za-z0-9_-]{1,256}/route")) return "printer-handoff:use"
                 }
@@ -273,7 +273,9 @@ class CompanionClient(
         val reply = send("PATCH", path, WireJson.encodeToString(JsonObject.serializer(), patch).toByteArray()).checked(path)
         return parseObject(reply.body)?.get("object").obj?.let(Project::decode)
     }
-    suspend fun setStatus(id: String, status: ProjectStatus) = changeProjectSettings(id, jsonOf("status" to status.wire))
+    /** The project's status; with [versionId], that earlier design's own It works / Needs changes (#616). */
+    suspend fun setStatus(id: String, status: ProjectStatus, versionId: String? = null) =
+        changeProjectSettings(id, jsonOf("status" to status.wire, "versionId" to versionId))
     suspend fun setArchived(id: String, archived: Boolean) = changeProjectSettings(id, jsonOf("archived" to archived))
     suspend fun rename(id: String, title: String) = changeProjectSettings(id, jsonOf("title" to title))
     suspend fun duplicate(id: String) = one(request("POST", "/v1/objects/$id/duplicate", JsonObject(emptyMap())))
@@ -380,7 +382,7 @@ class CompanionClient(
 
     // MARK: Files
 
-    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png""")
+    private val allowed = Pattern("""original/[0-9]+|model\.stl|renders/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|asks/[a-f0-9-]{36}\.(jpg|png)|prints/[a-f0-9-]{36}/frames/[a-f0-9-]{36}\.jpg|(?:photos|capture|scan)/[A-Za-z0-9][A-Za-z0-9._ -]{0,127}|pictures/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.png|versions/[a-f0-9-]{36}/(?:(?:renders|pictures)/)?[A-Za-z0-9][A-Za-z0-9._-]{0,120}""")
 
     /** The newest copy of this file the phone keeps, of any version: drawn at once, before (and whether or not) the computer answers. */
     fun stored(project: Project, name: String): File? = library?.latest(project.id, name)?.first
@@ -411,8 +413,9 @@ class CompanionClient(
         val target = File(folder, filename)
         if (target.exists()) {
             if (kept == null) return target
-            // Fetched before this kind was kept: into the library as it is, never over the network again.
-            runCatching { return kept.commit(target.readBytes(), project.id, name, project.mediaVersion, filename) }
+            // Fetched before this kind was kept: into the library as it is, with its validator (as the iPhone's
+            // `validator(of: target)`), so a later version is still answered 304 for unchanged bytes; never over the network again.
+            runCatching { return kept.commit(target.readBytes(), project.id, name, project.mediaVersion, filename, cachedValidator(target)) }
             return target
         }
         val path = "/v1/objects/${project.id}/${encodePath(resource)}"
