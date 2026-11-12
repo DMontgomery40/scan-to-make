@@ -82,6 +82,18 @@ export function sentWords(printer: string, bambuConnect: boolean): string {
   return bambuConnect ? 'Finish on your Mac: press Print in Bambu Connect' : `Sent to ${printer} · Counterpart can't follow this print`;
 }
 
+/**
+ * #630: the counterpart/1 problem code both MCPs give their `suspect_no_extrusion` verdict (a camera frame shows the
+ * expected print area empty after printing was attempted). Counterpart says it in its own words, below.
+ */
+export const NO_EXTRUSION = 'physical-no-extrusion';
+
+/** The line for a print whose camera shows nothing coming out of the nozzle: the notification, the card and the Live Activity. */
+export function noExtrusionWords(printer: string, firstLayer: boolean): string {
+  return `Nothing seems to be coming out of the nozzle on ${printer}: ${firstLayer ? "the first layer's area" : "the print's area"} is empty in the camera. The printer doesn't detect this itself. Check the print.`;
+}
+const noExtrusion = (data: CounterpartEvent['data']) => data?.problems?.find(problem => problem.code === NO_EXTRUSION);
+
 /** Short history lines for `print.events`, which older apps show as the print's log. */
 export const PRINT_LOG: Record<string, string> = {
   'print.started': 'The printer started it.',
@@ -95,7 +107,14 @@ export const PRINT_LOG: Record<string, string> = {
   'print.not-started': "The printer didn't start it.",
   'print.unreachable': 'Lost contact with the printer. Still trying.',
   'print.sent': "Sent. Counterpart can't follow this print.",
+  'print.check': 'The camera showed nothing coming out of the nozzle. Check the print.',
 };
+
+/** The print's log line for an event; a "done" after the camera showed nothing coming out says so instead. */
+export function printLogLine(type: string, data?: CounterpartEvent['data']): string | undefined {
+  if (type === 'print.done' && noExtrusion(data)) return "The printer says it's done, but the camera showed nothing coming out of the nozzle.";
+  return PRINT_LOG[type];
+}
 
 // ---------------------------------------------------------------------------
 // Event words (PRD §9.1; docs/protocols/events.md "Types, words and levels")
@@ -118,7 +137,7 @@ export const NOTIFY: Record<CounterpartEventType, NotifyLevel> = {
   'print.preparing': 'none', 'print.confirm': 'timeSensitive', 'print.started': 'passive',
   'print.status': 'none', 'print.first-layer': 'passive', 'print.milestone': 'active', 'print.paused': 'timeSensitive',
   'print.resumed': 'none', 'print.done': 'active', 'print.failed': 'timeSensitive', 'print.cancelled': 'passive',
-  'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive',
+  'print.not-started': 'timeSensitive', 'print.unreachable': 'passive', 'print.sent': 'passive', 'print.check': 'timeSensitive',
   'project.updated': 'none', 'project.deleted': 'none', 'settings.changed': 'none',
   'mcp.update.started': 'none', 'mcp.update.waiting': 'none', 'mcp.update.done': 'passive', 'mcp.update.failed': 'active',
 };
@@ -164,7 +183,11 @@ export function eventWords(type: CounterpartEventType, data: CounterpartEvent['d
     case 'print.milestone': title = milestoneTitle(t, data?.progress); body = joined(remaining ? `${remaining} left` : undefined, layers, printer); break;
     case 'print.paused': title = `${printer} paused ${t}`; body = problem ?? 'Open Counterpart to resume.'; break;
     case 'print.resumed': title = t; body = `Printing again on ${printer}`; break;
-    case 'print.done': title = `${t} is done`; body = 'Take it off the plate.'; break;
+    // A firmware "finished" isn't a part on the plate (#630): after the camera showed nothing coming out, it says so.
+    case 'print.done': if (noExtrusion(data)) { title = `${printer} says ${t} is done`; body = 'But the camera showed nothing coming out of the nozzle. Check the plate.'; }
+      else { title = `${t} is done`; body = 'Take it off the plate.'; } break;
+    // #630: never a control: the person looks, and pauses or stops it if they want to.
+    case 'print.check': title = `Check ${t} on ${printer}`; body = noExtrusion(data)?.message ?? noExtrusionWords(printer, false); break;
     case 'print.failed': title = `${printer} stopped ${t}`; body = printerStopped(data?.problems?.[0]); break;
     case 'print.cancelled': title = `${t} was cancelled`; body = 'Nothing more will print.'; break;
     // `reason`: the printer service refused it before anything reached the printer, in its own words.
@@ -198,7 +221,7 @@ export interface StatusSource extends TitleSource {
   failure?: string;
   passes?: {stages?: {words: string; endedAtMs?: number}[]; estimate?: {remainingSec: number}; endedAtMs?: number}[];
   print?: {destination?: {name: string}; dispatchedAt?: string; sentVia?: string;
-    live?: {state: string; job?: {progress?: number; remainingSec?: number; layer?: number; stage?: string}};
+    live?: {state: string; job?: {progress?: number; remainingSec?: number; layer?: number; stage?: string}; problems?: readonly {code: string; message: string}[]};
     monitor?: {phase: string; endedAt?: string}};
 }
 
@@ -247,6 +270,9 @@ export function objectStatus(object: StatusSource, updatedAtMs?: number): Object
       if (!object.print?.dispatchedAt || !watching || !live) return {phase: 'preparing', text: 'Getting the print ready', symbol: 'gearshape', tint: 'accent'};
       // The printer has the job but is still heating, cleaning or levelling: "Printing · 3%" would be a lie.
       if (printPreparing(live.state, live.job)) return {phase: 'preparing', text: joined('Getting ready', live.job?.stage).slice(0, 300), symbol: 'gearshape', tint: 'accent'};
+      // #630: the camera shows nothing coming out of the nozzle. Every layout shows this line, so it says that first.
+      const check = live.problems?.find(problem => problem.code === NO_EXTRUSION);
+      if (check) return {phase: 'printing', text: check.message.slice(0, 300), ...(rowDetail(check.message) ? {detail: rowDetail(check.message)} : {}), symbol: 'exclamationmark.triangle', tint: 'orange'};
       const progress = live.job?.progress !== undefined ? `${Math.round(live.job.progress)}%` : undefined;
       const left = live.job?.remainingSec !== undefined ? `${duration(live.job.remainingSec)} left` : undefined;
       const paused = live.state === 'paused';

@@ -34,7 +34,32 @@ export type CounterpartPrinterInfo = z.infer<typeof counterpartPrinterInfoSchema
 
 export const printStateSchema = z.enum(['idle', 'preparing', 'printing', 'paused', 'finished', 'failed', 'cancelled', 'offline', 'busy']);
 export type PrintState = z.infer<typeof printStateSchema>;
-const temp = z.object({actual: z.number().finite(), target: z.number().finite()});
+
+const savedId = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/i);
+const mm = z.number().finite();
+/** `progress.physical.assessment`: one saved frame the MCP asks the client's vision worker to judge (counterpart/1). */
+export const physicalAssessmentSchema = z.object({
+  required: z.boolean(),
+  frameId: savedId,
+  referenceFrameIds: z.array(savedId).max(16).catch([]),
+  layer: z.number().int().nonnegative(),
+  expectedHeightMm: mm.optional().catch(undefined),
+  /** The exact slice's deposition footprint at that layer: [minX, minY, maxX, maxY] in the printer's bed coordinates. */
+  expectedFootprintMm: z.tuple([mm, mm, mm, mm]),
+});
+export type PhysicalAssessment = z.infer<typeof physicalAssessmentSchema>;
+/**
+ * `progress.physical`. `status` stays a string so a status this version doesn't know is carried, not fatal;
+ * Counterpart acts only on `suspect_no_extrusion` (a clearly empty expected footprint after printing was attempted).
+ */
+export const physicalEvidenceSchema = z.object({
+  status: z.string().max(64),
+  evidence: z.array(z.string().max(64)).max(16).catch([]),
+  assessment: physicalAssessmentSchema.optional().catch(undefined),
+});
+export type PhysicalEvidence = z.infer<typeof physicalEvidenceSchema>;
+const temp =z.object({actual: z.number().finite(), target: z.number().finite()});
 export const counterpartPrintProgressSchema = z.object({
   contract: z.literal('counterpart/1'),
   observedAt: z.iso.datetime({offset: true}),
@@ -52,6 +77,12 @@ export const counterpartPrintProgressSchema = z.object({
     code: z.string().max(64), severity: z.enum(['fatal', 'error', 'warning', 'info']),
     message: z.string().max(500), url: z.url().optional(),
   })).max(32),
+  /**
+   * Physical evidence, kept apart from the firmware's state (#630): the MCP's verdict from saved camera frames and
+   * the client's visual observations, and the frame it wants a client vision worker to look at next. Lenient: an
+   * MCP that sends something this version can't read loses only this field, never the report.
+   */
+  physical: physicalEvidenceSchema.optional().catch(undefined),
 });
 export type CounterpartPrintProgress = z.infer<typeof counterpartPrintProgressSchema>;
 
@@ -79,6 +110,80 @@ export async function readPrintReport(session: PrinterSession, options: SessionC
   if (!parsed.success) throw new PrinterMcpError('invalid-progress');
   const {contract: _contract, ...report} = parsed.data;
   return {...report, source: 'counterpart'};
+}
+
+/** One saved camera frame of a print record, as `counterpart_print_record` describes it. */
+const recordFrameSchema = z.object({
+  id: savedId, role: z.string().max(32).optional(), layer: z.number().int().nonnegative(), status: z.string().max(32),
+  sha256: sha256Hex.optional(), imageContentIndex: z.number().int().positive().optional(),
+});
+const printRecordSchema = z.object({
+  contract: z.literal('counterpart/1'),
+  status: z.literal('recorded'),
+  record: z.object({id: savedId, dispatch: z.object({sha256: sha256Hex}), frames: z.array(z.looseObject({})).max(64)}),
+});
+export type PrintRecordFrame = z.infer<typeof recordFrameSchema> & {jpeg?: Buffer};
+/** The saved frames a client vision worker judges, bound to the exact job and artifact they belong to. */
+export interface PrintRecordFrames {jobId: string; artifactSha256: string; frames: PrintRecordFrame[]}
+
+/**
+ * `counterpart_print_record` with `frame_format: "images"` for up to four saved frames of the printer's latest job
+ * (#630). Reads the MCP's disk only: no printer contact. Undefined when the install lacks the tool, has no record,
+ * or the frames aren't part of its latest job (the request belonged to an earlier one).
+ */
+export async function readPrintRecordFrames(session: PrinterSession, frameIds: string[], options: SessionCallOptions = {}): Promise<PrintRecordFrames | undefined> {
+  if (!frameIds.length) return undefined;
+  await session.connect({...(options.signal ? {signal: options.signal} : {}), failFast: true});
+  if (!session.hasTool('counterpart_print_record')) return undefined;
+  let result;
+  try {
+    result = await session.call('counterpart_print_record', argsFor(session.getTool('counterpart_print_record'),
+      {...routeArgs(session.config), frame_format: 'images', frame_ids: frameIds.slice(0, 4)}), {timeoutMs: 20000, largeResult: true, ...options});
+  } catch (error) {
+    // A frame that isn't in the latest job is the MCP saying the request is stale: nothing to judge.
+    if (error instanceof PrinterMcpError && error.code === 'tool-failed') return undefined;
+    throw error;
+  }
+  const parsed = printRecordSchema.safeParse(toolResultJson(result));
+  if (!parsed.success) return undefined;
+  const content = (result.content ?? []) as {type: string; data?: string; mimeType?: string}[];
+  const frames: PrintRecordFrame[] = [];
+  for (const raw of parsed.data.record.frames) {
+    const frame = recordFrameSchema.safeParse(raw);
+    if (!frame.success || !frameIds.includes(frame.data.id)) continue;
+    const block = frame.data.imageContentIndex !== undefined ? content[frame.data.imageContentIndex] : undefined;
+    const jpeg = block?.type === 'image' && block.mimeType === 'image/jpeg' && typeof block.data === 'string' ? Buffer.from(block.data, 'base64') : undefined;
+    frames.push({...frame.data, ...(jpeg?.length ? {jpeg} : {})});
+  }
+  return {jobId: parsed.data.record.id, artifactSha256: parsed.data.record.dispatch.sha256, frames};
+}
+
+/** A client's visual observation of one saved frame, in `counterpart_print_assess`'s words. */
+export interface PrintAssessment {
+  jobId: string; artifactSha256: string; frameId: string; imageSha256: string;
+  visibility: 'clear' | 'dark' | 'occluded' | 'out_of_view' | 'unknown';
+  footprintVisible: boolean;
+  deposition: 'absent' | 'present' | 'unknown';
+  attempted: boolean;
+  reference?: {frameId: string; visibility: PrintAssessment['visibility']; empty: boolean};
+}
+
+/**
+ * `counterpart_print_assess`: saves the observation against the exact job, artifact and image hashes (local evidence
+ * in the MCP; no printer contact). Resolves to the MCP's physical verdict after it, when it says one.
+ */
+export async function submitPrintAssessment(session: PrinterSession, assessment: PrintAssessment, options: SessionCallOptions = {}): Promise<PhysicalEvidence | undefined> {
+  await session.connect({...(options.signal ? {signal: options.signal} : {}), failFast: true});
+  if (!session.hasTool('counterpart_print_assess')) return undefined;
+  const result = await session.call('counterpart_print_assess', argsFor(session.getTool('counterpart_print_assess'), {
+    ...routeArgs(session.config),
+    job_id: assessment.jobId, artifact_sha256: assessment.artifactSha256, frame_id: assessment.frameId, image_sha256: assessment.imageSha256,
+    visibility: assessment.visibility, footprint_visible: assessment.footprintVisible, deposition: assessment.deposition, attempted: assessment.attempted,
+    ...(assessment.reference ? {reference_frame_id: assessment.reference.frameId, reference_visibility: assessment.reference.visibility,
+      reference_empty: assessment.reference.empty} : {}),
+  }), {timeoutMs: 20000, largeResult: true, ...options});
+  const physical = physicalEvidenceSchema.safeParse((toolResultJson(result) as {physical?: unknown}).physical);
+  return physical.success ? physical.data : undefined;
 }
 
 /** `counterpart_printer_info`, when the install has it; undefined otherwise or when its result is invalid. */

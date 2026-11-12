@@ -20,6 +20,8 @@ export const COUNTERPART_EVENT_TYPES = [
   'print.preparing', 'print.confirm', 'print.started', 'print.status', 'print.first-layer',
   'print.milestone', 'print.paused', 'print.resumed', 'print.done', 'print.failed', 'print.cancelled',
   'print.not-started', 'print.unreachable', 'print.sent',
+  // #630: the printer's own camera shows something the printer doesn't detect itself (nothing coming out of the nozzle).
+  'print.check',
   // PRD §5.4: a project's status (or, later, its settings) changed.
   'project.updated',
   // A project and its files were deleted; `data.by` says from where.
@@ -167,7 +169,10 @@ export const PrintMonitorSchema = z.strictObject({
   /** The printer's report time of the last report that belonged to this print. */
   lastReportAt: iso.optional(),
   milestonesSent: z.array(z.number().int().min(1).max(99)).max(99),
+  /** "First layer's down" was said, from the camera showing plastic where the slice puts it (#630), never from counters. */
   firstLayerSent: z.boolean(),
+  /** `print.check` was sent for this print: once, even across a restart. */
+  checkSent: z.boolean().optional(),
   /** Set while the printer can't be reached (3 failed reads, or offline for 60 s). Never a failure by itself. */
   unreachableSince: iso.optional(),
   endState: MonitorEndSchema.optional(),

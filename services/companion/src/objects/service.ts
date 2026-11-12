@@ -11,6 +11,7 @@ import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, 
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession, type FilamentProposalInput} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
+import {checkPrintFrame, claudeVisionJudge} from '../printing/camera-check.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {defaultRunPublished, folderAccess, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
@@ -18,7 +19,7 @@ import {filamentProposalUnavailable, plateFilamentsUnavailable, ownSettingsUnava
 import type {RuntimeSettings} from '../runtime-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
-import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/words.js';
+import {PRINT_LOG, printEndFailure, printLogLine, projectTitle, sizeText} from '../events/words.js';
 import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind, type PassStage, type StageId} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
 import {copyDesign, isCodeDesign, type CodeDesign, type DesignSource} from '../touchup/code-engine.js';
@@ -2122,12 +2123,23 @@ export class ObjectService {
         await writeFile(join(this.dir(id), relative), frame.bytes, {mode: 0o600});
         return relative;
       },
+      keepFrame: async (eventId, jpeg) => {
+        const relative = join('prints', printId, 'frames', `${eventId}.jpg`);
+        await mkdir(join(this.dir(id), 'prints', printId, 'frames'), {recursive: true});
+        await writeFile(join(this.dir(id), relative), jpeg, {mode: 0o600});
+        return relative;
+      },
+      // #630: the MCP asks for a look at a saved frame; the person's own Claude login judges it. No worker: no check.
+      check: async (assessment, signal) => {
+        const worker = this.#deps.modelAccess?.claudeWorker();
+        return worker ? checkPrintFrame(session, assessment, claudeVisionJudge(worker), signal) : undefined;
+      },
       milestones: () => milestonesFor(this.#deps.settings?.current().milestones ?? '50'),
       adopted: async jobName => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, jobName}} : o)); },
       save: async (monitor, live) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, monitor, ...(live ? {live} : {})}} : o)); },
       end: async (end, report) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? this.#ended(o, end, report) : o)); },
       emit: async draft => {
-        const fixed = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : PRINT_LOG[draft.type];
+        const fixed = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : printLogLine(draft.type, draft.data);
         if (fixed) this.#changed(await this.#deps.store.update(id, o => {
           if (!ours(o)) return o;
           const events = o.print!.events ?? [];
@@ -2192,7 +2204,7 @@ export class ObjectService {
   async #emit(draft: EventDraft): Promise<void> {
     if (draft.printerName) draft = {...draft, printerName: this.#printerName(draft.destinationId, draft.printerName)};
     if (draft.projectId && draft.type.startsWith('print.') &&
-        !['print.confirm', 'print.paused', 'print.failed', 'print.not-started', 'print.unreachable', 'print.sent'].includes(draft.type)) {
+        !['print.confirm', 'print.paused', 'print.failed', 'print.not-started', 'print.unreachable', 'print.sent', 'print.check'].includes(draft.type)) {
       const object = await this.#deps.store.get(draft.projectId).catch(() => undefined);
       if (object?.preferences?.notifications === 'problems') draft = {...draft, notify: 'none'};
     }
