@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, drawnColour, photoPicture, still, filePath } from "../src/gallery";
+import { canLocate, gallery, drawnColour, photoPicture, still, filePath, stageStill, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
 import { designAnswer, designHistory, designThumbnail, inheritedConversation, sealedLine, showingDesign, twoTruthsLine, viewingLine } from "../src/designs";
 import {
   MAKE_FROM_SCAN, FIT_CHOICE, COPY_CHOICE, USE_EXISTING_SCAN, canMakeFromScan, scanLineage, scansToReuse, scannedLine,
@@ -1160,3 +1160,27 @@ test("inherited-history.json: a made project shows its source's conversation, re
   assert.equal(inheritedConversation(source!, [source!, made!]), undefined);
 });
 
+// #626: the stage never says a picture is coming forever.
+test("a picture the computer never draws settles into a reason with Try again, never an endless coming (#626)", () => {
+  // As a Linux companion leaves it: an STL result, no renders, no pictures, no pictureStates.
+  const linux = { ...project, id: "l", state: "ready", current: { model: "current/model.stl", renders: [] } } as Project;
+  const entry = gallery(linux)[0]!;
+  assert.equal(still(linux, entry), "waiting");
+  assert.deepEqual(stageStill(linux, "waiting", entry.label, "x", 0, entry.kind), { state: "waiting", line: "Your part: coming from your computer" });
+  assert.deepEqual(stageStill(linux, "waiting", entry.label, "x", PICTURE_PATIENCE_MS, entry.kind), { state: "not available", line: NOT_DRAWN_LINE, retry: true });
+  // While a pass runs, or while the computer says it is drawing it, it is still coming.
+  assert.equal(stageStill({ ...linux, state: "touching-up" }, "waiting", entry.label, "x", 10 * PICTURE_PATIENCE_MS, entry.kind).state, "waiting");
+  assert.equal(stageStill({ ...linux, pictureStates: { part: "drawing" } }, "waiting", entry.label, "x", 10 * PICTURE_PATIENCE_MS, entry.kind).state, "waiting");
+  // A failed drawing says so at once; a picture shows.
+  assert.equal(still({ ...linux, pictureStates: { part: "failed" } }, entry), "not available");
+  assert.deepEqual(stageStill(linux, "not available", entry.label, "Your computer couldn't draw a picture of this.", 0, entry.kind),
+    { state: "not available", line: "Your computer couldn't draw a picture of this.", retry: false });
+  assert.deepEqual(stageStill(linux, { picture: "renders/front.png" }, entry.label, "x", 0, entry.kind), { state: "picture", picture: "renders/front.png" });
+  // A draft with nothing to show yet ends in its own line.
+  assert.deepEqual(stageStill({ ...linux, state: "new" }, "waiting", "Your project", "Nothing to show yet.", PICTURE_PATIENCE_MS),
+    { state: "not available", line: "Nothing to show yet.", retry: false });
+  // A scan's picture (no Linux route to draw it) settles too.
+  const scanned = { ...linux, scan: "scan.usdz" } as Project;
+  const scanEntry = gallery(scanned).find((e) => e.kind === "scan")!;
+  assert.equal(stageStill(scanned, still(scanned, scanEntry), scanEntry.label, "x", PICTURE_PATIENCE_MS, scanEntry.kind).state, "not available");
+});

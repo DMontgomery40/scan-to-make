@@ -174,3 +174,27 @@ export function drawnColour(colour: Colour): Colour {
   return "#" + rgb.map((c) => Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, "0").toUpperCase()).join("");
 }
 
+/**
+ * How long the stage says a picture is coming while nothing is running before it settles (#626). The computer draws a
+ * picture in seconds after a pass; a companion that can't draw one (Linux) never says so, so "coming" must end.
+ */
+export const PICTURE_PATIENCE_MS = 20_000;
+export const NOT_DRAWN_LINE = "Your computer hasn't drawn a picture of this.";
+/**
+ * The stage's one still, settled (#626; CounterpartKit `StagePicture`): the picture; "waiting" with one line while
+ * something is running or the computer says it is drawing it, or for a short while after; then a plain reason with
+ * Try Again, never an endless "coming from your computer". `waitedMs` is how long this page has waited for it.
+ */
+export type StageStillState =
+  | { state: "picture"; picture: string }
+  | { state: "waiting"; line: string }
+  | { state: "not available"; line: string; retry: boolean };
+export function stageStill(p: Project, shown: Still, label: string, unavailableLine: string, waitedMs: number, role?: GalleryKind): StageStillState {
+  if (typeof shown === "object") return { state: "picture", picture: shown.picture };
+  if (shown === "not available") return { state: "not available", line: unavailableLine, retry: false };
+  const key = role === "together" ? "together" : role === "scan" ? "scan" : role === "part" ? "part" : undefined;
+  const busy = p.state === "touching-up" || (key !== undefined && p.pictureStates?.[key] === "drawing");
+  if (busy || waitedMs < PICTURE_PATIENCE_MS) return { state: "waiting", line: `${label}: coming from your computer` };
+  // Nothing is running and no picture came: say so, and Try Again waits once more (a picture that arrives shows at once).
+  return { state: "not available", line: role ? NOT_DRAWN_LINE : unavailableLine, retry: !!role };
+}
