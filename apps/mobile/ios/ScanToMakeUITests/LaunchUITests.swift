@@ -624,6 +624,7 @@ final class LayoutParityUITests: XCTestCase {
         printed.tap()
         let bar = app.descendants(matching: .any).matching(identifier: "viewing-earlier-design").firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["status-menu"].exists, "the project's status waits until the newest design is shown again")
         let viewing = XCTAttachment(screenshot: app.screenshot()); viewing.name = "Design history — the printed design on the stage"; viewing.lifetime = .keepAlways; add(viewing)
         let newest = app.buttons["Show the newest"]
         scrollProjectPage(app, until: newest)
