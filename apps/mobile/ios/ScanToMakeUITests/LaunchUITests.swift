@@ -2532,8 +2532,9 @@ final class OnDeviceLibraryUITests: XCTestCase {
     /// live view loaded it, but the stage that stayed on screen never ran its `.task` (`stage.appear` and
     /// `stage.disappear` in the same millisecond, no `stage.begin`): no still, no size. So the stage must also reach its
     /// still ("still"), which only its load gives. Explore in 3D alone shows on a stage whose load never ran. Twice: the
-    /// model 1.5 s after the push, and 70 ms after it, as on the phone. The simulator has not yet reproduced the instant
-    /// disappear; this guards the path either way.
+    /// model 1.5 s after the push, and 70 ms after it, as on the phone. The iPhone simulator does show the instant
+    /// disappear on Mic mount's opens (this PR's run, Nov 12: `stage.appear` and `stage.disappear` in one millisecond,
+    /// then `stage.begin` 60 ms later). Whether this test fails without the stage's start from `body` was not run.
     func testAModelThatArrivesJustAfterThePageOpensIsOnTheStageWithProjectsPresent() throws {
         for delay in ["1.5", "0.07"] { try openWithTheModelLate(delay) }
     }
