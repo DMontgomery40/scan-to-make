@@ -13,6 +13,7 @@ import {
   passHeading,
   sizeFields,
   sizesAnswer,
+  sizesParams,
   sizesUnchanged,
   sizeSource,
   KNOWN_ASK_KINDS,
@@ -879,8 +880,7 @@ test("a size question is number fields with the companion's labels, prefilled, w
   assert.equal(sizeFields({ kind: "closeup", sizes: ask.sizes }), undefined);
   assert.equal(sizeFields({ kind: "sizes", sizes: [] }), undefined);
   assert.equal(sizeFields(undefined), undefined);
-  assert.equal(sizeSource("published"), "from the maker");
-  assert.equal(sizeSource("scan"), "from your scan");
+  assert.equal(sizeSource("scan"), "Read from your scan");
   assert.deepEqual(KNOWN_ASK_KINDS, ["closeup", "file", "choice", "region", "scale", "sizes"]);
   // The same forms on every client (F8): digits with at most one decimal part.
   const typed = (text: string) => sizesAnswer([{ ...fields[0], text }])?.[0].mm;
@@ -895,6 +895,25 @@ test("a size question is number fields with the companion's labels, prefilled, w
   for (const kind of KNOWN_ASK_KINDS) assert.equal(askAnswerable({ kind }), true, kind);
   assert.equal(askAnswerable({}), true);
   assert.equal(askAnswerable({ kind: "colour" }), false);
+});
+
+// #622: the Forester phone mount (packages/contracts/fixtures/size-sources.json, which CounterpartKit, Android and the
+// companion read too). Each field says where the computer's number came from, a published one with its product and
+// where it was published; an untouched number goes as accepted and only a typed one as measured.
+test("each size keeps its source, and only a number the person typed is sent as measured", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/size-sources.json", import.meta.url), "utf8"));
+  for (const row of doc.words) assert.equal(sizeSource(row.from, row.product, row.reference), row.other, row.from);
+  const fields = sizeFields(doc.ask)!;
+  assert.deepEqual(fields.map((f) => sizeSource(f.from, f.product, f.reference)), [
+    "Published for JETech clear case for iPhone 16 Pro · example.invalid", "Published for JETech clear case for iPhone 16 Pro · JETech product listing (placeholder)",
+    "Your computer's estimate, not measured", "Read from your scan", "Published size, product not named"]);
+  for (const answer of doc.answers) {
+    const edited = fields.map((f) => (f.id in answer.edits ? { ...f, text: answer.edits[f.id] } : f));
+    assert.deepEqual(sizesParams(edited), { sizes: answer.sizes, measured: answer.measured }, answer.name);
+    assert.equal(sizesUnchanged(edited), answer.unchanged, answer.name);
+    assert.deepEqual(sizesCarried(edited), answer.sizes, answer.name);
+  }
+  assert.equal(sizesParams(fields.map((f) => ({ ...f, text: "" }))), undefined);
 });
 
 test("an ended pass from an older companion is worded from its status, never headed Working", () => {
@@ -1068,4 +1087,18 @@ test("a wait or a start that never hears back says so, and any other word stops 
   clock.stop();
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.deepEqual(expired, [reply.update.mcpId, "stuck"], "stopping clears every clock");
+});
+
+// #630: the companion's "nothing is coming out of the nozzle" line, from the fixture every client decodes. The Print tab
+// lists `print.live.problems` and every row and header shows `words()`: both are the line, with no Linux-only copy.
+test("a print whose camera shows nothing coming out says so on its card and in its Print tab", () => {
+  const doc = JSON.parse(readFileSync(new URL("../../../packages/contracts/fixtures/print-check.json", import.meta.url), "utf8"));
+  const project = doc.project as Project;
+  assert.equal(words(project), doc.line);
+  assert.equal(project.print?.live?.problems[0]?.message, doc.line);
+  assert.equal(doc.event.type, "print.check");
+  assert.equal(doc.event.body, doc.line);
+  // After the printer says it finished, the card keeps the warning.
+  assert.equal(words(doc.printedProject as Project), doc.printedProject.status.text);
+  assert.ok(words(doc.printedProject as Project).endsWith(doc.line), "the printer MCP's own words");
 });

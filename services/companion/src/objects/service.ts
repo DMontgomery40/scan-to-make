@@ -11,6 +11,7 @@ import {type PrintAsk, DispatchedPrintError, PrinterMcpError, inspectModelFile, 
   type PrintProgress, type PendingElicitation, type PrinterHandoffConfig, type PrinterSelection, type PrinterSlicer, type PrintReport, type PrinterSession, type FilamentProposalInput} from '@scan-to-make/printer-handoff';
 import type {PrintEstimate, PrintSettings, ProjectStatus, ProjectSettingsPatch} from '@scan-to-make/contracts/counterpart';
 import {PrintMonitorRunner, matchJob, milestonesFor, type EventDraft, type MonitorClock, type MonitorEnd, type MonitorTarget} from '../printing/monitor.js';
+import {checkPrintFrame, claudeVisionJudge} from '../printing/camera-check.js';
 import {CameraFrames, CameraUnavailableError, type CameraFrame, type CameraSize} from '../printing/camera.js';
 import {PrinterUpdatingError, type PrintGate} from '../printing/print-gate.js';
 import {defaultRunPublished, folderAccess, publishedLink, type PublishedModel, type PublishedPassInput, type PublishedResult} from '../published/published.js';
@@ -18,7 +19,7 @@ import {filamentProposalUnavailable, plateFilamentsUnavailable, ownSettingsUnava
 import type {RuntimeSettings} from '../runtime-settings.js';
 import type {CompanionSettingsStore} from '../settings.js';
 import type {CompanionSettingsPatch} from '@scan-to-make/contracts/counterpart';
-import {PRINT_LOG, printEndFailure, projectTitle, sizeText} from '../events/words.js';
+import {PRINT_LOG, printEndFailure, printLogLine, printedOut, projectTitle, sizeText} from '../events/words.js';
 import {PassTimings, STAGE_DEFAULT_SEC, passEstimate, stageWords, type PassKind, type PassStage, type StageId} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
 import {copyDesign, isCodeDesign, type CodeDesign, type DesignSource} from '../touchup/code-engine.js';
@@ -40,14 +41,16 @@ import {EstimateSupersededError, InvalidStateError, SlicerRefusedError} from './
 import type {TouchupInput} from '../touchup/touchup.js';
 import {carriedSeats, scanBoundsFromObj, seatsProblem, stlBounds, stlFileBounds, type Bounds, type Seat} from './seats.js';
 import {createCaptureConverter} from '../capture-converter.js';
-import {ProjectPictures, leadPicture, type DrawPicture} from './pictures.js';
+import {ProjectPictures, VersionPictures, leadPicture, type DrawPicture} from './pictures.js';
 import {publicTouchupText, limitWords, type TouchupActivity, type TouchupResult} from '../touchup/runner.js';
 import {ObjectNotFoundError, ObjectStore, restoreLocate, type LocateSnapshot, type ObjectPrintConfirmation, type StmObject} from './store.js';
 import {fitRequest, workerRequest} from './fit.js';
 import {inheritHistory} from './inherited.js';
-import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesNote, withCheckedSizes} from './asks.js';
-/** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers; any together. */
-export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]};
+import {sealVersion} from './versions.js';
+import {answeredSizes, askKind, InvalidSizesError, mergeCheckedSizes, sizesMessage, sizesNote, withCheckedSizes} from './asks.js';
+/** An answer to an open question: photos, words, Best Guess, and for a sizes question its numbers with `measured`,
+ *  the ids the person typed or edited (contracts `SizesAnswerSchema`); any together. */
+export type AskAnswer = {bestGuess?: boolean; text?: string; photoNames?: string[]; sizes?: {id: string; mm: number}[]; measured?: string[]};
 import {AskSchema, type Fit} from '@scan-to-make/contracts/counterpart';
 import {lastDesignPass, passResume, withPassEnded, type PassEnd} from './pass-end.js';
 import {readFilamentProposal, type FilamentProposal, type ProposalTray} from './filament-proposal.js';
@@ -546,6 +549,11 @@ export class ObjectService {
   #closed = false;
   constructor(deps: ObjectServiceDeps) {
     this.#deps = deps;
+    this.#versionPictures = new VersionPictures(deps.drawPicture, id => deps.store.get(id), async (id, versionId, names, states) => {
+      const updated = await deps.store.update(id, o => ({...o, versions: o.versions?.map(v => v.id !== versionId ? v : {...v, pictures: names, picture: names.part, pictureStates: states})}), {keepUpdatedAt: true});
+      deps.onChange?.(updated);
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['versions']}});
+    });
     this.#pictures = new ProjectPictures(deps.drawPicture, async (id, names, _object, states) => {
       // A redrawn picture is not news: the project keeps its place on Home and in the sidebar.
       const updated = await deps.store.update(id, o => {
@@ -558,6 +566,7 @@ export class ObjectService {
     }, id => deps.store.get(id));
   }
   readonly #pictures: ProjectPictures;
+  readonly #versionPictures: VersionPictures;
   /** Waits for the pictures being drawn (tests). */
   picturesDrawn(): Promise<void> { return this.#pictures.idle(); }
 
@@ -640,9 +649,9 @@ export class ObjectService {
       if (patch.designEngine === 'fusion' && passKind(object) === 'copy')
         throw new InvalidStateError('Scanned copies are cleaned up by the code design engine, or Blender without it.');
       // Validate all new fields before applying the existing status/archive actions.
-      if (patch.status !== undefined) object = await this.#setStatusNow(id, patch.status);
+      if (patch.status !== undefined) object = await this.#setStatusNow(id, patch.status, patch.versionId);
       if (patch.archived !== undefined) object = await this.#setArchivedNow(id, object, patch.archived);
-      const keys = Object.keys(patch).filter(key => key !== 'status' && key !== 'archived');
+      const keys = Object.keys(patch).filter(key => key !== 'status' && key !== 'archived' && key !== 'versionId');
       if (!keys.length) return object;
       const updated = await this.#deps.store.update(id, o => {
         const preferences = {...o.preferences};
@@ -702,8 +711,11 @@ export class ObjectService {
           title: `${projectTitle(source).slice(0, 114)} copy`, printerDestinationId: source.printerDestinationId,
           preferences: {...source.preferences, printDefaults: this.#resolvedPrintDefaults(source)}, ...(credit ? {credit} : {}),
           ...(files ? {files} : {}), ...(publishedSelection ? {publishedSelection} : {}), ...(scan ? {scan} : {})}));
-        await this.#emit({id: randomUUID(), type: 'project.updated', projectId: result.id, data: {keys: ['created']}});
-        return this.#changed(result);
+        // Born with its design sealed (review finding 5), so its first print names a design like any other project's.
+        const sealed = result.kind !== 'published' ? await sealVersion(result, this.dir(result.id), current, {endedAtMs: Date.now()}) : undefined;
+        const born = sealed ? await this.#deps.store.update(result.id, o => ({...o, versions: [sealed]}), {keepUpdatedAt: true}) : result;
+        await this.#emit({id: randomUUID(), type: 'project.updated', projectId: born.id, data: {keys: ['created']}});
+        return this.#changed(born);
       } catch (error) { await this.#deps.store.remove(duplicate.id); throw error; }
     });
   }
@@ -833,8 +845,25 @@ export class ObjectService {
   setStatus(id: string, status: ProjectStatus): Promise<StmObject> {
     return this.#gate(id, () => this.#setStatusNow(id, status));
   }
-  async #setStatusNow(id: string, status: ProjectStatus): Promise<StmObject> {
+  async #setStatusNow(id: string, status: ProjectStatus, versionId?: string): Promise<StmObject> {
     const object = await this.get(id);
+    const target = versionId ? object.versions?.find(v => v.id === versionId) : object.versions?.at(-1);
+    if (versionId && !target) throw new InvalidStateError('That design is no longer available.');
+    if ((!target || target.id === object.versions?.at(-1)?.id) && (object.state === 'touching-up' || object.state === 'printing')) throw new InvalidStateError('Wait until the current step finishes.');
+    let answered: StmObject | undefined;
+    if (target && status !== 'archived') {
+      // "Not printed" takes back a hand-set Printed as well as the answer (review finding 4); a print the monitor saw end
+      // `done` is still on record in `prints` and still counts.
+      const {printedAtMs: _printed, ...rest} = target;
+      const version = {...(status === 'not-printed' ? rest : target), outcome: status === 'works' || status === 'needs-changes' ? status : undefined,
+        ...(status === 'printed' || status === 'works' ? {printedAtMs: target.printedAtMs ?? Date.now()} : {})};
+      if (version.outcome === undefined) delete version.outcome;
+      answered = await this.#deps.store.update(id, o => ({...o, versions: o.versions?.map(v => v.id === target.id ? version : v)}));
+      if (target.id !== object.versions?.at(-1)?.id) {
+        await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['versions']}});
+        return this.#changed(answered);
+      }
+    }
     // Already there (the state itself, not just the label: a sent project marked printed is a real change).
     // `archived` is its own flag (setArchived); the status alias `archived` still hides it.
     if (status === 'archived') return this.#setArchivedNow(id, object, true);
@@ -842,7 +871,13 @@ export class ObjectService {
     const there = {works: object.state === 'confirmed', printed: object.state === 'printed' && clean,
       'needs-changes': object.outcome === 'needs-changes',
       'not-printed': clean && (object.current ? object.state === 'ready' : !['printed', 'confirmed', 'sent'].includes(object.state))}[status];
-    if (there && !(status === 'works' && object.pendingFollowup) && !(object.publishedSelection && ['works', 'printed', 'not-printed'].includes(status))) return object;
+    if (there && !(status === 'works' && object.pendingFollowup) && !(object.publishedSelection && ['works', 'printed', 'not-printed'].includes(status))) {
+      // The project's own status was already this, but the newest design's answer may just have been written: say so,
+      // and answer with the project as it now is (review finding 4), never the copy read before the write.
+      if (!answered) return object;
+      await this.#emit({id: randomUUID(), type: 'project.updated', projectId: id, data: {keys: ['versions']}});
+      return this.#changed(answered);
+    }
     if (object.state === 'touching-up' || object.state === 'printing') throw new InvalidStateError('Wait until the current step finishes.');
     if ((status === 'works' || status === 'printed') && !object.current) throw new InvalidStateError("There's no model yet, so it can't be marked printed.");
     const updated = await this.#deps.store.update(id, o => {
@@ -934,7 +969,7 @@ export class ObjectService {
     // Whether each 3MF prints with its own settings, asked once per file and in the background.
     for (const object of objects) void this.#askOwnSettings(object);
     // Each project's picture, drawn once when what it shows changes (PRD §5.1).
-    for (const object of objects) this.#pictures.ensure(object, this.dir(object.id));
+    for (const object of objects) { this.#pictures.ensure(object, this.dir(object.id)); this.#versionPictures.ensure(object, this.dir(object.id)); }
     return objects;
   }
 
@@ -1041,11 +1076,16 @@ export class ObjectService {
    * as it was on disk and is only read this way.
    */
   named(object: StmObject): StmObject {
-    const destination = object.print?.destination;
     // A snapshot from before names were stored has none to correct.
-    if (typeof destination?.name !== 'string') return object;
-    const name = this.#printerName(destination.id, destination.name);
-    return name === destination.name ? object : {...object, print: {...object.print!, destination: {...destination, name}}};
+    const rename = <T extends {destination?: {id: string; name: string}}>(record: T): T => {
+      const destination = record.destination;
+      if (typeof destination?.name !== 'string') return record;
+      const name = this.#printerName(destination.id, destination.name);
+      return name === destination.name ? record : {...record, destination: {...destination, name}};
+    };
+    // Every kept attempt (#616) carries the same snapshot as the last print, so it is read the same way.
+    const print = object.print ? rename(object.print) : undefined, prints = object.prints?.map(rename);
+    return print === object.print && (prints ?? []).every((p, i) => p === object.prints![i]) ? object : {...object, ...(print ? {print} : {}), ...(prints ? {prints} : {})};
   }
 
   /**
@@ -1766,10 +1806,10 @@ export class ObjectService {
     // Only this answer's explicit attachments belong to it. Other pending photos may already
     // be reserved by a correction queued on either client; Best Guess and text claim none.
     const photos = [...new Set(answer.photoNames ?? [])];
-    // Numbers for a sizes question: the ones it listed, confirmed or corrected. They may come with words and a photo.
+    // Numbers for a sizes question: the ones it listed, accepted as asked or measured. They may come with words and a photo.
     let sizes: ReturnType<typeof answeredSizes> | undefined;
     if (answer.sizes !== undefined) {
-      try { sizes = answeredSizes(askKind(object) === 'sizes' ? object.ask : undefined, answer.sizes); }
+      try { sizes = answeredSizes(askKind(object) === 'sizes' ? object.ask : undefined, answer.sizes, answer.measured); }
       catch (error) { if (error instanceof InvalidSizesError) throw new InvalidStateError(error.message); throw error; }
     }
     if (!photos.length && !answer.bestGuess && !answer.text?.trim() && !sizes) throw new InvalidStateError('Choose photos for this answer, answer in words, or use Best Guess. If you already chose photos, update Counterpart and try again.');
@@ -1785,7 +1825,7 @@ export class ObjectService {
       const fit = sizes ? withCheckedSizes(o, sizes) : o.fit;
       return {...o, ask: {...o.ask, status: 'answered'}, ...(sizes ? {checkedSizes: mergeCheckedSizes(o.checkedSizes, sizes)} : {}), ...(fit ? {fit} : {})};
     });
-    const shown = answer.text?.trim() ?? (sizes ? sizes.map(size => `${size.label}: ${size.mm} mm`).join('\n') : answer.bestGuess ? 'Use your best guess.' : '');
+    const shown = answer.text?.trim() ?? (sizes ? sizesMessage(sizes) : answer.bestGuess ? 'Use your best guess.' : '');
     const updated = await this.#message(await this.get(id), shown, photos, false);
     const message = updated.messages!.find(item => item.id === updated.pendingMessageId)!;
     return this.#pass(updated, {...(parts.length ? {note: parts.join('\n')} : {}), messageId: message.id, photos: message.photos, trigger: 'ask-answer'});
@@ -1879,7 +1919,15 @@ export class ObjectService {
     const manifest = await bundles.create({...(object.kind === 'published' || isMultipart(object) ? {model: {bytes: stl, format: isMultipart(object) ? '3mf' as const : 'stl' as const}} : {stl}), prompt: '', backend: runner.backend, ...(selected ? {selection:selected} : {})});
     const printId = randomUUID();
     const plate = selectedPlateIdentity(object);
-    const print = {bundleId: manifest.id, printId, ...(plate ? {plate} : {}), ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
+    // Every print names the design it printed (#616). A designed project with a model and no sealed design yet (made
+    // before designs were kept, or by a path that doesn't seal) has its model sealed now, so this print can't be orphaned.
+    let design = object.versions?.at(-1);
+    if (!design && object.kind !== 'published' && object.current) {
+      const sealed = await sealVersion(object, this.dir(id), object.current, {endedAtMs: Date.now()});
+      await this.#deps.store.update(id, o => ({...o, versions: [...(o.versions ?? []), sealed]}), {keepUpdatedAt: true});
+      design = sealed;
+    }
+    const print = {bundleId: manifest.id, printId, ...(design ? {versionId: design.id} : {}), ...(plate ? {plate} : {}), ...(printDestination ? {destination: printDestination, destinationId: printDestination.id} : {}),
       ...(Object.keys(settings).length ? {settings} : {})};
     // PRD §8.10: held from here until the dispatch ends, so the printer's MCP isn't updated under it.
     let release: () => void = () => undefined;
@@ -2122,12 +2170,23 @@ export class ObjectService {
         await writeFile(join(this.dir(id), relative), frame.bytes, {mode: 0o600});
         return relative;
       },
+      keepFrame: async (eventId, jpeg) => {
+        const relative = join('prints', printId, 'frames', `${eventId}.jpg`);
+        await mkdir(join(this.dir(id), 'prints', printId, 'frames'), {recursive: true});
+        await writeFile(join(this.dir(id), relative), jpeg, {mode: 0o600});
+        return relative;
+      },
+      // #630: the MCP asks for a look at a saved frame; the person's own Claude login judges it. No worker: no check.
+      check: async (assessment, signal) => {
+        const worker = this.#deps.modelAccess?.claudeWorker();
+        return worker ? checkPrintFrame(session, assessment, claudeVisionJudge(worker), signal) : 'no-worker';
+      },
       milestones: () => milestonesFor(this.#deps.settings?.current().milestones ?? '50'),
       adopted: async jobName => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, jobName}} : o)); },
       save: async (monitor, live) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? {...o, print: {...o.print!, monitor, ...(live ? {live} : {})}} : o)); },
       end: async (end, report) => { this.#changed(await this.#deps.store.update(id, o => ours(o) ? this.#ended(o, end, report) : o)); },
       emit: async draft => {
-        const fixed = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : PRINT_LOG[draft.type];
+        const fixed = draft.type === 'print.milestone' && draft.data?.progress !== 50 ? `${draft.data?.progress}% done.` : printLogLine(draft.type, draft.data, draft.detail?.reason);
         if (fixed) this.#changed(await this.#deps.store.update(id, o => {
           if (!ours(o)) return o;
           const events = o.print!.events ?? [];
@@ -2192,7 +2251,7 @@ export class ObjectService {
   async #emit(draft: EventDraft): Promise<void> {
     if (draft.printerName) draft = {...draft, printerName: this.#printerName(draft.destinationId, draft.printerName)};
     if (draft.projectId && draft.type.startsWith('print.') &&
-        !['print.confirm', 'print.paused', 'print.failed', 'print.not-started', 'print.unreachable', 'print.sent'].includes(draft.type)) {
+        !['print.confirm', 'print.paused', 'print.failed', 'print.not-started', 'print.unreachable', 'print.sent', 'print.check'].includes(draft.type)) {
       const object = await this.#deps.store.get(draft.projectId).catch(() => undefined);
       if (object?.preferences?.notifications === 'problems') draft = {...draft, notify: 'none'};
     }
@@ -3506,10 +3565,16 @@ export class ObjectService {
       : {status: result.status};
     // A changed model hasn't been shown to work yet: its first print asks "Did it fit?" again. A pass that
     // changed nothing leaves the outcome alone, and a Done project stays Done.
-    const changed = !!current && result.status !== 'unchanged';
+    const beforeSeal = await store.get(id);
+    const pass = beforeSeal.passes.find(p => p.startedAtMs === startedAtMs);
+    // A pass that said it changed nothing keeps the design it started from, even when its file was written again.
+    const kept = result.status === 'unchanged' ? beforeSeal.versions?.at(-1) : undefined;
+    const version = kept ?? (current && (result.status === 'done' || result.status === 'unchanged') ? await sealVersion(beforeSeal, dir, current, {startedAtMs, endedAtMs: now, ...(pass?.note ? {note: pass.note} : {})}) : undefined);
+    const changed = !!version && !beforeSeal.versions?.some(v => v.id === version.id);
     const updated = await store.update(id, o => ({...(changed ? (({outcome: _outcome, ...rest}) => rest)(o) : o),
       state: state === 'ready' && !changed && o.outcome === 'works' ? 'confirmed' : state, progress: undefined,
       ...(current ? {current} : {}),
+      ...(version && changed ? {versions: [...(o.versions ?? []), version]} : {}),
       ...(!o.title && result.title ? {title: result.title} : {}),
       ...(o.kind ? {} : {kind}),
       ...(ask ? {ask} : {}),
@@ -3526,7 +3591,8 @@ export class ObjectService {
     const saving = updated.passes.find(p => p.startedAtMs === startedAtMs)?.stages?.find(item => item.id === 'saving');
     if (saving?.endedAtMs !== undefined) void this.#deps.passTimings?.record(kind, result.engine ?? 'blender', 'saving', (saving.endedAtMs - saving.startedAtMs) / 1000).catch(() => undefined);
     const size = sizeText(updated.current?.sizeMm);
-    if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size ? {detail: {size}} : {})});
+    const printedBefore = changed && (updated.versions ?? []).slice(0, -1).some(v => v.printedAtMs !== undefined || updated.prints?.some(p => p.versionId === v.id && printedOut(p)));
+    if (state === 'ready') await this.#emit({id: randomUUID(), type: 'pass.ready', projectId: id, ...(size || printedBefore ? {detail: {...(size ? {size} : {}), ...(printedBefore ? {printedBefore} : {})}} : {})});
     else if (state === 'needs-closeup') await this.#emit({id: randomUUID(), type: 'pass.ask', projectId: id, ...(ask ? {data: {askId: ask.id}} : {}),
       detail: {question: ask?.question ?? `Can you take a close-up of ${result.closeup ?? 'a part of the object'}?`}});
     else await this.#emit({id: randomUUID(), type: 'pass.failed', projectId: id, detail: {reason: updated.failure ?? 'The touch-up stopped without a model.'}});
@@ -3550,8 +3616,10 @@ export class ObjectService {
     // Sizes to confirm or correct are their own kind: number fields, with words and a caliper photo beside them.
     // `type` is left absent, so a client from before kinds shows the question and takes the answer in words.
     // Checked against the contract here too: sizes that aren't whole never reach a client, and the question stands as words.
-    const listed = AskSchema.shape.sizes.safeParse(result.ask?.sizes?.map((size, index) => ({id: `size-${index + 1}`, label: size.label, mm: size.mm, from: size.from})));
-    const sizes = listed.success ? listed.data : undefined;
+    const listed = AskSchema.shape.sizes.safeParse(result.ask?.sizes?.map((size, index) => ({id: `size-${index + 1}`, label: size.label, mm: size.mm, from: size.from,
+      ...(size.product ? {product: size.product} : {}), ...(size.reference ? {reference: size.reference} : {})})));
+    // A published number is kept only with the product it is for and where the maker published it (#622).
+    const sizes = listed.success && listed.data?.every(size => size.from !== 'published' || (size.product && size.reference)) ? listed.data : undefined;
     const base = {id: askId, question: question.slice(0, 300), ...(photo ? {photo} : {}), ...(photo && result.ask?.region ? {region: result.ask.region} : {}),
       status: 'open' as const, askedAtMs: Date.now()};
     const ask: NonNullable<StmObject['ask']> = sizes?.length ? {...base, kind: 'sizes', sizes, answers: ['sizes', 'text', 'camera']}
@@ -3651,7 +3719,7 @@ export class ObjectService {
 
   #changed(object: StmObject): StmObject {
     this.#deps.onChange?.(object);
-    if (object.state !== 'touching-up') this.#pictures.ensure(object, this.dir(object.id));
+    if (object.state !== 'touching-up') { this.#pictures.ensure(object, this.dir(object.id)); this.#versionPictures.ensure(object, this.dir(object.id)); }
     return object;
   }
 }

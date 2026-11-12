@@ -602,6 +602,44 @@ final class LayoutParityUITests: XCTestCase {
         add(shot)
     }
 
+    /// #616, David (Nov 11): "my airpods max hanger was printed and done and nothing changed that. and then i modified it
+    /// and now it's no longer a thing that was done". With projects present, the changed-but-printed project's page shows
+    /// its printed design under What you have; opening it puts that design on the stage with a bar back to the newest,
+    /// and the main actions wait until the newest is shown again. A one-design project's page has no sections at all.
+    func testAChangedButPrintedProjectStillShowsItsPrintedDesignWithProjectsPresent() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "design-history",
+                               "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02"]
+        app.launch()
+        let history = app.descendants(matching: .any).matching(identifier: "design-history").firstMatch
+        XCTAssertTrue(history.waitForExistence(timeout: 20), app.debugDescription)
+        let printed = app.buttons["design-10000000-0000-4000-8000-000000000001"]
+        scrollProjectPage(app, until: printed)
+        XCTAssertTrue(printed.isHittable, app.debugDescription)
+        XCTAssertTrue(printed.label.contains("Printed Nov"), printed.label)
+        XCTAssertTrue(printed.label.contains("It works"), printed.label)
+        XCTAssertTrue(app.buttons["design-10000000-0000-4000-8000-000000000002"].exists, "the unprinted earlier design is listed too")
+        XCTAssertFalse(app.buttons["design-10000000-0000-4000-8000-000000000003"].exists, "the newest is the page itself, not a row")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Design history — what you have"; shot.lifetime = .keepAlways; add(shot)
+        printed.tap()
+        let bar = app.descendants(matching: .any).matching(identifier: "viewing-earlier-design").firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["status-menu"].exists, "the project's status waits until the newest design is shown again")
+        let viewing = XCTAttachment(screenshot: app.screenshot()); viewing.name = "Design history — the printed design on the stage"; viewing.lifetime = .keepAlways; add(viewing)
+        let newest = app.buttons["Show the newest"]
+        scrollProjectPage(app, until: newest)
+        newest.tap()
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: bar)], timeout: 5) == .completed)
+
+        let other = XCUIApplication()
+        other.launchArguments = ["-CounterpartFixtures", NSTemporaryDirectory() + "no-assets", "-CounterpartFixtureSet", "design-history",
+                                 "-CounterpartOpen", "counterpart://project/6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03"]
+        other.launch()
+        let title = other.buttons["project-title"]
+        XCTAssertTrue(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Mic mount"), object: title)], timeout: 20) == .completed)
+        XCTAssertFalse(other.descendants(matching: .any).matching(identifier: "design-history").firstMatch.exists, "one design: the page is today's page")
+    }
+
     func testACopysScanMakesAFitFromItsPageWithoutScanningAgainWithProjectsPresent() {
         let source = "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a01"
         let app = XCUIApplication()
@@ -2018,6 +2056,9 @@ final class LayoutParityUITests: XCTestCase {
             XCTAssertEqual(field.value as? String, value, id)
         }
         XCTAssertTrue(app.staticTexts["Width at the waist"].exists, "the Mac's own label for each size")
+        // #622: each number says where it came from, and the Mac's guess is never called a scan reading.
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "Read from your scan")).count, 3)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", "The Mac's estimate, not measured")).count, 1)
         XCTAssertFalse(app.buttons["Best guess"].exists, "a size is confirmed or measured, never guessed")
         XCTAssertFalse(app.buttons["Photos"].exists)
         XCTAssertTrue(app.buttons["Caliper photo"].exists)

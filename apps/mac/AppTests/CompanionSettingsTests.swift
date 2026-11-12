@@ -35,7 +35,7 @@ final class CompanionSettingsTests: XCTestCase {
         XCTAssertTrue(prefs.shouldNotify(type: "print.milestone", progress: 60))
         XCTAssertTrue(prefs.shouldNotify(type: "mcp.update.failed"))
         XCTAssertFalse(prefs.shouldNotify(type: "print.someday"), "a type the companion hasn't listed is off on the Mac")
-        XCTAssertEqual(MacNotificationTypes.ordered.count, 16)
+        XCTAssertEqual(MacNotificationTypes.ordered.count, 17)
         XCTAssertEqual(MacNotificationTypes.ordered.first?.type, "pass.ready")
     }
 

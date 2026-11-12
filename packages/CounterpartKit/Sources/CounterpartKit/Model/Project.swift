@@ -125,6 +125,41 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         public var bytes: Double
         public init(name: String, bytes: Double) { self.name = name; self.bytes = bytes }
     }
+    /// Sealed designs of this project, oldest first (#616): each finished pass that produced a printable model, kept
+    /// beside the others and never overwritten. `prints` are every print attempt, each naming its design; `historyRestored`
+    /// is the plain line the companion wrote when it rebuilt them from this Mac's records. Older builds ignore all three.
+    public var versions: [DesignVersion]?
+    public var prints: [PrintAttempt]?
+    public var historyRestored: String?
+    public struct DesignVersion: Codable, Equatable, Identifiable, Sendable {
+        public var id: String
+        public var sealedAtMs: Double
+        public var passStartedAtMs: Double?
+        public var note: String?
+        public var modelSha256: String
+        public var result: Result
+        public var picture: String?
+        public var pictures: [String: String]?
+        public var pictureStates: [String: String]?
+        public var outcome: String?
+        public var printedAtMs: Double?
+        /// How a person points at it (DESIGN.md §2 "The words"): what changed, in the pass's own first sentence, else its date.
+        public var label: String {
+            guard let line = result.summary?.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces), !line.isEmpty else { return DesignHistory.date(sealedAtMs) }
+            guard let end = line.range(of: ". ") else { return line }
+            return String(line[..<end.lowerBound]) + "."
+        }
+    }
+    public struct PrintAttempt: Codable, Equatable, Identifiable, Sendable {
+        public var id: String
+        public var versionId: String?
+        public var startedAtMs: Double
+        public var printId: String?
+        public var bundleId: String
+        public var destination: PrintDestination?
+        public var monitor: PrintMonitor?
+        public var spools: [Spool]?
+    }
     /// What was asked and answered for the project this one was made from (Make something else from this scan, or
     /// Duplicate), as the companion snapshotted it: the person's words (`you`) and the Mac's replies and questions
     /// (`app`), in time order. The companion's `fit` and per-item `from` fields are for the worker's brief; this build
@@ -177,7 +212,7 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, createdAtMs, updatedAtMs, instructions, state, scan, photos, capture, captureDepth, progress, passes, current, question
-        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, scanFrom, inherited, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
+        case failure, canRetryCleanup, print, printerDestinationId, printConfirmation, status, title, kind, ask, directory, settings, outcome, archived, picture, pictures, pictureStates, scanFiles, scanFrom, inherited, versions, prints, historyRestored, credit, files, plates, publishedSelection, completion, pendingFollowup, pendingMessageId, messages, requestPhotos, pendingPhotos
     }
 
     /// One odd object never drops out of the list: missing lists are empty, and an optional that doesn't
@@ -200,6 +235,9 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         scanFiles = optional([ScanFile].self, .scanFiles)
         scanFrom = optional(ScanSource.self, .scanFrom)
         inherited = optional(InheritedHistory.self, .inherited)
+        versions = optional([DesignVersion].self, .versions)
+        prints = optional([PrintAttempt].self, .prints)
+        historyRestored = optional(String.self, .historyRestored)
         files = optional(JSONValue.self, .files)
         plates = optional([ProjectPlate].self, .plates)
         publishedSelection = optional(PublishedSelection.self, .publishedSelection)
@@ -563,10 +601,13 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// `sizes`: the sizes to confirm or correct, prefilled.
         public var sizes: [Size]?
         /// One size in millimetres. `id` is opaque; `label` says what to measure; `from` is where the Mac's number
-        /// came from (`scan` or `published`).
+        /// came from (`published`, `scan` or `estimate`); a published one names its `product` and `reference` (#622).
         public struct Size: Codable, Equatable, Sendable, Identifiable {
             public var id: String; public var label: String; public var mm: Double; public var from: String
-            public init(id: String, label: String, mm: Double, from: String) { self.id = id; self.label = label; self.mm = mm; self.from = from }
+            public var product: String?; public var reference: String?
+            public init(id: String, label: String, mm: Double, from: String, product: String? = nil, reference: String? = nil) {
+                self.id = id; self.label = label; self.mm = mm; self.from = from; self.product = product; self.reference = reference
+            }
         }
         public init(id: String, question: String, photo: String? = nil, region: Region? = nil, answers: [String], status: String = "open", askedAtMs: Double? = nil,
                     kind: String? = nil, sizes: [Size]? = nil) {
@@ -602,9 +643,17 @@ public struct Project: Codable, Identifiable, Equatable, Sendable {
         /// done, failed, cancelled, not-started, replaced, sent
         public var endState: String?
         public var endedAt: String?
-        public init(phase: String, endState: String? = nil, endedAt: String? = nil, unreachableSince: String? = nil) {
+        /// The camera check (#630) said nothing was coming out of the nozzle, and `checkMessage` is the printer MCP's own
+        /// words for it: a later firmware "done" is only the printer's word, never a physical print.
+        public var checkSent: Bool?
+        public var checkMessage: String?
+        public init(phase: String, endState: String? = nil, endedAt: String? = nil, unreachableSince: String? = nil,
+                    checkSent: Bool? = nil, checkMessage: String? = nil) {
             self.phase = phase; self.endState = endState; self.endedAt = endedAt; self.unreachableSince = unreachableSince
+            self.checkSent = checkSent; self.checkMessage = checkMessage
         }
+        /// Ended "done" with nothing from the camera against it: a print that physically came out.
+        public var printedOut: Bool { endState == "done" && checkSent != true }
     }
 
     /// The last print.

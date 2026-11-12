@@ -29,6 +29,7 @@ final class AskSizesFormTests: XCTestCase {
         XCTAssertEqual(form.answer, [.init(id: "a", mm: 68.41), .init(id: "b", mm: 53.46)])
         form.fields[0].text = "68.42"
         XCTAssertFalse(form.unchanged)
+        XCTAssertEqual(form.answer, [.init(id: "a", mm: 68.42, measured: true), .init(id: "b", mm: 53.46)])
     }
 
     func testACorrectionAComma_AndABlankField() throws {
@@ -36,8 +37,8 @@ final class AskSizesFormTests: XCTestCase {
         form.fields[0].text = " 63 "
         form.fields[1].text = "53,2"
         XCTAssertFalse(form.unchanged)
-        XCTAssertEqual(form.answer, [.init(id: "size-1", mm: 63), .init(id: "size-2", mm: 53.2), .init(id: "size-3", mm: 107)])
-        // A size the person doesn't know is left out, never sent as confirmed.
+        XCTAssertEqual(form.answer, [.init(id: "size-1", mm: 63, measured: true), .init(id: "size-2", mm: 53.2, measured: true), .init(id: "size-3", mm: 107)])
+        // A size the person doesn't know is left out, never sent as accepted.
         form.fields[2].text = ""
         XCTAssertEqual(form.answer?.map(\.id), ["size-1", "size-2"])
     }
@@ -58,7 +59,7 @@ final class AskSizesFormTests: XCTestCase {
         var form = try XCTUnwrap(AskSizesForm(ask(waisted)))
         XCTAssertEqual(form.carried, .sizes([.init(id: "size-1", mm: 64), .init(id: "size-2", mm: 53.5), .init(id: "size-3", mm: 107)]), "prefilled")
         form.fields[0].text = "63"; form.fields[2].text = ""
-        XCTAssertEqual(form.carried, .sizes([.init(id: "size-1", mm: 63), .init(id: "size-2", mm: 53.5)]), "edited, one unknown")
+        XCTAssertEqual(form.carried, .sizes([.init(id: "size-1", mm: 63, measured: true), .init(id: "size-2", mm: 53.5)]), "edited, one unknown: the typed one carries as measured")
         form.fields[1].text = "about 53"
         XCTAssertEqual(form.carried, .invalid, "nothing goes until the field is a number or empty")
         for index in form.fields.indices { form.fields[index].text = " " }
@@ -79,10 +80,13 @@ final class AskSizesFormTests: XCTestCase {
     }
 
     func testTheAnswerBodyCarriesNumbersWithWordsAndPhotos() throws {
-        let body = CompanionClient.answerBody(bestGuess: false, text: "The waist is under the label.", photoNames: ["caliper.jpg"], sizes: [.init(id: "size-1", mm: 63)])
+        let body = CompanionClient.answerBody(bestGuess: false, text: "The waist is under the label.", photoNames: ["caliper.jpg"],
+                                              sizes: [.init(id: "size-1", mm: 63, measured: true), .init(id: "size-2", mm: 107)])
         let sent = try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: body))
+        // #622: which numbers were typed goes beside the numbers, so a Mac from before it still takes the answer.
         XCTAssertEqual(sent, .object(["text": .string("The waist is under the label."), "photoNames": .array([.string("caliper.jpg")]),
-                                      "sizes": .array([.object(["id": .string("size-1"), "mm": .number(63)])])]))
+                                      "sizes": .array([.object(["id": .string("size-1"), "mm": .number(63)]), .object(["id": .string("size-2"), "mm": .number(107)])]),
+                                      "measured": .array([.string("size-1")])]))
         XCTAssertNil(CompanionClient.answerBody(bestGuess: true, text: nil, photoNames: [], sizes: [])["sizes"], "no sizes key for other questions")
     }
 
@@ -92,7 +96,38 @@ final class AskSizesFormTests: XCTestCase {
         XCTAssertEqual(ask.kind, "sizes")
         XCTAssertEqual(ask.sizes, [.init(id: "size-1", label: "width at the waist", mm: 53, from: "scan")])
         XCTAssertNil(ask.type)
-        XCTAssertEqual(AskSizesForm.source("published"), "from the maker")
-        XCTAssertEqual(AskSizesForm.source("scan"), "from your scan")
+        XCTAssertNil(ask.sizes?.first?.product, "a question saved before Nov 12 names no product")
+    }
+
+    /// #622: the Forester phone mount (`size-sources.json`, which the companion, Android and Linux read too). Each
+    /// field says where the Mac's number came from, a published one with its product and where it was published;
+    /// an untouched number goes as accepted and only a typed one as measured.
+    func testEachSizeKeepsItsSourceAndOnlyATypedNumberIsMeasured() throws {
+        struct Fixture: Decodable {
+            struct Words: Decodable { var from: String; var product: String?; var reference: String?; var apple: String }
+            struct Sent: Decodable { var id: String; var mm: Double }
+            struct Case: Decodable { var name: String; var edits: [String: String]; var sizes: [Sent]; var measured: [String]; var unchanged: Bool }
+            var ask: Project.Ask; var words: [Words]; var answers: [Case]
+        }
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../contracts/fixtures/size-sources.json").standardizedFileURL
+        let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url))
+        XCTAssertEqual(fixture.ask.sizes?.first?.product, "JETech clear case for iPhone 16 Pro")
+        for row in fixture.words { XCTAssertEqual(AskSizesForm.source(row.from, product: row.product, reference: row.reference), row.apple, row.from) }
+        let form = try XCTUnwrap(AskSizesForm(fixture.ask))
+        XCTAssertEqual(form.fields.map(AskSizesForm.source), [
+            "Published for JETech clear case for iPhone 16 Pro · example.invalid", "Published for JETech clear case for iPhone 16 Pro · JETech product listing (placeholder)",
+            "The Mac's estimate, not measured", "Read from your scan", "Published size, product not named"])
+        for answer in fixture.answers {
+            var edited = form
+            for (id, text) in answer.edits { edited.fields[try XCTUnwrap(edited.fields.firstIndex { $0.id == id })].text = text }
+            let sent = try XCTUnwrap(edited.answer, answer.name)
+            XCTAssertEqual(sent.map(\.id), answer.sizes.map(\.id), answer.name)
+            XCTAssertEqual(sent.map(\.mm), answer.sizes.map(\.mm), answer.name)
+            XCTAssertEqual(sent.filter(\.measured).map(\.id), answer.measured, answer.name)
+            XCTAssertEqual(edited.unchanged, answer.unchanged, answer.name)
+            XCTAssertEqual(edited.carried, .sizes(sent), "words or a photo from the card carry the same marks: \(answer.name)")
+            let body = try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: CompanionClient.answerBody(bestGuess: false, text: nil, photoNames: [], sizes: sent)))
+            XCTAssertEqual(body.object?["measured"], .array(answer.measured.map(JSONValue.string)), answer.name)
+        }
     }
 }

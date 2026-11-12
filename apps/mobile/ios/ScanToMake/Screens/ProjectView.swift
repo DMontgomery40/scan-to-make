@@ -23,6 +23,7 @@ struct ProjectView: View {
     var makeFromScan: (String) -> Void = { _ in }
     /// Another project, from a line that names it (where this scan came from, what else was made from it).
     var openProject: (String) -> Void = { _ in }
+    @State private var viewingDesign: String?
     @State private var section = ProjectSection.result
     @State private var note = ""
     @State private var attempts = NoteAttempts()
@@ -210,11 +211,15 @@ struct ProjectView: View {
         ScrollViewReader { reader in
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                hero(object, words, stage: fit.stage)
+                hero(object.showingDesign(viewingDesign), viewingDesign == nil ? words : ProjectWords(object.showingDesign(viewingDesign)), stage: fit.stage)
+                    .id(viewingDesign ?? "newest")
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         // The status is one tap away: the capsule opens the same choices as ••• → Status.
-                        if store.projectSettings {
+                        // An earlier design on the stage shows its own state; the project's status menu waits for the newest (#616).
+                        if viewingDesign != nil {
+                            StatusCapsule(phase: ProjectWords(object.showingDesign(viewingDesign)).phase)
+                        } else if store.projectSettings {
                             Menu { statusChoices(object, words, inline: true) } label: {
                                 HStack(spacing: 4) { StatusCapsule(phase: words.phase); Image(systemName: "chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary) }
                             }
@@ -334,6 +339,24 @@ struct ProjectView: View {
                     }
                 if fit.cardFirst { requestText(object, words).padding(.horizontal, 20) }
 
+                if let viewingDesign, let version = object.versions?.first(where: { $0.id == viewingDesign }) {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Earlier design · \(DesignHistory(object).printedLine(version))").font(.caption).foregroundStyle(.secondary)
+                            Text(version.label).font(.callout)
+                        }
+                        Spacer()
+                        Button("Show the newest") { self.viewingDesign = nil }
+                    }.padding(.horizontal, 20).accessibilityElement(children: .contain).accessibilityIdentifier("viewing-earlier-design")
+                }
+                DesignHistoryView(project: object, select: { viewingDesign = $0 }, answer: { versionId, status in
+                    act { try await store.mac.client.setStatus(object.id, status == "works" ? .works : .needsChanges, versionId: versionId) }
+                }, thumbnail: { version in
+                    if let path = version.picture ?? version.result.renders.first {
+                        ProjectImage(project: object, path: path, maxPixelSize: 240).scaledToFit()
+                    } else { Image(systemName: "cube").font(.largeTitle).foregroundStyle(.secondary) }
+                }).padding(.horizontal, 16)
+
                 Picker("Section", selection: $section) {
                     ForEach(ProjectSection.allCases, id: \.self) { Text($0.rawValue) }
                 }
@@ -371,7 +394,9 @@ struct ProjectView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if writing { ToolbarItem(placement: .confirmationAction) { Button("Done") { writing = false } } }
-            if let modelURL {
+            // The page's model file is the newest design's: while an earlier design is on the stage it isn't offered, so
+            // Share never sends a different model from the one shown (train 11-12b review; the Mac blocks the same way).
+            if let modelURL = viewingDesign == nil ? modelURL : nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     ShareLink(item: modelURL, preview: SharePreview("\(words.title).\(object.preservesPublishedFilaments ? "3mf" : "stl")")) { Image(systemName: "square.and.arrow.up") }
                 }
@@ -397,7 +422,7 @@ struct ProjectView: View {
                             .accessibilityIdentifier("more-make-from-scan")
                         Divider()
                     }
-                    if let modelURL { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
+                    if let modelURL = viewingDesign == nil ? modelURL : nil { ShareLink(object.preservesPublishedFilaments ? "Share 3MF" : "Share STL", item: modelURL) }
                     if let arURL { ShareLink("Share USDZ", item: arURL) } else if let scanURL { ShareLink("Share Your Scan (USDZ)", item: scanURL) }
                     Divider()
                     Button("Delete Project", systemImage: "trash", role: .destructive) { confirmDelete = true }.disabled(away)
@@ -407,7 +432,7 @@ struct ProjectView: View {
         }
             // A failed pass that left an earlier model still offers changes and Print; with no model, the failed card's Try Again is the way on.
             if object.canAskForChanges || (words.phase != .needsYou && !(words.phase == .failed && object.current == nil)) {
-                bottomBar(object, words).padding(.top, 8)
+                bottomBar(object, words).disabled(viewingDesign != nil).padding(.top, 8)
             }
         }
         .background(Color.black)
@@ -1307,6 +1332,11 @@ struct PassTimeline: View {
             if let change = pass.requestedChange {
                 Text("Your change: “\(change)”").font(.footnote).foregroundStyle(.secondary).lineLimit(3).padding(.bottom, 8)
             }
+            // #616: the pass that sealed a design says which one, so Activity and the design sections name the same thing.
+            if let sealed = DesignHistory(project).sealedLine(passStartedAtMs: pass.startedAtMs) {
+                Label(sealed, systemImage: "seal").font(.footnote).foregroundStyle(.secondary).padding(.bottom, 8)
+                    .accessibilityIdentifier("pass-\(index + 1)-sealed")
+            }
             ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
                 HStack(alignment: .top, spacing: 12) {
                     VStack(spacing: 0) {
@@ -1556,7 +1586,9 @@ struct AskSizesFields: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(field.label.prefix(1).uppercased() + field.label.dropFirst()).font(.subheadline.weight(.medium))
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(AskSizesForm.source(field.from)).font(.caption).foregroundStyle(.secondary)
+                        // Where the number came from (#622): a published one names its product and source, so it can run to two lines.
+                        Text(AskSizesForm.source(field)).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     HStack(spacing: 4) {

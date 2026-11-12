@@ -27,7 +27,7 @@ function harness({reports = [], milestones = '50', state, taskId, frame = async 
 }
 const printing = (progress, layer, extra = {}) => ({state: 'printing', job: {name: JOB, progress, layer, totalLayers: 100, remainingSec: (100 - progress) * 30}, ...extra});
 
-test('a print that starts, crosses a layer and the halfway mark, and finishes raises each event once, with frames', async () => {
+test('a print that starts, crosses the halfway mark, and finishes raises each event once, with frames; layer counts never claim a first layer (#630)', async () => {
   const h = harness({reports: [
     {state: 'finished', job: {name: 'previous part', progress: 100}},   // the last job's leftover report
     {state: 'preparing', job: {name: JOB, progress: 0, stage: 'Heating the bed'}},
@@ -42,12 +42,12 @@ test('a print that starts, crosses a layer and the halfway mark, and finishes ra
   assert.equal(h.events[0].data.estimateSec, 2575);
   assert.equal(h.monitor.state.phase, 'watching');
   await h.steps(7);
-  assert.deepEqual(h.types(), ['print.started', 'print.status', 'print.first-layer', 'print.status', 'print.status', 'print.milestone', 'print.status', 'print.status', 'print.done']);
+  assert.deepEqual(h.types(), ['print.started', 'print.status', 'print.status', 'print.status', 'print.milestone', 'print.status', 'print.status', 'print.done']);
   const byType = Object.fromEntries(h.events.map(e => [e.type, e]));
   assert.equal(byType['print.milestone'].data.progress, 50);
   assert.match(byType['print.milestone'].frame, /^prints\/p\/frames\/.+\.jpg$/);
-  assert.ok(byType['print.first-layer'].frame);
   assert.ok(byType['print.done'].frame);
+  assert.equal(h.monitor.state.firstLayerSent, false, 'no camera check, no first layer');
   assert.equal(byType['print.started'].frame, undefined);
   assert.deepEqual(h.ends.map(e => e.end), ['done']);
   assert.deepEqual(h.monitor.state.milestonesSent, [50]);
@@ -173,11 +173,11 @@ test('milestone settings choose which percentages are news; a jump across severa
 });
 
 test('a slow camera never holds an event back: after the cap it goes without a frame', async () => {
-  const h = harness({frame: () => new Promise(() => {}), frameCapMs: 20, reports: [printing(1, 1), printing(3, 3)]});
+  const h = harness({frame: () => new Promise(() => {}), frameCapMs: 20, reports: [printing(1, 1), printing(51, 51)]});
   await h.steps(2);
-  const firstLayer = h.events.find(e => e.type === 'print.first-layer');
-  assert.ok(firstLayer);
-  assert.equal(firstLayer.frame, undefined);
+  const milestone = h.events.find(e => e.type === 'print.milestone');
+  assert.ok(milestone);
+  assert.equal(milestone.frame, undefined);
 });
 
 test('our job is matched by the printer task id when there is a real one, else by its job name', () => {
@@ -315,14 +315,14 @@ test('getting ready ends at layer 1: then it is "Printing · N% · T left"; a st
   assert.equal(printerStopped(undefined), 'The printer stopped.');
 });
 
-test('a print that reaches layer 1 after getting ready raises its first layer and milestones as before', async () => {
+test('a print that reaches layer 1 after getting ready raises its milestones as before; its first layer only from the camera', async () => {
   const h = harness({reports: [
     {state: 'preparing', job: {name: JOB, progress: 100, remainingSec: 0, layer: 30, totalLayers: 30}},
     {state: 'printing', job: {name: JOB, progress: 3, remainingSec: 10500, layer: 0, totalLayers: 100, stage: 'Auto bed leveling'}},
     printing(1, 1), printing(2, 2), printing(51, 51),
   ]});
   await h.steps(5);
-  assert.deepEqual(h.types(), ['print.started', 'print.status', 'print.status', 'print.first-layer', 'print.status', 'print.milestone', 'print.status']);
+  assert.deepEqual(h.types(), ['print.started', 'print.status', 'print.status', 'print.status', 'print.milestone', 'print.status']);
   assert.deepEqual(h.monitor.state.milestonesSent, [50]);
   assert.equal(h.events[2].data.state, 'printing');
   assert.equal(h.events[2].data.progress, 1);

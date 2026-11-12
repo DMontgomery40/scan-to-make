@@ -149,8 +149,11 @@ data class Project(
         val sizes: List<Size>? = null,
     ) {
         @Serializable data class Option(val id: String, val label: String, val detail: String? = null, val thumbnail: String? = null)
-        /** One size in millimetres. `id` is opaque; `label` says what to measure; `from` is `scan` or `published`. */
-        @Serializable data class Size(val id: String, val label: String, val mm: Double, val from: String = "scan")
+        /** One size in millimetres. `id` is opaque; `label` says what to measure; `from` is where the computer's number came
+         *  from (`published`, `scan` or `estimate`); a published one names its `product` and `reference` (#622). A size with
+         *  no `from` is from a computer that never said: it reads as an estimate, never as the scan's. */
+        @Serializable data class Size(val id: String, val label: String, val mm: Double, val from: String = "estimate",
+                                      val product: String? = null, val reference: String? = null)
     }
     @Serializable data class PrintDestination(val id: String, val name: String)
     @Serializable data class PrintEstimate(val seconds: Double? = null, val grams: Double? = null)

@@ -1,0 +1,244 @@
+[
+  {
+    "name": "hanger",
+    "designs": 6,
+    "events": [
+      {
+        "type": "print.started",
+        "printId": "success",
+        "atMs": 1200,
+        "data": {
+          "estimateSec": 100,
+          "estimateGrams": 10
+        }
+      },
+      {
+        "type": "print.done",
+        "printId": "success",
+        "atMs": 1600
+      },
+      {
+        "type": "print.started",
+        "printId": "retry",
+        "atMs": 6200
+      },
+      {
+        "type": "print.failed",
+        "printId": "retry",
+        "atMs": 6300
+      }
+    ],
+    "expected": [
+      {
+        "summary": "Design 1",
+        "outcome": null
+      },
+      {
+        "summary": "Design 2",
+        "outcome": null
+      },
+      {
+        "summary": "Design 3",
+        "outcome": null
+      },
+      {
+        "summary": "Design 4",
+        "outcome": null
+      },
+      {
+        "summary": "Design 5",
+        "outcome": null
+      },
+      {
+        "summary": "Design 6",
+        "outcome": null
+      }
+    ],
+    "attempts": [
+      {
+        "id": "success",
+        "version": 1,
+        "end": "done"
+      },
+      {
+        "id": "retry",
+        "version": 6,
+        "end": "failed"
+      }
+    ]
+  },
+  {
+    "name": "pink-box",
+    "designs": 2,
+    "events": [
+      {
+        "type": "print.started",
+        "printId": "success",
+        "atMs": 1200,
+        "data": {
+          "estimateSec": 100,
+          "estimateGrams": 10
+        }
+      },
+      {
+        "type": "print.done",
+        "printId": "success",
+        "atMs": 1600
+      },
+      {
+        "type": "project.updated",
+        "atMs": 1800,
+        "data": {
+          "keys": [
+            "status"
+          ]
+        }
+      },
+      {
+        "type": "print.started",
+        "printId": "retry",
+        "atMs": 2200
+      },
+      {
+        "type": "print.failed",
+        "printId": "retry",
+        "atMs": 2300
+      }
+    ],
+    "expected": [
+      {
+        "summary": "Design 1",
+        "outcome": null
+      },
+      {
+        "summary": "Design 2",
+        "outcome": null
+      }
+    ],
+    "attempts": [
+      {
+        "id": "success",
+        "version": 1,
+        "end": "done"
+      },
+      {
+        "id": "retry",
+        "version": 2,
+        "end": "failed"
+      }
+    ]
+  },
+  {
+    "name": "wall-holder",
+    "designs": 2,
+    "events": [
+      {
+        "type": "print.started",
+        "printId": "success",
+        "atMs": 1200,
+        "data": {
+          "estimateSec": 100,
+          "estimateGrams": 10
+        }
+      },
+      {
+        "type": "print.done",
+        "printId": "success",
+        "atMs": 1600
+      },
+      {
+        "type": "project.updated",
+        "atMs": 1800,
+        "data": {
+          "keys": [
+            "status"
+          ]
+        }
+      },
+      {
+        "type": "print.started",
+        "printId": "retry",
+        "atMs": 2200
+      },
+      {
+        "type": "print.failed",
+        "printId": "retry",
+        "atMs": 2300
+      }
+    ],
+    "expected": [
+      {
+        "summary": "Design 1",
+        "outcome": null
+      },
+      {
+        "summary": "Design 2",
+        "outcome": null
+      }
+    ],
+    "attempts": [
+      {
+        "id": "success",
+        "version": 1,
+        "end": "done"
+      },
+      {
+        "id": "retry",
+        "version": 2,
+        "end": "failed"
+      }
+    ]
+  },
+  {
+    "name": "stove-filler",
+    "designs": 2,
+    "events": [
+      {
+        "type": "print.started",
+        "printId": "success",
+        "atMs": 1200,
+        "data": {
+          "estimateSec": 100,
+          "estimateGrams": 10
+        }
+      },
+      {
+        "type": "print.done",
+        "printId": "success",
+        "atMs": 1600
+      },
+      {
+        "type": "print.started",
+        "printId": "retry",
+        "atMs": 2200
+      },
+      {
+        "type": "print.failed",
+        "printId": "retry",
+        "atMs": 2300
+      }
+    ],
+    "expected": [
+      {
+        "summary": "Design 1",
+        "outcome": null
+      },
+      {
+        "summary": "Design 2",
+        "outcome": null
+      }
+    ],
+    "attempts": [
+      {
+        "id": "success",
+        "version": 1,
+        "end": "done"
+      },
+      {
+        "id": "retry",
+        "version": 2,
+        "end": "failed"
+      }
+    ]
+  }
+]

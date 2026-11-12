@@ -230,6 +230,8 @@ struct LiveActivityPush: Encodable, Equatable {
         // never replayed by `LiveActivityRecovery`).
         case "print.status", "print.resumed", "print.first-layer", "print.milestone": kind = .update
         case "print.paused": kind = .update; priority = 10
+        // #630: the activity shows the line (data.problems); CloudKit owns the alert with its frame.
+        case "print.check": kind = .update; priority = 10
         // A print the printer never started ends its activity too, or it stays at 0% "Waiting for an update".
         case "print.done", "print.failed", "print.cancelled", "print.not-started": kind = .end; priority = 10
         default: return nil

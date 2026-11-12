@@ -8,18 +8,28 @@ public struct AskSizesForm: Equatable, Sendable {
         public let id: String
         /// What to measure, in the Mac's words ("width at the waist").
         public let label: String
-        /// Where the prefilled number came from: `scan` or `published`.
+        /// Where the prefilled number came from: `published`, `scan` or `estimate` (#622).
         public let from: String
+        /// For a published number: the exact product it is for, and where the maker published it.
+        public let product: String?
+        public let reference: String?
         /// The Mac's number, as it was asked.
         public let asked: Double
         /// What the field holds now.
         public var text: String
+        /// The person typed or edited this number (anything but the prefilled text, spaces aside). Untouched, it is
+        /// the Mac's number accepted, never a measurement.
+        public var measured: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines) != AskSizesForm.text(asked) }
+        public init(id: String, label: String, from: String, product: String? = nil, reference: String? = nil, asked: Double, text: String) {
+            self.id = id; self.label = label; self.from = from; self.product = product; self.reference = reference; self.asked = asked; self.text = text
+        }
     }
-    /// One size to send back.
+    /// One size to send back, and whether the person typed it (`measured`) or let the Mac's number stand.
     public struct Answer: Equatable, Sendable {
         public let id: String
         public let mm: Double
-        public init(id: String, mm: Double) { self.id = id; self.mm = mm }
+        public let measured: Bool
+        public init(id: String, mm: Double, measured: Bool = false) { self.id = id; self.mm = mm; self.measured = measured }
     }
 
     public var fields: [Field]
@@ -27,7 +37,7 @@ public struct AskSizesForm: Equatable, Sendable {
     /// Nil when the question lists no sizes: it is not a size question.
     public init?(_ ask: Project.Ask) {
         guard ask.kind == "sizes", let sizes = ask.sizes, !sizes.isEmpty else { return nil }
-        fields = sizes.map { Field(id: $0.id, label: $0.label, from: $0.from, asked: $0.mm, text: Self.text($0.mm)) }
+        fields = sizes.map { Field(id: $0.id, label: $0.label, from: $0.from, product: $0.product, reference: $0.reference, asked: $0.mm, text: Self.text($0.mm)) }
     }
 
     /// A number as a person types it: no trailing ".0", at most two decimals.
@@ -47,13 +57,13 @@ public struct AskSizesForm: Equatable, Sendable {
     }
 
     /// What to send: every field that holds a number. Nil while any filled field isn't a number, or none is filled.
-    /// A field left blank is a size the person doesn't know: it is left out, never sent as confirmed.
+    /// A field left blank is a size the person doesn't know: it is left out, never sent as accepted.
     public var answer: [Answer]? {
         var sizes: [Answer] = []
         for field in fields {
             if field.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
             guard let mm = Self.millimetres(field.text) else { return nil }
-            sizes.append(Answer(id: field.id, mm: mm))
+            sizes.append(Answer(id: field.id, mm: mm, measured: field.measured))
         }
         return sizes.isEmpty ? nil : sizes
     }
@@ -76,9 +86,29 @@ public struct AskSizesForm: Equatable, Sendable {
         return fields.allSatisfy { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ? .none : .invalid
     }
 
-    /// Nothing was changed: the button says Confirm. Otherwise it sends corrections.
-    public var unchanged: Bool { fields.allSatisfy { Self.millimetres($0.text) == Self.millimetres(Self.text($0.asked)) } }
+    /// Nothing was typed: the button says Confirm, and every number goes as accepted. Otherwise it sends the person's.
+    public var unchanged: Bool { !fields.contains(where: \.measured) }
 
-    /// Beside a field: where the Mac's number came from.
-    public static func source(_ from: String) -> String { from == "published" ? "from the maker" : "from your scan" }
+    /// Under a field: where the Mac's number came from (#622). A published one names the product it is for and where
+    /// it was published; a source this build doesn't know reads as an estimate, never as the scan or the maker's.
+    public static func source(_ from: String, product: String? = nil, reference: String? = nil) -> String {
+        switch from {
+        case "published":
+            guard let product = product?.trimmingCharacters(in: .whitespacesAndNewlines), !product.isEmpty else { return "Published size, product not named" }
+            guard let place = reference.flatMap(Self.place) else { return "Published for \(product)" }
+            return "Published for \(product) · \(place)"
+        case "scan": return "Read from your scan"
+        default: return "The Mac's estimate, not measured"
+        }
+    }
+    public static func source(_ field: Field) -> String { source(field.from, product: field.product, reference: field.reference) }
+    /// Where a published size was published, short: a link's site (without "www."), or the document's name as given.
+    static func place(_ reference: String) -> String? {
+        let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", let host = url.host(), !host.isEmpty {
+            return host.lowercased().hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        }
+        return trimmed
+    }
 }

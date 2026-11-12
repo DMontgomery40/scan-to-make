@@ -109,6 +109,13 @@ export class ModelAccessService {
       } finally { await rm(dir,{recursive:true,force:true}); }
     }, {browser: choice.kind === 'claude-code'});
   }
+  /**
+   * #630's camera check: the person's own Claude login (Claude Code), never an API key or another provider. Undefined
+   * with any other choice: the check doesn't run and nothing claims a first layer.
+   */
+  claudeWorker():ProjectWorker|undefined {
+    return this.record.choice.kind === 'claude-code' ? this.projectWorker() : undefined;
+  }
   cleanupSnapshot() {
     const choice = structuredClone(this.record.choice);
     const access:import('./ai-tweak.js').ModelAccess = choice.kind === 'api'

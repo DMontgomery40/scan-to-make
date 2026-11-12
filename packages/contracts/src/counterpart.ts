@@ -20,6 +20,8 @@ export const COUNTERPART_EVENT_TYPES = [
   'print.preparing', 'print.confirm', 'print.started', 'print.status', 'print.first-layer',
   'print.milestone', 'print.paused', 'print.resumed', 'print.done', 'print.failed', 'print.cancelled',
   'print.not-started', 'print.unreachable', 'print.sent',
+  // #630: the printer's own camera shows something the printer doesn't detect itself (nothing coming out of the nozzle).
+  'print.check',
   // PRD §5.4: a project's status (or, later, its settings) changed.
   'project.updated',
   // A project and its files were deleted; `data.by` says from where.
@@ -167,7 +169,12 @@ export const PrintMonitorSchema = z.strictObject({
   /** The printer's report time of the last report that belonged to this print. */
   lastReportAt: iso.optional(),
   milestonesSent: z.array(z.number().int().min(1).max(99)).max(99),
+  /** "First layer's down" was said, from the camera showing plastic where the slice puts it (#630), never from counters. */
   firstLayerSent: z.boolean(),
+  /** `print.check` was sent for this print: once, even across a restart. */
+  checkSent: z.boolean().optional(),
+  /** The printer MCP's own words for that verdict when it was sent: the card and the done keep them (#630). */
+  checkMessage: text(500).optional(),
   /** Set while the printer can't be reached (3 failed reads, or offline for 60 s). Never a failure by itself. */
   unreachableSince: iso.optional(),
   endState: MonitorEndSchema.optional(),
@@ -355,6 +362,43 @@ export const FitSchema = z.strictObject({
   .refine(fit => fit.sizeSource === 'measured' || fit.measured === undefined, { message: 'measured sizes go with the measured source only' });
 export type Fit = z.infer<typeof FitSchema>;
 
+/**
+ * Where the Mac's number for a size came from (#622). `published`: the maker published it for `product`, at
+ * `reference`; `scan`: read off the scan; `estimate`: the Mac's own guess, neither measured nor published. A client
+ * shows which, and never calls an estimate or an unknown source "from your scan".
+ */
+export const SizeFromSchema = z.enum(['scan', 'published', 'estimate']);
+export type SizeFrom = z.infer<typeof SizeFromSchema>;
+/**
+ * One size a `sizes` question asks about. A published size names the exact product the number is for, as the person
+ * has it ("JETech clear case for iPhone 16 Pro", not "iPhone 16 Pro" when the phone is in that case), and where the
+ * maker published it (a page or a document). Both are optional here only so questions saved before Nov 12 still
+ * read; the companion keeps no new published size without them.
+ */
+export const AskSizeSchema = z.strictObject({
+  ...SizeSchema.shape,
+  from: SizeFromSchema,
+  product: text(120).min(1).optional(),
+  reference: text(300).min(1).optional(),
+});
+export type AskSize = z.infer<typeof AskSizeSchema>;
+/**
+ * How the person checked a size they sent back (#622). `measured`: they typed or edited the number. `accepted`:
+ * they confirmed the Mac's number untouched, so it is exactly as certain as where it came from, never a measurement.
+ */
+export const SizeCheckSchema = z.enum(['measured', 'accepted']);
+export type SizeCheck = z.infer<typeof SizeCheckSchema>;
+/**
+ * A `sizes` answer: `{id, mm}` for each size the person filled, and `measured`, the ids they typed or edited. A
+ * client from before Nov 12 sends no `measured`; then a number equal to the asked one is accepted and any other is
+ * measured. `measured` sits beside `sizes`, not inside each size, so a companion from before it still takes the answer.
+ */
+export const SizesAnswerSchema = z.strictObject({
+  sizes: z.array(z.strictObject({ id: text(64).min(1), mm: z.number().positive().max(10_000) })).min(1).max(6),
+  measured: z.array(text(64).min(1)).max(6).optional(),
+});
+export type SizesAnswer = z.infer<typeof SizesAnswerSchema>;
+
 export const AskSchema = z.strictObject({
   id: uuid,
   question: text(300),
@@ -376,7 +420,7 @@ export const AskSchema = z.strictObject({
   /** `file`: why the file is wanted when it isn't simply "send it": macOS refused the Downloads folder. */
   reason: z.enum(['downloads-access']).optional(),
   /** `sizes`: the sizes to confirm or correct, prefilled, each with where the number came from. One to six. */
-  sizes: z.array(z.strictObject({ ...SizeSchema.shape, from: z.enum(['scan', 'published']) })).min(1).max(6).optional(),
+  sizes: z.array(AskSizeSchema).min(1).max(6).optional(),
   /** `file`: the model's page (Open in Safari), its name and site, and the file types it takes. */
   url: z.string().url().max(2048).optional(),
   modelName: text(120).optional(),
@@ -440,6 +484,7 @@ export const ProjectPreferencesSchema = z.strictObject({
 export type ProjectPreferences = z.infer<typeof ProjectPreferencesSchema>;
 export const ProjectSettingsPatchSchema = ProjectPreferencesSchema.extend({
   title: z.string().trim().min(1).max(120).regex(/^[^\u0000-\u001f\u007f]+$/).optional(),
+  versionId: z.string().min(1).max(128).optional(),
   status: ProjectStatusSchema.optional(), archived: z.boolean().optional(),
   printerDestinationId: z.string().min(1).max(256).nullable().optional(),
 }).refine(value => Object.keys(value).length > 0);
@@ -471,3 +516,51 @@ export const InheritedHistorySchema = z.object({
   fit: FitSchema.optional(),
 });
 export type InheritedHistory = z.infer<typeof InheritedHistorySchema>;
+
+// #616: a project's designs and print attempts, beside the old one-slot `current`/`print`/`outcome` (which stay for older
+// clients). A design is sealed when a pass finishes with a model and is never edited or replaced afterwards: only its
+// own answer (`outcome`, `printedAtMs`) and its own pictures are added later. Paths are relative to the project folder
+// and live under `versions/<id>/`. The newest design is the last; there is no stored "current version".
+const relativePath = z.string().min(1).max(512).refine(path => !path.startsWith('/') && !path.split('/').includes('..'));
+export const DesignVersionSchema = z.object({
+  id: z.string().min(1).max(128),
+  sealedAtMs: z.number().finite(),
+  /** The pass that sealed it (Activity's "This became the … design"). */
+  passStartedAtMs: z.number().finite().optional(),
+  /** The person's words that asked for it. */
+  note: z.string().optional(),
+  modelSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  result: z.object({model: relativePath, renders: z.array(relativePath), summary: z.string().optional(),
+    sizeMm: z.tuple([z.number(), z.number(), z.number()]).optional()}).passthrough(),
+  picture: relativePath.optional(),
+  pictures: z.record(z.string(), relativePath).optional(),
+  pictureStates: z.record(z.string(), z.enum(['drawing', 'failed'])).optional(),
+  outcome: z.enum(['works', 'needs-changes']).optional(),
+  printedAtMs: z.number().finite().optional(),
+});
+export type DesignVersion = z.infer<typeof DesignVersionSchema>;
+/** One print of one design. Appended, never replaced: a later print never removes an earlier one. */
+export const PrintAttemptSchema = z.object({
+  id: z.string().min(1).max(128),
+  /** Absent only for a published file's print (its plates carry the history) or an attempt before any design. */
+  versionId: z.string().min(1).max(128).optional(),
+  startedAtMs: z.number().finite(),
+  printId: z.string().optional(),
+  bundleId: z.string(),
+  destination: z.object({id: z.string(), name: z.string()}).optional(),
+  monitor: z.object({endState: MonitorEndSchema.optional(), endedAt: iso.optional()}).passthrough().optional(),
+}).passthrough();
+export type PrintAttempt = z.infer<typeof PrintAttemptSchema>;
+export const ProjectDesignsSchema = z.object({
+  versions: z.array(DesignVersionSchema).optional(),
+  prints: z.array(PrintAttemptSchema).optional(),
+  /** Written once by the startup migration when it rebuilt earlier designs from this Mac's pass folders. */
+  historyRestored: z.string().optional(),
+}).superRefine((value, context) => {
+  const ids = new Set(value.versions?.map(v => v.id));
+  if (ids.size !== (value.versions?.length ?? 0)) context.addIssue({code: 'custom', message: 'design ids repeat'});
+  for (const attempt of value.prints ?? []) if (attempt.versionId && !ids.has(attempt.versionId)) context.addIssue({code: 'custom', message: `print ${attempt.id} names no design`});
+  const sealed = value.versions?.map(v => v.sealedAtMs) ?? [];
+  if (sealed.some((at, i) => i > 0 && at < sealed[i - 1]!)) context.addIssue({code: 'custom', message: 'designs are oldest first'});
+});
+export type ProjectDesigns = z.infer<typeof ProjectDesignsSchema>;

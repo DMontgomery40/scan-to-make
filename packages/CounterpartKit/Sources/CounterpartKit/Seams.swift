@@ -33,7 +33,7 @@ public enum CloudKitRecords {
         ("ev-confirm", ["print.confirm"], "CONFIRM"),
         ("ev-progress", ["print.first-layer", "print.milestone"], "PROGRESS"),
         ("ev-done", ["print.done"], "DONE"),
-        ("ev-problem", ["print.paused", "print.failed", "print.not-started", "pass.failed", "print.unreachable"], "PROBLEM"),
+        ("ev-problem", ["print.paused", "print.failed", "print.not-started", "pass.failed", "print.unreachable", "print.check"], "PROBLEM"),
     ]
 }
 

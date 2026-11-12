@@ -321,6 +321,25 @@ final class CompanionClientTests: XCTestCase {
         XCTAssertFalse(text.contains(token)); XCTAssertFalse(text.contains(keyPin)); XCTAssertFalse(text.contains("192.168"))
     }
 
+    /// #616: an earlier design's thumbnail and model come from `versions/<id>/…`. The phone refused both before it knew
+    /// the path (its allowlist and its scope table), so What you have showed a placeholder on iPhone and iPad.
+    func testASealedDesignsFilesDownloadAndNothingElseUnderVersions() async throws {
+        let fake = FakeTransport { _, _ in HTTPReply(status: 200, body: Data("png".utf8)) }
+        let c = try client(fake)
+        defer { try? FileManager.default.removeItem(at: c.cache) }
+        let version = "2d67e062-42b7-4d91-ab77-212a490a5a65"
+        for path in ["versions/\(version)/renders/0-1_overview.png", "versions/\(version)/touched.stl", "versions/\(version)/pictures/part-9080508a.png"] {
+            let file = try await c.download(project([:]), path)
+            XCTAssertEqual(try Data(contentsOf: file), Data("png".utf8), path)
+        }
+        XCTAssertTrue(fake.calls.contains { $0.request.url?.path.hasSuffix("/versions/\(version)/renders/0-1_overview.png") == true },
+                      fake.calls.map { $0.request.url?.path ?? "" }.joined(separator: ", "))
+        XCTAssertEqual(CompanionClient.scope("GET", "/v1/objects/\(project([:]).id)/versions/\(version)/touched.stl"), "projects:read")
+        for refused in ["versions/\(version)/../object.json", "versions/\(version)/design/inputs/scan.obj", "versions/not-a-design/touched.stl"] {
+            do { _ = try await c.download(project([:]), refused); XCTFail(refused) } catch {}
+        }
+    }
+
     func testHTTPDownloadRefusalKeepsStatus() async throws {
         let fake = FakeTransport { _, _ in HTTPReply(status: 503, body: Data()) }
         let c = try client(fake)
@@ -1037,6 +1056,29 @@ final class DecodingTests: XCTestCase {
         _ = try decode([Project.Stage].self, object["stages"])
     }
 
+    /// #630: the companion's "nothing is coming out of the nozzle" line reaches the event, the card's line and the Printing screen.
+    func testPrintCheckFixtureReachesTheEventAndTheCard() throws {
+        let url = repoRoot.appending(path: "packages/contracts/fixtures/print-check.json")
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let line = try XCTUnwrap(object["line"] as? String)
+        let event = try JSONDecoder().decode(CounterpartEvent.self, from: JSONSerialization.data(withJSONObject: try XCTUnwrap(object["event"])))
+        XCTAssertEqual(event.type, "print.check")
+        XCTAssertEqual(event.body, line)
+        XCTAssertEqual(event.notify, .timeSensitive)
+        var project = try XCTUnwrap(object["project"] as? [String: Any])
+        project["createdAtMs"] = 1; project["updatedAtMs"] = 2; project["photos"] = [String](); project["passes"] = [Any]()
+        let decoded = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: project))
+        XCTAssertEqual(decoded.status?.text, line)
+        XCTAssertEqual(decoded.print?.live?.problems?.first?.message, line)
+        XCTAssertTrue(CloudKitRecords.subscriptions.contains { $0.id == "ev-problem" && $0.types.contains("print.check") })
+        // After the printer says it finished, the card keeps the warning (the Mac's words win on the card).
+        var printed = try XCTUnwrap(object["printedProject"] as? [String: Any])
+        printed["createdAtMs"] = 1; printed["updatedAtMs"] = 2; printed["photos"] = [String](); printed["passes"] = [Any]()
+        let done = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: printed))
+        XCTAssertEqual(ProjectWords(done).line, done.status?.text)
+        XCTAssertTrue(done.status?.text.hasSuffix(line) == true, "the printer MCP's own words")
+    }
+
     /// The Mac's control socket (`objects.list`) adds the project folder; `/v1/objects` doesn't.
     func testDirectoryDecodesWhenTheMacSendsIt() throws {
         let base = #"{"id":"p","createdAtMs":1,"updatedAtMs":2,"state":"ready","photos":[],"passes":[]"#
@@ -1174,6 +1216,10 @@ final class NotificationActionsTests: XCTestCase {
         for failed in ["print.failed", "print.not-started", "pass.failed"] { XCTAssertEqual(A.category(for: failed), .failed, failed) }
         XCTAssertEqual(A.actions(in: .failed), [.tryAgain, .openProject])
         XCTAssertEqual(A.category(for: "print.unreachable"), .problem)
+        // #630: Watch the print, or Pause it: the person decides; Counterpart never pauses by itself.
+        XCTAssertEqual(A.category(for: "print.check"), .progress)
+        XCTAssertEqual(A.command(action: "PAUSE", type: "print.check", projectId: "p"), .control("p", .pause))
+        XCTAssertEqual(AppRoute(notification: ["projectId": "p", "type": "print.check"]), .printing("p"))
         XCTAssertEqual(A.actions(in: .ready), [.print, .askForChanges])
         XCTAssertEqual(A.actions(in: .ask), [.camera, .bestGuess])
         XCTAssertNil(A.category(for: "pass.started"))

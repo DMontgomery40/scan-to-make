@@ -17,6 +17,7 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `print_3mf` `print_3mf_bambu_network` `process_and_print_stl` `upload_gcode` `upload_file` `start_print` `start_print_job` `confirm_temperatures` `delete_printer_file` | dispatch |
 | `pause_print` `resume_print` `cancel_print` `clear_hms_errors` `skip_objects` `set_fan_speed` `set_light` `set_print_speed` `set_printer_temperature` `set_temperature` | printer controls |
 | `camera_snapshot` `camera_stream_start` `camera_frame` `camera_stream_stop` | printer camera |
+| `counterpart_print_record` `counterpart_print_assess` | camera evidence of a print (#630; bambu-printer-mcp #144, mcp-3D-printer-server #100). The MCP saves frames against the exact slice and asks for a look in `counterpart_print_progress`'s `physical.assessment`; it decides which frame and when. The companion reads that frame (and one baseline) with `counterpart_print_record` as MCP images, has the person's Claude login look at the two pictures, and submits `counterpart_print_assess` bound to the record's job, artifact and image hashes. It acts only on `physical.status` `suspect_no_extrusion` and, for the frame the record calls `first_layer`, on plastic seen. An MCP without the tools: no check, no first-layer claim |
 | `bambu_network_bridge_status` | Bambu network bridge readiness (setup) |
 | `blender_mcp_status` `blender_mcp_call` `execute_blender_code` `get_addon_status` | the Blender bridge |
 | `fusion_mcp_status` `fusion_mcp_call` `fusion_mcp_new_design` `fusion_mcp_export` | the Fusion bridge |
@@ -47,6 +48,7 @@ Every MCP name that app code (`services/companion/src`, `services/printer-handof
 | `angle_x` `angle_y` `angle_z` `scale_x` `scale_y` `scale_z` | rotate and scale |
 | `include_preview` `bed_side` | `inspect_print_file`'s preview of the exact sliced file: asked for with `include_preview`; the `top` and `bed_side` views are shown as they are. The app checks its `artifact_sha256` against the file and the PNG signature, never the G-code |
 | `slicer_report` `slicer_message` `plate_count` `layer_height_mm` `sparse_infill_percent` `wall_loops` `layer_count` `slicer_result` | what the app reads about a slice, all from the MCP (bambu-printer-mcp 1.1.64+, mcp-3d-printer-server 1.2.42+; §8.0 #8, #9): a slicing result's `slicer_report` (`failed`, `message`, `plate_count`, and `slicer_message`, the slicer's own words, which the companion writes to its log on a refusal and never shows; a result with `slicer_result` and no `slicer_report` is an MCP to update) and `inspect_print_file`'s `sliced` (`plate_count`, `estimate` `seconds`/`grams`, `settings`). The app keeps no slice cache: the MCPs reuse identical slices |
+| `frame_format` `frame_ids` `job_id` `artifact_sha256` `frame_id` `image_sha256` `visibility` `footprint_visible` `deposition` `attempted` `reference_frame_id` `reference_visibility` `reference_empty` `out_of_view` `first_layer` `suspect_no_extrusion` | `counterpart_print_record` (`frame_format: "images"`, at most four `frame_ids`) and `counterpart_print_assess`'s observation, passed as the vision worker answered it (`out_of_view` is one of its `visibility` values); the record's `first_layer` frame role and the `suspect_no_extrusion` verdict (#630) |
 | `include_thumbnails` `thumbnail_png_base64` | `list_3mf_plates`' argument and each plate's picture, saved as the plate's render |
 | `project_filaments` `filament_id` | `list_3mf_plates`' every declared filament, and each filament's Bambu filament id (with `index`, `colour`, `material`, `name`), read field by field in `model-plates.ts` |
 | `source_path` `raw_key_count` | `get_slice_settings`'s argument and the result field compared, with `summary`, between a designer's 3MF and a copy's edit of it: the app checks the two reports match, never what's in them |
@@ -75,6 +77,7 @@ Keys of the `z.object` schemas in `services/printer-handoff/src/counterpart.ts`.
 |---|
 | `contract` `server` `name` `version` `printer` `kind` `model` `serial` `host` `id` `capabilities` `progress` `layers` `camera` `cameraStream` `filaments` `pause` `resume` `cancel` `print3mf` `gcode` `slicing` `supports` `copies` `orient` `controls` `route` `mode` `choices` `options` `label` `available` `reason` `type` `url` `savedTo` |
 | `observedAt` `state` `job` `elapsedSec` `remainingSec` `layer` `totalLayers` `stage` `temps` `nozzle` `bed` `chamber` `actual` `target` `activeFilament` `slot` `material` `color` `problems` `code` `severity` `message` |
+| `physical` `status` `evidence` `assessment` `required` `frameId` `referenceFrameIds` `expectedHeightMm` `expectedFootprintMm` `record` `dispatch` `sha256` `frames` `role` `imageContentIndex` |
 
 ## Not MCP
 

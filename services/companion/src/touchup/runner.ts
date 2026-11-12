@@ -25,8 +25,9 @@ const KILL_GRACE_MS = 5000;
 
 export interface TouchupChange {tag: 'added' | 'changed' | 'assumed' | 'estimated'; text: string; toleranceMm?: number}
 export interface TouchupAsk {question: string; photo?: string; region?: {x: number; y: number; width: number; height: number};
-  /** Sizes the worker wants confirmed or corrected, each with a label a person can act on and where the number came from. */
-  sizes?: {label: string; mm: number; from: 'scan' | 'published'}[]}
+  /** Sizes the worker wants confirmed or corrected, each with a label a person can act on and where the number came
+   *  from; a published one with the product it is for and where the maker published it (#622). */
+  sizes?: {label: string; mm: number; from: 'scan' | 'published' | 'estimate'; product?: string; reference?: string}[]}
 /** The designer's supports choice, passed to the slicer as it is (slice_stl `enable_support` / `support_type`). */
 export interface TouchupSupports {enabled: boolean; type?: 'tree(auto)' | 'normal(auto)'}
 export interface TouchupResult {
@@ -100,8 +101,8 @@ export interface ResultEvent {
   structured_output?: {status?: string; closeup?: string; summary?: string; title?: string; changes?: unknown; ask?: unknown; parts?: unknown; seats?: unknown};
 }
 
-/** The worker's title, what-changed list and Ask, checked and made safe to show. */
-function structured(answer: ResultEvent['structured_output'], publicText: (text: string) => string): Pick<TouchupResult, 'title' | 'changes' | 'ask' | 'supports'> {
+/** The worker's title, what-changed list and Ask, checked and made safe to show. Exported for its tests. */
+export function structured(answer: ResultEvent['structured_output'], publicText: (text: string) => string): Pick<TouchupResult, 'title' | 'changes' | 'ask' | 'supports'> {
   const out: Pick<TouchupResult, 'title' | 'changes' | 'ask' | 'supports'> = {};
   const supports = (answer as {supports?: unknown} | undefined)?.supports as Record<string, unknown> | undefined;
   if (supports && typeof supports.enabled === 'boolean')
@@ -124,13 +125,18 @@ function structured(answer: ResultEvent['structured_output'], publicText: (text:
       ...(typeof ask.photo === 'string' && /^[A-Za-z0-9._ -]{1,128}$/.test(ask.photo.split('/').at(-1) ?? '') ? {photo: ask.photo.split('/').at(-1)!} : {}),
       ...(region && unit(region.x) && unit(region.y) && unit(region.width) && unit(region.height)
         ? {region: {x: region.x as number, y: region.y as number, width: region.width as number, height: region.height as number}} : {})};
-    // Sizes to confirm: every entry must be whole (a label, a positive number, a known source), or none is kept and
-    // the question stands as words.
+    // Sizes to confirm: every entry must be whole (a label, a positive number, a known source, and for a published
+    // size the product and where it was published), or none is kept and the question stands as words. A published
+    // number with no product named could be any product's (#622: a bare phone's, offered for a phone in a case).
     const sizes = Array.isArray(ask.sizes) ? ask.sizes.map((item: unknown) => {
       const size = item as Record<string, unknown> | null;
       const label = typeof size?.label === 'string' ? publicText(size.label).trim().slice(0, 120) : '';
-      return label && typeof size?.mm === 'number' && Number.isFinite(size.mm) && size.mm > 0 && size.mm <= 10_000 && (size.from === 'scan' || size.from === 'published')
-        ? {label, mm: size.mm, from: size.from as 'scan' | 'published'} : undefined;
+      const product = typeof size?.product === 'string' ? publicText(size.product).trim().slice(0, 120) : '';
+      const reference = typeof size?.reference === 'string' ? publicText(size.reference).trim().slice(0, 300) : '';
+      const from = size?.from === 'scan' || size?.from === 'published' || size?.from === 'estimate' ? size.from : undefined;
+      if (!label || typeof size?.mm !== 'number' || !Number.isFinite(size.mm) || size.mm <= 0 || size.mm > 10_000 || !from) return undefined;
+      if (from === 'published') return product && reference ? {label, mm: size.mm, from, product, reference} : undefined;
+      return {label, mm: size.mm, from};
     }) : [];
     if (sizes.length >= 1 && sizes.length <= 6 && sizes.every(Boolean)) out.ask.sizes = sizes as NonNullable<TouchupAsk['sizes']>;
   }

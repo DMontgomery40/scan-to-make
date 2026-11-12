@@ -10,7 +10,7 @@ import {basename, join, isAbsolute, sep} from 'node:path';
 import type {RemoteScope} from '../remote-auth.js';
 import {InvalidAnswerError, InvalidCaptureCameraError, InvalidCaptureManifestError, InvalidStateError, passKind, projectStatus, type ObjectService} from './service.js';
 import {CameraUnavailableError, type CameraFrame} from '../printing/camera.js';
-import {CompanionSettingsPatchSchema, FitSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
+import {CompanionSettingsPatchSchema, FitSchema, SizesAnswerSchema, type ObjectStatus, type ProjectStatus} from '@scan-to-make/contracts/counterpart';
 import {z} from 'zod';
 import {fitRequest} from './fit.js';
 import {askKind} from './asks.js';
@@ -25,7 +25,7 @@ import {PrinterSetupError, type PrinterSetup} from '../printing/setup.js';
 const READ: RemoteScope = 'projects:read', WRITE: RemoteScope = 'captures:import', PRINT: RemoteScope = 'printer-handoff:use';
 const MAX_SCAN = 64 * 1024 * 1024, MAX_PHOTO = 25 * 1024 * 1024, MAX_JSON = 16 * 1024;
 const MAX_DEPTH = 8 * 1024 * 1024;
-const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|make-from-scan|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+))?)?$/;
+const PATH = /^\/v1\/objects(?:\/([0-9a-f-]{36})(?:\/(scan|model|ask|plate-selection|settings|duplicate|make-from-scan|locate|photos|capture|capture-manifest|capture-depth|capture-camera|reconstruction|reconstruction-preview\.stl|start|corrections|closeup|print|print\/pause|print\/resume|print\/cancel|estimate|camera\.jpg|prints\/[0-9a-f-]{36}\/frames\/[0-9a-f-]{36}\.jpg|asks\/[0-9a-f-]{36}\.jpg|filaments|colour-mapping|print-confirmation|printer|model\.stl|original\/[0-9]+|passes\/[^/]+\/activity|(?:renders|photos|capture|scan|pictures)\/[^/]+|versions\/[0-9a-f-]{36}\/(?:[^/]+|(?:renders|pictures)\/[^/]+)))?)?$/;
 const PRINTER_CAMERA = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/camera\.jpg$/;
 /** Settings -> Printers: the printer MCP's connection (`route`) and which MCP a printer uses (`mcp`). */
 const PRINTER_CHOICE = /^\/v1\/objects\/printers\/([A-Za-z0-9_-]{1,256})\/(route|mcp)$/;
@@ -421,6 +421,16 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
           await exportFile(response, service.dir(id), `${kind}/${name}`, {'content-type': type, 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store'}, header('if-none-match'));
           return;
         }
+        if (action.startsWith('versions/')) {
+          if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
+          await authorize(READ);
+          const object = await service.get(id);
+          // A sealed design's own files: its model (and the merged STL sealed beside a multi-part 3MF), renders and pictures.
+          const allowed = object.versions?.flatMap(v => [v.result.model, `${v.result.model.split('/').slice(0, -1).join('/')}/model.stl`, ...v.result.renders, ...Object.values(v.pictures ?? {})]);
+          if (!allowed?.includes(action)) throw new HttpFailure(404, 'not-found');
+          await exportFile(response, service.dir(id), action, {'content-type': action.endsWith('.png') ? 'image/png' : action.endsWith('.3mf') ? 'model/3mf' : 'model/stl', 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff'});
+          return;
+        }
         if (action.startsWith('pictures/')) {
           if (method !== 'GET') throw new HttpFailure(405, 'method-not-allowed');
           await authorize(READ);
@@ -604,13 +614,15 @@ export function createObjectRoutes(service: ObjectService, options: {printerSetu
             break;
           }
           case 'closeup': {
-            const input = await json<{bestGuess?: unknown; text?: unknown; photoNames?: unknown; sizes?: unknown}>(request);
+            const input = await json<{bestGuess?: unknown; text?: unknown; photoNames?: unknown; sizes?: unknown; measured?: unknown}>(request);
             if (input.text !== undefined && (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 2000)) throw new HttpFailure(400, 'invalid-request');
-            // A sizes question's numbers: {id, mm} for the sizes it listed.
-            const sizes = input.sizes === undefined ? undefined : z.array(z.strictObject({id: z.string().min(1).max(64), mm: z.number().positive().max(10_000)})).min(1).max(6).safeParse(input.sizes);
+            // A sizes question's numbers: {id, mm} for the sizes it listed, and the ids the person typed or edited
+            // (contracts `SizesAnswerSchema`; a client from before Nov 12 sends no `measured`).
+            if (input.measured !== undefined && input.sizes === undefined) throw new HttpFailure(400, 'invalid-request');
+            const sizes = input.sizes === undefined ? undefined : SizesAnswerSchema.safeParse({sizes: input.sizes, ...(input.measured !== undefined ? {measured: input.measured} : {})});
             if (sizes && !sizes.success) throw new HttpFailure(400, 'invalid-request');
             if (input.photoNames !== undefined && (!Array.isArray(input.photoNames) || input.photoNames.length > 100 || input.photoNames.some(name => typeof name !== 'string' || !name || name.length > 128))) throw new HttpFailure(400, 'invalid-request');
-            object = await service.answerCloseup(id, {photoNames: input.photoNames as string[] | undefined, bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {}), ...(sizes ? {sizes: sizes.data} : {})});
+            object = await service.answerCloseup(id, {photoNames: input.photoNames as string[] | undefined, bestGuess: input.bestGuess === true, ...(typeof input.text === 'string' ? {text: input.text} : {}), ...(sizes ? sizes.data : {})});
             break;
           }
           case 'print': {

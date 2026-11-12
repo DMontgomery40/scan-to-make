@@ -75,6 +75,8 @@ NAMESPACE = uuid.UUID('6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a00')
 PROJECTS = [
     ('wall-holder', '30a2a33c', 'ready: a fit, its question answered, 130 scan photos'),
     ('wall-holder-question', 'synth:question', 'question open (copy of wall-holder at its first pass)'),
+    ('phone-mount-question', 'synth:question', "sizes question open (copy of the Forester phone mount at its first pass: Apple's bare-phone sizes offered for a cased phone, #622)"),
+    ('phone-mount-sourced', 'synth:question', 'sizes question open (the same copy, asked as the worker asks it now: packages/contracts/fixtures/size-sources.json, #622)'),
     ('bike-oil-scan', '0ddbecb5', 'ready: an untitled copy from a scan, 77 photos'),
     ('dad-sign', 'e9b21ab1', 'ready: an untitled copy from a scan, 94 photos'),
     ('guitar-pick', 'a2bfa85a', 'done: printed, marked works'),
@@ -112,19 +114,20 @@ def clone(src: Path, dst: Path) -> None:
     subprocess.run(['cp', '-cR' if sys.platform == 'darwin' else '-R', str(src), str(dst)], check=True)
 
 
-def synth_question(objects: Path, source: str) -> str:
-    """The wall holder as it was when its question was open: first pass only, no model yet, no answer."""
-    new = str(uuid.uuid5(NAMESPACE, f'question:{source}'))
+def synth_question(objects: Path, source: str, variant: str = '', ask: dict | None = None) -> str:
+    """A project as it was when its question was open: first pass only, no model yet, no answer, nothing checked.
+    `ask` replaces the question (kept open, with its own id) for a variant of the same project."""
+    new = str(uuid.uuid5(NAMESPACE, f'question:{source}{":" + variant if variant else ""}'))
     clone(objects / source, objects / new)
     path = objects / new / 'object.json'
     o = json.loads(path.read_text())
     o['id'] = new
     o['state'] = 'needs-closeup'
     o['passes'] = o['passes'][:1]
-    o['ask'] = {**o['ask'], 'status': 'open'}
+    o['ask'] = {**(ask or o['ask']), 'status': 'open'}
     o['messages'] = []
     o['updatedAtMs'] = o['passes'][0].get('endedAtMs', o['updatedAtMs'])
-    for key in ('current', 'outcome', 'print', 'plateProgress'): o.pop(key, None)
+    for key in ('current', 'outcome', 'print', 'plateProgress', 'checkedSizes'): o.pop(key, None)
     path.write_text(json.dumps(o))
     return new
 
@@ -182,6 +185,13 @@ def prepare(source: Path, data: Path) -> dict:
         if any(p.name.startswith(prefix) for p in objects.iterdir()): ids[name] = resolve_id(objects, prefix)
         else: log(f'{name} ({prefix}) is no longer in the projects; its screens are skipped')
     if 'wall-holder' in ids: ids['wall-holder-question'] = synth_question(objects, ids['wall-holder'])
+    # The Forester phone mount's sizes question (#622): the card that offered a bare phone's sizes for a cased phone.
+    if any(p.name.startswith('53a48b5e') for p in objects.iterdir()):
+        ids['phone-mount-question'] = synth_question(objects, resolve_id(objects, '53a48b5e'))
+        # The same question with each size's source as the worker gives it now (published with its product and source,
+        # the Mac's estimate, the scan), from the fixture every client's tests read.
+        ids['phone-mount-sourced'] = synth_question(objects, resolve_id(objects, '53a48b5e'), 'sourced',
+                                                    json.loads((REPO / 'packages/contracts/fixtures/size-sources.json').read_text())['ask'])
     if any(p.name.startswith('2f0a0229') for p in objects.iterdir()):
         ids['stove-gap-limit'] = synth_limit(objects, resolve_id(objects, '2f0a0229'))
     rewrite_paths(state, source)
@@ -273,7 +283,7 @@ def screens(ids: dict, record: str, offline_record: str, fixtures: Path, offline
             real + ['-CounterpartScreen', 'new', '-CounterpartNewScan', 'walk-around'],
             [['find', rows['fit'], 'click'], ['find', label, 'click']], pages=2)
     for name, _, state in [p for p in PROJECTS if p[0] in ids]:
-        data = 'real (state synthesised)' if name in ('wall-holder-question', 'stove-gap-limit') else 'real'
+        data = 'real (state synthesised)' if name in ('wall-holder-question', 'phone-mount-question', 'phone-mount-sourced', 'stove-gap-limit') else 'real'
         for item in project_screens(name, ids[name], state, data, record): item['order'] = len(out); out.append(item)
     add('print-wall-holder', 'Print sheet', 'wall-holder, stub printer MCP', 'real (printer stub)', real + ['-CounterpartOpen', f'counterpart://print/{ids["wall-holder"]}'], pages=3)
     add('print-scan-platform-3mf', 'Print sheet: plates', 'multi-plate 3MF, stub printer MCP', 'real (printer stub)', real + ['-CounterpartOpen', f'counterpart://print/{ids["scan-platform-3mf"]}'], pages=3)

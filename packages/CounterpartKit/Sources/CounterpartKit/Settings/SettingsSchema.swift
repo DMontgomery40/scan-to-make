@@ -25,6 +25,7 @@ public enum SettingsSchema {
         .init(id: "print.paused", label: "Print paused", phone: true, mac: true),
         .init(id: "print.done", label: "Print done", phone: true, mac: true),
         .init(id: "print.failed", label: "Print failed", phone: true, mac: true),
+        .init(id: "print.check", label: "Nothing coming out of the nozzle", phone: true, mac: true),
         .init(id: "print.not-started", label: "Print didn't start", phone: true, mac: true),
         .init(id: "print.cancelled", label: "Print stopped", phone: true, mac: false),
         .init(id: "print.unreachable", label: "Lost contact with the printer", phone: true, mac: false),

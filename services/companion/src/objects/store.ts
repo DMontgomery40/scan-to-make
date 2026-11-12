@@ -1,8 +1,11 @@
 import {randomUUID} from 'node:crypto';
 import {mkdir, readdir, readFile, rename, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
-import type {Fit} from '@scan-to-make/contracts/counterpart';
+import type {Fit, SizeFrom} from '@scan-to-make/contracts/counterpart';
 import {withPassEnded, type PassStatus} from './pass-end.js';
+import {retainAttempts, migrateProjectVersions, migrationBytes, freeBytes} from './versions.js';
+/** What the first start after the update did to each project's history (#616). */
+export interface VersionsMigrationReport {migrated: string[]; skipped: {id: string; reason: string}[]; failed: {id: string; reason: string}[]}
 import type {TouchupActivity, TouchupChange, WorkerLimit} from '../touchup/runner.js';
 import type {PassStage} from '../touchup/stages.js';
 import type {DesignEngine} from '../touchup/invocation.js';
@@ -27,7 +30,14 @@ export interface ObjectPrintConfirmation {
   supported: boolean;
 }
 
-export interface CheckedSize { label: string; mm: number; certainty: 'confirmed' | 'measured' }
+/**
+ * A size the person sent back for a size question (#622). `certainty` is how they checked it: `measured` (typed or
+ * edited the number) or `accepted` (confirmed the Mac's number untouched). `confirmed` is how an accepted size was
+ * stored before Nov 12: it stays as stored and is read as accepted, with its source unknown. `from`, `product` and
+ * `reference` are where the Mac's number came from (`AskSizeSchema`); `asked` is that number.
+ */
+export interface CheckedSize { label: string; mm: number; certainty: 'accepted' | 'measured' | 'confirmed';
+  from?: SizeFrom; product?: string; reference?: string; asked?: number }
 export interface ObjectMessage { id: string; text: string; atMs: number; photos: string[];
   /** The sending client's own id for this message. A second request carrying it is the same message arriving again,
    *  never a new one (Nov 10: a note whose reply was lost was sent again and started a second design pass). */
@@ -141,6 +151,10 @@ export interface StmObject {
    * on, and every client decodes projects ignoring fields it doesn't know.
    */
   scanFrom?: {id: string; title: string};
+  versions?: import('./versions.js').DesignVersion[];
+  prints?: import('./versions.js').PrintAttempt[];
+  versionsV1?: boolean;
+  historyRestored?: string;
   /**
    * What was asked and answered for the project this one was made from (Make something else from this scan, or
    * Duplicate), snapshotted when it was made (`inheritHistory`): every later pass's worker reads it, and deleting or
@@ -223,7 +237,7 @@ export interface StmObject {
   /** The pass (its `startedAtMs`) whose ending is `failure`. Dropped by `update` when anything else changes the failure. */
   failedPass?: number;
   /** The last print; `uncertain` when it may have reached the printer and must not be sent again by itself. */
-  print?: {plate?: import('./plates.js').PlateIdentity; bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[];
+  print?: {versionId?: string; plate?: import('./plates.js').PlateIdentity; bundleId: string; uncertain?: boolean; destination?: {id: string; name: string}; printerStatus?: {state: string; job?: string; checkedAtMs: number; percent?: number; remainingMinutes?: number}; sliced?: boolean; estimate?: {seconds?: number; grams?: number}; events?: {atMs: number; message: string}[];
     /** PRD §8.5: one uuid per print, from Print. */
     printId?: string;
     destinationId?: string;
@@ -278,7 +292,7 @@ export class ObjectStore {
 
   async create(instructions?: string, kind?: 'fit' | 'copy' | 'published', fit?: Fit): Promise<StmObject> {
     const now = Date.now();
-    const object: StmObject = {id: randomUUID(), createdAtMs: now, updatedAtMs: now, state: 'new', photos: [], requestPhotos: [], pendingPhotos: [], messages: [], passes: [],
+    const object: StmObject = {id: randomUUID(), createdAtMs: now, updatedAtMs: now, state: 'new', versionsV1: true, versions: [], prints: [], photos: [], requestPhotos: [], pendingPhotos: [], messages: [], passes: [],
       ...(instructions?.trim() ? {instructions: instructions.trim()} : {}), ...(kind ? {kind} : {}), ...(fit ? {fit} : {})};
     await mkdir(this.dir(object.id), {recursive: true});
     await this.#write(object);
@@ -308,7 +322,7 @@ export class ObjectStore {
     const previous = this.#queues.get(id) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
       const before = await this.get(id);
-      const updated = {...change(before), id, updatedAtMs: options.keepUpdatedAt ? before.updatedAtMs : Date.now()};
+      const updated = retainAttempts(before, {...change(before), id, updatedAtMs: options.keepUpdatedAt ? before.updatedAtMs : Date.now()});
       // A failure belongs to the pass that set it only until something else sets one: a change that carries
       // `failedPass` over while the project stops being failed, or fails for another reason, loses it.
       if (updated.failedPass !== undefined && updated.failedPass === before.failedPass && (updated.state !== 'failed' || updated.failure !== before.failure)) delete updated.failedPass;
@@ -335,6 +349,39 @@ export class ObjectStore {
   async remove(id: string): Promise<void> {
     await this.get(id);
     await rm(this.dir(id), {recursive: true, force: true});
+  }
+
+  /**
+   * Runs before recovery. Read old source folders and events, write only additive project fields and sealed copies.
+   * Each project on its own (#602 review, finding 1): one that fails, or that would leave the disk with less than
+   * `reserveBytes` free, is reported and left exactly as it was (unmigrated, read as before, tried again next start), and
+   * the others go on. It never throws: restoring history must not stop the companion serving projects or prints.
+   */
+  async migrateVersions(options: {eventsPath?: string; stlInfo?: (path: string) => Promise<[number, number, number] | undefined>;
+    freeBytes?: (dir: string) => Promise<number>; reserveBytes?: number} = {}): Promise<VersionsMigrationReport> {
+    const report: VersionsMigrationReport = {migrated: [], skipped: [], failed: []};
+    const lines = options.eventsPath ? await readFile(options.eventsPath, 'utf8').catch(() => '') : '';
+    const events = lines.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+    const reserve = options.reserveBytes ?? 2 * 1024 ** 3, free = options.freeBytes ?? freeBytes;
+    let objects: StmObject[];
+    try { objects = await this.list(); } catch (error) { report.failed.push({id: '*', reason: String((error as Error)?.message ?? error)}); return report; }
+    for (const object of objects) {
+      if (object.versionsV1) continue;
+      const dir = this.dir(object.id);
+      try {
+        const needed = await migrationBytes(object, dir), available = await free(dir);
+        if (available - needed < reserve) {
+          report.skipped.push({id: object.id, reason: `needs about ${Math.ceil(needed / 1024 ** 2)} MB; ${Math.floor(available / 1024 ** 2)} MB free leaves less than ${Math.round(reserve / 1024 ** 2)} MB`});
+          continue;
+        }
+        const migrated = await migrateProjectVersions(object, dir, {...options, events: events.filter(e => e.projectId === object.id)});
+        await this.update(object.id, () => migrated, {keepUpdatedAt: true});
+        report.migrated.push(object.id);
+      } catch (error) {
+        report.failed.push({id: object.id, reason: String((error as NodeJS.ErrnoException)?.code ?? (error as Error)?.message ?? error)});
+      }
+    }
+    return report;
   }
 
   /** After a restart nothing is still running: record interruption, never successful completion. */

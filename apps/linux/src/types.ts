@@ -48,12 +48,15 @@ export interface RawQuestion {
   url?: string;
   requestedSchema?: unknown;
 }
-/** One size a question asks about, in millimetres. `id` is opaque; `label` says what to measure. */
+/** One size a question asks about, in millimetres. `id` is opaque; `label` says what to measure; `from` is where the
+ *  computer's number came from, and a published one names its `product` and `reference` (#622). */
 export interface AskSize {
   id: string;
   label: string;
   mm: number;
-  from: "scan" | "published" | string;
+  from: "published" | "scan" | "estimate" | string;
+  product?: string;
+  reference?: string;
 }
 export interface Ask {
   id: string;

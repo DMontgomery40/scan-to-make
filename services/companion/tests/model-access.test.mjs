@@ -37,6 +37,13 @@ test('only the Claude Code worker can drive the person’s browser (a published 
   assert.equal(service.projectWorker().browser,browser,choice.kind);
  }
 });
+test('#630: the camera check runs only on the person’s Claude login (Claude Code), never an API key, an endpoint or another provider',async t=>{
+ const {service}=await fixture(t);
+ for(const [choice,claude] of [[{kind:'none'},false],[{kind:'claude-code'},true],[{kind:'codex-cli'},false],[api(),false],[{kind:'endpoint',url:'http://127.0.0.1:1234/v1',model:'local',keychainRef:randomUUID()},false]]){
+  await service.set(service.get().revision,choice);
+  assert.equal(typeof service.claudeWorker(),claude?'function':'undefined',choice.kind);
+ }
+});
 test('CAS serializes simultaneous edits; input/snapshot mutation cannot change stored choice',async t=>{
  const {service}=await fixture(t);const revision=service.get().revision,choice=api();
  const first=service.set(revision,choice),second=service.set(revision,{kind:'codex-cli'});

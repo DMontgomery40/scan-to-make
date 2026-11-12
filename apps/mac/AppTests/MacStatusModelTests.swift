@@ -170,7 +170,7 @@ private func phone(_ id: String, _ name: String, pairedAt: Double = 1_700_000_00
         let defaults = try XCTUnwrap(UserDefaults(suiteName:"kan220-notify-\(UUID().uuidString)"))
         let prefs = NotificationPrefs(defaults:defaults)
         for type in ["pass.ready", "pass.ask", "print.done", "print.failed", "print.paused", "print.not-started",
-                     "print.confirm", "pass.failed"] {
+                     "print.confirm", "pass.failed", "print.check"] {
             XCTAssertTrue(prefs.shouldNotify(type:type), type)
         }
         for type in ["print.first-layer", "print.unreachable", "print.status", "print.started", "pass.started", "pass.stage",

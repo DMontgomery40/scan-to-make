@@ -66,6 +66,111 @@ enum Fixtures {
 
     static func objects(now: Date = Date()) -> [[String: Any]] {
         if set == "empty" { return [] }
+        if set == "design-history" {
+            let data = Data(#"""
+[
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a02",
+    "title": "Desk hanger",
+    "kind": "fit",
+    "instructions": "A desk hanger.",
+    "state": "ready",
+    "createdAtMs": 1793750400000,
+    "updatedAtMs": 1793980800000,
+    "photos": [],
+    "passes": [],
+    "current": {
+      "model": "current/model.stl",
+      "renders": [],
+      "summary": "Grooved rails."
+    },
+    "versions": [
+      {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "sealedAtMs": 1793750400000,
+        "modelSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "result": {
+          "model": "versions/10000000-0000-4000-8000-000000000001/model.stl",
+          "renders": [
+            "versions/10000000-0000-4000-8000-000000000001/renders/front.png"
+          ],
+          "summary": "A rest for a 25 mm desk.",
+          "sizeMm": [
+            60,
+            40,
+            20
+          ]
+        },
+        "picture": "versions/10000000-0000-4000-8000-000000000001/pictures/part.png",
+        "outcome": "works"
+      },
+      {
+        "id": "10000000-0000-4000-8000-000000000002",
+        "sealedAtMs": 1793836800000,
+        "modelSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "result": {
+          "model": "versions/10000000-0000-4000-8000-000000000002/model.stl",
+          "renders": [],
+          "summary": "A wider rest."
+        }
+      },
+      {
+        "id": "10000000-0000-4000-8000-000000000003",
+        "sealedAtMs": 1793980800000,
+        "modelSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "result": {
+          "model": "versions/10000000-0000-4000-8000-000000000003/model.stl",
+          "renders": [],
+          "summary": "Grooved rails."
+        }
+      }
+    ],
+    "prints": [
+      {
+        "id": "print-one",
+        "printId": "print-one",
+        "bundleId": "bundle",
+        "versionId": "10000000-0000-4000-8000-000000000001",
+        "startedAtMs": 1793808000000,
+        "destination": {
+          "id": "current",
+          "name": "Workshop printer"
+        },
+        "monitor": {
+          "phase": "ended",
+          "endState": "done",
+          "endedAt": "2026-11-04T23:32:00Z"
+        }
+      }
+    ]
+  },
+  {
+    "id": "6f1c1b6e-2d1e-4c3a-9a51-0e7a0b9e1a03",
+    "title": "Mic mount",
+    "kind": "fit",
+    "instructions": "A mic mount.",
+    "state": "confirmed",
+    "outcome": "works",
+    "createdAtMs": 1793750000000,
+    "updatedAtMs": 1793750100000,
+    "photos": [],
+    "passes": [],
+    "current": {"model": "current/model.stl", "renders": [], "summary": "A rounded cup."},
+    "versions": [
+      {
+        "id": "20000000-0000-4000-8000-000000000001",
+        "sealedAtMs": 1793750000000,
+        "modelSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "result": {"model": "versions/20000000-0000-4000-8000-000000000001/model.stl", "renders": [], "summary": "A rounded cup."},
+        "outcome": "works"
+      }
+    ],
+    "prints": []
+  }
+]
+"""#.utf8)
+            return (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+        }
         if set == "inherited-history" {
             let data = Data(#"""
 [
@@ -489,7 +594,8 @@ enum Fixtures {
             ask["question"] = "Kroger doesn't publish this bottle's size. Can you confirm or correct what the scan reads?"
             ask["sizes"] = [["id": "size-1", "label": "width at the widest point", "mm": 64, "from": "scan"],
                             ["id": "size-2", "label": "width at the waist", "mm": 53.5, "from": "scan"],
-                            ["id": "size-3", "label": "thickness", "mm": 32, "from": "scan"],
+                            // The scan can't see the back: the Mac's own estimate (#622), never "from your scan".
+                            ["id": "size-3", "label": "thickness", "mm": 32, "from": "estimate"],
                             ["id": "size-4", "label": "height to the cap tip", "mm": 107, "from": "scan"]]
         }
         // A kind this build doesn't know (a later Mac's question): the card must offer no answer at all.

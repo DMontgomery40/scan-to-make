@@ -185,6 +185,10 @@ private struct ActivityTab: View {
                     StageRow(title: pass.endedAtMs == nil ? "Working on it" : Self.outcome(pass), detail: pass.summary.map(Self.firstSentence) ?? "",
                              time: pass.endedAtMs.map(Self.clock) ?? "", done: pass.endedAtMs != nil, running: pass.endedAtMs == nil)
                 }
+                // #616: the pass that sealed a design names it, as the design rows under the stage do.
+                if let sealed = DesignHistory(object).sealedLine(passStartedAtMs: pass.startedAtMs) {
+                    Label(sealed, systemImage: "seal").font(.caption).foregroundStyle(.secondary)
+                }
                 if (pass.activityCount ?? pass.activity?.count ?? 0) > 0 {
                     PassToolLines(object: object, model: model, index: index, count: pass.activityCount ?? pass.activity?.count ?? 0,
                                   preview: pass.activity ?? [], open: index == object.passes.count - 1)
