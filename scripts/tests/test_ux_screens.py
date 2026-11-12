@@ -56,6 +56,11 @@ class UxScreensTests(unittest.TestCase):
         self.env.pop('STM_LANE_HELD', None)
         self.env.pop('UX_SCREENS_COMPANION', None)
         self.lane_state = lane / 'state'
+        # The tests replace every agent-device call; a runner without T3's bundled CLI still has to resolve one.
+        from unittest import mock
+        patcher = mock.patch.dict(os.environ, {'AGENT_DEVICE': os.environ.get('AGENT_DEVICE') or 'true'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -218,7 +223,7 @@ class UxScreensTests(unittest.TestCase):
         (src / 'fit.ts').write_text('export const brief = false;\n')
         self.assertTrue(built_now(), 'an uncommitted change rebuilds')
         self.assertFalse(built_now())
-        git('commit', '-qam', 'two')
+        git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qam', 'two')
         self.assertFalse(built_now(), 'committing the same content keeps the build')
         (src / 'new.ts').write_text('export {};\n')
         self.assertTrue(built_now(), 'an untracked source file rebuilds')
