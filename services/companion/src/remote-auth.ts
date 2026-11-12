@@ -27,6 +27,8 @@ const TOKEN_LIFETIME = DEVICE_CREDENTIAL_LIFETIME_MS;
 /** Refreshing again within this window returns the current expiry without a write. */
 const REFRESH_INTERVAL = 60 * 60 * 1000;
 const MAX_STORE_BYTES = 128 * 1024;
+/** How long a write waits for another write to release the store's lock before it is refused. */
+const LOCK_WAIT_MS = 1000;
 const scopesSchema = z
   .array(RemoteScopeSchema)
   .min(1)
@@ -391,7 +393,15 @@ export class RemoteAuthStore {
     const lock = join(this.directory, '.lock');
     try {
       await checkDirectory(this.directory);
-      await mkdir(lock, { mode: 0o700 });
+      // Another write holds the lock for a few milliseconds: wait for it, briefly, rather than refuse (#751).
+      // A lock still held after a second (left by a crash) is refused as before.
+      for (const started = Date.now(); ; ) {
+        try { await mkdir(lock, { mode: 0o700 }); break; }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || Date.now() - started >= LOCK_WAIT_MS) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
       locked = true;
       const { state, v1Bytes } = await this.read(),
         now = this.now();
@@ -602,10 +612,22 @@ export class RemoteAuthStore {
       throw new RemoteAuthFailure('auth-unavailable');
     }
   }
+  /**
+   * A read, never a write: it takes no lock. Several of the Mac app's first calls after an update list devices at
+   * once (status.get, devices.list, liveActivity.tokens), and the store's lock is taken once or refused, so as a write
+   * all but one were refused (#751). Expired devices are left out here and pruned by the next write.
+   */
   async listDevices() {
-    return this.mutate((state) =>
-      state.devices.map(({ tokenHash: _secret, installationKeyHash: _installation, ...device }) => device)
-    );
+    try {
+      const { state } = await this.read();
+      const now = this.now();
+      return state.devices
+        .filter((device) => device.expiresAt > now)
+        .map(({ tokenHash: _secret, installationKeyHash: _installation, ...device }) => device);
+    } catch (error) {
+      if (error instanceof RemoteAuthFailure) throw error;
+      throw new RemoteAuthFailure('auth-unavailable');
+    }
   }
   /**
    * The phone's own name from `X-Scan-Device-Name`, saved when it changes. An empty or unusable value never

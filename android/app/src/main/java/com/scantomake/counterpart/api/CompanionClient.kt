@@ -317,7 +317,8 @@ class CompanionClient(
 
     // MARK: Health and printing
 
-    data class Health(val capabilities: Set<String>, val name: String?)
+    /** `checking`: capabilities the host is still checking (#751); each is false in `capabilities` until it settles. */
+    data class Health(val capabilities: Set<String>, val name: String?, val checking: Set<String> = emptySet())
 
     /** A quick "are you there?": `/healthz` with a short timeout. */
     suspend fun answers(): Boolean = try { send("GET", "/healthz", timeoutMs = 6_000).checked("/healthz"); true } catch (_: Exception) { false }
@@ -326,7 +327,8 @@ class CompanionClient(
         val o = request("GET", "/healthz")
         val caps = o["capabilities"].obj?.filter { it.value.bool == true }?.keys ?: emptySet()
         val name = (o["name"].str ?: o["macName"].str)?.trim()?.takeIf { it.isNotEmpty() }
-        return Health(caps, name)
+        val checking = o["checking"].arr?.mapNotNull { it.str }?.toSet() ?: emptySet()
+        return Health(caps, name, checking)
     }
 
     suspend fun printers(): PrinterCatalog = WireJson.decodeFromJsonElement(request("GET", "/v1/objects/printers"))

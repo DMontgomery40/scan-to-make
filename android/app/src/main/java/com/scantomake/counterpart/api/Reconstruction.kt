@@ -147,4 +147,22 @@ object ReconstructionAnswers {
     const val CAPABILITY = "reconstructionReviewV1"
     val updateHost: CompanionException
         get() = CompanionException("update-host", "Update Counterpart on your computer, then send this scan again. Your scan is kept on this phone.")
+    val hostStillChecking: CompanionException
+        get() = CompanionException("host-checking", "Your computer is still getting ready. Send this scan again in a minute. Your scan is kept on this phone.")
+
+    /**
+     * Whether the host can take this scan: null when it can, else what to tell the person. A companion that has just
+     * started names the capability in `checking` while its own check runs (#751, up to about 30 s): the phone waits
+     * for that answer instead of calling a current Mac out of date.
+     */
+    suspend fun hostRefusal(health: suspend () -> CompanionClient.Health, wait: suspend (Long) -> Unit, limitMs: Long = 36_000, stepMs: Long = 2_000): CompanionException? {
+        var waited = 0L
+        while (true) {
+            val answer = health()
+            if (CAPABILITY in answer.capabilities) return null
+            if (CAPABILITY !in answer.checking) return updateHost
+            if (waited >= limitMs) return hostStillChecking
+            wait(stepMs); waited += stepMs
+        }
+    }
 }

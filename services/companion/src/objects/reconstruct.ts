@@ -433,9 +433,20 @@ export function reconstructionReviewSupported(platform: string = process.platfor
 export interface ReconstructionReadiness { ok: boolean; error?: string; versions?: Record<string, string> }
 
 let readinessCache: {key: string; at: number; promise: Promise<ReconstructionReadiness>} | undefined;
+/** The last probe that finished, and for which tools: what a caller that cannot wait is told. */
+let readinessSettled: {key: string; result: ReconstructionReadiness} | undefined;
 
 /** Test seam: drop cached readiness evidence. */
-export function resetReconstructionReadiness(): void { readinessCache = undefined; }
+export function resetReconstructionReadiness(): void { readinessCache = undefined; readinessSettled = undefined; }
+
+function startProbe(key: string, at: number, platform: string, env: NodeJS.ProcessEnv): Promise<ReconstructionReadiness> {
+  const promise = probeReadiness(platform, env);
+  readinessCache = {key, at, promise};
+  // Only the newest probe settles the answer (#768 review): an older one for tools that have since changed, finishing
+  // last, must not pin status and health to its stale result.
+  void promise.then(result => { if (readinessCache?.promise === promise) readinessSettled = {key, result}; }, () => undefined);
+  return promise;
+}
 
 async function probeReadiness(platform: string, env: NodeJS.ProcessEnv): Promise<ReconstructionReadiness> {
   const binary = findLinuxReconstruct(env);
@@ -494,20 +505,36 @@ export function packagedBuildId(binary: string | undefined): string | undefined 
  */
 export function reconstructionReadiness(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): Promise<ReconstructionReadiness> {
   if (platform !== 'linux' && platform !== 'darwin') return Promise.resolve({ok: false, error: QUALIFY_NOT_INSTALLED});
-  const binary = findLinuxReconstruct(env);
-  const buildId = packagedBuildId(binary);
-  let stamp = '';
-  if (!buildId) { try { stamp = binary ? String(statSync(binary).mtimeMs) : ''; } catch { stamp = ''; } }
-  const key = `${platform}|${binary ?? ''}|build:${buildId ?? ''}|mtime:${stamp}|${platform === 'darwin' ? findMacReconstruct(env) ?? '' : ''}`;
+  const key = readinessKey(platform, env);
   const now = Date.now();
   if (readinessCache?.key === key && now - readinessCache.at < 30000) return readinessCache.promise;
   if (readinessCache?.key === key) {
     // Reuse a prior success indefinitely for the same binary; re-probe failures.
     const cached = readinessCache;
-    return cached.promise.then(result => result.ok ? result : (readinessCache = {key, at: now, promise: probeReadiness(platform, env)}).promise);
+    return cached.promise.then(result => result.ok ? result : startProbe(key, now, platform, env));
   }
-  readinessCache = {key, at: now, promise: probeReadiness(platform, env)};
-  return readinessCache.promise;
+  return startProbe(key, now, platform, env);
+}
+
+function readinessKey(platform: string, env: NodeJS.ProcessEnv): string {
+  const binary = findLinuxReconstruct(env);
+  const buildId = packagedBuildId(binary);
+  let stamp = '';
+  if (!buildId) { try { stamp = binary ? String(statSync(binary).mtimeMs) : ''; } catch { stamp = ''; } }
+  return `${platform}|${binary ?? ''}|build:${buildId ?? ''}|mtime:${stamp}|${platform === 'darwin' ? findMacReconstruct(env) ?? '' : ''}`;
+}
+
+/**
+ * Readiness for a caller that must answer at once (status.get, /healthz): the settled answer for these tools,
+ * or 'checking' while their first probe runs. It starts the probe when none is running, and never waits for it.
+ * A new payload's first `check` can take longer than a control request's 10 s (#751: the first status.get after
+ * every Mac update timed out on it), so status must not wait on the probe.
+ */
+export function reconstructionReadinessNow(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): ReconstructionReadiness | 'checking' {
+  if (platform !== 'linux' && platform !== 'darwin') return {ok: false, error: QUALIFY_NOT_INSTALLED};
+  void reconstructionReadiness(platform, env);
+  const key = readinessKey(platform, env);
+  return readinessSettled?.key === key ? readinessSettled.result : 'checking';
 }
 
 /** The platform's own builder: Linux tool on Linux, Apple's (with qualification) on a Mac. */

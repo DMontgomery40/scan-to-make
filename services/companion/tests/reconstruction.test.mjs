@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {ObjectStore} from '../dist/objects/store.js';
 import {ObjectService, InvalidStateError} from '../dist/objects/service.js';
 import {createObjectRoutes, publicObject} from '../dist/objects/http.js';
-import {linuxReconstructRunner, macQualifiedReconstructRunner, parseRegionOutcome, parseScaleOutcome, reconstructionReviewSupported, reconstructionReadiness, resetReconstructionReadiness, QUALIFY_NOT_INSTALLED} from '../dist/objects/reconstruct.js';
+import {linuxReconstructRunner, macQualifiedReconstructRunner, parseRegionOutcome, parseScaleOutcome, reconstructionReviewSupported, reconstructionReadiness, reconstructionReadinessNow, resetReconstructionReadiness, QUALIFY_NOT_INSTALLED} from '../dist/objects/reconstruct.js';
 import {validateCaptureCamera, InvalidCaptureCameraError} from '../dist/objects/capture-camera.js';
 import {tempDir} from './support/temp.mjs';
 
@@ -331,6 +331,28 @@ test('readiness cache is keyed by packaged BUILD-ID, not launcher mtime', async 
   await writeFile(join(root, 'BUILD-ID'), 'reconstruction-9.9-g222222222222-linux-x64\n');
   assert.equal((await reconstructionReadiness('linux', env)).ok, true);
   assert.equal((await readFile(counter, 'utf8')).trim().split('\n').length, 2);
+  resetReconstructionReadiness();
+});
+
+// #768 review: the tools changed under a running companion while a slow check of the old ones was still running. The
+// old check finishing last must not become the answer for the new tools, or status and health say "checking" until a restart.
+test('an older readiness check that finishes after a newer one for other tools never replaces its answer', async () => {
+  resetReconstructionReadiness();
+  const root = await tempDir('readiness-stale-');
+  const older = join(root, 'older'), newer = join(root, 'newer');
+  await writeFile(older, `#!/bin/sh\nsleep 1\necho '{"ok":false,"error":"old tools"}'\nexit 2\n`);
+  await writeFile(newer, `#!/bin/sh\necho '{"ok":true,"versions":{"tools":"new"}}'\n`);
+  await chmod(older, 0o755); await chmod(newer, 0o755);
+  const olderEnv = {SCAN_TO_MAKE_LINUX_RECONSTRUCT: older, PATH: process.env.PATH};
+  const newerEnv = {SCAN_TO_MAKE_LINUX_RECONSTRUCT: newer, PATH: process.env.PATH};
+  assert.equal(reconstructionReadinessNow('linux', olderEnv), 'checking');
+  const olderDone = reconstructionReadiness('linux', olderEnv);
+  assert.equal((await reconstructionReadiness('linux', newerEnv)).ok, true);
+  await olderDone;
+  await new Promise(resolve => setImmediate(resolve));
+  const now = reconstructionReadinessNow('linux', newerEnv);
+  assert.notEqual(now, 'checking', 'the newer tools keep their own settled answer');
+  assert.equal(now.ok, true);
   resetReconstructionReadiness();
 });
 
