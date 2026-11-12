@@ -132,7 +132,9 @@ data class Project(
                                     /** This 3MF prints with the settings it carries (a designer's project), as its printer's MCP says. */
                                     val ownSettings: Boolean? = null,
                                     /** A fit's places for the scanned object, as its pass said (docs/protocols/seats.md). */
-                                    val seats: List<Seat>? = null)
+                                    val seats: List<Seat>? = null,
+                                    /** #769: the merged mesh beside a multi-part design's 3MF, listed only while the file is there. */
+                                    val mergedMesh: String? = null)
     /** The scan turned about the fixed X, then Y, then Z axes (`rotationDeg`), then moved (`translationMm`), into the part's frame. */
     @Serializable data class Seat(val name: String? = null, val translationMm: List<Double>, val rotationDeg: List<Double>)
     /** A spool a print used, as the printer MCP reported it when the print was sent. */

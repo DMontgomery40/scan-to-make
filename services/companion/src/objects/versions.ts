@@ -79,7 +79,8 @@ export async function sealVersion(object: StmObject, dir: string, result: NonNul
     }
     if (!reused) { await rename(temp, join(dir, prefix)); pass.created?.add(id); }
     return {id, sealedAtMs: pass.endedAtMs, ...(pass.startedAtMs !== undefined ? {passStartedAtMs: pass.startedAtMs} : {}), ...(pass.note ? {note: pass.note} : {}), modelSha256,
-      result: {...result, model: paths.get(result.model)!, renders, ...(design ? {design} : {})}};
+      // The merged mesh is listed from disk as the project is read, never copied from `current` (its path is current's).
+      result: {...withoutMergedMesh(result), model: paths.get(result.model)!, renders, ...(design ? {design} : {})}};
   } catch (error) { await rm(temp, {recursive: true, force: true}); throw error; }
 }
 
@@ -268,4 +269,9 @@ async function migrateOnce(object: StmObject, dir: string, options: {events?: Hi
   if (latest && object.state === 'printed' && latest.printedAtMs === undefined && printedAt(latest, attempts) === undefined)
     latest.printedAtMs = object.updatedAtMs;
   return {...migrated, versionsV1: true, ...(versions.length > 1 ? {historyRestored: restoredWords} : {})};
+}
+
+function withoutMergedMesh<T extends {mergedMesh?: string}>(result: T): Omit<T, 'mergedMesh'> {
+  const {mergedMesh: _mergedMesh, ...rest} = result;
+  return rest;
 }

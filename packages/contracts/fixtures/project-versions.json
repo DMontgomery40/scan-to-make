@@ -40,6 +40,7 @@
         "modelSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "result": {
           "model": "versions/10000000-0000-4000-8000-000000000002/touched.3mf",
+          "mergedMesh": "versions/10000000-0000-4000-8000-000000000002/model.stl",
           "renders": [],
           "summary": "A wider rest."
         }

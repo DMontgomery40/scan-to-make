@@ -122,15 +122,27 @@ final class DesignHistoryTests: XCTestCase {
         XCTAssertEqual(lid.arMesh, "versions/\(wider.id)/model.stl")
 
         // The newest design is a multi-part 3MF (Pink snap-lid box, Caliper card logo, Guitar pick): its merged current/model.stl.
-        project.current?.model = "current/model.3mf"
+        project.current?.model = "current/model.3mf"; project.current?.mergedMesh = "current/model.stl"
         let box = try XCTUnwrap(ProjectGallery(project: project).first)
         XCTAssertEqual(box.drawing, .model("current/model.stl"))
         XCTAssertEqual(project.partMesh, "current/model.stl")
         XCTAssertEqual(box.colour, .neutral)
         XCTAssertEqual(box.arMesh, "current/model.stl")
 
+        // Review of #770: a pass-made 3MF whose merged mesh the Mac doesn't list (none was written, or an older Mac that
+        // doesn't say) stays its picture: no 3D to fail, no Try Again that can't succeed, no AR.
+        project.current?.mergedMesh = nil
+        XCTAssertNil(project.partMesh)
+        XCTAssertEqual(ProjectGallery(project: project).first?.drawing, .picture(""))
+        XCTAssertNil(ProjectGallery(project: project).first?.arMesh)
+        var lidless = project.showingDesign(wider.id); lidless.current?.mergedMesh = nil
+        XCTAssertNil(lidless.partMesh, "a sealed 3MF with no merged mesh listed")
+        // A listed path that isn't the 3MF's own sibling is never fetched.
+        project.current?.mergedMesh = "current/elsewhere.stl"
+        XCTAssertNil(project.partMesh)
+
         // A one-colour STL newest still draws the page's own model.
-        project.current?.model = "current/model.stl"
+        project.current?.mergedMesh = nil; project.current?.model = "current/model.stl"
         XCTAssertEqual(project.partMesh, "model.stl")
         XCTAssertEqual(ProjectGallery(project: project).first?.arMesh, "model.stl")
 
@@ -139,5 +151,18 @@ final class DesignHistoryTests: XCTestCase {
         XCTAssertNil(project.partMesh)
         XCTAssertEqual(ProjectGallery(project: project).first?.drawing, .picture(""))
         XCTAssertNil(ProjectGallery(project: project).first?.arMesh)
+    }
+
+    /// Review of #770, finding 1: the AR file is offered (by the stage's chip and by Share) only for the model and colour it
+    /// was written from. Prepared, then a change pass brings a new model or the spool changes: the old USDZ is not offered.
+    func testAnARFileIsOfferedOnlyForTheModelAndColourItWasWrittenFrom() {
+        let mesh = URL(fileURLWithPath: "/cache/v1/model.stl"), usdz = URL(fileURLWithPath: "/cache/ar/part.usdz")
+        let prepared = PreparedAR(from: mesh, tint: "#F5547C", usdz: usdz)
+        XCTAssertEqual(prepared.usdz(for: mesh, tint: "#F5547C"), usdz, "the model on the stage: offered")
+        XCTAssertNil(prepared.usdz(for: URL(fileURLWithPath: "/cache/v2/model.stl"), tint: "#F5547C"), "a new model after a change pass")
+        XCTAssertNil(prepared.usdz(for: mesh, tint: "#000000"), "the spool changed")
+        XCTAssertNil(prepared.usdz(for: mesh, tint: nil), "now neutral")
+        XCTAssertNil(prepared.usdz(for: nil, tint: "#F5547C"), "no model on the stage")
+        XCTAssertNil(PreparedAR?.none?.usdz(for: mesh, tint: nil))
     }
 }

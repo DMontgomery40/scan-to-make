@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { canLocate, gallery, drawnColour, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
+import { canLocate, gallery, partMesh, drawnColour, photoPicture, still, filePath, stageStill, pictureClock, PICTURE_PATIENCE_MS, NOT_DRAWN_LINE } from "../src/gallery";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ProjectPage } from "../src/ProjectView";
@@ -1147,6 +1147,11 @@ test("an earlier design opens on the same stage from its own files, with Show th
   assert.deepEqual(gallery(lid)[0]?.drawing, { model: `versions/${widerDesign!.id}/model.stl` });
   assert.equal(gallery(lid)[0]?.colour, "neutral");
   assert.equal(filePath(lid, "model.stl"), `versions/${widerDesign!.id}/model.stl`);
+  // Review of #770: when the computer lists no merged mesh beside the 3MF (none written, or an older companion), the design
+  // is its picture: no Explore in 3D that would fail.
+  const bare = { ...lid, current: { ...lid.current!, mergedMesh: undefined } } as Project;
+  assert.equal(partMesh(bare), undefined);
+  assert.ok("picture" in gallery(bare)[0]!.drawing, "a picture, not a model to turn");
   assert.equal(filePath(shown, `renders/front.png`), `versions/${firstDesign!.id}/renders/front.png`);
   assert.equal(shown.state, "confirmed");
   assert.equal(words(shown), "Done", "the header shows the design's own state, never the newest's words");

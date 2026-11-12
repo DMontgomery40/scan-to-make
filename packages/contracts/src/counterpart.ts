@@ -531,7 +531,9 @@ export const DesignVersionSchema = z.object({
   note: z.string().optional(),
   modelSha256: z.string().regex(/^[0-9a-f]{64}$/),
   result: z.object({model: relativePath, renders: z.array(relativePath), summary: z.string().optional(),
-    sizeMm: z.tuple([z.number(), z.number(), z.number()]).optional()}).passthrough(),
+    sizeMm: z.tuple([z.number(), z.number(), z.number()]).optional(),
+    /** #769: the merged mesh sealed beside a multi-part design's 3MF, listed only while the file is there. */
+    mergedMesh: relativePath.optional()}).passthrough(),
   picture: relativePath.optional(),
   pictures: z.record(z.string(), relativePath).optional(),
   pictureStates: z.record(z.string(), z.enum(['drawing', 'failed'])).optional(),

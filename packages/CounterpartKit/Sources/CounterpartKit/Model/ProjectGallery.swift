@@ -119,16 +119,25 @@ extension Project {
 
     /// The mesh the part's stage turns and its AR is written from, as a project path the Mac serves (#769):
     /// - the page's own model, `model.stl`, for a one-colour design;
-    /// - `current/model.stl` for a multi-part design: the merged mesh a pass writes beside its `current/model.3mf`
-    ///   (the companion's `isMultipart && kind !== 'published'`, the same file the Mac opens in Blender);
-    /// - a sealed design's own file (`versionMesh`): `versions/<id>/touched.stl`, or the `model.stl` sealed beside a 3MF.
-    /// Nil for a designer's published 3MF, which has no merged mesh (sealed or not): the stage shows its picture.
+    /// - a sealed design's own file: `versions/<id>/touched.stl`;
+    /// - for a multi-part design, the merged mesh beside its 3MF (`current/model.stl`, `versions/<id>/model.stl`), only
+    ///   when the Mac lists it (`Result.mergedMesh`, there only while the file is: review of #770).
+    /// Nil for a designer's published 3MF, and for a 3MF whose merged mesh isn't listed (none was written, or an older Mac
+    /// that doesn't say): the stage shows its picture, as before #769, never a 3D model that can't come.
     /// `model.stl` stays the route for the file that prints (the 3MF itself for a multi-part design): Share and Print use it.
     public var partMesh: String? {
         guard let model = current?.model else { return nil }
         guard preservesPublishedFilaments else { return model.hasPrefix("versions/") ? model : "model.stl" }
-        guard kind != "published", model.hasPrefix("current/") || model.hasPrefix("versions/") else { return nil }
-        return Self.versionMesh(model)
+        guard kind != "published", model.hasPrefix("current/") || model.hasPrefix("versions/"),
+              let mesh = current?.mergedMesh, mesh == Self.versionMesh(model) else { return nil }
+        return mesh
+    }
+
+    /// The colour the part's AR file is written in: its spool, none for a multi-part design or before a spool (neutral, as
+    /// on the stage).
+    public var arTint: String? {
+        if case .spool(let hex)? = ProjectGallery(project: self).entries.first(where: { $0.kind == .part })?.colour { return hex }
+        return nil
     }
 
     /// The one spool the result prints in (PRD §5.4): the spool its last print was sent with, as the printer MCP reported
@@ -372,4 +381,19 @@ public enum ModelUnavailable: Equatable, Sendable {
         case .undrawable: return "\(Model) couldn’t be shown on this phone. Open it on your Mac."
         }
     }
+}
+
+
+/// An AR file the phone wrote for a part, and what it was written from (#769, review of #770). The stage's AR chip and the
+/// page's Share both ask it for the file, so neither ever offers a USDZ of another model or colour than the stage shows
+/// (a change pass finished, the spool changed, an earlier design opened).
+public struct PreparedAR: Equatable, Sendable {
+    /// The mesh the USDZ was written from.
+    public var from: URL
+    /// The spool colour it was written in; nil for neutral.
+    public var tint: String?
+    public var usdz: URL
+    public init(from: URL, tint: String?, usdz: URL) { self.from = from; self.tint = tint; self.usdz = usdz }
+    /// The USDZ when it was written from `model` in `tint`; nil otherwise.
+    public func usdz(for model: URL?, tint: String?) -> URL? { model == from && tint == self.tint ? usdz : nil }
 }

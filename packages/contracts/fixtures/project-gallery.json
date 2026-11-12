@@ -363,7 +363,8 @@
        "name": "letters",
        "colour": "#000000"
       }
-     ]
+     ],
+     "mergedMesh": "current/model.stl"
     },
     "print": {
      "bundleId": "b",
@@ -606,7 +607,8 @@
      "model": "current/model.3mf",
      "renders": [
       "current/renders/1_overview.png"
-     ]
+     ],
+     "mergedMesh": "current/model.stl"
     }
    },
    "entries": [
@@ -898,7 +900,8 @@
        "name": "letters",
        "colour": "#000000"
       }
-     ]
+     ],
+     "mergedMesh": "current/model.stl"
     },
     "print": {
      "bundleId": "b",
@@ -1219,7 +1222,8 @@
     "outcome": "works",
     "current": {
      "model": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/touched.3mf",
-     "renders": []
+     "renders": [],
+     "mergedMesh": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/model.stl"
     },
     "pictures": {
      "part": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/pictures/part.png"
@@ -1279,6 +1283,116 @@
      },
      "colour": "own",
      "measures": "Part",
+     "still": "renders/1_overview.png"
+    }
+   ]
+  },
+  {
+   "name": "the same printed multi-part design when the Mac lists no merged mesh beside its 3MF (none written, or an older Mac): its picture alone, as before #769 (review of #770)",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "confirmed",
+    "kind": "fit",
+    "outcome": "works",
+    "current": {
+     "model": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/touched.3mf",
+     "renders": []
+    },
+    "pictures": {
+     "part": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/pictures/part.png"
+    },
+    "print": {
+     "bundleId": "b",
+     "spools": [
+      {
+       "index": 1,
+       "colour": "#F5547C"
+      },
+      {
+       "index": 2,
+       "colour": "#000000"
+      }
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "picture": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/pictures/part.png"
+     },
+     "colour": "own",
+     "measures": "Part",
+     "still": "versions/64cb716c-5fea-89b0-a10b-d163ebfca3bc/pictures/part.png"
+    }
+   ]
+  },
+  {
+   "name": "a pass-made multi-colour 3MF whose merged mesh the Mac doesn't list is its pass's picture alone: no 3D to fail, no AR (review of #770)",
+   "project": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "createdAtMs": 1,
+    "updatedAtMs": 2,
+    "photos": [],
+    "passes": [],
+    "state": "printed",
+    "kind": "fit",
+    "current": {
+     "model": "current/model.3mf",
+     "renders": [
+      "current/renders/1_overview.png"
+     ],
+     "sizeMm": [
+      166.2,
+      157.4,
+      48.4
+     ],
+     "filaments": [
+      {
+       "name": "body",
+       "colour": "#F5547C"
+      },
+      {
+       "name": "letters",
+       "colour": "#000000"
+      }
+     ]
+    },
+    "print": {
+     "bundleId": "b",
+     "spools": [
+      {
+       "index": 1,
+       "colour": "#F5547C"
+      },
+      {
+       "index": 2,
+       "colour": "#000000"
+      }
+     ]
+    }
+   },
+   "entries": [
+    {
+     "id": "result",
+     "kind": "part",
+     "label": "Your part",
+     "drawing": {
+      "picture": "renders/1_overview.png"
+     },
+     "colour": "own",
+     "measures": "Part",
+     "sizeMm": [
+      166.2,
+      157.4,
+      48.4
+     ],
      "still": "renders/1_overview.png"
     }
    ]

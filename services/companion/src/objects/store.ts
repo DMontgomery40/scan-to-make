@@ -203,6 +203,9 @@ export interface StmObject {
   progress?: string;
   passes: ObjectPass[];
   current?: {model: string; renders: string[]; sizeMm?: [number, number, number]; summary?: string;
+    /** #769: the merged mesh beside a multi-part design's 3MF (`current/model.stl`, or a sealed design's
+     * `versions/<id>/model.stl`), listed only while that file is there (read from disk as the project is read). */
+    mergedMesh?: string;
     /** A design in several colours: the colour (and material, when named) each of the 3MF's filaments
      * belongs in, in filament order, as the pass declared them. The 3MF itself carries none. */
     filaments?: {name?: string; colour?: string; material?: string}[];

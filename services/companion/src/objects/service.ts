@@ -1118,7 +1118,7 @@ export class ObjectService {
 
   async #read(id: string): Promise<StmObject> {
     // A printed project's question is closed (#638), also one stored open before that rule: the service and every client agree.
-    let object = closedByPrint(await this.#scanFiles(await this.#deps.store.get(id)));
+    let object = closedByPrint(await this.#mergedMeshes(await this.#scanFiles(await this.#deps.store.get(id))));
     if (object.state === 'touching-up') object = await this.#freshEstimate(object);
     if (!object.print) return object;
     // A watched print reads its monitor's last report instead of asking the printer again.
@@ -3754,6 +3754,36 @@ export class ObjectService {
     const value = files.length ? files : undefined;
     if (JSON.stringify(value) === JSON.stringify(object.scanFiles)) return object;
     return this.#deps.store.update(object.id, o => ({...o, scanFiles: value}), {keepUpdatedAt: true}).catch(() => ({...object, scanFiles: value}));
+  }
+
+  /**
+   * #769 (review of #770): the merged mesh beside each multi-part design's 3MF, listed as `mergedMesh` on `current` and on
+   * each sealed design's result only while the file is there. A client turns such a design in 3D only when it is listed;
+   * otherwise it shows the design's picture. A designer's published 3MF has none. Read from disk as the project is read,
+   * as `scanFiles` is, and written to it only when it changes.
+   */
+  async #mergedMeshes(object: StmObject): Promise<StmObject> {
+    const dir = this.dir(object.id);
+    const published = object.kind === 'published';
+    const meshOf = async (model: string | undefined): Promise<string | undefined> => {
+      if (!model || published || !model.toLowerCase().endsWith('.3mf') || !(model.startsWith('current/') || model.startsWith('versions/'))) return undefined;
+      const path = `${model.slice(0, model.lastIndexOf('/'))}/model.stl`;
+      // Only a regular file in the project: a link out of it is never offered (and never exported).
+      const info = await lstat(join(dir, path)).catch(() => undefined);
+      return info?.isFile() ? path : undefined;
+    };
+    const models = [...new Set([object.current?.model, ...(object.versions ?? []).map(v => v.result.model)].filter((m): m is string => !!m))];
+    const meshes = new Map(await Promise.all(models.map(async m => [m, await meshOf(m)] as const)));
+    const listed = <T extends {model: string; mergedMesh?: string}>(result: T): T => {
+      const mesh = meshes.get(result.model);
+      if (mesh === result.mergedMesh) return result;
+      const {mergedMesh: _old, ...rest} = result;
+      return (mesh ? {...rest, mergedMesh: mesh} : rest) as T;
+    };
+    const apply = (o: StmObject): StmObject => ({...o, ...(o.current ? {current: listed(o.current)} : {}), ...(o.versions ? {versions: o.versions.map(v => ({...v, result: listed(v.result)}))} : {})});
+    const same = (object.current ? listed(object.current) === object.current : true) && (object.versions ?? []).every(v => listed(v.result) === v.result);
+    if (same) return object;
+    return this.#deps.store.update(object.id, apply, {keepUpdatedAt: true}).catch(() => apply(object));
   }
 
   #changed(object: StmObject): StmObject {
